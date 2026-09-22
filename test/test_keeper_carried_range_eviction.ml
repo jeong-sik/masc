@@ -525,6 +525,7 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
             ~last_resort:false
             ~base_path:""
             ~demote_before:0
+            ~completed_end_atom:0
             history
         in
         let first_atom = composed.Try_provider.projection.Window.dropped_atoms in
@@ -612,7 +613,7 @@ let test_a_refused_front_survives_candidate_changes ?(fallback_atoms = 16) ~bloc
             Try_provider.For_testing.compose_carried_model_input
               ~measure_message_bytes:(fun _ -> 1) ~front
               ~history_digest_at:digest_at ~last_resort:false
-              ~base_path:"" ~demote_before:0 history
+              ~base_path:"" ~demote_before:0 ~completed_end_atom:0 history
           in
           let first_atom = composed.Try_provider.projection.Window.dropped_atoms in
           last := Some (request ~first_atom ~atom_count:16);

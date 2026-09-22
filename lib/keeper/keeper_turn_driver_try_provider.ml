@@ -48,43 +48,13 @@ type checkpoint_progress =
   | Tool_results_saved
 
 type continuity =
-  | Uncompressed_history
+  | Without_snapshot
   | Summarized of
   { snapshot : Librarian_continuity_snapshot.t
   ; covered_messages : Agent_core.Types.message list
   }
-  | Absorbed of
-  { trace_id : string
-  ; end_atom : int
-  ; last_atom_digest : string
-  }
 
-let uncompressed_history = Uncompressed_history
-
-(* The Librarian's durable position, when it is a place in this history: the
-   position names this trace and the atom before it opens with the message
-   the position recorded -- the same test the Librarian's own range selection
-   applies to its position (Keeper_librarian_range, RFC librarian-lifecycle
-   section 4.4 row 5). A position of another trace, past this history, or
-   over a message the history no longer holds at that index is no place here,
-   and the caller falls back as it would with no position at all. *)
-let absorbed_history ~trace_id ~messages (progress : Keeper_librarian_progress.t) =
-  let position = progress.Keeper_librarian_progress.position in
-  let end_atom = position.Keeper_librarian_progress.end_atom in
-  if not (String.equal position.Keeper_librarian_progress.trace_id trace_id) || end_atom < 1
-  then None
-  else (
-    match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
-    | Some opening when String.equal opening position.Keeper_librarian_progress.last_atom_digest ->
-      Some
-        ( end_atom
-        , Absorbed
-            { trace_id
-            ; end_atom
-            ; last_atom_digest = position.Keeper_librarian_progress.last_atom_digest
-            } )
-    | Some _ | None -> None)
-;;
+let without_snapshot = Without_snapshot
 
 let covered_messages ~end_atom messages =
   let labelled, _ = Runtime_model_input_tail_window.annotate messages in
@@ -99,6 +69,34 @@ let completed_history_end ~trace_id ~lines ~messages =
   |> Result.map (fun range -> range.Keeper_librarian_range.end_atom)
 ;;
 
+(* RFC keeper-context-window-in-tokens §13.4: where a request with no
+   absorbed point starts. The end of the last completed turn on this
+   history, verified against it; 0 when the history has no completed turn.
+   A boundary store this process cannot read, or a boundary the history in
+   hand does not match, leaves the start at the oldest atom and says so:
+   the turn goes out rather than not at all, and under the small input
+   policy no completed-turn boundary demotes tool bodies either. *)
+let turn_start ~config ~keeper_name ~trace_id ~messages =
+  match
+    Keeper_turn_boundaries.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+  with
+  | Error detail ->
+    Log.Keeper.warn ~keeper_name
+      "turn start unknown, the range starts at the oldest atom: boundary read failed: %s"
+      detail;
+    0
+  | Ok lines ->
+    (match completed_history_end ~trace_id ~lines ~messages with
+     | Ok end_atom -> end_atom
+     | Error Librarian_continuity_snapshot.Uncovered_history -> 0
+     | Error error ->
+       Log.Keeper.warn ~keeper_name
+         "turn start unknown, the range starts at the oldest atom: %s"
+         (Librarian_continuity_snapshot.error_to_string error);
+       0)
+;;
+
 let prepare_continuity ~trace_id ~lines ~messages snapshot =
   Result.map (fun _ ->
     Summarized { snapshot; covered_messages = covered_messages ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom messages })
@@ -106,13 +104,7 @@ let prepare_continuity ~trace_id ~lines ~messages snapshot =
 ;;
 
 let validate_continuity ~messages = function
-  | Uncompressed_history -> Ok ()
-  | Absorbed { end_atom; last_atom_digest; _ } ->
-    (match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
-     | Some opening when String.equal opening last_atom_digest -> Ok ()
-     | Some _ | None ->
-       Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
-         { field = "librarian.progress"; detail = "Absorbed conversation changed during dispatch" })))
+  | Without_snapshot -> Ok ()
   | Summarized continuity ->
   let current = covered_messages ~end_atom:continuity.snapshot.end_atom messages in
   if List.equal Agent_core.Types.Message_value.equal current continuity.covered_messages
@@ -783,6 +775,7 @@ let compose_carried_model_input
       ~last_resort
       ~base_path
       ~demote_before
+      ~completed_end_atom
       messages
   =
   let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
@@ -831,18 +824,6 @@ let compose_carried_model_input
       projection, transmitted_bytes,
         Keeper_carried_front.Librarian_snapshot
           { end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }
-    | Some (Absorbed { end_atom; _ }), _ ->
-      (* No summary stands in for the absorbed atoms; the omission preamble
-         says older turns are left out, and an exclusive end at the newest
-         atom -- a Librarian that has read everything, which is the only
-         state a purge leaves it in -- carries no history atom at all. *)
-      let projection, transmitted_bytes =
-        Runtime_model_input_tail_window.project_from_atom
-          ~allow_empty_history:true ~measure_message_bytes
-          ~first_atom:end_atom
-          planned.Keeper_model_input_demotion.messages
-      in
-      projection, transmitted_bytes, Keeper_carried_front.Librarian_progress { end_atom }
     | None, Some (seed : Keeper_carried_front.seed) ->
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
@@ -858,14 +839,22 @@ let compose_carried_model_input
           planned.Keeper_model_input_demotion.messages
       in
       projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
-    | None, None | Some Uncompressed_history, _ ->
+    | None, None | Some Without_snapshot, _ ->
+      (* No absorbed point and no seed (RFC keeper-context-window-in-tokens
+         §13.4): the range begins where the last completed turn on this
+         history ended, clamped so the newest atom always goes. The atoms
+         before it wait for the Librarian's next pass. A history with no
+         completed turn starts at 0, which is everything it has. *)
+      let first_atom =
+        Keeper_carried_front.clamp ~atom_count:history_atom_count completed_end_atom
+      in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
-          ~first_atom:0
+          ~first_atom
           planned.Keeper_model_input_demotion.messages
       in
-      projection, transmitted_bytes, Keeper_carried_front.Whole_history
+      projection, transmitted_bytes, Keeper_carried_front.Turn_start { end_atom = first_atom }
   in
   { planned
   ; projection
@@ -909,6 +898,7 @@ let request_view
       ~last_resort
       ~base_path
       ~demote_before
+      ~completed_end_atom
       ~materialize
       messages
   =
@@ -922,6 +912,7 @@ let request_view
         ~last_resort
         ~base_path
         ~demote_before
+        ~completed_end_atom
         messages)
   in
   let carried =
@@ -1149,6 +1140,7 @@ let bounded_model_input_projection
         ~last_resort
         ~base_path:demotion_base_path
         ~demote_before
+        ~completed_end_atom:ctx.completed_end_atom
         ~materialize:(fun ~pending messages ->
           (* Blob materialization writes files, so it stays on the owning Eio
              fiber rather than in the CPU domain pool. The store skips writing
@@ -1560,9 +1552,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                        Keeper_continuity_observation.Summarized
                          { trace_id = snapshot.trace_id; end_atom = snapshot.end_atom;
                            boundary_line = snapshot.end_boundary_line }
-                     | Some (Absorbed { trace_id; end_atom; _ }) ->
-                       Keeper_continuity_observation.Absorbed { trace_id; end_atom }
-                     | Some Uncompressed_history -> Keeper_continuity_observation.Uncompressed
+                     | Some Without_snapshot -> Keeper_continuity_observation.Without_snapshot
                      | None -> Keeper_continuity_observation.Not_applied in
                    if Option.is_some ctx.session_id then
                      Keeper_continuity_observation.record

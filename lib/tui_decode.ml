@@ -2510,14 +2510,9 @@ type memory_context_frontier = {
   mcf_end_atom : int;
   mcf_boundary_line : int;
 }
-type memory_context_position = {
-  mcpo_trace_id : string;
-  mcpo_end_atom : int;
-}
 type memory_context_input =
   | Context_summarized of memory_context_frontier
-  | Context_absorbed of memory_context_position
-  | Context_uncompressed
+  | Context_without_snapshot
   | Context_not_applied
 
 type memory_context_prepared = {
@@ -4850,18 +4845,11 @@ let decode_memory_context_cycle keeper_json =
     let* () = require_exact_object_fields "context input" ["kind"; "frontier"] input in
     let* kind = required_string_field input "kind" in
     let* value = required_member input "frontier" in
-    let position json =
-      let* () = require_exact_object_fields "context position" ["trace_id"; "end_atom"] json in
-      let* mcpo_trace_id = required_string_field json "trace_id" in
-      let* mcpo_end_atom = required_int_field json "end_atom" in
-      if String.trim mcpo_trace_id = "" || mcpo_end_atom < 1
-      then Error "invalid context position"
-      else Ok {mcpo_trace_id; mcpo_end_atom} in
+    let* value = nullable frontier value in
     let* mcp_input = match kind, value with
-      | "summarized", (`Assoc _ as value) -> Result.map (fun value -> Context_summarized value) (frontier value)
-      | "absorbed", (`Assoc _ as value) -> Result.map (fun value -> Context_absorbed value) (position value)
-      | "uncompressed", `Null -> Ok Context_uncompressed
-      | "not_applied", `Null -> Ok Context_not_applied
+      | "summarized", Some value -> Ok (Context_summarized value)
+      | "without_snapshot", None -> Ok Context_without_snapshot
+      | "not_applied", None -> Ok Context_not_applied
       | _ -> Error "context input kind disagrees with frontier" in
     Ok {mcp_prepared_at; mcp_runtime_id; mcp_request_bytes; mcp_input} in
   let* saved = required_member json "saved" in

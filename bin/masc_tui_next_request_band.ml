@@ -20,7 +20,8 @@ let origin_sentence = function
       Printf.sprintf "front halved after a refusal (retry %d)" retry
   | Inspector.Carried_evicted_after_refusal { retry } ->
       Printf.sprintf "front evicted after a refusal (retry %d)" retry
-  | Inspector.Carried_whole_history -> "no front to start from: the whole history"
+  | Inspector.Carried_turn_start { end_atom } ->
+      Printf.sprintf "no front to start from: this turn's own atoms, from atom %d" end_atom
 ;;
 
 (* A Unix epoch as a UTC clock reading, the day dropped: the band compares

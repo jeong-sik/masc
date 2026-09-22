@@ -1,11 +1,5 @@
 type frontier = { trace_id : string; end_atom : int; boundary_line : int }
-type input =
-  | Summarized of frontier
-  | Absorbed of { trace_id : string; end_atom : int }
-      (** The request started at the Librarian's durable position, with no
-          summary of what lies before it. *)
-  | Uncompressed
-  | Not_applied
+type input = Summarized of frontier | Without_snapshot | Not_applied
 type t =
   { prepared_at : float
   ; runtime_id : string

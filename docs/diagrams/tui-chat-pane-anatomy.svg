@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="chat-pane-anatomy-title chat-pane-anatomy-desc">
+          <title id="chat-pane-anatomy-title">masc TUI chat pane anatomy</title>
+          <desc id="chat-pane-anatomy-desc">Layer stack of the chat pane's five screen regions from top to bottom — header, transcript, status band, composer and key footer — naming the function that draws each, with the transcript as the focal layer.</desc>
+          <defs><style>@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&amp;display=swap');</style></defs>
+
+          <rect width="100%" height="100%" fill="#141414" />
+
+          <!-- Direction column (left margin): screen rows, top to bottom -->
+          <text x="40" y="70" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.18em">TOP</text>
+          <line x1="80" y1="88" x2="80" y2="456" stroke="#f5f5f5" stroke-opacity="0.30" stroke-width="1"/>
+          <polygon points="76,456 84,456 80,464" fill="#9a9a9a"/>
+          <text x="40" y="484" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.18em">BOTTOM</text>
+
+          <!-- Stack container hairlines -->
+          <line x1="120" y1="80" x2="960" y2="80" stroke="#f5f5f5" stroke-opacity="0.12" stroke-width="1"/>
+          <line x1="120" y1="464" x2="960" y2="464" stroke="#f5f5f5" stroke-opacity="0.12" stroke-width="1"/>
+
+          <!-- 1 — Header -->
+          <rect x="120" y="80" width="840" height="64" fill="#1b1b1b"/>
+          <line x1="120" y1="144" x2="960" y2="144" stroke="#f5f5f5" stroke-opacity="0.12" stroke-width="1"/>
+          <text x="140" y="116" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">01</text>
+          <text x="220" y="118" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', monospace">Header</text>
+          <text x="940" y="110" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">Keepers ▸ name ▸ chat · metadata:full</text>
+          <text x="940" y="128" fill="#5c5c5c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">chat_visibility_summary · keeper status row</text>
+
+          <!-- 2 — Transcript (FOCAL) -->
+          <rect x="120" y="144" width="840" height="128" fill="#ff5a36" fill-opacity="0.10"/>
+          <rect x="120" y="144" width="840" height="128" fill="none" stroke="#ff5a36" stroke-width="1"/>
+          <text x="140" y="180" fill="#ff5a36" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em" font-weight="600">02</text>
+          <text x="220" y="182" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', monospace">Transcript</text>
+          <text x="220" y="204" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" letter-spacing="0.04em">hour rail · origin heading · body rows · turn rail down the left</text>
+          <text x="220" y="222" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" letter-spacing="0.04em">rows from three sources: history rows, a held log, the live stream</text>
+          <text x="940" y="176" fill="#ff5a36" font-size="10" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">render_keeper_message → chat_rows_for</text>
+          <text x="940" y="194" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">timeline_break_row · origin_heading · origin_gutter</text>
+          <text x="940" y="212" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">held_projection ~committed · live_block · turn_rail_glyph</text>
+          <text x="940" y="230" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">Masc_tui_message_layout.visible_rows</text>
+          <text x="220" y="256" fill="#5c5c5c" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.06em">Ctrl-F origin · Ctrl-R reasoning · Ctrl-D tools · Ctrl-N journal change what this layer draws, nothing else</text>
+
+          <!-- 3 — Status band -->
+          <rect x="120" y="272" width="840" height="64" fill="#141414"/>
+          <line x1="120" y1="336" x2="960" y2="336" stroke="#f5f5f5" stroke-opacity="0.12" stroke-width="1"/>
+          <text x="140" y="308" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">03</text>
+          <text x="220" y="310" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', monospace">Status band</text>
+          <text x="940" y="302" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">the running turn · your queued line · the interrupt</text>
+          <text x="940" y="320" fill="#5c5c5c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">keeper_message_activity_rows · keeper_observed_interrupt_rows · progress row</text>
+
+          <!-- 4 — Composer -->
+          <rect x="120" y="336" width="840" height="64" fill="#1b1b1b"/>
+          <line x1="120" y1="400" x2="960" y2="400" stroke="#f5f5f5" stroke-opacity="0.12" stroke-width="1"/>
+          <text x="140" y="372" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">04</text>
+          <text x="220" y="374" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', monospace">Composer</text>
+          <text x="940" y="366" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">&gt; draft · Enter sends, Ctrl-J breaks a line</text>
+          <text x="940" y="384" fill="#5c5c5c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">Masc_tui_composer · msg_input · a queued line is drawn in 02 as a tail entry</text>
+
+          <!-- 5 — Key footer -->
+          <rect x="120" y="400" width="840" height="64" fill="#141414"/>
+          <text x="140" y="436" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.14em">05</text>
+          <text x="220" y="438" fill="#f5f5f5" font-size="16" font-weight="600" font-family="'Geist Mono', monospace">Key footer</text>
+          <text x="940" y="430" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">Enter:send · Esc:stop current turn · …?</text>
+          <text x="940" y="448" fill="#5c5c5c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end" letter-spacing="0.06em">Masc_tui_keys.for_surface · version mismatch warning</text>
+
+          <!-- Caption -->
+          <text x="120" y="516" fill="#9a9a9a" font-size="9" font-family="'Geist Mono', monospace" letter-spacing="0.18em">FOCAL LAYER</text>
+          <text x="240" y="516" fill="#9a9a9a" font-size="10" font-family="'Geist Mono', monospace">The transcript is the only layer whose rows have three sources; the table below says what each source draws.</text>
+        </svg>

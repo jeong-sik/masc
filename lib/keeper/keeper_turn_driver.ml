@@ -1547,28 +1547,20 @@ let run_named
 	     to the next). *)
       (* Freeze the pair for the whole dispatch, including provider failover.
          The checkpoint remains the source of every atom index. *)
+      (* The end of the last completed turn on this history: where a request
+         with no absorbed point starts (RFC keeper-context-window-in-tokens
+         §13.4) and, under the small input policy, the boundary before which
+         completed turns' tool bodies demote. Read once per turn for every
+         input policy and lane. A turn resuming an operation composes from
+         its recovery view and names no boundary here, as before. *)
       let completed_end_atom = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
-        match input_policy, session_id, recovery_view with
-        | Keeper_input_policy.Small, Some trace_id, None ->
+        match session_id, recovery_view with
+        | Some trace_id, None ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
-            let config = Workspace.default_config base_path in
-            match Keeper_turn_boundaries.read
-              ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name with
-            | Error detail ->
-              Log.Keeper.warn ~keeper_name
-                "small input policy retained original bodies: boundary read failed: %s" detail;
-              0
-            | Ok lines ->
-              match Keeper_turn_driver_try_provider.completed_history_end
-                ~trace_id ~lines ~messages:initial_messages with
-              | Ok end_atom -> end_atom
-              | Error Librarian_continuity_snapshot.Uncovered_history -> 0
-              | Error error ->
-                Log.Keeper.warn ~keeper_name
-                  "small input policy retained original bodies: %s"
-                  (Librarian_continuity_snapshot.error_to_string error);
-                0)
-        | _ -> 0) in
+            Keeper_turn_driver_try_provider.turn_start
+              ~config:(Workspace.default_config base_path) ~keeper_name ~trace_id
+              ~messages:initial_messages)
+        | None, _ | Some _, Some _ -> 0) in
       let continuity = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id, recovery_view with
         | None, _ | _, Some _ -> Ok None
@@ -1578,7 +1570,7 @@ let run_named
             let ( let* ) = Result.bind in
             let* saved = Keeper_librarian_continuity.read ~config ~keeper_name in
             match saved with
-            | None -> Ok (Some Keeper_turn_driver_try_provider.uncompressed_history)
+            | None -> Ok (Some Keeper_turn_driver_try_provider.without_snapshot)
             | Some snapshot ->
               let* lines = Keeper_turn_boundaries.read
                 ~keepers_dir:(Workspace.keepers_runtime_dir config)
@@ -1590,44 +1582,14 @@ let run_named
                   ((Librarian_continuity_snapshot.Trace_mismatch
                    | Librarian_continuity_snapshot.History_changed
                    | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
-                (* The snapshot no longer fits this history. The Librarian's
-                   durable position may still: a purge renumbers the atoms and
-                   moves that position with them (Keeper_checkpoint_purge) but
-                   leaves the snapshot in the old numbering, which is how a
-                   keeper came to send its 12,720 atoms, 16.4 MB, 44 cycles in
-                   a row (goo-yang-bong, 2026-09-22). From the position the
-                   request carries what the Librarian has not read; with no
-                   position it carries everything, as before. *)
-                let mismatch = Librarian_continuity_snapshot.error_to_string mismatch in
-                let message_count = List.length initial_messages in
-                let absorbed =
-                  match
-                    Keeper_librarian_progress.read
-                      ~keepers_dir:(Workspace.keepers_runtime_dir config)
-                      ~keeper_id:keeper_name
-                  with
-                  | Ok (Some progress) ->
-                    Keeper_turn_driver_try_provider.absorbed_history
-                      ~trace_id ~messages:initial_messages progress
-                  | Ok None -> None
-                  | Error error ->
-                    Log.Keeper.warn ~keeper_name
-                      "Librarian progress unreadable while the continuity snapshot does not fit (%s): %s"
-                      mismatch
-                      (Keeper_librarian_progress.read_error_to_string error);
-                    None
-                in
-                (match absorbed with
-                 | Some (end_atom, continuity) ->
-                   Log.Keeper.info ~keeper_name
-                     "Librarian continuity does not fit the current history (%s); starting at the Librarian's position, atom %d, over %d messages"
-                     mismatch end_atom message_count;
-                   Ok (Some continuity)
-                 | None ->
-                   Log.Keeper.info ~keeper_name
-                     "Librarian continuity does not fit the current history (%s); sending all %d messages in full"
-                     mismatch message_count;
-                   Ok (Some Keeper_turn_driver_try_provider.uncompressed_history))
+                (* Three different mismatches used to share one sentence, so
+                   a keeper whose snapshot did not fit (goo-yang-bong,
+                   2026-09-22: 12,720 messages, 44 cycles in a row) left no
+                   way to tell a new trace from a changed history. *)
+                Log.Keeper.info ~keeper_name
+                  "Librarian continuity does not fit the current history (%s); the request starts at this turn's own boundary"
+                  (Librarian_continuity_snapshot.error_to_string mismatch);
+                Ok (Some Keeper_turn_driver_try_provider.without_snapshot)
               | Error error -> Error (Librarian_continuity_snapshot.error_to_string error)))
       in
 	  let refused_carried_front = ref None in
@@ -2281,6 +2243,7 @@ let run_named
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
+            ~turn_start:(Eio.Lazy.force completed_end_atom)
             (* Antigravity's CLI assembles the wire, so the shape masc can
                report is the list it handed over. *)
             ?on_model_input_window_observation:
@@ -2399,6 +2362,7 @@ let run_named
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
+            ~turn_start:(Eio.Lazy.force completed_end_atom)
             ~pre_tool_rejects
             ~base_path
             ~goal
@@ -2569,9 +2533,9 @@ let run_named
                  the range the newest completed Agent Core turn record on
                  this history measured, whichever runtime ran it, so a
                  restart or a lane's next candidate resumes the range the
-                 last turn carried rather than the whole history. A caller
-                 that reads no records leaves the first request to the whole
-                 history. *)
+                 last turn carried rather than this turn's own boundary. A
+                 caller that reads no records leaves the first request to
+                 that boundary. *)
               carried_front_seed =
                 (fun () ->
                    match carried_front_seed with

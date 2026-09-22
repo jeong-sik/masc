@@ -570,8 +570,11 @@ let composer_line state ~cols =
        key nobody presses, and the row has space exactly while there is no
        draft to crowd. It goes away once a capture starts, because the meter
        has taken that space and says the same thing louder. *)
+    (* And only where speech-to-text is set up: without a transcriber the
+       keys refuse, and naming them was noise beside every empty draft. *)
     | Composer.Focused, Composer.Ready _
-      when state.voice_capture = None
+      when state.voice_stt_set_up
+           && state.voice_capture = None
            && state.voice_continuous = None
            && Buffer.length state.msg_input = 0 ->
         "  " ^ Masc_tui_keys.voice_keys_hint

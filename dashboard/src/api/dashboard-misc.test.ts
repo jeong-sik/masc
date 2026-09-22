@@ -231,31 +231,6 @@ describe('fetchKeeperMemoryHealth', () => {
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
   })
 
-  it('keeps an absorbed request as a position with no boundary line and no summary', async () => {
-    const payload = keeperMemoryHealthPayload()
-    const prepared = { prepared_at: 1_700_000_000, runtime_id: 'fixture.model',
-      input: { kind: 'absorbed' as const, frontier: { trace_id: 'trace-a', end_atom: 12719 } },
-      request_bytes: 4096 }
-    payload.keepers[0]!.context_cycle = { saved: null, saved_read_error: null, prepared, synthesis: null }
-    getMock.mockResolvedValue(payload)
-    expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle.prepared).toEqual(prepared)
-  })
-
-  it.each([
-    { kind: 'absorbed', frontier: null },
-    { kind: 'absorbed', frontier: { trace_id: 'trace-a', end_atom: 8, boundary_line: 6 } },
-    { kind: 'absorbed', frontier: { trace_id: 'trace-a', end_atom: 0 } },
-    { kind: 'summarized', frontier: { trace_id: 'trace-a', end_atom: 8 } },
-  ])('rejects a position in the wrong shape for its kind: %o', async input => {
-    const payload = keeperMemoryHealthPayload()
-    Object.assign(payload.keepers[0]!, { context_cycle: {
-      saved: null, saved_read_error: null, synthesis: null,
-      prepared: { prepared_at: 1, runtime_id: 'fixture.model', request_bytes: 5, input },
-    } })
-    getMock.mockResolvedValue(payload)
-    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
-  })
-
   it('rejects a summarized request without a frontier', async () => {
     const payload = keeperMemoryHealthPayload()
     Object.assign(payload.keepers[0]!, { context_cycle: {

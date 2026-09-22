@@ -851,6 +851,9 @@ let test_purge_keeps_the_librarian_position_and_every_message () =
        (result.report.reasoning_blocks_stripped > 0);
      check bool "the result was cleared" true (result.report.tool_results_cleared > 0)
    | Error error -> fail (Checkpoints.purge_error_to_string error));
+  (match Checkpoints.purge_current config ~keeper_name ~apply:true with
+   | Ok again -> check bool "a second apply changes nothing" false again.applied
+   | Error error -> fail (Checkpoints.purge_error_to_string error));
   let purged =
     match Store.load_agent_core ~session_dir ~session_id:trace_id with
     | Ok purged -> purged

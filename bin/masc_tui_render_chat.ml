@@ -217,10 +217,12 @@ let folded_thinking_summary body =
      block is the withheld-step count alone, and Ctrl-R on it redrew the same
      sentence. A block with nothing to fold draws as itself. *)
   | [] | [ _ ] -> body
+  (* A turn that reasons between every call draws this once a round, eight
+     rounds a turn. At 61 cells the sentence was the widest thing in the pane
+     and said the same "or /thinking to expand" each time; the key stays, the
+     footer and /help carry the rest. Two lines or more, so always plural. *)
   | lines ->
-      Printf.sprintf
-        "Reasoning · %d line(s) folded · Ctrl-R or /thinking to expand"
-        (List.length lines)
+      Printf.sprintf "Reasoning · %d lines folded · Ctrl-R" (List.length lines)
 
 
 let tool_projection_mode (state : state) =
@@ -593,7 +595,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           request_label
         else " \xc2\xb7 " ^ request_label
       in
-      let plain = mark ^ " " ^ speaker ^ request in
+      (* A keeper's own row without a request id has neither, and the mark
+         then stands alone before the rule instead of two spaces. *)
+      let gap =
+        if String.equal speaker "" && String.equal request "" then "" else " "
+      in
+      let plain = mark ^ gap ^ speaker ^ request in
       let styled =
         match row.style with
         | Message_layout.Tool | Message_layout.Thinking ->
@@ -609,8 +616,8 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
               if String.equal speaker "" then ""
               else Printf.sprintf "%s%s%s" Ansi.reverse speaker Ansi.reset
             in
-            Printf.sprintf "%s%s%s %s%s%s%s" (Chat_theme.origin row.style)
-              Ansi.bold mark badge Ansi.dim request Ansi.reset
+            Printf.sprintf "%s%s%s%s%s%s%s%s" (Chat_theme.origin row.style)
+              Ansi.bold mark gap badge Ansi.dim request Ansi.reset
       in
       origin_heading buf cols ~plain ~styled ~clock
 
@@ -1335,12 +1342,30 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               Message_layout.Skill (skill_tone_of_state state)
           | Message_thinking -> Message_layout.Thinking
         in
-        let speaker = grouped_role_label in
+        (* The [Origin_row] heading names whoever the pane does not already.
+           This pane is the keeper's own, so its replies carry no name there:
+           the breadcrumb says whose chat it is, and a turn used to say it
+           once per block. An autonomous turn still says who asked -- nobody
+           -- where it opens. The inline gutter keeps the name. *)
+        let speaker =
+          match message.me_role with
+          | Message_keeper -> ""
+          | Message_autonomous -> (
+              match edge with
+              | Masc_tui_types.Turn_opens | Masc_tui_types.Turn_alone ->
+                  grouped_role_label
+              | Masc_tui_types.Turn_continues | Masc_tui_types.Turn_closes
+              | Masc_tui_types.Turn_outside ->
+                  "")
+          | Message_user _ | Message_status | Message_local | Message_memory
+          | Message_error | Message_tool | Message_skill _ | Message_thinking ->
+              grouped_role_label
+        in
         (* One column for every speaker so the [timestamp] speaker request
            rows line up down the pane, whatever name each row carries. *)
         let role_label =
           Message_layout.align_role_label ~column:role_label_column ~style
-            speaker
+            grouped_role_label
         in
         let body =
           match message.me_role with
@@ -2240,7 +2265,7 @@ let render_keeper_message (state : state) =
                       Some (Printf.sprintf "%s→%s" start finish)
                   | None -> Some (Printf.sprintf "%s→" start)
                 in
-                let entry style role_label body =
+                let entry ?(speaker : string option) style role_label body =
                   (* One alignment, on the label the row actually carries.
                      Aligning the continuation mark and then aligning the
                      result again pays the badge's width twice, so the second
@@ -2250,7 +2275,7 @@ let render_keeper_message (state : state) =
                        timestamp = keeper_message_clock started_at;
                        timeline_bucket;
                        span_clock;
-                       speaker = role_label;
+                       speaker = Option.value speaker ~default:role_label;
                        role_label =
                          Message_layout.align_role_label
                            ~column:role_label_column
@@ -2306,7 +2331,10 @@ let render_keeper_message (state : state) =
                             skill))
                 | Keeper_chat_transcript.Drawn_text text
                 | Keeper_chat_transcript.Drawn_reply text ->
-                    entry Message_layout.Keeper (label keeper_label) (annotate_body text)
+                    (* No name on the heading, as on the committed rows:
+                       this is the keeper's own pane. *)
+                    entry ~speaker:(label "") Message_layout.Keeper
+                      (label keeper_label) (annotate_body text)
                 | Keeper_chat_transcript.Drawn_status text ->
                     entry Message_layout.Status (label "STATUS") text)
              (Keeper_chat_transcript.drawn transcript)

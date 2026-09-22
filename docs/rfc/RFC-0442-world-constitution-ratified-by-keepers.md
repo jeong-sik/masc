@@ -47,7 +47,7 @@ librarian이 회수·인용·개정으로 굳히거나 버린다(RFC-0418). 빠�
 | 관측 축적에서 프롬프트 렌더까지의 루프 | Memory OS (`keeper_memory_os_current`, `_render`) | keeper 1명 |
 | 철회와 승계 | librarian claim / drop / `supersedes` (RFC-0418) | keeper 1명 |
 | 합의 도구 | board post·comment·vote (`docs/spec/11-board.md`) | world |
-| 추가 지시 슬롯 | `keeper.instructions.custom` (`prompt_names.ml:107`, `keeper_prompt.ml:37`) | operator가 채움 |
+| keeper 역할 | keeper TOML `instructions`, `<role>` 태그 안 (`keeper_prompt.ml`) | operator가 채움 |
 
 합의 엔진도, durable 저장소도, 프롬프트 주입 경로도 이미 있다. 셋이 서로 안 이어져 있다.
 
@@ -110,7 +110,7 @@ type entry =
 
 ### 3.3 주입과 상한
 
-`keeper.instructions.custom` 옆에 `keeper.constitution` 슬롯을 둔다.
+`keeper.worldview` 와 keeper 신원 사이에 `keeper.constitution` 슬롯을 둔다.
 `Keeper_prompt.build_keeper_system_prompt`가 원장을 접은 결과를 렌더한다. 조항이 0개인
 세계에서는 프롬프트 바이트가 변하지 않는다.
 

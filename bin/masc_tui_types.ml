@@ -6092,12 +6092,20 @@ let abandon_fusion_launch (state : state) =
        | Fusion_launch_open form -> Masc_tui_fusion_launch.submitting form
        | Fusion_launch_reading_presets _ | Fusion_launch_started _ -> false)
 
-(* The launch form belongs to the Fusion surface and to nothing else, so a
-   jump anywhere else drops it. The mouse reaches [goto_surface] from the
-   Activity pane before any key handler runs, so the form's own Esc is not
-   the only way out of the surface it lives on. *)
-let leave_fusion_launch (state : state) ~(destination : surface) =
-  if destination = Fusion then false else abandon_fusion_launch state
+(* The launch form belongs to the Fusion surface and to nothing else, so the
+   loop drops it whenever the surface under it is no longer Fusion. Asked
+   every iteration rather than at the places that change the surface: there
+   are 44 assignments to [view] in the key and message paths and one
+   [goto_surface] among them, and the overlays that have to be torn down on
+   a jump are named by hand in some of them -- [Task_dispatched] closes the
+   help sheet, the palette and the row search by name, and would have left
+   this form open on a Keeper chat. A rule kept in one place cannot be the
+   one an author forgets.
+
+   Answers whether a submit was still out, which the caller turns into the
+   notice: dropping the form does not unsend the request. *)
+let reconcile_fusion_launch (state : state) =
+  state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
   | Text_browser_url

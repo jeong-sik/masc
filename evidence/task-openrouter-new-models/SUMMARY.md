@@ -7,7 +7,15 @@ Date: 2026-09-22. `probe.sh` in this directory ran every case against
 and stops below $0.50, because the same key serves a live runtime.
 
 Spend: $0.083 for the whole run, read as the key's `limit_remaining` before
-($2.0112) and after ($1.9285). `status.log` has every HTTP status in order.
+($2.0112) and after ($1.9285). The two haiku budget probes below ran while
+probe.sh was running, so that figure includes them. The review follow-up's three
+`*-toolcall-thinking.json` probes cost $0.0059 more (their `usage.cost`).
+
+`status.txt` lists every committed response with its status, derived from the
+files (probe.sh's own `status.log` is excluded by `*.log` in `.gitignore`).
+`models-snapshot.json` is the gateway metadata the rows' window, ceiling, price
+and parameter support were read from. Account identifiers the gateway echoed
+in four error bodies are replaced with `<redacted-…>`.
 
 ## Cases per model
 
@@ -32,7 +40,7 @@ Spend: $0.083 for the whole run, read as the key's `limit_remaining` before
 | `openai/gpt-5.6-luna` | `get_weather` | 200, 0 tokens | 200 | 200 (128000) | encrypted + summary; 13 at `xhigh`, 21 at `max` |
 | `google/gemini-3.1-pro-preview` | `get_weather` | **400** mandatory | 200 | 200 (65536) | stream: details item only, no `delta.reasoning` text |
 | `x-ai/grok-4.7` | `get_weather` | **400** mandatory | 200 | 200 (450000) | encrypted + summary, text in stream |
-| `minimax/minimax-m3` | `get_weather` | 200 but **55 tokens** | 200 | 200 (512000) | `reasoning.text` |
+| `minimax/minimax-m3` | `get_weather` | 200 but **55 tokens** | 200, but **content null** at high/xhigh/max | 200 (512000) | `reasoning.text` |
 | `qwen/qwen3.8-flash` | **400** "does not support being set to required or object in thinking mode" | 200, 0 tokens | 200 | 200 (131072) | `reasoning.text` |
 | `z-ai/glm-5.3-flashx` | `get_weather` | **400** mandatory | 200 | 200 (131072) | `reasoning.text` |
 
@@ -54,15 +62,35 @@ with content, and carried `usage` on the last stream chunk. No response used
   reservation applies to any request on this key that sends a large
   `max_tokens` to an expensive model.
 - **haiku-4.5 needs room to reason.** At `max_tokens` 200 and 400 every rung
-  billed 0 reasoning tokens. A second pair at `max_tokens: 4000`
-  (`probe-claude-haiku45-reasoning-budget-{high,none}.json`, a prime-counting
-  prompt) billed 3628 reasoning tokens at `high` and 0 at `none`.
-- **minimax-m3 accepts `none` without disabling.** 55 reasoning tokens were
-  billed on the `none` request, so the row does not list it.
+  billed 0 reasoning tokens. A second pair,
+  `probe-claude-haiku45-reasoning-budget-{high,none}.json`, sent
+  `reasoning_effort` `high` / `none`, `max_tokens: 4000` and "How many prime
+  numbers are there between 1000 and 1100? Think it through, then give the
+  count."; it billed 3628 reasoning tokens at `high` and 0 at `none`.
+- **Forced tool_choice with thinking requested.** `probe-claude-{haiku45,sonnet5,opus5}-toolcall-thinking.json`
+  sent `tool_choice: "required"` with `reasoning_effort: "high"` and
+  `max_tokens: 4000`. All three called `get_weather` and billed 0 reasoning
+  tokens: the gateway serves a forced call without thinking, so those rows keep
+  the base tool_choice claims. fable-5.1 differs because its thinking cannot be
+  turned off.
+- **What "none billed 0" shows.** It is a real disable where other rungs billed
+  reasoning on the same prompt: luna (13 at `xhigh`, 21 at `max`), qwen3.8-flash
+  and haiku-4.5 at `max_tokens` 4000. terra billed 0 on every rung, so for
+  terra it shows only that `none` is accepted.
+- **minimax-m3 is not bound.** It accepts `none` without disabling (55
+  reasoning tokens billed), and at `high`, `xhigh` and `max` the Novita upstream
+  answered `finish_reason: stop` with `content: null` and the answer inside
+  `reasoning`. The seed binds OpenRouter ids at `high`, so a keeper turn there
+  would come back empty. The gateway lists `reasoning` but not
+  `reasoning_effort` for this id, and its `top_provider.context_length` is
+  524288 against a top-level 1048576. minimax-m3 stays reachable through the
+  ollama_cloud binding.
 - **qwen3.8-flash differs from qwen3.8-max on `none`.** Both refuse forced
   tool_choice in thinking mode; only flash takes `none` as a real disable.
 - **fable-5.1 refused forced tool_choice with no reasoning field on the
   request.** Its thinking is always on, so a forced tool_choice fails whatever
   the caller asks for thinking.
-- **glm-5.3-flashx** is refused by the Z.AI coding plan (code 1311) but served
-  here.
+- **glm-5.3-flashx** is refused by the Z.AI coding plan
+  (`zai-coding-plan-glm53-flashx.json`, code 1311) but served here. The gateway
+  lists `response_format` for it but not `structured_outputs`, so its row turns
+  structured output off.

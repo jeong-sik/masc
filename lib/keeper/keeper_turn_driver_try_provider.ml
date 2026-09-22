@@ -61,6 +61,20 @@ type continuity =
 
 let without_snapshot = Without_snapshot
 
+type continuity_choice =
+  | Chose_no_point
+  | Chose_a_librarian_point
+
+(* The one question a caller outside this module asks of a continuity: did
+   the turn start at a Librarian point, or at none? Answering it here keeps
+   [continuity] abstract -- its constructors carry a snapshot checked against
+   this dispatch's checkpoint, and nothing outside should be able to make
+   one. *)
+let continuity_choice = function
+  | Without_snapshot -> Chose_no_point
+  | Summarized _ | Absorbed _ -> Chose_a_librarian_point
+;;
+
 (* The Librarian's durable position, when it is a place in this history: the
    position names this trace and the atom before it opens with the message
    the position recorded -- the same test the Librarian's own range selection

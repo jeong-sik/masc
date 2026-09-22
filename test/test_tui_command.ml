@@ -31,6 +31,11 @@ let describe = function
   | Command.Set_acting_pane_call_order `By_tool -> "acting-pane-call-order:by-tool"
   | Command.Acting_pane_call_order_unknown word ->
       "acting-pane-call-order-unknown:" ^ word
+  | Command.Scroll_acting_pane `Up -> "acting-pane-scroll:up"
+  | Command.Scroll_acting_pane `Down -> "acting-pane-scroll:down"
+  | Command.Scroll_acting_pane `Top -> "acting-pane-scroll:top"
+  | Command.Scroll_acting_pane (`By rows) -> Printf.sprintf "acting-pane-scroll:%+d" rows
+  | Command.Acting_pane_scroll_unknown word -> "acting-pane-scroll-unknown:" ^ word
   | Command.Lane_addons input -> "lane-addons:" ^ input
   | Command.Open_metrics -> "open-metrics"
   | Command.Switch_keeper name -> "keeper:" ^ name
@@ -155,6 +160,14 @@ let test_pane_commands_parse_by_word () =
     ; "acting-pane-call-order-unknown:fastest"
     ; "acting-pane-tab-unknown:orders"
     ; "acting-pane-call-order:oldest"
+    ; "acting-pane-scroll:up"
+    ; "acting-pane-scroll:down"
+    ; "acting-pane-scroll:top"
+    ; "acting-pane-scroll:+5"
+    ; "acting-pane-scroll:-2"
+    ; "acting-pane-scroll-unknown:5"
+    ; "acting-pane-scroll-unknown:"
+    ; "acting-pane-scroll-unknown:+"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
     ; "queue:"
@@ -217,6 +230,14 @@ let test_pane_commands_parse_by_word () =
        ; "/activity order fastest"
        ; "/activity orders"
        ; "/activity order\toldest"
+       ; "/activity scroll up"
+       ; "/activity scroll down"
+       ; "/activity scroll top"
+       ; "/activity scroll +5"
+       ; "/activity scroll -2"
+       ; "/activity scroll 5"
+       ; "/activity scroll"
+       ; "/activity scroll +"
        ; "/keeper orbiter"
        ; "/keeper   "
        ; "/queue"

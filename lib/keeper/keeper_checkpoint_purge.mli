@@ -65,6 +65,15 @@
 
     Recovery from a structurally broken input drops the broken tail, so its
     end moves by design; atoms are then counted on the history it returns.
+    With a Librarian position in the trace, that end is where the position
+    moves ({!librarian_rebase}), and the Librarian reads from a position only
+    when a boundary line it has counted states it
+    ({!Keeper_turn_boundaries.witness_line}). So the recovery ends the history
+    at the last turn end such a line states, ahead of the break, and is
+    refused with [Recovery_end_unwitnessed] when there is none; a position
+    moved to an end no line states stops the Librarian for good (masc #37772).
+    What it cuts between that turn end and the break is in atoms the
+    Librarian has read. Without a position in the trace it ends at the break.
     A working state that covers the dropped tail no longer fits, and the
     recovery is refused; with the server stopped, removing that working
     state (the keeper's [librarian-continuity.json]) lets it through, and
@@ -101,10 +110,11 @@ val default_config : config
     librarian-lifecycle §10-2). A purge of a sound transcript keeps every atom
     and the last one byte-exact, so the position is answered back unchanged.
     Recovery from a broken transcript drops its tail, and there the position
-    moves to the new end. Either way it is only allowed when the position has
-    nothing left to read: the rewrite clears tool results and reasoning, and
-    in atoms the Librarian has not read yet that is content it would never
-    absorb.
+    moves to the new end, which the recovery chose where a line the position
+    counted states it ({!purge_messages}). Either way it is only allowed when
+    the position has nothing left to read: the rewrite clears tool results
+    and reasoning, and in atoms the Librarian has not read yet that is
+    content it would never absorb.
 
     [boundary_lines_seen] is left as it is. It says which lines of the
     boundary log a round had already counted, so that a restart line beyond
@@ -126,8 +136,10 @@ type refusal =
       { end_atom : int
       ; atom_count : int
       }
-      (** The position stops short of the history's end
-          ([specs/bug-models/LibrarianRead-purge-trim-buggy.cfg]). *)
+      (** The position stops short of the history's end. The guard asks
+          about atoms: asked about turns, it lets a rewrite pass the atoms of
+          a turn that saved and died
+          ([specs/bug-models/LibrarianRead-purge-trim-by-turns-buggy.cfg]). *)
   | Position_beyond_history of
       { end_atom : int
       ; atom_count : int
@@ -204,6 +216,13 @@ type purge_error =
       (** The Librarian working state fits the input and not the output. On a
           sound input this is a bug in the transform; on a recovery the
           dropped tail was part of what it covers. *)
+  | Recovery_end_unwitnessed of { boundary_lines_seen : int }
+      (** A recovery with a Librarian position in the trace found no turn end
+          ahead of the break that one of the position's first
+          [boundary_lines_seen] boundary lines states
+          ({!Keeper_turn_boundaries.witness_line}). Moved to any other end,
+          the position would stand on no line and the Librarian would stop on
+          it for good. *)
 
 val purge_error_to_string : purge_error -> string
 
@@ -216,18 +235,22 @@ val purge_messages
   -> trace_id:string
   -> boundary_lines:boundary_line list
   -> continuity:Librarian_continuity_snapshot.t option
+  -> progress:Keeper_librarian_progress.t option
   -> Agent_core.Types.message list
   -> (Agent_core.Types.message list * report, purge_error) result
 (** Pure message-list transform behind {!purge}. [boundary_lines] is the
-    keeper's turn-boundary log and [continuity] its saved Librarian working
-    state, both as they are when the result is installed: they say which
-    messages stay byte-exact. Exposed for tests. *)
+    keeper's turn-boundary log, [continuity] its saved Librarian working
+    state and [progress] its Librarian position, all as they are when the
+    result is installed: the first two say which messages stay byte-exact,
+    and on a recovery the first and the last say where the history may end.
+    Exposed for tests. *)
 
 val purge
   :  config:config
   -> trace_id:string
   -> boundary_lines:boundary_line list
   -> continuity:Librarian_continuity_snapshot.t option
+  -> progress:Keeper_librarian_progress.t option
   -> Agent_core.Checkpoint.t
   -> (Agent_core.Checkpoint.t * report, purge_error) result
 (** Apply {!purge_messages} to [ckpt.messages], leaving every other field

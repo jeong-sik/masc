@@ -213,3 +213,34 @@ val read
   :  keepers_dir:string
   -> keeper_id:string
   -> ((int * (record, read_error) result) list, string) result
+
+(** {1 Witness} *)
+
+(** The turn and atom position [record] states for [trace_id]: a turn of that
+    trace that ended with [end_atom] atoms and [last_atom_digest]. A restart
+    line, a turn with no atom position and a turn of another trace state
+    none. Pure. *)
+val atom_position_stated
+  :  trace_id:string
+  -> record
+  -> (Ids.Turn_ref.t * int * string) option
+
+(** The line that states a read position: the last of [lines] ending a turn of
+    [trace_id] with exactly [end_atom] atoms and [last_atom_digest], as
+    [(line, recorded_at, turn_ref)]. With [through], only lines numbered at
+    most [through] count: the lines a position has taken in, its
+    [boundary_lines_seen] ({!Keeper_librarian_progress}). A line that cannot
+    be decoded, a restart line and a turn with no atom position state none.
+
+    This is the one test of whether a position stands on the log. The
+    Librarian reads from a position only when this finds its line, and stops
+    otherwise ({!Keeper_librarian_durable_consumer}); a checkpoint purge that
+    moves a position moves it only to where this finds one
+    ({!Keeper_checkpoint_purge.purge_messages}). *)
+val witness_line
+  :  ?through:int
+  -> trace_id:string
+  -> end_atom:int
+  -> last_atom_digest:string
+  -> (int * (record, read_error) result) list
+  -> (int * float * Ids.Turn_ref.t) option

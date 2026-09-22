@@ -54,6 +54,7 @@
 - Keepers waiting for explicit session recovery are no longer counted as automatic retries; the Dashboard and TUI show them separately and fleet health reports them as needing operator action (#37236).
 - Remote Keepers now use one resolved workspace for the request boundary, command working directory, and file tools, so the three can no longer disagree (#37325).
 - A turn's decision record now states the degraded-retry result exactly as the execution receipt does, instead of inferring it from a runtime change (#37446).
+- Checkpoint purge recovery of a structurally broken checkpoint no longer leaves the Librarian stopped. The recovery drops the history from the break on and moved the Librarian's read position to the new end, which is inside a turn when the break is, so no turn-boundary line stated it and every later pass stopped with "read position has no matching turn boundary". With a Librarian position in the trace, the recovery now ends the history at the last turn end a boundary line the position has counted states, and is refused when there is none. The durable consumer and the purge answer "does a line state this position" with one lookup, `Keeper_turn_boundaries.witness_line` (#37772).
 
 ### Internal
 

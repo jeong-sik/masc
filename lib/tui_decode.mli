@@ -1129,6 +1129,11 @@ type verification_request = {
   vr_task_title : string;
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
+  vr_intent : Masc_domain.verification_intent option;
+      (** Which verdict the row waits on, when the server joined the backlog
+          (the awaiting view): a completion, or a cancellation that only an
+          operator's verdict clears. [None] in the history view, which has
+          no join, and drawn as nothing rather than as [complete]. *)
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;

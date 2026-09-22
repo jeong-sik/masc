@@ -1981,13 +1981,14 @@ let system_log_snapshot_json entries =
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
 let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
-    ?(evidence_error = `Null) () =
+    ?(evidence_error = `Null) ?(intent = `String "complete") () =
   `Assoc
     [ ("request_id", `String "vr-1")
     ; ("task_id", `String "task-470")
     ; ("task_title", `String "wire the approval gate")
     ; ("created_at", `String "2026-08-23T09:00:00Z")
     ; ("submitted_by", `String "keeper.one")
+    ; ("intent", intent)
     ; ("completion_contract", `List [ `String "tests pass" ])
     ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
     ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
@@ -6202,6 +6203,45 @@ let test_decode_verification_separates_a_stale_queue_from_a_failed_one () =
         (Some "read from backlog.json.last-good")
         snapshot.Tui_decode.vs_backlog_recovery
 
+(* The row says which verdict it waits on. A cancellation is cleared only by
+   an operator, so reading it as a completion hid the one row that needed
+   the operator most. [null] is the history view, and a name outside the
+   pair is refused rather than read as either. *)
+let test_decode_verification_reads_which_verdict_the_row_waits_on () =
+  let decode json =
+    match Tui_decode.decode_verification_snapshot json with
+    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> Ok r
+    | Ok _ -> Alcotest.fail "expected one request"
+    | Error err -> Error err
+  in
+  let intent_of json =
+    match decode json with
+    | Ok r -> r.Tui_decode.vr_intent
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  Alcotest.(check bool) "a cancel row waits on a cancel verdict" true
+    (intent_of
+       (verification_snapshot_json
+          [ verification_request_json ~intent:(`String "cancel") () ])
+     = Some Masc_domain.Cancel_task);
+  Alcotest.(check bool) "a complete row waits on a completion" true
+    (intent_of
+       (verification_snapshot_json [ verification_request_json () ])
+     = Some Masc_domain.Complete_task);
+  Alcotest.(check bool) "the history view carries no intent" true
+    (intent_of
+       (verification_snapshot_json
+          [ verification_request_json ~intent:`Null () ])
+     = None);
+  Alcotest.(check bool) "a name outside the pair is refused" true
+    (match
+       decode
+         (verification_snapshot_json
+            [ verification_request_json ~intent:(`String "stop") () ])
+     with
+     | Error _ -> true
+     | Ok _ -> false)
+
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could
      not be read is the error field, and folding the two together would show a
@@ -10350,6 +10390,8 @@ let () =
           test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
+        Alcotest.test_case "the row says which verdict it waits on" `Quick
+          test_decode_verification_reads_which_verdict_the_row_waits_on;
       ] );
     ( "decode_system_logs",
       [

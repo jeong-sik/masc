@@ -1343,10 +1343,12 @@ let collect_board_events_with_cursor_policy
                | Keeper_registry_event_queue.Stimulus_storage_error detail ->
                  Error (Delivery_failed detail))
              else
-               let observation = Board_signal.board_observation_of_board_stimulus
-                   ~post_id:signal.post_id (Board_signal.board_stimulus_of_board_signal signal) in
-               pending_board_event_of_board_observation ~meta
-                 ~arrived_at:(Time_compat.now ()) observation
+               Result.bind
+                 (Board_signal.board_observation_of_board_stimulus
+                    ~post_id:signal.post_id
+                    (Board_signal.board_stimulus_of_board_signal signal))
+                 (pending_board_event_of_board_observation ~meta
+                    ~arrived_at:(Time_compat.now ()))
                |> Result.map Option.some
                |> Result.map_error (fun error -> Source_unavailable error)
            in

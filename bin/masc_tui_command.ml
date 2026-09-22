@@ -20,6 +20,8 @@ type t =
   | Toggle_acting_pane
   | Show_acting_pane_tab of [ `Fleet | `Changes ]
   | Acting_pane_tab_unknown of string
+  | Set_acting_pane_call_order of [ `Next | `Newest | `Oldest | `Longest | `By_tool ]
+  | Acting_pane_call_order_unknown of string
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Queue of string
@@ -215,8 +217,8 @@ let catalog =
     }
   ; { word = "activity"
     ; aliases = []
-    ; args = "[fleet|changes]"
-    ; summary = "walk the Activity pane beside this surface narrow, wide, hidden, or show one of its tabs"
+    ; args = "[fleet|changes|order [newest|oldest|longest|tool]]"
+    ; summary = "walk the Activity pane beside this surface narrow, wide, hidden, show one of its tabs, or turn the order of its calls"
     }
   ; { word = "preview"
     ; aliases = []
@@ -336,6 +338,18 @@ let parse text =
     | "activity", "" -> Toggle_acting_pane
     | "activity", "fleet" -> Show_acting_pane_tab `Fleet
     | "activity", "changes" -> Show_acting_pane_tab `Changes
+    (* The calls' order used to turn only under a mouse press on their
+       heading, so a terminal that does not report the mouse could not reach
+       it (#37672). The words are the heading's own: "by tool" is also
+       taken as "tool". *)
+    | "activity", arg when String.equal (fst (split_word arg)) "order" -> (
+        match snd (split_word arg) with
+        | "" -> Set_acting_pane_call_order `Next
+        | "newest" -> Set_acting_pane_call_order `Newest
+        | "oldest" -> Set_acting_pane_call_order `Oldest
+        | "longest" -> Set_acting_pane_call_order `Longest
+        | "tool" | "by tool" -> Set_acting_pane_call_order `By_tool
+        | other -> Acting_pane_call_order_unknown other)
     | "activity", other -> Acting_pane_tab_unknown other
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name

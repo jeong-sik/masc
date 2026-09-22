@@ -45,8 +45,8 @@ type t =
   | Open_changes
       (** [/changes] — open recorded file changes for this keeper. *)
   | Toggle_acting_pane
-      (** [/activity] — show or hide the Activity pane beside this surface,
-          the same toggle as Ctrl-L. *)
+      (** [/activity] — the Activity pane beside this surface, narrow, wide
+          or hidden in turn: the same cycle as Ctrl-L. *)
   | Show_acting_pane_tab of [ `Fleet | `Changes ]
       (** [/activity fleet], [/activity changes] — show the pane on that
           tab: the fleet's feed, or the selected keeper's file changes. *)

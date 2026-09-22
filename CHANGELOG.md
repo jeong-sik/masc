@@ -45,6 +45,7 @@
 
 ### Fixed
 
+- A keeper whose Librarian continuity snapshot cannot be read or no longer matches its history (a corrupt file, a changed covered prefix, an unreadable boundary log) now turns from the Librarian's position or its own turn start, as it does with no snapshot, instead of being refused before dispatch as an invalid `librarian.continuity` configuration (#37762).
 - Setup fixture substitutions now fail at the exact changed fixture location instead of silently passing and blaming the wrong field (#37434).
 - The cancel guard now follows complete handler arm lists and recognizes both exception-arm forms, eliminating false positives from comments and distant cancellation arms (#37495).
 - The strict runtime-config check now excludes vendored warning policy from MASC's warning gate without weakening MASC source checks (#37315).

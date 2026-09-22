@@ -1563,12 +1563,10 @@ let run_named
         | None, _ | Some _, Some _ -> 0) in
       let continuity = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id, recovery_view with
-        | None, _ | _, Some _ -> Ok None
+        | None, _ | _, Some _ -> None
         | Some trace_id, None ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
             let config = Workspace.default_config base_path in
-            let ( let* ) = Result.bind in
-            let* saved = Keeper_librarian_continuity.read ~config ~keeper_name in
             (* Where a request without a fitting snapshot starts: the
                Librarian's durable position when it is a place in this history
                (RFC keeper-context-window-in-tokens §13.6), else this turn's
@@ -1595,36 +1593,57 @@ let run_named
                 Log.Keeper.info ~keeper_name
                   "no Librarian continuity snapshot fits the current history (%s); starting at the Librarian's position, atom %d"
                   why end_atom;
-                Ok (Some continuity)
+                Some continuity
               | None ->
                 Log.Keeper.info ~keeper_name
                   "no Librarian continuity snapshot fits the current history (%s); the request starts at this turn's own boundary"
                   why;
-                Ok (Some Keeper_turn_driver_try_provider.without_snapshot)
+                Some Keeper_turn_driver_try_provider.without_snapshot
             in
-            match saved with
-            | None -> absorbed_or_turn_start ~why:"no continuity snapshot is saved"
-            | Some snapshot ->
-              let* lines = Keeper_turn_boundaries.read
-                ~keepers_dir:(Workspace.keepers_runtime_dir config)
-                ~keeper_id:keeper_name in
-              match Keeper_turn_driver_try_provider.prepare_continuity ~trace_id ~lines
-                ~messages:initial_messages snapshot with
-              | Ok restored -> Ok (Some restored)
-              | Error
-                  ((Librarian_continuity_snapshot.Trace_mismatch
-                   | Librarian_continuity_snapshot.History_changed
-                   | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
-                (* The snapshot no longer fits this history. The Librarian's
-                   durable position may still: goo-yang-bong's did on
-                   2026-09-22 while its snapshot did not, and the keeper sent
-                   its 12,720 atoms, 16.4 MB, 44 cycles in a row until the
-                   position was used. From the position the request carries
-                   what the Librarian has not read (RFC
-                   keeper-context-window-in-tokens §13.6); with no position it
-                   starts at this turn's own boundary (§13.4). *)
-                absorbed_or_turn_start ~why:(Librarian_continuity_snapshot.error_to_string mismatch)
-              | Error error -> Error (Librarian_continuity_snapshot.error_to_string error)))
+            (* A snapshot this process cannot read or check is no front either. The
+               request goes down the same order instead of being refused before
+               dispatch (#37762): a keeper whose snapshot file is corrupt, or whose
+               covered messages changed under it, still turns, and the warning names
+               what was wrong so an operator can purge the file
+               (RFC-librarian-lifecycle §10-2). *)
+            let unusable_snapshot ~why =
+              Log.Keeper.warn ~keeper_name
+                "continuity snapshot unusable, the request starts without it: %s" why;
+              absorbed_or_turn_start ~why
+            in
+            match Keeper_librarian_continuity.read ~config ~keeper_name with
+            | Error detail -> unusable_snapshot ~why:("continuity snapshot unreadable: " ^ detail)
+            | Ok None -> absorbed_or_turn_start ~why:"no continuity snapshot is saved"
+            | Ok (Some snapshot) ->
+              match
+                Keeper_turn_boundaries.read
+                  ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+              with
+              | Error detail -> unusable_snapshot ~why:("turn boundary log unreadable: " ^ detail)
+              | Ok lines ->
+                match Keeper_turn_driver_try_provider.prepare_continuity ~trace_id ~lines
+                  ~messages:initial_messages snapshot with
+                | Ok restored -> Some restored
+                | Error
+                    ((Librarian_continuity_snapshot.Trace_mismatch
+                     | Librarian_continuity_snapshot.History_changed
+                     | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
+                  (* The snapshot no longer fits this history. The Librarian's
+                     durable position may still: goo-yang-bong's did on
+                     2026-09-22 while its snapshot did not, and the keeper sent
+                     its 12,720 atoms, 16.4 MB, 44 cycles in a row until the
+                     position was used. From the position the request carries
+                     what the Librarian has not read (RFC
+                     keeper-context-window-in-tokens §13.6); with no position it
+                     starts at this turn's own boundary (§13.4). *)
+                  absorbed_or_turn_start ~why:(Librarian_continuity_snapshot.error_to_string mismatch)
+                | Error
+                    ((Librarian_continuity_snapshot.Invalid_snapshot _
+                     | Librarian_continuity_snapshot.Range_stopped _
+                     | Librarian_continuity_snapshot.Prefix_changed
+                     | Librarian_continuity_snapshot.Read_failed _
+                     | Librarian_continuity_snapshot.Write_failed _) as unusable) ->
+                  unusable_snapshot ~why:(Librarian_continuity_snapshot.error_to_string unusable)))
       in
 	  let refused_carried_front = ref None in
 	  (* The same front the Agent Core branch reads, for the official-client
@@ -2500,11 +2519,6 @@ let run_named
       | Runtime_execution.Agent_core runtime_provider_config ->
        let continuity = Eio.Lazy.force continuity in
        (match
-          match continuity, recovery_view with
-          | Error detail, None ->
-            Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
-              { field = "librarian.continuity"; detail }))
-          | (Ok _ | Error _), _ ->
           match provider_config_transform with
           | None -> Ok runtime_provider_config
           | Some transform -> transform runtime_provider_config
@@ -2560,9 +2574,9 @@ let run_named
             ; context_marks
             ; input_policy
             ; completed_end_atom = Eio.Lazy.force completed_end_atom
-            ; continuity = (match recovery_view, continuity with
-                | None, Ok snapshot -> snapshot
-                | Some _, _ | None, Error _ -> None)
+            ; continuity = (match recovery_view with
+                | None -> continuity
+                | Some _ -> None)
             ; (* Read only when the process holds no ledger for this pair:
                  the range the newest completed Agent Core turn record on
                  this history measured, whichever runtime ran it, so a

@@ -182,6 +182,7 @@ let marked =
   ; number = "<num>"
   ; literal = "<lit>"
   ; punctuation = "<pun>"
+  ; note = "<note>"
   ; reset = "<->"
   }
 
@@ -243,6 +244,56 @@ let test_a_block_keeps_the_pane_foreground () =
   check bool "the block's own line is unpainted" true
     (holds "\n    line one" rendered)
 
+(* A served result runs to hundreds of lines and the chat is not where it is
+   read whole: the tree keeps the head of a document and says how much it
+   left out and where that is. The rule has one edge -- a single line over
+   is drawn, because a note standing for one line takes the row it saved --
+   and a Text value, the pane's own reading, is never folded. *)
+let fold = { Tool_detail.fold_rows = 8; fold_note = Printf.sprintf "+%d more" }
+
+let numbered n = String.concat "\n" (List.init n (Printf.sprintf "line %d"))
+
+let test_a_long_document_keeps_its_head_and_says_the_rest () =
+  let rendered =
+    Tool_detail.tree ~fold [ served "output" (numbered 20); said "result" "1 KB" ]
+  in
+  check int "eight lines, the note, and the field after" (8 + 1 + 1)
+    (List.length rendered);
+  check bool "the eighth line is the last one drawn" true
+    (List.exists (fun row -> holds "line 7" row) rendered);
+  check bool "the ninth is not" false
+    (List.exists (fun row -> holds "line 8" row) rendered);
+  check bool "the note counts what it stands for" true
+    (List.exists (fun row -> holds "+12 more" row) rendered);
+  (* The note sits inside the branch: it is a row of the output, not a field
+     of its own, so it takes the continuation glyph and not a label. *)
+  match List.nth_opt rendered 8 with
+  | Some row -> check string "under the branch" "  │  +12 more" row
+  | None -> fail "no ninth row"
+
+let test_one_line_over_is_drawn_not_folded () =
+  let rendered = Tool_detail.tree ~fold [ served "output" (numbered 9) ] in
+  check int "nine lines, no note" 9 (List.length rendered);
+  check bool "the last line is drawn" true
+    (List.exists (fun row -> holds "line 8" row) rendered);
+  check bool "nothing says more" false
+    (List.exists (fun row -> holds "more" row) rendered)
+
+let test_a_text_value_is_never_folded () =
+  let rendered = Tool_detail.tree ~fold [ said "context" (numbered 20) ] in
+  check int "every line" 20 (List.length rendered)
+
+let test_without_a_fold_the_whole_document_is_drawn () =
+  let rendered = Tool_detail.tree [ served "output" (numbered 20) ] in
+  check int "every line" 20 (List.length rendered)
+
+let test_the_note_draws_in_its_own_role () =
+  let rendered =
+    Tool_detail.tree ~palette:marked ~fold [ served "output" (numbered 20) ]
+  in
+  check bool "the note is a note" true
+    (List.exists (fun row -> holds "<note>+12 more<->" row) rendered)
+
 let () =
   run
     "tui_tool_detail"
@@ -264,6 +315,18 @@ let () =
             test_padding_does_not_leak_between_trees
         ; test_case "last field closes the tree" `Quick
             test_last_field_closes_the_tree
+        ] )
+    ; ( "fold"
+      , [ test_case "a long document keeps its head and says the rest" `Quick
+            test_a_long_document_keeps_its_head_and_says_the_rest
+        ; test_case "one line over is drawn, not folded" `Quick
+            test_one_line_over_is_drawn_not_folded
+        ; test_case "a text value is never folded" `Quick
+            test_a_text_value_is_never_folded
+        ; test_case "without a fold the whole document is drawn" `Quick
+            test_without_a_fold_the_whole_document_is_drawn
+        ; test_case "the note draws in its own role" `Quick
+            test_the_note_draws_in_its_own_role
         ] )
     ; ( "palette"
       , [ test_case "each part of a document draws in its own role" `Quick

@@ -19,6 +19,7 @@ type palette = {
   number : string;
   literal : string;  (** [true], [false], [null] *)
   punctuation : string;  (** braces, brackets, colons, commas *)
+  note : string;  (** the row that says how much of a document is folded *)
   reset : string;
 }
 
@@ -61,11 +62,25 @@ val structured : ?palette:palette -> string -> string
     is returned unchanged, because a single-line rendering is already its
     best one. *)
 
-val tree : ?palette:palette -> field list -> string list
+type fold = {
+  fold_rows : int;  (** how many lines of a document the tree keeps *)
+  fold_note : int -> string;
+      (** the row drawn in place of the rest, given how many lines it stands
+          for -- the caller's, because it names where the whole payload is *)
+}
+
+val tree : ?palette:palette -> ?fold:fold -> field list -> string list
 (** [tree fields] draws [fields] as one branch per field, in order, with the
     last field closing the tree. A value's own newlines are kept: its first
     line carries the label and the rest are indented under it, so a structured
     payload stays inside the branch that owns it.
+
+    With [fold], a [Document] longer than [fold_rows] lines keeps its first
+    [fold_rows] and closes on [fold_note] saying how many it left out -- a
+    served result runs to hundreds of lines and the chat is not where it is
+    read whole. One line over is drawn rather than folded: the note would
+    take the row it saved. A [Text] value is never folded; it is the pane's
+    own reading and already short.
 
     Labels are padded to the widest label in [fields], measured in terminal
     cells, so one tree's separators line up. The padding is per-call: a tree of

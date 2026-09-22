@@ -1428,6 +1428,27 @@ let load_fusion_detail ~(host : string) ~(port : int) ~(run_id : string) :
   | Error err -> Error ("fusion detail load failed: " ^ err)
   | Ok json -> Tui_decode.decode_fusion_detail json
 
+(** Read what the launch form offers. *)
+let load_fusion_launch_options ~(host : string) ~(port : int) :
+    (Tui_decode.fusion_launch_options, string) result =
+  match fetch_fusion_config ~host ~port with
+  | Error err -> Error ("fusion presets load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_fusion_launch_options json
+
+(** Start a Fusion run and read back its run id. A refusal is the server's
+    sentence; an unanswered request says so, because the run may have
+    started and the list is the place to look. *)
+let launch_fusion_run ~(host : string) ~(port : int)
+    ~(request : Masc_tui_fusion_launch.request) : (string, string) result =
+  match
+    post_fusion_launch ~host ~port ~keeper:request.Masc_tui_fusion_launch.keeper
+      ~body:(Masc_tui_fusion_launch.request_body request)
+  with
+  | Post_answered json -> Tui_decode.decode_fusion_launch_receipt json
+  | Post_refused detail -> Error detail
+  | Post_unanswered detail ->
+      Error ("fusion launch unanswered: " ^ detail ^ "; the run may have started, r refreshes the list")
+
 (** Load one page of one view from /api/v1/verification/requests *)
 let load_verification ~(host : string) ~(port : int) ~(limit : int)
     ~(view : Tui_decode.verification_view) ~(offset : int) :

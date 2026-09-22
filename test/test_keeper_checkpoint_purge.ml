@@ -60,14 +60,15 @@ let filler n =
 
 let no_tail_config = { Purge.default_config with keep_recent_messages = 0 }
 
-(* A purge with no boundary log and no Librarian working state: only the
-   history's own end names a message. *)
+(* A purge with no boundary log, no Librarian working state and no Librarian
+   position: only the history's own end names a message. *)
 let purge_plain ~config messages =
   Purge.purge_messages
     ~config
     ~trace_id:"trace-purge-plain"
     ~boundary_lines:[]
     ~continuity:None
+    ~progress:None
     messages
 
 let purge_checkpoint ~config (checkpoint : Agent_core.Checkpoint.t) =
@@ -76,6 +77,7 @@ let purge_checkpoint ~config (checkpoint : Agent_core.Checkpoint.t) =
     ~trace_id:checkpoint.session_id
     ~boundary_lines:[]
     ~continuity:None
+    ~progress:None
     checkpoint
 
 let run ?(config = no_tail_config) messages =
@@ -744,13 +746,29 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
            Alcotest.fail "fixture checkpoint was not saved"
        | Error detail -> Alcotest.failf "fixture checkpoint: %s" detail);
       let original = In_channel.with_open_bin checkpoint_path In_channel.input_all in
+      (* The keeper is not the checkpoint's [agent_name]: that field holds the
+         agent-core agent's name (the runtime id on a live keeper). The CLI
+         finds the keeper's Librarian files by the name the operator passes,
+         and its meta names the trace (#37770). *)
+      let keeper_name = "purge-cli-keeper" in
+      (match
+         Masc.Keeper_meta_store.replace_snapshot config
+           (match
+              Masc_test_deps.meta_of_json_fixture
+                (`Assoc [ "name", `String keeper_name; "trace_id", `String checkpoint.session_id ])
+            with
+            | Ok meta -> meta
+            | Error detail -> Alcotest.failf "keeper meta fixture: %s" detail)
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.failf "keeper meta: %s" detail);
       let before = workspace_contents owner_root in
       let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
       let write_progress ~end_atom =
         match
           Progress.write
             ~keepers_dir:runtime_keepers_dir
-            ~keeper_id:checkpoint.agent_name
+            ~keeper_id:keeper_name
             (progress_at checkpoint.messages ~end_atom)
         with
         | Ok () -> ()
@@ -758,13 +776,15 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
       in
       let read_progress () =
         match
-          Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:checkpoint.agent_name
+          Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
         with
         | Ok (Some progress) -> progress
         | Ok None -> Alcotest.fail "the Librarian position is gone"
         | Error error -> Alcotest.fail (Progress.read_error_to_string error)
       in
-      let run_cli ?(from_cwd = false) ?(exit_code = 0) args =
+      let run_cli
+            ?(from_cwd = false) ?(exit_code = 0) ?(reports_checkpoint = true)
+            ?(identity = [ "--keeper"; keeper_name ]) args =
         let runtime_base_path =
           Masc.Workspace.runtime_base_path (Masc.Workspace.Explicit base_path)
         in
@@ -790,20 +810,31 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
             ~env:(Array.of_list child_env)
             ~is_success:(Int.equal exit_code)
             (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
-            ([ executable
-             ; "--trace"; checkpoint.session_id; "--keep-recent"; "0"
-             ] @ args)
+            ([ executable ] @ identity @ [ "--keep-recent"; "0" ] @ args)
         in
-        Alcotest.(check bool) "CLI reports the producer checkpoint" true
+        Alcotest.(check bool) "CLI reports the producer checkpoint" reports_checkpoint
           (List.mem ("checkpoint: " ^ checkpoint_path)
              (String.split_on_char '\n' output));
         print_string output;
         output
       in
-      let run_cli ?from_cwd ?exit_code args =
-        let (_ : string) = run_cli ?from_cwd ?exit_code args in
+      let run_cli ?from_cwd ?exit_code ?reports_checkpoint ?identity args =
+        let (_ : string) = run_cli ?from_cwd ?exit_code ?reports_checkpoint ?identity args in
         ()
       in
+      (* The keeper names the trace; a trace argument only cross-checks it. *)
+      run_cli ~exit_code:1 ~reports_checkpoint:false
+        ~identity:[ "--trace"; checkpoint.session_id ] [ "--base"; base_path ];
+      run_cli ~exit_code:1 ~reports_checkpoint:false
+        ~identity:[ "--keeper"; "no-such-keeper" ] [ "--base"; base_path ];
+      run_cli ~exit_code:1 ~reports_checkpoint:false
+        ~identity:[ "--keeper"; keeper_name; "--trace"; "trace-of-another-keeper" ]
+        [ "--base"; base_path ];
+      run_cli ~identity:[ "--keeper"; keeper_name; "--trace"; checkpoint.session_id ]
+        [ "--base"; base_path ];
+      Alcotest.(check (list (pair string (option string))))
+        "refused and cross-checked runs leave the workspace unchanged"
+        before (workspace_contents owner_root);
       run_cli [ "--base"; base_path ];
       Alcotest.(check (list (pair string (option string))))
         "dry-run leaves all workspace files and directories unchanged"
@@ -882,13 +913,14 @@ let turn_ended_line ~line ~absolute_turn messages ~end_atom : Purge.boundary_lin
       } )
 ;;
 
-let purge_with ~boundary_lines ~continuity messages =
+let purge_with ?progress ~boundary_lines ~continuity messages =
   match
     Purge.purge_messages
       ~config:no_tail_config
       ~trace_id:fixture_trace
       ~boundary_lines
       ~continuity
+      ~progress
       messages
   with
   | Ok result -> result
@@ -961,6 +993,7 @@ let test_a_fitting_working_state_keeps_its_prefix () =
     match
       Masc.Librarian_continuity_snapshot.capture_checkpoint_prefix
         ~end_atom:3
+        ~catch_up_end_atom:None
         ~trace_id:fixture_trace
         ~lines
         ~messages
@@ -1019,6 +1052,259 @@ let test_recovery_keeps_the_last_atom_it_returns () =
       report.reasoning_blocks_stripped
 ;;
 
+(* A second tool_use opens while the first is unanswered: the break a
+   recovery drops, and everything after it. *)
+let overlapping_cycles () =
+  [ block_message Types.Assistant [ tool_use "c1" ]
+  ; block_message Types.Assistant [ tool_use "c2" ]
+  ; { (block_message Types.Tool [ tool_result "c1" ]) with tool_call_id = Some "c1" }
+  ; { (block_message Types.Tool [ tool_result "c2" ]) with tool_call_id = Some "c2" }
+  ]
+;;
+
+(* masc #37772. Two turns: the first ends after two atoms and its line says
+   so; the second asks, answers, and then breaks on an overlapping tool cycle.
+   The broken turn still ended, and the Librarian read to its end. *)
+let broken_second_turn () =
+  let first_turn =
+    [ text_message Types.User "q1"; block_message Types.Assistant [ Types.Text "a1" ] ]
+  in
+  let before_the_break =
+    [ text_message Types.User "q2"
+    ; block_message Types.Assistant [ unsigned_thinking "t2"; Types.Text "a2" ]
+    ]
+  in
+  let messages = first_turn @ before_the_break @ overlapping_cycles () in
+  let lines =
+    [ turn_ended_line ~line:1 ~absolute_turn:1 messages ~end_atom:2
+    ; turn_ended_line ~line:2 ~absolute_turn:2 messages ~end_atom:(atom_count messages)
+    ]
+  in
+  let progress =
+    { (progress_at messages ~end_atom:(atom_count messages)) with boundary_lines_seen = 2 }
+  in
+  first_turn, before_the_break, messages, lines, progress
+;;
+
+let stated_by ~(progress : Progress.t) lines messages =
+  let end_atom, last_atom_digest = atom_position messages in
+  Option.map
+    (fun (line, _recorded_at, _turn_ref) -> line)
+    (Boundaries.witness_line
+       ~through:progress.boundary_lines_seen
+       ~trace_id:fixture_trace
+       ~end_atom
+       ~last_atom_digest
+       lines)
+;;
+
+(* Without a position nothing needs a line, and the recovery keeps every
+   closed unit ahead of the break -- half of the second turn, an end no line
+   states. With one, it goes back to the first turn's end, which a line the
+   position counted states, and the rebase moves the position there: the
+   Librarian finds its line through the same lookup it reads by. Moved to
+   the break instead, the position would stop every round
+   ([specs/bug-models/LibrarianRead-purge-trim-anywhere-live-buggy.cfg]). *)
+let test_recovery_ends_where_a_counted_line_states_the_end () =
+  let first_turn, before_the_break, messages, lines, progress = broken_second_turn () in
+  let at_break, _ = purge_with ~boundary_lines:lines ~continuity:None messages in
+  Alcotest.(check int) "without a position it ends at the break"
+    (List.length (first_turn @ before_the_break)) (List.length at_break);
+  Alcotest.(check (option int)) "an end no counted line states" None
+    (stated_by ~progress lines at_break);
+  let recovered, report =
+    purge_with ~progress ~boundary_lines:lines ~continuity:None messages
+  in
+  Alcotest.(check (list string)) "with one it ends at the first turn's end, byte-exact"
+    (List.map Types.show_message first_turn) (List.map Types.show_message recovered);
+  Alcotest.(check int) "and counts what it cut as dropped"
+    (List.length messages - List.length first_turn)
+    report.messages_dropped_at_structural_break;
+  match rebase ~progress:(Some progress) ~before:messages ~after:recovered () with
+  | Ok (Purge.Rebased { before = _; after }) ->
+    Alcotest.(check int) "the position moves to that end" 2 after.position.end_atom;
+    Alcotest.(check (option int)) "and stands on the line that states it" (Some 1)
+      (stated_by ~progress:after lines recovered)
+  | Ok Purge.No_progress -> Alcotest.fail "a position was given and none came back"
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+;;
+
+(* A line past [boundary_lines_seen] is not one the position took in, so it
+   is no place to move it: the Librarian would not find it there either. *)
+let test_recovery_passes_over_a_line_the_position_has_not_counted () =
+  let first_turn, before_the_break, messages, lines, progress = broken_second_turn () in
+  let uncounted =
+    turn_ended_line ~line:3 ~absolute_turn:3 messages
+      ~end_atom:(atom_count (first_turn @ before_the_break))
+  in
+  let recovered, _ =
+    purge_with
+      ~progress
+      ~boundary_lines:(lines @ [ uncounted ])
+      ~continuity:None
+      messages
+  in
+  Alcotest.(check int) "it goes back to the counted turn end"
+    (List.length first_turn) (List.length recovered)
+;;
+
+(* No counted line states an end ahead of the break: every end the recovery
+   could leave would strand the position, so it is refused. *)
+let test_recovery_without_a_counted_end_is_refused () =
+  let _first_turn, _before_the_break, messages, lines, progress = broken_second_turn () in
+  let only_the_broken_turn = List.filter (fun (line, _) -> line = 2) lines in
+  match
+    Purge.purge_messages
+      ~config:no_tail_config
+      ~trace_id:fixture_trace
+      ~boundary_lines:only_the_broken_turn
+      ~continuity:None
+      ~progress:(Some progress)
+      messages
+  with
+  | Error (Purge.Recovery_end_unwitnessed { boundary_lines_seen }) ->
+    Alcotest.(check int) "it names the lines it looked through" 2 boundary_lines_seen
+  | Error error -> Alcotest.fail (Purge.purge_error_to_string error)
+  | Ok _ -> Alcotest.fail "a recovery was allowed to strand the position"
+;;
+
+(* A position in another trace is not moved into this history (the rebase
+   refuses it), so it asks for no line here and the recovery ends at the
+   break. *)
+let test_recovery_ignores_a_position_of_another_trace () =
+  let first_turn, before_the_break, messages, lines, progress = broken_second_turn () in
+  let elsewhere =
+    { progress with position = { progress.position with trace_id = "trace-elsewhere" } }
+  in
+  let recovered, _ =
+    purge_with ~progress:elsewhere ~boundary_lines:lines ~continuity:None messages
+  in
+  Alcotest.(check int) "it ends at the break"
+    (List.length (first_turn @ before_the_break)) (List.length recovered)
+;;
+
+(* A sound history is not cut, position or not: its end does not move. *)
+let test_a_sound_history_is_not_cut_for_a_position () =
+  let first_turn, before_the_break, _messages, lines, progress = broken_second_turn () in
+  let sound = first_turn @ before_the_break in
+  let purged, report =
+    purge_with ~progress ~boundary_lines:lines ~continuity:None sound
+  in
+  Alcotest.(check int) "every message stays" (List.length sound) (List.length purged);
+  Alcotest.(check int) "nothing dropped" 0 report.messages_dropped_at_structural_break
+;;
+
+(* Two turns ended ahead of the break, and a line the position counted
+   states each end. The recovery keeps the later: the longest history the
+   position can stand on. *)
+let two_ended_turns_then_a_break () =
+  let first_turn =
+    [ text_message Types.User "q1"; block_message Types.Assistant [ Types.Text "a1" ] ]
+  in
+  let second_turn =
+    [ text_message Types.User "q2"; block_message Types.Assistant [ Types.Text "a2" ] ]
+  in
+  let messages =
+    first_turn @ second_turn @ [ text_message Types.User "q3" ] @ overlapping_cycles ()
+  in
+  let progress =
+    { (progress_at messages ~end_atom:(atom_count messages)) with boundary_lines_seen = 3 }
+  in
+  first_turn, second_turn, messages, progress
+;;
+
+let test_recovery_keeps_the_latest_counted_turn_end () =
+  let first_turn, second_turn, messages, progress = two_ended_turns_then_a_break () in
+  let lines =
+    [ turn_ended_line ~line:1 ~absolute_turn:1 messages ~end_atom:2
+    ; turn_ended_line ~line:2 ~absolute_turn:2 messages ~end_atom:4
+    ; turn_ended_line ~line:3 ~absolute_turn:3 messages ~end_atom:(atom_count messages)
+    ]
+  in
+  let recovered, _ = purge_with ~progress ~boundary_lines:lines ~continuity:None messages in
+  Alcotest.(check (list string)) "it keeps both ended turns"
+    (List.map Types.show_message (first_turn @ second_turn))
+    (List.map Types.show_message recovered)
+;;
+
+(* A line with the end count of the second turn but another history's digest
+   is not the second turn's end: the Librarian would not find the position on
+   it, so the recovery does not stop there. *)
+let test_recovery_needs_the_digest_as_well_as_the_count () =
+  let first_turn, _second_turn, messages, progress = two_ended_turns_then_a_break () in
+  let of_another_history : Purge.boundary_line =
+    ( 2
+    , Ok
+        { Boundaries.recorded_at = 100.0
+        ; event =
+            Boundaries.Turn_ended
+              { turn_ref = Ids.Turn_ref.make ~trace_id:fixture_trace ~absolute_turn:2
+              ; history_at_start = Boundaries.Continued_history
+              ; position =
+                  Boundaries.Atom_history
+                    { end_atom = 4; last_atom_digest = "a digest of another history" }
+              }
+        } )
+  in
+  let lines =
+    [ turn_ended_line ~line:1 ~absolute_turn:1 messages ~end_atom:2
+    ; of_another_history
+    ; turn_ended_line ~line:3 ~absolute_turn:3 messages ~end_atom:(atom_count messages)
+    ]
+  in
+  let recovered, _ = purge_with ~progress ~boundary_lines:lines ~continuity:None messages in
+  Alcotest.(check (list string)) "it goes back to the first turn's end"
+    (List.map Types.show_message first_turn)
+    (List.map Types.show_message recovered)
+;;
+
+(* A position short of the history's end is not moved: the rebase refuses it
+   for its unread atoms. The recovery then ends at the break and asks no line
+   of it, so that refusal, not a missing turn end, is what the operator
+   reads. *)
+let test_recovery_leaves_an_unread_position_to_the_rebase () =
+  let first_turn, before_the_break, messages, lines, _progress = broken_second_turn () in
+  let short =
+    { (progress_at messages ~end_atom:(atom_count messages - 1)) with
+      boundary_lines_seen = 2
+    }
+  in
+  let only_the_broken_turn = List.filter (fun (line, _) -> line = 2) lines in
+  let recovered, _ =
+    purge_with ~progress:short ~boundary_lines:only_the_broken_turn ~continuity:None messages
+  in
+  Alcotest.(check int) "it ends at the break"
+    (List.length (first_turn @ before_the_break)) (List.length recovered);
+  match rebase ~progress:(Some short) ~before:messages ~after:recovered () with
+  | Error (Purge.Unread_atoms_present _) -> ()
+  | Error refusal -> Alcotest.fail (Purge.refusal_to_string refusal)
+  | Ok _ -> Alcotest.fail "a position with unread atoms was moved"
+;;
+
+(* The protected tail is the last [keep_recent_messages] messages of the
+   history the recovery returns, not of the input it cut. *)
+let test_recovery_protects_the_tail_of_what_it_returns () =
+  let reply_in_the_tail =
+    block_message Types.Assistant [ unsigned_thinking "t1"; Types.Text "a1" ]
+  in
+  let messages =
+    [ text_message Types.User "q1"
+    ; reply_in_the_tail
+    ; text_message Types.User "q2"
+    ; block_message Types.Assistant [ Types.Text "a2" ]
+    ]
+    @ overlapping_cycles ()
+  in
+  match purge_plain ~config:{ no_tail_config with keep_recent_messages = 3 } messages with
+  | Error error -> Alcotest.fail (Purge.purge_error_to_string error)
+  | Ok (purged, report) ->
+    Alcotest.(check string) "the reply inside the tail is byte-exact"
+      (Types.show_message reply_in_the_tail)
+      (Types.show_message (List.nth purged 1));
+    Alcotest.(check int) "nothing in the returned tail is stripped" 0
+      report.Purge.reasoning_blocks_stripped
+;;
+
 let () =
   Alcotest.run
     "keeper checkpoint purge"
@@ -1047,6 +1333,42 @@ let () =
             "recovery keeps the last atom it returns"
             `Quick
             test_recovery_keeps_the_last_atom_it_returns
+        ; Alcotest.test_case
+            "recovery ends where a counted line states the end"
+            `Quick
+            test_recovery_ends_where_a_counted_line_states_the_end
+        ; Alcotest.test_case
+            "recovery passes over a line the position has not counted"
+            `Quick
+            test_recovery_passes_over_a_line_the_position_has_not_counted
+        ; Alcotest.test_case
+            "recovery without a counted end is refused"
+            `Quick
+            test_recovery_without_a_counted_end_is_refused
+        ; Alcotest.test_case
+            "recovery ignores a position of another trace"
+            `Quick
+            test_recovery_ignores_a_position_of_another_trace
+        ; Alcotest.test_case
+            "a sound history is not cut for a position"
+            `Quick
+            test_a_sound_history_is_not_cut_for_a_position
+        ; Alcotest.test_case
+            "recovery keeps the latest counted turn end"
+            `Quick
+            test_recovery_keeps_the_latest_counted_turn_end
+        ; Alcotest.test_case
+            "recovery needs the digest as well as the count"
+            `Quick
+            test_recovery_needs_the_digest_as_well_as_the_count
+        ; Alcotest.test_case
+            "recovery leaves an unread position to the rebase"
+            `Quick
+            test_recovery_leaves_an_unread_position_to_the_rebase
+        ; Alcotest.test_case
+            "recovery protects the tail of what it returns"
+            `Quick
+            test_recovery_protects_the_tail_of_what_it_returns
         ] )
     ; ( "rules"
       , [ Alcotest.test_case "reasoning strip scope" `Quick test_reasoning_strip_scope

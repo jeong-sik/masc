@@ -1347,6 +1347,16 @@
  (modules test_fusion_delivery_obligation)
  (libraries alcotest masc_test_deps masc.fusion_core))
 
+; RFC fusion-seat-routes §2.4 — masc_fusion per-run roster. A wrong argument
+; shape, an unresolvable route or a roster the preset check rejects creates no
+; run; an accepted roster reaches the computation, the delivery obligation and
+; the run registry unchanged.
+
+(test
+ (name test_fusion_tool_roster)
+ (modules test_fusion_tool_roster)
+ (libraries alcotest masc_test_deps masc.fusion_core))
+
 ; Board-unavailable-result: keeper_world_observation_board_signal's
 ; Board_unavailable exception -> (_, board_unavailable) result conversion.
 ; Pins the poison/transient classification table and the reported incident
@@ -1410,9 +1420,19 @@
 ; Panel routing for official-client runtimes. Needs the full masc library
 ; (not just fusion_core) because the predicate reads Runtime/Runtime_execution.
 
+; Typed fusion settings write (RFC fusion-seat-routes §2.5): one operation
+; reaches runtime.toml through the config lock, or is refused untouched.
+
+(test
+ (name test_fusion_config_edit)
+ (modules test_fusion_config_edit)
+ (libraries masc_test_deps masc masc.runtime masc.fusion_core))
+
 (test
  (name test_fusion_official_client_panel)
  (modules test_fusion_official_client_panel)
+ (deps
+  (source_tree %{workspace_root}/config/prompts))
  (libraries
   masc_test_deps
   masc
@@ -3463,6 +3483,7 @@
  (modules test_tui_chat_rows_memo)
  (libraries masc_tui_image_preview
   alcotest
+  masc_tui_message_layout
   masc
   masc.masc_types
   masc_tui_keeper_chat_live
@@ -3479,7 +3500,8 @@
 (test
  (name test_tui_chat_timeline_assembly)
  (modules test_tui_chat_timeline_assembly)
- (libraries masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript masc_tui_types))
+ (libraries masc_tui_image_preview alcotest masc_tui_keeper_chat_transcript
+  masc_tui_message_layout masc_tui_types))
 
 (test
  (name test_tui_text_input_target)
@@ -3489,6 +3511,7 @@
   fmt
   masc
   masc_tui_types
+  masc_tui_fusion_launch
   masc_tui_ask_projection
   masc.voice_setup
   masc.voice_wizard))
@@ -3631,7 +3654,7 @@
 (test
  (name test_tui_memory_fold)
  (modules test_tui_memory_fold)
- (libraries masc_tui_image_preview alcotest masc_tui_types))
+ (libraries masc_tui_image_preview alcotest masc_tui_message_layout masc_tui_types))
 
 (test
  (name test_tui_gate_text)
@@ -6560,6 +6583,16 @@
  (modules test_tui_lane_subscriptions)
  (libraries alcotest yojson masc masc_tui_lane_subscriptions))
 
+(test
+ (name test_tui_fusion_launch)
+ (modules test_tui_fusion_launch)
+ (libraries alcotest yojson masc masc.fusion_core masc_tui_fusion_launch))
+
+(test
+ (name test_tui_fusion_seat_routes)
+ (modules test_tui_fusion_seat_routes)
+ (libraries alcotest masc masc_tui_fusion_seat_routes))
+
 (rule
  (alias runtest-test_tui_lane_package_pty)
  (deps test_tui_lane_package_pty.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
@@ -6578,6 +6611,11 @@
 (test
  (name test_runtime_adapter_credential_requirement)
  (modules test_runtime_adapter_credential_requirement)
+ (libraries masc_test_deps))
+
+(test
+ (name test_runtime_official_cli_install)
+ (modules test_runtime_official_cli_install)
  (libraries masc_test_deps))
 
 (include stanzas/test_browser_bidi_peer.inc)

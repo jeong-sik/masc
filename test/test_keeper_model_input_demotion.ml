@@ -710,7 +710,7 @@ let compose ~base_path ~front ~last_resort ~demote_before messages =
     ~last_resort
     ~base_path
     ~demote_before
-    ~completed_end_atom:demote_before
+    ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = demote_before })
     messages
 ;;
 
@@ -874,7 +874,7 @@ let a_front_the_history_shrank_under_starts_over () =
       ~last_resort:false
       ~base_path:""
       ~demote_before:0
-      ~completed_end_atom:0
+      ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
       messages
   in
   Alcotest.(check bool) "everything goes, from the turn start at atom 0" true
@@ -904,7 +904,7 @@ let a_front_that_opens_with_another_message_starts_over () =
       ~last_resort:false
       ~base_path:""
       ~demote_before:0
-      ~completed_end_atom:0
+      ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
       messages
   in
   Alcotest.(check bool) "atom 1 exists" true

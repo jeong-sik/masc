@@ -684,11 +684,13 @@ let ollama_cloud_v1_capabilities =
 let glm_capabilities =
   { default_capabilities with
     max_context_tokens = Some 200_000
-  ; (* Glm-5.1 API enforces max_tokens <= 40960 at request time; keeping a
-     higher value here causes server-side rejection with
-     "Invalid request: `max_tokens` must be less than or equal to `40960`".
-     Empirical upper bound observed on 2026-04-12 during automated
-     turns against glm-coding:glm-5.1 and glm:glm-5.1. *)
+  ; (* The ceiling for a GLM id with no row of its own. 40960 is the lowest
+     limit a Z.AI endpoint has enforced: glm-5.1 refused anything higher on
+     2026-04-12 with "Invalid request: `max_tokens` must be less than or equal
+     to `40960`", on glm-coding and glm alike. On 2026-09-22 the glm-coding
+     endpoint named [1,131072] for glm-5.1, and the glm-coding rows in
+     models.toml carry their own measured ceilings; an id without a row keeps
+     this lower bound. *)
     max_output_tokens = Some 40_960
   ; supports_tools = true
   ; (* Z.AI's function-calling docs currently document [tool_choice]

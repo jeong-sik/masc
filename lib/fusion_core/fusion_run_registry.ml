@@ -57,6 +57,7 @@ type run =
   { run_id : string
   ; keeper : string
   ; preset : string
+  ; roster : Fusion_types.roster
   ; topology : Fusion_types.fusion_topology
   ; started_at : float
   ; finished_at : float option
@@ -71,6 +72,7 @@ module Payload = struct
   type registration =
     { keeper : string
     ; preset : string
+    ; roster : Fusion_types.roster
     ; topology : Fusion_types.fusion_topology
     }
 
@@ -87,13 +89,22 @@ module Payload = struct
   let completed_retention = `Latest 64
   let retention_group = None
 
+  (* 명단 바꾸기는 바꾼 칸만 적는다. 키가 없으면 그 실행은 preset 의 그 칸을 썼다. *)
   let registration_to_yojson registration =
+    let roster = registration.roster in
     `Assoc
-      [ "keeper", `String registration.keeper
-      ; "preset", `String registration.preset
-      ; ( "topology"
-        , `String (Fusion_types.fusion_topology_to_string registration.topology) )
-      ]
+      ([ "keeper", `String registration.keeper
+       ; "preset", `String registration.preset
+       ; ( "topology"
+         , `String (Fusion_types.fusion_topology_to_string registration.topology) )
+       ]
+       @ (match roster.Fusion_types.judge_route with
+          | None -> []
+          | Some route -> [ "judge_route", `String route ])
+       @ (match roster.Fusion_types.panel_routes with
+          | None -> []
+          | Some routes ->
+            [ "panel_routes", `List (List.map (fun route -> `String route) routes) ]))
   ;;
 
   let registration_of_yojson json =
@@ -106,14 +117,20 @@ module Payload = struct
     let* () =
       Run_registry_core.Json.exact_fields
         ~required:[ "keeper"; "preset"; "topology" ]
+        ~optional:[ "judge_route"; "panel_routes" ]
         fields
     in
     let* keeper = Run_registry_core.Json.string_field "keeper" fields in
     let* preset = Run_registry_core.Json.string_field "preset" fields in
+    let* judge_route = Run_registry_core.Json.optional_string_field "judge_route" fields in
+    let* panel_routes =
+      Run_registry_core.Json.optional_string_list_field "panel_routes" fields
+    in
     let* topology_wire = Run_registry_core.Json.string_field "topology" fields in
     match Fusion_types.fusion_topology_of_string topology_wire with
     | None -> Error (Printf.sprintf "unknown fusion topology %S" topology_wire)
-    | Some topology -> Ok { keeper; preset; topology }
+    | Some topology ->
+      Ok { keeper; preset; roster = { Fusion_types.judge_route; panel_routes }; topology }
   ;;
 
   let outcome_to_yojson = function
@@ -211,9 +228,9 @@ let replay_status t = Store.replay_status t.store
 let max_completed_retained = Store.max_completed_retained
 let cut_replay_log ~execute path = Store.cut_replay_log ~execute path
 
-let register_running t ~run_id ~keeper ~preset ~topology ~started_at =
+let register_running t ~run_id ~keeper ~preset ~roster ~topology ~started_at =
   Store.register t.store ~id:run_id ~started_at
-    ~registration:{ Payload.keeper; preset; topology };
+    ~registration:{ Payload.keeper; preset; roster; topology };
   Stdlib.Mutex.protect t.progress_mutex (fun () ->
     Hashtbl.replace t.progress_by_run run_id Progress_accepted)
 ;;
@@ -260,6 +277,7 @@ let run_of_entry t (entry : Store.entry) =
   { run_id = entry.id
   ; keeper = entry.registration.keeper
   ; preset = entry.registration.preset
+  ; roster = entry.registration.roster
   ; topology = entry.registration.topology
   ; started_at = entry.started_at
   ; finished_at
@@ -332,6 +350,7 @@ let run_to_yojson run =
     [ "run_id", `String run.run_id
     ; "keeper", `String run.keeper
     ; "preset", `String run.preset
+    ; "roster", Fusion_types.roster_to_yojson run.roster
     ; "topology", `String (Fusion_types.fusion_topology_to_string run.topology)
     ; "started_at", `Float run.started_at
     ; "finished_at", (match run.finished_at with None -> `Null | Some ts -> `Float ts)

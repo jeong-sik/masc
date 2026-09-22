@@ -179,18 +179,16 @@ let voice_speak_key = "Ctrl-Y"
 let voice_listen_key = "Ctrl-A"
 let roster_toggle_key = "Ctrl-B"
 
+(* [t] on a keeper: the Keeper Calls view, where a call's served input and
+   output are drawn whole. Named for the rows that fold a long payload and
+   say where the rest is. *)
+let keeper_calls_key = "t"
+
 (* Ctrl-X opens the context inspector from the chat. It is named on the
    context header, beside the figure it explains, and nowhere else: the
    footer has no room for a key whose home is that row. *)
 let context_inspector_key = "\024"
 let context_inspector_label = "Ctrl-X"
-
-(* The two voice keys, named for a reader looking at an empty draft. One
-   spelling for every row that takes a draft, so the composer row and the chat
-   pane cannot come to describe the same keys two ways. *)
-let voice_keys_hint =
-  Printf.sprintf "(%s to speak, %s to keep listening)" voice_speak_key
-    voice_listen_key
 
 
 let keepers_jump =
@@ -236,7 +234,7 @@ let listing_meta = [ b Meta "r" "refresh"; b Meta "Tab" "next"; b Meta "q" "quit
 let keeper_actions =
   [ b Act "c" "chat" ~help:"chat with the keeper"
   ; b Act "l" "logs"
-  ; b Act "t" "calls" ~help:"tool calls"
+  ; b Act keeper_calls_key "calls" ~help:"tool calls"
   ; b Act "u" "runtime" ~help:"pick a runtime lane"
   ; b Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
   ; b Act "p / w" "pause / wake"
@@ -633,6 +631,13 @@ let for_surface = function
           ~help:"while a detail is open, step to the row before or after it"
       ; fusion_caller_key
       ; fusion_board_key
+        (* Spelled as Keepers spells its own [a]: new. The form is the
+           schema form the Lane Add-ons action uses, so its keys are that
+           form's; the footer names them while it is open. *)
+      ; b Act "a" "new run"
+          ~help:"launch a Fusion run from the list: pick the Keeper, preset \
+                 and topology, type the prompt, then Ctrl-S reviews and \
+                 Enter starts it"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching run id, Keeper or preset; an \

@@ -159,6 +159,25 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   }
 ;;
 
+(* Antigravity has no system-prompt channel. A one-shot turn puts the
+   instructions at the head of the input in the frame a keeper turn uses
+   ({!Antigravity_input_frame}). Without this the panel or judge system prompt
+   — for a judge-of-judges first judge, its whole lens — never reaches the
+   model. *)
+let antigravity_prompt ~runtime_id ~system_prompt ~prompt =
+  match system_prompt with
+  | None -> Ok prompt
+  | Some instructions ->
+    Result.map_error
+      (fun detail -> provider_error ~runtime_id detail)
+      (Result.bind (Antigravity_input_frame.system_instructions_label ()) (fun system_label ->
+         Result.map
+           (fun goal_label ->
+              String.concat Antigravity_input_frame.section_separator
+                [ system_label ^ instructions; goal_label ^ prompt ])
+           (Antigravity_input_frame.current_goal_label ())))
+;;
+
 type image_input = { media_type : string; base64_data : string }
 type response = { text : string; model : string }
 type failure =
@@ -168,18 +187,37 @@ type failure =
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
 
+let failure_detail ~runtime_id = function
+  | Setup_failure failure -> Fusion_agent_core.panel_failure_text failure
+  | Codex_failure error ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_codex_app_server.error_to_string error)
+  | Claude_failure error | Claude_admission_failure error ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_claude_code.error_to_string error)
+  | Antigravity_failure error ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_antigravity.error_to_string error)
+;;
+
+(* 세 어댑터 모두 자기 [Timeout] 갈래를 갖는다. 그것을 문자열로 접으면 Fusion
+   증거에서 "CLI 가 시간 안에 답을 못 냈다" 가 provider 실패와 구분되지 않는다 —
+   HTTP 쪽 [Fusion_panel.attempt_of_result] 가 두 timeout 갈래를 [Timeout] 으로
+   올리는 것과 같은 규칙을 여기에도 적용한다. *)
 let panel_failure ~runtime_id = function
   | Setup_failure failure -> failure
+  | Codex_failure (Runtime_codex_app_server.Timeout _) -> Fusion_types.Timeout
   | Codex_failure error -> provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)
+  | Claude_failure (Runtime_claude_code.Timeout _)
+  | Claude_admission_failure (Runtime_claude_code.Timeout _) -> Fusion_types.Timeout
   | Claude_failure error | Claude_admission_failure error -> provider_error ~runtime_id (Runtime_claude_code.error_to_string error)
+  | Antigravity_failure (Runtime_antigravity.Timeout _) -> Fusion_types.Timeout
   | Antigravity_failure error -> provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
 
 
 let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let ( let* ) = Result.bind in
-  (* Both adapters take the system prompt as an option and treat [None] as
-     "client default". An empty group prompt is not an instruction, so it
-     becomes [None] rather than an empty instruction the client must obey. *)
+  (* The Codex and Claude adapters take the system prompt as an option and
+     treat [None] as "client default"; Antigravity gets it framed into the
+     input. An empty group prompt is not an instruction, so it becomes [None]
+     rather than an empty instruction the client must obey. *)
   let system_prompt =
     match String.trim system_prompt with "" -> None | text -> Some text
   in
@@ -267,6 +305,10 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
     (* [home_dir] is left unset so the client uses the inherited HOME, which is
        where its OAuth token already lives. The keeper path overrides it for
        per-keeper isolation; a panelist has no durable state to isolate. *)
+    let* prompt =
+      antigravity_prompt ~runtime_id ~system_prompt ~prompt
+      |> Result.map_error (fun failure -> Setup_failure failure)
+    in
     (match Runtime_antigravity.run_turn ~mgr ~clock ~cwd config ~prompt with
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model }
      | Error error ->

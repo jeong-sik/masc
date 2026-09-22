@@ -19,6 +19,7 @@ import type {
   DashboardRuntimeProviderSnapshot,
   DashboardRuntimeProvidersResponse,
   DashboardToolInventoryItem,
+  FusionConfigSnapshot,
   RuntimeDefaultsResponse,
   RuntimeResolvedResponse,
 } from '../api/dashboard'
@@ -57,6 +58,7 @@ const apiMock = vi.hoisted(() => ({
   fetchRuntimeResolved: vi.fn(),
   fetchRuntimeProviders: vi.fn(),
   fetchRuntimeTomlConfig: vi.fn(),
+  fetchFusionConfig: vi.fn(),
   patchRuntimeMediaFailover: vi.fn(),
   patchRuntimeRouting: vi.fn(),
   saveRuntimeTomlConfig: vi.fn(),
@@ -103,6 +105,7 @@ vi.mock('../api/dashboard.js', async () => {
     fetchRuntimeResolved: apiMock.fetchRuntimeResolved,
     fetchRuntimeProviders: apiMock.fetchRuntimeProviders,
     fetchRuntimeTomlConfig: apiMock.fetchRuntimeTomlConfig,
+    fetchFusionConfig: apiMock.fetchFusionConfig,
     patchRuntimeMediaFailover: apiMock.patchRuntimeMediaFailover,
     patchRuntimeRouting: apiMock.patchRuntimeRouting,
     saveRuntimeTomlConfig: apiMock.saveRuntimeTomlConfig,
@@ -365,6 +368,36 @@ function stubRuntimeDefaults(value: RuntimeDefaultsResponse = makeRuntimeDefault
   apiMock.fetchRuntimeDefaults.mockResolvedValue(value)
 }
 
+function makeFusionConfig(): FusionConfigSnapshot {
+  return {
+    enabled: true,
+    defaultPreset: 'trio',
+    stagedJudgeGroupSize: 3,
+    sourceRevision: 'fusion-revision',
+    presets: [
+      {
+        name: 'trio',
+        panels: [
+          {
+            models: ['rt-a', 'rt-b'],
+            label: '',
+            systemPrompt: 'panelist',
+            webTools: false,
+            maxOutputTokens: null,
+            timeoutS: null,
+          },
+        ],
+        judge: 'rt-c',
+        judgeSystemPrompt: 'judge',
+        judgeMaxOutputTokens: null,
+        judgeTimeoutS: null,
+        judges: [],
+        minAnswered: 2,
+      },
+    ],
+  }
+}
+
 function stubRuntimeResolved(value: RuntimeResolvedResponse = makeRuntimeResolved()) {
   apiMock.fetchRuntimeResolved.mockResolvedValue(value)
 }
@@ -384,6 +417,7 @@ function stubEmptyApi() {
     reloaded: false,
     provider_protocols: runtimeProviderProtocols,
   })
+  apiMock.fetchFusionConfig.mockResolvedValue(makeFusionConfig())
   apiMock.patchRuntimeMediaFailover.mockImplementation(async () => committedRuntimeTomlConfigFixture({
     ok: true,
     path: MOCK_RUNTIME_PATH,
@@ -435,6 +469,7 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeResolved.mockReset()
     apiMock.fetchRuntimeProviders.mockReset()
     apiMock.fetchRuntimeTomlConfig.mockReset()
+    apiMock.fetchFusionConfig.mockReset()
     apiMock.patchRuntimeMediaFailover.mockReset()
     apiMock.patchRuntimeRouting.mockReset()
     apiMock.saveRuntimeTomlConfig.mockReset()
@@ -1615,25 +1650,23 @@ describe('SettingsSurface', () => {
     expect(allRows().length).toBe(7)
   })
 
-  it('renders the live fusion settings writer from runtime.toml without an env gate', async () => {
-    apiMock.fetchRuntimeTomlConfig.mockResolvedValueOnce({
-      ok: true,
-      path: MOCK_RUNTIME_PATH,
-      file_name: 'runtime.toml',
-      source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\n\n[fusion.presets.trio]\nmin_answered = 2\n',
-      reloaded: false,
-      provider_protocols: runtimeProviderProtocols,
-    })
+  it('renders the live fusion settings writer from the typed config without an env gate', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-fusion"]') as HTMLElement)
 
     await waitFor(() => expect(container.querySelector('[data-testid="fusion-settings-editor"]')).not.toBeNull())
-    expect(apiMock.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
+    expect(apiMock.fetchFusionConfig).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
     expect(container.querySelector('[data-testid="fusion-readonly-no-writer"]')).toBeNull()
     expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
-    expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
+    // The `live-backed` badge above is read off the section table, which says
+    // nothing about the panel. Assert a write is actually offered, so the badge
+    // and the screen cannot disagree with this test still green.
+    expect((container.querySelector('[data-testid="fusion-settings-save"]') as HTMLButtonElement).disabled).toBe(false)
+    expect((container.querySelector('[data-testid="fusion-preset-save"]') as HTMLButtonElement).disabled).toBe(false)
+    // The editor opens on the default preset with its seats from the resolver.
+    expect((container.querySelector('[data-testid="fusion-preset-name"]') as HTMLInputElement).value).toBe('trio')
     expect(container.textContent).not.toContain('per_hour_budget')
     expect(container.textContent).not.toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
   })

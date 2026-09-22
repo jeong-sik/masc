@@ -127,33 +127,40 @@ let test_only_the_notable_outcomes_speak () =
          (has
             (Printf.sprintf "%d days" (Credential.self_mint_expiry_hours / 24))
             notice));
-  match
-    Credential.outcome_notice
-      (Credential.Unavailable Credential.no_workspace_detail)
-  with
+  match Credential.outcome_notice (Credential.Mint_failed "disk is read-only") with
   | None -> fail "a failed mint must be reported"
   | Some notice ->
-      check bool "a failure carries its own detail" true
+      check bool "a failed mint carries its own detail" true
+        (has "disk is read-only" notice);
+      check bool "a failed mint names the remedy" true
+        (has Credential.remedy notice)
+
+(* The one outcome a first install produces. It is the ordinary path -- the
+   server that makes the workspace is the one the TUI starts a moment later --
+   so the line must not hand over a command for a state that clears itself,
+   which is what made the operator distrust it. *)
+let test_a_pending_workspace_asks_nothing_of_the_operator () =
+  match Credential.outcome_notice Credential.Workspace_pending with
+  | None -> fail "a pending workspace must be reported"
+  | Some notice ->
+      check bool "it says what is missing" true
         (has "no workspace to mint into" notice);
-      check bool "a failure still names the remedy" true (has "masc login" notice);
-      (* The remedy is the fallback, not the instruction. A first install
-         reaches this line before the server it is about to start has made the
-         workspace, and an operator sent to masc login for a state that clears
-         itself learns to distrust the line. *)
-      check bool "a failure says it is taken again" true
-        (has "taken again when a server answers" notice)
+      check bool "it says this client takes it again" true
+        (has "mints one once a server answers" notice);
+      check bool "it hands over no command" false
+        (has Credential.login_command notice);
+      check bool "it does not name the remedy" false
+        (has Credential.remedy notice)
 
-
-(* A boot that could not obtain a bearer is the one outcome a workspace
-   appearing later would change, and the reason a first install recovers
-   without [masc login]: the server that makes the workspace is the one the
-   TUI starts a moment after the boot decision was taken. The other three are
-   answers already, and retrying them would re-read the credential store on
-   every refresh for nothing. *)
-let test_only_an_unavailable_boot_is_taken_again () =
-  check bool "a failed mint is taken again" true
-    (Credential.outcome_needs_retry
-       (Credential.Unavailable Credential.no_workspace_detail));
+(* A boot with no workspace is the one outcome a workspace appearing later
+   would change, and the reason a first install recovers without [masc login]:
+   the server that makes the workspace is the one the TUI starts a moment
+   after the boot decision was taken. The other four are answers already --
+   including a mint that failed against a workspace that was already here,
+   which is local file work and fails the same way after the server is up. *)
+let test_only_a_pending_workspace_is_taken_again () =
+  check bool "a missing workspace is taken again" true
+    (Credential.outcome_needs_retry Credential.Workspace_pending);
   List.iter
     (fun (label, outcome) ->
       check bool (label ^ " is settled") false
@@ -161,6 +168,7 @@ let test_only_an_unavailable_boot_is_taken_again () =
     [ ("a held bearer", Credential.Held)
     ; ("a fresh mint", Credential.Minted)
     ; ("a workspace that demands none", Credential.Not_required)
+    ; ("a mint that failed", Credential.Mint_failed "disk is read-only")
     ]
 
 let () =
@@ -180,7 +188,9 @@ let () =
             test_self_mint_window_is_neither_a_day_nor_forever
         ; test_case "only the notable outcomes speak" `Quick
             test_only_the_notable_outcomes_speak
-        ; test_case "only an unavailable boot is taken again" `Quick
-            test_only_an_unavailable_boot_is_taken_again
+        ; test_case "a pending workspace asks nothing of the operator" `Quick
+            test_a_pending_workspace_asks_nothing_of_the_operator
+        ; test_case "only a pending workspace is taken again" `Quick
+            test_only_a_pending_workspace_is_taken_again
         ] )
     ]

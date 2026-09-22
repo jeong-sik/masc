@@ -1623,7 +1623,7 @@ let run_direct_attempt
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
                   in
                   Keeper_claude_code_runtime.run
-                    ~turn_start:0
+                    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
                     ~pre_tool_rejects:(ref [])
@@ -2082,7 +2082,7 @@ let agent_core_range ?(turn_start = 0) ~front messages =
      ~last_resort:false
      ~base_path:""
      ~demote_before:0
-     ~completed_end_atom:turn_start
+     ~turn_boundary:(Keeper_carried_front.Turn_boundary { end_atom = turn_start })
      messages)
     .Keeper_turn_driver_try_provider.projection
     .Runtime_model_input_tail_window.messages
@@ -2098,7 +2098,7 @@ let test_a_start_seed_begins_at_the_carried_front () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read)
-      ~turn_start:0
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2162,7 +2162,7 @@ let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes
       ~carried_front_seed:(fun () -> seed_read)
-      ~turn_start:0
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2194,7 +2194,7 @@ let test_a_cold_start_with_no_completed_turn_carries_everything () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read_of [])
-      ~turn_start:0
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2223,7 +2223,7 @@ let test_a_cold_start_begins_at_the_turn_start () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read_of [])
-      ~turn_start:112
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 112 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2241,6 +2241,86 @@ let test_a_cold_start_begins_at_the_turn_start () =
          observation.Runtime_model_input_tail_window.total_atoms;
        check int "and says this turn's eight atoms went" 8
          observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* The Librarian front reaches the list this lane sends -- a read position
+   as the start, a working state carried in place of the atoms before it --
+   and a list the turn's choice no longer describes refuses the request,
+   as it refuses an Agent Core request, instead of going out from the seed. *)
+let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
+  let messages = start_seed_history () in
+  let seen_front = ref None in
+  let project librarian_front =
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
+      ~librarian_front
+      ~on_carried_front:(fun front ~transmitted_bytes -> seen_front := Some (front, transmitted_bytes))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  in
+  (match project (fun _ -> Ok (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 100 })) with
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok carried ->
+     check (list string) "the range starts at the read position"
+       (encoded (List.filteri (fun i _ -> i >= 100) messages))
+       (encoded carried));
+  (match !seen_front with
+   | Some (Keeper_official_client_host.Librarian_progress { end_atom = 100 }, bytes) ->
+     check bool "the front is reported with the range's bytes" true (bytes > 0)
+   | Some _ -> fail "the reported front is not the read position"
+   | None -> fail "the composition reported no front");
+  let working_state = "Fifty asks answered so far." in
+  let snapshot =
+    let covered = List.filteri (fun i _ -> i < 100) messages in
+    let position =
+      match Keeper_turn_boundaries.position_of_messages covered with
+      | Ok position -> position
+      | Error detail -> fail detail
+    in
+    let line =
+      ( 1
+      , Ok
+          { Keeper_turn_boundaries.recorded_at = 1.
+          ; event =
+              Keeper_turn_boundaries.Turn_ended
+                { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+                ; history_at_start = Keeper_turn_boundaries.Fresh_history
+                ; position
+                }
+          } )
+    in
+    match
+      Librarian_continuity_snapshot.capture ~trace_id:"trace-1" ~lines:[ line ] ~messages:covered
+        ~working_state
+    with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Librarian_continuity_snapshot.error_to_string error)
+  in
+  (match project (fun _ -> Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)) with
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok carried ->
+     (match carried with
+      | working :: rest ->
+        check string "the working state leads the list"
+          (Keeper_turn_driver_try_provider.working_state_text snapshot)
+          (match working.Agent_core.Types.content with
+           | [ Agent_core.Types.Text text ] -> text
+           | _ -> "");
+        check (list string) "and the atoms it covers are not sent"
+          (encoded (List.filteri (fun i _ -> i >= 100) messages))
+          (encoded rest)
+      | [] -> fail "nothing was composed"));
+  let refused _ =
+    Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
+            { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
+  in
+  match project refused with
+  | Error _ -> ()
+  | Ok _ -> fail "a list the turn's choice no longer describes went out"
 ;;
 
 let () =
@@ -2375,6 +2455,10 @@ let () =
             "a cold start begins at the turn start"
             `Quick
             test_a_cold_start_begins_at_the_turn_start
+        ; test_case
+            "the Librarian front reaches the list and its error refuses"
+            `Quick
+            test_the_librarian_front_reaches_the_list_and_its_error_refuses
         ] )
     ]
 ;;

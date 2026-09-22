@@ -446,37 +446,53 @@ let tools_display_lines (state : state) =
         let skill_profile_lines =
           List.mapi
             (fun index (profile : Masc.Tui_decode.effective_skill_profile) ->
+               let instruction = String.equal profile.esp_kind "instruction" in
                let execution =
-                 if String.equal profile.esp_kind "instruction"
-                 then "on-demand"
-                 else profile.esp_execution
+                 if instruction then "on-demand" else profile.esp_execution
                in
-               let reasons =
-                 profile.esp_load_reasons
-                 |> List.map (function
-                      | Masc.Tui_decode.Skill_catalog_default -> "catalog default"
-                      | Skill_keeper_profile -> "Keeper profile"
-                      | Skill_task task_id -> "Task " ^ task_id)
-                 |> String.concat " + "
-               in
-               [ ( (if index = state.tools_skill_cursor
-                    then Theme.selection
-                    else Ansi.dim)
-                 , Printf.sprintf
-                     " %s %-22s %-11s nodes=%d batches=%d parallel=%d discovery=%dB body=%dB"
-                     (if index = state.tools_skill_cursor then Masc_tui_theme.Glyph.current_entry else " ")
-                     (Terminal_text.single_line profile.esp_name)
-                     (Terminal_text.single_line execution)
+               (* An instruction skill is text the model reads; it has no
+                  flow, so its node, batch and parallel counts are zero on
+                  every row. A composition's are the shape of its plan and
+                  are drawn. *)
+               let flow =
+                 if instruction then ""
+                 else
+                   Printf.sprintf " nodes=%d batches=%d parallel=%d"
                      profile.esp_node_count
                      profile.esp_batch_count
                      profile.esp_max_parallelism
-                     profile.esp_discovery_bytes
-                     profile.esp_body_bytes )
-               ; Ansi.dim,
-                 "     why loaded: "
-                 ^ Terminal_text.single_line
-                     (if String.equal reasons "" then "unattributed" else reasons)
-               ])
+               in
+               (* Why a skill is loaded is worth a row when something chose
+                  it. Loaded because the catalog holds it is the default for
+                  every skill here, and a row per skill saying so is the same
+                  sentence down the pane. *)
+               let chosen =
+                 profile.esp_load_reasons
+                 |> List.filter_map (function
+                      | Masc.Tui_decode.Skill_catalog_default -> None
+                      | Skill_keeper_profile -> Some "Keeper profile"
+                      | Skill_task task_id -> Some ("Task " ^ task_id))
+               in
+               ( (if index = state.tools_skill_cursor
+                  then Theme.selection
+                  else Ansi.dim)
+               , Printf.sprintf " %s %-22s %-11s%s discovery=%dB body=%dB"
+                   (if index = state.tools_skill_cursor then Masc_tui_theme.Glyph.current_entry else " ")
+                   (Terminal_text.single_line profile.esp_name)
+                   (Terminal_text.single_line execution)
+                   flow
+                   profile.esp_discovery_bytes
+                   profile.esp_body_bytes )
+               :: (match profile.esp_load_reasons, chosen with
+                   | [], _ ->
+                       [ ( Theme.warn ()
+                         , "     why loaded: unattributed" ) ]
+                   | _, [] -> []
+                   | _, chosen ->
+                       [ ( Ansi.dim
+                         , "     why loaded: "
+                           ^ Terminal_text.single_line (String.concat " + " chosen) )
+                       ]))
             ets_skill_profiles
           |> List.concat
         in
@@ -821,10 +837,6 @@ let tools_display_lines (state : state) =
         let scoped_lines =
           List.concat_map
             (fun (scoped : Masc.Keeper_skill_activation_ledger.scoped_summary) ->
-               let exact =
-                 Skill_reference.to_yojson scoped.scope.reference
-                 |> Yojson.Safe.to_string
-               in
                let scoped_summary = scoped.summary in
                let runtime_counts values =
                  match values with
@@ -836,40 +848,106 @@ let tools_display_lines (state : state) =
                            Printf.sprintf "%s:%d" item.runtime_id item.count)
                    |> String.concat ","
                in
+               (* The scope, in the parts a reader uses: which skill
+                  revision, in which turn, on which runtime. The JSON
+                  encoding of the same reference stood above these rows and
+                  said each of them a second time, in braces. *)
+               let name =
+                 Terminal_text.single_line scoped.scope.reference.identity.name
+               in
+               let package =
+                 Terminal_text.single_line
+                   (Skill_reference.identity_package_id_to_string
+                      scoped.scope.reference.identity)
+               in
                [ Ansi.dim,
-                 "   proof exact=" ^ Terminal_text.single_line exact
+                 Printf.sprintf "   %s%s \xc2\xb7 rev %s" name
+                   (* A skill is usually named after the package that holds
+                      it, and "work-intake · work-intake" says it twice. *)
+                   (if String.equal name package then ""
+                    else " \xc2\xb7 " ^ package)
+                   (Skill_reference.content_revision_to_string
+                      scoped.scope.reference.content_revision
+                    |> Terminal_text.single_line
+                    |> short_revision)
                ; Ansi.dim,
-                 Printf.sprintf
-                   "     snapshot=%s keeper_turn=%s invocation_runtime=%s"
-                   (Skill_catalog_snapshot.snapshot_revision_to_string
-                      scoped.scope.snapshot_revision
-                    |> Terminal_text.single_line)
+                 Printf.sprintf "     turn %s \xc2\xb7 %s \xc2\xb7 snapshot %s"
                    (Ids.Turn_ref.to_string scoped.scope.turn_ref
                     |> Terminal_text.single_line)
                    (Terminal_text.single_line
                       scoped.scope.invocation_runtime_id)
-               ; Ansi.dim,
-                 Printf.sprintf
-                   "     invoked=%d bodies=%d resources=%d provider_deliveries=%d official_handoffs=%d actions=%d composition=%d/%d/%d/%d invalid=%d"
-                   scoped_summary.instruction_invocations
-                   scoped_summary.skill_bodies_served
-                   scoped_summary.skill_resources_served
-                   scoped_summary.instruction_provider_deliveries
-                   scoped_summary.instruction_official_client_handoffs
-                   scoped_summary.instruction_actions_observed
-                   scoped_summary.composition_invocations
-                   scoped_summary.composition_provider_deliveries
-                   scoped_summary.composition_official_client_handoffs
-                   scoped_summary.composition_actions_observed
-                   scoped_summary.invalid_transitions
-               ; Ansi.dim,
-                 Printf.sprintf
-                   "     provider_delivery_runtimes=%s official_handoff_runtimes=%s action_runtimes=%s"
-                   (runtime_counts scoped.provider_delivery_runtime_counts)
-                   (runtime_counts
-                      scoped.official_client_handoff_runtime_counts)
-                   (runtime_counts scoped.action_runtime_counts)
-               ])
+                   (Skill_catalog_snapshot.snapshot_revision_to_string
+                      scoped.scope.snapshot_revision
+                    |> Terminal_text.single_line
+                    |> short_revision)
+               ]
+               (* What the scope amounts to: how many times it was
+                  triggered, how many of those were delivered, and what the
+                  model did after. Instruction and composition are two
+                  columns of the same three counts rather than one row of
+                  ten [key=value] pairs. Zero rows are left out: a
+                  composition's counts on a scope that is an instruction are
+                  four zeros saying nothing happened in a kind this scope is
+                  not. *)
+               @ List.filter_map
+                   (fun (kind, invoked, delivered, handoffs, actions) ->
+                     if invoked = 0 && delivered = 0 && handoffs = 0 && actions = 0
+                     then None
+                     else
+                       Some
+                         ( Ansi.dim
+                         , Printf.sprintf
+                             "     %-11s triggered %d \xc2\xb7 delivered %d \xc2\xb7 handed off %d \xc2\xb7 actions %d"
+                             kind invoked delivered handoffs actions ))
+                   [ ( "instruction"
+                     , scoped_summary.instruction_invocations
+                     , scoped_summary.instruction_provider_deliveries
+                     , scoped_summary.instruction_official_client_handoffs
+                     , scoped_summary.instruction_actions_observed )
+                   ; ( "composition"
+                     , scoped_summary.composition_invocations
+                     , scoped_summary.composition_provider_deliveries
+                     , scoped_summary.composition_official_client_handoffs
+                     , scoped_summary.composition_actions_observed )
+                   ]
+               (* Bodies and resources are what a trigger served; invalid
+                  transitions are the ledger refusing what it was told.
+                  Both are zero on a healthy scope and are drawn only when
+                  they are not. *)
+               @ (if scoped_summary.skill_bodies_served = 0
+                     && scoped_summary.skill_resources_served = 0
+                  then []
+                  else
+                    [ ( Ansi.dim
+                      , Printf.sprintf "     served %d bodies \xc2\xb7 %d resources"
+                          scoped_summary.skill_bodies_served
+                          scoped_summary.skill_resources_served )
+                    ])
+               @ (if scoped_summary.invalid_transitions = 0 then []
+                  else
+                    [ ( Theme.warn ()
+                      , Printf.sprintf "     %d invalid transition(s)"
+                          scoped_summary.invalid_transitions )
+                    ])
+               @ (let runtimes =
+                    List.filter
+                      (fun (_, counts) -> counts <> [])
+                      [ "delivered", scoped.provider_delivery_runtime_counts
+                      ; "handed off", scoped.official_client_handoff_runtime_counts
+                      ; "actions", scoped.action_runtime_counts
+                      ]
+                  in
+                  match runtimes with
+                  | [] -> []
+                  | runtimes ->
+                      [ ( Ansi.dim
+                        , "     runtimes \xc2\xb7 "
+                          ^ String.concat " \xc2\xb7 "
+                              (List.map
+                                 (fun (label, counts) ->
+                                   label ^ " " ^ runtime_counts counts)
+                                 runtimes) )
+                      ]))
             scoped_summaries
         in
         let receipt_lines =
@@ -999,23 +1077,26 @@ let tools_display_lines (state : state) =
           Printf.sprintf " Skill Use — %s (%d receipts)"
             (Terminal_text.single_line sap_keeper_name)
             (List.length sap_activations)
-        ; Ansi.bold,
+        ; Ansi.dim,
           Printf.sprintf
-            "   session totals: invoked=%d bodies=%d resources=%d provider_deliveries=%d official_handoffs=%d actions=%d invalid=%d"
+            "   this session \xc2\xb7 %-11s triggered %d \xc2\xb7 delivered %d \xc2\xb7 handed off %d \xc2\xb7 actions %d"
+            "instruction"
             summary.instruction_invocations
-            summary.skill_bodies_served
-            summary.skill_resources_served
             summary.instruction_provider_deliveries
             summary.instruction_official_client_handoffs
             summary.instruction_actions_observed
-            summary.invalid_transitions
         ; Ansi.dim,
           Printf.sprintf
-            "   composition invoked=%d provider_deliveries=%d official_handoffs=%d actions=%d"
+            "                %-11s triggered %d \xc2\xb7 delivered %d \xc2\xb7 handed off %d \xc2\xb7 actions %d"
+            "composition"
             summary.composition_invocations
             summary.composition_provider_deliveries
             summary.composition_official_client_handoffs
             summary.composition_actions_observed
+        ; Ansi.dim,
+          Printf.sprintf "                served %d bodies \xc2\xb7 %d resources"
+            summary.skill_bodies_served
+            summary.skill_resources_served
         ; Ansi.dim,
           Printf.sprintf "   session=%s  ledger=%s"
             (Masc.Keeper_skill_activation_ledger.session_id sap_ledger
@@ -1030,6 +1111,12 @@ let tools_display_lines (state : state) =
              |> Terminal_text.single_line
              |> short_revision)
         ]
+        @ (if summary.invalid_transitions = 0 then []
+           else
+             [ ( Theme.warn ()
+               , Printf.sprintf "                %d invalid transition(s)"
+                   summary.invalid_transitions )
+             ])
         @ timeline_lines
         @ scoped_lines
         @ receipt_lines
@@ -1137,26 +1224,36 @@ let tools_display_lines (state : state) =
           @ coverage_lines
           @ [ Ansi.dim, Tool_table.skill_usage_name_indent ^ "SKILL"
           (* One skill's keepers do not fit beside its name -- there can be
-             several, joined -- so the rows put them on the line below. The
-             header said the two sat side by side and named the second column
-             over the first one's trailing spaces; it now stands where each
-             reading stands. *)
+             several -- so they stand on the lines below it, one each, in
+             columns. Joined onto one line with interpuncts, six keepers ran
+             past the pane and the counts of the last of them could not be
+             read at all. *)
           ; Ansi.dim,
             Tool_table.skill_usage_keeper_indent
-            ^ "KEEPER  inv/delivered/actions \xc2\xb7 last used" ]
+            ^ Tool_table.skill_usage_keeper_header ]
         in
         let rows =
           List.concat_map
             (fun (surface : Masc.Tui_decode.skills_catalog_surface) ->
-               let keepers =
+               let keeper_rows =
                  surface.scs_usage
                  |> List.map (fun (row : Masc.Tui_decode.skill_usage_row) ->
-                        Printf.sprintf "%s %d/%d/%d \xc2\xb7 %s"
-                          (Terminal_text.single_line row.su_keeper)
-                          row.su_invocations row.su_deliveries row.su_actions
-                          (Terminal_text.single_line
-                             (skill_last_used_label row.su_last_used_at)))
-                 |> String.concat " · "
+                        ( Ansi.dim
+                        , Tool_table.skill_usage_keeper_indent
+                          ^ Tool_table.skill_usage_keeper_line
+                              ~keeper:(Terminal_text.single_line row.su_keeper)
+                              ~invocations:row.su_invocations
+                              ~deliveries:row.su_deliveries
+                              ~actions:row.su_actions
+                                (* The server writes RFC 3339 on the UTC
+                                   timeline; the pane's other clocks are the
+                                   terminal's zone, and the two are nine
+                                   hours apart in Seoul. *)
+                              ~last_used:
+                                (match row.su_last_used_at with
+                                 | Some at when String.trim at <> "" ->
+                                     Terminal_text.short_timestamp at
+                                 | Some _ | None -> skill_last_used_label None) ))
                in
                (* Which kind a skill is says why it has a plan under it, or
                   why it has none: only a composition runs a flow. *)
@@ -1175,8 +1272,8 @@ let tools_display_lines (state : state) =
                       [ ( Ansi.dim
                         , Tool_table.skill_usage_keeper_indent ^ line ) ])
                in
-               [ (Ansi.bold, Tool_table.skill_usage_name_indent ^ named)
-               ; (Ansi.dim, Tool_table.skill_usage_keeper_indent ^ keepers) ]
+               ((Ansi.bold, Tool_table.skill_usage_name_indent ^ named)
+                :: keeper_rows)
                @ flow_rows)
             used
         in
@@ -1251,12 +1348,12 @@ let tools_display_lines (state : state) =
         ]
     | Masc_tui_types.Tools_activations ->
         [ Theme.info (), " 선택 Keeper의 현재 세션에 보존된 Skill 증거입니다."
-        ; Ansi.dim, "   invoked=호출 · deliveries/handoffs=전달 · actions=이후 Tool 행동"
+        ; Ansi.dim, "   triggered=호출 · delivered/handed off=전달 · actions=이후 Tool 행동"
         ; Ansi.dim, "   호출·전달·이후 행동은 별도 증거이며, 기록 없음은 미사용 확정이 아닙니다."
         ]
     | Masc_tui_types.Tools_usage ->
         [ Theme.info (), " 현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계입니다."
-        ; Ansi.dim, "   inv/delivered/actions=호출/전달/이후 행동 · 마지막 사용 시각"
+        ; Ansi.dim, "   TRIGGERED/DELIVERED/ACTIONS=호출/전달/이후 행동 · 마지막 사용은 이 터미널 시각"
         ; Ansi.dim, "   호출 기록이 있는 행만 표시합니다. 읽지 못한 원장은 아래에 표시합니다."
         ]
     | Masc_tui_types.Tools_catalog ->

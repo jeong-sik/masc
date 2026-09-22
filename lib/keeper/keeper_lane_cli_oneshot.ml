@@ -21,8 +21,7 @@ let failure_to_string = function
   | Not_an_official_client { runtime_id } ->
     Printf.sprintf "cli lane slot %s is not an official-client runtime" runtime_id
   | Execution_failed { runtime_id; cause } ->
-    let detail = Fusion_official_client.panel_failure ~runtime_id cause
-      |> Fusion_types.show_panel_failure in
+    let detail = Fusion_official_client.failure_detail ~runtime_id cause in
     Printf.sprintf "cli lane slot %s failed to answer: %s" runtime_id detail
   | Invalid_json_output { runtime_id; detail } ->
     Printf.sprintf "cli lane slot %s answered non-JSON: %s" runtime_id detail

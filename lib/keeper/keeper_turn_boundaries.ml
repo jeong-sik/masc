@@ -339,3 +339,42 @@ let read ~keepers_dir ~keeper_id =
     settled cleanup_failure;
     unreadable exn
 ;;
+
+let atom_position_stated ~trace_id (record : record) =
+  match record.event with
+  | Turn_ended
+      { turn_ref; history_at_start = _; position = Atom_history { end_atom; last_atom_digest } }
+    ->
+    if String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
+    then Some (turn_ref, end_atom, last_atom_digest)
+    else None
+  | Turn_ended
+      { turn_ref = _
+      ; history_at_start = _
+      ; position = Empty_atom_history | No_atom_history | Stale_noop
+      }
+  | History_restarted _ -> None
+;;
+
+let witness_line ?through ~trace_id ~end_atom ~last_atom_digest lines =
+  List.fold_left
+    (fun latest (line, decoded) ->
+       let counted =
+         match through with
+         | None -> true
+         | Some last_counted -> line <= last_counted
+       in
+       if not counted
+       then latest
+       else (
+         match decoded with
+         | Error (_ : read_error) -> latest
+         | Ok record ->
+           (match atom_position_stated ~trace_id record with
+            | Some (turn_ref, stated_end, stated_digest)
+              when stated_end = end_atom && String.equal stated_digest last_atom_digest ->
+              Some (line, record.recorded_at, turn_ref)
+            | Some _ | None -> latest)))
+    None
+    lines
+;;

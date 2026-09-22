@@ -20,7 +20,11 @@ This is the default install location; use your chosen directory if you changed
 "$HOME/.local/bin/masc" setup
 ```
 
-Claude Code and Codex appear when their CLI is on `PATH`. A failed connection
+Claude Code and Codex appear when their CLI is on `PATH` or where its official
+installer puts it (`~/.local/bin`, or `CODEX_INSTALL_DIR` for Codex), so a
+terminal that has not picked up the installer's PATH change still finds them.
+`masc runtime-client-path --client claude-code` prints what setup and the
+runtime will use. A failed connection
 check can offer sign-in without losing the selection. Setup offers installation
 and startup actions for missing sandbox prerequisites. On macOS these open the
 official download or instructions; MASC does not verify the vendor installer's
@@ -143,7 +147,7 @@ To install one specific release instead of the latest one, take that tag's
 installer and pin it. Check that the tag is listed on GitHub Releases first:
 
 ```bash
-TAG=v0.35.22
+TAG=v0.36.0
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -323,6 +327,7 @@ answers, but every image build fails. Setup checks this and offers two choices:
 masc setup                     # reopen connection and sandbox selection
 masc doctor                    # read-only preparation report
 masc sandbox-catalog           # inspect host sandbox choices as JSON
+masc runtime-client-path --client claude-code   # where an official client runs from, as JSON
 ```
 
 Preparation uses the selected backend, validates it before saving the selection,
@@ -381,8 +386,8 @@ masc voice-verify --base-path "$HOME/masc-workspace" --agent imp --audio utteran
 `voice-verify` synthesizes one sentence and transcribes the audio file, and says
 `answered` or `refused` with the reason for each endpoint.
 
-In the TUI, open imp's chat. An empty draft shows
-`(^Y to speak, ^A to keep listening)`:
+In the TUI, open imp's chat. The voice keys are on the chat's help sheet
+(`…?`):
 
 | Key | What it does |
 |---|---|

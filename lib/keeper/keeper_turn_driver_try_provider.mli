@@ -41,9 +41,24 @@ type continuity
 (** A snapshot verified against the dispatch's original checkpoint. *)
 
 val without_snapshot : continuity
-(** No snapshot to summarize with: none is saved, or the saved one belongs to
-    another history. The request starts at the turn's own boundary
+(** No snapshot to summarize with: none is saved, or the saved one does not
+    fit this history or cannot be used ({!continuity_for_request}). The request starts at the turn's own boundary
     ({!Keeper_carried_front.Turn_start}); an older eviction front is not used. *)
+
+type continuity_choice =
+  | Chose_no_point
+      (** The turn had no Librarian point to start from
+          ({!without_snapshot}). *)
+  | Chose_a_librarian_point
+      (** The turn started at a snapshot's end or at the Librarian's read
+          position. *)
+
+val continuity_choice : continuity -> continuity_choice
+(** Which of the two a continuity is, for a caller that records what a
+    request started from
+    ({!Keeper_official_client_host.continuity_observation_input}). The
+    constructors stay in, so no caller can build a continuity that was never
+    checked against this dispatch's checkpoint. *)
 
 val absorbed_history :
   trace_id:string ->
@@ -55,8 +70,9 @@ val absorbed_history :
     and are not sent again, and no summary stands in for them. [Some] only
     when the position names [trace_id] and the atom before it opens with the
     message the position recorded, so a position from another trace or
-    another history generation is [None]. Taken when a saved continuity
-    snapshot no longer fits the history (RFC keeper-context-window-in-tokens
+    another history generation is [None]. Taken when no saved continuity
+    snapshot fits the history: none is saved, it no longer fits, or it cannot
+    be used ({!continuity_for_request}) (RFC keeper-context-window-in-tokens
     section 13.6). *)
 
 val completed_history_end :
@@ -68,13 +84,14 @@ val completed_history_end :
 
 val turn_start :
   config:Workspace.config -> keeper_name:string -> trace_id:string ->
-  messages:Agent_core.Types.message list -> int
+  messages:Agent_core.Types.message list -> Keeper_carried_front.turn_start
 (** Where a request with no absorbed point starts (RFC
     keeper-context-window-in-tokens §13.4): {!completed_history_end} read from
-    the keeper's turn-boundary store, 0 when the history has no completed
-    turn. A store this process cannot read, or a boundary the history in hand
-    does not match, is logged and answered 0: the request goes out from the
-    oldest atom rather than not at all. *)
+    the keeper's turn-boundary store, [Turn_boundary 0] when the history has
+    no completed turn. A store this process cannot read, or a boundary the
+    history in hand does not match, is logged and answered
+    [Turn_boundary_unknown]: the request then opens on the newest atom alone
+    and its origin says so, rather than on the whole history. *)
 
 val prepare_continuity :
   trace_id:string ->
@@ -86,7 +103,83 @@ val prepare_continuity :
 val validate_continuity :
   messages:Agent_core.Types.message list -> continuity -> (unit, Agent_core.Error.t) result
 (** Check immutable covered messages again before each request. No source bytes
-    are reserialized; a changed prefix refuses the request. *)
+    are reserialized; a changed prefix refuses the request. The baseline it
+    compares against belongs to one attempt ({!continuity_for_attempt}), so
+    what it answers is whether that attempt's list changed in flight. *)
+
+val continuity_for_attempt :
+  messages:Agent_core.Types.message list -> continuity -> continuity
+(** The turn's choice with the baseline {!validate_continuity} compares
+    against taken from [messages], the list one attempt starts from. Which
+    continuity the turn chose does not change; only the bytes the
+    dispatch-time check holds it to.
+
+    A candidate can be handed another rendering of the same history — a
+    runtime that cannot see an image gets a reading of it in its place, for
+    that candidate alone (RFC-0265 media degrade). Held to the checkpoint's
+    bytes, such a candidate was refused on every request (#37812). Whether
+    the choice fits this history at all is a question
+    {!continuity_for_request} already answered, against the history. *)
+
+(** Where the chosen continuity puts a lane's range, for the official-client
+    lanes that cut their own start seed. *)
+type librarian_position =
+  | No_position
+      (** No absorbed point: no snapshot or position fits this history
+          ({!without_snapshot}). The lane's seed, its own cut, or the turn
+          start decides. *)
+  | Librarian_snapshot of Librarian_continuity_snapshot.t
+      (** A snapshot fits: the atoms before its end are summarised by its
+          working state, which is carried in their place. *)
+  | Librarian_progress of { end_atom : int }
+      (** No snapshot fits, and the Librarian's read position does: the atoms
+          before [end_atom] are in the keeper's memory, and nothing is
+          carried in their place. *)
+
+val librarian_position :
+  messages:Agent_core.Types.message list ->
+  continuity ->
+  (librarian_position, Agent_core.Error.t) result
+(** The continuity the turn chose ({!continuity_for_request}) as a position
+    in [messages], the list a lane is about to cut. [Error] when that list no
+    longer holds what the choice covered ({!validate_continuity}), the same
+    error that refuses an Agent Core request; the lane refuses its request
+    with it. *)
+
+val working_state_text : Librarian_continuity_snapshot.t -> string
+(** The text a request carries in place of the atoms a fitting snapshot
+    covers: its working state under a label saying it is a summary to use as
+    context, not new instructions. Every lane that carries a working state
+    sends this text. *)
+
+val continuity_for_request :
+  keeper_name:string ->
+  trace_id:string ->
+  messages:Agent_core.Types.message list ->
+  snapshot:(Librarian_continuity_snapshot.t option, string) result ->
+  lines:
+    (unit ->
+     ((int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list,
+      string)
+     result) ->
+  progress:(unit -> (Keeper_librarian_progress.t option, string) result) ->
+  continuity
+(** Where a request starts (RFC keeper-context-window-in-tokens §13.4, §13.6):
+    a [snapshot] that fits these messages, else the Librarian's durable
+    [progress] when it is a place in this history ({!absorbed_history}), else
+    {!without_snapshot}. There is no refusal: a snapshot that cannot be read,
+    whose [lines] cannot be read, or whose covered bytes changed is one that
+    does not fit, and is logged as a warning naming what is wrong (#37762). A
+    turn needs no snapshot to go out, and a refused turn ran no Librarian
+    round, so a snapshot whose covered bytes changed was never written again.
+    An unreadable snapshot file or boundary log stops the Librarian's
+    continuity pass too, so it stays until the file is fixed.
+    A snapshot the Librarian is rewriting from atom 0 is not used until its
+    end reaches its catch-up target
+    ([Librarian_continuity_snapshot.t.catch_up_end_atom]); until then the
+    request starts as it would with no snapshot, so the rewrite never moves
+    the start back.
+    [lines] is read only when a snapshot is saved. *)
 
 type try_provider_ctx =
   { runtime_id : string
@@ -101,7 +194,7 @@ type try_provider_ctx =
             refusal in this turn supplies the front. *)
   ; continuity : continuity option
   ; input_policy : Keeper_input_policy.t
-  ; completed_end_atom : int
+  ; turn_boundary : Keeper_carried_front.turn_start
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
         (** The latest refusal's front, shared by every Agent Core candidate
             of this turn. A valid later front takes precedence over the
@@ -444,7 +537,7 @@ type composed =
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
     atoms older than [demote_before], or over every atom when the last
     resort is armed, then the carried range from [front], or from
-    [completed_end_atom] without one (§13.4). Nothing here measures the
+    [turn_boundary] without one (§13.4). Nothing here measures the
     request against a limit. *)
 
 type request_view =
@@ -536,7 +629,7 @@ module For_testing : sig
     last_resort:bool ->
     base_path:string ->
     demote_before:int ->
-    completed_end_atom:int ->
+    turn_boundary:Keeper_carried_front.turn_start ->
     Agent_core.Types.message list ->
     composed
 
@@ -550,7 +643,7 @@ module For_testing : sig
     last_resort:bool ->
     base_path:string ->
     demote_before:int ->
-    completed_end_atom:int ->
+    turn_boundary:Keeper_carried_front.turn_start ->
     materialize:
       (pending:Keeper_model_input_demotion.pending list ->
        Agent_core.Types.message list ->

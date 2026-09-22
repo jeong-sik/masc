@@ -61,6 +61,14 @@ type t =
   | Acting_pane_call_order_unknown of string
       (** [/activity order <word>] with a word that names no order;
           reported, not guessed. *)
+  | Scroll_acting_pane of [ `Up | `Down | `Top | `By of int ]
+      (** [/activity scroll up|down|top|+N|-N] — scroll the pane from the
+          keyboard: one wheel notch, back to the top, or a signed number of
+          rows. The wheel and the "more" row were the only ways (#37672). *)
+  | Acting_pane_scroll_unknown of string
+      (** [/activity scroll <word>] with a word that is none of those,
+          including a bare number without its sign; reported, not
+          guessed. *)
   | Switch_keeper of string
       (** [/keeper <name>] — point this pane at another keeper. *)
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)

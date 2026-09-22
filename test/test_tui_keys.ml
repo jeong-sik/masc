@@ -2494,7 +2494,8 @@ let test_a_searchable_surface_does_not_also_bind_n () =
      the key itself, and [search_last] outlives the surface it was typed on.
      A surface that both answers the row search and binds [n] therefore loses
      that key for the rest of the session. Harness did: its overrule now
-     spells [x], the way Verification spells its own rejection.
+     spells [x], the way Verification spells its own rejection, and since
+     #36652 that [x] rides inside the pinned pair [y / x].
 
      Read over the same list the declaration test uses, so the two cannot
      disagree about which surfaces the row search reaches. *)
@@ -2503,8 +2504,19 @@ let test_a_searchable_surface_does_not_also_bind_n () =
        check Alcotest.bool (label ^ " leaves n to the search step") false
          (List.mem "n" (surface_keys surface)))
     surfaces_that_answer_the_row_search;
+  (* Read the atoms, not the whole key: #36652 put the overrule inside the
+     pinned pair ([y / x]) so a narrow verdict pane cannot drop the keys that
+     answer a ruling. What this asserts is unchanged -- this surface's
+     rejection is [x], not [n].
+
+     The [n] check above stays whole on purpose. [n / N] *is* the row search,
+     so a surface carrying that item is fine; what would cost the session is
+     binding a bare [n] to something else. *)
   check Alcotest.bool "Harness overrules with x" true
-    (List.mem "x" (surface_keys Harness))
+    (List.exists
+       (fun key ->
+         List.mem "x" (List.map String.trim (String.split_on_char '/' key)))
+       (surface_keys Harness))
 
 let test_detail_tab_keys_reach_the_help_sheet () =
   let sheet = Masc_tui_keys.help_sections ~current:(Keepers Keeper_detail) () in

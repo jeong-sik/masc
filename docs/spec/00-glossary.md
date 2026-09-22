@@ -301,7 +301,61 @@ status: reference
   기록 추가·조회 도구가 있다. Schedule은 이후 외부 효과를 자동 승인하지 않는다.
 
 **Fusion**
-: 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행.
+: 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행. 패널 구성원
+  (panelist)들이 각자 답하고, 심판(judge)이 하나의 종합을 낸다. 실행 단위는 preset이며,
+  검증을 통과한 `Validated_preset`만 게이트와 orchestrator로 흐른다. 패널 정체성은
+  `panelist_id` — 라벨이 있으면 `label (model)`, 없으면 `model`이고, 같은 model이라도
+  라벨이 다르면 다른 패널이다. JOJ(judge-of-judges)는 1차 심판 여럿과 meta 심판을 둔다.
+  → [Fusion_policy](../../lib/fusion_core/fusion_policy.mli)
+
+**Fusion Seat (자리)**
+: Fusion 실행에서 답을 내는 한 자리. panel 한 명과 judge 하나가 각각 한 자리다
+  (`Panel_seat`·`Judge_seat`). 자리마다 경로 이름 하나를 받고, 그 이름을 후보 목록으로
+  풀어 적힌 순서로 시도한다. 실행마다 명단(Fusion Roster)을 바꿀 수 있다.
+  → [Fusion_types.seat](../../lib/fusion_core/fusion_types.ml)
+
+**Fusion Judge Role (심판 역할)**
+: Fusion 심판 자리(`Judge_seat`)의 정체성 중 위상 종류. `Fusion_types.judge_role`의 닫힌
+  합타입이고, 정체성(panelist_id·stage 번호)을 뺀 종류 라벨이 board meta_json의 `role`
+  필드와 TUI 디코드가 공유하는 어휘다(`judge_role_kind_label`): `single`(simple 위상 단일
+  심판)·`refine`(refine/conditional 2차)·`first`(JOJ 1차, panelist_id 보존)·`meta`(JOJ
+  reconcile)·`stage_meta`(staged JOJ stage reducer, `stage-N`)·`final_meta`(staged JOJ 최종
+  reducer). 한쪽만 아는 종류는 그쪽에서 실패하지 다른 것으로 그려지지 않는다.
+  TUI의 seat 표기는 `judge/<role>/<identity>`이고, panel 자리는 `panel/<id>`다.
+  경계: 이 "role"은 프롬프트 `<role>` 블록(Keeper Prompt)도, Message의 role도, Board
+  Interest 판정의 `keeper_role`도 아니다 — Fusion 심판의 위상 종류다.
+  → [Fusion_types.judge_role](../../lib/fusion_core/fusion_types.mli)
+
+**Fusion Route (경로 이름)**
+: Fusion 자리에 적히는 값. Keeper 배정과 같은 규칙(`Runtime.resolve_assignment`)으로
+  푼다 — `[runtime.lanes.<이름>]`이 있으면 그 lane 의 후보 목록, 없고 런타임 id 이면 그
+  런타임 하나짜리 후보 목록. 한 자리는 후보를 적힌 순서로 시도하고 처음 쓸 수 있는
+  답에서 멈춘다(panel 은 비어 있지 않은 글, judge 는 파싱을 통과한 종합). 적힌 이름이
+  로드된 lane 도 런타임도 아니면 `Unknown_route`, 런타임의 카탈로그 행이 없으면
+  `Route_unavailable` typed 실패다. 배포 preset 의 자리 이름은 같은 파일이 선언한 lane
+  이나 `[provider.model]` 바인딩이어야 하며, 아니면 첫 실행이 아니라 빌드에서 잡힌다.
+  용어집 `Exact-output route`(Librarian 같은 단독 모델 작업의 목적별 실행 경로)와 다른
+  층이다 — 이쪽은 Fusion 자리의 failover 후보 순서를 지목한다.
+  → [Fusion_seat](../../lib/fusion/fusion_seat.mli)
+
+**Fusion Roster (명단)**
+: 한 Fusion 실행만 preset 의 자리 대신 쓰는 경로 이름 목록. `judge_route` 는 심판 자리
+  하나를, `panel_routes` 는 패널 명단을 바꾼다. `None` 인 칸은 preset 값을 그대로 쓴다.
+  명단을 preset 에 얹는 규칙과 검사는 `Fusion_policy.with_roster` 한 곳에 있고, 검사를
+  통과하지 못하면 `Roster_invalid` 로 거절한다. 바꾸지 않으면 `preset_roster`(두 칸 모두
+  `None`)다. 명단에 적힌 이름은 `route_name` 으로 앞뒤 공백을 떼어 읽는다.
+  → [Fusion_types.roster](../../lib/fusion_core/fusion_types.mli)
+
+**Fusion Delivery Obligation (전달 의무)**
+: Fusion 실행 하나가 접수됐다는 사실을 재시작 뒤에도 되살리려고 남기는 durable 기록.
+  요청 수명주기와 종결의 유일한 진실은 여전히 `Keeper_msg_async`이고, 이 기록은 그
+  일반 기록이 알 수 없는 것만 담는다 — 접수한 Fusion 요청과 종결을 되비출 원래
+  continuation 채널. 워커가 시작되기 전에 `prepare` 로 접수를 남기고(같은 요청 id·같은
+  payload 재생은 `Already_present`, 같은 id·다른 payload 는 `Identity_conflict`), 종결
+  되비추기가 성공한 뒤에만 `remove_delivered` 로 그 기록을 지운다. `inventory` 는 깨진
+  기록을 고치거나 버리지 않고 살릴 수 있는 이웃 옆에 보고한다. 되비추는 쪽은
+  `Fusion_delivery_projector`다.
+  → [Fusion_delivery_obligation](../../lib/fusion/fusion_delivery_obligation.mli)
 
 **Gate**
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는

@@ -857,6 +857,15 @@
  (libraries masc_tui_table))
 
 (library
+ (name masc_tui_lane_table)
+ (wrapped false)
+ ; masc_tui_message_layout so a column is measured in display cells rather
+ ; than bytes: a slot list names runtimes, and a byte count would leave the
+ ; observed column drawn where the row has no room for it.
+ (modules masc_tui_lane_table)
+ (libraries masc_tui_message_layout))
+
+(library
  (name masc_tui_table)
  (wrapped false)
  ; masc_tui_message_layout so a cell is fitted in display cells rather than
@@ -1486,6 +1495,7 @@
   masc_tui_fork_guard
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
+  masc_tui_lane_table
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
   masc.build_commit

@@ -1315,6 +1315,26 @@ class OfficialClientLookup(unittest.TestCase):
                               'a custom name is not looked for in the vendor directory')
 
 
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_a_subcommand_spawns_the_client_the_lookup_finds(self):
+        """The web setup path hands a configured command to these subcommands,
+        which spawn it. With ~/.local/bin off PATH the spawn used to fail as
+        "not found"; the fake client below leaves a mark when it runs."""
+        with tempfile.TemporaryDirectory() as home:
+            marker = Path(home, 'spawned')
+            client = Path(home, '.local/bin/codex')
+            client.parent.mkdir(parents=True)
+            client.write_text('#!/bin/sh\nprintf %s spawned > ' + str(marker) + '\nexit 1\n')
+            client.chmod(0o700)
+            env = dict(os.environ, HOME=home, PATH='/usr/bin:/bin')
+            env.pop('CODEX_INSTALL_DIR', None)
+            result = subprocess.run([BINARY, 'runtime-codex-models', '--cli-path', 'codex'],
+                                    env=env, cwd=home, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertTrue(marker.is_file(),
+                            'masc did not spawn the client in the vendor directory: ' + result.stderr)
+
+
 class QuickSetup(unittest.TestCase):
     """One screen, then straight through: workspace, Claude Code, text only, sandbox.
 

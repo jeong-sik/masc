@@ -565,6 +565,15 @@ status: reference
   claim 한도에 세지 않는다. Producer 는 기다리는 중에 다시 낼 수 있고 그때마다 id 가
   바뀐다.
 
+**Verification Intent (검증 의도)**
+: 제출이 판정자에게 요청하는 종류의 닫힌 두 값(`Types_core.verification_intent`). wire
+  이름은 `complete`(`Complete_task`)와 `cancel`(`Cancel_task`)이고,
+  `verification_intent_of_string`은 다른 이름을 어느 쪽으로도 기본값 처리하지 않고
+  거절한다. 완료 제출과 취소 요청은 같은 대기열에서 같은 판정자를 기다리므로, 대시보드
+  검증 대기열 행은 자기가 어느 쪽을 기다리는지 이 값으로 밝힌다. 어느 쪽이든 승인·반려는
+  Verdict 가 정한다.
+  → [Types_core](../../lib/types/types_core.mli)
+
 **Verification ID**
 : 제출 하나의 식별자. 판정은 자기가 읽은 id 가 지금 id 와 같을 때만 적용된다.
 

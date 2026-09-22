@@ -287,7 +287,8 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; Observer.Snapshot "execution_snapshot"
     ; settled "largo"
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
-    ; Observer.Other "internal_agent_runs_changed"
+    ; Observer.Other "brand_new_push"
+    ; Observer.Internal_agent_runs_changed
     ; Observer.Keeper_chat_stream_frame
         { keeper = "test-keeper"; operation_id = "op"; seq = None
         ; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
@@ -302,9 +303,26 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   in
   check int "actions keeps the call, the settlement, the chat, and the unknown" 4
     (under Acting.Actions);
-  check int "everything keeps all eleven" 11 (under Acting.Everything);
+  check int "everything keeps all twelve" 12 (under Acting.Everything);
   check bool "an event this build was not taught always draws" true
     (Acting.visible Acting.Actions (Observer.Other "brand_new"))
+
+(* The run registries broadcast a change on every run they add or settle, and
+   it arrived as a type this build did not know -- which every scope draws,
+   with the mark that asks the reader to look. On the live fleet it was two of
+   the five rows under "turns", beside a scope line promising one row per
+   Keeper turn. It is a server push: the everything scope shows it, the two
+   that show what a keeper did do not. *)
+let test_the_internal_runs_push_is_not_a_keepers_act () =
+  let push = Observer.Internal_agent_runs_changed in
+  check bool "turns does not draw it" false (Acting.visible Acting.Turns push);
+  check bool "actions does not draw it" false (Acting.visible Acting.Actions push);
+  check bool "everything does" true (Acting.visible Acting.Everything push);
+  let row = Acting.row_of_event ~at:100. ~duration_ms:None push in
+  check bool "it is drawn quiet, not with the look-here mark" true
+    (row.Acting.glyph = Acting.Quiet);
+  check string "and it says what changed" "a run registry changed"
+    row.Acting.detail
 
 (* A reply sends one stream frame per token, so a single keeper answering fills
    the retained ring on its own. Before these frames were decoded they arrived
@@ -577,7 +595,8 @@ let test_every_row_wears_the_clock_the_feed_ordered_it_by () =
     (fun (name, event) ->
        check bool (name ^ " wears the arrival clock") true
          (Float.equal (at_of event) received))
-    [ ("an unknown type", Observer.Other "internal_agent_runs_changed")
+    [ ("an unknown type", Observer.Other "brand_new_push")
+    ; ("the internal runs push", Observer.Internal_agent_runs_changed)
     ; ("a snapshot", Observer.Snapshot "execution_snapshot")
       (* These two carried a clock of their own before, and it is no longer
          what the row shows -- the row shows the order it sits in. *)
@@ -1191,7 +1210,9 @@ let test_call_key_prefers_the_provider_id () =
 let () =
   run "tui acting"
     [ ( "rows"
-      , [ test_case "actions hide what says nothing a row can act on" `Quick
+      , [ test_case "the internal runs push is not a keeper's act" `Quick
+            test_the_internal_runs_push_is_not_a_keepers_act
+        ; test_case "actions hide what says nothing a row can act on" `Quick
             test_actions_hide_what_says_nothing_a_row_can_act_on
         ; test_case "filter explanations name scope and quiet rows" `Quick
             test_filter_explanations_name_scope_and_quiet_rows

@@ -60,7 +60,10 @@ let visible filter (event : Observer.event) =
       (* Server push, same verdict as the whole-projection snapshots: a
          deliberation changing stage is something the server reports, not
          something a keeper did. *)
-      | Observer.Fusion_run_status _ ->
+      | Observer.Fusion_run_status _
+      (* A run registry changed. Nothing a keeper did; the frame says only
+         that a reader showing internal runs should fetch them again. *)
+      | Observer.Internal_agent_runs_changed ->
           false
       | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
       | Observer.Keeper_chat_appended _ | Observer.Other _ ->
@@ -94,7 +97,8 @@ let retained_as_action (event : Observer.event) =
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
-  | Observer.Fusion_run_status _ | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+  | Observer.Snapshot _ | Observer.Other _ ->
       visible Actions event
 
 let retain ~actions ~quiet ~event_of entries =
@@ -252,7 +256,9 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_waiting_inventory_changed { keeper; _ }
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
-  | Observer.Snapshot _ | Observer.Other _ -> "server"
+  | Observer.Internal_agent_runs_changed | Observer.Snapshot _
+  | Observer.Other _ ->
+      "server"
 
 let row_of_event ~at ~duration_ms (event : Observer.event) =
   match event with
@@ -354,6 +360,13 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; glyph = Quiet
       ; label = "fusion"
       ; detail = status ^ " \xc2\xb7 " ^ run_id
+      }
+  | Observer.Internal_agent_runs_changed ->
+      { at
+      ; keeper = "server"
+      ; glyph = Quiet
+      ; label = "internal runs"
+      ; detail = "a run registry changed"
       }
   | Observer.Snapshot name ->
       { at; keeper = "server"; glyph = Quiet; label = "snapshot"; detail = name }
@@ -522,7 +535,8 @@ let member_of_event (event : Observer.event) =
   | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Snapshot _
-  | Observer.Fusion_run_status _ | Observer.Other _ ->
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+  | Observer.Other _ ->
       None
 
 let empty_chunk ~keeper ~at =
@@ -695,7 +709,8 @@ let observation_of_event (event : Observer.event) =
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
-  | Observer.Fusion_run_status _ | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+  | Observer.Snapshot _ | Observer.Other _ ->
       None
 
 (* The agent session's ordinal a member states, if it states one. *)
@@ -961,7 +976,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
           | Observer.Keeper_chat_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _
-          | Observer.Fusion_run_status _
+          | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
           | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before

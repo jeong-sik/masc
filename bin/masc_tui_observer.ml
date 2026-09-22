@@ -130,6 +130,9 @@ type event =
      carries no [at]: nothing computes a duration from it. *)
   | Fusion_run_status of
       { keeper : string; run_id : string; status : string }
+  (* Server push with no payload: a run registry changed, and a reader that
+     shows internal runs re-fetches them. *)
+  | Internal_agent_runs_changed
   | Snapshot of string
   | Other of string
 
@@ -157,7 +160,7 @@ let chat_appended_keeper = function
   | Keeper_turn_complete _
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Snapshot _ | Other _ ->
+  | Fusion_run_status _ | Internal_agent_runs_changed | Snapshot _ | Other _ ->
       None
 
 (* Field readers over one object's assoc list. Each answers [None] for an
@@ -433,6 +436,9 @@ let event_of_json (json : Yojson.Safe.t) =
               | Error detail, _, _ | _, Error detail, _ | _, _, Error detail ->
                   Error detail)
           | None -> Error "fusion_run_status carries no run object")
+      | Some type_name
+        when String.equal type_name Masc.Internal_agent_runs_event.event_type ->
+          Ok Internal_agent_runs_changed
       | Some ("keeper_chat_appended" as event) ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_chat_appended

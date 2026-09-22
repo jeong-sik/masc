@@ -12105,6 +12105,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_chat_stream_frame _
       | Masc_tui_observer.Keeper_waiting_inventory_changed _
       | Masc_tui_observer.Fusion_run_status _
+      | Masc_tui_observer.Internal_agent_runs_changed
       | Masc_tui_observer.Snapshot _
       | Masc_tui_observer.Other _ ->
           None

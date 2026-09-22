@@ -179,6 +179,10 @@ type event =
           a keeper act: the Fusion surface re-fetches the run on it instead of
           reading the payload as data, so only the identity strings are kept
           and, unlike the keeper events, it carries no [at]. *)
+  | Internal_agent_runs_changed
+      (** An internal agent run registry -- verification, goal verification,
+          exact lanes -- changed. A server push with no payload, named by
+          {!Masc.Internal_agent_runs_event}. *)
   | Snapshot of string
       (** A whole-projection push; the name is kept, the payload is not. Which
           types these are comes from the wire's own routing table

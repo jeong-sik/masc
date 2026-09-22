@@ -108,6 +108,7 @@ let summary = function
       Printf.sprintf "waiting(%s,%s)" keeper (Option.value ~default:"-" queue_kind)
   | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
+  | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
   | Observer.Event (Observer.Snapshot name) -> "snapshot:" ^ name
   | Observer.Event (Observer.Other name) -> "other:" ^ name
   | Observer.Undecodable detail -> "undecodable:" ^ detail
@@ -391,16 +392,28 @@ let untaught_agent_core_frame =
   "data: {\"type\":\"agent_core:relay_dropped\",\"event_type\":\"relay_dropped\",\
    \"agent_name\":\"lane-smith\",\"ts_unix\":1.0}\n\n"
 
+(* The run registries' change push is read by the name the server broadcasts
+   it under, so the two cannot drift apart. *)
+let test_the_internal_runs_push_is_read_by_the_servers_name () =
+  check (list string) "the frame the server broadcasts decodes to the push"
+    [ "internal_runs" ]
+    (List.map summary
+       (decode_all
+          [ "data: "
+            ^ Yojson.Safe.to_string (Masc.Internal_agent_runs_event.to_json ())
+            ^ "\n\n"
+          ]))
+
 let test_what_this_build_was_not_taught_keeps_its_name () =
   check (list string) "snapshots are named, not retained; unknown types are named"
     [ "snapshot:execution_snapshot"
-    ; "other:internal_agent_runs_changed"
+    ; "other:brand_new_push"
     ; "agent_core(lane-smith,other:relay_dropped,-,turn=-,batch=-)"
     ]
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"execution_snapshot\",\"payload\":{\"keepers\":[]}}\n\n"
-          ; "data: {\"type\":\"internal_agent_runs_changed\"}\n\n"
+          ; "data: {\"type\":\"brand_new_push\"}\n\n"
           ; untaught_agent_core_frame
           ]));
   match decode_all [ untaught_agent_core_frame ] with
@@ -593,6 +606,8 @@ let () =
             test_multiline_frame_preserves_payload_and_cursor
         ; test_case "a line cut by the chunk boundary is held" `Quick
             test_a_line_cut_by_the_chunk_boundary_is_held
+        ; test_case "the internal runs push is read by the server's name" `Quick
+            test_the_internal_runs_push_is_read_by_the_servers_name
         ; test_case "what this build was not taught keeps its name" `Quick
             test_what_this_build_was_not_taught_keeps_its_name
         ; test_case "streaming telemetry names no agent" `Quick

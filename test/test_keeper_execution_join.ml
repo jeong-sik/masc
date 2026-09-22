@@ -525,7 +525,10 @@ let test_a_frame_off_a_turn_names_no_keeper_turn () =
      | Some `Null -> true
      | Some _ | None -> false)
 
-let test_a_scope_that_is_not_a_keeper_turn_keeps_its_text () =
+(* The row's key set does not depend on what the scope says. A scope masc
+   never makes -- one that is not a keeper turn -- is an invariant break the
+   bridge logs; the row still carries [keeper_turn_id] and nothing else. *)
+let test_a_scope_that_is_not_a_keeper_turn_writes_null_and_no_extra_key () =
   Eio_main.run @@ fun _env ->
   let scope = Agent_core.Caller_scope.of_string "fusion-run-7" |> Result.get_ok in
   let json =
@@ -537,8 +540,7 @@ let test_a_scope_that_is_not_a_keeper_turn_keeps_its_text () =
     (match member "keeper_turn_id" json with
      | Some `Null -> true
      | Some _ | None -> false);
-  check (option string) "the scope is not dropped" (Some "fusion-run-7")
-    (string_of_field (member "caller_scope" json))
+  check bool "no caller_scope key" true (Option.is_none (member "caller_scope" json))
 
 let test_authorization_errors_have_typed_projection () =
   let check_projection label expected_domain error =
@@ -725,8 +727,8 @@ let () =
             test_a_turn_frame_names_its_keeper_turn
         ; test_case "a frame off a turn names no keeper turn" `Quick
             test_a_frame_off_a_turn_names_no_keeper_turn
-        ; test_case "a scope that is not a keeper turn keeps its text" `Quick
-            test_a_scope_that_is_not_a_keeper_turn_keeps_its_text
+        ; test_case "a scope that is not a keeper turn writes null and no extra key" `Quick
+            test_a_scope_that_is_not_a_keeper_turn_writes_null_and_no_extra_key
         ; test_case "terminal agent failures redact raw detail" `Quick
             test_terminal_agent_failure_projection_redacts_detail
         ; test_case "authorization errors have typed projection" `Quick

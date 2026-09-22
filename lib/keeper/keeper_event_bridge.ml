@@ -140,18 +140,18 @@ let emit_native_event_log (evt : Agent_core.Event_bus.event) (json : Yojson.Safe
 ;;
 
 (* The only scope masc hands an agent's bus is the keeper turn
-   ([Keeper_turn_scope.bus]), so the row carries it as [keeper_turn_id]. A
-   scope that does not read as one keeps its text under [caller_scope] beside
-   the null, so the row does not claim the event had no scope. *)
+   ([Keeper_turn_scope.bus]), so the row carries it as [keeper_turn_id] and
+   the key is always present. A scope that does not read as one is a masc
+   invariant broken by whoever scoped the bus, not a shape the row admits:
+   it is logged here and the row says null, the same as no scope. *)
 let caller_scope_fields = function
   | None -> [ "keeper_turn_id", `Null ]
   | Some scope ->
     (match Keeper_turn_scope.keeper_turn_id scope with
      | Ok keeper_turn_id -> [ "keeper_turn_id", `Int keeper_turn_id ]
-     | Error _ ->
-       [ "keeper_turn_id", `Null
-       ; "caller_scope", `String (Agent_core.Caller_scope.to_string scope)
-       ])
+     | Error detail ->
+       Log.Server.error "keeper event bridge: %s; the row carries no keeper turn" detail;
+       [ "keeper_turn_id", `Null ])
 ;;
 
 (** Build the durable/SSE JSON wrapper from the canonical event envelope.

@@ -6586,9 +6586,10 @@ let rows_the_logs_do_not_draw ~held rows =
    carry, folded into the log's transcript by the identity both records
    share: a call's outcome and duration by its execution id, and a skill
    read's exact delivery record by the read call's tool-use id. The block a
-   held turn is drawn from then says what the loaded rows it replaces would
-   have said. Run where loaded rows arrive and where a journal log is
-   held. *)
+   held turn is drawn from then says what the loaded rows it replaces said
+   about those calls and reads. A skill evidence gap on a loaded row
+   (missing, unreadable) names no read and is not carried over. Run where
+   loaded rows arrive and where a journal log is held. *)
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->

@@ -2086,10 +2086,11 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
    model made because of it, and the proof ids. Only the states the stream
    can never reach are taken; calling, pending and failed are the stream's
    own words, and the two evidence gaps name no read. The record is kept
-   whole, not merged field by field, so the row a held turn draws says what
-   the loaded row it replaces would have said. Keyed by the read call's
+   whole, not merged field by field, so the row a held turn draws for the
+   read says what the loaded row said about it. Keyed by the read call's
    tool-use id, the one identity the wire and the ledger share; a record
-   without one has nothing to stand over. *)
+   without one has nothing to stand over. A later record for the same id
+   replaces the earlier one, as a later page replaces the loaded row. *)
 let note_skill_activity t (evidence : skill_activity) =
   match evidence.state with
   | Skill_calling | Skill_served_pending | Skill_failed | Skill_evidence_missing
@@ -2148,7 +2149,15 @@ type drawn_item =
    item the trail derived from the same read call, and, apart, the noted
    records no skill item carries: reads whose call the trail never saw -- a
    cut stream, a gap in the journal -- while the loaded row that carried the
-   record is one a held log leaves out of the timeline. *)
+   record is one a held log leaves out of the timeline.
+
+   Only the id pairs the two. The stream's tool start always names its call
+   (the agent-core stream bridge reports a start without a tool id as a
+   protocol error instead), so a skill item without an id is not expected.
+   One that came anyway would stay as the stream drew it, and the record
+   would be drawn on its own beside it: two rows for one read, rather than
+   a record pinned to a read by its skill's name, which a turn that reads
+   one skill several times would pin to the wrong call. *)
 let with_noted_skills noted items =
   match noted with
   | [] -> items, []

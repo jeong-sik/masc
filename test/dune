@@ -6634,3 +6634,5 @@
 (include stanzas/test_keeper_continuity_dispatch.inc)
 
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
+
+(include stanzas/test_deployment_store_directories.inc)

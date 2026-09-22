@@ -593,15 +593,19 @@ status: reference
   증명하지 않는다. 구간이 없거나 관측 전이면 알 수 없음으로 표시한다.
 
 **Continuity Request Observation (요청 입력 관측)**
-: 직렬화된 Agent Core 요청 하나가 무엇을 실었는지에 대한 읽기 전용 관측
-  (`Keeper_continuity_observation.input`). 이 관측은 History 삭제를 승인하지 않고
-  provider가 요청을 받아들였음을 증명하지도 않는다. 종류는 넷이다 —
+: 직렬화된 요청 하나가 무엇을 실었는지에 대한 읽기 전용 관측
+  (`Keeper_continuity_observation.input`). Agent Core 는 직렬화한 요청 본문을,
+  공식 클라이언트 레인은 클라이언트에 넘긴 범위를 기록한다. 이 관측은 History 삭제를
+  승인하지 않고 provider가 요청을 받아들였음을 증명하지도 않는다. 종류는 넷이다 —
   `Summarized of frontier`(하던 일 저장본이 대신하는 경계까지 요약; frontier는 trace·
   끝 Atom·경계 줄), `Absorbed of { trace_id; end_atom }`(Librarian의 durable Read
-  Position에서 시작하고 그 앞을 요약하지 않음), `Without_snapshot`(맞는 저장본도,
+  Position에서 시작하고 그 앞을 요약하지 않음 — Agent Core 와 공식 클라이언트 레인
+  모두에서 성립), `Without_snapshot`(맞는 저장본도,
   이 History의 자리인 읽은 위치도 없어 마지막으로 끝난 turn의 경계부터 실음 — 그
   경계마저 못 읽으면 가장 새 Atom 하나만 실음),
-  `Not_applied`(저장된 맥락을 적용하지 않음). `Absorbed`는 경계 줄이 없어 모양이
+  `Not_applied`(저장된 맥락을 적용하지 않음: turn 이 아무 선택도 안 했거나(추적 없음·
+  복구 뷰), 공식 클라이언트 레인에서 씨앗이나 레인 자체의 자르기가 turn 이 고른 지점보다
+  뒤에 있었음). `Absorbed`는 경계 줄이 없어 모양이
   trace와 Atom뿐이다. Dashboard의 `context_cycle.prepared.input.kind`가
   `summarized`·`absorbed`·`without_snapshot`·`not_applied`로, TUI Memory 화면이
   `summary …`·`absorbed to atom N · trace X · no summary`·`no snapshot: this turn only`·

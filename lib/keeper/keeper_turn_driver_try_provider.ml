@@ -164,7 +164,7 @@ let validate_continuity ~messages = function
    prefix that changes while the request is in flight is still refused, by
    [validate_continuity].
 
-   [lines] and [progress] are read only when the answer depends on them. *)
+   [lines] is read only when a snapshot is saved. *)
 let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~progress =
   let absorbed_or_turn_start ~why =
     let absorbed =

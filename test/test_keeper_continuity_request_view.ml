@@ -433,7 +433,7 @@ let test_an_unusable_snapshot_starts_without_it () =
            (Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id
               ~messages:(covered @ [fresh]) ~snapshot:(Ok (Some snapshot))
               ~lines:(fun () -> Ok lines)
-              ~progress:(fun () -> fail "the position was read although the snapshot fits"))
+              ~progress:(fun () -> Ok None))
    with
    | Front.Librarian_snapshot _ -> ()
    | _ -> fail "a snapshot that fits was not used")

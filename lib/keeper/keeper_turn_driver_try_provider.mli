@@ -107,8 +107,7 @@ val continuity_for_request :
     whose [lines] cannot be read, or whose covered bytes changed is one that
     does not fit, and is logged as a warning. A refused turn would run no
     Librarian round, so nothing would ever replace the snapshot (#37762).
-    [lines] is read only when a snapshot is saved, [progress] only when none
-    fits. *)
+    [lines] is read only when a snapshot is saved. *)
 
 type try_provider_ctx =
   { runtime_id : string

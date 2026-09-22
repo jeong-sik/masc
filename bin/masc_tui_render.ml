@@ -9391,7 +9391,10 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
      5 and the evidence is 6. *)
   let seat_route_lines =
     match evidence.fe_seat_routes with
-    | None -> []
+    (* An empty array draws nothing rather than a header with no seat under
+       it. The sink writes the key on every post, so a deliberation that
+       seated nobody reaches here as [Some []]. *)
+    | None | Some [] -> []
     | Some routes ->
         [ Ansi.dim, ""; Ansi.bold, "  5  SEAT ROUTES" ]
         @ List.concat_map
@@ -9400,9 +9403,7 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
               |> List.map (fun line -> Ansi.reset, "  " ^ line))
             (Masc_tui_fusion_seat_routes.lines routes)
   in
-  let evidence_section =
-    match evidence.fe_seat_routes with None -> "5" | Some _ -> "6"
-  in
+  let evidence_section = if seat_route_lines = [] then "5" else "6" in
   [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
   ; Ansi.dim, ""
   ; Ansi.bold, "  1  QUESTION"

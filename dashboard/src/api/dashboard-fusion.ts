@@ -416,6 +416,11 @@ export type FusionConfigEditFailure =
     }
   | { readonly code: 'name_invalid'; readonly message: string; readonly preset: string }
   | { readonly code: 'default_preset_deleted'; readonly message: string; readonly preset: string }
+  // The line-surgical TOML writer could not address what the edit names: the
+  // [fusion] table or the preset table is written as dotted keys, an inline
+  // table or a scalar rather than as a header with its keys below it. Every
+  // operation can answer this, `set_settings` included, and the message names
+  // which table and says to edit the raw runtime.toml instead.
   | { readonly code: 'edit_refused'; readonly message: string }
   | { readonly code: 'fusion_invalid'; readonly message: string; readonly messages: readonly string[] }
   | { readonly code: 'configuration_rejected'; readonly message: string }

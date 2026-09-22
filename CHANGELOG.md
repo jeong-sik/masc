@@ -23,6 +23,7 @@
 
 ### Fixed
 
+- The Identity tab no longer repeats the keys its footer draws. The sentence above the service list spelled them because the title row carried the hint and cut it (#35539); the keys have since moved to the footer, which draws all six at 120 columns and gives up `/:filter` and `R:refresh` at 80 with `?` naming what it dropped (#38011).
 - The Board title counts what the board holds rather than the listing page it drew. The listing is one server page of fifty with no key past it, so a board of 109 posts read `MASC Board (50)` and the 59 posts off the page left no trace; the title now reads `(50 of 109)`, and `(41)` where the page carries everything (#37999).
 - Transcript tail recovery reads a missing checkpoint ref as `Already_dispatchable`, as its interface promised, instead of failing the recovery as `Checkpoint_unavailable` on a keeper whose session directory holds no checkpoint yet. A ref that cannot be read, names another identity or session, or cannot be locked still fails it (#37904).
 - A `cd` operand in a keeper's Execute call is checked to exist only under the Host and Docker sandboxes, where the host filesystem is what the command sees. Microvm, SSH and delegated sandboxes keep their checkouts in the guest, so the host check refused every `cd <checkout>` on those keepers with a path error. The containment check still applies under every sandbox (#37908).

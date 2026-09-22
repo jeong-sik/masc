@@ -8,14 +8,28 @@ open Masc_tui_types
 
 type group = Navigate | Act | Search | Meta
 
+(* Whether a binding answers while a surface's detail is open. A surface that
+   owns a detail draws one footer for two states, so it advertised exactly one
+   key the dispatcher refuses in the state on screen: [Right / Enter] once a
+   detail is already open, [[ / ]] while it is not. The fact was in the table
+   already -- but only as prose inside [help] ("while a detail is open"), which
+   no footer can read. This is that same fact as a value, so the footer and the
+   dispatcher stop disagreeing. *)
+type detail_state =
+  | Either  (** answers in both states; the default *)
+  | List_only  (** only while no detail is open *)
+  | Detail_only  (** only while a detail is open *)
+
 type binding = {
   key : string;
   label : string;
   help : string option;
   group : group;
+  detail : detail_state;
 }
 
-let b ?help group key label = { key; label; help; group }
+let b ?help ?(detail = Either) group key label =
+  { key; label; help; group; detail }
 
 (* [None] is shared by all Config panes; [Some panes] belongs only to those
    input handlers. Keep availability beside the binding, not in a second key
@@ -541,11 +555,11 @@ let for_surface = function
       ; b Navigate "v" "next Planning tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
-      ; b Act "Right / Enter" "detail"
+      ; b Act "Right / Enter" "detail" ~detail:List_only
       ; b Act "Left / Esc" "back"
       ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
       ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "c" "request completion"
           ~help:"send the goal to the completion judge; press again to submit"
@@ -563,9 +577,10 @@ let for_surface = function
   | Schedules ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
       ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Right / Enter" "details" ~help:"open schedule details"
+      ; b Act "Right / Enter" "details" ~detail:List_only
+          ~help:"open schedule details"
       ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "n" "new" ~help:"create a schedule through a $EDITOR JSON form"
       ; b Act "e" "modify"
@@ -581,9 +596,10 @@ let for_surface = function
       ; b Navigate "h" "queue / history"
           ~help:"the queue is what a task is still waiting on; the history is \
                  every request ever submitted, which nothing removes"
-      ; b Act "Right / Enter" "details" ~help:"read the request and evidence"
+      ; b Act "Right / Enter" "details" ~detail:List_only
+          ~help:"read the request and evidence"
       ; b Act "Left / Esc" "back" ~help:"back to the list"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Navigate "< / >" "newer / older"
           ~help:"step either list a page at a time; one page holds two \
@@ -841,7 +857,34 @@ let hints_of_bindings bindings =
   |> List.map (fun { key; label; _ } -> key ^ ":" ^ label)
   |> String.concat "  "
 
-let footer_hints surface = hints_of_bindings (for_surface surface)
+(* [detail_open] is how a surface that owns a detail says which of its two
+   states is on screen. A surface without a detail leaves it out, and then
+   every binding stands -- which is what every caller did before this argument
+   existed, so their footers are unchanged. A surface that does own one and
+   forgets to pass it falls back to that same behaviour, which is the bug this
+   argument exists to end; [test_tui_footer_detail_state] is what keeps a new
+   surface from quietly landing there. *)
+let footer_hints ?detail_open surface =
+  let answers binding =
+    match detail_open, binding.detail with
+    | _, Either -> true
+    | None, (List_only | Detail_only) -> true
+    | Some open_, List_only -> not open_
+    | Some open_, Detail_only -> open_
+  in
+  hints_of_bindings (List.filter answers (for_surface surface))
+
+(* Whether this surface's table scopes any binding to one of the two states.
+   A surface this answers [true] for owes [footer_hints] a [~detail_open] from
+   both of its renderers; [test_tui_footer_detail_state] reads this rather
+   than a list written by hand beside it. *)
+let has_detail_scoped_keys surface =
+  List.exists
+    (fun binding ->
+      match binding.detail with
+      | Either -> false
+      | List_only | Detail_only -> true)
+    (for_surface surface)
 
 (* The keys an open approval answers to. Its footer was written out in the
    renderer, which is how it came to spell the decision keys apart from the

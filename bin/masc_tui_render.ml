@@ -2776,7 +2776,7 @@ let render_planning_list (state : state) =
   box_bottom tail cols;
   Buffer.add_string tail
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
@@ -3403,7 +3403,7 @@ let render_planning_detail (state : state)
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints state.view));
+         (Masc_tui_keys.footer_hints ~detail_open:true state.view));
   finish_surface state ~clamped:(Planning_detail_scroll scroll)
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
 
@@ -3520,7 +3520,7 @@ let render_schedule_list (state : state) =
     (connection_badge state) in
 
   surface_chrome state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
-    ~hints:(Masc_tui_keys.footer_hints Schedules)
+    ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Schedules)
     ~body:(fun ~budget c ->
   (match state.schedules with
    | None ->
@@ -4073,7 +4073,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints Schedules));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true Schedules));
   finish_surface state ~clamped:(Schedule_detail_scroll scroll)
     ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols buf
 
@@ -8118,7 +8118,7 @@ let render_verification_list (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
 let verification_detail_lines ~width
@@ -8302,7 +8302,9 @@ let render_verification_detail (state : state) request =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf "%s  %s" (Masc_tui_keys.footer_hints state.view) position));
+         (Printf.sprintf "%s  %s"
+            (Masc_tui_keys.footer_hints ~detail_open:true state.view)
+            position));
   finish_surface state
     ~clamped:(Verification_detail_scroll scroll)
     ~surface_key:"verification-detail" ~rows:terminal_rows ~cols buf

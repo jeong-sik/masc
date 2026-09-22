@@ -240,6 +240,15 @@ jobs:
       - name: Prepare managed presentation verification inputs
         run: python3 scripts/ci/prepare-presentation-verifier.py
 
+      # The targeted step below selects test_run_local_script whenever a pull
+      # request edits a file it opens (config/runtime.toml among them), and
+      # that suite builds a dashboard PATH from the directories holding node,
+      # pnpm, python3, git, mkdir and bash. Without pnpm it fails with
+      # "required test command is missing: pnpm" before any scenario runs.
+      # Same step and version as test.yml.
+      - name: Make pnpm available to the suites that read a dashboard PATH
+        run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+
       - name: Verify standalone namespace fixtures
         run: python3 test/test_run_standalone_suites.py --compile-fixtures -v
 

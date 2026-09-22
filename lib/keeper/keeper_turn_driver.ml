@@ -1586,11 +1586,18 @@ let run_named
               match Keeper_turn_driver_try_provider.prepare_continuity ~trace_id ~lines
                 ~messages:initial_messages snapshot with
               | Ok restored -> Ok (Some restored)
-              | Error (Librarian_continuity_snapshot.Trace_mismatch
-                       | Librarian_continuity_snapshot.History_changed
-                       | Librarian_continuity_snapshot.Uncovered_history) ->
+              | Error
+                  ((Librarian_continuity_snapshot.Trace_mismatch
+                   | Librarian_continuity_snapshot.History_changed
+                   | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
+                (* Three different mismatches used to share one sentence, so
+                   a keeper that fell back to its whole history (goo-yang-bong,
+                   2026-09-22: 12,720 messages, 16.4 MB, 44 cycles in a row)
+                   left no way to tell a new trace from a changed history. *)
                 Log.Keeper.info ~keeper_name
-                  "Librarian continuity belongs to an earlier history; sending current history in full";
+                  "Librarian continuity does not fit the current history (%s); sending all %d messages in full"
+                  (Librarian_continuity_snapshot.error_to_string mismatch)
+                  (List.length initial_messages);
                 Ok (Some Keeper_turn_driver_try_provider.uncompressed_history)
               | Error error -> Error (Librarian_continuity_snapshot.error_to_string error)))
       in

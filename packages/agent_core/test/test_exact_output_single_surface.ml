@@ -489,11 +489,15 @@ let test_deepseek_catalog_is_json_only_before_dispatch () =
      only the slot that names them, which is what a deployment binding does. *)
   let targets : EO.declared_target list =
     [ { target_ref = target_id
-      ; provider_ref = "deepseek"
-      ; model_id = "deepseek-v4-pro"
-      ; enable_thinking = None
-      ; reasoning_effort = None
-      ; connect_timeout_s = Some 30.0
+      ; binding =
+          Provider_config.make
+            ~kind:Provider_config.OpenAI_compat
+            ~provider_id:"deepseek"
+            ~model_id:"deepseek-v4-pro"
+            ~base_url:"https://api.deepseek.com"
+            ~request_path:"/chat/completions"
+            ~connect_timeout_s:30.0
+            ()
       ; body_timeout_s = None
       ; api_key_env = None
       }

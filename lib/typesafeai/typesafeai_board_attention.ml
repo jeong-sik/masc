@@ -54,22 +54,16 @@ let rationale
     probabilities
 ;;
 
-let judge_candidate ?clock ~api_key ~candidate () =
+let judge_candidate ?clock ~destinations ~candidate () =
   let* choices = relevance_choices in
   let* state =
     Keeper_board_attention_candidate.singleton_judgment_request
       candidate
   in
-  let destination =
-    { Typesafeai_client.endpoint = Typesafeai_config.endpoint ()
-    ; model = Typesafeai_config.model ()
-    ; api_key
-    }
-  in
   let* evaluated =
     Typesafeai_client.evaluate
       ?clock
-      ~destinations:(destination, [])
+      ~destinations
       ~state
       ~questions:[ relevance_question_id, relevance_question ~choices candidate ]
       ()

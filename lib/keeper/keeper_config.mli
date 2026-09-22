@@ -20,13 +20,6 @@ val default_runtime_id : unit -> string
     provider/model policy is applied here. *)
 val validate_max_context_override_value : int -> (int, string) result
 
-
-(** Maximum bytes of Keeper instructions included in the rendered prompt.
-    Drives [normalize_prompt_text] when called from prompt rendering.
-    NOTE: persistence layer does NOT enforce this — disk JSON may hold
-    longer values; the cap applies at prompt build time. *)
-val prompt_render_max_bytes : int
-
 (** {1 Environment Variable Parsing} *)
 
 (** Parse a boolean env var where the default is [true] when unset. *)
@@ -63,12 +56,6 @@ val invalid_name_error : string -> string
 
 (** Replace invalid UTF-8 sequences with U+FFFD. *)
 val utf8_repair_string : string -> string
-
-(** {1 Text Normalization} *)
-
-(** Trim and truncate prompt text to [max_bytes] on a UTF-8 character
-    boundary. Caller MUST pass [max_bytes] explicitly so the unit is visible. *)
-val normalize_prompt_text : max_bytes:int -> string -> string
 
 (** {1 Runtime Parameters}
 

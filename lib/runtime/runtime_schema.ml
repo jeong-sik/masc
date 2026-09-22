@@ -390,19 +390,31 @@ type exact_output_lane_decl =
     Routes/aliases/profiles/system_targets/strategy from the deleted
     [runtime_config] are dropped (RFC-0206 §5): the single-binding Runtime model
     has no routing layer. *)
-(** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. The key stays in
-    the environment ([TYPESAFEAI_API_KEY]); everything else about the lane is
-    here. [lane_enabled] turns the lane off; it cannot turn it on without a
-    key. Two gates ask the vendor: [board_attention] (the Board attention
-    judgment, {!Keeper_board_attention_exact_flow}, which sends the post and
-    the keeper's context) and [absorb_gate] (the librarian absorb gate,
-    {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context preservation and Skill applicability review are opt-in too.
-    All reach the same endpoint, so one [excluded_keepers] applies to every review: a keeper
-    named there is never asked about, whichever gate asks. *)
+(** One System One server [\[typesafeai\] destinations] names. *)
+type typesafeai_destination =
+  { endpoint : string  (** the URL the request is posted to *)
+  ; model : string  (** the model id as that server names it *)
+  ; api_key_env : string  (** the environment variable holding that server's bearer key *)
+  }
+[@@deriving show, eq]
+
+(** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. Keys stay in
+    the environment; each destination names the variable holding its own
+    ([api_key_env]). Everything else about the lane is here. [lane_enabled]
+    turns the lane off; it cannot turn it on without a key in one of the named
+    variables. [destinations] are the System One servers asked in order until
+    one answers ({!Typesafeai_client.evaluate}); TypeSafe's own server and
+    OpenRouter's [/api/v1/systemone] both speak the protocol. Two gates ask
+    the vendor: [board_attention] (the Board attention judgment,
+    {!Keeper_board_attention_exact_flow}, which sends the post and the
+    keeper's context) and [absorb_gate] (the librarian absorb gate,
+    {!Keeper_librarian_absorb_gate}, which sends memory sentences). Context
+    preservation and Skill applicability review are opt-in too. All reach the
+    same destinations, so one [excluded_keepers] applies to every review: a
+    keeper named there is never asked about, whichever gate asks. *)
 type typesafeai =
   { lane_enabled : bool
-  ; lane_endpoint : string
-  ; lane_model : string
+  ; destinations : typesafeai_destination * typesafeai_destination list
   ; board_attention : bool
   ; absorb_gate : bool
   ; context_review : bool
@@ -411,14 +423,21 @@ type typesafeai =
   }
 [@@deriving show, eq]
 
+(* The vendor's own server, its latest model, and the variable the lane read
+   before the table could name destinations. *)
+let typesafe_destination =
+  { endpoint = "https://api.typesafe.ai/v1/systemone"
+  ; model = "jev-latest"
+  ; api_key_env = "TYPESAFEAI_API_KEY"
+  }
+;;
+
 (* What an absent [typesafeai] table means: the lane on when a key is set,
-   the vendor's own endpoint and latest model, Board attention on, the absorb
-   gate off (it sends memories out, so the operator turns it on by name),
-   nobody excluded. *)
+   the vendor's own server alone, Board attention on, the absorb gate off (it
+   sends memories out, so the operator turns it on by name), nobody excluded. *)
 let default_typesafeai =
   { lane_enabled = true
-  ; lane_endpoint = "https://api.typesafe.ai/v1/systemone"
-  ; lane_model = "jev-latest"
+  ; destinations = typesafe_destination, []
   ; board_attention = true
   ; absorb_gate = false
   ; context_review = false

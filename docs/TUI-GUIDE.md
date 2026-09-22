@@ -317,14 +317,16 @@ opening ten chats.
    TIME     KEEPER             EVENT            DETAIL
    01:12:03 analyst          ▶ call             read_file [1/2] · turn 2086 · task-494
    01:12:03 analyst          ✓ returned         read_file · 32ms [1/2] · task-494
-   01:11:58 rondo            ■ turn settled     turn 2086 · in 73877 out 358 · $0.0258 · 0 calls
+   01:11:58 rondo            ■ turn done        turn 2086 · in 73877 out 358 · $0.0258 · 0 calls
    01:11:51 taskmaster       ● turn start       turn 1738
   j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit  | Port: 8935
 ```
 
 The glyphs are the same vocabulary the Keepers roster uses: `▶` a call
-started, `✓` a call returned, `✗` a failure, `●` a turn boundary, `■` a turn
-settled, `?` something needing attention, `·` the quiet kinds. A returned
+started, `✓` a call returned, `✗` a failure, `●` a boundary inside a turn
+(a provider call's start or end, an internal agent run's start), `■` done
+(the keeper's turn, or an internal agent run), `?` something needing
+attention, `·` the quiet kinds. A returned
 call shows how long it took when its start is among the events held; a
 call that began before the feed opened shows none.
 

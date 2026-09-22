@@ -4615,30 +4615,49 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
    | Ok (Some Tui_decode.Jev_off) -> ()
    | Ok _ -> Alcotest.fail "off JEV state decoded to the wrong variant"
    | Error detail -> Alcotest.fail detail);
-  let enabled =
+  let destination uri model =
+    `Assoc [ "destination_uri", `String uri; "model", `String model ]
+  in
+  let configured destinations =
     replace_assoc_field "jev"
-      (`Assoc [ "state", `String "configured"; "model", `String "jev-next" ])
+      (`Assoc [ "state", `String "configured"; "destinations", `List destinations ])
       board
   in
-  (match decode_board enabled with
-   | Ok (Some (Tui_decode.Jev_configured { model })) ->
-     Alcotest.(check string) "enabled model" "jev-next" model
+  (* Two servers asked for the same model id stay two rows: the URL is what
+     tells them apart. *)
+  (match
+     decode_board
+       (configured
+          [ destination "https://jev.invalid/v1/systemone" "jev-next"
+          ; destination "https://reserve.invalid/api/v1/systemone" "jev-next"
+          ])
+   with
+   | Ok (Some (Tui_decode.Jev_configured { destinations })) ->
+     Alcotest.(check (list (pair string string))) "armed destinations, in walk order"
+       [ "https://jev.invalid/v1/systemone", "jev-next"
+       ; "https://reserve.invalid/api/v1/systemone", "jev-next"
+       ]
+       (List.map
+          (fun (d : Tui_decode.standalone_lane_jev_destination) ->
+             d.sljd_destination_uri, d.sljd_model)
+          destinations)
    | Ok _ -> Alcotest.fail "enabled JEV state decoded to the wrong variant"
    | Error detail -> Alcotest.fail detail);
   List.iter
-    (fun model ->
-       let blank =
-         replace_assoc_field "jev"
-           (`Assoc [ "state", `String "configured"; "model", `String model ])
-           board
-       in
-       match decode_board blank with
-       | Ok _ -> Alcotest.fail "a blank JEV model decoded"
+    (fun (destinations, expected) ->
+       match decode_board (configured destinations) with
+       | Ok _ -> Alcotest.fail "an empty or blank JEV destination list decoded"
        | Error detail ->
-         Alcotest.(check bool) "blank model fails closed" true
-           (String_util.contains_substring detail
-              "JEV model must be a non-empty string"))
-    [ ""; " \t " ];
+         Alcotest.(check bool) ("fails closed: " ^ expected) true
+           (String_util.contains_substring detail expected))
+    [ [], "JEV destinations must name at least one server"
+    ; ( [ destination "https://jev.invalid/v1/systemone" " \t " ]
+      , "destinations[0]: field 'model' must be a non-blank string" )
+    ; ( [ destination "https://jev.invalid/v1/systemone" "jev-next"; destination "" "jev-next" ]
+      , "destinations[1]: field 'destination_uri' must be a non-blank string" )
+    ; ( [ `Assoc [ "destination_uri", `String "https://jev.invalid/v1/systemone" ] ]
+      , "destinations[0]: missing required field 'model'" )
+    ];
   List.iter
     (fun (state, expected) ->
        let unavailable =

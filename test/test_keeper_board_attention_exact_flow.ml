@@ -1380,8 +1380,9 @@ let with_jev ~endpoint f =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "test-typesafeai-key") (fun () ->
     Masc_test_deps.with_typesafeai_policy
       { Runtime_schema.default_typesafeai with
-        lane_endpoint = endpoint
-      ; lane_model = "requested-model"
+        destinations =
+          ( { Runtime_schema.endpoint; model = "requested-model"; api_key_env = "TYPESAFEAI_API_KEY" }
+          , [] )
       }
       f)
 ;;
@@ -1701,7 +1702,12 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
         match
           Typesafeai_board_attention.judge_candidate
             ~clock
-            ~api_key:"test-typesafeai-key"
+            ~destinations:
+              ( { Typesafeai_client.endpoint = jev.base_url
+                 ; model = "requested-model"
+                 ; api_key = "test-typesafeai-key"
+                 }
+              , [] )
             ~candidate
             ()
         with

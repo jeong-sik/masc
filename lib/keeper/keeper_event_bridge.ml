@@ -139,12 +139,28 @@ let emit_native_event_log (evt : Agent_core.Event_bus.event) (json : Yojson.Safe
   | Agent_core.Event_bus.Custom _ -> ()
 ;;
 
+(* The only scope masc hands an agent's bus is the keeper turn
+   ([Keeper_turn_scope.bus]), so the row carries it as [keeper_turn_id] and
+   the key is always present. A scope that does not read as one is a masc
+   invariant broken by whoever scoped the bus, not a shape the row admits:
+   it is logged here and the row says null, the same as no scope. *)
+let caller_scope_fields = function
+  | None -> [ "keeper_turn_id", `Null ]
+  | Some scope ->
+    (match Keeper_turn_scope.keeper_turn_id scope with
+     | Ok keeper_turn_id -> [ "keeper_turn_id", `Int keeper_turn_id ]
+     | Error detail ->
+       Log.Server.error "keeper event bridge: %s; the row carries no keeper turn" detail;
+       [ "keeper_turn_id", `Null ])
+;;
+
 (** Build the durable/SSE JSON wrapper from the canonical event envelope.
     [event_id], [correlation_id], and [run_id] are producer-owned mandatory
     identity; adapters must not reconstruct them from content or timestamps.
     [caused_by] is the envelope's causation pointer (agent-core boundary) — for
     [agent_core:tool_completed] it equals the matching [agent_core:tool_called] row's
-    [run_id], the only key that pairs the two rows. *)
+    [run_id], the only key that pairs the two rows. The envelope's
+    [caller_scope] is written as [keeper_turn_id] ({!caller_scope_fields}). *)
 let wrap_event
       ~event_id
       ~event_time
@@ -155,6 +171,7 @@ let wrap_event
       ?parent_event_id
       ?caused_by
       ~source_clock
+      ~caller_scope
       ~event_type
       ~payload
       ?agent_name
@@ -164,7 +181,7 @@ let wrap_event
       ()
   =
   `Assoc
-    [ "type", `String ("agent_core:" ^ event_type)
+    ([ "type", `String ("agent_core:" ^ event_type)
     ; "event_type", `String event_type
     ; "event_id", `String event_id
     ; "ts_unix", `Float event_time
@@ -179,8 +196,9 @@ let wrap_event
     ; "task_id", Json_util.string_opt_to_json_trimmed task_id
     ; "turn", Option.fold ~none:`Null ~some:(fun value -> `Int value) turn
     ; "tool_name", Json_util.string_opt_to_json_trimmed tool_name
-    ; "payload", payload
     ]
+     @ caller_scope_fields caller_scope
+     @ [ "payload", payload ])
 ;;
 
 (** Serialize an Agent Core event to JSON for SSE relay and durable storage.
@@ -210,6 +228,7 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     ; parent_event_id
     ; caused_by
     ; source_clock
+    ; caller_scope
     }
     = evt.meta
   in
@@ -224,6 +243,7 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
       ?parent_event_id
       ?caused_by
       ~source_clock
+      ~caller_scope
   in
   match evt.payload with
   | Agent_core.Event_bus.AgentStarted { agent_name; task_id } ->

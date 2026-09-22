@@ -61,23 +61,22 @@ type catalog_document =
   ; contents : string
   }
 
-(** One exact-output slot: which binding it names, and the request controls and deadlines that
-    binding runs under. A caller that already holds these as typed values --
-    a deployment's runtime bindings -- passes them directly instead of
-    rendering a TOML document for this module to parse back. [target_ref] is
-    the slot id the lane configuration names, conventionally
+(** One exact-output slot: the binding it names. A caller that already holds
+    that binding as the typed config its ordinary requests run on -- a
+    deployment does -- passes it whole instead of copying a field list into
+    this module: the wire, the model, the capability override, the thinking
+    and effort controls and the connect deadline are all read from it. Three
+    defects came from copying a subset instead: the connect deadline
+    (#37004), the declared effort (#37326) and the wire itself (#37674).
+    [target_ref] is the slot id the lane configuration names, conventionally
     "<provider>.<model>". *)
 type declared_target =
   { target_ref : string
-  ; provider_ref : string
-  ; model_id : string
-  ; enable_thinking : bool option
-  ; reasoning_effort : Reasoning_effort.t option
-      (** The binding's explicit effort. [None] leaves the request unspecified.
-          Runtime bindings supply this typed value. Target documents have no
-          effort field and leave it [None]. *)
-  ; connect_timeout_s : float option
+  ; binding : Provider_config.t
   ; body_timeout_s : float option
+      (** The exact request's body deadline. It is the one request fact a
+          binding does not carry: ordinary requests stream, and this one does
+          not. *)
   ; api_key_env : string option
       (** Which environment name holds this slot's credential. [None] keeps the
           catalog row's name; a deployment that reads a different one says so

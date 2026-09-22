@@ -1,5 +1,4 @@
 val default_runtime_id : unit -> string
-val prompt_render_max_bytes : int
 val bool_default_true_of_env : string -> bool
 val bool_of_env_default : string -> default:bool -> bool
 val bool_of_env_opt : string -> bool option
@@ -10,7 +9,6 @@ val float_of_env_default :
   string -> default:float -> min_v:float -> max_v:float -> float
 val validate_name : string -> bool
 val utf8_repair_string : string -> string
-val normalize_prompt_text : max_bytes:int -> string -> string
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int

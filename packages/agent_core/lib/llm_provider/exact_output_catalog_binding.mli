@@ -109,9 +109,15 @@ val catalog_anthropic_thinking_control
   -> Capabilities.anthropic_thinking_control option
 
 val capabilities_of_catalog_binding
-  :  Model_catalog.provider_entry
+  :  ?wire:Provider_config.provider_kind
+  -> Model_catalog.provider_entry
   -> Model_catalog.model_entry
   -> Capabilities.capabilities
+(** [wire] is the provider wire the caller's binding reaches. A provider row
+    can name a different capability base per wire
+    ([[providers]] capabilities_base_by_identity_kind), and only a binding
+    knows which one this deployment speaks. Omitting it keeps the row's own
+    base. *)
 
 val anthropic_thinking_control_of_model
   :  Model_catalog.model_entry

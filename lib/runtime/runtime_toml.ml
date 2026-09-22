@@ -2306,7 +2306,10 @@ let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
   in
   let slots_result =
     match Otoml.find_opt tbl Fun.id [ "slots" ] with
-    | None -> Error (error (path ^ ".slots") "exact-output lane slots is required")
+    (* Absent reads as empty, the same as [cli_slots] below. The lane's rule is
+       one slot across the two lists, refused further down; requiring the key
+       on top of that only made a CLI-only lane carry an empty one. *)
+    | None -> Ok []
     | Some value ->
       (try Ok (Otoml.get_array Otoml.get_string value) with
        | Otoml.Type_error msg ->
@@ -2480,8 +2483,10 @@ let validate_ollama_only_binding_fields
 (* --- [typesafeai] --- *)
 
 let typesafeai_keys =
-  [ "enabled"; "endpoint"; "model"; "board_attention"; "absorb_gate"; "context_review"; "skill_applicability"; "excluded_keepers" ]
+  [ "enabled"; "destinations"; "board_attention"; "absorb_gate"; "context_review"; "skill_applicability"; "excluded_keepers" ]
 ;;
+
+let typesafeai_destination_keys = [ "endpoint"; "model"; "api_key_env" ]
 
 let unknown_table_keys ~(path : string) ~(expected : string list) (entries : (string * Otoml.t) list) =
   List.concat_map
@@ -2527,16 +2532,95 @@ let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
     if bad = [] then Ok names else Error bad
 ;;
 
-(* An absent key means the default; a present one must be a non-empty
-   string without surrounding whitespace. Spelled as a match so the rule is
-   visible here rather than hidden in a permissive default. *)
-let typesafeai_string_field ~(path : string) (tbl : Otoml.t) (key : string) ~(absent : string)
-  : (string, parse_error list) result
+(* One entry of [destinations]: the table naming where to post, which model
+   to ask for, and which environment variable holds that server's key. Every
+   field is required. [api_key_env] is a variable name, not a value, so it
+   must look like one: non-empty, no whitespace. *)
+let parse_typesafeai_destination ~(path : string) (entry : Otoml.t)
+  : (Runtime_schema.typesafeai_destination, parse_error list) result
   =
-  match exact_non_empty_string_opt_field ~path tbl key with
-  | Ok (Some value) -> Ok value
-  | Ok None -> Ok absent
-  | Error _ as error -> error
+  match entry with
+  | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+    let unknown = unknown_table_keys ~path ~expected:typesafeai_destination_keys entries in
+    let required key =
+      match exact_non_empty_string_opt_field ~path entry key with
+      | Ok (Some value) -> Ok value
+      | Ok None -> Error (error (path ^ "." ^ key) (key ^ " is required"))
+      | Error _ as error -> error
+    in
+    let endpoint = required "endpoint" in
+    let model = required "model" in
+    let api_key_env =
+      match required "api_key_env" with
+      | Ok name
+        when String.exists (fun c -> c = ' ' || c = '\t' || c = '\n' || c = '\r') name ->
+        Error
+          (error
+             (path ^ ".api_key_env")
+             (Printf.sprintf
+                "api_key_env %S must name an environment variable without whitespace"
+                name))
+      | other -> other
+    in
+    (match unknown, endpoint, model, api_key_env with
+     | [], Ok endpoint, Ok model, Ok api_key_env ->
+       Ok { Runtime_schema.endpoint; model; api_key_env }
+     | _ ->
+       Error
+         (unknown @ result_errors endpoint @ result_errors model @ result_errors api_key_env))
+  | _ ->
+    Error
+      (error path "each destination must be a table with endpoint, model and api_key_env")
+;;
+
+(* [destinations]: an absent key means the vendor's own server alone; a
+   present array names every server asked, in order, and must name at least
+   one. The same server asked for the same model twice would be asked twice,
+   so that pair is refused. *)
+let parse_typesafeai_destinations ~(path : string) (tbl : Otoml.t)
+  : ( Runtime_schema.typesafeai_destination * Runtime_schema.typesafeai_destination list
+    , parse_error list )
+    result
+  =
+  let key_path = path ^ ".destinations" in
+  match Otoml.find_opt tbl Fun.id [ "destinations" ] with
+  | None -> Ok Runtime_schema.default_typesafeai.Runtime_schema.destinations
+  (* An array of inline tables and [[typesafeai.destinations]] headers are the
+     same list written two ways. *)
+  | Some (Otoml.TomlArray entries | Otoml.TomlTableArray entries) ->
+    let parsed =
+      List.mapi
+        (fun index entry ->
+           parse_typesafeai_destination ~path:(Printf.sprintf "%s[%d]" key_path index) entry)
+        entries
+    in
+    (match List.concat_map result_errors parsed, List.filter_map Result.to_option parsed with
+     | [], first :: rest ->
+       let same (a : Runtime_schema.typesafeai_destination) (b : Runtime_schema.typesafeai_destination) =
+         String.equal a.endpoint b.endpoint && String.equal a.model b.model
+       in
+       let rec first_duplicate = function
+         | [] -> None
+         | destination :: later ->
+           if List.exists (same destination) later then Some destination else first_duplicate later
+       in
+       (match first_duplicate (first :: rest) with
+        | None -> Ok (first, rest)
+        | Some duplicate ->
+          Error
+            (error
+               key_path
+               (Printf.sprintf
+                  "destination %s (%s) is listed twice"
+                  duplicate.endpoint
+                  duplicate.model)))
+     | [], [] ->
+       Error
+         (error
+            key_path
+            "destinations must name at least one server; leave the key out for the vendor's own")
+     | errors, _ -> Error errors)
+  | Some _ -> Error (error key_path "destinations must be an array of tables")
 ;;
 
 (* [\[typesafeai\]] -- the TypeSafe AI lane; the key is not here. An absent
@@ -2553,8 +2637,7 @@ let parse_typesafeai (toml : Otoml.t)
     let unknown = unknown_table_keys ~path ~expected:typesafeai_keys entries in
     let d = Runtime_schema.default_typesafeai in
     let enabled = typed_find_or "a boolean" path tbl "enabled" Otoml.get_boolean ~default:d.lane_enabled in
-    let endpoint = typesafeai_string_field ~path tbl "endpoint" ~absent:d.lane_endpoint in
-    let model = typesafeai_string_field ~path tbl "model" ~absent:d.lane_model in
+    let destinations = parse_typesafeai_destinations ~path tbl in
     let board_attention =
       typed_find_or "a boolean" path tbl "board_attention" Otoml.get_boolean ~default:d.board_attention
     in
@@ -2568,11 +2651,10 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "skill_applicability" Otoml.get_boolean ~default:d.skill_applicability
     in
     let excluded_keepers = parse_typesafeai_excluded_keepers ~path tbl in
-    (match unknown, enabled, endpoint, model, board_attention, absorb_gate, context_review, skill_applicability, excluded_keepers with
+    (match unknown, enabled, destinations, board_attention, absorb_gate, context_review, skill_applicability, excluded_keepers with
      | ( []
        , Ok lane_enabled
-       , Ok lane_endpoint
-       , Ok lane_model
+       , Ok destinations
        , Ok board_attention
        , Ok absorb_gate
        , Ok context_review
@@ -2580,8 +2662,7 @@ let parse_typesafeai (toml : Otoml.t)
        , Ok excluded_keepers ) ->
        Ok
          { Runtime_schema.lane_enabled
-         ; lane_endpoint
-         ; lane_model
+         ; destinations
          ; board_attention
          ; absorb_gate
          ; context_review
@@ -2592,8 +2673,7 @@ let parse_typesafeai (toml : Otoml.t)
        Error
          (unknown
           @ result_errors enabled
-          @ result_errors endpoint
-          @ result_errors model
+          @ result_errors destinations
           @ result_errors board_attention
           @ result_errors absorb_gate
           @ result_errors context_review

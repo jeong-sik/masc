@@ -279,7 +279,7 @@ let test_a_settle_without_a_number_names_no_turn () =
   in
   let texts = List.map text drawn.Pane.rows in
   let header = List.nth texts (last_index_of_in texts "mute") in
-  check bool "settles with its state" true (contains "settled" header);
+  check bool "settles with its state" true (contains "done" header);
   check bool "no turn is named" false (contains "turn" header)
 
 (* An offline keeper has no fleet row any more, but the operator can still
@@ -294,7 +294,7 @@ let test_a_gone_keepers_turn_is_not_read_as_running () =
   let header = find_row_in dead_texts "goner" in
   check bool "the focus header says the process is gone" true
     (contains "process gone" header);
-  check bool "and that the turn never settled" true (contains "unsettled" header);
+  check bool "and that the turn never settled" true (contains "no end" header);
   check bool "the focus block does not say running" false
     (contains "running" header);
   let body = find_row_in dead_texts "Read" in
@@ -314,7 +314,7 @@ let test_an_open_record_without_a_tool_does_not_claim_a_current_turn () =
   let row = find_row_in dead_texts "bare" in
   check bool "a record with no call shows a dash, not a zero" true
     (contains "    -" row);
-  check bool "and says so in the state column" true (contains "unsettled" row);
+  check bool "and says so in the state column" true (contains "open" row);
   check bool "the fleet row never borrows the phase word" false
     (contains "running" row)
 
@@ -384,7 +384,7 @@ let test_a_record_without_markers_keeps_the_older_reading () =
       ]
   in
   let header = now_header entries_of in
-  check bool "the state word stands" true (contains "unsettled" header);
+  check bool "the state word stands" true (contains "open" header);
   check bool "with the age of the newest event" true (contains "last event 10.0s" header);
   check bool "nothing is claimed about the model" false (contains "waiting on model" header)
 
@@ -398,12 +398,43 @@ let test_an_idle_keepers_settled_record_says_how_long_it_has_been_quiet () =
 
 let test_a_gone_keepers_focus_header_says_unfinished () =
   let header = last_index_of_in dead_texts "goner" in
-  check bool "the focus header says the record is unsettled and why" true
-    (contains "unsettled, process gone" (List.nth dead_texts header));
+  check bool "the focus header says no end is coming and why" true
+    (contains "no end, process gone" (List.nth dead_texts header));
   check bool "the focus header does not say in turn" false
     (contains "in turn" (List.nth dead_texts header));
   check bool "an open turn does not borrow the session number" false
     (contains "turn 7" (List.nth dead_texts header))
+
+(* A gone keeper with two turns that never ended: the focus header carries
+   the long form and the earlier turn's own row the short one, each with the
+   [!] mark rather than [~]. Only the header had a test, so the short form
+   could have said anything. *)
+let test_a_gone_keepers_earlier_turn_also_says_no_end () =
+  let input =
+    { fixture with
+      Pane.keepers =
+        Some
+          [ keeper ~mark:"\xc3\x97" ~tone:Pane.Bad
+              ~health:(Some Masc.Tui_decode.Health_offline) "goner" ]
+    ; selected = Some "goner"
+    ; approvals = []
+    ; chunks = chunks [ "goner" ] @@ entries
+        [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
+            ~correlation:"trace-goner" lane
+        ; 980., agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.
+            ~correlation:"trace-goner" lane
+        ]
+    }
+  in
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  let header = List.nth texts (last_index_of_in texts "goner") in
+  check bool "the header carries the long form" true
+    (contains "no end, process gone" header);
+  let prior = List.nth texts (last_index_of_in texts "no end") in
+  check bool "the earlier row is not the header" false (contains "goner" prior);
+  check bool "the earlier row carries the short form behind the gone mark" true
+    (contains "! no end" prior);
+  check bool "and not the open mark" false (contains "~ " prior)
 
 let test_idle_health_does_not_turn_an_open_record_into_current_work () =
   let input =
@@ -415,7 +446,7 @@ let test_idle_health_does_not_turn_an_open_record_into_current_work () =
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
   let header = List.nth texts (last_index_of_in texts "tester") in
   check bool "idle health preserves the unresolved feed record" true
-    (contains "unsettled" header);
+    (contains "open" header);
   check bool "and does not blame the process" false (contains "gone" header);
   check bool "receipt clock remains visible" true (contains "last event 10.0s" header);
   check bool "no row asserts a current turn" false
@@ -469,14 +500,14 @@ let test_earlier_unclosed_record_is_not_presented_as_settled () =
     }
   in
   let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
-  (* The header says unsettled for the current record; the earlier one is
+  (* The header says open for the current record; the earlier one is
      the later row that says it again. *)
-  let prior = List.nth texts (last_index_of_in texts "unsettled") in
+  let prior = List.nth texts (last_index_of_in texts "open") in
   check bool "the earlier row is not the header" false (contains "tester" prior);
-  check bool "earlier missing settlement remains unsettled" true (contains "~ unsettled" prior);
+  check bool "earlier missing settlement stays open" true (contains "~ open" prior);
   check bool "earlier record uses an observed count" true (contains "no calls yet" prior);
-  check bool "no settled marker is invented" false
-    (contains (Acting.glyph_text Acting.Turn_settled) prior)
+  check bool "no done marker is invented" false
+    (contains (Acting.glyph_text Acting.Turn_done) prior)
 
 (* ── width contract ─────────────────────────────────────────────────── *)
 
@@ -564,6 +595,8 @@ let test_fleet_rows_read_the_state () =
   check bool "waiting names which tool" true (contains "tool_execute" (find_row "polisher"));
   check bool "working names the call out" true (contains "Execute" (find_row "tester"));
   check bool "working counts its calls as at least" true (contains "   2+" (find_row "tester"));
+  check bool "working says open in the state column" true (contains "open" (find_row "tester"));
+  check bool "done says so in the state column" true (contains "done" (find_row "probe"));
   check bool "settled counts its calls" true (contains "    3" (find_row "probe"));
   (* The fleet column carries the sum. The two figures apart are the focus
      block's job: nine cells cannot hold "in 73.9k · out 358". *)
@@ -573,7 +606,7 @@ let test_fleet_rows_read_the_state () =
 
 let test_focus_block_names_the_latest_observed_record () =
   let header = last_index_of "tester" in
-  check bool "the record has no observed settlement" true (contains "unsettled" (nth header));
+  check bool "the record has no observed settlement" true (contains "open" (nth header));
   check bool "the header carries the receipt age" true (contains "last event 10.0s" (nth header));
   check bool "the heading names the order" true
     (contains "calls \xc2\xb7 oldest first" (nth (header + 1)));
@@ -1159,7 +1192,8 @@ let test_focus_header_keeps_its_clock_behind_a_wide_name_and_a_named_turn () =
   let header = List.nth texts (last_index_of_in texts name) in
   check bool "the turn is named" true (contains "turn 3141" header);
   check bool "the clock is whole" true (contains "last event 10.0s" header);
-  check bool "no state word doubles the number" false (contains "settled" header)
+  check bool "no state word doubles the number" false
+    (List.exists (fun word -> contains word header) [ "done"; "open"; "no end" ])
 
 let test_beside_the_roster_a_long_record_folds_and_scrolls () =
   let events =
@@ -1867,8 +1901,10 @@ let () =
     ; ( "a gone keeper"
       , [ test_case "a gone keeper's turn is not read as running" `Quick
             test_a_gone_keepers_turn_is_not_read_as_running
-        ; test_case "a gone keeper's focus header says unsettled, process gone" `Quick
+        ; test_case "a gone keeper's focus header says no end, process gone" `Quick
             test_a_gone_keepers_focus_header_says_unfinished
+        ; test_case "a gone keeper's earlier turn also says no end" `Quick
+            test_a_gone_keepers_earlier_turn_also_says_no_end
         ; test_case "an open record does not claim a current turn" `Quick
             test_an_open_record_without_a_tool_does_not_claim_a_current_turn
         ; test_case "a settled row counts only what the settle confirmed" `Quick

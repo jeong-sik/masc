@@ -106,6 +106,49 @@ let test_json_roundtrip_full () =
   | Error msg -> failf "of_json failed: %s" msg
 ;;
 
+let scope_exn value =
+  match Caller_scope.of_string value with
+  | Ok scope -> scope
+  | Error detail -> failf "test scope %S refused: %s" value detail
+;;
+
+let test_json_roundtrip_caller_scope () =
+  let t = Event_envelope.make ~caller_scope:(scope_exn "turn-7") () in
+  match Event_envelope.of_json (Event_envelope.to_json t) with
+  | Ok t2 ->
+    check (option string) "caller_scope preserved" (Some "turn-7")
+      (Option.map Caller_scope.to_string t2.caller_scope)
+  | Error msg -> failf "of_json failed: %s" msg
+;;
+
+let without_key key = function
+  | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+  | json -> json
+;;
+
+let with_key key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | json -> json
+;;
+
+(* [to_json] always writes [caller_scope], so an envelope without the key was
+   written by something else and is refused rather than read as unscoped. *)
+let test_of_json_refuses_a_missing_caller_scope () =
+  let json = without_key "caller_scope" (Event_envelope.to_json (Event_envelope.make ())) in
+  match Event_envelope.of_json json with
+  | Ok _ -> fail "an envelope without caller_scope was accepted"
+  | Error _ -> ()
+;;
+
+let test_of_json_refuses_a_blank_caller_scope () =
+  let json =
+    with_key "caller_scope" (`String " ") (Event_envelope.to_json (Event_envelope.make ()))
+  in
+  match Event_envelope.of_json json with
+  | Ok _ -> fail "a blank caller_scope was accepted"
+  | Error _ -> ()
+;;
+
 let test_of_json_invalid () =
   let bad = `String "not an object" in
   match Event_envelope.of_json bad with
@@ -129,6 +172,15 @@ let () =
       , [ test_case "minimal round-trip" `Quick test_json_roundtrip_minimal
         ; test_case "full-field round-trip" `Quick test_json_roundtrip_full
         ; test_case "invalid input → Error" `Quick test_of_json_invalid
+        ; test_case "caller_scope round-trip" `Quick test_json_roundtrip_caller_scope
+        ; test_case
+            "missing caller_scope → Error"
+            `Quick
+            test_of_json_refuses_a_missing_caller_scope
+        ; test_case
+            "blank caller_scope → Error"
+            `Quick
+            test_of_json_refuses_a_blank_caller_scope
         ] )
     ]
 ;;

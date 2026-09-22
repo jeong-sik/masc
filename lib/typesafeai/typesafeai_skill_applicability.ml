@@ -31,20 +31,21 @@ type t =
   | Evaluated of
       { reference : Skill_reference.t
       ; body_sha256 : string
-      ; requested_model : string
+      ; requested_models : string list
       ; outcome : outcome
       }
 
 let assess ?clock ~keeper_id ~context ~reference ~body () =
-  match Typesafeai_config.skill_applicability_api_key ~keeper_id with
+  match Typesafeai_config.skill_applicability_destinations ~keeper_id with
   | Error reason -> Skipped reason
-  | Ok api_key ->
+  | Ok ((first, rest) as armed) ->
     (match context, choices with
      | None, _ -> Context_unavailable
      | Some _, Error reason -> Question_unavailable reason
      | Some context, Ok choices ->
-       let endpoint = Typesafeai_config.endpoint () in
-       let requested_model = Typesafeai_config.model () in
+       let requested_models =
+         List.map (fun (destination : Client.destination) -> destination.model) (first :: rest)
+       in
        let body_sha256 = Digestif.SHA256.(digest_string body |> to_hex) in
        let state = `Assoc
          [ "keeper", `String keeper_id
@@ -63,13 +64,12 @@ let assess ?clock ~keeper_id ~context ~reference ~body () =
            (Yojson.Safe.to_string (`Assoc
               ([ "reference", Skill_reference.to_yojson reference
                ; "body_sha256", `String body_sha256
-               ; "requested_model", `String requested_model
+               ; "requested_models", `List (List.map (fun model -> `String model) requested_models)
                ] @ fields)))
        in
        observe [ "status", `String "started" ];
        let outcome =
-         let destination = { Client.endpoint; model = requested_model; api_key } in
-         match Client.evaluate ?clock ~destinations:(destination, []) ~state ~questions () with
+         match Client.evaluate ?clock ~destinations:armed ~state ~questions () with
          | Error failure -> Failed failure
          | Ok evaluated ->
            let decoded =
@@ -92,7 +92,7 @@ let assess ?clock ~keeper_id ~context ~reference ~body () =
             [ "status", `String "judged"; "model", `String evaluated.response.model
             ; "request_body_sha256", `String evaluated.request_body_sha256
             ; "decision", `String (label judgment.choice) ]);
-       Evaluated { reference; body_sha256; requested_model; outcome })
+       Evaluated { reference; body_sha256; requested_models; outcome })
 ;;
 
 let evaluated_fields (evaluated : Client.evaluated) =
@@ -112,7 +112,7 @@ let to_yojson = function
       [ "status", `String "unavailable"; "reason", `String "turn_context_unavailable" ]
   | Question_unavailable reason -> `Assoc
       [ "status", `String "unavailable"; "reason", `String reason ]
-  | Evaluated { reference; body_sha256; requested_model; outcome } ->
+  | Evaluated { reference; body_sha256; requested_models; outcome } ->
     let fields = match outcome with
       | Failed failure ->
         [ "status", `String "failed"; "failure", Client.failure_to_yojson failure ]
@@ -131,7 +131,8 @@ let to_yojson = function
     in
     `Assoc ([ "reference", Skill_reference.to_yojson reference
             ; "body_sha256", `String body_sha256
-            ; "requested_model", `String requested_model ] @ fields)
+            ; "requested_models", `List (List.map (fun model -> `String model) requested_models)
+            ] @ fields)
 ;;
 
 let model_advice = function

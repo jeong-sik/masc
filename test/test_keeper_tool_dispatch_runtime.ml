@@ -3952,6 +3952,7 @@ let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
               ~meta
               ~publication_recovery
               ~ctx_snapshot:(make_ctx ())
+              ~keeper_turn_id:(fun () -> None)
               ()
           in
           let result =
@@ -3975,6 +3976,57 @@ let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
           check bool "clock reaches keeper dispatch" true (Atomic.get saw_clock);
           check bool "live provider reaches keeper dispatch" true
             (Atomic.get saw_provider))))
+
+(* A handler is built with the bundle, before the turn fills the context the
+   tool-call ledger reads its keeper turn from, so it asks for the keeper
+   turn when a call runs and broadcasts the call under that turn. A call
+   refused at input validation broadcasts too, which makes it the shortest
+   run through the handler. *)
+let test_agent_core_handler_broadcasts_the_keeper_turn_asked_per_call () =
+  let dir = temp_dir "agent-core-handler-keeper-turn" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let config = Workspace.default_config dir in
+      let meta = make_meta () in
+      let keeper_turn_id = ref None in
+      let handler =
+        Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
+          ~name:"test_keeper_turn_probe"
+          ~input_schema:
+            (`Assoc
+              [ "type", `String "object"
+              ; "properties", `Assoc [ "x", `Assoc [ "type", `String "string" ] ]
+              ; "required", `List [ `String "x" ]
+              ])
+          ~config
+          ~meta
+          ~publication_recovery:
+            { Publication_availability.provider =
+                Publication_availability.non_runtime_provider
+            ; keeper_name = meta.name
+            }
+          ~ctx_snapshot:(make_ctx ())
+          ~keeper_turn_id:(fun () -> !keeper_turn_id)
+          ()
+      in
+      keeper_turn_id := Some 2275;
+      let before = Masc.Sse.current_id () in
+      let result = handler (`Assoc []) in
+      check bool "the call is refused at validation" false (Tool_result.is_success result);
+      let broadcast_turns =
+        Masc.Sse.get_events_after_for_test before
+        |> List.filter_map (fun (delivery : Masc.Sse.delivery) ->
+          match delivery.payload with
+          | `Assoc fields
+            when List.assoc_opt "type" fields = Some (`String "keeper_tool_call") ->
+            Some (List.assoc_opt "keeper_turn_id" fields)
+          | _ -> None)
+      in
+      check bool "one broadcast, under the turn asked when the call ran" true
+        (broadcast_turns = [ Some (`Int 2275) ]))
 
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
 
@@ -8211,6 +8263,7 @@ let test_composition_runtime_uses_canonical_descriptor () =
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
+           ~keeper_turn_id:(fun () -> None)
            ()
        with
        | Error _ -> fail "canonical exact-descriptor composition execution failed"
@@ -8254,6 +8307,7 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
            ~meta
            ~publication_recovery
            ~ctx_snapshot:ctx_work
+           ~keeper_turn_id:(fun () -> None)
            ()
        with
        | Error
@@ -9788,6 +9842,8 @@ let () =
         test_tool_execute_empty_input_names_both_forms;
       test_case "Agent Core handler threads Eio context to keeper dispatch" `Quick
         test_agent_core_handler_threads_eio_context_to_keeper_dispatch;
+      test_case "Agent Core handler broadcasts the keeper turn asked per call" `Quick
+        test_agent_core_handler_broadcasts_the_keeper_turn_asked_per_call;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
       test_case "registered dispatch preserves workflow failure class" `Quick

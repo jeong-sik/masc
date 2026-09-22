@@ -117,6 +117,7 @@ let write_exit_reason () =
       output_string stderr row;
       flush stderr
     with _ -> (
+      (* fire-and-forget: the note above says why this failure is dropped. *)
       try ignore (Unix.write_substring Unix.stderr row 0 (String.length row))
       with _ -> ())
   end

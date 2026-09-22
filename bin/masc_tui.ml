@@ -12792,9 +12792,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.voice_wizard
   | Voice_config_loaded (result, setup, device) ->
       state.voice_input_device <- device;
-      (* The Config surface re-reads voice on entry and after every save, so
-         a transcriber set up there is named on the next empty draft. *)
-      state.voice_stt_set_up <- Masc.Voice_bridge.stt_set_up ();
       (match result with
        | Ok json ->
            state.voice_config <- Some json;
@@ -15752,7 +15749,6 @@ let main
     Option.value
       (tui_settings.send_on_stop)
       ~default:false;
-  state.voice_stt_set_up <- Masc.Voice_bridge.stt_set_up ();
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in

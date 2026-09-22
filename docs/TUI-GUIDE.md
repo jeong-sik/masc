@@ -712,8 +712,8 @@ output:` tail it used to carry is left out while the pane draws that text.
 A turn whose stream the TUI opened and lost is followed the same way.
 
 Memory journal rows open in summary mode, using producer-owned compact text
-instead of reconstructing a summary from rendered prose. The summary itself
-ends in `Ctrl-N: journal detail`; `Ctrl-N` or `/memory`
+instead of reconstructing a summary from rendered prose. The footer's
+`Ctrl-N:journal` or `/memory`
 cycles those rows through summary, full, and hidden; the header names the two
 non-default states as `journal:full` and `journal:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.

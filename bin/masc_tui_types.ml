@@ -8402,11 +8402,18 @@ type lanes_overview_hit =
   | Lanes_hit_standalone of int  (** index into [sls_lanes] *)
   | Lanes_hit_none  (** chrome, notes and padding: nothing to select *)
 
-(* The first standalone row is the frame's sixth line: surface strip, box top,
-   header, divider, matrix heading. [render_lanes_overview] draws in that
-   order and this answers a click from the same order -- a row added to either
-   section moves both. *)
-let lanes_overview_first_standalone_row = 6
+(* The rows the Standalone overview draws above its lanes, in the order
+   [render_lanes_overview] writes them: the strip the frame prepends, the box
+   top, the header, the divider, the standalone heading, the Add-ons summary
+   and the table's own heading. The count stood at five while seven were
+   drawn, and a press on the first lane selected the third.
+
+   Mouse rows count from one, so the first lane sits one row below them. A
+   PTY walk presses the row the fixture's last lane is drawn on and reads
+   the detail below, so a row added to either section is caught on the screen
+   rather than in a second hand count here. *)
+let lanes_overview_rows_above_standalone = 7
+let lanes_overview_first_standalone_row = lanes_overview_rows_above_standalone + 1
 
 let lanes_overview_hit (state : state) ~terminal_rows:_ ~row : lanes_overview_hit =
   if row < lanes_overview_first_standalone_row then Lanes_hit_none

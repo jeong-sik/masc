@@ -2332,11 +2332,21 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
   | Ok _ -> fail "a list the turn's choice no longer describes went out"
 ;;
 
-(* The declared ceiling cuts before the working state is known. A range that
-   carries one is windowed again at the ceiling: the atoms in front of the
-   working state go until it fits, the working state stays, and a ceiling
-   the working state and the newest atom do not fit refuses the request. *)
-let test_a_working_state_the_ceiling_did_not_measure_is_windowed_again () =
+let working_state_not_carried ~reason =
+  Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string WorkingStateNotCarried)
+    ~labels:
+      [ "keeper", "alpha"; "runtime", "claude_code.claude-sonnet-5"; "reason", reason ]
+    ()
+;;
+
+(* The declared ceiling cuts before the working state is known (RFC-0460).
+   A working state carried in front of a range the ceiling then has to cut
+   would push out atoms it does not cover, so it stays out and the
+   Librarian's position goes alone: the same range, every atom of it. The
+   turn is not refused, and the counter says the summary was left out and
+   why. *)
+let test_a_working_state_that_would_displace_atoms_stays_out () =
   let messages = start_seed_history () in
   let measure = Keeper_official_client_host.measure_message_bytes in
   let bytes lo hi =
@@ -2356,9 +2366,8 @@ let test_a_working_state_the_ceiling_did_not_measure_is_windowed_again () =
     | Some bytes -> bytes
     | None -> fail "the fixture history has no shrinkable atom"
   in
-  (* Room for the preamble and the twenty messages from atom 100, nothing
-     more: without a working state the ceiling cuts where the Librarian
-     read to. *)
+  (* Room for the preamble and the twenty messages from atom 100, where the
+     Librarian read to, and nothing for a working state on top. *)
   let capacity_bytes = preamble_bytes + bytes 100 120 in
   let observed = ref None in
   let project snapshot =
@@ -2377,37 +2386,91 @@ let test_a_working_state_the_ceiling_did_not_measure_is_windowed_again () =
     (not (Runtime_model_input_tail_window.is_synthetic_preamble message))
     && message.role <> Agent_core.Types.System
   in
+  let goes_alone ~reason snapshot =
+    let before = working_state_not_carried ~reason in
+    match project snapshot with
+    | Error error -> fail (Agent_core.Error.to_string error)
+    | Ok sent ->
+      let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+      check int "the working state stays out" 0
+        (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
+      check (list string) "and every atom from the Librarian's position goes"
+        (encoded (List.filteri (fun i _ -> i >= 100) messages))
+        (encoded (List.filter is_atom sent));
+      check bool "inside the ceiling" true
+        (List.fold_left (fun total m -> total + measure m) 0 sent <= capacity_bytes);
+      (match !observed with
+       | None -> fail "the projection reported no window"
+       | Some (observation : Runtime_model_input_tail_window.window_observation) ->
+         check int "the window reports the twenty atoms that went" 20
+           observation.transmitted_atoms;
+         check int "of the whole history" 120 observation.total_atoms);
+      check (float 0.) ("counted as " ^ reason) (before +. 1.)
+        (working_state_not_carried ~reason)
+  in
+  goes_alone ~reason:"displaces_atoms"
+    (snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far.");
+  (* A working state the ceiling cannot hold beside the pinned messages at
+     all is the same answer: the position goes alone. *)
+  goes_alone ~reason:"does_not_fit"
+    (snapshot_through ~messages ~end_atom:100 ~working_state:(String.make 4_000 'w'))
+;;
+
+(* A ceiling that holds the working state and the whole range sends both. *)
+let test_a_working_state_that_displaces_nothing_goes () =
+  let messages = start_seed_history () in
+  let measure = Keeper_official_client_host.measure_message_bytes in
   let snapshot =
     snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
   in
-  (match project snapshot with
-   | Error error -> fail (Agent_core.Error.to_string error)
-   | Ok sent ->
-     let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
-     check int "the working state stays, once" 1
-       (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
-     let atoms = List.filter is_atom sent in
-     let carried = List.length atoms in
-     check bool "atoms in front of the working state went, not all of them" true
-       (carried > 0 && carried < 20);
-     check (list string) "and what stays is the newest atoms"
-       (encoded (List.filteri (fun i _ -> i >= 120 - carried) messages))
-       (encoded atoms);
-     check bool "the request is inside the ceiling" true
-       (List.fold_left (fun total m -> total + measure m) 0 sent <= capacity_bytes);
-     (match !observed with
-      | None -> fail "the projection reported no window"
-      | Some (observation : Runtime_model_input_tail_window.window_observation) ->
-        check int "the window reports the atoms that went out" carried
-          observation.transmitted_atoms;
-        check int "of the whole history" 120 observation.total_atoms));
-  match project (snapshot_through ~messages ~end_atom:100 ~working_state:(String.make 4_000 'w')) with
-  | Error _ -> ()
+  let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+  let pinned : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text working_state ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  (* Exactly the working state, the preamble and the twenty atoms from 100. *)
+  let capacity_bytes =
+    (match
+       Runtime_model_input_tail_window.minimum_capacity_bytes
+         ~measure_message_bytes:measure
+         (pinned :: messages)
+     with
+     | Some bytes -> bytes
+     | None -> fail "the fixture history has no shrinkable atom")
+    + List.fold_left
+        (fun total message -> total + measure message)
+        0
+        (List.filteri (fun i _ -> i >= 100) messages)
+  in
+  let before = working_state_not_carried ~reason:"displaces_atoms" in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes
+      ~librarian_front:(fun _ ->
+        Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
   | Ok sent ->
-    fail
-      (Printf.sprintf
-         "a working state the ceiling cannot hold beside the newest atom went out (%d messages)"
-         (List.length sent))
+    check int "the working state goes, once" 1
+      (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
+    check (list string) "with every atom it abuts"
+      (encoded (List.filteri (fun i _ -> i >= 100) messages))
+      (encoded
+         (List.filter
+            (fun (m : Agent_core.Types.message) ->
+               (not (Runtime_model_input_tail_window.is_synthetic_preamble m))
+               && m.role <> Agent_core.Types.System)
+            sent));
+    check (float 0.) "and nothing is counted as left out" before
+      (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
 let () =
@@ -2547,9 +2610,13 @@ let () =
             `Quick
             test_the_librarian_front_reaches_the_list_and_its_error_refuses
         ; test_case
-            "a working state the ceiling did not measure is windowed again"
+            "a working state that would displace atoms stays out"
             `Quick
-            test_a_working_state_the_ceiling_did_not_measure_is_windowed_again
+            test_a_working_state_that_would_displace_atoms_stays_out
+        ; test_case
+            "a working state that displaces nothing goes"
+            `Quick
+            test_a_working_state_that_displaces_nothing_goes
         ] )
     ]
 ;;

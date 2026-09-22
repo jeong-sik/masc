@@ -894,6 +894,59 @@ let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
     (first_fitting ~room:cols
        [ line ~tokens:parts ~cost; line ~tokens:parts ~cost:""; line ~tokens:sum ~cost:"" ])
 
+(* What the keeper is doing right now, when the record and the keepalive
+   agree on it. The record alone cannot say: an open wire call sits in a
+   record whose keeper stopped answering just the same, and the surface
+   already refuses to read work out of a record that has not closed. So the
+   health reading decides who may be quoted, and the record says what.
+
+   - Running keeper, a wire call the runtime started and no return settled:
+     that tool is out, and the clock is the call's own start.
+   - Running keeper, no call out, [Marker_started] newest: the provider call
+     is in flight, so the model has the turn.
+   - Idle keeper on a settled record: the turn is over, and the clock is how
+     long the keeper has been quiet.
+
+   [None] everywhere else, and the header reads as it did before: the
+   record's state word and the age of its newest event. That covers a
+   failing or offline keeper, whose call is not running whatever the last
+   frame said; the gap between a tool's return and the next provider call;
+   and a CLI lane, which sends no turn markers and runs a whole keeper turn
+   as one provider call. *)
+let now_text ~now ~health ~state (chunk : Acting.chunk) =
+  let open_call =
+    List.fold_left
+      (fun open_so_far (wire : Acting.wire_tool) ->
+        match wire.Acting.wt_duration_ms with
+        | None -> Some wire
+        | Some _ -> open_so_far)
+      None chunk.Acting.ck_wire_tools
+  in
+  let working () =
+    match open_call with
+    | Some wire ->
+        Some
+          (Printf.sprintf "running %s %s" wire.Acting.wt_tool
+             (age_text ~now wire.Acting.wt_started))
+    | None -> (
+        match chunk.Acting.ck_marker with
+        | Some (Acting.Marker_started, at) ->
+            Some ("waiting on model " ^ age_text ~now at)
+        | Some (Acting.Marker_ready, _)
+        | Some (Acting.Marker_completed, _)
+        | None -> None)
+  in
+  match health with
+  | Some Reading.Health_running -> (
+      match state with
+      | Record_open | Record_unfinished -> working ()
+      | Record_settled -> None)
+  | Some Reading.Health_idle -> (
+      match state with
+      | Record_settled -> Some ("idle " ^ age_text ~now chunk.Acting.ck_at)
+      | Record_open | Record_unfinished -> None)
+  | Some Reading.Health_failing | Some Reading.Health_offline | None -> None
+
 let focus_header_line ~cols ~now ~health name current =
   match current with
   | Some (current : Acting.chunk) ->
@@ -913,11 +966,28 @@ let focus_header_line ~cols ~now ~health name current =
               (fun (word, tone) -> [ { text = middle_dot ^ word; tone } ])
               [ record_word_long state; record_word state ]
       in
+      (* What the keeper is doing now comes before the state word, and
+         carries its own clock, so the row does not spell two ages. The
+         state word rows stay behind it: a narrow pane, or a record with
+         nothing to say about now, falls back to them. *)
+      let now_rows =
+        match now_text ~now ~health ~state current with
+        | None -> []
+        | Some text ->
+            let now_span = { text = middle_dot ^ text; tone = Info } in
+            let named =
+              match turn_name current with
+              | Some turn when state = Record_settled ->
+                  [ [ now_span; { text = middle_dot ^ turn; tone = Plain } ] ]
+              | Some _ | None -> []
+            in
+            named @ [ [ now_span ] ]
+      in
+      let with_clock words = with_border (({ text = name; tone = Accent } :: words) @ [ clock ]) in
       fit_line ~cols
         (first_fitting ~room:cols
-           (List.map
-              (fun words -> with_border (({ text = name; tone = Accent } :: words) @ [ clock ]))
-              states))
+           (List.map (fun words -> with_border ({ text = name; tone = Accent } :: words)) now_rows
+            @ List.map with_clock states))
   | None ->
       fit_line ~cols
         (with_border

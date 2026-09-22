@@ -13,7 +13,7 @@
   (`masc_tui_keeper_chat_transcript.ml`). The `(no runtime lanes configured)`
   empty state and the `pick a runtime lane` help now say "runtime candidate
   order", matching the glossary's Lane definition; the shipped
-  `config/runtime.toml` section comment says "Runtime candidate orders" (#PR).
+  `config/runtime.toml` section comment says "Runtime candidate orders" (#37918).
   The `[runtime].media_failover` key, which orders the vision fleet and is a
   different mechanism, is unchanged — its screen strings keep the key name,
   and the glossary now carries a `media_failover` entry fencing it from the

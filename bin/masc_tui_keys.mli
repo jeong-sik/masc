@@ -35,9 +35,6 @@ val voice_listen_key : string
 (** Ctrl-Y and Ctrl-A as the table spells them, for the rows that name them
     beside a draft or a capture. *)
 
-val voice_keys_hint : string
-(** The two voice keys named for a reader looking at an empty draft; the
-    composer row and the chat pane draw this one string. *)
 
 val roster_toggle_key : string
 (** Ctrl-B, as the roster pane's title names it. *)

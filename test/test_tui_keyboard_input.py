@@ -3010,7 +3010,7 @@ def send_on_stop_from_the_composer_row_interaction(requests: HttpRequests) -> In
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"i", b"Ctrl-Y to speak")
+        send_and_wait(process, master_fd, output, b"i", COMPOSER_FOCUSED)
         os.write(master_fd, b"\x19")
         wait_for_spoken_send(process, master_fd, output, requests)
         # A sent message brings the chat pane forward, as Enter on the row does.
@@ -3031,9 +3031,6 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
     the composer row is never focused there. A transcript that was handed to
     the row's send key from this pane stayed in the draft and nothing was
     sent -- measured 2026-09-13 against a live keeper with send_on_stop on.
-
-    The empty draft names the key first, as the composer row does: this pane
-    bound Ctrl-Y and Ctrl-A and nothing on it said so.
     """
 
     def interact(
@@ -3048,14 +3045,8 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
         )
-        read_available(master_fd, output)
-        chat_opened_at = len(output)
         send_and_wait(
             process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
-        )
-        wait_for_output(
-            process, master_fd, output, b"(Ctrl-Y to speak, Ctrl-A to keep listening)",
-            start=chat_opened_at, timeout=3.0,
         )
         os.write(master_fd, b"\x19")
         wait_for_spoken_send(process, master_fd, output, requests)
@@ -7277,9 +7268,16 @@ def memory_journal_timeline_interaction(
         )
         plain_resting = CSI_RE.sub(b"", resting)
         assert_monotonic_direct_turn(bytes(output))
-        if b"\xc2\xb7 Ctrl-N" not in plain_resting:
+        # The key that opens the summary is the footer's Ctrl-N:journal; the
+        # row itself names no key.
+        summary_rows = [
+            text
+            for text in screen_rows(bytes(output)).values()
+            if b"Librarian \xc2\xb7 revision 9" in text
+        ]
+        if not summary_rows or any(b"Ctrl-N" in row for row in summary_rows):
             raise AssertionError(
-                f"Journal summary did not expose its detail key: {resting!r}"
+                f"Journal summary row named a key the footer names: {summary_rows!r}"
             )
         # What the key does is the footer's line, which is on screen with
         # this row; saying it again per row is what the row stopped doing.

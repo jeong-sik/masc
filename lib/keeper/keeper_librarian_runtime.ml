@@ -570,17 +570,33 @@ type cli_fallback_failure =
   | Fitted_prompt_unavailable
   | Slot_failures of Keeper_lane_cli_oneshot.failure list
 
+type continuity_answer =
+  | Memory_only
+  | Continuity of
+      { prepared : Keeper_librarian_continuity.prepared
+      ; working_state : string
+      }
+
+type accepted =
+  { selection : Keeper_librarian.selection
+  ; continuity_answer : continuity_answer
+  }
+
 (* A continuity pass must produce both Memory disposition and its saved
    working state before either may be published. Ordinary Memory extraction
-   has no continuity obligation and still accepts an absent working state. *)
+   has no continuity obligation and still accepts an absent working state.
+   The accepted answer carries the pair, so publication has no case for a
+   continuity pass without one. *)
 let validate_selection ?continuity selected_input output =
   let open Result.Syntax in
   let* selection = Keeper_librarian.selection_of_json_result selected_input output in
   match continuity, selection.Keeper_librarian.working_state with
+  | None, _ -> Ok { selection; continuity_answer = Memory_only }
+  | Some prepared, Some working_state ->
+    Ok { selection; continuity_answer = Continuity { prepared; working_state } }
   | Some _, None ->
     Error (Keeper_librarian.Working_state_invalid
       "continuity requires a nonblank working_state")
-  | None, _ | Some _, Some _ -> Ok selection
 ;;
 
 let try_cli_slots
@@ -1019,7 +1035,7 @@ let run_best_effort
                |> Result.map (fun material -> material.rendered)
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
-             let* (selection, exact_output), selected_slot =
+             let* ({ selection; continuity_answer }, exact_output), selected_slot =
                execute_exact_output_classified
                  ~continuity
                  ?cli_runner
@@ -1087,10 +1103,9 @@ let run_best_effort
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
                   "working context commit failed independently of memory: %s" (Printexc.to_string exn))));
              let publish_continuity () =
-               match continuity, selection.working_state with
-              | None, _ -> ()
-              | Some _, None -> continuity_write := `Assoc ["status", `String "not_provided"]
-              | Some prepared, Some working_state ->
+               match continuity_answer with
+              | Memory_only -> ()
+              | Continuity { prepared; working_state } ->
                 continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
                 commit_continuity
                   ~commit:(fun () ->

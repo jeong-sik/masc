@@ -102,6 +102,20 @@ val run_best_effort
     sidecar, so a durable consumer can recover a later progress-file failure
     without submitting the completed-turn range again. *)
 
+(** What an accepted answer publishes besides Memory. A continuity pass is
+    accepted only with its working state, so the two arrive together. *)
+type continuity_answer =
+  | Memory_only
+  | Continuity of
+      { prepared : Keeper_librarian_continuity.prepared
+      ; working_state : string
+      }
+
+type accepted =
+  { selection : Keeper_librarian.selection
+  ; continuity_answer : continuity_answer
+  }
+
 module For_testing : sig
   val cause_shows_size : Agent_core.Exact_output.execution_error_cause -> bool
   (** The size verdict one provider cause gives, so the whole table can be
@@ -131,7 +145,7 @@ module For_testing : sig
     -> selected_input:Keeper_librarian.input
     -> messages:Agent_core.Types.message list
     -> unit
-    -> ( (Keeper_librarian.selection * Yojson.Safe.t) * string
+    -> ( (accepted * Yojson.Safe.t) * string
        , classified_error )
        result
 

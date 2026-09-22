@@ -17,18 +17,32 @@
     moved 15 memory snapshots aside and the keepers started empty; the
     preflight would have refused those files.
 
-    Covered stores: keeper meta ([<masc>/keepers/<name>.json]) and the
-    current Memory OS snapshot ([config/keepers/<name>.memory-current.json]).
-    The deploy preflight scans the same stores with the same decoders. *)
+    Which store may refuse boot is carried on its type (RFC-0420, RFC-0444
+    §2.4). Keeper meta ([<masc>/keepers/<name>.json]) and the current Memory
+    OS snapshot ([config/keepers/<name>.memory-current.json]) are
+    [refuse_boot]: without them a keeper starts as another keeper or with
+    empty memory, and overwrites what it lost. The deploy preflight scans
+    these two with the same decoders. The goal store ([goals.json]) is
+    [degrade_typed]: every reader shows an unreadable store as a typed value
+    and every writer refuses it, so keepers run on tasks, board and schedules
+    and nothing overwrites the file. [examine] reads it once and logs one
+    INFO line when it is unreadable. {!undecodable} holds only a
+    [refuse_boot store], so the goal store is never refused, never moved
+    aside, and [--accept-store-quarantine] does not reach it. A new store
+    constructor makes the compiler ask which policy it gets. *)
 
-type store =
-  | Keeper_meta
-  | Memory_current
+type refuse_boot = [ `Refuse_boot ]
+type degrade_typed = [ `Degrade_typed ]
 
-val store_to_string : store -> string
+type _ store =
+  | Keeper_meta : refuse_boot store
+  | Memory_current : refuse_boot store
+  | Goal_store : degrade_typed store
+
+val store_to_string : refuse_boot store -> string
 
 type undecodable =
-  { store : store
+  { store : refuse_boot store
   ; keeper : string
   ; path : string
   ; rejection : string
@@ -42,7 +56,11 @@ type examination =
 val examine : Workspace.config -> examination
 (** Decode every store file with this build. Reads only: no file is renamed,
     so calling it twice gives the same answer. A snapshot the process cannot
-    read at all counts as undecodable; its [rejection] says so. *)
+    read at all counts as undecodable; its [rejection] says so. The goal
+    store is read once through [Goal_store.load_source]; when it is
+    [Unavailable], one INFO line [Goal_store.unavailable_to_string] is
+    logged, otherwise nothing. [readable] and [undecodable] count the
+    per-keeper files only. *)
 
 val admit
   :  accept_quarantine:bool
@@ -57,7 +75,7 @@ val refusal_to_string : undecodable list -> string
     the two ways forward. *)
 
 type quarantined =
-  { store : store
+  { store : refuse_boot store
   ; keeper : string
   ; path : string
   ; rejected_path : string
@@ -65,7 +83,7 @@ type quarantined =
   }
 
 type failure =
-  { store : store
+  { store : refuse_boot store
   ; keeper : string
   ; path : string
   ; error : string

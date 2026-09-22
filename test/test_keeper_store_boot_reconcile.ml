@@ -1,6 +1,9 @@
 (** A store this build cannot decode is settled once, at boot: examined
     without being touched, refused unless the operator accepted the
-    quarantine, and moved aside only then (RFC-0420). *)
+    quarantine, and moved aside only then (RFC-0420). The goal store is only
+    read: boot logs one INFO line when it cannot read it, never refuses or
+    moves it, and leaves its bytes as they were (RFC-0444 §2.4, criteria 3
+    and 7). *)
 
 open Alcotest
 open Masc
@@ -45,12 +48,82 @@ let write_bytes path bytes =
   close_out oc
 ;;
 
-(* One sound meta, one meta that is not a current snapshot, and one memory
-   snapshot that is not JSON. *)
+let file_digest path = Digest.to_hex (Digest.file path)
+
+(* goals.json as the #34459 hard cut left it: a row without
+   [criterion_revision], in the file and in its .last-good mirror. Written
+   raw so no writer of the store plants it. *)
+let goal_bytes_without_criterion_revision () =
+  let ts = Masc_domain.now_iso () in
+  let goal =
+    { Goal_store.id = "goal-before-the-hard-cut"
+    ; criterion_revision = "fixture-criterion"
+    ; title = "Goal before the hard cut"
+    ; metric = None
+    ; target_value = None
+    ; due_date = None
+    ; priority = 3
+    ; phase = Goal_phase.Executing
+    ; last_review_note = None
+    ; last_review_at = None
+    ; created_at = ts
+    ; updated_at = ts
+    }
+  in
+  let row =
+    match Goal_store.goal_to_yojson goal with
+    | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      fail "goal serializer returned a non-object"
+  in
+  Yojson.Safe.to_string
+    (`Assoc [ "version", `Int 1; "updated_at", `String ts; "goals", `List [ row ] ])
+;;
+
+(* The line boot has to log for the seeded store, rendered from the store's
+   own reader: refused on [criterion_revision], with the mirror refused too.
+   Any other reading means the fixture is not the #34459 shape. *)
+let unavailable_goal_store_line config =
+  match Goal_store.load_source config with
+  | Goal_store.Unavailable
+      ({ Goal_store.reason = Goal_store.Schema_rejected { field; _ }
+       ; mirror = Goal_store.Mirror_rejected _
+       ; _
+       } as unavailable) ->
+    check string "the store refuses the missing field" "criterion_revision" field;
+    Goal_store.unavailable_to_string unavailable
+  | Goal_store.Unavailable unavailable ->
+    failf "the goal store was refused another way: %s"
+      (Goal_store.unavailable_to_string unavailable)
+  | Goal_store.Available _ -> fail "the seeded goal store read as Available"
+  | Goal_store.Uninitialized -> fail "the seeded goal store read as Uninitialized"
+;;
+
+(* [since_seq] is exclusive and the ring's first entry carries seq 0. *)
+let ring_cursor () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+;;
+
+let keeper_info_lines_since cursor line =
+  Log.Ring.recent ~limit:Log.Ring.capacity ~since_seq:cursor ~module_filter:"Keeper" ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+    match entry.Log.Ring.level with
+    | Log.Info -> String.equal entry.Log.Ring.message line
+    | Log.Debug | Log.Warn | Log.Error -> false)
+  |> List.length
+;;
+
+(* One sound meta, one meta that is not a current snapshot, one memory
+   snapshot that is not JSON, and a goal store this build refuses in both
+   its files. *)
 type fixture =
   { sound_meta : string
   ; broken_meta : string
   ; broken_snapshot : string
+  ; goals : string
+  ; goals_mirror : string
   }
 
 let seed config =
@@ -67,7 +140,19 @@ let seed config =
     Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"sound"
   in
   write_bytes broken_snapshot "{ this is not a snapshot";
-  { sound_meta; broken_meta; broken_snapshot }
+  let goals = Goal_store.goals_path config in
+  let goals_mirror = goals ^ ".last-good" in
+  let goal_bytes = goal_bytes_without_criterion_revision () in
+  write_bytes goals goal_bytes;
+  write_bytes goals_mirror goal_bytes;
+  { sound_meta; broken_meta; broken_snapshot; goals; goals_mirror }
+;;
+
+let goal_digests fixture = file_digest fixture.goals, file_digest fixture.goals_mirror
+
+let check_goal_digests label fixture (goals, goals_mirror) =
+  check string (label ^ ": goals.json digest") goals (file_digest fixture.goals);
+  check string (label ^ ": .last-good digest") goals_mirror (file_digest fixture.goals_mirror)
 ;;
 
 let stores_of undecodable =
@@ -78,8 +163,13 @@ let test_examine_reads_and_moves_nothing () =
   with_workspace
   @@ fun config ->
   let fixture = seed config in
+  let digests = goal_digests fixture in
+  let line = unavailable_goal_store_line config in
+  let cursor = ring_cursor () in
   let examination = R.examine config in
   check int "readable" 1 examination.R.readable;
+  check int "one INFO line for the unreadable goal store" 1
+    (keeper_info_lines_since cursor line);
   check (list string) "both broken stores are named, meta first"
     [ "keeper_meta"; "memory_current" ]
     (stores_of examination.R.undecodable);
@@ -95,6 +185,8 @@ let test_examine_reads_and_moves_nothing () =
   check (list string) "a second look gives the same answer"
     (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable)
     (List.map (fun (u : R.undecodable) -> u.R.path) again.R.undecodable);
+  check int "one INFO line per look" 2 (keeper_info_lines_since cursor line);
+  check_goal_digests "after two looks" fixture digests;
   check int "and no rejected copy appeared" 0
     (Sys.readdir (Filename.dirname fixture.broken_snapshot)
      |> Array.to_list
@@ -158,6 +250,7 @@ let test_undecodable_stores_are_moved_aside_once () =
   with_workspace
   @@ fun config ->
   let fixture = seed config in
+  let digests = goal_digests fixture in
   let report = R.quarantine ~now:1_700_000_000.0 config (R.examine config) in
   check int "examined" 3 report.R.examined;
   check int "readable" 1 report.R.readable;
@@ -176,6 +269,7 @@ let test_undecodable_stores_are_moved_aside_once () =
     (List.map (fun (q : R.quarantined) -> R.store_to_string q.R.store) report.R.quarantined);
   check bool "the sound meta still reads" true
     (Result.is_ok (Keeper_meta_store.validate_current_meta_file_result fixture.sound_meta));
+  check_goal_digests "after the quarantine" fixture digests;
   let again = R.examine config in
   check int "a second boot finds nothing to move" 0 (List.length again.R.undecodable);
   check int "and still reads the sound meta" 1 again.R.readable;
@@ -185,11 +279,15 @@ let test_undecodable_stores_are_moved_aside_once () =
 ;;
 
 (* The whole preparation, as the server runs it: refused without the flag with
-   the file untouched, moved aside with it. *)
+   the file untouched, moved aside with it. The goal store gives one line per
+   boot and keeps its bytes through both. *)
 let test_preparation_refuses_then_moves_aside_with_the_flag () =
   with_workspace
   @@ fun config ->
   let fixture = seed config in
+  let digests = goal_digests fixture in
+  let line = unavailable_goal_store_line config in
+  let cursor = ring_cursor () in
   Fun.protect
     ~finally:B.For_testing.reset_keeper_persistence_lifecycle
     (fun () ->
@@ -211,12 +309,16 @@ let test_preparation_refuses_then_moves_aside_with_the_flag () =
           failf "preparation failed for another reason: %s"
             (B.keeper_persistence_prepare_error_to_string error)
         | Ok _ -> fail "preparation went on past an undecodable store without the flag");
+       check_goal_digests "after the refused boot" fixture digests;
        B.For_testing.reset_keeper_persistence_lifecycle ();
        match B.prepare_keeper_persistence ~accept_store_quarantine:true ~config () with
        | Ok _ ->
          check bool "with the flag the broken snapshot is moved aside" false
            (Sys.file_exists fixture.broken_snapshot);
-         check bool "and the broken meta too" false (Sys.file_exists fixture.broken_meta)
+         check bool "and the broken meta too" false (Sys.file_exists fixture.broken_meta);
+         check_goal_digests "after the accepted quarantine" fixture digests;
+         check int "one INFO line per boot, two boots" 2
+           (keeper_info_lines_since cursor line)
        | Error error ->
          failf "preparation with the flag failed: %s"
            (B.keeper_persistence_prepare_error_to_string error))

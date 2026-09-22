@@ -836,9 +836,25 @@ let input_capacity_evidence_json = function
 ;;
 
 (* A refusal the transport or the provider config produced, said once for both
-   the evidence record and the operator-facing line. The typed error keeps its
-   own vocabulary; this renders the sentence inside it. *)
-let refusal_reason refusal = Error.to_string (Error.of_http_error refusal)
+   the evidence record and the operator-facing line: the sentence inside the
+   typed error, and only that. The provider-error rendering was tried first
+   and opened every line with "Provider '' ..." -- this renderer has no
+   provider name, and the slot id already stands beside the reason in the
+   line that carries it. Exhaustive on purpose: a new transport error must
+   say here what its sentence is. *)
+let refusal_reason = function
+  | Http_client.AcceptRejected { reason } -> reason
+  | Http_client.HttpError { code; body; retry_after_header = _ } ->
+    Printf.sprintf "http %d: %s" code (Http_client.refusal_body_text body)
+  | Http_client.NetworkError { message; kind = _ } -> message
+  | Http_client.TimeoutError { message; phase } ->
+    Printf.sprintf "%s timeout: %s" (Http_client.timeout_phase_to_label phase) message
+  | Http_client.ProviderTerminal { kind = Http_client.Session_conflict; message } ->
+    "session conflict: " ^ message
+  | Http_client.ProviderTerminal { kind = Http_client.Other reason; message } ->
+    reason ^ ": " ^ message
+  | Http_client.ProviderFailure { kind; message } ->
+    Http_client.provider_failure_to_string ~kind ~message
 
 let wire_admission_error_evidence_json = function
   | Capability_snapshot_missing ->

@@ -889,6 +889,12 @@ type memory_librarian_health = {
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;
+  mlh_continuity_unread_atoms : int option;
+      (** How far the continuity snapshot trails the Librarian's read
+          position. A different lag from [mlh_unread_atom_turns], which is
+          the durable round's: the two fall behind separately. [None] is
+          "cannot say" -- no snapshot, an unreadable one, or one from
+          another trace -- and is not the same as caught up. *)
   mlh_last_success_at : float option;
   mlh_last_failure_kind : string option;
 }
@@ -963,6 +969,11 @@ type memory_health_snapshot = {
   mhs_total_source_snapshot_bytes : int;
   mhs_total_librarian_failures : int;
   mhs_total_librarian_unread_turns : int option;
+  mhs_total_librarian_continuity_unread_atoms : int;
+      (** Summed over the keepers whose continuity lag could be taken. *)
+  mhs_total_librarian_continuity_unmeasured : int;
+      (** How many keepers it could not be taken for, so the sum above is not
+          read as a caught-up fleet. *)
   mhs_total_vision_ingest_errors : int;
   mhs_total_read_errors : int;
   mhs_total_source_read_errors : int;

@@ -767,12 +767,91 @@ let test_context_cycle_separates_saved_and_prepared () =
   Alcotest.(check bool) "forgotten request is unknown" true (is_null (member "prepared" (cycle ())))
 ;;
 
+(* RFC librarian-lifecycle §4.9: the durable round and the continuity round
+   fall behind separately, so the screen carries both. A lag it cannot take
+   reads as "cannot say" rather than as zero -- zero is what a caught-up
+   keeper shows. *)
+let test_the_continuity_lag_is_measured_or_says_it_cannot_be () =
+  let module S = Masc.Librarian_continuity_snapshot in
+  let module B = Masc.Keeper_turn_boundaries in
+  let module P = Masc.Keeper_librarian_progress in
+  let base = fresh_dir "masc-continuity-lag" in
+  let config = Masc.Workspace.default_config base in
+  let keeper_name = "continuity-lag" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
+  let json () = Health.keeper_memory_health_http_json ~base_path:base in
+  let librarian () = member "librarian" (keeper_obj keeper_name (json ())) in
+  let lag () = member "continuity_unread_atoms" (librarian ()) in
+  let lag_atoms () = int_field "continuity_unread_atoms" (librarian ()) in
+  Alcotest.(check bool) "no snapshot cannot be compared" true (is_null (lag ()));
+  Alcotest.(check int) "and the fleet counts it as unmeasured" 1
+    (int_field "librarian_continuity_unmeasured" (totals (json ())));
+  Alcotest.(check int) "with nothing summed for it" 0
+    (int_field "librarian_continuity_unread_atoms" (totals (json ())));
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let messages =
+    [ Agent_core.Types.make_message ~role:Agent_core.Types.User
+        [ Agent_core.Types.Text "one atom" ] ]
+  in
+  let position = B.position_of_messages messages |> get in
+  let last_atom_digest =
+    match position with
+    | B.Atom_history { last_atom_digest; _ } -> last_atom_digest
+    | B.Empty_atom_history | B.No_atom_history | B.Stale_noop ->
+      Alcotest.fail "fixture history has one atom"
+  in
+  let trace_id = "lag-trace" in
+  let lines =
+    [ ( 1
+      , Ok
+          { B.recorded_at = test_now
+          ; event =
+              B.Turn_ended
+                { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+                ; history_at_start = B.Fresh_history
+                ; position
+                }
+          } )
+    ]
+  in
+  let snapshot =
+    S.capture ~trace_id ~lines ~messages ~working_state:"working state"
+    |> Result.map_error S.error_to_string
+    |> get
+  in
+  let path = Masc.Keeper_librarian_continuity.path ~config ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Yojson.Safe.to_file path (S.to_json snapshot);
+  let write_position ~trace_id ~end_atom =
+    P.write ~keepers_dir ~keeper_id:keeper_name
+      { P.position = { P.trace_id; end_atom; last_atom_digest }
+      ; boundary_lines_seen = 1
+      }
+    |> Result.map_error P.write_error_to_string
+    |> get
+  in
+  write_position ~trace_id ~end_atom:5;
+  Alcotest.(check int) "the position past the snapshot is the lag" 4 (lag_atoms ());
+  Alcotest.(check int) "and the fleet sums it" 4
+    (int_field "librarian_continuity_unread_atoms" (totals (json ())));
+  Alcotest.(check int) "with nothing left unmeasured" 0
+    (int_field "librarian_continuity_unmeasured" (totals (json ())));
+  write_position ~trace_id:"another-trace" ~end_atom:9;
+  Alcotest.(check bool) "two traces are not comparable" true (is_null (lag ()));
+  write_position ~trace_id ~end_atom:1;
+  Alcotest.(check int) "a position level with the snapshot is caught up" 0 (lag_atoms ())
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
     [ ( "current snapshot"
       , [ Alcotest.test_case "saved versus prepared context" `Quick
             test_context_cycle_separates_saved_and_prepared
+        ; Alcotest.test_case "continuity lag measured or unknown" `Quick
+            test_the_continuity_lag_is_measured_or_says_it_cannot_be
         ; Alcotest.test_case "curator canonical owners and malformed config" `Quick
             test_curator_inventory_canonical_owner_discovery
         ; Alcotest.test_case "curator inventory binds committed sources and retractions" `Quick

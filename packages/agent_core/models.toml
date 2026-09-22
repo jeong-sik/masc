@@ -3496,14 +3496,20 @@ max_context_tokens = 1048576
 
 # ollama.com serves this model under both the bare name and a ":cloud" suffix.
 # Earlier comment here claimed "a prefix match covers the pair from one row" --
-# false: Exact_output_catalog_binding.resolve_exact and
+# false for the provider-scoped path a runtime binding actually resolves
+# through: Exact_output_catalog_binding.resolve_exact and
 # Model_catalog.lookup_for_provider_result both compare id_prefix with exact
 # (case-folded) equality, never a prefix test, so a deployment whose runtime
 # binding names the ":cloud" spelling resolved to no catalog row and was
 # excluded from librarian_exact/hitl_auto_judge/board_attention_exact (#37074,
-# 2026-09-19 live deployment). The sibling qwen3.5:cloud/qwen3.5:397b split
-# below is the established fix for the same ollama.com ":cloud" alias shape:
-# one row per exact spelling, not a shared prefix.
+# 2026-09-19 live deployment). A separate provider_name-agnostic path
+# (Model_catalog.lookup/lookup_result/lookup_entries_result, model_catalog.ml
+# :853-887) does longest-prefix-first matching, but it filters to rows
+# declaring no provider_name at all -- both deepseek-v4.1-flash rows below set
+# provider_name = "ollama_cloud", so that path never sees either of them. The
+# sibling qwen3.5:cloud/qwen3.5:397b split below is the established fix for
+# the same ollama.com ":cloud" alias shape: one row per exact spelling, not a
+# shared prefix.
 [[models]]
 id_prefix = "deepseek-v4.1-flash"
 provider_name = "ollama_cloud"
@@ -3525,10 +3531,14 @@ supports_structured_output = false
 
 # Same backend as the bare "deepseek-v4.1-flash" row above under ollama.com's
 # ":cloud" alias spelling (#37074). Every capability field is duplicated
-# verbatim rather than left to inherit, matching how qwen3.5:cloud/qwen3.5:397b
-# below duplicate each other: id_prefix is compared with exact equality by
-# every exact-output consumer, so each spelling a deployment can bind needs
-# its own row.
+# verbatim rather than left to inherit -- unlike qwen3.5:cloud/qwen3.5:397b
+# below, where supports_response_format_json/supports_structured_output are
+# declared only on the ":cloud" row and are absent (base-inherited) on
+# ":397b". Whether that is a real per-spelling difference or a stale gap in
+# ":397b" is unresolved (PR #37574 review); duplicating both fields here
+# avoids adding a third instance of the same ambiguity. id_prefix is compared
+# with exact equality by every provider-scoped exact-output consumer, so each
+# spelling a deployment can bind needs its own row.
 [[models]]
 id_prefix = "deepseek-v4.1-flash:cloud"
 provider_name = "ollama_cloud"

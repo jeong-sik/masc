@@ -25,7 +25,7 @@ let row ?(keeper = "alpha") ?(request_id = "") ?turn_sequence
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
-  ; me_skill_activity = None
+  ; me_skill_block = []
   ; me_timestamp = ""
   ; me_request_id = request_id
   ; me_at = at

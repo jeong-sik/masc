@@ -746,7 +746,15 @@ change view are discoverable from the row that owns it. The typed calls
 themselves stay attached to the message, so
 changing the view does not reconstruct facts from rendered glyphs. Expanded
 Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
-a mixed block does not collapse into an anonymous tool count. An `Execute`
+a mixed block does not collapse into an anonymous tool count.
+
+A turn's Skill invocations are one block, like its tool calls. At rest it
+draws one row per skill, in the order each was first triggered, with how many
+times: `msx-observe ×7`. A trigger that failed, or whose evidence the pane
+could not read, adds that state's words (`prior-art ×2 · 실패 1`). `Ctrl-D`
+opens every invocation: how far it got (an instruction skill is `읽음`, a
+composition `실행됨`), the tool calls the server attributes to it, and its
+proof coordinates. An `Execute`
 call whose result reads as the output schema its descriptor declares draws
 `status` (`exit 0 · 808 ms`, `signal 9 · 30012 ms · timed out at 30 s`), the
 command's `output`, and any `stderr`. Output too large to ride inline is named

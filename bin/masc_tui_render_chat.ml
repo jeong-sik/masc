@@ -1465,16 +1465,16 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
             when state.msg_reasoning_visibility = Reasoning_folded ->
               folded_thinking_summary message.me_text
           | Message_skill _ -> (
-              match message.me_skill_activity with
-              | None -> message.me_text
-              (* The summary line carries the fact this row exists for —
-                 "delivered and used, N actions" — so it never folds. The
-                 action list, proof line and detail ride the tool toggle:
-                 Ctrl-D opens them, the resting pane stays one line. *)
-              | Some activity ->
+              match message.me_skill_block with
+              | [] -> message.me_text
+              (* One row per skill the turn triggered, counted, is the fact
+                 this row exists for. Each invocation's state, actions,
+                 proof line and detail ride the tool toggle: Ctrl-D opens
+                 them, the resting pane stays one line per skill. *)
+              | activities ->
                   Keeper_chat_transcript.skill_rows
                     ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
-                    activity
+                    activities
                   |> String.concat "\n")
           (* The Memory journal's change arrives inside a ["```diff"]
              fence, so a leading [+] is fence content rather than a list
@@ -2425,17 +2425,19 @@ let render_keeper_message (state : state) =
                     in
                     let body = String.concat "\n" (projected_tool_rows projection) in
                     entry (tool_block_style projection) (label "") (annotate_body body)
-                | Keeper_chat_transcript.Drawn_skill skill ->
+                | Keeper_chat_transcript.Drawn_skill skills ->
                     entry
-                      (Message_layout.Skill (skill_tone_of_state skill.state))
+                      (Message_layout.Skill
+                         (skill_tone_of_state
+                            (Keeper_chat_transcript.skill_block_state skills)))
                       (label "")
                       (String.concat "\n"
-                         (* Same fold as the committed rows: the summary line
-                            stays, the action list, proof line and detail ride
-                            the tool toggle. *)
+                         (* Same fold as the committed rows: one counted row
+                            per skill; each invocation's state, actions,
+                            proof line and detail ride the tool toggle. *)
                          (Keeper_chat_transcript.skill_rows
                             ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
-                            skill))
+                            skills))
                 | Keeper_chat_transcript.Drawn_text text
                 | Keeper_chat_transcript.Drawn_reply text ->
                     (* No name on the heading, as on the committed rows:

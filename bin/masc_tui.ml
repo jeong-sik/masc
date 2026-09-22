@@ -2294,7 +2294,7 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
              drawn from its log, and a loaded row's block comes from the
              server ([msg_entry_of_history_row]). *)
           me_tool_block = None;
-          me_skill_activity = None;
+          me_skill_block = [];
           me_timestamp = clock_text_of_unix at;
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
@@ -7150,7 +7150,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Fusion_conclusion _ ->
         None
   in
-  let role, turn_phase, text, tool_block, skill_activity =
+  let role, turn_phase, text, tool_block, skill_block =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
         (* The label is what the row draws; the speaker is what it is. Both
@@ -7171,13 +7171,13 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
           | Keeper_chat_history.Unresolved _ ->
               Sent_by_other { speaker = name; surface = arrived_by }
         in
-        (Message_user author, Turn_input, row.text, None, None)
+        (Message_user author, Turn_input, row.text, None, [])
     | Keeper_chat_history.Said_by_keeper ->
-        (Message_keeper, Turn_output, row.text, None, None)
+        (Message_keeper, Turn_output, row.text, None, [])
     | Keeper_chat_history.Autonomous_reply ->
         (* The decoder no longer emits a blank autonomous reply, so there is
            nothing here to stand in for. *)
-        (Message_autonomous, Turn_output, row.text, None, None)
+        (Message_autonomous, Turn_output, row.text, None, [])
     | Keeper_chat_history.Delivery_failed { recovered_at; _ } ->
         let text, recovered =
           match
@@ -7190,22 +7190,22 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Turn_output
         , text
         , None
-        , None )
+        , [] )
     | Keeper_chat_history.Tool_calls block ->
         ( Message_tool
         , Turn_tool
         , String.concat "\n" (Keeper_chat_history.tool_rows block)
         , Some block
-        , None )
-    | Keeper_chat_history.Skill_activity activity ->
-        ( Message_skill activity.Keeper_chat_transcript.state
+        , [] )
+    | Keeper_chat_history.Skill_activity activities ->
+        ( Message_skill (Keeper_chat_transcript.skill_block_state activities)
         , Turn_progress
         , String.concat "\n"
-            (Keeper_chat_transcript.skill_rows ~full:false activity)
+            (Keeper_chat_transcript.skill_rows ~full:false activities)
         , None
-        , Some activity )
+        , activities )
     | Keeper_chat_history.Reasoning lines ->
-        (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
+        (Message_thinking, Turn_progress, String.concat "\n" lines, None, [])
     | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool; summary } ->
         (* Server-owned gate status, drawn from the phase rather than from
            the sentence the store composed. It is not Memory: putting it in
@@ -7215,9 +7215,9 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Turn_progress
         , Masc_tui_gate_text.lifecycle_line ~phase ~tool ~summary
         , None
-        , None )
+        , [] )
     | Keeper_chat_history.Memory_activity _ ->
-        (Message_memory, Turn_progress, row.text, None, None)
+        (Message_memory, Turn_progress, row.text, None, [])
     | Keeper_chat_history.Fusion_conclusion
         { fusion_run_id; fusion_board_post_id } ->
         (* A pointer row, not keeper speech: the conclusion text is the
@@ -7233,7 +7233,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Turn_progress
         , Printf.sprintf "Fusion deliberation %s — 상세는 Runs 탭" pointer
         , None
-        , None )
+        , [] )
   in
   let submitted_at =
     match row.Keeper_chat_history.kind, row.Keeper_chat_history.turn_id with
@@ -7310,7 +7310,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_gate = gate
   ; me_submitted_at = submitted_at
   ; me_tool_block = tool_block
-  ; me_skill_activity = skill_activity
+  ; me_skill_block = skill_block
   ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
   ; (* Direct rows retain their typed delivery key; autonomous rows retain the
@@ -8292,7 +8292,7 @@ let chat_notice state ~keeper_name ~kind text =
               me_gate = None;
               me_submitted_at = None;
               me_tool_block = None;
-              me_skill_activity = None;
+              me_skill_block = [];
               me_timestamp = current_clock_text ();
               me_keeper_name = keeper;
               me_request_id = "";

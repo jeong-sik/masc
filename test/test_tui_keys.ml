@@ -263,14 +263,22 @@ let test_lanes_scroll_reserves_standalone_matrix_rows () =
 ;;
 
 let test_harness_footer_links_to_overview_task () =
+(* The four surfaces that own a detail -- Harness, Schedules, Verification,
+   Planning -- pin their list footer, and say so. Called without the state,
+   [footer_hints] returns every binding, which puts [[ / ]] (detail-only) and
+   [Right / Enter] (list-only) in one row: a spelling no screen draws. It
+   still caught label drift, so nothing failed; it just described a footer
+   nobody has. The detail side is checked by [test_tui_footer_detail_state],
+   which asserts each state drops the other's key, and for Harness by the PTY
+   walk, which reads the drawn row. *)
   check str "Harness names its task link"
-    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Home/End:top/bottom  Right / Enter:verdict  Left / Esc:back  y / x:agree / overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints Harness)
+    "j/k:move  v:next Planning tab  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:verdict  Left / Esc:back  y / x:agree / overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints ~detail_open:false Harness)
 
 let test_schedules_footer_names_write_and_read_controls () =
   check str "Schedules names create and modify"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints Schedules)
+    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints ~detail_open:false Schedules)
 
 let schedule_form_row : schedule_row =
   { sch_schedule_id = "daily-check"
@@ -540,8 +548,8 @@ let test_verification_footer_carries_the_verdict_keys () =
      the other list -- the store keeps every submission, so the history holds
      rows whose task finished weeks ago -- and [< / >] pages that history. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  h:queue / history  [ / ]:previous / next  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a / x:approve / reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints Verification)
+    "j/k:move  v:next Planning tab  h:queue / history  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a / x:approve / reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints ~detail_open:false Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
@@ -735,8 +743,8 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints Planning)
+    "j/k:move  v:next Planning tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints ~detail_open:false Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =
   let keys =
@@ -1447,7 +1455,15 @@ let test_fleet_total_cost () =
 let test_config_footer_names_child_hops () =
   (* The five short labels after f are pane-scoped writes and views that were
      in no list at all -- which pane each belongs to is in the help the ?
-     overlay draws, and a pane's own footer carries only its own. *)
+     overlay draws, and a pane's own footer carries only its own.
+
+     This row is a dump of the table, not a screen. Every Config renderer
+     draws [footer_hints_config ~pane], so nobody sees [e:edit] and
+     [e / Enter:edit] side by side the way they stand here -- the panes that
+     answer each are disjoint. Kept because it catches label drift across the
+     whole table in one string; the per-pane rows below are what a reader
+     meets, and [test_every_config_pane_answers_once] is what holds them to
+     one answer each. *)
   check str "Config names its three off-ring children"
     "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
@@ -2455,7 +2471,9 @@ let test_workspace_activity_offers_no_row_search () =
   let repository : Tui_decode.repository =
     { rp_id = "masc"; rp_name = "masc"; rp_codebase = None; rp_url = ""
     ; rp_local_path = "."; rp_resolved_local_path = "/tmp/masc"
-    ; rp_default_branch = "main"; rp_status = "ready"; rp_keepers = []
+    ; rp_default_branch = "main"
+    ; rp_status = Tui_decode.Repository_status Repo_manager_types.Active
+    ; rp_keepers = []
     ; rp_auto_sync = false }
   in
   state.view <- Repositories;

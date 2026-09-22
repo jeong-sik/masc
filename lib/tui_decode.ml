@@ -2480,6 +2480,14 @@ type runtime_surface_snapshot = {
   rss_unassigned_probe_count : int;
 }
 
+(* What the server said a repository's status is. [Repo_manager_types] owns
+   the four words and the reason [Error] carries; an unrecognised word is the
+   reading of a server newer than this build, kept as it arrived rather than
+   folded into one of the four. *)
+type repository_status =
+  | Repository_status of Repo_manager_types.repository_status
+  | Unrecognised_repository_status of string
+
 type repository = {
   rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
@@ -2492,7 +2500,7 @@ type repository = {
   rp_local_path : string;
   rp_resolved_local_path : string;
   rp_default_branch : string;
-  rp_status : string;
+  rp_status : repository_status;
   rp_keepers : string list;
   rp_auto_sync : bool;
 }
@@ -4670,7 +4678,16 @@ let decode_repository json =
     required_string_field json "resolved_local_path"
   in
   let* rp_default_branch = required_string_field json "default_branch" in
-  let* rp_status = required_string_field json "status" in
+  let* status_word = required_string_field json "status" in
+  let* status_error_message = optional_string_field json "error_message" in
+  let rp_status =
+    match
+      Repo_manager_types.status_of_wire_name ~error_message:status_error_message
+        status_word
+    with
+    | Some status -> Repository_status status
+    | None -> Unrecognised_repository_status status_word
+  in
   let* rp_keepers = decode_string_name_list json "keepers" in
   let* rp_auto_sync =
     match member "auto_sync" json with
@@ -4683,6 +4700,16 @@ let decode_repository json =
     ; rp_resolved_local_path
     ; rp_default_branch; rp_status; rp_keepers; rp_auto_sync
     }
+
+let repository_status_word = function
+  | Repository_status status -> Repo_manager_types.status_wire_name status
+  | Unrecognised_repository_status word -> word
+;;
+
+let repository_status_reason = function
+  | Repository_status status -> Repo_manager_types.status_error_message status
+  | Unrecognised_repository_status _ -> None
+;;
 
 let decode_repository_snapshot json =
   let* repos_json = required_list_field json "repositories" in

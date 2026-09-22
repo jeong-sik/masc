@@ -3437,6 +3437,19 @@
   (source_tree ../bin)
   %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
 
+; The STATE column of the Fusion run list against the three vocabularies it
+; draws. Reads the width out of bin/ and the vocabularies out of bin/ and lib/,
+; because a list of today's strings written into the test is the copy that goes
+; stale while the column silently truncates.
+
+(test
+ (name test_tui_fusion_state_width)
+ (modules test_tui_fusion_state_width)
+ (libraries alcotest ast_grep compiler-libs.common)
+ (deps
+  (source_tree ../lib)
+  (source_tree ../bin)))
+
 ; The footer of a detail-owning surface and the renderers that draw it. Reads
 ; the key table for the contract and bin/ for the renderers, because the
 ; renderer half is an optional argument -- omitting it compiles.
@@ -5266,6 +5279,11 @@
  (libraries alcotest masc_tui_message_layout masc_tui_tool_table))
 
 (test
+ (name test_tui_connector_state)
+ (modules test_tui_connector_state)
+ (libraries alcotest masc masc_tui_connector_state))
+
+(test
  (name test_tui_fleet_line)
  (modules test_tui_fleet_line)
  (libraries alcotest masc masc_tui_fleet_line))
@@ -5731,7 +5749,7 @@
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
- (libraries alcotest masc_tui_types))
+ (libraries alcotest masc_tui_types masc_tui_keys masc_tui_footer))
 
 (test
  (name test_tui_log_channel_column)

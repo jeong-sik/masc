@@ -62,6 +62,13 @@ TUI 경로를 커밋 단위로 다시 읽었다.
   `lib/browser_lane_launcher.ml` 09-15 에 3건(#36481·#36516·#36537), `keeper_board_attention_exact_flow.ml` 주간 8건(순차 롤아웃).
   둘째 fix 에서 근본을 봤는지는 이 기록에서 판정하지 않는다.
 - Access Control: 권한을 읽고 Error/None 에서 계속 진행하는 곳(fail-open)은 대상 경로에서 찾지 못했다.
+  `keeper_librarian_context_review.ml:85-87`·`keeper_librarian_absorb_gate.ml:566-589` 는 얼핏 fail-open 같지만
+  "게이트가 꺼져 있으면 예전 동작, 켜져 있는데 답이 없으면 흡수를 막는다" 는 의도된 비대칭이다.
+- Schedule: `schedules/signal_keys.json` 은 8,846 키·619 KB(+`.last-good` 사본)이고 지우는 코드가 없다.
+  723b932f09 가 "#26686 items 1-3 of 5" 라고 자인한 채 item 4(무제한 증가)를 남겼고 #26686 은 닫혔다.
+  → [#37919](https://github.com/jeong-sik/masc/issues/37919)
+- Board attention 후보·파티션·워커에 주간 5 커밋(v7 hard cut → #37586 → #37668 → #37693 → #37641)이 "정체된 후보" 계열
+  증상으로 몰렸다. #37668 은 `Settled -> Ready` 전이를 `_` 없이 명시해 FSM 규칙은 지켰다. 다음 회차에 또 나오면 근본을 본다.
 - Runtime Failover 경로 8개 파일·89 커밋(별도 에이전트, 코드로 확인): 문자열 분류·stub·permissive default 0.
   `keeper_runtime_failure_route.ml` 은 커밋이 많았는데도 전부 exhaustive match 와 근거 주석이다.
   남은 것 넷 — `retry.ml:55-56` 의 `529`·`500..599` 에 출처 주석이 없다(529 는 Anthropic 의 overloaded 상태).

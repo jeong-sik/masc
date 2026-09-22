@@ -504,7 +504,8 @@ status: reference
 
 **받은 일 정리**
 : 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
-  checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다.
+  checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다. 정리 하나가
+  pocket이고, 저장된 현재 pocket 묶음은 Working Context다.
   `[typesafeai] context_review = true`이면 새 정리 전체의 의미 보존을 JEV Choice로
   평가한다. 원본의 요청·제약·약속과 다음 행동 제안을 함께 보며, 합치는 이전 정리의
   참조 원문도 포함한다. `needs_revision`이면 새 정리의 게시만 보류한다. 미평가·실패·
@@ -608,7 +609,8 @@ status: reference
 
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
-  한 파일. 전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
+  한 파일. 설명 절반은 Working State이고, 범위 절반은 완료된 History 구간이다.
+  전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
   Librarian Read Position은 합성 없이 기준점을 설정할 때도 움직이므로 이
   저장본을 대신하지 않는다. 받은 요청을 묶는 Working Context와도 구분한다.
   완료 대화 합성 회차는 대기열 정리를 요청하거나 Working Context를 변경하지 않는다.
@@ -618,6 +620,15 @@ status: reference
   상태는 별개이며, 둘 다 모델 생성 설명의 의미 보존을 증명하지는 않는다.
   `masc-librarian-continuity capture/restore`는 같은 파일 경계를 검증한다.
   → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
+
+**Working State (대화 작업 상태)**
+: Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항
+  (`Keeper_librarian.selection.working_state`). Continuity Snapshot이 담는
+  "이어서 할 일의 설명" 절반이며, 같은 파일에 저장된 정확한 대화 범위와 한 쌍이다.
+  큐 원본을 정리한 Working Context(`working_contexts`)나 장기 Memory facts와 다르다.
+  모델의 출력만으로 범위가 소비된 것은 아니며, pair 저장과 소비 시 이력 검증이
+  필요하다.
+  → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli)
 
 **Continuity Synthesis Observation (대화 요약 진행 관측)**
 : 이번 서버 실행에서 Librarian이 마지막으로 선택한 Atom 구간, 그때 확인한
@@ -640,7 +651,9 @@ status: reference
   공식 클라이언트는 자체 문맥 처리를 사용하므로 선택값과 실제 적용 여부를 구분한다.
 
 **Working Context**
-: Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. Memory OS와 같은
+: Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. 각 항목은 받은 일
+  정리가 낸 pocket(`Keeper_librarian_context.pocket`)이고, 현재 묶음은
+  `Keeper_librarian.selection.working_contexts`다. Memory OS와 같은
   operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.
   cluster별 Librarian Read Position과는 별개의 상태다.
 
@@ -718,11 +731,6 @@ status: reference
   서버의 Librarian 실행이 아니라 그 읽기 규칙의 측정 하네스다.
   → [masc_librarian_replay](../../bin/masc_librarian_replay.ml)
 
-**Librarian Continuity**
-: `masc-librarian-continuity` CLI. 의미 보존 측정을 돌리는 하네스다. 개념과
-  결과의 한계는 아래 Continuity Measurement 항목이 정한다.
-  → [masc_librarian_continuity](../../bin/masc_librarian_continuity.ml)
-
 **JEV / Noul**
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
   참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의
@@ -744,14 +752,9 @@ status: reference
 
 **Continuity Measurement (의미 보존 측정)**
 : 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과
-  비교해 그 답을 평가하는 관측. `masc-librarian-continuity`는 명시한 합성
-  입력과 각 단계의 결과를 JSON 파일에 저장한다. TUI의 `/measurement SHA`는
-  게시한 결과 사본을 읽는다. 운영 Librarian 실행이나 Memory 변경을 승인하는
-  Gate가 아니다. 실행 방법과 결과의 한계는 [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.
-
-### 대화 작업 상태 (working_state)
-
-Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항.
-같은 파일에 저장된 정확한 대화 범위와 한 쌍이며, 큐 원본을 정리한
-`working_contexts`나 장기 Memory facts와 다릅니다. 모델의 출력만으로 범위가
-소비된 것은 아닙니다. pair 저장과 소비 시 이력 검증이 필요합니다.
+  비교해 그 답을 평가하는 관측. CLI `masc-librarian-continuity`가 이 측정을
+  돌리는 하네스이며, 명시한 합성 입력과 각 단계의 결과를 JSON 파일에 저장한다.
+  TUI의 `/measurement SHA`는 게시한 결과 사본을 읽는다. 운영 Librarian 실행이나
+  Memory 변경을 승인하는 Gate가 아니다. 실행 방법과 결과의 한계는
+  [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.
+  → [masc_librarian_continuity](../../bin/masc_librarian_continuity.ml)

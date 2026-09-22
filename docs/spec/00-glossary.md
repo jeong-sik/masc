@@ -619,24 +619,36 @@ status: reference
   항목)가 LLM 없이 재작성한다.
 
 **Checkpoint Purge (체크포인트 청소)**
-: 멈춘 Keeper의 canonical AGENT_CORE checkpoint를 LLM 없이 세 닫힌 규칙으로 줄이는
-  운영자 작업(RFC-0351 S1). R2는 `ToolUse`가 없는 assistant message의 서명 없는
-  `Thinking`·`ReasoningDetails` 블록을 지우고, R3는 닫힌 tool cycle의 `ToolResult`
-  내용을 고정 표시로 바꾸며, R1은 바이트가 같은 text-only message가 `dup_threshold`번
-  이상 반복되면 처음과 마지막만 남긴다. R2·R3를 R1보다 먼저 적용하는 순서가 한 번의
-  통과를 fixpoint로 만든다. tool protocol cycle은 쪼개거나 순서를 바꾸지 않고, 마지막
+: 멈춘 Keeper의 canonical AGENT_CORE checkpoint를 LLM 없이 두 닫힌 규칙으로 줄이는
+  운영자 작업(RFC-0351 S1). 둘 다 atom을 여는 message는 지우지 않는다. 추론 제거는
+  assistant message의 서명 없는 `Thinking`·`ReasoningDetails` 블록을 지우되, 지우면
+  빈 message가 되는 것은 그대로 둔다. tool 결과 비우기는 닫힌 tool cycle의 `ToolResult`
+  내용을 고정 표시로 바꾸되, 실패한 결과(`Tool_failed`)는 예외로 바이트 그대로 남긴다 —
+  그 payload가 다음 turn에 Keeper가 읽는 피드백이고 durable 이력이 가진 유일한 오류
+  증거다. tool protocol cycle은 쪼개거나 순서를 바꾸지 않고, 마지막
   `keep_recent_messages`개와 구조적으로 보호된 꼬리는 바이트 그대로 남긴다. `messages`
   밖의 필드는 바뀌지 않아 같은 watermark 재저장으로 받아들여진다. Dashboard의
   "정리 미리보기"는 읽기 전용이고, "백업 후 청소"는 원본을 바이트 그대로 백업한 뒤
   저장하며 Keeper가 등록돼 있으면 쓸 수 없다. CLI `masc-checkpoint-purge`는 기본이
-  dry-run이고 `--apply`가 백업 후 저장한다. checkpoint를 다시 쓰면 atom 번호가 바뀌므로
-  Librarian의 atom 위치도 함께 옮기며(`librarian_rebase`), Librarian이 아직 읽을 atom을
+  dry-run이고 `--apply`가 백업 후 저장한다.
+
+  atom을 여는 message를 지우지 않으므로 atom 번호는 그대로다. atom으로 자리를 세는
+  저장소 넷(turn-boundary 로그, Librarian 위치, continuity 스냅숏, carried-front 씨앗)이
+  같은 이력을 계속 가리키도록, 기록이 지목하는 message는 바이트 그대로 남긴다 — 마지막
+  atom과 꼬리, 각 완료 turn이 끝난 atom의 여는 message(`Turn_ended` 줄이 지목), 이
+  이력에 맞는 Librarian 작업 상태가 덮는 앞부분. `purge_messages`가 atom 수·남긴 여는
+  message의 digest·작업 상태를 `Librarian_continuity_snapshot.restore`로 대조하고, 어긋나면
+  이력을 돌려주지 않고 오류를 낸다. carried-front 씨앗은 남기지 않는다 — purge가 그
+  atom의 여는 message를 다시 썼으면 씨앗이 안 맞아 요청은 마지막 완료 turn이 끝난 자리에서
+  시작한다. 구조적으로 깨진 입력의 복구는 깨진 꼬리를 버리므로 끝이 옮겨지는 것이 설계다.
+
+  Librarian의 atom 위치(`librarian_rebase`)는 sound transcript면 그대로 돌려받고, 깨진
+  transcript 복구에서만 새 끝으로 옮긴다. 어느 쪽이든 Librarian이 아직 읽을 atom을
   남겼으면 재작성을 거부한다. Librarian의 continuity 스냅숏(`librarian-continuity.json`)은
-  옛 번호와 digest를 갖고 있어 새 번호로 옮길 수 없으므로 적용이 지우고, 다음 Librarian
-  회차가 새 이력의 것을 쓴다. 결과 JSON의 `continuity_snapshot`이 그 처리를 알린다 —
-  `untouched`(미리보기·거부·no-op)·`removed`·`absent`·`not_removed`(checkpoint와 위치는
-  설치됐으나 unlink 실패: 다음 턴은 옮긴 위치에서 시작한다). 서버의 dashboard 청소 동작은
-  그 전에 Librarian lane을 취소하고 기다린다.
+  적용이 설치 전에 지운다(`Keeper_librarian_continuity.discard`) — 그 스냅숏이 다시 쓴
+  바이트의 digest를 갖고 있어 그대로 두면 모든 Agent-Core turn이 `Prefix_changed`로
+  거절된다. 다음 Librarian 회차가 atom 0부터 다시 쓴다. 서버의 dashboard 청소 동작은
+  그 전에 Librarian lane을 취소하고 기다린다(`with_librarian_purge`).
   → [Keeper_checkpoint_purge](../../lib/keeper/keeper_checkpoint_purge.mli),
   [Runbook](../CHECKPOINT-PURGE-RUNBOOK.md)
 

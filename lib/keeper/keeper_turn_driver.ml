@@ -1604,7 +1604,11 @@ let run_named
 	     is their whole answer. *)
 	  let official_client_carried_front_seed () : Keeper_carried_front.seed_read =
 	    match !refused_carried_front with
-	    | Some seed -> { Keeper_carried_front.seed = Some seed; unreadable = None }
+	    | Some seed ->
+	      { Keeper_carried_front.seed = Some seed
+	      ; unreadable = None
+	      ; boundary_error = None
+	      }
 	    | None ->
 	      (match carried_front_seed with
 	       | Some read -> read ()

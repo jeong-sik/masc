@@ -719,16 +719,23 @@ let test_board_replay_routes_exact_replies () =
     (List.length (collect bystander))
 ;;
 
-let test_accepted_comment_identity_survives_queue_projection () =
+(* [`Reply] queues a comment with a parent, [`Top_level] one without: the
+   parent survives the queue as [Some id] and its absence as [None], so both
+   sides of the optional field make the same round trip. *)
+let accepted_comment_identity_survives_queue_projection ~shape () =
   let module Signal = Keeper_world_observation_board_signal in
   let post_id = create_thread ~title:"queued identity" "thread topic" in
-  let parent_id = add_comment ~post_id ~author:"parent-author" "parent" in
+  let parent_id =
+    match shape with
+    | `Reply -> Some (add_comment ~post_id ~author:"parent-author" "parent")
+    | `Top_level -> None
+  in
   let captured = ref None in
   Board_dispatch.set_board_signal_hook (fun addressed -> captured := Some addressed);
   Fun.protect ~finally:(fun () -> Board_dispatch.set_board_signal_hook (fun _ -> ()))
   @@ fun () ->
   let accepted =
-    match Board_dispatch.add_comment ~post_id ~parent_id ~author:"reply-author"
+    match Board_dispatch.add_comment ~post_id ?parent_id ~author:"reply-author"
             ~content:"the queued reply" () with
     | Ok comment -> comment
     | Error error -> fail (Board.show_board_error error)
@@ -753,19 +760,51 @@ let test_accepted_comment_identity_survives_queue_projection () =
   let observation =
     match restored.payload with
     | Keeper_event_queue.Board_signal board ->
-      Signal.board_observation_of_board_stimulus ~post_id board
+      (match Signal.board_observation_of_board_stimulus ~post_id board with
+       | Ok observation -> observation
+       | Error unavailable -> fail (Signal.unavailable_to_string unavailable))
     | _ -> fail "restored queue payload is not a Board signal"
   in
   (match observation.kind with
    | Signal.Observed_comment_added identity ->
      check string "accepted comment ID" (Board.Comment_id.to_string accepted.id)
-       identity.comment_id;
-     check (option string) "accepted parent ID" (Some parent_id) identity.parent_id
+       (Board.Comment_id.to_string identity.comment_id);
+     check (option string) "accepted parent ID" parent_id
+       (Option.map Board.Comment_id.to_string identity.parent_id)
    | _ -> fail "restored signal is not a comment");
   check string "queued author does not become the later author"
     "reply-author" observation.author;
   check string "queued body does not become the later body"
     "the queued reply" observation.content
+;;
+
+(* The queue only checks that a comment identity is non-empty. One that is
+   not a Board comment id is refused where the queue meets the keeper, as a
+   failed Board read, instead of reaching a consumer as a trusted id. *)
+let test_malformed_queued_comment_identity_is_a_failed_read () =
+  let module Signal = Keeper_world_observation_board_signal in
+  let queued ~comment_id ~parent_id : Keeper_event_queue.board_stimulus =
+    { kind = Keeper_event_queue.Comment_added { comment_id; parent_id }
+    ; author = "reply-author"
+    ; title = "thread"
+    ; content = "a reply"
+    ; hearth = None
+    ; updated_at = None
+    }
+  in
+  let refused what stimulus =
+    match Signal.board_observation_of_board_stimulus ~post_id:"p-queued" stimulus with
+    | Ok _ -> failf "%s: a malformed identity became an observation" what
+    | Error unavailable ->
+      check bool (what ^ " is reported as the identity parse")
+        true (unavailable.Signal.operation = Signal.Parse_queued_comment_identity);
+      check string (what ^ " names the post") "p-queued" unavailable.Signal.post_id
+  in
+  refused "comment id" (queued ~comment_id:"not-a-comment-id" ~parent_id:None);
+  (* The shape Board.Comment_id.generate mints, written out so the test needs
+     no random source. *)
+  let valid = "c-" ^ String.make 32 'a' in
+  refused "parent id" (queued ~comment_id:valid ~parent_id:(Some "not-a-comment-id"))
 ;;
 
 let () =
@@ -817,7 +856,15 @@ let () =
       , [ test_case
             "accepted comment identity survives queue projection"
             `Quick
-            (with_eio test_accepted_comment_identity_survives_queue_projection)
+            (with_eio (accepted_comment_identity_survives_queue_projection ~shape:`Reply))
+        ; test_case
+            "a top-level comment keeps no parent through queue projection"
+            `Quick
+            (with_eio (accepted_comment_identity_survives_queue_projection ~shape:`Top_level))
+        ; test_case
+            "a malformed queued comment identity is a failed read"
+            `Quick
+            test_malformed_queued_comment_identity_is_a_failed_read
         ; test_case
             "queued comment keeps its author and body"
             `Quick

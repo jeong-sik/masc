@@ -45,14 +45,22 @@ type t =
   | Open_changes
       (** [/changes] — open recorded file changes for this keeper. *)
   | Toggle_acting_pane
-      (** [/activity] — show or hide the Activity pane beside this surface,
-          the same toggle as Ctrl-L. *)
+      (** [/activity] — the Activity pane beside this surface, narrow, wide
+          or hidden in turn: the same cycle as Ctrl-L. *)
   | Show_acting_pane_tab of [ `Fleet | `Changes ]
       (** [/activity fleet], [/activity changes] — show the pane on that
           tab: the fleet's feed, or the selected keeper's file changes. *)
   | Acting_pane_tab_unknown of string
       (** [/activity <word>] with a word that names no tab; reported, not
           guessed. *)
+  | Set_acting_pane_call_order of [ `Next | `Newest | `Oldest | `Longest | `By_tool ]
+      (** [/activity order] turns the order of the pane's calls one step,
+          the same step a press on their heading takes; [/activity order
+          newest|oldest|longest|tool] goes straight to that order. The
+          keyboard's way to what was a mouse-only press (#37672). *)
+  | Acting_pane_call_order_unknown of string
+      (** [/activity order <word>] with a word that names no order;
+          reported, not guessed. *)
   | Switch_keeper of string
       (** [/keeper <name>] — point this pane at another keeper. *)
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)

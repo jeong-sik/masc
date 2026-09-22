@@ -655,9 +655,7 @@ let test_memory_search_uses_the_filter_text_and_query () =
    terminal gave 136 at 140 columns; the title really has 80. *)
 let facts_title_cells ~terminal_cols =
   let pane =
-    if Masc_tui_acting_pane.shown ~hidden:false ~cols:terminal_cols
-    then Masc_tui_acting_pane.pane_cols
-    else 0
+    Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols:terminal_cols
   in
   Masc_tui_frame.inner_width ~cols:(terminal_cols - pane)
 

@@ -28,13 +28,59 @@ let surface_floor_cols =
   Masc_tui_roster_pane.threshold_cols - Masc_tui_roster_pane.pane_cols
 
 let threshold_cols = pane_cols + surface_floor_cols
-let shown ~hidden ~cols = (not hidden) && cols >= threshold_cols
 
-let toggle_hidden ~hidden ~cols =
-  if cols < threshold_cols then None else Some (not hidden)
+(* The wide pane spends its extra cells where the narrow one cuts: the
+   keeper's name in a fleet row, and a call's age at the end of a call row.
+   Eighteen more name cells hold the longest name on the live roster whole
+   (kidsnote-slack-context-collector, 32 of 34); the calls' own column is
+   the call row's remaining width, so the tool names gain the rest.
 
-let content_cols ~hidden ~cols =
-  if shown ~hidden ~cols then cols - pane_cols else cols
+   What it costs: every reader needs a 150-column terminal for the wide
+   pane, and fourteen of the eighteen are for that one name -- the next
+   longest, kidsnote-spec-mania, is 19, and a longer name still reads,
+   folded in the middle by [Layout.fit_middle]. The floor is seven: the age
+   and its gap take seven cells of any extra, and fewer would leave the
+   tool names narrower than the narrow pane's. The operator chose 74 over
+   a width sized to the second name (2026-09-22). A roster name longer
+   than 34 folds rather than raising this. *)
+let wide_extra_cols = 18
+let wide_pane_cols = pane_cols + wide_extra_cols
+let wide_threshold_cols = wide_pane_cols + surface_floor_cols
+
+type layout =
+  | Narrow
+  | Wide
+  | Hidden
+
+(* What a width the pane was handed can hold. The renderer hands it the
+   columns {!drawn_cols} reserved, so this is the layout the reader chose
+   whenever the terminal fits it. *)
+let is_wide ~cols = cols >= wide_pane_cols
+
+let drawn_cols ~layout ~cols =
+  match layout with
+  | Hidden -> 0
+  | Wide when cols >= wide_threshold_cols -> wide_pane_cols
+  | Wide | Narrow -> if cols >= threshold_cols then pane_cols else 0
+
+(* Narrow, wide, hidden is the operator's order (2026-09-22): hiding from
+   narrow takes two presses. Narrow, hidden, wide would make hiding one
+   press and widening two; the order is this match and nothing else. *)
+let next_layout ~layout ~cols =
+  if cols < threshold_cols then None
+  else
+    Some
+      (match layout with
+       | Narrow -> if cols >= wide_threshold_cols then Wide else Hidden
+       | Wide -> Hidden
+       | Hidden -> Narrow)
+
+let layout_label = function
+  | Narrow -> "narrow"
+  | Wide -> "wide"
+  | Hidden -> "hidden"
+
+let content_cols ~layout ~cols = cols - drawn_cols ~layout ~cols
 
 (* ── Input ─────────────────────────────────────────────────────────────── *)
 
@@ -109,7 +155,9 @@ type scope =
 
 (* How the focus block orders the record's calls: receipt order either way,
    or the two readings that are not an order in time. The heading over the
-   calls names which is up, and a press on it moves to the next. *)
+   calls names which is up, and a press on it moves to the next. The TUI
+   opens on newest first, so the first press turns time around and the two
+   sorts come after. *)
 type call_order =
   | Oldest_first
   | Newest_first
@@ -123,10 +171,10 @@ let call_order_label = function
   | By_tool -> "by tool"
 
 let next_call_order = function
-  | Oldest_first -> Newest_first
-  | Newest_first -> Longest_first
+  | Newest_first -> Oldest_first
+  | Oldest_first -> Longest_first
   | Longest_first -> By_tool
-  | By_tool -> Oldest_first
+  | By_tool -> Newest_first
 
 type input = {
   now : float;
@@ -296,12 +344,38 @@ type detail_part =
   | Detail_input
   | Detail_output
 
+(* Where a call sits in the model response it came from. When the focus
+   block splits the record into responses, the call row draws it in the
+   border cell: a bracket per response, [\xe2\x94\x8c] over the first call,
+   [\xe2\x94\x82] beside the ones between, [\xe2\x94\x94] at the last, and
+   [\xe2\x94\x80] beside a response of one call. The bracket costs no row.
+   Measured on the September ledger, a record keyed by (keeper,
+   keeper_turn_id) -- [keeper_turn_id] counts per keeper, and alone it
+   merges different keepers' turns: 21,273 records hold more than one
+   response, a response holds 1.38 calls on average, 80.7% hold one. A line
+   of its own over each response would have been close to half the list.
+
+   A lone call carries no mark. A dim tick beside each one put a glyph on
+   58.7% of the call rows, and on the live screen the fleet read as a wall
+   of hooks (operator, 2026-09-22). What the tick said -- this record is
+   split, and this call stood alone -- the heading says once instead: it
+   counts the responses whenever the record splits. 45.2% of split records
+   are all lone calls; they draw no bracket, and the count is what tells
+   them from a record that is one response or whose responses are unknown
+   (a CLI lane, a sort, an unnumbered call). *)
+type response_place =
+  | Ungrouped
+  | Alone
+  | Opens
+  | Inside
+  | Closes
+
 type logical_row =
   | Fleet_row of keeper * Acting.chunk option
   | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
   | Approval_row of string
-  | Calls_heading
-  | Tool_row of Acting.chunk * Acting.chunk_tool * record_state
+  | Calls_heading of int option
+  | Tool_row of Acting.chunk * Acting.chunk_tool * record_state * response_place
   | Call_detail of Acting.chunk * Acting.chunk_tool * detail_part
   | Earlier_turn of Acting.chunk * Reading.keeper_health_reading option
   | Rule
@@ -555,6 +629,10 @@ let fleet_order input newest =
   in
   List.stable_sort (fun a b -> compare (rank a) (rank b)) (working_keepers input)
 
+(* The fleet row's name column: the wide pane's extra cells, all of them. *)
+let name_cells_for ~cols =
+  if is_wide ~cols then name_cells + wide_extra_cols else name_cells
+
 let fleet_row ~cols input keeper chunk =
   let approval = approval_for input.approvals keeper.name in
   let selected =
@@ -565,7 +643,7 @@ let fleet_row ~cols input keeper chunk =
   ( fit_line ~cols
       (with_border
          ([ { text = Layout.fit_width keeper.mark mark_cells; tone = keeper.mark_tone }
-          ; { text = Layout.fit_middle name_cells keeper.name
+          ; { text = Layout.fit_middle (name_cells_for ~cols) keeper.name
             ; tone = (if selected then Accent else Plain)
             }
           ; { text = String.make gap_cells ' '; tone = Plain }
@@ -621,7 +699,24 @@ let dispatch_marks (tool : Acting.chunk_tool) =
   in
   [ batch; deferred; { text = String.make gap_cells ' '; tone = Plain } ]
 
-let tool_line ~cols ~state (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
+(* The border cell of a call row. Out of a bracket it is the pane's edge
+   like every other row, a lone call's included; in one it is the bracket,
+   drawn plain so it reads over the dim edge, the calls between included. *)
+let rail_span = function
+  | Ungrouped | Alone -> border
+  | Opens -> { text = "\xe2\x94\x8c"; tone = Plain }
+  | Inside -> { border with tone = Plain }
+  | Closes -> { text = "\xe2\x94\x94"; tone = Plain }
+
+(* A call's age in the wide pane, at the row's end, in the pane's own age
+   wording ({!age_text}): the facts row under an opened call and the focus
+   header spell ages that way, and a row and its own detail must not say
+   one age two ways. Padded to six cells, so the ages and the durations
+   before them line up down the list through ninety-nine minutes; an older
+   age widens its own row rather than losing digits to a cut. *)
+let age_min_cells = 6
+
+let tool_line ~cols ~now ~state ~place (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
   let duration =
     match tool.Acting.ct_duration_ms with
     | Some ms -> { text = Acting.elapsed_text ms; tone = Dim }
@@ -641,25 +736,46 @@ let tool_line ~cols ~state (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
            | Record_open | Record_settled -> { text = open_record_glyph ^ " "; tone = Dim })
         else { text = settled_glyph ^ " "; tone = Dim }
   in
+  let age =
+    if is_wide ~cols then
+      let text = age_text ~now tool.Acting.ct_at in
+      [ { text = String.make gap_cells ' '; tone = Plain }
+      ; { text = String.make (max 0 (age_min_cells - Layout.display_width text)) ' ' ^ text
+        ; tone = Dim
+        }
+      ]
+    else []
+  in
   let inner = cols - border_cells - mark_cells - dispatch_cells - gap_cells in
-  let right = Layout.display_width duration.text in
+  let right =
+    Layout.display_width duration.text
+    + List.fold_left (fun cells span -> cells + Layout.display_width span.text) 0 age
+  in
   let name_room = max 0 (inner - right - (if right > 0 then gap_cells else 0)) in
   fit_line ~cols
-    (with_border
-       ((glyph :: dispatch_marks tool)
-        @ [ { text = Layout.fit_width tool.Acting.ct_tool name_room; tone = Plain }
-          ; { text = (if right > 0 then String.make gap_cells ' ' else ""); tone = Plain }
-          ; duration
-          ]))
+    (rail_span place
+     :: (glyph :: dispatch_marks tool)
+     @ [ { text = Layout.fit_width tool.Acting.ct_tool name_room; tone = Plain }
+       ; { text = (if right > 0 then String.make gap_cells ' ' else ""); tone = Plain }
+       ; duration
+       ]
+     @ age)
 
-(* The heading over the calls: which order they are in. Beside it the
+(* The heading over the calls: which order they are in, and how many
+   model responses the record splits into when it splits. Beside it the
    order is a press away, so the heading is the control as well as the
-   label. *)
-let calls_heading_line ~cols order =
+   label. No count is a record that is one response or whose responses the
+   pane cannot tell apart; the count never says "1". *)
+let calls_heading_line ~cols order responses =
+  let count =
+    match responses with
+    | Some n -> middle_dot ^ string_of_int n ^ " responses"
+    | None -> ""
+  in
   fit_line ~cols
     (with_border
        [ { text = String.make mark_cells ' '; tone = Plain }
-       ; { text = "calls" ^ middle_dot ^ call_order_label order; tone = Dim }
+       ; { text = "calls" ^ middle_dot ^ call_order_label order ^ count; tone = Dim }
        ])
 
 (* Text cut to [room] cells, the cut shown: a preview that ends mid-word
@@ -839,6 +955,49 @@ let ordered_calls order (calls : Acting.chunk_tool list) =
           String.compare a.Acting.ct_tool b.Acting.ct_tool)
         calls
 
+(* The calls split into model responses, when the order and the record can
+   say where one ends. Neighbours with the same session ordinal are one
+   response: the next provider call has the next ordinal. The planned index
+   cannot stand in for it -- a concurrent batch settles in any order, so
+   [1, 0, 2] arrives inside one response, and a CLI lane counts its calls
+   across the whole turn. Receipt order keeps a response's calls together,
+   forwards or backwards; the two sorts interleave them. A call that states
+   no ordinal leaves the boundary beside it unknown, and a single response
+   has nothing to split.
+
+   One path breaks the neighbour rule: a deferred composition runs its plan
+   under the parent's ordinal after the tool returns, so a child that
+   settles after the next response's calls draws as a response of its own.
+   Grouping by ordinal value instead would fix that and merge two responses
+   whenever a fresh agent session reuses an ordinal inside one keeper turn,
+   which is the worse claim; the ledger of 2026-09-20..22 shows neither
+   (0 deferred compositions in 359, 0 ordinals reappearing in 852
+   multi-response turns). *)
+let responses order (calls : Acting.chunk_tool list) =
+  let keeps_responses_together =
+    match order with
+    | Oldest_first | Newest_first -> true
+    | Longest_first | By_tool -> false
+  in
+  let states_its_response (tool : Acting.chunk_tool) =
+    Option.is_some tool.Acting.ct_session_turn
+  in
+  if not (keeps_responses_together && List.for_all states_its_response calls) then None
+  else
+    let groups =
+      List.fold_left
+        (fun groups (tool : Acting.chunk_tool) ->
+          match groups with
+          | ((last : Acting.chunk_tool) :: _ as group) :: rest
+            when Option.equal Int.equal last.Acting.ct_session_turn
+                   tool.Acting.ct_session_turn ->
+              (tool :: group) :: rest
+          | [] | [] :: _ | (_ :: _) :: _ -> [ tool ] :: groups)
+        [] calls
+      |> List.rev_map List.rev
+    in
+    match groups with [] | [ _ ] -> None | _ :: _ :: _ -> Some groups
+
 let is_expanded input ~keeper key =
   List.exists
     (fun (name, opened) -> String.equal name keeper && Acting.call_key_equal opened key)
@@ -863,21 +1022,43 @@ let focus_rows input chunks name =
     | [] -> []
     | current :: earlier ->
         let state = record_state ~health current in
-        let calls =
-          ordered_calls input.call_order (Acting.chunk_tools current)
-          |> List.concat_map (fun tool ->
-                 Tool_row (current, tool, state)
-                 ::
-                 (if is_expanded input ~keeper:name (Acting.call_key tool) then
-                    List.map
-                      (fun part -> Call_detail (current, tool, part))
-                      [ Detail_facts; Detail_input; Detail_output ]
-                  else []))
+        let ordered = ordered_calls input.call_order (Acting.chunk_tools current) in
+        let call_rows (tool, place) =
+          Tool_row (current, tool, state, place)
+          ::
+          (if is_expanded input ~keeper:name (Acting.call_key tool) then
+             List.map
+               (fun part -> Call_detail (current, tool, part))
+               [ Detail_facts; Detail_input; Detail_output ]
+           else [])
         in
+        let groups = responses input.call_order ordered in
+        let placed =
+          match groups with
+          | Some groups ->
+              List.concat_map
+                (fun group ->
+                  match group with
+                  | [ only ] -> [ (only, Alone) ]
+                  | first :: rest ->
+                      let last = List.length rest - 1 in
+                      (first, Opens)
+                      :: List.mapi
+                           (fun i tool -> (tool, if i = last then Closes else Inside))
+                           rest
+                  | [] -> [])
+                groups
+          | None -> List.map (fun tool -> (tool, Ungrouped)) ordered
+        in
+        let calls = List.concat_map call_rows placed in
         (* A call-less record draws no body row: the header already states
            the observation state and its receipt age. The heading names the
            order only when there are calls in it. *)
-        let heading = match calls with [] -> [] | _ :: _ -> [ Calls_heading ] in
+        let heading =
+          match calls with
+          | [] -> []
+          | _ :: _ -> [ Calls_heading (Option.map List.length groups) ]
+        in
         heading @ calls @ List.map (fun chunk -> Earlier_turn (chunk, health)) earlier
   in
   Focus_header (name, current, health) :: approval @ body
@@ -1026,7 +1207,7 @@ let fleet_lines ~below ~scroll (body, overview) =
    reader. Naming four columns over one sentence spends a row saying nothing. *)
 let row_uses_the_columns = function
   | Fleet_row _ | Tool_row _ | Earlier_turn _ -> true
-  | Focus_header _ | Approval_row _ | Calls_heading | Call_detail _ | Rule | More _
+  | Focus_header _ | Approval_row _ | Calls_heading _ | Call_detail _ | Rule | More _
   | Indicator _ | File_row _ | Formatted_status _ -> false
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
@@ -1131,9 +1312,11 @@ let materialize_row ~cols input = function
   | Focus_header (name, current, health) ->
       focus_header_line ~cols ~now:input.now ~health name current, Target_none
   | Approval_row tool -> approval_line ~cols tool, Target_none
-  | Calls_heading -> calls_heading_line ~cols input.call_order, Target_call_order
-  | Tool_row (chunk, tool, state) ->
-      tool_line ~cols ~state chunk tool, Target_call (chunk.Acting.ck_keeper, Acting.call_key tool)
+  | Calls_heading responses ->
+      calls_heading_line ~cols input.call_order responses, Target_call_order
+  | Tool_row (chunk, tool, state, place) ->
+      ( tool_line ~cols ~now:input.now ~state ~place chunk tool
+      , Target_call (chunk.Acting.ck_keeper, Acting.call_key tool) )
   | Call_detail (chunk, tool, part) ->
       ( call_detail_line ~cols ~now:input.now tool part
       , Target_call (chunk.Acting.ck_keeper, Acting.call_key tool) )
@@ -1147,16 +1330,13 @@ let materialize_row ~cols input = function
   | File_row (index, file) -> file_line ~cols ~now:input.now index file
   | Formatted_status (line, target) -> line, target
 
-(* One legend row: the two record glyphs a fleet row can start with, what
-   a count with a plus means, and what the token figure adds up. It fits
-   the 55 text cells the pane has beside its border. *)
 (* Column headings, in the row the legend used to hold. With the parts in
    fixed columns the names can sit over them, which says what each one is
    once for the whole list instead of a glyph key the reader has to carry
    down every row. Built from the same widths, so a change to one moves both
    the heading and the column under it. *)
-let legend =
-  String.make (mark_cells + name_cells + gap_cells) ' '
+let legend ~cols =
+  String.make (mark_cells + name_cells_for ~cols + gap_cells) ' '
   ^ pad_right state_cells "state"
   ^ pad_right tool_cells "tool"
   ^ pad_left calls_cells "calls"
@@ -1174,7 +1354,7 @@ let lines ~rows ~cols ~scroll input =
     let headers =
       match fleet with
       | Some (body, _) when rows >= 2 && List.exists row_uses_the_columns body ->
-        [ header; (fit_line ~cols (with_border [ { text = legend; tone = Dim } ]), Target_none) ]
+        [ header; (fit_line ~cols (with_border [ { text = legend ~cols; tone = Dim } ]), Target_none) ]
       | Some _ | None -> [ header ]
     in
     let below = rows - List.length headers in

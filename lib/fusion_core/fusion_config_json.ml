@@ -2,11 +2,9 @@
 
    RFC-0306 §3.1. The dashboard fusion settings editor needs the full active
    product-relevant [Fusion_policy.t] fields as structured JSON to populate its
-   form (panel roster, meta judge, JoJ first-round judges). No serializer
-   existed: the config types derive only [show]/[eq], and the only consumer
-   flattens errors to a string ([fusion_config_loader.ml]). This is a read-only
-   projection; it does not round-trip back to TOML (the write path is
-   line-based, RFC-0306 §3.2). *)
+   form (panel roster, meta judge, JoJ first-round judges). The config types
+   derive only [show]/[eq], so the shape is written by hand here, and the write
+   endpoint decodes the same shape back with [preset_of_yojson]. *)
 
 let opt_int : int option -> Yojson.Safe.t = function
   | None -> `Null
@@ -63,3 +61,138 @@ let to_yojson (c : Fusion_policy.t) : Yojson.Safe.t =
                preset_to_yojson (vp :> Fusion_policy.preset))
              c.Fusion_policy.presets) )
     ]
+
+(* ── decode ── *)
+
+let ( let* ) = Result.bind
+
+let fields ~what = function
+  | `Assoc fields -> Ok fields
+  | _ -> Error (what ^ " must be a JSON object")
+;;
+
+let exact ~what ~keys fields =
+  match
+    List.find_opt (fun (key, _) -> not (List.mem key keys)) fields,
+    List.find_opt (fun key -> not (List.mem_assoc key fields)) keys
+  with
+  | Some (key, _), _ -> Error (Printf.sprintf "%s has an unknown key %S" what key)
+  | None, Some key -> Error (Printf.sprintf "%s is missing %S" what key)
+  | None, None -> Ok ()
+;;
+
+let field ~what key fields decode =
+  match List.assoc_opt key fields with
+  | Some json -> decode json |> Result.map_error (fun detail -> Printf.sprintf "%s.%s %s" what key detail)
+  | None -> Error (Printf.sprintf "%s is missing %S" what key)
+;;
+
+let string = function
+  | `String text -> Ok text
+  | _ -> Error "must be a string"
+;;
+
+let bool = function
+  | `Bool value -> Ok value
+  | _ -> Error "must be a boolean"
+;;
+
+let int = function
+  | `Int value -> Ok value
+  | _ -> Error "must be an integer"
+;;
+
+let float = function
+  | `Float value -> Ok value
+  | `Int value -> Ok (float_of_int value)
+  | _ -> Error "must be a number"
+;;
+
+let nullable decode = function
+  | `Null -> Ok None
+  | json -> Result.map Option.some (decode json)
+;;
+
+let list decode = function
+  | `List items ->
+    List.fold_right
+      (fun item acc ->
+         let* rest = acc in
+         let* value = decode item in
+         Ok (value :: rest))
+      items (Ok [])
+  | _ -> Error "must be an array"
+;;
+
+let group_keys = [ "models"; "label"; "system_prompt"; "web_tools"; "max_output_tokens"; "timeout_s" ]
+
+let panel_group_of_yojson json : (Fusion_policy.panel_group, string) result =
+  let what = "panel group" in
+  let* fields = fields ~what json in
+  let* () = exact ~what ~keys:group_keys fields in
+  let* models = field ~what "models" fields (list string) in
+  let* label = field ~what "label" fields string in
+  let* system_prompt = field ~what "system_prompt" fields string in
+  let* web_tools = field ~what "web_tools" fields bool in
+  let* max_output_tokens = field ~what "max_output_tokens" fields (nullable int) in
+  let* timeout_s = field ~what "timeout_s" fields (nullable float) in
+  Ok { Fusion_policy.models; label; system_prompt; web_tools; max_output_tokens; timeout_s }
+;;
+
+let judge_keys = [ "model"; "label"; "system_prompt"; "web_tools"; "max_output_tokens"; "timeout_s" ]
+
+let judge_spec_of_yojson json : (Fusion_policy.judge_spec, string) result =
+  let what = "judge" in
+  let* fields = fields ~what json in
+  let* () = exact ~what ~keys:judge_keys fields in
+  let* jmodel = field ~what "model" fields string in
+  let* jlabel = field ~what "label" fields string in
+  let* jsystem_prompt = field ~what "system_prompt" fields string in
+  let* jweb_tools = field ~what "web_tools" fields bool in
+  let* jmax_output_tokens = field ~what "max_output_tokens" fields (nullable int) in
+  let* jtimeout_s = field ~what "timeout_s" fields (nullable float) in
+  Ok
+    { Fusion_policy.jmodel
+    ; jlabel
+    ; jsystem_prompt
+    ; jweb_tools
+    ; jmax_output_tokens
+    ; jtimeout_s
+    }
+;;
+
+let preset_keys =
+  [ "name"
+  ; "panels"
+  ; "judge"
+  ; "judge_system_prompt"
+  ; "judge_max_output_tokens"
+  ; "judge_timeout_s"
+  ; "judges"
+  ; "min_answered"
+  ]
+;;
+
+let preset_of_yojson json : (Fusion_policy.preset, string) result =
+  let what = "preset" in
+  let* fields = fields ~what json in
+  let* () = exact ~what ~keys:preset_keys fields in
+  let* name = field ~what "name" fields string in
+  let* panels = field ~what "panels" fields (list panel_group_of_yojson) in
+  let* judge = field ~what "judge" fields string in
+  let* judge_system_prompt = field ~what "judge_system_prompt" fields string in
+  let* judge_max_output_tokens = field ~what "judge_max_output_tokens" fields (nullable int) in
+  let* judge_timeout_s = field ~what "judge_timeout_s" fields (nullable float) in
+  let* judges = field ~what "judges" fields (list judge_spec_of_yojson) in
+  let* min_answered = field ~what "min_answered" fields int in
+  Ok
+    { Fusion_policy.name
+    ; panels
+    ; judge
+    ; judge_system_prompt
+    ; judge_max_output_tokens
+    ; judge_timeout_s
+    ; judges
+    ; min_answered
+    }
+;;

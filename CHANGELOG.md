@@ -27,6 +27,7 @@
 
 ### Changed
 
+- A HITL resolution that cannot be admitted because the approval store failed to read is now logged with the approval id and the read error, instead of being held back silently like an unresolved one.
 - A provider response with no text, thinking, or tool call is now settled as an observed response instead of being retried as an unseen server failure (#37206).
 - Gateway readers now document and consistently treat cancellation as an intentional shutdown rather than a connection failure (#37481).
 - The owner-child cancellation marker is retained only after both cancellation paths were verified, making the lifecycle evidence match the runtime tree (#37488).

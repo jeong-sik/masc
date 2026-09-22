@@ -1239,11 +1239,11 @@ let test_timeline_breaks_follow_civil_hours () =
     (List.map fst breaks);
   check bool "the first rail names its local date and hour" true
     (String.starts_with
-       ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 18:00 "
+       ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 18:00 "
        (List.assoc 18 breaks));
   check bool "the later rail names its local date and hour" true
     (String.starts_with
-       ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 19:00 "
+       ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 19:00 "
        (List.assoc 19 breaks));
   check int "full transcript counts two rails" 8
     (Layout.total_rows ~inner_width:60 entries);
@@ -1335,15 +1335,15 @@ let test_repeated_dst_hour_has_distinct_rails () =
   | daylight_label :: standard_label :: [] ->
       check bool "the daylight occurrence says DST" true
         (String.starts_with
-           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 DST "
+           ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 01:00 DST "
            daylight_label);
       check bool "the standard occurrence is visibly distinct" true
         (String.starts_with
-           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 "
+           ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 01:00 "
            standard_label);
       check bool "the standard occurrence does not claim daylight time" false
         (String.starts_with
-           ~prefix:"\xe2\x94\x80\xe2\x94\x80 2026-09-01 \xc2\xb7 01:00 DST "
+           ~prefix:"\xe2\x94\x84\xe2\x94\x84 2026-09-01 \xc2\xb7 01:00 DST "
            standard_label)
   | _ -> fail "the repeated civil hour did not produce two labels"
 ;;

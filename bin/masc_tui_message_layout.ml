@@ -1184,12 +1184,16 @@ let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
           bucket.tb_month bucket.tb_day bucket.tb_hour
         ^ (if bucket.tb_is_dst then " DST" else "")
       in
-      let lead = "\xe2\x94\x80\xe2\x94\x80 " ^ label ^ " " in
+      (* Triple-dash (U+2504), not the solid line: the origin heading under
+         [Origin_row] now ends in a solid rule to its clock, and two solid
+         rules a row apart read as one kind of break. This pane already
+         tells kinds apart by texture -- the journal siding is dashed, an
+         arrival's is solid -- so the hour keeps the dashed one: the time
+         moved, not the speaker. *)
+      let dash = "\xe2\x94\x84" in
+      let lead = dash ^ dash ^ " " ^ label ^ " " in
       let rule_cells = max 0 (inner_width - display_width lead) in
-      let rule =
-        String.concat ""
-          (List.init rule_cells (fun _ -> "\xe2\x94\x80"))
-      in
+      let rule = String.concat "" (List.init rule_cells (fun _ -> dash)) in
       let text, _, _ = cell_prefix (lead ^ rule) inner_width in
       Some
         { style = entry.style

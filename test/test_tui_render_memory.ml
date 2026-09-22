@@ -137,11 +137,25 @@ let multi_line_claim =
   "The chat pane keeps the model's reply verbatim.\n\n**Why**:\n1. first reason\n\
    2. second reason\x07 rings"
 
+(* The claim's rows are the ones between the block heading and the first
+   labelled field. The fixed-format rows under it (Origin and Timeline, File
+   SHA) are not wrapped by this change, so a 40-cell bound on them would be a
+   claim about something else. *)
 let claim_rows lines =
-  List.map Masc_tui_theme.strip_sgr lines |> List.map String.trim
+  let plain = List.map Masc_tui_theme.strip_sgr lines in
+  let is_field line =
+    List.exists (fun label -> contains label line) [ "Category:"; "Bound Path:" ]
+  in
+  let rec take = function
+    | [] -> []
+    | line :: rest -> if is_field line then [] else line :: take rest
+  in
+  match plain with [] -> [] | _heading :: body -> take body
 
 let check_claim_rows ~what lines =
-  let rows = claim_rows lines in
+  let raw_rows = claim_rows lines in
+  let rows = List.map String.trim raw_rows in
+  check bool (what ^ ": the claim has rows") true (rows <> []);
   check bool (what ^ ": no newline is printed as \\x0A") false
     (List.exists (contains "\\x0A") rows);
   check bool (what ^ ": each line of the claim is its own row") true
@@ -152,9 +166,9 @@ let check_claim_rows ~what lines =
     (List.exists (contains "\\x07") rows);
   List.iter
     (fun line ->
-      check bool (what ^ ": row bounded at 40 cells") true
+      check bool (what ^ ": claim row bounded at 40 cells") true
         (Layout.display_width line <= 40))
-    lines;
+    raw_rows;
   List.iter
     (fun word ->
       check bool (what ^ ": " ^ word ^ " is not cut at the edge") true

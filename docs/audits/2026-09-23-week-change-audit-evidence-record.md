@@ -74,7 +74,8 @@ TUI 경로를 커밋 단위로 다시 읽었다.
   `keeper_librarian_queue_refresh.ml:141` (`pass_end` 6개 중 5개를 한 갈래로), `librarian_continuity_snapshot.ml:167`
   (`R.selection` 4개를 `source_range` 로); `keeper_librarian_absorb_gate.ml:6` `min_statement_chars = 20`,
   `keeper_checkpoint_purge.ml:13` `keep_recent_messages = 20`. 셋은 모두 "모르면 보수적으로" 방향이라 오늘 동작은 안전하지만
-  새 생성자가 조용히 그 갈래로 떨어진다. → [#37922](https://github.com/jeong-sik/masc/issues/37922)
+  새 생성자가 조용히 그 갈래로 떨어진다. → [#37922](https://github.com/jeong-sik/masc/issues/37922),
+  `_` 셋은 세션 A 의 [#37928](https://github.com/jeong-sik/masc/pull/37928) 이 생성자 이름으로 적었다(값 변화 없음, 리뷰 통과).
   좋은 반례: `keeper_librarian_absorb_gate.ml:574-606` 은 게이트 불가를 이름 있는 세 묶음으로 나누고 원문을 남기는 쪽으로 틀린다.
   fix 사슬 둘 더: absorb gate 의 "판정이 안 돌았으면 원문을 버리지 않는다" 6 커밋(#37369→#37409→#37432→#37464→#37630→#37708),
   연속성 스냅숏 재작성 11 커밋(09-21~22, #37564→…→#37795). 09-15 의 Memory 쓰기 실패 문장 4 커밋, 09-20 의 Memory 검색·철회 4 커밋.

@@ -49,6 +49,21 @@ status: reference
   → [Dashboard_event_slices](../../lib/dashboard_event_slices.mli),
   [Activity scope](../../bin/masc_tui_acting.ml), [TUI 안내](../TUI-GUIDE.md)
 
+**Harness (하네스)**
+: 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
+  (1) TUI Harness 화면: 평가자 판정을 읽는 TUI 표면. 코드의 화면 이름은 `Harness`지만
+  키 표가 운영자에게 보이는 이름은 "Planning / Task Verdicts"이고
+  (`bin/masc_tui_keys.ml:1233`), 상세에서 `y`(agree)·`x`(overrule)로 그 판정에 답한다
+  (`render_harness_detail`). (2) Eval Harness: Keeper 에이전트의 시나리오 기반 행동
+  평가(`lib/eval_harness.mli`). scenario·grader·metric 타입과 runner·summary 를
+  정의하고 eval CLI 와 dashboard 가 소비한다. (3) Lab Safety Harness: Dashboard Lab
+  표면의 안전 판독(`#lab?section=harness`,
+  `lib/dashboard/dashboard_harness_health.ml`) — 평가자 보정 통계와 최근 runtime 안전
+  신호를 한 화면에 모은다. (4) Harness First: "측정 없이 AI 에이전트 코드를 진행하지
+  않는다"는 프로젝트 원칙. RFC 들이 이 이름으로 인용한다.
+  → [masc_tui_keys](../../bin/masc_tui_keys.ml), [Eval_harness](../../lib/eval_harness.mli),
+  [Dashboard_harness_health](../../lib/dashboard/dashboard_harness_health.ml)
+
 **Exit Reason (세션 종료 사유)**
 : TUI 세션이 왜 끝났는지 자기 stderr 로그(`.masc/logs/masc-tui-<pid>.log`)에 남기는 한 줄.
   `Masc_tui_exit_reason.t`가 닫힌 어휘를 소유한다 — `Quit_key`(q·Q·Ctrl-Q),
@@ -608,8 +623,11 @@ status: reference
   `Computation_failed`·`Lost`·`Cancelled`·`Persistence_failed`·`Evidence_unavailable`·
   `Evidence_unreadable`)에서 파생해 돌려주는 문자열 여섯(`computation_failed`·`lost`·
   `cancelled`·`persistence_failed`·`evidence_unavailable`·`evidence_unreadable`)이다.
-  코드는 문장이 아니라 tag 이고, 서버가 쓰는 가장 넓은 값이 `evidence_unavailable` 이라
-  STATE 칸은 스무 칸이다. 전체 오류 문장은 고른 실행의 줄에 남는다.
+  코드는 문장이 아니라 tag 이고, 그중 가장 넓은 `evidence_unavailable` 이 STATE 칸
+  스무 칸을 정확히 채운다. 칸을 채우는 것은 이 값만이 아니다 — 같은 칸이 그리는 진행
+  단계 `recording(%d/%d)` 도 네 자리 수 둘이면 스무 칸이다. 세 어휘 전부와 칸 폭은
+  `test/test_tui_fusion_state_width.ml` 이 소스에서 읽어 대조하므로, 여유가 얼마인지는
+  그 테스트가 말한다. 전체 오류 문장은 고른 실행의 줄에 남는다.
   → [Fusion_core.Fusion_types.judge_failure_tag](../../lib/fusion_core/fusion_types.mli),
   [Fusion_sink.delivery_failure_code](../../lib/fusion/fusion_sink.mli)
 

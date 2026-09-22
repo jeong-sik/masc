@@ -653,6 +653,65 @@ let expressions_of_value_binding ~module_path ~binding_name =
   List.rev !expressions
 ;;
 
+(* Every string literal a binding holds, in source order.
+
+   The counting form above answers "is this exact text here"; this one answers
+   "what are all of them", which is the question a width check asks. A column
+   whose cell truncates silently cannot be held by naming today's longest
+   string -- the next arm somebody adds is the one that overflows, and it
+   arrives without a list to update. Reading the arms themselves means the new
+   arm is measured the moment it compiles.
+
+   Format strings come back with their directives intact ("recording(%d/%d)").
+   The caller decides what a directive costs; the AST cannot know. *)
+let string_literals_in_value_binding ~module_path ~binding_name =
+  let collected = ref [] in
+  List.iter
+    (fun expression ->
+      let iter =
+        { Ast_iterator.default_iterator with
+          expr =
+            (fun self node ->
+              (match node.pexp_desc with
+               | Pexp_constant { pconst_desc = Pconst_string (text, _, _); _ } ->
+                 collected := text :: !collected
+               | _ -> ());
+              Ast_iterator.default_iterator.expr self node)
+        }
+      in
+      iter.expr iter expression)
+    (expressions_of_value_binding ~module_path ~binding_name);
+  List.rev !collected
+;;
+
+(* Integer literals a binding holds, in source order. For reading a layout
+   constant out of the module that owns it, so a test can compare against the
+   width the screen actually uses instead of a number copied into the test --
+   a copy drifts, and a drifted width check passes while the column is wrong.
+   Literals with a suffix (3L, 3n) are skipped: a width is a plain int. *)
+let int_literals_in_value_binding ~module_path ~binding_name =
+  let collected = ref [] in
+  List.iter
+    (fun expression ->
+      let iter =
+        { Ast_iterator.default_iterator with
+          expr =
+            (fun self node ->
+              (match node.pexp_desc with
+               | Pexp_constant { pconst_desc = Pconst_integer (text, None); _ }
+                 ->
+                 (match int_of_string_opt text with
+                  | Some value -> collected := value :: !collected
+                  | None -> ())
+               | _ -> ());
+              Ast_iterator.default_iterator.expr self node)
+        }
+      in
+      iter.expr iter expression)
+    (expressions_of_value_binding ~module_path ~binding_name);
+  List.rev !collected
+;;
+
 (* [Pexp_field] is a read. Clearing a field is [Pexp_setfield], so a test
    that pins "this path clears X" has to look for the write or it counts
    zero while the code is correct. *)

@@ -183,6 +183,16 @@ let test_panel_failure_yojson_round_trips_current_shapes () =
     (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)");
   check_round_trip "invalid max output tokens"
     (Fusion_types.Invalid_max_output_tokens 0);
+  (* Every constructor must decode what it encodes. [Bridge_error] had an
+     encoder arm and no decoder arm, so a stored bridge failure failed to
+     read back. *)
+  check_round_trip "bridge error" (Fusion_types.Bridge_error "bootstrap failed");
+  check_round_trip "invalid structured response"
+    (Fusion_types.Invalid_structured_response "not an object");
+  check_round_trip "invalid timeout" (Fusion_types.Invalid_timeout_s 0.5);
+  check_round_trip "unknown route" (Fusion_types.Unknown_route "fusion-judge");
+  check_round_trip "route unavailable"
+    (Fusion_types.Route_unavailable "ollama_cloud.x (ollama_cloud/x)");
   Alcotest.(check bool)
     "detail empty response serializes as tagged payload, not legacy string"
     true

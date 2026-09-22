@@ -6999,6 +6999,27 @@ def memory_journal_backfill_fixture() -> HttpResponse:
     return status, payload
 
 
+def memory_journal_failing_fixture() -> HttpResponse:
+    """The fixture's journal with a pass that failed after its last commit."""
+    status, payload = memory_journal_fixture()
+    entries = payload["entries"]
+    if not isinstance(entries, list):
+        raise AssertionError("memory journal fixture entries are not a list")
+    entries.append(
+        {
+            "ok": True,
+            "outcome": "failed",
+            "recorded_at": 1788273300.0,
+            "trace_id": "trace-failing-pass",
+            "kind": "exact_execution_failure",
+            "detail": "provider returned 503",
+            "snapshot_present": True,
+        },
+    )
+    payload["returned"] = len(entries)
+    return status, payload
+
+
 MEMORY_JOURNAL_REQUEST_TS = 1788273291.814646
 
 # The scenario runs a 30-row terminal and the chat pane is shorter than that,
@@ -7551,6 +7572,39 @@ def memory_journal_timeline_interaction(
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "
                 f"was swallowed by the composer gate: {widened!r}"
+            )
+
+        # A pass that failed after the last commit is a state of the keeper's
+        # memory: the header names the run, from the producer's typed outcome
+        # through to the pane, and summary mode draws no row for it.
+        memory.responses.append(memory_journal_failing_fixture())
+        served_before_failure = memory.served
+        failing_from = len(output)
+        wait_for_fixture_served(
+            process,
+            master_fd,
+            output,
+            memory,
+            after=served_before_failure,
+            description="Journal with a failed pass",
+            timeout=5.0,
+        )
+        failing_header = b"Librarian failing \xc3\x971 since"
+        wait_for_output(
+            process, master_fd, output, failing_header, start=failing_from, timeout=5.0
+        )
+        # journal:full -> off -> summary.
+        send_and_wait(process, master_fd, output, b"\x0e", b"journal:off")
+        send_and_wait(process, master_fd, output, b"\x0e", b"Librarian \xc2\xb7 revision 9")
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        naming = [row for row, text in rows.items() if failing_header in text]
+        failed_rows = [row for row, text in rows.items() if b"Librarian failed" in text]
+        if len(naming) != 1 or failed_rows:
+            raise AssertionError(
+                "A failing Librarian is the header item alone in summary mode "
+                f"(header rows {naming}, failure rows {failed_rows}): "
+                + screen_text(bytes(output)).decode("utf8", "replace")
             )
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")

@@ -466,6 +466,9 @@ type msg_entry = {
       (** A committed Memory journal revision's lines, typed and made
           terminal-safe, for the pane to draw in columns. Empty on every other
           row; [me_text] says the same in plain text. *)
+  me_memory_pass: Masc_tui_message_layout.memory_pass;
+      (** The Librarian pass a Memory row reports. [No_pass] on every row
+          that reports none. *)
   me_gate: gate_step option;
       (** The typed approval step behind a Gate status row. Carried so a run
           of steps can be folded back into the one approval they describe;
@@ -486,17 +489,32 @@ type msg_entry = {
   me_at: float;
 }
 
-(* A run of journal rows says one thing: where the memory ended up. Each row
-   in summary mode still wraps to about two lines, so three commits in a row
-   took six lines of a pane whose whole point is the conversation. The newest
-   row carries the current revision, so it is the one kept; the ones before it
-   are counted, and Ctrl-N still opens all of them.
+(* The Memory lane in summary mode says where the memory ended up.
 
-   Full mode is not folded: it exists to show every commit. *)
-let fold_memory_summary_runs ~visibility entries =
+   A failed Librarian pass is not drawn there: while passes keep failing the
+   chat header names the run once ({!librarian_failing}), and a failure row
+   between every pair of turns said the same thing each time.
+
+   A run of journal rows says one thing. Each row still wraps to about two
+   lines, so three commits in a row took six lines of a pane whose whole
+   point is the conversation. The newest row carries the current revision,
+   so it is the one kept; the ones before it are counted, and Ctrl-N still
+   opens all of them.
+
+   Full mode is neither filtered nor folded: it exists to show every pass. *)
+let project_memory_history ~visibility entries =
   match visibility with
   | Memory_hidden | Memory_full -> entries
   | Memory_summary ->
+    let entries =
+      List.filter
+        (fun (entry, _) ->
+          match entry.me_memory_pass with
+          | Masc_tui_message_layout.Pass_failed _ -> false
+          | Masc_tui_message_layout.Pass_committed
+          | Masc_tui_message_layout.No_pass -> true)
+        entries
+    in
     let annotate folded (entry, extra) =
       if folded = 0 then (entry, extra)
       else
@@ -526,6 +544,42 @@ let fold_memory_summary_runs ~visibility entries =
     in
     go [] [] entries
 ;;
+
+(* Librarian passes failing in a row, up to the newest one: how the newest
+   failed, how many in a row, and when the first of them was recorded. A
+   committed pass ends the run; a row that reports no pass says nothing about
+   it. [None] when the newest pass committed or none is on record. The passes
+   are ordered by observation time, because a producer backfill lands older
+   rows after newer ones in the history. *)
+type librarian_failing = {
+  lf_kind: string;
+  lf_count: int;
+  lf_since: float;
+}
+
+let librarian_failing entries =
+  entries
+  |> List.filter_map (fun entry ->
+       match entry.me_memory_pass with
+       | Masc_tui_message_layout.Pass_failed { kind } -> Some (entry.me_at, Some kind)
+       | Masc_tui_message_layout.Pass_committed -> Some (entry.me_at, None)
+       | Masc_tui_message_layout.No_pass -> None)
+  |> List.stable_sort (fun (left, _) (right, _) -> Float.compare left right)
+  |> List.fold_left
+       (fun failing (at, failed) ->
+         match failed, failing with
+         | Some kind, None -> Some { lf_kind = kind; lf_count = 1; lf_since = at }
+         | Some kind, Some run ->
+             Some { run with lf_kind = kind; lf_count = run.lf_count + 1 }
+         | None, (Some _ | None) -> None)
+       None
+
+(* The header item: the run first, so a narrow row cut from the right still
+   says that the Librarian is failing and since when; the server's word for
+   how comes last. *)
+let librarian_failing_text ~since failing =
+  Printf.sprintf "Librarian failing \xc3\x97%d since %s \xc2\xb7 %s"
+    failing.lf_count since failing.lf_kind
 
 (* Compact folds only a successfully settled approval. Its durable identity
    survives the continuation's new request id, so prose or a tool block between

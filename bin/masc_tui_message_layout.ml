@@ -106,6 +106,11 @@ type journal_line =
       { sign : journal_sign; category : string; tone : journal_tone; claim : string }
   | Journal_drop of { memory_id : string; reason : string }
 
+type memory_pass =
+  | Pass_committed
+  | Pass_failed of { kind : string }
+  | No_pass
+
 type entry = {
   style : style;
   timestamp : string;

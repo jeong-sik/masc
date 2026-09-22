@@ -1603,6 +1603,29 @@ let test_deliberation_evidence_roundtrip () =
         ; dropped_events = 0
         ; gaps = []
         }
+    ; seat_routes =
+        [ { seat = Panel_seat "skeptic (fusion-panel)"
+          ; route = "fusion-panel"
+          ; answered_by = Some "claude_code.claude-sonnet-5"
+          ; failed_attempts =
+              [ { attempt_runtime = "ollama_cloud.deepseek-v4-pro"
+                ; attempt_failure = Panel_attempt_failed (Bridge_error "bootstrap")
+                }
+              ]
+          }
+        ; { seat = Judge_seat (First "lens (fusion-judge)")
+          ; route = "fusion-judge"
+          ; answered_by = None
+          ; failed_attempts =
+              [ { attempt_runtime = "ollama_cloud.deepseek-v4-pro"
+                ; attempt_failure = Judge_attempt_failed (Parse_error "not json")
+                }
+              ; { attempt_runtime = "claude_code.claude-sonnet-5"
+                ; attempt_failure = Judge_attempt_failed Timeout
+                }
+              ]
+          }
+        ]
     }
   in
   let encoded = Fusion_types.deliberation_evidence_to_yojson evidence in

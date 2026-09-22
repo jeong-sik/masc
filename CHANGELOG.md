@@ -2,22 +2,25 @@
 
 ## [0.36.0] - 2026-09-22
 
-> Before you upgrade: read the two items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), and the removed `--dup-threshold` purge option (#37751).
+> Before you upgrade: read the three items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), the removed `--dup-threshold` purge option (#37751), and the new Fusion `deliberation_evidence` shape that earlier run records do not read as (#37783).
 
 ### Upgrade notes
 
 - The shared keeper prompt (`keeper`) no longer carries a value system, and the `keeper.instructions.custom` slot is gone: a keeper's `instructions` now sit in `<role>` tags as written, with no heading in front. What a world values goes in the new `keeper.worldview` slot, whose default says no value system is set and each keeper's role decides. An operator override of `keeper` still replaces the whole shared body, so to take the new body, move any worldview text from that override into `keeper.worldview` and clear the `keeper` override. Restart the server right after installing the binary: until it restarts, an old server reads the new prompt files and cannot find `keeper.instructions.custom`, which fails the turns of every keeper that has instructions (#37753).
 - `masc-checkpoint-purge` no longer takes `--dup-threshold`; a call that still passes it fails with `unknown argument`. The purge report no longer has `duplicates_dropped` or `reasoning_messages_dropped`, and the dashboard purge table drops the matching column, because a purge no longer removes messages (#37751).
+- Fusion run records saved before this version do not read as the new `deliberation_evidence` shape, which now carries `seat_routes`; there is no compatibility reader for them (#37783).
 
 ### Added
 
 - A Fusion judge seat (single, refine, JOJ first pass, meta and stage meta) can name an official-client runtime (Claude Code, Codex or Antigravity); the judge then runs as a one-turn CLI call, the same path a panel seat takes, instead of failing every run with `Build_error`. Its token usage is recorded as unmeasured and its tool record as `Official_client_uninstrumented` (#37768).
+- A Fusion seat (panel or any judge role) takes a route name, resolved the way a keeper assignment is: a `[runtime.lanes.<name>]` names candidates that are tried in order until one answers, a runtime id names that one. HTTP and official-client runtimes can share one list. The deliberation evidence and the Board meta record which candidate answered each seat and which failed before it, as `seat_routes`. A route that does not resolve fails the run as `Unknown_route` or `Route_unavailable` instead of falling back to a default runtime (#37783).
 - The TUI's `tools:full` view opens an Execute call with its exit status and elapsed time, then its output and stderr, instead of the whole JSON result envelope. An output stored as an artifact shows its digest and size, and a timed-out call shows its limit on the status line (#37766, #37792).
 - The TUI's `journal:full` view draws each Memory journal revision's facts in two columns — sign and category on the left, the claim wrapped at word boundaries on the right (#37764).
 - In a chat pane at least 96 columns wide, lines that arrive from another keeper, another person or a connector start a third of the way across the pane, so they sit apart from the operator's messages and the keeper's replies; narrower panes keep one column (#37773).
 - The catalog and the shipped `config/runtime.toml` carry nine more OpenRouter models, each probed before its row was written: `claude-fable-5.1`, `claude-haiku-4.5`, `gpt-6-astra`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gemini-3.1-pro-preview`, `grok-4.7`, `qwen3.8-flash` and `glm-5.3-flashx`. The rows record what the probes found, such as a model that refuses a required or named `tool_choice` or rejects reasoning effort `none`, and `glm-5.3-flashx` declares no structured output. OpenRouter `minimax-m3` is not bound, because at effort `high` and above it answers with empty content; its Ollama Cloud binding stays (#37782, #37789).
 - Z.AI coding-plan (`glm-coding`) models `glm-5.2`, `glm-5.1`, `glm-5-turbo`, `glm-5`, `glm-4.7`, `glm-4.6`, `glm-4.5` and `glm-4.5-air` have their own catalog rows, so they no longer fall back to the glm defaults of a 200000-token window and 40960 output tokens. The catalog gives `kimi-for-coding` a 1048576-token window and adds a `k3-256k` row. The shipped `config/runtime.toml` binds every subscription and coding-plan model (Claude Code, Codex, Antigravity, `glm-coding`, `kimi_coding`, Ollama Cloud) and marks the binding the install wizard picks with `wizard-default` (#37767).
 - In the TUI, a failed operator action — a `Ctrl-V` paste with no image, a `/find`, `/queue`, `/steer` or `/preset` call missing its argument, an image that cannot be opened, a voice failure — is shown on the current pane's footer for a few seconds and written to the event log, instead of being left as an error line in the chat history. A request the server refused still appears in the history (#37796).
+- In the TUI's summary chat view, a Librarian pass that keeps failing is named once on the header's status line, as `Librarian failing ×N since HH:MM:SS · <kind>`, instead of as a journal row between every turn; the full view still shows each failed pass (#37798).
 
 ### Changed
 
@@ -27,14 +30,20 @@
 
 ### Fixed
 
-- A Fusion run records an official-client timeout as a timeout instead of a provider error, and runs its HTTP and CLI panel seats at the same time instead of starting the CLI seats after the HTTP ones finish (#37768).
+- A Fusion run records an official-client timeout as a timeout instead of a provider error, and runs every panel seat in its own fiber instead of starting the CLI seats after the HTTP ones finish (#37768, #37783).
 - A keeper request that starts at the last completed turn records that turn's boundary as its `turn_start` `end_atom`, instead of the atom where the clamped range opens; the next-request forecast does the same (#37757).
+- Saving `runtime.toml` — raw save, its preview, routing and assignment edits, the TUI key save — now rejects a `[fusion]` section that does not load, such as `panel = []`, a preset without a judge, a `default_preset` that names no preset, or `min_answered` above the panel seat count; before, one such save made every later Fusion run fail with `fusion config invalid` until the file was fixed by hand. Server boot does not run this check (#37787).
 - The TUI's `metadata:full` title line no longer shows the request id, and the mark's color and weight end at the mark instead of running into the rule (#37780).
 - A keeper whose turn-boundary store cannot be read, or matches no boundary of its history, no longer sends its whole history as if the last completed turn ended at atom 0. The request opens on the newest atom alone and its origin says `turn_start_unknown` with the reader's reason, in the TUI band and the request forecast as well (#37746).
 - A Librarian working state that cannot be read, cannot be checked against the turn-boundary log, or covers conversation bytes that changed no longer refuses every Agent-Core turn. The request starts at the Librarian's read position, or at the turn's own boundary, as it does when the working state no longer fits, and the reason is logged as a warning. A refused turn also ran no Librarian round, so a working state whose covered bytes changed was never written again; a working-state file or boundary log that cannot be read now leaves turns running and names the file to fix (#37762).
 - A Fusion panel or judge seat on an Antigravity runtime receives its system prompt (the panel's group prompt, the judge prompt, a JOJ first-pass perspective) ahead of the question, as a keeper turn does; before, the prompt was dropped and the seat answered without its perspective (#37784).
 - The summarized journal row no longer ends in `· Ctrl-N`, and an empty composer line no longer prints the voice key hint; the footer and the chat help table carry those keys (#37786).
 - Checkpoint purge recovery of a structurally broken checkpoint no longer leaves the Librarian stopped. The recovery drops the history from the break on and moved the Librarian's read position to the new end, which is inside a turn when the break is, so no turn-boundary line stated it and every later pass stopped with "read position has no matching turn boundary". With a Librarian position in the trace, the recovery now ends the history at the last turn end a boundary line the position has counted states, and is refused when there is none. The durable consumer and the purge answer "does a line state this position" with one lookup, `Keeper_turn_boundaries.witness_line` (#37772).
+
+### Internal
+
+- `Fusion_config_writer` rewrites one preset's region of `runtime.toml` from typed values and leaves every other byte alone: comments follow the key or entry they sit above, `[[panels]]`/`[[judges]]` entries are recognized by label and route rather than position, and a preset written without its own table header is refused as `Unaddressable_preset`. It is a pure function with no caller yet (#37790).
+- The `SYSTEM INSTRUCTIONS:` / `CURRENT GOAL:` frame that Antigravity input carries, since the CLI has no system prompt slot, lives in one module (`Antigravity_input_frame`) for the keeper turn and the Fusion one-shot turn (#37800).
 
 ## [0.35.22] - 2026-09-22
 

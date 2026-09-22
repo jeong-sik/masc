@@ -128,6 +128,19 @@ status: reference
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
 
+**Demotion (강등)**
+: 어떤 항목을 제거하지 않고 우선순위·가시성·전송 여부만 낮추는 처분. 네 곳이 같은
+  불변식을 지킨다 — 강등된 것은 사라지지 않는다.
+  - 도구 결과 강등: 전송 사본에서만 blob 마커로 바뀌고 History 원본은 남는다
+    (`Keeper_model_input_demotion`, RFC-0363).
+  - 후보 강등: 고갈이 표시된 runtime 후보를 lane 형제 뒤로 보낸다. 배제가 아니라
+    순서다 — 그 lane에 남은 것이 그것뿐이면 여전히 시도한다
+    (`Runtime_quota_window.demote_order`, RFC-0433).
+  - 로그 강등: WARN을 DEBUG로 내린다. 기록은 남는다(`runtime_agent.ml`).
+  - 차단 강등: 낡은 blocker를 "이전 차단"으로 낮춰 보여준다. 감추지 않는다
+    (`agent-roster.ts`).
+  → [Runtime_quota_window.demote_order](../../lib/runtime/runtime_quota_window.mli)
+
 **Official-client Session Recovery**
 : 공식 클라이언트 세션에 기록된 `Input_rejected` 때문에 같은 runtime의 새 실행
   요청을 거절하는 상태. `bootstrap_floor_exceeded`는 줄일 수 있는 이력을 제거한

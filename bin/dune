@@ -611,6 +611,14 @@
  (wrapped false)
  (modules masc_tui_exit_signals))
 
+;; Why a session ended, in the vocabulary the exit line is written in. Own
+;; library so the normal/abnormal split and the one-row flattening run under a
+;; test with no terminal.
+(library
+ (name masc_tui_exit_reason)
+ (wrapped false)
+ (modules masc_tui_exit_reason))
+
 ;; The exit-time tcsetattr on a descriptor that is no longer a terminal:
 ;; ENOTTY and EIO mean the terminal is gone and the rest of the at_exit chain
 ;; still runs; any other refusal propagates. Own library so the rule runs
@@ -1548,6 +1556,7 @@
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
   masc_tui_exit_signals
+  masc_tui_exit_reason
   masc_tui_terminal_restore
   masc.runtime
   masc.keeper_registry

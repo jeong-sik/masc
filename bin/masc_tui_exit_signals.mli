@@ -18,9 +18,16 @@ type t
 
 val create : unit -> t
 
-val request_terminate : t -> unit
-(** SIGTERM, SIGHUP, SIGQUIT: the session is over. One atomic store, so it is
-    safe from a handler. Stays set: a terminate is never withdrawn. *)
+val request_terminate : t -> signal:string -> unit
+(** SIGTERM, SIGHUP, SIGQUIT: the session is over. [signal] is the name the
+    exit line writes down, so a day of ends can be read by cause. One atomic
+    store each, so it is safe from a handler. Stays set: a terminate is never
+    withdrawn. *)
+
+val terminate_signal : t -> string option
+(** The name of the signal that requested the terminate, or [None] when none
+    did. Read after {!poll} returns [Quit] to tell a terminate from a second
+    Ctrl-C. *)
 
 val request_interrupt : t -> unit
 (** SIGINT: asks the loop what a Ctrl-C means this time. One atomic store. *)

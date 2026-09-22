@@ -1833,6 +1833,15 @@ Exit signals restore terminal modes and cursor state. Job-control suspension
 (`Ctrl-Z`) restores the shell terminal, and `fg` re-enters raw mode and forces a
 complete repaint.
 
+Every session writes one line saying why it ended to its own stderr log,
+`.masc/logs/masc-tui-<pid>.log`: `exit: normal (quit key)`, `exit: normal
+(signal SIGTERM)` or `exit: abnormal (exception ...)`. A normal end is the
+operator or the session's owner asking for it — the `q` key, a second `Ctrl-C`,
+or a terminate signal — and an abnormal one is the surface leaving without
+being asked, such as an uncaught exception. The line is the only record of the
+end: the log otherwise holds the boot lines, so a session that ended used to
+leave no reason behind.
+
 Viewports below the fixed chrome budget render a compact resize gate instead of
 a clipped frame, and message editing is suppressed until the terminal grows.
 

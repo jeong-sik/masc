@@ -251,6 +251,11 @@ status: reference
   `reasoning_uncontrolled`도 안 밝힘). 검사하는 값은 wire가 실을 값이다 — 명시
   `enable_thinking = Some false`는 노력 `none`으로 가므로, `none`이 없는 사다리는
   그 끄기를 `Explicit_disable_outside_ladder`로 거절한다.
+  이 거절은 깎기(Effort Ladder)와 나란한 대안이 아니라 그 뒤의 문지기다 — 공식
+  클라이언트 호스트가 요청 전에 운영자가 선언한 노력을 먼저 깎고(로그 `reasoning
+  effort clamped to catalog`), 문지기는 wire가 실을 값(명시 토글이 적용된 뒤)을 본다.
+  그래서 집합 밖 선언 노력은 깎여 통과하고, 거절로 남는 것은 깎을 기준이 없는 선언
+  없음과, 토글이 사다리 밖으로 만든 값이다.
   → [Provider_config.reasoning_effort_request_rejection](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
 **Runtime execution**

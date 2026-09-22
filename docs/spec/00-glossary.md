@@ -625,12 +625,15 @@ status: reference
 : `masc_library_add`로 수동 추가한 Markdown 문서를 읽는 지식 라이브러리.
   자동 수집 경로는 없고 Keeper에게는 검색·읽기 샤드만 있으므로, 설치에 문서가
   하나도 없는 상태도 정상이다. 알려진 문서가 있을 때만 검색한다.
-  문서는 `MASC_BASE_PATH/docs/library`(없으면 호스트 런타임 루트) 아래 저장되고,
+  문서는 호출자가 해석한 workspace(`Workspace.config.base_path`) 아래
+  `<base_path>/docs/library`에 저장되고, 도구는 환경 변수를 읽지 않는다.
   각 문서는 YAML frontmatter
   (`title`·`source`·`author`·`created`·`updated`·`tags`)를 갖는다. 한 층의 평평한
   디렉터리라 문서는 들어 있거나 없거나 둘 중 하나다. `source`는 닫힌 합타입
   (`Direct_experience`·`Research`·`Experiment`·`Observation`)이고, 생성자를 더하면
-  `source_to_string`이 컴파일 오류로 강제된다. 네 도구가 이걸 쓴다 —
+  `source_to_string`이 컴파일 오류로 강제된다. 쓰기에서 `source`가 없으면 `title`
+  없을 때처럼 거부하고, 읽기에서 알 수 없는 `source`는 파일명과 이유로 표시한다.
+  네 도구가 이걸 쓴다 —
   `masc_library_list`·`masc_library_read`·`masc_library_add`·`masc_library_search`.
   Keeper 쪽에는 read-only인 `keeper_library_search`·`keeper_library_read` 샤드
   투영만 있다.

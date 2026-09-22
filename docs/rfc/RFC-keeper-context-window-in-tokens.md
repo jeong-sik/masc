@@ -519,7 +519,6 @@ origin/main `64ef87af83` 의 원장은 T 를 실은 usage 로도 전체와 묶�
 | 어느 provider 로 어느 모델을 부른다 | 2 (`runtime.toml` 바인딩 / overlay `[[targets]]`) | `librarian_exact` 가 선언 없는 슬롯을 가리킨 채 돌았고, `#36984` 이 deadline 을 요구하자 세 슬롯이 한꺼번에 떨어졌다 |
 | 이 모델의 창은 얼마인가 | 2 (`runtime.toml max-context` / overlay `max_context_tokens`) | 둘이 싸우면 작은 쪽이 이긴다(`Override_clamped_by_capability`). 그래서 배포가 카탈로그 값을 받아 적는 8행이 생겼다 |
 | 이 요청은 얼마나 커도 되나 | 3 (`max-prompt-bytes` / `context-high·low-water-tokens` / 공급자 판정) | 셋이 각자 답해서 `critic` 이 2시간 죽었다 |
-| 어디서부터 실을까 | 4 (`Ledger` / `Turn_record` / `Halved_after_refusal` / `Evicted_after_refusal`) | 넷 다 못 찾으면 마지막으로 끝난 턴의 경계에서 시작한다(경계도 모르면 가장 새 atom 하나) |
 | 남은 예산은 얼마인가 | 20 (`*_bytes` 이름, 전부 `int`) | `capacity - reserved - undroppable` 을 잘못 써도 컴파일러가 안 잡는다 |
 
 두 벌을 맞춰 두라고 주석으로 부탁하는 자리가 여러 곳이다. 부탁은 지켜지지 않는다.

@@ -489,6 +489,57 @@ let test_publish_to_bridge_preserves_one_producer_identity () =
     (Yojson.Safe.to_string first)
     (Yojson.Safe.to_string retry)
 
+(* A turn's agent publishes on [Keeper_turn_scope.bus]. Each frame the
+   bridge writes then names the keeper turn, whatever ordinal the agent
+   session gave it: a session created without a checkpoint repeats
+   ordinals, the keeper turn id does not. *)
+let bridged_turn_started bus ~session_turn =
+  let config =
+    Agent_core.Event_bus.subscription_config ~capacity:4
+      ~overflow:Agent_core.Event_bus.Drop_oldest
+    |> Result.get_ok
+  in
+  let subscription = Agent_core.Event_bus.subscribe ~config bus in
+  Agent_core.Event_bus.publish bus
+    (Agent_core.Event_bus.mk_event
+       (Agent_core.Event_bus.TurnStarted { agent_name = "keeper-a"; turn = session_turn }));
+  match Agent_core.Event_bus.drain subscription with
+  | [ delivered ] -> Bridge.native_event_to_json delivered |> Option.get
+  | events -> failf "expected one delivered event, got %d" (List.length events)
+
+let test_a_turn_frame_names_its_keeper_turn () =
+  Eio_main.run @@ fun _env ->
+  let bus = Agent_core.Event_bus.create () in
+  let first = bridged_turn_started (Masc.Keeper_turn_scope.bus bus ~keeper_turn_id:41) ~session_turn:0 in
+  let second = bridged_turn_started (Masc.Keeper_turn_scope.bus bus ~keeper_turn_id:42) ~session_turn:0 in
+  check (option int) "same ordinal, first keeper turn" (Some 41)
+    (int_of_field (member "keeper_turn_id" first));
+  check (option int) "same ordinal, next keeper turn" (Some 42)
+    (int_of_field (member "keeper_turn_id" second))
+
+let test_a_frame_off_a_turn_names_no_keeper_turn () =
+  Eio_main.run @@ fun _env ->
+  let json = bridged_turn_started (Agent_core.Event_bus.create ()) ~session_turn:0 in
+  check bool "keeper_turn_id is null" true
+    (match member "keeper_turn_id" json with
+     | Some `Null -> true
+     | Some _ | None -> false)
+
+let test_a_scope_that_is_not_a_keeper_turn_keeps_its_text () =
+  Eio_main.run @@ fun _env ->
+  let scope = Agent_core.Caller_scope.of_string "fusion-run-7" |> Result.get_ok in
+  let json =
+    bridged_turn_started
+      (Agent_core.Event_bus.with_caller_scope (Agent_core.Event_bus.create ()) scope)
+      ~session_turn:0
+  in
+  check bool "keeper_turn_id is null" true
+    (match member "keeper_turn_id" json with
+     | Some `Null -> true
+     | Some _ | None -> false);
+  check (option string) "the scope is not dropped" (Some "fusion-run-7")
+    (string_of_field (member "caller_scope" json))
+
 let test_authorization_errors_have_typed_projection () =
   let check_projection label expected_domain error =
     let projection = Error_json.agent_failed_error_projection error in
@@ -670,6 +721,12 @@ let () =
             test_agent_failed_keeps_canonical_envelope_and_typed_error
         ; test_case "publish to bridge preserves producer identity" `Quick
             test_publish_to_bridge_preserves_one_producer_identity
+        ; test_case "a turn frame names its keeper turn" `Quick
+            test_a_turn_frame_names_its_keeper_turn
+        ; test_case "a frame off a turn names no keeper turn" `Quick
+            test_a_frame_off_a_turn_names_no_keeper_turn
+        ; test_case "a scope that is not a keeper turn keeps its text" `Quick
+            test_a_scope_that_is_not_a_keeper_turn_keeps_its_text
         ; test_case "terminal agent failures redact raw detail" `Quick
             test_terminal_agent_failure_projection_redacts_detail
         ; test_case "authorization errors have typed projection" `Quick

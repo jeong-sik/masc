@@ -424,14 +424,24 @@ let exact_output_targets_of_runtimes () =
                   Llm_provider.Provider_config.enable_thinking =
                     rt.model.Runtime_schema.thinking_support
                 }
-             ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
-            ; (* A slot's credential is the one its binding names; the catalog row
-                 carries the provider's usual environment name, not this
-                 deployment's. *)
-              api_key_env =
-                (match rt.provider.Runtime_schema.credentials with
-                 | Some (Runtime_schema.Env name) -> Some name
-                 | Some (Runtime_schema.File _ | Runtime_schema.Inline _) | None -> Some "")
+            ; (* A slot's credential is the key its binding already resolved --
+                 the one the Keeper's requests carry, whatever source the
+                 binding named. Handing over the environment name instead sent
+                 the resolver back to read it a second time, and a binding fed
+                 from a file or an inline value had no name to hand over, so it
+                 reached the wire with no key at all. An environment name that
+                 resolved to nothing stays named, so the refusal can say which. *)
+              credential =
+                (let key = config.Llm_provider.Provider_config.api_key in
+                 match rt.provider.Runtime_schema.credentials with
+                 | Some (Runtime_schema.Env name) when Llm_provider.Secret.is_empty key ->
+                   Exact_output.Credential_unresolved { environment_variable = name }
+                 | Some (Runtime_schema.Env _ | Runtime_schema.File _ | Runtime_schema.Inline _)
+                   -> Exact_output.Credential_resolved key
+                 | None when Llm_provider.Secret.is_empty key ->
+                   Exact_output.Credential_not_declared
+                 | None -> Exact_output.Credential_resolved key)
+            ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
             } : Exact_output.declared_target)
        | Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _

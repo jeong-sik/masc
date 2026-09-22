@@ -196,8 +196,9 @@ let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
           ~request_path:"/v1/responses"
           ~connect_timeout_s:1.0
           ()
+    ; credential =
+        Exact_output.Credential_unresolved { environment_variable = "MISSING_FLOW_KEY" }
     ; body_timeout_s = None
-    ; api_key_env = Some "MISSING_FLOW_KEY"
     }
   in
   let snapshot =

@@ -27,7 +27,8 @@ let test_missing_effort_has_typed_request_rejection () =
   let target : Resolver.declared_target =
     { target_ref = "openrouter.probe"
     ; binding = openrouter_binding ()
-    ; body_timeout_s = None; api_key_env = None } in
+    ; credential = Resolver.Credential_not_declared
+    ; body_timeout_s = None } in
   let snapshot = Resolver.load_resolver_snapshot
       ~io:{ getenv = (fun _ -> Ok None) }
       ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
@@ -150,7 +151,9 @@ let test_explicit_effort_reaches_serialized_request () =
     let target : Resolver.declared_target =
       { target_ref = "openrouter.probe"
       ; binding = openrouter_binding ~reasoning_effort:effort ()
-      ; body_timeout_s = None; api_key_env = None } in
+      ; credential =
+          Resolver.Credential_resolved (Llm_provider.Secret.of_string "synthetic-no-network")
+      ; body_timeout_s = None } in
     let snapshot = Resolver.load_resolver_snapshot
         ~io:{ getenv = (fun _ -> Ok (Some "synthetic-no-network")) }
         ~catalog:(Resolver.Embedded_with_targets [ target ]) ()

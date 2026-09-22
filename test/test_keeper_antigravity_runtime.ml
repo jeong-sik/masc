@@ -1601,6 +1601,80 @@ let test_a_working_state_the_window_holds_goes () =
     (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
+(* The ceiling cuts the range whether or not the working state is in front
+   of it, and here it cuts both the same: the working state fits in the room
+   the cut leaves. It displaced nothing, so it goes, beside the atoms the
+   position alone would have carried. *)
+let test_a_working_state_that_fits_the_cut_goes () =
+  let messages =
+    List.init 60 (fun index ->
+      plain_user_message (Printf.sprintf "history-%02d:%s" index (String.make 200 'h')))
+  in
+  let measure = Keeper_antigravity_runtime.For_testing.measure_model_input_message_bytes in
+  let snapshot = snapshot_of ~messages ~end_atom:53 ~working_state:"ok" in
+  let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+  let pinned_working_state : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text working_state ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  let preamble_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        messages
+    with
+    | Some bytes -> bytes
+    | None -> fail "the fixture history has no shrinkable atom"
+  in
+  let bytes lo hi =
+    List.fold_left
+      (fun total message -> total + measure message)
+      0
+      (List.filteri (fun index _ -> index >= lo && index < hi) messages)
+  in
+  (* The working state is smaller than an atom, so room for it and the atoms
+     from 55 is not room for atom 54: both compositions keep 55..59. *)
+  check bool "the fixture's working state is smaller than an atom" true
+    (measure pinned_working_state < measure (List.nth messages 54));
+  let capacity =
+    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes ~system_prompt:"system"
+      ~goal:"goal"
+    + preamble_bytes
+    + measure pinned_working_state
+    + bytes 55 60
+  in
+  let before = working_state_not_carried ~reason:"displaces_atoms" in
+  let projected =
+    project_with_capacity
+      ~librarian_front:(fun _ ->
+        Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+      ~capacity
+      messages
+  in
+  check int "the working state goes, once" 1
+    (List.length
+       (List.filter
+          (fun (m : Agent_core.Types.message) ->
+             match m.content with
+             | [ Text text ] -> String.equal text working_state
+             | _ -> false)
+          projected));
+  check (list string) "beside the atoms the cut keeps either way"
+    (encoded_history (List.filteri (fun index _ -> index >= 55) messages))
+    (encoded_history
+       (List.filter
+          (fun (m : Agent_core.Types.message) ->
+             (not (Runtime_model_input_tail_window.is_synthetic_preamble m))
+             && m.role <> Agent_core.Types.System)
+          projected));
+  check (float 0.) "and nothing is counted as left out" before
+    (working_state_not_carried ~reason:"displaces_atoms")
+;;
+
 (* The window numbers what it is handed from atom 0, and a range that opens
    on an assistant turn is handed with the omission preamble in front. That
    preamble is the first atom the window drops, and it is no durable atom:
@@ -1772,6 +1846,10 @@ let () =
             "a working state the window holds goes"
             `Quick
             test_a_working_state_the_window_holds_goes
+        ; test_case
+            "a working state that fits the cut goes"
+            `Quick
+            test_a_working_state_that_fits_the_cut_goes
         ; test_case
             "a dropped preamble is not a durable atom"
             `Quick

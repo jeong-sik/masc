@@ -145,6 +145,7 @@ let model_input_projection_for_capacity
         | None -> 0
       in
       let* librarian_front = Host.read_librarian_front librarian_front messages in
+      let carried_front_seed = Host.read_seed_once carried_front_seed in
       (* Every candidate range starts at or past the ceiling's own cut, so
          the window over it drops nothing -- except in front of a working
          state, which the cut above never measured.
@@ -172,27 +173,11 @@ let model_input_projection_for_capacity
             ; atoms_kept = Host.carried_atoms carried
             }
         | Some _ ->
-          Domain_pool_ref.submit_cpu_or_inline (fun () ->
-            match
-              Runtime_model_input_tail_window.project_with_drop
-                ~allow_empty_history:true
-                ~measure_message_bytes:measure_model_input_message_bytes
-                ~capacity_bytes
-                ~reserved_bytes:0
-                carried.Host.messages
-            with
-            | Ok projection ->
-              Ok
-                { Host.carried
-                ; sent = projection.Runtime_model_input_tail_window.messages
-                ; atoms_kept =
-                    Host.durable_atoms_kept
-                      carried
-                      ~window_dropped:
-                        projection.Runtime_model_input_tail_window.dropped_atoms
-                }
-            | Error error ->
-              Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
+          Host.window_carried_range
+            ~measure_message_bytes:measure_model_input_message_bytes
+            ~capacity_bytes
+            ~reserved_bytes:0
+            carried
       in
       let* windowed =
         Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front

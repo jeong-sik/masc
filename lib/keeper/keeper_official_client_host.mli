@@ -348,12 +348,28 @@ type windowed_range =
 val carried_atoms : carried_start -> int
 (** The durable atoms a range carries, before any window. *)
 
-val durable_atoms_kept : carried_start -> window_dropped:int -> int
-(** How many of the range's durable atoms a window over the list composed
-    from it kept, given the atoms that window dropped. An omission preamble
-    the range opened on is the window's atom 0 and is not counted as a
-    durable atom lost; material a lane appends after the range is reached
-    only after every durable atom went. *)
+val window_carried_range
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> capacity_bytes:int
+  -> reserved_bytes:int
+  -> ?source_projection:
+       (Agent_core.Types.message list
+        -> (Agent_core.Types.message list, Agent_core.Error.t) result)
+  -> carried_start
+  -> (windowed_range, Agent_core.Error.t) result
+(** The range under a declared ceiling. [source_projection] runs first, on
+    the range as composed. An omission preamble the range opened on is taken
+    off before the window, which charges one itself, and put back when the
+    window dropped nothing; a range that fit therefore goes exactly as cut.
+    [atoms_kept] counts the range's durable atoms only: what the source
+    projection appends is reached by a drop only after all of them. *)
+
+val read_seed_once
+  :  (unit -> Keeper_carried_front.seed_read) option
+  -> (unit -> Keeper_carried_front.seed_read) option
+(** The same seed read, taken at most once, for a lane that composes a range
+    more than once in a turn ({!compose_librarian_range}). Sequential use on
+    one fiber only. *)
 
 val windowed_projection : windowed_range -> Runtime_model_input_tail_window.projection
 (** The window reading counted against the whole history, for
@@ -377,7 +393,7 @@ val compose_librarian_range
     least the newest atom and as many atoms with it as without it. When it
     stays out, the request goes with the position alone, a WARN names the
     reason and the first atom sent, and
-    [masc_keeper_working_state_not_carried_total] counts it -- the turn is not
+    [masc_keeper_librarian_working_state_not_carried_total] counts it -- the turn is not
     refused, because that band is usually a Librarian that has not caught up
     yet. A composition the position alone cannot carry is refused with its
     own error. Other positions are composed once, as given. *)

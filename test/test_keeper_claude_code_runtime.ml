@@ -2416,6 +2416,92 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
     (snapshot_through ~messages ~end_atom:100 ~working_state:(String.make 4_000 'w'))
 ;;
 
+(* A range the ceiling already fits goes out as it was cut. When the cut
+   lands on an assistant turn the range opens with the omission preamble,
+   and a window handed that list must charge the preamble once: it is the
+   message the window itself would put back, not an atom of the range.
+   Charged twice, a range that fit loses atoms at its front, and the reading
+   names a later front that the next turn's seed then holds. *)
+let test_a_range_the_ceiling_fits_goes_as_cut () =
+  (* One ask in front of the fixture puts an assistant turn at atom 60, the
+     first multiple the window's quantized cut tries, and leaves 61 atoms
+     from there: more than one quantum, so a window that failed at 0 would
+     jump to 60 rather than drop the preamble alone. *)
+  let messages =
+    ({ role = User; content = [ Text "ask intro" ]; name = None; tool_call_id = None
+     ; metadata = [] }
+     : Agent_core.Types.message)
+    :: start_seed_history ()
+  in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let preamble_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        messages
+    with
+    | Some bytes -> bytes
+    | None -> fail "the fixture history has no shrinkable atom"
+  in
+  (* Exactly the preamble and the atoms from 60, an assistant turn. *)
+  let capacity_bytes =
+    preamble_bytes
+    + List.fold_left
+        (fun total message -> total + measure message)
+        0
+        (List.filteri (fun i _ -> i >= 60) messages)
+  in
+  let observed = ref None in
+  let project ?librarian_front () =
+    observed := None;
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes
+      ?librarian_front
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  in
+  let goes_as_cut label sent =
+    (match sent with
+     | head :: rest ->
+       check bool (label ^ ": the range opens with the preamble") true
+         (Runtime_model_input_tail_window.is_synthetic_preamble head);
+       check (list string) (label ^ ": and every atom from the cut follows")
+         (encoded (List.filteri (fun i _ -> i >= 60) messages))
+         (encoded rest)
+     | [] -> fail (label ^ ": nothing went out"));
+    match !observed with
+    | None -> fail (label ^ ": the projection reported no window")
+    | Some (observation : Runtime_model_input_tail_window.window_observation) ->
+      check int (label ^ ": the reading counts the sixty-one atoms") 61
+        observation.transmitted_atoms;
+      check (option string) (label ^ ": and names atom 60 as its front")
+        (Runtime_model_input_tail_window.atom_opening_digest messages 60)
+        (Some observation.front_atom_digest)
+  in
+  (match project () with
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok sent -> goes_as_cut "no Librarian position" sent);
+  (* A snapshot behind the cut does not win the range: the same range goes,
+     nothing is pinned, and nothing is counted as left out. *)
+  let before = working_state_not_carried ~reason:"displaces_atoms" in
+  match
+    project
+      ~librarian_front:(fun _ ->
+        Ok
+          (Keeper_turn_driver_try_provider.Librarian_snapshot
+             (snapshot_through ~messages ~end_atom:50 ~working_state:"Twenty-five asks.")))
+      ()
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok sent ->
+    goes_as_cut "a snapshot behind the cut" sent;
+    check (float 0.) "and no working state is counted as left out" before
+      (working_state_not_carried ~reason:"displaces_atoms")
+;;
+
 (* A ceiling that holds the working state and the whole range sends both. *)
 let test_a_working_state_that_displaces_nothing_goes () =
   let messages = start_seed_history () in
@@ -2617,6 +2703,10 @@ let () =
             "a working state that displaces nothing goes"
             `Quick
             test_a_working_state_that_displaces_nothing_goes
+        ; test_case
+            "a range the ceiling fits goes as cut"
+            `Quick
+            test_a_range_the_ceiling_fits_goes_as_cut
         ] )
     ]
 ;;

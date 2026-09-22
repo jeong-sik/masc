@@ -416,7 +416,7 @@ let to_string = function
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
   | TurnBoundaryFailures -> "masc_keeper_turn_boundary_failures_total"
   | HistoryFragmentFailures -> "masc_keeper_history_fragment_failures_total"
-  | WorkingStateNotCarried -> "masc_keeper_working_state_not_carried_total"
+  | WorkingStateNotCarried -> "masc_keeper_librarian_working_state_not_carried_total"
 ;;
 
 type collection =

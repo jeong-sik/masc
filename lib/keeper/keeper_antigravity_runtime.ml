@@ -126,6 +126,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
   =
   fun history_messages ->
   let* librarian_front = Host.read_librarian_front librarian_front history_messages in
+  let carried_front_seed = Host.read_seed_once carried_front_seed in
   (* The window drops atoms, never a pinned message, so a request whose
      pinned messages -- the hooks' system context and the preamble -- exceed
      what the fixed sections leave is refused for every front. A working
@@ -149,29 +150,12 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
         ~turn_start
         history_messages
     in
-    let* projected_messages =
-      match source_projection with
-      | None -> Ok carried.Host.messages
-      | Some project -> project carried.Host.messages
-    in
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
-      match
-        Runtime_model_input_tail_window.project_with_drop
-          ~allow_empty_history:true
-          ~measure_message_bytes:measure_model_input_message_bytes
-          ~capacity_bytes
-          ~reserved_bytes
-          projected_messages
-      with
-      | Ok projection ->
-        Ok
-          { Host.carried
-          ; sent = projection.messages
-          ; atoms_kept =
-              Host.durable_atoms_kept carried ~window_dropped:projection.dropped_atoms
-          }
-      | Error error ->
-        Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
+    Host.window_carried_range
+      ~measure_message_bytes:measure_model_input_message_bytes
+      ~capacity_bytes
+      ~reserved_bytes
+      ?source_projection
+      carried
   in
   let* windowed =
     Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front

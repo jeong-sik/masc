@@ -710,21 +710,77 @@ let carried_atoms (carried : carried_start) =
   - carried.projection.Runtime_model_input_tail_window.dropped_atoms
 ;;
 
-(* The window numbers the list composed from a range from atom 0. An
-   omission preamble the range opened on is that atom: dropped first, and put
-   back by the window when the new head still needs one, so it is no durable
-   atom lost. What a lane appends after the range (a Gate replay reference)
-   is newer than every durable atom, so a drop from the front reaches it only
-   after all of them went. *)
-let durable_atoms_kept (carried : carried_start) ~window_dropped =
-  let range = carried_atoms carried in
-  let preamble_dropped =
-    match carried.messages with
-    | head :: _
-      when Runtime_model_input_tail_window.is_synthetic_preamble head && window_dropped > 0 -> 1
-    | _ :: _ | [] -> 0
+(* A carried range windowed at a declared ceiling.
+   [Runtime_model_input_tail_window.project_with_drop] charges the omission
+   preamble up front, as the message it puts back whenever a cut lands on a
+   non-[User] head. A range that already opens with one would pay for it
+   twice -- there and again as its first atom -- and a range that fit would
+   fail at no drop and lose a whole quantum of atoms. So the preamble comes
+   off before the window and goes back when the window dropped nothing: a
+   range that fit goes exactly as it was cut, and a cut that did land puts
+   back its own. [source_projection] runs on the range as composed, preamble
+   and all, so what it records is what goes out; it appends after the range,
+   so a drop from the front reaches what it added only after every durable
+   atom went. *)
+let window_carried_range
+      ~measure_message_bytes
+      ~capacity_bytes
+      ~reserved_bytes
+      ?source_projection
+      (carried : carried_start)
+  =
+  let* projected =
+    match source_projection with
+    | None -> Ok carried.messages
+    | Some project -> project carried.messages
   in
-  range - Int.min range (window_dropped - preamble_dropped)
+  let opened_with, input =
+    match projected with
+    | head :: rest when Runtime_model_input_tail_window.is_synthetic_preamble head ->
+      Some head, rest
+    | _ :: _ | [] -> None, projected
+  in
+  let* projection =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Runtime_model_input_tail_window.project_with_drop
+        ~allow_empty_history:true
+        ~measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes
+        input)
+    |> Result.map_error Runtime_model_input_tail_window.budget_error_to_core_error
+  in
+  let sent =
+    match opened_with, projection.Runtime_model_input_tail_window.dropped_atoms with
+    | Some preamble, 0 -> preamble :: projection.Runtime_model_input_tail_window.messages
+    | Some _, _ | None, _ -> projection.Runtime_model_input_tail_window.messages
+  in
+  let range = carried_atoms carried in
+  Ok
+    { carried
+    ; sent
+    ; atoms_kept =
+        range - Int.min range projection.Runtime_model_input_tail_window.dropped_atoms
+    }
+;;
+
+(* A seed read taken once however many times a composition asks for it.
+   [compose_librarian_range] may compose a range twice; the second must start
+   from the same seed, and the turn-record read, and whatever it reports on
+   records it could not parse, should happen once. The compositions run one
+   after the other on the caller's fiber. *)
+let read_seed_once = function
+  | None -> None
+  | Some read ->
+    let taken = ref None in
+    Some
+      (fun () ->
+         match !taken with
+         | Some seed -> seed
+         | None ->
+           let seed = read () in
+           taken := Some seed;
+           seed)
 ;;
 
 (* The window reading in the history's own vocabulary: the atoms the range
@@ -814,12 +870,14 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
          Log.Keeper.warn
            ~keeper_name
            "model input working state not carried runtime=%s reason=%s \
-            summary_end=%d first_atom=%d %s: the Librarian position goes \
+            summary_end=%d first_atom=%s %s: the Librarian position goes \
             alone until it has read far enough for its summary to fit"
            runtime_id
            (working_state_left_out_label reason)
            snapshot.end_atom
-           (alone.carried.history_atom_count - alone.atoms_kept)
+           (match alone.atoms_kept with
+            | 0 -> "none"
+            | kept -> string_of_int (alone.carried.history_atom_count - kept))
            (working_state_left_out_detail reason);
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string WorkingStateNotCarried)

@@ -288,13 +288,14 @@ let parse_fusion_result text =
 ;;
 
 (* Operator-initiated deliberation: runs [Fusion_tool.handle] from an HTTP
-   request with the prompt, preset and topology the operator supplied. The
-   judge-of-judges and staged topologies the tool advertises had no reachable
-   HTTP surface before this: only a keeper deciding on its own to call the tool
-   could exercise them. The run is owned by [name], so its wake, board post and
-   chat delivery land on that keeper exactly as a self-initiated run would.
+   request with the prompt, preset, topology and per-run roster (judge, panel)
+   the operator supplied. The judge-of-judges and staged topologies the tool
+   advertises had no reachable HTTP surface before this: only a keeper deciding
+   on its own to call the tool could exercise them. The run is owned by [name],
+   so its wake, board post and chat delivery land on that keeper exactly as a
+   self-initiated run would.
 
-   Validation stays in the tool. Preset/topology/prompt rejections come back as
+   Validation stays in the tool. Preset/topology/prompt/roster rejections come back as
    the tool's own typed refusals rather than a second copy of those rules here,
    which is what keeps this endpoint from drifting away from what a keeper-side
    call would do. *)
@@ -334,12 +335,24 @@ let handle_keeper_fusion_post state req reqd body_str =
                | Some (`Bool value) -> [ "web_tools", `Bool value ]
                | _ -> []
              in
+             (* judge/panel 은 받은 값 그대로 넘긴다. 모양 검사는 도구가 하고, 틀린
+                모양은 도구의 거절로 돌아와 400 이 된다 — 여기서 걸러 버리면 운영자가
+                바꾼 명단이 조용히 preset 명단으로 돌아간다. *)
+             let forwarded_arg key =
+               match Json_util.assoc_member_opt key args with
+               | Some value -> [ key, value ]
+               | None -> []
+             in
              (* preset/topology 를 생략하면 도구의 기본값(default_preset / simple)이
                 그대로 적용된다 — 여기서 기본값을 새로 정하지 않는다. *)
              let fusion_args =
                `Assoc
                  (("prompt", `String prompt)
-                  :: (string_arg "preset" @ string_arg "topology" @ web_tools))
+                  :: (string_arg "preset"
+                      @ string_arg "topology"
+                      @ web_tools
+                      @ forwarded_arg "judge"
+                      @ forwarded_arg "panel"))
              in
              let raw =
                Fusion_tool.handle ~sw ~net ~base_dir:config.base_path ~keeper:name

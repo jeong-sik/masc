@@ -67,6 +67,26 @@ at least two exact groups; ragged counts are rejected). Unknown values are \
 rejected."""
 
 [[params]]
+name = "judge"
+type = "string"
+description = """
+Route for the judge seat in this run only: a [runtime.lanes] lane name or a \
+runtime id. Omitted uses the preset's judge. An unknown route is rejected \
+before the run starts."""
+
+[[params]]
+name = "panel"
+type = "array"
+items = { type = "string" }
+min_items = 1
+description = """
+Routes for the panel in this run only, one seat per route ([runtime.lanes] \
+lane names or runtime ids). They form one group that takes its prompt, \
+web_tools, output budget and timeout from the preset's first group. Omitted \
+uses the preset's panel. Unknown routes, repeated routes, or fewer routes \
+than the preset's min_answered are rejected before the run starts."""
+
+[[params]]
 name = "task_id"
 type = "string"
 description = "Optional assigned Task to deliberate for. If neither task_id nor goal_id is supplied, the runtime selects your current active Task from authoritative ownership. Its title, description, completion contract and linked Goal criteria are captured before starting the panel; they are separate from your summary."

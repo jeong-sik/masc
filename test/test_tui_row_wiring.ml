@@ -822,6 +822,18 @@ let test_both_strips_mark_where_they_are_from_one_value () =
   Alcotest.(check bool) "the surface strip reads the same mark" true
     (mark "surface_strip" "bin/masc_tui_render_prim.ml" > 0)
 
+(* The Board title's count. The listing is one server page and the board can
+   hold more, so the count beside the name has to be the one that knows both
+   numbers. A title that goes back to printing the page length typechecks and
+   says nothing on screen but a smaller board. *)
+let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
+  let asks callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"render_board_list" ~callee
+  in
+  Alcotest.(check int) "the title asks what the board holds" 1
+    (asks "board_list_count_text")
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -892,5 +904,7 @@ let () =
             `Quick test_both_strips_mark_where_they_are_from_one_value
         ; Alcotest.test_case "the Approvals title counts what the badge does"
             `Quick test_the_approvals_title_counts_what_the_badge_counts
+        ; Alcotest.test_case "the Board title counts through the helper" `Quick
+            test_the_board_title_counts_through_the_helper_that_knows_the_board
         ] )
     ]

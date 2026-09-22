@@ -16,11 +16,24 @@ type group =
   | Search    (** finding a row *)
   | Meta      (** refresh, surface switching, quit *)
 
+(** Whether a binding answers while a surface's detail is open.
+
+    A surface that owns a detail draws one footer for two states, so it used
+    to advertise exactly one key the dispatcher refuses in the state on
+    screen: [Right / Enter] once a detail is already open, [[ / ]] while it
+    is not. The fact was in the table already, but only as prose inside
+    [help], which no footer can read. *)
+type detail_state =
+  | Either  (** answers in both states; the default *)
+  | List_only  (** only while no detail is open *)
+  | Detail_only  (** only while a detail is open *)
+
 type binding = {
   key : string;
   label : string;      (** the footer's short word *)
   help : string option;  (** the overlay's longer sentence; [label] if absent *)
   group : group;
+  detail : detail_state;  (** which of a detail-owning surface's two states *)
 }
 
 val expand_turn_key : string
@@ -78,9 +91,22 @@ val for_surface : Masc_tui_types.surface -> binding list
     Feeds both projections; a surface whose footer is not yet converted is
     still read by the help overlay. *)
 
-val footer_hints : Masc_tui_types.surface -> string
+val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
-    Meta order. *)
+    Meta order.
+
+    [detail_open] is how a surface that owns a detail says which of its two
+    states is on screen, so the footer drops the key the dispatcher refuses
+    there. A surface without a detail leaves it out and every binding stands.
+    Left out by a surface that does own one, every binding stands too -- the
+    behaviour from before this argument existed, and the one
+    {!has_detail_scoped_keys} exists to catch. *)
+
+val has_detail_scoped_keys : Masc_tui_types.surface -> bool
+(** Whether this surface's table scopes any binding to one of the two states,
+    and so owes [footer_hints] a [~detail_open] from both of its renderers.
+    Read by the test that keeps a new detail-owning surface from landing
+    without it. *)
 
 val footer_hints_config : pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps

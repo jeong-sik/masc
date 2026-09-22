@@ -6,6 +6,16 @@ module Gate = Masc.Keeper_librarian_absorb_gate
 module T = Masc.Typesafeai_types
 module Types = Masc.Keeper_memory_os_types
 
+(* The one element a single-destination case expects. A mismatch fails with
+   every element it got, not only how many, so the failure log shows what the
+   run actually reported. *)
+let only_one ~what ~to_json = function
+  | [ item ] -> item
+  | items ->
+    Alcotest.failf "one destination, got %d %s: %s" (List.length items) what
+      (Yojson.Safe.to_string (`List (List.map to_json items)))
+;;
+
 let fact claim : Types.fact =
   Types.observed
     ~claim
@@ -477,9 +487,9 @@ let run_runtime_evidence ?fixture_dir () =
        let raw = List.hd !jev_requests in
        let sent = Yojson.Safe.from_string raw in
        let request = member "request" evaluation in
-       let asked = match member "destinations" request |> Yojson.Safe.Util.to_list with
-         | [ destination ] -> destination
-         | destinations -> Alcotest.failf "one destination, %d listed" (List.length destinations) in
+       let asked =
+         only_one ~what:"listed" ~to_json:Fun.id
+           (member "destinations" request |> Yojson.Safe.Util.to_list) in
        Alcotest.(check string) "endpoint observation omits userinfo/query/fragment" displayed_jev_uri
          (member "destination_uri" asked |> string);
        check_json "actual JEV request model" (member "model" sent) (member "model" asked);
@@ -496,9 +506,10 @@ let run_runtime_evidence ?fixture_dir () =
           let failure = member "failure" evaluation in
           Alcotest.(check string) "the walk records every destination asked" "every_destination_refused"
             (member "kind" failure |> string);
-          let refusal = match member "attempts" failure |> Yojson.Safe.Util.to_list with
-            | [ attempt ] -> member "refusal" attempt
-            | attempts -> Alcotest.failf "one destination, %d attempts" (List.length attempts) in
+          let refusal =
+            only_one ~what:"attempts" ~to_json:Fun.id
+              (member "attempts" failure |> Yojson.Safe.Util.to_list)
+            |> member "refusal" in
           Alcotest.(check int) "actual HTTP failure status" 503 (member "status" refusal |> Yojson.Safe.Util.to_int);
           Alcotest.(check string) "actual HTTP failure body" "fixture unavailable" (member "body" refusal |> string);
           List.iter (fun key -> check_json ("failure does not invent " ^ key)
@@ -506,9 +517,10 @@ let run_runtime_evidence ?fixture_dir () =
         | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run ->
           Alcotest.(check string) "a rejected HTTP response is a failed evaluation" "failed"
             (member "status" evaluation |> string);
-          let refusal = match member "failure" evaluation |> member "attempts" |> Yojson.Safe.Util.to_list with
-            | [ attempt ] -> member "refusal" attempt
-            | attempts -> Alcotest.failf "one destination, %d attempts" (List.length attempts) in
+          let refusal =
+            only_one ~what:"attempts" ~to_json:Fun.id
+              (member "failure" evaluation |> member "attempts" |> Yojson.Safe.Util.to_list)
+            |> member "refusal" in
           Alcotest.(check string) "HTTP and transport failures remain distinct" "http_response"
             (member "kind" refusal |> string);
           Alcotest.(check int) "actual successful HTTP status survives decoding failure" 200
@@ -767,9 +779,8 @@ let test_failure_bodies_omit_configured_credentials () =
     let failure =
       match Client.evaluate ~clock ~destinations:(destination, []) ~state:`Null ~questions:[] () with
       | Error failure ->
-        (match Client.attempts failure with
-         | [ attempt ] -> attempt.refusal
-         | asked -> Alcotest.failf "one destination, %d attempts" (List.length asked))
+        (only_one ~what:"attempts" ~to_json:Client.attempt_to_yojson
+           (Client.attempts failure)).refusal
       | Ok _ -> Alcotest.fail "the gateway response must remain a typed failure" in
     let expected = "gateway echo [REDACTED] url=" ^ displayed ^ suffix in
     (match failure with
@@ -881,11 +892,11 @@ let test_run_uses_one_destination_and_model_snapshot () =
    | Gate.Skipped _ -> Alcotest.fail "expected evaluations"
    | Gate.Evaluated { evaluations; _ } ->
      List.iter (fun (evaluation : Gate.evaluation) ->
-       match evaluation.destinations with
-       | [ asked ] ->
-         Alcotest.(check string) "typed evaluation has an observation endpoint"
-           initial.base_url asked.destination_uri
-       | asked -> Alcotest.failf "one destination, %d listed" (List.length asked)) evaluations);
+       let asked =
+         only_one ~what:"listed" ~to_json:Masc.Typesafeai_client.destination_id_to_yojson
+           evaluation.destinations in
+       Alcotest.(check string) "typed evaluation has an observation endpoint"
+         initial.base_url asked.destination_uri) evaluations);
   let report = Gate.run_result_to_yojson run in
   (match List.rev !observations with
    | [ Gate.Incomplete [ first ]; Gate.Incomplete [ again; second ]; Gate.Complete final ] ->
@@ -905,9 +916,9 @@ let test_run_uses_one_destination_and_model_snapshot () =
       "initial-request-model" (Yojson.Safe.from_string raw |> member "model" |> to_string))
     (F.request_bodies initial);
   List.iter (fun evaluation ->
-    let asked = match member "request" evaluation |> member "destinations" |> to_list with
-      | [ destination ] -> destination
-      | destinations -> Alcotest.failf "one destination, %d listed" (List.length destinations) in
+    let asked =
+      only_one ~what:"listed" ~to_json:Fun.id
+        (member "request" evaluation |> member "destinations" |> to_list) in
     Alcotest.(check string) "reported endpoint is the transmitted snapshot" initial.base_url
       (member "destination_uri" asked |> to_string);
     Alcotest.(check string) "reported model is the transmitted snapshot" "initial-request-model"
@@ -977,9 +988,9 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
   match List.rev !observed with
   | [ Gate.Incomplete [ evaluation ] as observation ] ->
     let sent = List.hd (F.request_bodies server) in
-    let asked = match evaluation.destinations with
-      | [ asked ] -> asked
-      | asked -> Alcotest.failf "one destination, %d listed" (List.length asked) in
+    let asked =
+      only_one ~what:"listed" ~to_json:Masc.Typesafeai_client.destination_id_to_yojson
+        evaluation.destinations in
     Alcotest.(check string) "completed request destination remains inspectable"
       server.base_url asked.destination_uri;
     Alcotest.(check string) "completed request model remains inspectable"

@@ -493,13 +493,13 @@ status: reference
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
-  이 위치의 출처(`Keeper_carried_front.origin`)는 넷이다 — `Carried`(seed에서 온
+  이 위치의 출처(`Keeper_carried_front.origin`)는 셋이다 — `Carried`(seed에서 온
   위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기),
   `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),
-  `Librarian_progress`(저장본이 이 History에 맞지 않을 때 Librarian의 durable Read
-  Position), `Whole_history`(앞머리 없음). `Librarian_progress`는 그 위치가 이 trace를
-  지목하고 그 앞 Atom이 위치가 기록한 Message로 열릴 때만 채택하며, 그때 요청은 읽지
-  않은 Atom부터 실리고 그 앞을 요약하지 않는다.
+  `Turn_start`(앞머리도 맞는 저장본도 없음: 이 History에서 마지막으로 끝난 turn이
+  끝난 자리에서 시작한다). `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞
+  Atom은 Librarian의 다음 회차를 기다린다. 끝난 turn이 없는 History에서는 `end_atom`이
+  0이고, 그 0은 새 Keeper가 가진 짧은 History 전체를 가리킨다.
 
   저장된 응답 관측의 범위는 당시의 사실이다. 현재 카탈로그에서 그 runtime을
   지우거나 바꾸어도 이 사실을 취소하지 않으며, 현재 History의 같은 위치·digest로 검증한다.
@@ -583,14 +583,12 @@ status: reference
 **Continuity Request Observation (요청 입력 관측)**
 : 직렬화된 Agent Core 요청 하나가 무엇을 실었는지에 대한 읽기 전용 관측
   (`Keeper_continuity_observation.input`). 이 관측은 History 삭제를 승인하지 않고
-  provider가 요청을 받아들였음을 증명하지도 않는다. 종류는 넷이다 —
+  provider가 요청을 받아들였음을 증명하지도 않는다. 종류는 셋이다 —
   `Summarized of frontier`(하던 일 저장본이 대신하는 경계까지 요약; frontier는 trace·
-  끝 Atom·경계 줄), `Absorbed of { trace_id; end_atom }`(Librarian의 durable Read
-  Position에서 시작하고 그 앞을 요약하지 않음), `Uncompressed`(이력 전체),
-  `Not_applied`(저장된 맥락을 적용하지 않음). `Absorbed`는 경계 줄이 없어 모양이
-  trace와 Atom뿐이다. Dashboard의 `context_cycle.prepared.input.kind`가
-  `summarized`·`absorbed`·`uncompressed`·`not_applied`로, TUI Memory 화면이
-  `summary …`·`absorbed to atom N · trace X · no summary`·`full history`·
+  끝 Atom·경계 줄), `Without_snapshot`(맞는 저장본이 없어 이 turn 자신의 Atom만 실음),
+  `Not_applied`(저장된 맥락을 적용하지 않음). Dashboard의
+  `context_cycle.prepared.input.kind`가 `summarized`·`without_snapshot`·`not_applied`로,
+  TUI Memory 화면이 `summary …`·`no snapshot: this turn only`·
   `saved context not applied`로 그린다. 같은 `context_cycle`의 `synthesis`를 담는
   Continuity Synthesis Observation과 다른 필드이고, 저장된 파일인 Continuity
   Snapshot과도 다르다.

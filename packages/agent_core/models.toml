@@ -3099,16 +3099,22 @@ supports_reasoning = true
 reasoning_streaming_format = "delta:reasoning_content"
 supports_native_streaming = true
 
-# The rest of the Z.AI coding plan's text models. A glm-coding binding never
-# reads a bare row (the glm-4.6v twin below has the full account), so without
-# these every one resolved to the glm capabilities_base: a 200000 window for
-# all of them, glm-4.5 and glm-4.5-air included, whose bare rows say 128000.
+# The rest of the Z.AI coding plan's text models. A glm-coding binding's
+# capability lookup never reads a bare row (the glm-4.6v twin below has the
+# full account), so without these every one resolved to the glm
+# capabilities_base: a 200000 window and a 40960 output ceiling for all of
+# them, glm-4.5 and glm-4.5-air included, whose bare rows say 128000.
 # All eight are listed by GET /coding/paas/v4/models and answered a plain and
 # a tool-call completion on 2026-09-22, reasoning on message.reasoning_content.
-# The output ceiling is the range each endpoint named when it refused an
-# oversized max_tokens the same day: code 1210 "[1,131072]" on all eight.
-# glm-5.2's 1M window is docs.z.ai/guides/llm/glm-5.2; the other windows are
-# their bare rows' values, since docs.z.ai no longer has a page for them.
+# Windows: glm-5.2's 1M is docs.z.ai/guides/llm/glm-5.2; the others are their
+# bare rows' values, since docs.z.ai no longer has a page for them.
+# Output: each endpoint named "[1,131072]" when it refused an oversized
+# max_tokens the same day (code 1210). That is the parameter's range, not room
+# in the window, so glm-4.5 and glm-4.5-air keep their bare rows' 96000 inside
+# a 128000 window; an exact-output call sends this value as max_tokens.
+# Prices: pricing, unlike the capability lookup, falls back to a bare row when
+# no scoped row exists, so these rows restate the bare rows' prices and a turn
+# on them is estimated exactly as before. glm-5.2's bare row has no price.
 [[models]]
 id_prefix = "glm-5.2"
 provider_name = "glm-coding"
@@ -3128,6 +3134,10 @@ provider_name = "glm-coding"
 base = "glm"
 max_context_tokens = 200000
 max_output_tokens = 131072
+input_per_million = 1.4
+output_per_million = 4.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18571428571428572
 supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
@@ -3141,6 +3151,10 @@ provider_name = "glm-coding"
 base = "glm"
 max_context_tokens = 200000
 max_output_tokens = 131072
+input_per_million = 1.2
+output_per_million = 4.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
 supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
@@ -3154,6 +3168,10 @@ provider_name = "glm-coding"
 base = "glm"
 max_context_tokens = 200000
 max_output_tokens = 131072
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
 supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
@@ -3167,6 +3185,10 @@ provider_name = "glm-coding"
 base = "glm"
 max_context_tokens = 200000
 max_output_tokens = 131072
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
 supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
@@ -3180,6 +3202,10 @@ provider_name = "glm-coding"
 base = "glm"
 max_context_tokens = 200000
 max_output_tokens = 131072
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
 supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
@@ -3192,7 +3218,11 @@ id_prefix = "glm-4.5"
 provider_name = "glm-coding"
 base = "glm"
 max_context_tokens = 128000
-max_output_tokens = 131072
+max_output_tokens = 96000
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
 supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false
@@ -3205,7 +3235,11 @@ id_prefix = "glm-4.5-air"
 provider_name = "glm-coding"
 base = "glm"
 max_context_tokens = 128000
-max_output_tokens = 131072
+max_output_tokens = 96000
+input_per_million = 0.2
+output_per_million = 1.1
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.15
 supports_tools = true
 supports_tool_choice = true
 supports_named_tool_choice = false

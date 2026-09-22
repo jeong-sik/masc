@@ -1958,6 +1958,7 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_official_client_recovery_required_names: string list;
   fs_active_task_owner_without_fiber_count: int;
   fs_completion_authority_pending_count: int;
+  fs_active_task_owner_scan_error_count: int;
 }
 
 type planning_goal_history = Tui_decode.planning_goal_history
@@ -2392,19 +2393,15 @@ let identity_filter_rows ~providers filter =
 
 (* Each block above the list brings its own trailing blank, so two of them
    do not stack two blanks and none of them leaves the list flush against
-   the hint.
+   the tally.
 
-   The sentence reads as a duplicate of the tab's own hint row -- [ ]:tab,
-   arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh -- and it was
-   dropped on that ground, until a 150-column frame showed the hint row does
-   not reach the screen at all: the row spends 79 cells on nine tab labels
-   before the hint starts, so the title is cut inside "Automation" and the
-   keys are never drawn. Until that row is fixed this sentence is the only
-   place an operator can read them -- #35539. *)
-let identity_preamble ~keeper ~summary ~notice =
-  ("  Move with arrows, enter to connect " ^ keeper
-   ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
-  :: summary :: "" :: notice
+   No keys here. The tab's own keys ride the footer, which is where every
+   other surface puts them: at 120 columns it draws all six
+   ([ ]:tab, arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh) and
+   at 80 it gives up /:filter and R:refresh in that order, with [?] naming
+   what it dropped. A sentence spelling them again stood here while the
+   title row carried the hint and cut it, which the footer no longer does. *)
+let identity_preamble ~summary ~notice = summary :: "" :: notice
 
 (** Which pane line the provider at [index] is drawn on.
 
@@ -2413,7 +2410,7 @@ let identity_preamble ~keeper ~summary ~notice =
     fifty-odd rows they would have to scroll past. It moves the list down,
     so the row a keypress scrolls to moves with it. *)
 let identity_provider_line ~summary ~notice ~index =
-  List.length (identity_preamble ~keeper:"" ~summary ~notice) + index
+  List.length (identity_preamble ~summary ~notice) + index
 
 (** The cursor held inside the list it names. A cursor left behind by a
     shorter list answers from the last row rather than from one that is no
@@ -8403,11 +8400,18 @@ type lanes_overview_hit =
   | Lanes_hit_standalone of int  (** index into [sls_lanes] *)
   | Lanes_hit_none  (** chrome, notes and padding: nothing to select *)
 
-(* The first standalone row is the frame's sixth line: surface strip, box top,
-   header, divider, matrix heading. [render_lanes_overview] draws in that
-   order and this answers a click from the same order -- a row added to either
-   section moves both. *)
-let lanes_overview_first_standalone_row = 6
+(* The rows the Standalone overview draws above its lanes, in the order
+   [render_lanes_overview] writes them: the strip the frame prepends, the box
+   top, the header, the divider, the standalone heading, the Add-ons summary
+   and the table's own heading. The count stood at five while seven were
+   drawn, and a press on the first lane selected the third.
+
+   Mouse rows count from one, so the first lane sits one row below them. A
+   PTY walk presses the row the fixture's last lane is drawn on and reads
+   the detail below, so a row added to either section is caught on the screen
+   rather than in a second hand count here. *)
+let lanes_overview_rows_above_standalone = 7
+let lanes_overview_first_standalone_row = lanes_overview_rows_above_standalone + 1
 
 let lanes_overview_hit (state : state) ~terminal_rows:_ ~row : lanes_overview_hit =
   if row < lanes_overview_first_standalone_row then Lanes_hit_none

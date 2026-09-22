@@ -281,6 +281,11 @@ val bracketed : max_cells:int -> string -> string
 (** [\[text\]], with [text] folded in the middle only when it runs past
     [max_cells]. Never padded inside the brackets. *)
 
+val board_list_count_text : loaded:int -> holding:int option -> string
+(** [(loaded of holding)] when the board holds more than the listing page
+    carries, and [(loaded)] otherwise. [holding] is the census count for the
+    whole board, or for the hearth being read when one is narrowed. *)
+
 val board_read_title :
   screen:string -> id:string -> hearth:string option -> votes:int -> replies:int ->
   string

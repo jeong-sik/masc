@@ -76,6 +76,7 @@ let summary = function
          | Observer.Agent_completed _ -> "agent_completed"
          | Observer.Agent_failed _ -> "agent_failed"
          | Observer.Agent_yielded _ -> "agent_yielded"
+         | Observer.Agent_input_required _ -> "agent_input_required"
          | Observer.Tool_approval_completed -> "tool_approval_completed"
          | Observer.Telemetry -> "telemetry"
          | Observer.Agent_core_other name -> "other:" ^ name)

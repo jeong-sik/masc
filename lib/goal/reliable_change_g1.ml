@@ -72,6 +72,7 @@ type reported_usage =
 type usage_observation =
   | Usage_reported of reported_usage
   | Usage_missing of string
+  | Usage_malformed of Yojson.Safe.t
 
 type phase_timestamps =
   { queue_started_at : float option
@@ -294,11 +295,13 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
                     match a.usage with
                     | Usage_reported r -> (match r.cost_usd with Some c -> c | None -> 0.0)
                     | Usage_missing _ -> 0.0
+                    | Usage_malformed _ -> 0.0
                   in
                   let b_cost =
                     match b.usage with
                     | Usage_reported r -> (match r.cost_usd with Some c -> c | None -> 0.0)
                     | Usage_missing _ -> 0.0
+                    | Usage_malformed _ -> 0.0
                   in
                   Float.compare a_cost b_cost
                 | c -> c)
@@ -325,7 +328,8 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
             has_reported_cost := true;
             total_cost := !total_cost +. c
           | None -> ())
-       | Usage_missing _ -> ())
+       | Usage_missing _ -> ()
+       | Usage_malformed _ -> ())
     all_countable;
   let final_cost = if !has_reported_cost then Some !total_cost else None in
   let final_cost_exact =
@@ -684,7 +688,9 @@ let check_observations
               && final_attempt.external_verified
             | "unreported_usage_preserved" ->
               (not final_attempt.external_verified)
-              && (match final_attempt.usage with Usage_missing _ -> true | _ -> false)
+              && (match final_attempt.usage with
+                  | Usage_missing _ -> true
+                  | Usage_reported _ | Usage_malformed _ -> false)
             | _ -> false
           in
           if not outcome_matches then (
@@ -791,7 +797,13 @@ let check_observations
                  "usage-unreported run was marked verified unexpectedly"
                  false
                  None
-             ))
+             )
+           | Usage_malformed _ ->
+             run_valid := false;
+             add_finding (Printf.sprintf "usage_unreported_malformed_%d" repeat_index)
+               "usage-unreported run carried a malformed usage value"
+               false
+               None)
         | Live_scenario _ ->
           run_valid := false;
           add_finding (Printf.sprintf "invalid_live_scenario_in_matrix_%d" repeat_index)
@@ -1017,6 +1029,8 @@ let run_observation_to_json (o : run_observation) : Yojson.Safe.t =
     match o.usage with
     | Usage_missing reason ->
       `Assoc [ "reported", `Bool false; "reason", `String reason; "cost_usd", `Null ]
+    | Usage_malformed raw ->
+      `Assoc [ "reported", `Bool false; "malformed", raw ]
     | Usage_reported r ->
       `Assoc
         [ "reported", `Bool true
@@ -1170,88 +1184,94 @@ let run_observation_of_json (json0 : Yojson.Safe.t) : (run_observation, string) 
       | None -> None
     in
     let usage =
-      (* Guard (task-1540): a malformed "usage" value (string, list, number
-         or null) must not kill the whole row with a Type_error on
-         [member "reported"]; degrade to an empty usage object so the
-         flat-format top-level fallback below stays reachable. *)
-      let u =
-        match json |> member "usage" with
-        | `Assoc _ as usage_obj -> usage_obj
-        | _ -> `Assoc []
-      in
-      let reported =
-        match u |> member "reported" |> to_bool_option with
-        | Some b -> b
-        | None ->
-          (match json |> member "input_tokens" with
-           | `Int _ -> true
-           | _ ->
-             (match u |> member "input_tokens" with
-              | `Int _ -> true
-              | _ -> false))
-      in
-      if reported then
-        let input_tokens =
-          match u |> member "input_tokens" |> to_int_option with
-          | Some t -> t
-          | None -> json |> member "input_tokens" |> to_int
-        in
-        let output_tokens =
-          match u |> member "output_tokens" |> to_int_option with
-          | Some t -> t
-          | None -> json |> member "output_tokens" |> to_int
-        in
-        let cache_read_input_tokens =
-          match u |> member "cache_read_input_tokens" |> to_int_option with
-          | Some t -> t
+      (* task-1540 stopped a malformed "usage" from killing the row with a
+         Type_error, but it degraded every non-object to an empty object, so
+         a corrupt value (string, list, number) read exactly like the flat
+         format that never carried a "usage" object. Only an absent or null
+         "usage" is that flat format; anything else is corruption and is
+         carried as [Usage_malformed] so it stays visible. *)
+      let decode_usage_object u =
+        let reported =
+          match u |> member "reported" |> to_bool_option with
+          | Some b -> b
           | None ->
-            (match json |> member "cache_read_input_tokens" |> to_int_option with
-             | Some t -> t
-             | None -> 0)
-        in
-        let parse_cost json_node =
-          match json_node with
-          | `Float f -> Some f
-          | `Int i -> Some (float_of_int i)
-          | `String s -> (try Some (float_of_string s) with Failure _ -> None)
-          | _ -> None
-        in
-        let cost_usd =
-          match parse_cost (u |> member "cost_usd") with
-          | Some c -> Some c
-          | None -> parse_cost (json |> member "cost_usd")
-        in
-        let cost_usd_exact =
-          match u |> member "cost_usd_exact" |> to_string_option with
-          | Some s -> Some s
-          | None ->
-            (match u |> member "cost_usd" with
-             | `String s -> Some s
+            (match json |> member "input_tokens" with
+             | `Int _ -> true
              | _ ->
-               (match json |> member "cost_usd" with
-                | `String s -> Some s
-                | _ ->
-                  (match cost_usd with
-                   | Some c -> Some (Printf.sprintf "%.2f" c)
-                   | None -> None)))
+               (match u |> member "input_tokens" with
+                | `Int _ -> true
+                | _ -> false))
         in
-        Usage_reported
-          { input_tokens
-          ; output_tokens
-          ; cache_read_input_tokens
-          ; cost_usd
-          ; cost_usd_exact
-          }
-      else
-        let reason =
-          match u |> member "reason" |> to_string_option with
-          | Some r -> r
-          | None ->
-            (match json |> member "error" |> to_string_option with
-             | Some e -> e
-             | None -> "unreported")
-        in
-        Usage_missing reason
+        if reported then
+          let input_tokens =
+            match u |> member "input_tokens" |> to_int_option with
+            | Some t -> t
+            | None -> json |> member "input_tokens" |> to_int
+          in
+          let output_tokens =
+            match u |> member "output_tokens" |> to_int_option with
+            | Some t -> t
+            | None -> json |> member "output_tokens" |> to_int
+          in
+          let cache_read_input_tokens =
+            match u |> member "cache_read_input_tokens" |> to_int_option with
+            | Some t -> t
+            | None ->
+              (match json |> member "cache_read_input_tokens" |> to_int_option with
+               | Some t -> t
+               | None -> 0)
+          in
+          let parse_cost json_node =
+            match json_node with
+            | `Float f -> Some f
+            | `Int i -> Some (float_of_int i)
+            | `String s -> (try Some (float_of_string s) with Failure _ -> None)
+            | _ -> None
+          in
+          let cost_usd =
+            match parse_cost (u |> member "cost_usd") with
+            | Some c -> Some c
+            | None -> parse_cost (json |> member "cost_usd")
+          in
+          let cost_usd_exact =
+            match u |> member "cost_usd_exact" |> to_string_option with
+            | Some s -> Some s
+            | None ->
+              (match u |> member "cost_usd" with
+               | `String s -> Some s
+               | _ ->
+                 (match json |> member "cost_usd" with
+                  | `String s -> Some s
+                  | _ ->
+                    (match cost_usd with
+                     | Some c -> Some (Printf.sprintf "%.2f" c)
+                     | None -> None)))
+          in
+          Usage_reported
+            { input_tokens
+            ; output_tokens
+            ; cache_read_input_tokens
+            ; cost_usd
+            ; cost_usd_exact
+            }
+        else
+          let reason =
+            match u |> member "reason" |> to_string_option with
+            | Some r -> r
+            | None ->
+              (match json |> member "error" |> to_string_option with
+               | Some e -> e
+               | None -> "unreported")
+          in
+          Usage_missing reason
+      in
+      match json |> member "usage" with
+      | `Assoc _ as u ->
+        (match u |> member "malformed" with
+         | `Null -> decode_usage_object u
+         | raw -> Usage_malformed raw)
+      | `Null -> decode_usage_object (`Assoc [])
+      | malformed -> Usage_malformed malformed
     in
     let pt =
       match json |> member "phase_timestamps" with

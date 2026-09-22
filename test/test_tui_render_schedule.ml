@@ -1764,18 +1764,10 @@ let test_board_columns_with_styles_hold_their_offsets () =
     check_left_cell "REPLIES" "G" ~header ~row ~inner_width
   done
 
-(* The defect this closes. The rows sized the title to the terminal minus a
-   hand-summed constant and the header claimed its own, so at eighty columns
-   the header ran long, pushed SCORE into the frame and REPLIES off it. Both
-   read one description now, so a row is exactly as wide as the header over it
-   whatever any reading measures. *)
-(* The one column on these two screens that carries a sentence. A post's
-   subject is at the front of its title, and the middle fold spent the column
-   on what came after: the live Board drew
-   "Verify: run-e\xe2\x80\xa69e327af211400cba719b59128]" and Planning drew
-   "v0.36.0 continui\xe2\x80\xa6y 8\xea\xb1\xb4 \xeb\x8b\xab\xed\x9e\x98 (GitHub milestone #10)".
-   Every other column here names a thing -- an id, a hearth, an author -- and
-   keeps both ends. *)
+(* The title is the one column on these two screens that carries a sentence.
+   A post's subject is at the front of its title, so the title keeps its head
+   and gives way at the tail. Every other column here names a thing -- an id,
+   a hearth, an author -- and keeps both ends. *)
 let test_a_title_gives_way_at_its_tail () =
   let title =
     "Verify: run-exact-output-lane-board-attention-9e327af211400cba719b59128"
@@ -1849,6 +1841,11 @@ let test_a_board_id_keeps_both_ends () =
   check bool "the head is drawn" true (Option.is_some (index_of row "p-6"));
   check bool "and so is the tail" true (Option.is_some (index_of row "813cc1"))
 
+(* The defect this closes. The rows sized the title to the terminal minus a
+   hand-summed constant and the header claimed its own, so at eighty columns
+   the header ran long, pushed SCORE into the frame and REPLIES off it. Both
+   read one description now, so a row is exactly as wide as the header over it
+   whatever any reading measures. *)
 let test_a_board_row_is_as_wide_as_its_header () =
   List.iter
     (fun inner_width ->

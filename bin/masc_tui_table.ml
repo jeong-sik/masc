@@ -54,12 +54,11 @@ let used_width cells =
   List.fold_left (fun total cell -> total + cell.width) 0 cells
   + (cell_gap * max 0 (List.length cells - 1))
 
-(* Where a reading gives way is the column's own fact, not one rule for every
-   column. An identifier cut at the head reads as a different identifier and a
-   number cut at either end is a wrong number, so both ends stay and the middle
-   folds. A sentence is the other way round: it is read from the front, and the
-   Board's "Verify: run-e\xe2\x80\xa69e327af211400cba719b59128]" spent its cells
-   on a hex tail while the subject of the post was the half that folded.
+(* Where a reading gives way is the column's choice. An identifier keeps both
+   ends and folds in the middle: cut at the head it reads as a different
+   identifier, and a number cut at either end is a wrong number. A sentence
+   keeps its head and gives way at the tail, because it is read from the front
+   and its subject is there.
 
    Only a reading that overruns its column is folded. [fit_middle] pads a short
    reading out to the column on the left, which left no slack for this to place

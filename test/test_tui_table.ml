@@ -97,9 +97,7 @@ let test_an_overlong_reading_folds_rather_than_pushes () =
     (contains "\xe2\x80\xa6" (Table.row cells))
 
 (* An identifier and a sentence give way at different ends. Both ends of an
-   identifier decide which one it is; a sentence is read from the front, and
-   the Board row "Verify: run-e\xe2\x80\xa69e327af211400cba719b59128]" spent its
-   column on a hex tail while the subject of the post was the half that folded. *)
+   identifier decide which one it is; a sentence is read from the front. *)
 let test_a_column_chooses_which_end_gives_way () =
   let title = "Verify: run-exact-output-lane-board-attention-9e327af211400cba" in
   let folded fold =
@@ -118,6 +116,43 @@ let test_a_column_chooses_which_end_gives_way () =
   check int "and both stay in the column" (width middle) (width tail);
   check bool "both mark the cut" true
     (contains "\xe2\x80\xa6" middle && contains "\xe2\x80\xa6" tail)
+
+(* A Planning title from the live fleet, in Hangul: two cells a syllable. The
+   column is measured in cells, so a tail fold has to stop on a syllable edge
+   and still fill the column exactly, or every column after it moves. *)
+let test_a_hangul_title_folds_at_its_tail_on_a_syllable_edge () =
+  let title =
+    "\xec\xb5\x9c\xea\xb7\xbc 6\xec\x9d\xbc\xea\xb0\x84 MASC \
+     \xec\xbd\x94\xeb\x93\x9c\xeb\xb2\xa0\xec\x9d\xb4\xec\x8a\xa4 \
+     \xed\x9a\x8c\xea\xb7\x80\xc2\xb7SSOT \xec\x9c\x84\xeb\xb0\x98"
+  in
+  List.iter
+    (fun column ->
+      let row =
+        Table.row
+          [ Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:column title
+          ; Table.cell ~header:"AGE" ~width:3 "9h"
+          ]
+      in
+      check int
+        (Printf.sprintf "at %d cells the row is exactly as wide as its header"
+           column)
+        (width
+           (Table.header_row
+              [ Table.cell ~header:"TITLE" ~width:column ""
+              ; Table.cell ~header:"AGE" ~width:3 ""
+              ]))
+        (width row);
+      check bool
+        (Printf.sprintf "at %d cells the head is kept: %s" column row)
+        true
+        (String.starts_with ~prefix:"\xec\xb5\x9c\xea\xb7\xbc 6" row);
+      check bool
+        (Printf.sprintf "at %d cells the cut is marked" column)
+        true
+        (contains "\xe2\x80\xa6" row))
+    (* Odd and even widths: an odd one leaves a cell a syllable cannot fill. *)
+    [ 12; 13; 20; 21 ]
 
 (* Nothing passes a fold at most call sites, and an identifier is the reading
    that must not lose an end. *)
@@ -197,6 +232,8 @@ let () =
             test_an_overlong_reading_folds_rather_than_pushes
         ; test_case "a column chooses which end gives way" `Quick
             test_a_column_chooses_which_end_gives_way
+        ; test_case "a hangul title folds at its tail on a syllable edge"
+            `Quick test_a_hangul_title_folds_at_its_tail_on_a_syllable_edge
         ; test_case "a column that says nothing keeps both ends" `Quick
             test_a_column_that_says_nothing_keeps_both_ends
         ; test_case "a dropped column leaves both lines" `Quick

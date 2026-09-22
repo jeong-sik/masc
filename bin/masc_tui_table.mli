@@ -16,9 +16,7 @@ type fold =
       (** Which part of a reading gives way when it is wider than its column.
           {!Fold_middle} keeps both ends -- an identifier cut at the head reads
           as a different identifier, and a number cut at either end is a wrong
-          number. {!Fold_tail} keeps the head, which is how a sentence is read:
-          a post's title spent its cells on a hex tail while its subject was
-          the half that folded. *)
+          number. {!Fold_tail} keeps the head, the way a sentence is read. *)
 
 type cell = private {
   header : string;

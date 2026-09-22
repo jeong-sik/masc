@@ -258,14 +258,65 @@ streaming = false
       }
     ]
   in
+  (* #37602 gates body externalization on completed-turn evidence: the small
+     input policy (the default) only demotes atoms a durable turn-boundary
+     line already covers ([completed_end_atom > 0]), plus a reader tool the
+     demoted content's blob marker can be answered with. Neither is present
+     by default, so this fixture seeds them: a durable boundary line says the
+     two seed messages above are already a completed turn's history, built
+     the same way Keeper_turn_boundaries' own tests build one
+     (test_keeper_librarian_range.ml), and the run below joins that trace by
+     session id. Anything the turn appends live -- the active tool's own call
+     and result -- lands past that boundary and stays inline. *)
+  let trace_id = "trace-demote-proof" in
+  let historical_position =
+    match Keeper_turn_boundaries.position_of_messages initial_messages with
+    | Ok position -> position
+    | Error detail -> fail ("fixture boundary position: " ^ detail)
+  in
+  let keepers_dir = Workspace.keepers_runtime_dir (Workspace.default_config base_path) in
+  let append_boundary record =
+    match Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:"demote-proof" record with
+    | Ok () -> ()
+    | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error)
+  in
+  append_boundary
+    { Keeper_turn_boundaries.recorded_at = 0.
+    ; event = Keeper_turn_boundaries.History_restarted { trace_id }
+    };
+  append_boundary
+    { Keeper_turn_boundaries.recorded_at = 0.
+    ; event =
+        Keeper_turn_boundaries.Turn_ended
+          { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+          ; history_at_start = Keeper_turn_boundaries.Fresh_history
+          ; position = historical_position
+          }
+    };
+  let reader_tool =
+    let schema = Keeper_runtime_schemas_toml.artifact_read in
+    match
+      Agent_core.Types.tool_schema_of_input_schema
+        ~name:schema.name ~description:schema.description
+        ~input_schema:schema.input_schema ()
+    with
+    | Error detail -> fail ("fixture reader schema: " ^ detail)
+    | Ok schema ->
+      Agent_core.Tool.of_schema
+        ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+        schema
+        (Agent_core.Tool.ignoring_execution_env (fun _ ->
+           Ok { Agent_core.Types.content = "{}"; content_blocks = None; _meta = None }))
+  in
   let result =
     Keeper_turn_driver.run_named
       ~system_prompt:"Demotion fixture."
       ~runtime_id:"fixture.sample"
       ~keeper_name:"demote-proof"
       ~base_path
+      ~session_id:trace_id
       ~tools:[ active_tool ]
-      ~agent_core_tools:[ active_tool ]
+      ~agent_core_tools:[ active_tool; reader_tool ]
       ~goal:"execute tool"
       ~initial_messages
       ~sw ~net:env#net ()

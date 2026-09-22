@@ -223,6 +223,12 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     when the ledger said the call failed, then two dispatch cells: [&] when
     it ran in a batch with others, [>] when it returned a deferral.
 
+    Under either receipt order, a record whose calls came from more than one
+    model response draws a line over each response's calls saying how many
+    it asked for. The response is the call's session ordinal, not its planned
+    index. No line draws under the two sorts, which interleave responses,
+    for a single response, or when any call states no ordinal.
+
     Recent tab under [Selected_only]: the fleet rows of keepers waiting on
     an approval, then the selected keeper's focus block, windowed like the
     Changes tab. The focus header names a settled turn by its number alone;

@@ -4768,7 +4768,10 @@ type state = {
      who put the pane away on Changes gets Changes back. *)
   mutable acting_pane_tab: Masc_tui_acting_pane.tab;
   (* The order the focus block lists the record's calls in; the heading
-     over them names it and a press on that heading moves to the next. *)
+     over them names it and a press on that heading moves to the next. It
+     opens newest first: a reader glancing at the pane is looking for what
+     the keeper just did, and oldest first put that below the fold on any
+     turn longer than the pane. *)
   mutable acting_pane_call_order: Masc_tui_acting_pane.call_order;
   (* The calls a press opened, by keeper and call key: an opened call draws
      its receipt age, schedule, disposition and the two previews under its
@@ -6775,7 +6778,7 @@ let create_state
   acting_pane_hidden = false;
   acting_pane_scroll = 0;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
-  acting_pane_call_order = Masc_tui_acting_pane.Oldest_first;
+  acting_pane_call_order = Masc_tui_acting_pane.Newest_first;
   acting_pane_expanded = [];
   acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;

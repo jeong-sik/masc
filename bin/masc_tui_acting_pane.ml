@@ -109,7 +109,9 @@ type scope =
 
 (* How the focus block orders the record's calls: receipt order either way,
    or the two readings that are not an order in time. The heading over the
-   calls names which is up, and a press on it moves to the next. *)
+   calls names which is up, and a press on it moves to the next. The TUI
+   opens on newest first, so the first press turns time around and the two
+   sorts come after. *)
 type call_order =
   | Oldest_first
   | Newest_first
@@ -123,10 +125,10 @@ let call_order_label = function
   | By_tool -> "by tool"
 
 let next_call_order = function
-  | Oldest_first -> Newest_first
-  | Newest_first -> Longest_first
+  | Newest_first -> Oldest_first
+  | Oldest_first -> Longest_first
   | Longest_first -> By_tool
-  | By_tool -> Oldest_first
+  | By_tool -> Newest_first
 
 type input = {
   now : float;
@@ -301,6 +303,7 @@ type logical_row =
   | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
   | Approval_row of string
   | Calls_heading
+  | Response_break of int
   | Tool_row of Acting.chunk * Acting.chunk_tool * record_state
   | Call_detail of Acting.chunk * Acting.chunk_tool * detail_part
   | Earlier_turn of Acting.chunk * Reading.keeper_health_reading option
@@ -652,6 +655,27 @@ let tool_line ~cols ~state (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
           ; duration
           ]))
 
+(* The line over one model response's calls: a short rule, how many calls
+   that response asked for, and the rule on to the edge. The eye finds where
+   one response ends without reading the rows. No number for the response:
+   the feed can open mid-turn, and "response 1" would name the first one
+   this screen saw, not the turn's first. *)
+let response_break_line ~cols calls =
+  let count = match calls with 1 -> "1 call" | n -> Printf.sprintf "%d calls" n in
+  let lead = rule_glyph ^ " " in
+  let label = "response" ^ middle_dot ^ count ^ " " in
+  let used =
+    border_cells + mark_cells + Layout.display_width lead + Layout.display_width label
+  in
+  fit_line ~cols
+    (with_border
+       [ { text = String.make mark_cells ' '; tone = Plain }
+       ; { text = lead ^ label; tone = Dim }
+       ; { text = String.concat "" (List.init (max 0 (cols - used)) (fun _ -> rule_glyph))
+         ; tone = Dim
+         }
+       ])
+
 (* The heading over the calls: which order they are in. Beside it the
    order is a press away, so the heading is the control as well as the
    label. *)
@@ -839,6 +863,40 @@ let ordered_calls order (calls : Acting.chunk_tool list) =
           String.compare a.Acting.ct_tool b.Acting.ct_tool)
         calls
 
+(* The calls split into model responses, when the order and the record can
+   say where one ends. Neighbours with the same session ordinal are one
+   response: the next provider call has the next ordinal. The planned index
+   cannot stand in for it -- a concurrent batch settles in any order, so
+   [1, 0, 2] arrives inside one response, and a CLI lane counts its calls
+   across the whole turn. Receipt order keeps a response's calls together,
+   forwards or backwards; the two sorts interleave them. A call that states
+   no ordinal leaves the boundary beside it unknown, and a single response
+   has nothing to split. *)
+let responses order (calls : Acting.chunk_tool list) =
+  let keeps_responses_together =
+    match order with
+    | Oldest_first | Newest_first -> true
+    | Longest_first | By_tool -> false
+  in
+  let states_its_response (tool : Acting.chunk_tool) =
+    Option.is_some tool.Acting.ct_session_turn
+  in
+  if not (keeps_responses_together && List.for_all states_its_response calls) then None
+  else
+    let groups =
+      List.fold_left
+        (fun groups (tool : Acting.chunk_tool) ->
+          match groups with
+          | ((last : Acting.chunk_tool) :: _ as group) :: rest
+            when Option.equal Int.equal last.Acting.ct_session_turn
+                   tool.Acting.ct_session_turn ->
+              (tool :: group) :: rest
+          | [] | [] :: _ | (_ :: _) :: _ -> [ tool ] :: groups)
+        [] calls
+      |> List.rev_map List.rev
+    in
+    match groups with [] | [ _ ] -> None | _ :: _ :: _ -> Some groups
+
 let is_expanded input ~keeper key =
   List.exists
     (fun (name, opened) -> String.equal name keeper && Acting.call_key_equal opened key)
@@ -863,16 +921,24 @@ let focus_rows input chunks name =
     | [] -> []
     | current :: earlier ->
         let state = record_state ~health current in
+        let ordered = ordered_calls input.call_order (Acting.chunk_tools current) in
+        let call_rows tool =
+          Tool_row (current, tool, state)
+          ::
+          (if is_expanded input ~keeper:name (Acting.call_key tool) then
+             List.map
+               (fun part -> Call_detail (current, tool, part))
+               [ Detail_facts; Detail_input; Detail_output ]
+           else [])
+        in
         let calls =
-          ordered_calls input.call_order (Acting.chunk_tools current)
-          |> List.concat_map (fun tool ->
-                 Tool_row (current, tool, state)
-                 ::
-                 (if is_expanded input ~keeper:name (Acting.call_key tool) then
-                    List.map
-                      (fun part -> Call_detail (current, tool, part))
-                      [ Detail_facts; Detail_input; Detail_output ]
-                  else []))
+          match responses input.call_order ordered with
+          | Some groups ->
+              List.concat_map
+                (fun group ->
+                  Response_break (List.length group) :: List.concat_map call_rows group)
+                groups
+          | None -> List.concat_map call_rows ordered
         in
         (* A call-less record draws no body row: the header already states
            the observation state and its receipt age. The heading names the
@@ -1026,7 +1092,8 @@ let fleet_lines ~below ~scroll (body, overview) =
    reader. Naming four columns over one sentence spends a row saying nothing. *)
 let row_uses_the_columns = function
   | Fleet_row _ | Tool_row _ | Earlier_turn _ -> true
-  | Focus_header _ | Approval_row _ | Calls_heading | Call_detail _ | Rule | More _
+  | Focus_header _ | Approval_row _ | Calls_heading | Response_break _ | Call_detail _
+  | Rule | More _
   | Indicator _ | File_row _ | Formatted_status _ -> false
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
@@ -1132,6 +1199,7 @@ let materialize_row ~cols input = function
       focus_header_line ~cols ~now:input.now ~health name current, Target_none
   | Approval_row tool -> approval_line ~cols tool, Target_none
   | Calls_heading -> calls_heading_line ~cols input.call_order, Target_call_order
+  | Response_break calls -> response_break_line ~cols calls, Target_none
   | Tool_row (chunk, tool, state) ->
       tool_line ~cols ~state chunk tool, Target_call (chunk.Acting.ck_keeper, Acting.call_key tool)
   | Call_detail (chunk, tool, part) ->

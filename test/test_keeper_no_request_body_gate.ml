@@ -258,14 +258,61 @@ streaming = false
       }
     ]
   in
+  (* The historical exchange is the work of a completed earlier turn of this
+     trace, and the boundary line that turn wrote is what makes it history:
+     the driver reads the completed end of the trace from the boundary lines
+     and demotes only the atoms before it. Without the line the whole seed
+     is current work and every body stays inline. *)
+  let trace_id = "demote-proof-trace" in
+  let keeper_name = "demote-proof" in
+  let keepers_dir = Workspace.keepers_runtime_dir (Workspace.default_config base_path) in
+  let position =
+    match Keeper_turn_boundaries.position_of_messages initial_messages with
+    | Ok position -> position
+    | Error detail -> fail detail
+  in
+  (match
+     Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:keeper_name
+       { Keeper_turn_boundaries.recorded_at = Unix.gettimeofday ()
+       ; event =
+           Keeper_turn_boundaries.Turn_ended
+             { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+             ; history_at_start = Keeper_turn_boundaries.Fresh_history
+             ; position
+             }
+       }
+   with
+   | Ok () -> ()
+   | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error));
+  (* A demoted body is a reference the model has to be able to follow, so the
+     driver demotes only when the artifact reader is among the turn's tools.
+     The fixture model never calls it. *)
+  let reader_tool =
+    let schema : Masc_domain.tool_schema = Keeper_runtime_schemas_toml.artifact_read in
+    match
+      Agent_core.Types.tool_schema_of_input_schema
+        ~name:schema.Masc_domain.name
+        ~description:schema.Masc_domain.description
+        ~input_schema:schema.Masc_domain.input_schema
+        ()
+    with
+    | Error detail -> fail detail
+    | Ok schema ->
+      Agent_core.Tool.of_schema
+        ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+        schema
+        (fun _env _input ->
+           Ok { Agent_core.Types.content = ""; content_blocks = None; _meta = None })
+  in
   let result =
     Keeper_turn_driver.run_named
       ~system_prompt:"Demotion fixture."
       ~runtime_id:"fixture.sample"
-      ~keeper_name:"demote-proof"
+      ~keeper_name
+      ~session_id:trace_id
       ~base_path
-      ~tools:[ active_tool ]
-      ~agent_core_tools:[ active_tool ]
+      ~tools:[ active_tool; reader_tool ]
+      ~agent_core_tools:[ active_tool; reader_tool ]
       ~goal:"execute tool"
       ~initial_messages
       ~sw ~net:env#net ()

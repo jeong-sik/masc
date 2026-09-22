@@ -27,9 +27,7 @@ type purge_report =
   ; messages_after : int
   ; bytes_before : int
   ; bytes_after : int
-  ; duplicates_dropped : int
   ; reasoning_blocks_stripped : int
-  ; reasoning_messages_dropped : int
   ; tool_results_cleared : int
   }
 
@@ -61,6 +59,10 @@ type purge_error =
       (** The checkpoint was installed and the position write after it
           failed. *)
   | Purge_backup_failed of string
+  | Purge_continuity_not_discarded of string
+      (** The Librarian working state was hashed against the checkpoint bytes
+          the purge rewrites and could not be removed first; nothing was
+          rewritten. *)
   | Purge_source_changed
   | Purge_install_failed of string
 
@@ -72,9 +74,12 @@ val purge_error_to_string : purge_error -> string
     serializes that check with same-Keeper boot registration. A rewrite is
     refused while the Librarian has atoms left to read
     ({!Keeper_checkpoint_purge.librarian_rebase}); otherwise apply cancels and
-    awaits the server-owned Librarian lane, installs the checkpoint, and
-    writes the rebased position after it. The canonical checkpoint is
-    installed only if its exact source reference is unchanged. *)
+    awaits the server-owned Librarian lane, backs the checkpoint up, removes
+    the Librarian working state hashed against its bytes
+    ({!Keeper_librarian_continuity.discard}), installs the checkpoint, writes
+    the rebased position after it, and logs what it did. The canonical
+    checkpoint is installed only if its exact source reference is
+    unchanged. *)
 val purge_current :
   Workspace.config ->
   keeper_name:string ->

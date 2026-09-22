@@ -752,11 +752,13 @@ let test_checkpoint_inventory_projects_missing_current () =
    observed-at window spanning both. *)
 (* RFC librarian-lifecycle §10-2 through the dashboard action. The preview
    says why an apply would be refused; the apply refuses while an atom is
-   unread and writes nothing; an apply at the end installs the checkpoint and
-   moves the position after it, leaving [boundary_lines_seen] alone. The
-   server-owned Librarian lane is cancelled and awaited before the writes;
-   here it has no unit, so cancellation returns at once. *)
-let test_purge_moves_the_librarian_position_with_the_checkpoint () =
+   unread and writes nothing; an apply at the end installs the checkpoint,
+   keeps every message and the position where it was (the purge keeps the
+   history's end), leaves [boundary_lines_seen] alone, and removes the
+   Librarian working state hashed against the old bytes. The server-owned
+   Librarian lane is cancelled and awaited before the writes; here it has no
+   unit, so cancellation returns at once. *)
+let test_purge_keeps_the_librarian_position_and_drops_the_working_state () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   with_temp_dir @@ fun dir ->
@@ -772,12 +774,31 @@ let test_purge_moves_the_librarian_position_with_the_checkpoint () =
     (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
   |> Result.map_error (fun detail -> fail detail) |> Result.get_ok;
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
-  (* Four identical wakes ahead of the protected tail: the fixed policy drops
-     the two middle ones and keeps the twenty most recent messages. *)
+  (* Ahead of the protected tail: repeated wakes, a reply with unsigned
+     reasoning and a closed tool cycle. The fixed policy strips the reasoning
+     and clears the result, and keeps every message. *)
   let wake = Agent_core.Types.user_msg "(autonomous wake)" in
+  let assistant content =
+    { Agent_core.Types.role = Agent_core.Types.Assistant
+    ; content
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
   let messages =
-    [ wake; Agent_core.Types.user_msg "reply-a"; wake; Agent_core.Types.user_msg "reply-b"
-    ; wake; wake ]
+    [ wake
+    ; assistant
+        [ Agent_core.Types.Thinking { content = "unsigned"; signature = None }
+        ; Agent_core.Types.Text "reply-a"
+        ]
+    ; wake
+    ; assistant
+        [ Agent_core.Types.ToolUse { id = "tool-a"; name = "test_tool"; input = `Assoc [] } ]
+    ; Agent_core.Types.tool_result_msg ~tool_use_id:"tool-a" ~content:"raw output" ()
+    ; wake
+    ; wake
+    ]
     @ List.init Purge.default_config.keep_recent_messages (fun i ->
         Agent_core.Types.user_msg (Printf.sprintf "recent %d" i))
   in
@@ -824,20 +845,31 @@ let test_purge_moves_the_librarian_position_with_the_checkpoint () =
    | Ok _ -> fail "an apply over an unread atom was allowed");
   check string "a refused apply leaves the checkpoint" original (Fs_compat.load_file canonical);
   write_position ~end_atom:count;
+  let working_state = Keeper_librarian_continuity.path ~config ~keeper_name in
+  Fs_compat.save_file working_state "{}";
   (match Checkpoints.purge_current config ~keeper_name ~apply:true with
-   | Ok result -> check bool "applied" true result.applied
+   | Ok result ->
+     check bool "applied" true result.applied;
+     check bool "the reasoning was stripped" true
+       (result.report.reasoning_blocks_stripped > 0);
+     check bool "the result was cleared" true (result.report.tool_results_cleared > 0)
    | Error error -> fail (Checkpoints.purge_error_to_string error));
+  check bool "the working state hashed against the old bytes is gone" false
+    (Sys.file_exists working_state);
   let purged =
     match Store.load_agent_core ~session_dir ~session_id:trace_id with
     | Ok purged -> purged
     | Error _ -> fail "the installed checkpoint is not readable"
   in
-  check int "the two middle wakes are gone" (List.length messages - 2)
+  check int "every message is kept" (List.length messages)
     (List.length purged.messages);
+  check int "and every atom" count (atoms purged.messages);
   match Progress.read ~keepers_dir ~keeper_id:keeper_name with
   | Ok (Some progress) ->
-    check int "the position moved to the rewritten end" (atoms purged.messages)
-      progress.position.end_atom;
+    check int "the position stays at the end" count progress.position.end_atom;
+    check (option string) "with the digest it had"
+      (Runtime_model_input_tail_window.atom_opening_digest messages (count - 1))
+      (Some progress.position.last_atom_digest);
     check int "boundary_lines_seen is untouched" boundary_lines_seen
       progress.boundary_lines_seen
   | Ok None -> fail "the position is gone"
@@ -985,9 +1017,9 @@ let () =
         ] )
     ; ( "checkpoint_purge"
       , [ test_case
-            "purge moves the Librarian position with the checkpoint"
+            "purge keeps the Librarian position and drops the working state"
             `Quick
-            test_purge_moves_the_librarian_position_with_the_checkpoint
+            test_purge_keeps_the_librarian_position_and_drops_the_working_state
         ] )
     ]
 ;;

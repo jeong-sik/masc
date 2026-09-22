@@ -2,6 +2,14 @@
     Memory progress and queued-input pockets do not authorize this frontier. *)
 type prepared
 val path : config:Workspace.config -> keeper_name:string -> string
+val discard : keepers_dir:string -> keeper_name:string -> (unit, string) result
+(** Remove the saved working state, durably; absent is success. For a writer
+    that has rewritten the checkpoint bytes this state was hashed against: a
+    checkpoint purge. {!commit} checks the file it read under its lock before
+    it writes, so a generation that started before this sees the change and
+    does not write; the caller still keeps new generations out while it
+    rewrites -- the dashboard purge stops the Keeper's Librarian lane under the
+    lifecycle lock, and the CLI purge holds the workspace writer lease. *)
 val read : config:Workspace.config -> keeper_name:string ->
   (Librarian_continuity_snapshot.t option, string) result
 val prepare : ?end_atom:int -> config:Workspace.config -> keeper_name:string -> trace_id:string -> unit ->

@@ -260,9 +260,7 @@ export interface KeeperCheckpointPurgeReport {
   bytes_before: number
   bytes_after: number
   bytes_removed: number
-  duplicates_dropped: number
   reasoning_blocks_stripped: number
-  reasoning_messages_dropped: number
   tool_results_cleared: number
 }
 

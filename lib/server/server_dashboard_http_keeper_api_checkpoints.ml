@@ -200,9 +200,7 @@ type purge_report =
   ; messages_after : int
   ; bytes_before : int
   ; bytes_after : int
-  ; duplicates_dropped : int
   ; reasoning_blocks_stripped : int
-  ; reasoning_messages_dropped : int
   ; tool_results_cleared : int
   }
 
@@ -227,6 +225,7 @@ type purge_error =
   | Purge_librarian_cancel_failed of string
   | Purge_librarian_position_not_written of string
   | Purge_backup_failed of string
+  | Purge_continuity_not_discarded of string
   | Purge_source_changed
   | Purge_install_failed of string
 
@@ -255,6 +254,10 @@ let purge_error_to_string = function
     ^ detail
   | Purge_backup_failed detail ->
     "checkpoint backup failed: " ^ detail
+  | Purge_continuity_not_discarded detail ->
+    "checkpoint purge refused: the Librarian working state hashed against the \
+     current checkpoint could not be removed, and nothing was rewritten: "
+    ^ detail
   | Purge_source_changed ->
     "checkpoint changed after preview; preview the current checkpoint again"
   | Purge_install_failed detail ->
@@ -343,9 +346,7 @@ let purge_report_json report =
     ; "bytes_before", `Int report.bytes_before
     ; "bytes_after", `Int report.bytes_after
     ; "bytes_removed", `Int (report.bytes_before - report.bytes_after)
-    ; "duplicates_dropped", `Int report.duplicates_dropped
     ; "reasoning_blocks_stripped", `Int report.reasoning_blocks_stripped
-    ; "reasoning_messages_dropped", `Int report.reasoning_messages_dropped
     ; "tool_results_cleared", `Int report.tool_results_cleared
     ]
 ;;
@@ -407,15 +408,6 @@ let ensure_exact_backup ~config ~trace_id ~source_ref source_bytes =
         | Error detail -> Error ("backup read-back failed: " ^ detail)))
 ;;
 
-let checkpoint_purge_error_to_string = function
-  | Keeper_checkpoint_purge.Invalid_config detail -> "invalid config: " ^ detail
-  | Invalid_input_structure structural ->
-    Keeper_transcript_unit.show_structural_error structural
-  | Invalid_output_structure structural ->
-    "purge produced invalid structure: "
-    ^ Keeper_transcript_unit.show_structural_error structural
-;;
-
 let purge_current_unlocked config ~keeper_name ~apply =
   match Keeper_meta_store.read_meta_resolved config keeper_name with
   | Error detail -> Error (Purge_checkpoint_unavailable detail)
@@ -467,7 +459,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
                 | Error error ->
                   Error
                     (Purge_checkpoint_invalid
-                       (checkpoint_purge_error_to_string error))
+                       (Keeper_checkpoint_purge.purge_error_to_string error))
                 | Ok (purged, purge_report) ->
                   let purged_bytes = Agent_core.Checkpoint.to_string purged in
                   let rebase =
@@ -487,9 +479,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
               ; messages_after = raw_report.messages_after
               ; bytes_before = String.length source_bytes
               ; bytes_after = String.length purged_bytes
-              ; duplicates_dropped = raw_report.duplicates_dropped
               ; reasoning_blocks_stripped = raw_report.reasoning_blocks_stripped
-              ; reasoning_messages_dropped = raw_report.reasoning_messages_dropped
               ; tool_results_cleared = raw_report.tool_results_cleared
               }
             in
@@ -542,52 +532,83 @@ let purge_current_unlocked config ~keeper_name ~apply =
                    with
                    | Error detail -> Error (Purge_backup_failed detail)
                    | Ok backup_path ->
+                     (* The working state was hashed against the bytes this
+                        rewrites, so it goes first: installed after, a failed
+                        removal would leave it refusing every Agent-Core turn
+                        with [Prefix_changed]; removed first, a failed install
+                        costs one working state the next Librarian round
+                        writes again. *)
                      (match
-                        Keeper_checkpoint_store.save_agent_core_if_source
-                          ~session_dir
-                          ~expected_source_ref:source_ref
-                          purged
+                        Keeper_librarian_continuity.discard
+                          ~keepers_dir:runtime_keepers_dir
+                          ~keeper_name
                       with
-                      | Keeper_checkpoint_store.Not_installed
-                          { cause = Source_changed _; _ } ->
-                        Error Purge_source_changed
-                      | Not_installed { cause; _ } ->
-                        Error
-                          (Purge_install_failed
-                             (checkpoint_cas_error_to_string cause))
-                      | Installed installed ->
-                        (* The checkpoint is on disk; the position follows it
-                           (RFC librarian-lifecycle §10-2). Between the two
-                           writes a crash leaves the old position against the new
-                           numbering, which the next round stops on; the error
-                           text says how that is resolved. *)
-                        let position_written =
-                          match rebase with
-                          | Keeper_checkpoint_purge.No_progress -> Ok ()
-                          | Rebased { after; _ } ->
-                            Keeper_librarian_progress.write
-                              ~keepers_dir:runtime_keepers_dir
-                              ~keeper_id:keeper_name
-                              after
-                        in
-                        (match position_written with
-                         | Error error ->
+                      | Error detail -> Error (Purge_continuity_not_discarded detail)
+                      | Ok () ->
+                        (match
+                           Keeper_checkpoint_store.save_agent_core_if_source
+                             ~session_dir
+                             ~expected_source_ref:source_ref
+                             purged
+                         with
+                         | Keeper_checkpoint_store.Not_installed
+                             { cause = Source_changed _; _ } ->
+                           Error Purge_source_changed
+                         | Not_installed { cause; _ } ->
                            Error
-                             (Purge_librarian_position_not_written
-                                (Keeper_librarian_progress.write_error_to_string error))
-                         | Ok () ->
-                           Ok
-                             { keeper = keeper_name
-                             ; trace_id
-                             ; apply_allowed = true
-                             ; applied = true
-                             ; backup_path = Some backup_path
-                             ; report
-                             ; warnings =
-                                 List.map
-                                   checkpoint_installation_auxiliary_to_string
-                                   installed.auxiliary
-                             }))))))
+                             (Purge_install_failed
+                                (checkpoint_cas_error_to_string cause))
+                         | Installed installed ->
+                           (* The checkpoint is on disk; the position follows it
+                              (RFC librarian-lifecycle §10-2). A sound purge keeps
+                              the history's end, so this writes back the position
+                              it had. A recovery drops the broken tail and the
+                              position moves to the new end; a crash between the
+                              two writes leaves it past that end, which the next
+                              round stops on, and the error text says how that is
+                              resolved. *)
+                           let position_written =
+                             match rebase with
+                             | Keeper_checkpoint_purge.No_progress -> Ok ()
+                             | Rebased { after; _ } ->
+                               Keeper_librarian_progress.write
+                                 ~keepers_dir:runtime_keepers_dir
+                                 ~keeper_id:keeper_name
+                                 after
+                           in
+                           (match position_written with
+                            | Error error ->
+                              Error
+                                (Purge_librarian_position_not_written
+                                   (Keeper_librarian_progress.write_error_to_string error))
+                            | Ok () ->
+                              Log.Keeper.info
+                                ~keeper_name
+                                "checkpoint purge applied trace=%s messages=%d->%d \
+                                 bytes=%d->%d reasoning_blocks_stripped=%d \
+                                 tool_results_cleared=%d \
+                                 messages_dropped_at_structural_break=%d backup=%s"
+                                trace_id
+                                report.messages_before
+                                report.messages_after
+                                report.bytes_before
+                                report.bytes_after
+                                report.reasoning_blocks_stripped
+                                report.tool_results_cleared
+                                raw_report.messages_dropped_at_structural_break
+                                backup_path;
+                              Ok
+                                { keeper = keeper_name
+                                ; trace_id
+                                ; apply_allowed = true
+                                ; applied = true
+                                ; backup_path = Some backup_path
+                                ; report
+                                ; warnings =
+                                    List.map
+                                      checkpoint_installation_auxiliary_to_string
+                                      installed.auxiliary
+                                })))))))
 ;;
 
 let purge_current config ~keeper_name ~apply =

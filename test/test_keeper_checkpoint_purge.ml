@@ -1,7 +1,8 @@
-(* RFC-0351 S1: deterministic offline checkpoint purge. The rules were
-   measured live on one Keeper's checkpoint (1,315 -> 579 messages, -28.0%
-   bytes); these tests pin the rule contract so the checked-in tool cannot
-   drift from what was validated. *)
+(* RFC-0351 S1: deterministic offline checkpoint purge. These tests pin the
+   rule contract, and above all that a purge keeps every atom and the last one
+   byte-exact: four stores count in atoms, and a purge that renumbered them
+   left goo-yang-bong sending its whole 16 MB history on every turn
+   (2026-09-22). *)
 
 module Purge = Masc.Keeper_checkpoint_purge
 module Types = Agent_core.Types
@@ -80,38 +81,94 @@ let message_texts messages =
             m.content))
     messages
 
-let test_duplicate_collapse_keeps_first_and_last () =
+let atom_count messages = snd (Runtime_model_input_tail_window.annotate messages)
+
+let history_end messages =
+  match Masc.Keeper_turn_boundaries.position_of_messages messages with
+  | Ok (Masc.Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }) ->
+    end_atom, last_atom_digest
+  | Ok _ -> Alcotest.fail "fixture history has no atoms"
+  | Error detail -> Alcotest.fail detail
+
+(* The shape goo-yang-bong's history had: the same wake cue opening turn after
+   turn, and replies that were nothing but unsigned reasoning. Every one of
+   them opens an atom, so every one stays. *)
+let test_repeated_messages_all_survive () =
   let wake = text_message Types.User "(autonomous wake)" in
   let messages =
     [ wake
     ; text_message Types.Assistant "reply-a"
+    ; wake
+    ; block_message Types.Assistant [ unsigned_thinking "only reasoning" ]
     ; wake
     ; text_message Types.Assistant "reply-b"
     ; wake
     ; wake
     ]
   in
-  let purged, report = run messages in
-  Alcotest.(check int) "two middles dropped" 2 report.duplicates_dropped;
+  let purged, _report = run messages in
   Alcotest.(check (list string))
-    "first and last occurrence survive in order"
-    [ "(autonomous wake)"; "reply-a"; "reply-b"; "(autonomous wake)" ]
+    "every message survives, in order"
+    [ "(autonomous wake)"
+    ; "reply-a"
+    ; "(autonomous wake)"
+    ; "<thinking>"
+    ; "(autonomous wake)"
+    ; "reply-b"
+    ; "(autonomous wake)"
+    ; "(autonomous wake)"
+    ]
     (message_texts purged)
 
-let test_duplicates_below_threshold_survive () =
+let test_every_atom_survives_a_purge () =
   let wake = text_message Types.User "(autonomous wake)" in
-  let messages = [ wake; text_message Types.Assistant "reply"; wake ] in
-  let _purged, report = run messages in
-  Alcotest.(check int) "pair is under the threshold" 0 report.duplicates_dropped
-
-let test_duplicate_tool_cycles_are_never_collapsed () =
-  (* Byte-identical cycles differ only in tool_use_id here — but even truly
-     repeated payloads must stay: R1 is scoped to text-only ordinary
-     messages. *)
-  let messages = cycle "a" @ cycle "b" @ cycle "c" in
+  let messages =
+    [ wake
+    ; block_message Types.Assistant [ unsigned_thinking "t1"; Types.Text "answer" ]
+    ; wake
+    ; block_message Types.Assistant [ unsigned_thinking "only reasoning" ]
+    ; wake
+    ]
+    @ [ block_message Types.Assistant [ unsigned_thinking "pre-tool"; tool_use "a" ]
+      ; block_message Types.Assistant [ unsigned_thinking "interstitial" ]
+      ; { (block_message Types.Tool [ tool_result "a" ]) with tool_call_id = Some "a" }
+      ]
+    @ [ wake; wake ]
+  in
   let purged, report = run messages in
-  Alcotest.(check int) "no cycle collapsed" 0 report.duplicates_dropped;
-  Alcotest.(check int) "all cycle messages survive" 6 (List.length purged)
+  Alcotest.(check bool) "the purge changed something" true
+    (report.reasoning_blocks_stripped > 0 && report.tool_results_cleared > 0);
+  Alcotest.(check int) "no message removed" (List.length messages) (List.length purged);
+  Alcotest.(check int) "same atom count" (atom_count messages) (atom_count purged);
+  Alcotest.(check (pair int string)) "same history end" (history_end messages)
+    (history_end purged)
+
+(* With no count-based tail, the last atom is still returned byte-exact. Its
+   opening message is what the history's end is keyed by: stripping the
+   reasoning from a final reply would move that end, and every position at
+   the end of the history -- the Librarian's, the last turn-boundary line, the
+   request front -- would stop matching. *)
+let test_last_atom_is_kept_with_no_tail () =
+  let final_reply =
+    block_message Types.Assistant [ unsigned_thinking "last turn"; Types.Text "final" ]
+  in
+  let messages =
+    [ text_message Types.User "q"
+    ; block_message Types.Assistant [ unsigned_thinking "earlier"; Types.Text "a" ]
+    ; text_message Types.User "(autonomous wake)"
+    ; final_reply
+    ]
+  in
+  match Purge.purge_messages ~config:no_tail_config messages with
+  | Error error -> Alcotest.fail (Purge.purge_error_to_string error)
+  | Ok (purged, report) ->
+    Alcotest.(check int) "the earlier reply is still stripped" 1
+      report.reasoning_blocks_stripped;
+    Alcotest.(check string) "the last atom opens exactly as before"
+      (Types.show_message final_reply)
+      (Types.show_message (List.nth purged 3));
+    Alcotest.(check (pair int string)) "same history end" (history_end messages)
+      (history_end purged)
 
 let test_reasoning_strip_scope () =
   let messages =
@@ -121,11 +178,11 @@ let test_reasoning_strip_scope () =
     ]
   in
   let purged, report = run messages in
-  Alcotest.(check int) "unsigned blocks stripped" 2 report.reasoning_blocks_stripped;
-  Alcotest.(check int) "thinking-only message dropped" 1 report.reasoning_messages_dropped;
+  Alcotest.(check int) "unsigned block stripped beside text" 1
+    report.reasoning_blocks_stripped;
   Alcotest.(check (list string))
-    "text survives; signed thinking is untouched"
-    [ "answer"; "<thinking>|signed" ]
+    "text survives; a reasoning-only reply and signed thinking are untouched"
+    [ "answer"; "<thinking>"; "<thinking>|signed" ]
     (message_texts purged)
 
 (* Contract change: R2 used to skip any message carrying a ToolUse, so the
@@ -135,9 +192,12 @@ let test_reasoning_strip_scope () =
    41.0% of the file) were held by this rule. Unsigned reasoning carries no
    signature to replay, so the exemption bought nothing. *)
 let test_unsigned_reasoning_inside_tool_cycle_is_stripped () =
+  (* The trailing turn keeps the cycle out of the last atom, which is always
+     returned byte-exact. *)
   let messages =
     [ block_message Types.Assistant [ unsigned_thinking "pre-tool"; tool_use "a" ]
     ; { (block_message Types.Tool [ tool_result "a" ]) with tool_call_id = Some "a" }
+    ; text_message Types.User "after"
     ]
   in
   let purged, report = run messages in
@@ -145,7 +205,7 @@ let test_unsigned_reasoning_inside_tool_cycle_is_stripped () =
     "unsigned reasoning is stripped even beside a tool_use"
     1
     report.reasoning_blocks_stripped;
-  Alcotest.(check int) "no cycle message dropped" 2 (List.length purged);
+  Alcotest.(check int) "no message dropped" 3 (List.length purged);
   (match List.hd purged with
    | { Types.content = [ Types.ToolUse { id; _ } ]; _ } ->
      Alcotest.(check string) "the tool_use itself survives" "a" id
@@ -160,6 +220,7 @@ let test_signed_reasoning_inside_tool_cycle_is_kept () =
   let messages =
     [ block_message Types.Assistant [ signed_thinking "pre-tool"; tool_use "a" ]
     ; { (block_message Types.Tool [ tool_result "a" ]) with tool_call_id = Some "a" }
+    ; text_message Types.User "after"
     ]
   in
   let purged, report = run messages in
@@ -167,7 +228,7 @@ let test_signed_reasoning_inside_tool_cycle_is_kept () =
     "signed reasoning beside a tool_use is untouched"
     0
     report.reasoning_blocks_stripped;
-  Alcotest.(check int) "no cycle message dropped" 2 (List.length purged);
+  Alcotest.(check int) "no message dropped" 3 (List.length purged);
   match List.hd purged with
   | { Types.content = [ Types.Thinking { signature = Some _; _ }; Types.ToolUse _ ]; _ } ->
     ()
@@ -177,10 +238,10 @@ let test_signed_reasoning_inside_tool_cycle_is_kept () =
       (Types.show_message other)
 
 (* An assistant progress frame can sit inside an already-open tool cycle
-   without carrying either anchor. Once its unsigned reasoning is stripped,
-   dropping that empty interstitial frame leaves the ToolUse/ToolResult pair
-   intact. *)
-let test_thinking_only_interstitial_cycle_message_is_dropped () =
+   without carrying either anchor. It opens an atom like any assistant
+   message, so a frame that is nothing but unsigned reasoning stays whole
+   rather than being emptied or removed. *)
+let test_thinking_only_interstitial_cycle_message_is_kept () =
   let messages =
     [ block_message Types.Assistant [ tool_use "a" ]
     ; block_message Types.Assistant [ unsigned_thinking "only-thinking" ]
@@ -189,12 +250,15 @@ let test_thinking_only_interstitial_cycle_message_is_dropped () =
     ]
   in
   let purged, report = run messages in
-  Alcotest.(check int) "unsigned reasoning stripped" 1 report.reasoning_blocks_stripped;
-  Alcotest.(check int) "empty interstitial dropped" 1 report.reasoning_messages_dropped;
-  Alcotest.(check int) "pairing intact" 3 (List.length purged);
+  Alcotest.(check int) "nothing to strip without emptying" 0
+    report.reasoning_blocks_stripped;
+  Alcotest.(check int) "every message kept" 4 (List.length purged);
+  Alcotest.(check (list string)) "the interstitial frame is untouched"
+    [ "use:a"; "<thinking>"; "result:a:" ^ Purge.cleared_tool_result_content; "after" ]
+    (message_texts purged);
   match Masc.Keeper_transcript_unit.validate purged with
   | Ok () -> ()
-  | Error _ -> Alcotest.fail "dropping the interstitial broke tool pairing"
+  | Error _ -> Alcotest.fail "keeping the interstitial broke tool pairing"
 
 let test_tool_result_clear_preserves_pairing () =
   let messages = cycle "a" @ [ text_message Types.User "after" ] in
@@ -220,7 +284,7 @@ let test_tool_result_clear_preserves_pairing () =
 let test_error_tool_result_is_never_cleared () =
   (* R3 clears successful payloads only: an error result is feedback and
      lesson evidence, so its payload, json, and outcome all survive. *)
-  let messages = error_cycle "a" @ cycle "b" in
+  let messages = error_cycle "a" @ cycle "b" @ [ text_message Types.User "after" ] in
   let purged, report = run messages in
   Alcotest.(check int)
     "only the successful result is cleared"
@@ -252,7 +316,6 @@ let test_protected_tail_is_byte_exact () =
   in
   let messages = filler 3 @ tail in
   let purged, report = run ~config messages in
-  Alcotest.(check int) "tail duplicates survive" 0 report.duplicates_dropped;
   Alcotest.(check int) "tail reasoning survives" 0 report.reasoning_blocks_stripped;
   Alcotest.(check int) "nothing dropped" 7 (List.length purged)
 
@@ -263,30 +326,6 @@ let test_cycle_overlapping_protected_tail_is_untouched () =
   let messages = [ text_message Types.User "head" ] @ cycle "a" in
   let _purged, report = run ~config messages in
   Alcotest.(check int) "overlapping cycle not cleared" 0 report.tool_results_cleared
-
-let test_strip_revealed_duplicates_collapse_in_one_pass () =
-  (* Three assistant replies that differ only in their reasoning become
-     byte-identical once R2 strips them; R1 must see the stripped form in the
-     same pass (measured on that checkpoint: the reverse ordering left
-     229 duplicates for a second run to find). *)
-  let reply thinking =
-    block_message Types.Assistant [ unsigned_thinking thinking; Types.Text "same answer" ]
-  in
-  let messages =
-    [ reply "t1"
-    ; text_message Types.User "q1"
-    ; reply "t2"
-    ; text_message Types.User "q2"
-    ; reply "t3"
-    ]
-  in
-  let purged, report = run messages in
-  Alcotest.(check int) "three blocks stripped" 3 report.reasoning_blocks_stripped;
-  Alcotest.(check int) "middle stripped duplicate dropped" 1 report.duplicates_dropped;
-  Alcotest.(check (list string))
-    "first and last stripped occurrence survive"
-    [ "same answer"; "q1"; "q2"; "same answer" ]
-    (message_texts purged)
 
 let test_purge_is_idempotent () =
   let wake = text_message Types.User "(autonomous wake)" in
@@ -305,7 +344,6 @@ let test_purge_is_idempotent () =
     "second purge is the identity"
     (message_texts once)
     (message_texts twice);
-  Alcotest.(check int) "no further duplicates" 0 second_report.duplicates_dropped;
   Alcotest.(check int)
     "no further reasoning"
     0
@@ -377,13 +415,6 @@ let test_sound_input_drops_nothing_at_a_break () =
       report.Purge.messages_dropped_at_structural_break
 
 let test_config_bounds_are_enforced () =
-  (match
-     Purge.purge_messages
-       ~config:{ no_tail_config with dup_threshold = 1 }
-       [ text_message Types.User "x" ]
-   with
-   | Error (Purge.Invalid_config _) -> ()
-   | _ -> Alcotest.fail "dup_threshold 1 was accepted");
   match
     Purge.purge_messages
       ~config:{ no_tail_config with keep_recent_messages = -1 }
@@ -401,7 +432,10 @@ let checkpoint_fixture () =
       ; system_prompt = None
       ; messages =
           [ text_message Types.User "(autonomous wake)"
+          ; block_message Types.Assistant [ unsigned_thinking "t"; Types.Text "a" ]
           ; text_message Types.User "(autonomous wake)"
+          ; block_message Types.Assistant [ tool_use "x" ]
+          ; { (block_message Types.Tool [ tool_result "x" ]) with tool_call_id = Some "x" }
           ; text_message Types.User "(autonomous wake)"
           ]
       ; usage = Types.empty_usage
@@ -429,7 +463,10 @@ let test_checkpoint_fields_pass_through () =
   match Purge.purge ~config:no_tail_config checkpoint with
   | Error _ -> Alcotest.fail "checkpoint purge failed"
   | Ok (purged, report) ->
-    Alcotest.(check int) "one middle dropped" 1 report.duplicates_dropped;
+    Alcotest.(check int) "no message removed" report.messages_before
+      report.messages_after;
+    Alcotest.(check bool) "the fixture gives the purge something to change" true
+      (report.reasoning_blocks_stripped > 0 && report.tool_results_cleared > 0);
     Alcotest.(check string)
       "session identity unchanged"
       checkpoint.session_id
@@ -457,8 +494,6 @@ let rewritten_fixture () =
   | Error _ -> Alcotest.fail "checkpoint purge failed"
   | Ok (purged, _) -> checkpoint.messages, purged.Agent_core.Checkpoint.messages
 ;;
-
-let atom_count messages = snd (Window.annotate messages)
 
 let atom_position messages =
   match Boundaries.position_of_messages messages with
@@ -513,16 +548,17 @@ let test_librarian_rebase_refuses_unread_atoms () =
   | Ok _ -> Alcotest.fail "a rewrite over an unread atom was allowed"
 ;;
 
-(* [LibrarianRead-purge-trim-at-end.cfg]: at the end, the position moves to
-   the end of the rewritten history. *)
-let test_librarian_rebase_moves_the_position_to_the_rewritten_end () =
-  let _before, after, progress, moved_from, moved_to = rebased_at_end () in
-  let end_atom, last_atom_digest = atom_position after in
-  Alcotest.(check bool) "the rebase hands back the position it moved" true
+(* A purge keeps the history's end, so the position at the end comes back as
+   it was: the same atom count, the same digest. *)
+let test_librarian_rebase_keeps_the_position_at_the_end () =
+  let before, after, progress, moved_from, moved_to = rebased_at_end () in
+  let end_atom, last_atom_digest = atom_position before in
+  Alcotest.(check (pair int string)) "the rewritten end is the old end"
+    (end_atom, last_atom_digest) (atom_position after);
+  Alcotest.(check bool) "the rebase hands back the position it was given" true
     (moved_from == progress);
-  Alcotest.(check int) "end_atom is the rewritten end" end_atom
-    moved_to.position.end_atom;
-  Alcotest.(check string) "the digest opens the rewritten last atom" last_atom_digest
+  Alcotest.(check int) "end_atom is unchanged" end_atom moved_to.position.end_atom;
+  Alcotest.(check string) "the digest is unchanged" last_atom_digest
     moved_to.position.last_atom_digest;
   Alcotest.(check string) "the trace is unchanged" fixture_trace
     moved_to.position.trace_id
@@ -537,12 +573,11 @@ let test_librarian_rebase_keeps_boundary_lines_seen () =
     moved_to.boundary_lines_seen
 ;;
 
-(* [LibrarianRead-purge-trim-at-end-live.cfg]: the old end line stays in the
-   log after the purge. Against the rebased position it is not a cut point
-   (its end_atom is past the rewritten history), so the next round has
-   nothing to read and does not stop; against the old position the same
-   round stops on the mismatch, which is why a rewrite is never installed
-   without its rebase. *)
+(* The end line the last turn wrote stays in the log after the purge, and it
+   still names the rewritten history's end: its end_atom and digest are the
+   position's. So the next round has nothing to read and does not stop, and
+   the durable consumer finds that line as the position's witness rather than
+   stopping on [Progress_boundary_missing]. *)
 let test_librarian_rebase_leaves_nothing_to_read () =
   let before, after, old_progress, _moved_from, moved_to = rebased_at_end () in
   let old_end_line =
@@ -566,18 +601,23 @@ let test_librarian_rebase_leaves_nothing_to_read () =
       ~messages:after
       Range.All_unread
   in
-  (match select moved_to with
-   | Range.Nothing_to_read -> ()
-   | Range.Read _ | Range.Baseline _ | Range.Position_in_other_trace _ ->
-     Alcotest.fail "the rebased position found something to read in a fully read history"
-   | Range.Stop _ -> Alcotest.fail "the rebased position stopped the round");
-  match select old_progress with
-  | Range.Stop (Range.Position_mismatch { atom_count = rewritten_atoms; _ }) ->
-    Alcotest.(check int) "the old position is past the rewritten history"
-      (atom_count after) rewritten_atoms
-  | Range.Stop (Range.Unreadable_line _) -> Alcotest.fail "the old end line was refused"
-  | Range.Nothing_to_read | Range.Read _ | Range.Baseline _ | Range.Position_in_other_trace _ ->
-    Alcotest.fail "the old position did not stop on the rewritten history"
+  let old_end = atom_position before in
+  (match old_end_line.event with
+   | Boundaries.Turn_ended
+       { position = Boundaries.Atom_history { end_atom; last_atom_digest }; _ } ->
+     Alcotest.(check (pair int string)) "the old end line names the rewritten end"
+       (atom_position after) (end_atom, last_atom_digest);
+     Alcotest.(check (pair int string)) "and the position it witnesses"
+       (moved_to.position.end_atom, moved_to.position.last_atom_digest)
+       (end_atom, last_atom_digest)
+   | _ -> Alcotest.fail "the fixture end line is not an atom position");
+  Alcotest.(check (pair int string)) "the old position is the rebased one" old_end
+    (old_progress.position.end_atom, old_progress.position.last_atom_digest);
+  match select moved_to with
+  | Range.Nothing_to_read -> ()
+  | Range.Read _ | Range.Baseline _ | Range.Position_in_other_trace _ ->
+    Alcotest.fail "the position found something to read in a fully read history"
+  | Range.Stop _ -> Alcotest.fail "the position stopped the round on the rewritten history"
 ;;
 
 let test_librarian_rebase_without_a_position () =
@@ -759,10 +799,19 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
         "no base or recorded default uses current workspace without writes"
         before (workspace_contents owner_root);
       (* RFC librarian-lifecycle §10-2 at the CLI: a position short of the
-         end refuses the apply and writes nothing; a position at the end is
-         moved to the rewritten end after the checkpoint is installed. *)
+         end refuses the apply and writes nothing; a position at the end stays
+         where it was, because the purge keeps the history's end. The working
+         state was hashed against the bytes the purge rewrites, so an apply
+         removes it and a refused apply leaves it. *)
       let atoms = atom_count checkpoint.messages in
       write_progress ~end_atom:(atoms - 1);
+      (* The progress write made the keeper's runtime directory, where the
+         working state lives beside it. *)
+      let working_state =
+        Masc.Keeper_librarian_continuity.path ~config ~keeper_name:checkpoint.agent_name
+      in
+      Out_channel.with_open_bin working_state (fun output ->
+        Out_channel.output_string output "{}");
       let before_refused = workspace_contents owner_root in
       run_cli ~exit_code:1 [ "--base"; base_path; "--apply" ];
       Alcotest.(check (list (pair string (option string))))
@@ -787,14 +836,21 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
         ~session_dir ~session_id:checkpoint.session_id with
        | Error _ -> Alcotest.fail "applied checkpoint is not readable"
        | Ok purged ->
-           Alcotest.(check int) "actual CLI removes the middle duplicate" 2
-             (List.length purged.messages);
+           Alcotest.(check int) "actual CLI keeps every message"
+             (List.length checkpoint.messages) (List.length purged.messages);
+           Alcotest.(check bool) "and rewrote something" true
+             (Agent_core.Checkpoint.to_string purged
+              <> Agent_core.Checkpoint.to_string checkpoint);
+           Alcotest.(check bool) "apply removes the Librarian working state" false
+             (Sys.file_exists working_state);
            Alcotest.(check int) "apply preserves turn watermark" checkpoint.turn_count
              purged.turn_count;
            Alcotest.(check string) "apply preserves session identity" checkpoint.session_id
              purged.session_id;
            let moved = read_progress () in
-           Alcotest.(check int) "apply moves the Librarian position to the rewritten end"
+           Alcotest.(check int) "apply leaves the Librarian position at the end"
+             atoms moved.position.end_atom;
+           Alcotest.(check int) "which is still the history's end"
              (atom_count purged.messages) moved.position.end_atom;
            Alcotest.(check int) "apply leaves boundary_lines_seen alone"
              fixture_boundary_lines_seen moved.boundary_lines_seen))
@@ -802,20 +858,22 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
 let () =
   Alcotest.run
     "keeper checkpoint purge"
-    [ ( "rules"
+    [ ( "atoms"
       , [ Alcotest.test_case
-            "duplicate collapse keeps first and last"
+            "repeated messages all survive"
             `Quick
-            test_duplicate_collapse_keeps_first_and_last
+            test_repeated_messages_all_survive
         ; Alcotest.test_case
-            "duplicates below threshold survive"
+            "every atom survives a purge"
             `Quick
-            test_duplicates_below_threshold_survive
+            test_every_atom_survives_a_purge
         ; Alcotest.test_case
-            "tool cycles are never collapsed"
+            "the last atom is kept with no tail"
             `Quick
-            test_duplicate_tool_cycles_are_never_collapsed
-        ; Alcotest.test_case "reasoning strip scope" `Quick test_reasoning_strip_scope
+            test_last_atom_is_kept_with_no_tail
+        ] )
+    ; ( "rules"
+      , [ Alcotest.test_case "reasoning strip scope" `Quick test_reasoning_strip_scope
         ; Alcotest.test_case
             "unsigned reasoning inside a tool cycle is stripped"
             `Quick
@@ -825,9 +883,9 @@ let () =
             `Quick
             test_signed_reasoning_inside_tool_cycle_is_kept
         ; Alcotest.test_case
-            "a thinking-only interstitial cycle message is dropped"
+            "a thinking-only interstitial cycle message is kept"
             `Quick
-            test_thinking_only_interstitial_cycle_message_is_dropped
+            test_thinking_only_interstitial_cycle_message_is_kept
         ; Alcotest.test_case
             "tool result clear preserves pairing"
             `Quick
@@ -836,10 +894,6 @@ let () =
             "error tool result is never cleared"
             `Quick
             test_error_tool_result_is_never_cleared
-        ; Alcotest.test_case
-            "strip-revealed duplicates collapse in one pass"
-            `Quick
-            test_strip_revealed_duplicates_collapse_in_one_pass
         ] )
     ; ( "boundaries"
       , [ Alcotest.test_case
@@ -878,9 +932,9 @@ let () =
             `Quick
             test_librarian_rebase_refuses_unread_atoms
         ; Alcotest.test_case
-            "librarian_rebase_moves_the_position_to_the_rewritten_end"
+            "librarian_rebase_keeps_the_position_at_the_end"
             `Quick
-            test_librarian_rebase_moves_the_position_to_the_rewritten_end
+            test_librarian_rebase_keeps_the_position_at_the_end
         ; Alcotest.test_case
             "librarian_rebase_keeps_boundary_lines_seen"
             `Quick

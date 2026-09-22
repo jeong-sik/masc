@@ -2,9 +2,9 @@
     (RFC-0351 S1).
 
     Loads the canonical AGENT_CORE checkpoint for one trace, applies
-    {!Masc.Keeper_checkpoint_purge.purge} (duplicate collapse, unsigned
-    reasoning strip, tool-result content clear — no LLM involved), and prints
-    a per-rule report. Dry-run by default; [--apply] backs the original file
+    {!Masc.Keeper_checkpoint_purge.purge} (unsigned reasoning strip and
+    tool-result content clear, neither of which removes an atom — no LLM
+    involved), and prints a per-rule report. Dry-run by default; [--apply] backs the original file
     up byte-exact and saves the purged checkpoint through
     [Keeper_checkpoint_store.save_agent_core_classified] (locked, structure-validated,
     watermark-checked; [turn_count] is unchanged so the save lands as an
@@ -21,7 +21,10 @@
     The Librarian's atom position moves with the checkpoint (RFC
     librarian-lifecycle §10-2, {!Masc.Keeper_checkpoint_purge.librarian_rebase}):
     the rewrite is refused while the Librarian has atoms left to read, and
-    otherwise the position is written after the checkpoint. *)
+    otherwise the position is written after the checkpoint. The Librarian
+    working state was hashed against the bytes the purge rewrites, so it is
+    removed before the checkpoint is saved
+    ({!Masc.Keeper_librarian_continuity.discard}). *)
 
 let usage =
   {|Usage: masc_checkpoint_purge --trace TRACE_ID [OPTIONS]
@@ -33,7 +36,6 @@ Options:
   --base DIR               workspace root (default: MASC_BASE_PATH or cwd)
   --apply                  back up, then write the purged checkpoint
   --keep-recent N          protected tail length in messages (default 20)
-  --dup-threshold N        duplicate collapse threshold (default 3, >= 2)
   --no-strip-thinking      keep unsigned Thinking/ReasoningDetails blocks
   --no-clear-tool-results  keep ToolResult payloads
   -h, --help               print this help
@@ -82,6 +84,8 @@ let purge_error_text = function
       "purge produced an invalid structure — this is a bug in \
        keeper_checkpoint_purge, nothing was written: %s"
       (structural_error_text structural)
+  | (Purge.History_end_unreadable _ | Purge.History_end_moved _) as purge_error ->
+    Purge.purge_error_to_string purge_error
 
 let load_error_text = function
   | Store.Not_found -> "canonical checkpoint file not found"
@@ -132,12 +136,6 @@ let () =
       config
       := { !config with
            Purge.keep_recent_messages = parse_positive_int_arg "--keep-recent" value
-         };
-      parse rest
-    | "--dup-threshold" :: value :: rest ->
-      config
-      := { !config with
-           Purge.dup_threshold = parse_positive_int_arg "--dup-threshold" value
          };
       parse rest
     | "--no-strip-thinking" :: rest ->
@@ -216,14 +214,10 @@ let () =
             *. (float_of_int after_len -. float_of_int before_len)
             /. float_of_int before_len);
        Printf.printf
-         "R1 duplicate messages dropped: %d\n"
-         report.Purge.duplicates_dropped;
+         "reasoning blocks stripped: %d\n"
+         report.Purge.reasoning_blocks_stripped;
        Printf.printf
-         "R2 reasoning blocks stripped: %d (messages dropped when emptied: %d)\n"
-         report.Purge.reasoning_blocks_stripped
-         report.Purge.reasoning_messages_dropped;
-       Printf.printf
-         "R3 tool results cleared: %d\n"
+         "tool results cleared: %d\n"
          report.Purge.tool_results_cleared;
        (match rebase with
         | Ok Purge.No_progress -> print_endline "librarian position: none"
@@ -272,6 +266,20 @@ let () =
          let backup_path = Filename.concat backup_dir (trace ^ ".json") in
          write_file_bytes backup_path original_bytes;
          Printf.printf "backup: %s (%d bytes)\n" backup_path before_len;
+         (* The working state was hashed against the bytes this rewrites. It
+            goes before the save: left behind a saved purge, it would refuse
+            every Agent-Core turn with [Prefix_changed]. *)
+         (match
+            Masc.Keeper_librarian_continuity.discard
+              ~keepers_dir:runtime_keepers_dir
+              ~keeper_name:checkpoint.agent_name
+          with
+          | Ok () -> print_endline "librarian working state: removed"
+          | Error detail ->
+            error
+              ("the Librarian working state could not be removed, and nothing was \
+                rewritten (backup retained): "
+               ^ detail));
          (match
             Store.save_agent_core_classified ~session_dir
               ~history_retained:

@@ -18,9 +18,13 @@ type prepared =
   ; end_atom : int
   ; unread : Agent_core.Types.message list
   }
+let path_in ~keepers_dir ~keeper_name =
+  Filename.concat (Filename.concat keepers_dir keeper_name) "librarian-continuity.json"
 let path ~config ~keeper_name =
-  Filename.concat (Filename.concat (Workspace.keepers_runtime_dir config) keeper_name)
-    "librarian-continuity.json"
+  path_in ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+let discard ~keepers_dir ~keeper_name =
+  Keeper_fs.remove_file_durable (path_in ~keepers_dir ~keeper_name)
+  |> Result.map_error Keeper_fs.durable_remove_error_to_string
 let read ~config ~keeper_name =
   let file = path ~config ~keeper_name in
   match Fs_compat.exact_path_kind ~follow:false file with

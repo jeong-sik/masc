@@ -1,14 +1,13 @@
 (** Deterministic offline checkpoint purge (RFC-0351 S1).
 
-    Reduces a persisted AGENT_CORE checkpoint with three closed rules, none of which
-    involves an LLM:
+    Reduces a persisted AGENT_CORE checkpoint with two closed rules, neither of
+    which involves an LLM, and neither of which removes a message that opens an
+    atom:
 
-    - R1 duplicate collapse: byte-identical text-only messages repeated at
-      least [dup_threshold] times keep their first and last occurrence.
-    - R2 reasoning strip: unsigned [Thinking] and [ReasoningDetails] blocks are
-      removed from assistant messages that carry no [ToolUse] block; a message
-      left with no content is dropped.
-    - R3 tool-result clear: [ToolResult] blocks in closed tool cycles have
+    - Reasoning strip: unsigned [Thinking] and [ReasoningDetails] blocks are
+      removed from assistant messages. A message the strip would leave empty
+      is kept as it was.
+    - Tool-result clear: [ToolResult] blocks in closed tool cycles have
       their content replaced by {!cleared_tool_result_content}, preserving the
       [tool_use_id]/[ToolUse] pairing (the cycle stays a valid closed unit).
       Failed results ([Tool_failed]) are exempt and pass through byte-exact:
@@ -18,15 +17,39 @@
       so it stays inside RFC-0351 §2's "judge by type, integer, or byte
       comparison only" rule.
 
-    R2 and R3 run before R1: stripping reasoning can make previously distinct
-    assistant messages byte-identical, and duplicate grouping sees only the
-    stripped form — this ordering is what makes a single pass a fixpoint.
+    {2 The atom sequence is kept}
+
+    Every [User] and [Assistant] message opens an atom
+    ({!Runtime_model_input_tail_window.annotate}), and four stores count in
+    atoms: the turn-boundary log, the Librarian position, the continuity
+    snapshot and the carried-front seed. A purge that removed an atom would
+    renumber every one after it, and each of those stores would describe a
+    history that is no longer there. goo-yang-bong's purge on 2026-09-22
+    dropped 825 repeated wake cues and 6 reasoning-only replies, the history
+    went from 13,550 atoms to 12,719, nothing that counted in atoms matched
+    it any more, and every turn sent the whole 16 MB history until one
+    finally completed. So no rule here removes an atom-opening message.
+
+    The last atom is returned byte-exact along with the tail, so the
+    history's end — its atom count and the digest of the message that opens
+    the last atom — is the same after the purge as before. That end is what a
+    position at the end of the history is keyed by, so the Librarian
+    position, the latest turn-boundary line and the request front all still
+    match. {!purge_messages} checks it and returns {!History_end_moved}
+    rather than a history whose end moved. The exception is a structurally
+    broken input: recovery drops the broken tail, so its end moves by design.
 
     Tool protocol cycles are never split, reordered, or dropped. The last
-    [keep_recent_messages] messages — and the structurally protected suffix
-    from {!Keeper_transcript_unit.partition} — are returned byte-exact.
-    Signed thinking ([Thinking] with a signature and [RedactedThinking]) is
-    never removed: providers replay it byte-exact on tool turns.
+    [keep_recent_messages] messages, the whole last atom, and the structurally
+    protected suffix from {!Keeper_transcript_unit.partition} are returned
+    byte-exact. Signed thinking ([Thinking] with a signature and
+    [RedactedThinking]) is never removed: providers replay it byte-exact on
+    tool turns.
+
+    The rewritten bytes still differ from what a continuity snapshot hashed
+    (its [prefix_sha256]), so whoever installs a purged checkpoint discards
+    that snapshot first ({!Keeper_librarian_continuity.discard}); left in
+    place, it would refuse every Agent-Core turn with [Prefix_changed].
 
     Input and output are both validated with
     {!Keeper_transcript_unit.validate}; a checkpoint that fails input
@@ -38,25 +61,25 @@
     equal-watermark re-save.
 
     Applying the purge twice with the same config returns the first result
-    unchanged (verified by test): survivors of R1 number below
-    [dup_threshold], R2 leaves nothing further to strip, and R3 is a fixed
-    substitution. *)
+    unchanged (verified by test): the reasoning strip leaves nothing further
+    to strip, and the tool-result clear is a fixed substitution. *)
 
 type config =
-  { dup_threshold : int (** minimum occurrences before R1 collapses, >= 2 *)
-  ; keep_recent_messages : int (** byte-exact protected tail length, >= 0 *)
-  ; strip_thinking : bool (** apply R2 *)
-  ; clear_tool_results : bool (** apply R3 *)
+  { keep_recent_messages : int (** byte-exact protected tail length, >= 0 *)
+  ; strip_thinking : bool (** apply the reasoning strip *)
+  ; clear_tool_results : bool (** apply the tool-result clear *)
   }
 
 val default_config : config
+(** [{ keep_recent_messages = 20; strip_thinking = true; clear_tool_results = true }]. *)
 
 (** What a purge does to the Librarian's atom position (RFC
-    librarian-lifecycle §10-2). A rewrite renumbers atoms and changes the
-    message that opens the last one, so the position the Librarian holds
-    in the old numbering is not a place in the new one. It is moved, not
-    dropped, and only when it has nothing left to read: an unread atom has
-    no place in the rewritten history to be read from.
+    librarian-lifecycle §10-2). A purge of a sound transcript keeps every atom
+    and the last one byte-exact, so the position is answered back unchanged.
+    Recovery from a broken transcript drops its tail, and there the position
+    moves to the new end. Either way it is only allowed when the position has
+    nothing left to read: the reasoning strip rewrites the messages that open earlier atoms, so
+    a position short of the end would no longer match the message it names.
 
     [boundary_lines_seen] is left as it is. It says which lines of the
     boundary log a round had already counted, so that a restart line beyond
@@ -113,22 +136,16 @@ val librarian_rebase
   -> (rebase, refusal) result
 (** The position to write once [after] is installed in place of [before],
     or why the rewrite must not be installed. Pure. *)
-(** [{ dup_threshold = 3; keep_recent_messages = 20; strip_thinking = true;
-      clear_tool_results = true }] — the rule set measured on a live Keeper
-    checkpoint (1,315 -> 579 messages, -28.0% bytes, next-turn input
-    -26.0%). *)
 
 val cleared_tool_result_content : string
-(** Replacement content for R3-cleared [ToolResult] blocks. A fixed marker,
+(** Replacement content for cleared [ToolResult] blocks. A fixed marker,
     not a classifier: nothing reads it back. *)
 
 type report =
   { messages_before : int
   ; messages_after : int
-  ; duplicates_dropped : int (** R1: middle occurrences removed *)
-  ; reasoning_blocks_stripped : int (** R2: blocks removed from survivors *)
-  ; reasoning_messages_dropped : int (** R2: messages left empty and dropped *)
-  ; tool_results_cleared : int (** R3: blocks whose content was replaced *)
+  ; reasoning_blocks_stripped : int (** reasoning blocks removed; no message is removed *)
+  ; tool_results_cleared : int (** tool-result blocks whose content was replaced *)
   ; messages_dropped_at_structural_break : int
       (** Messages discarded because the input transcript was already broken:
           the offending cycle and everything after it. Zero for a structurally
@@ -149,6 +166,19 @@ type purge_error =
   | Invalid_output_structure of Keeper_transcript_unit.structural_error
       (** Defensive re-validation of our own output; reaching this is a bug in
           the transform, never a property of the input. *)
+  | History_end_unreadable of string
+      (** {!Keeper_turn_boundaries.position_of_messages} could not name the end
+          of the input or of the output. *)
+  | History_end_moved of
+      { before : Keeper_turn_boundaries.position
+      ; after : Keeper_turn_boundaries.position
+      }
+      (** A sound input came out with a different atom count or a different
+          message opening its last atom. The rules above keep both, so this is
+          a bug in the transform; the rewrite is refused rather than installed
+          under positions it would no longer match. *)
+
+val purge_error_to_string : purge_error -> string
 
 val purge_messages
   :  config:config

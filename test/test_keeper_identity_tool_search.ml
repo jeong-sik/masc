@@ -1107,11 +1107,15 @@ let test_load_survives_purge_checkpoint_and_resume () =
     let checkpoint =
       { checkpoint with
         messages =
+          (* The later turn keeps this cycle out of the last atom, which a
+             purge returns byte-exact; here the cycle is what has to be
+             purged. *)
           [ asked_for [ "atlassian_jira_search" ]
           ; Agent_core.Types.tool_result_msg
               ~tool_use_id:"toolu_ask"
               ~content:output.content
               ()
+          ; Agent_core.Types.user_msg "next turn"
           ]
       }
     in

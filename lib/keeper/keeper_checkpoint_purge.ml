@@ -4,18 +4,13 @@
    from the first line to the last. *)
 
 type config =
-  { dup_threshold : int
-  ; keep_recent_messages : int
+  { keep_recent_messages : int
   ; strip_thinking : bool
   ; clear_tool_results : bool
   }
 
 let default_config =
-  { dup_threshold = 3
-  ; keep_recent_messages = 20
-  ; strip_thinking = true
-  ; clear_tool_results = true
-  }
+  { keep_recent_messages = 20; strip_thinking = true; clear_tool_results = true }
 ;;
 
 type rebase =
@@ -46,8 +41,8 @@ type refusal =
 let refusal_to_string = function
   | Unread_atoms_present { end_atom; atom_count } ->
     Printf.sprintf
-      "the Librarian has read %d of %d atoms; the unread ones have no place in \
-       the rewritten history"
+      "the Librarian has read %d of %d atoms; the rewrite changes the message that \
+       opens atoms before the end, so a position short of it would no longer match"
       end_atom
       atom_count
   | Position_beyond_history { end_atom; atom_count } ->
@@ -132,9 +127,7 @@ let cleared_tool_result_content =
 type report =
   { messages_before : int
   ; messages_after : int
-  ; duplicates_dropped : int
   ; reasoning_blocks_stripped : int
-  ; reasoning_messages_dropped : int
   ; tool_results_cleared : int
   ; messages_dropped_at_structural_break : int
   }
@@ -143,6 +136,53 @@ type purge_error =
   | Invalid_config of string
   | Invalid_input_structure of Keeper_transcript_unit.structural_error
   | Invalid_output_structure of Keeper_transcript_unit.structural_error
+  | History_end_unreadable of string
+  | History_end_moved of
+      { before : Keeper_turn_boundaries.position
+      ; after : Keeper_turn_boundaries.position
+      }
+
+let position_to_string = function
+  | Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest } ->
+    Printf.sprintf "%d atoms, last opens %s" end_atom last_atom_digest
+  | Keeper_turn_boundaries.Empty_atom_history -> "no atom"
+  | Keeper_turn_boundaries.No_atom_history -> "no atom history"
+  | Keeper_turn_boundaries.Stale_noop -> "stale no-op"
+;;
+
+let purge_error_to_string = function
+  | Invalid_config detail -> "invalid config: " ^ detail
+  | Invalid_input_structure structural ->
+    Keeper_transcript_unit.show_structural_error structural
+  | Invalid_output_structure structural ->
+    "purge produced invalid structure: "
+    ^ Keeper_transcript_unit.show_structural_error structural
+  | History_end_unreadable detail -> "history end unreadable: " ^ detail
+  | History_end_moved { before; after } ->
+    Printf.sprintf
+      "purge moved the history's end (%s -> %s); nothing was written"
+      (position_to_string before)
+      (position_to_string after)
+;;
+
+let same_position before after =
+  match before, after with
+  | ( Keeper_turn_boundaries.Atom_history { end_atom; last_atom_digest }
+    , Keeper_turn_boundaries.Atom_history
+        { end_atom = after_end; last_atom_digest = after_digest } ) ->
+    end_atom = after_end && String.equal last_atom_digest after_digest
+  | Keeper_turn_boundaries.Empty_atom_history, Keeper_turn_boundaries.Empty_atom_history
+  | Keeper_turn_boundaries.No_atom_history, Keeper_turn_boundaries.No_atom_history
+  | Keeper_turn_boundaries.Stale_noop, Keeper_turn_boundaries.Stale_noop -> true
+  | ( ( Keeper_turn_boundaries.Atom_history _
+      | Keeper_turn_boundaries.Empty_atom_history
+      | Keeper_turn_boundaries.No_atom_history
+      | Keeper_turn_boundaries.Stale_noop )
+    , ( Keeper_turn_boundaries.Atom_history _
+      | Keeper_turn_boundaries.Empty_atom_history
+      | Keeper_turn_boundaries.No_atom_history
+      | Keeper_turn_boundaries.Stale_noop ) ) -> false
+;;
 
 (* One purge work item: an ordinary message or a whole closed tool cycle.
    [flat_last] is the index of the item's last message in the original list,
@@ -152,30 +192,17 @@ type item =
   ; flat_last : int
   }
 
-let is_text_only (message : Agent_core.Types.message) =
-  (match message.role with
-   | Agent_core.Types.User | Agent_core.Types.Assistant -> true
-   | Agent_core.Types.System | Agent_core.Types.Tool -> false)
-  && Option.is_none message.tool_call_id
-  && message.content <> []
-  && List.for_all
-       (function
-         | Agent_core.Types.Text _ -> true
-         | _ -> false)
-       message.content
-;;
-
 let is_assistant (message : Agent_core.Types.message) =
   match message.role with
   | Agent_core.Types.Assistant -> true
   | Agent_core.Types.User | Agent_core.Types.System | Agent_core.Types.Tool -> false
 ;;
 
-(* R2: remove unsigned reasoning blocks. Signed thinking and
+(* Reasoning strip: remove unsigned reasoning blocks. Signed thinking and
    [RedactedThinking] replay byte-exact on tool turns and are kept — that
    distinction lives in the match below, which is the whole safety argument.
 
-   R2 originally also skipped any assistant message carrying a ToolUse
+   The strip originally also skipped any assistant message carrying a ToolUse
    (#25537). That outer guard had no rationale of its own: the commit message
    justified it with "providers replay [signed thinking] byte-exact", which the
    [signature = None] pattern already enforces per block. On an agentic keeper
@@ -199,7 +226,7 @@ let strip_reasoning_blocks (message : Agent_core.Types.message) =
   { message with Agent_core.Types.content = List.rev kept }, stripped
 ;;
 
-(* R3: replace a SUCCESSFUL tool result's payload with the fixed marker while
+(* Tool-result clear: replace a SUCCESSFUL tool result's payload with the fixed marker while
    keeping the [tool_use_id] pairing and the typed delivery outcome.
    Failed results ([Tool_failed]) are exempt: their payload is the feedback
    the keeper reads on later turns and the only lesson evidence the librarian
@@ -234,60 +261,30 @@ let clear_tool_result_blocks (message : Agent_core.Types.message) =
   { message with Agent_core.Types.content }, !cleared_count
 ;;
 
-(* An item after R2/R3: its surviving messages ([] when R2 emptied and
-   dropped it) and, when it is an unprotected text-only ordinary message, the
-   R1 grouping key over its full derived representation. *)
-type transformed_item =
-  { messages : Agent_core.Types.message list
-  ; dedup_key : string option
-  }
+(* A message that opens an atom in {!Runtime_model_input_tail_window.annotate}:
+   every [User] and [Assistant] message does. The atom sequence is what the
+   turn-boundary log, the Librarian position, the continuity snapshot and the
+   carried-front seed all count in, so no rule below removes one of these. *)
+let opens_atom (message : Agent_core.Types.message) =
+  match message.role with
+  | Agent_core.Types.User | Agent_core.Types.Assistant -> true
+  | Agent_core.Types.System | Agent_core.Types.Tool -> false
+;;
 
-(* R1 bookkeeping: positions (item indices) of duplicate-eligible items,
-   grouped by their transformed representation. *)
-let duplicate_positions_to_drop ~dup_threshold transformed_items =
-  let groups : (string, int list) Hashtbl.t = Hashtbl.create 64 in
-  List.iteri
-    (fun position transformed ->
-       match transformed.dedup_key with
-       | Some key ->
-         let positions =
-           (* DET-OK: Hashtbl accumulator — an absent key is the empty group
-              by construction, not unknown input collapsed to a default. *)
-           Option.value ~default:[] (Hashtbl.find_opt groups key)
-         in
-         Hashtbl.replace groups key (position :: positions)
-       | None -> ())
-    transformed_items;
-  let dropped = Hashtbl.create 64 in
-  Hashtbl.iter
-    (fun _key positions ->
-       if List.length positions >= dup_threshold
-       then (
-         (* [positions] is in reverse traversal order: the head is the last
-            occurrence. Keep the first and last occurrence; drop the middle. *)
-         match positions with
-         | _last :: rest ->
-           (match List.rev rest with
-            | _first :: middle ->
-              List.iter
-                (fun position -> Hashtbl.replace dropped position ())
-                middle
-            | [] -> ())
-         | [] -> ()))
-    groups;
-  dropped
+(* The reasoning strip over one assistant message, never emptying it. A
+   message whose only content is unsigned reasoning opens an atom; removing it
+   would renumber every atom after it (goo-yang-bong, 2026-09-22), and
+   stripping it to nothing would leave an assistant message no provider
+   accepts. It stays as it was. *)
+let strip_reasoning_keeping_the_message message =
+  let stripped, count = strip_reasoning_blocks message in
+  match stripped.Agent_core.Types.content with
+  | [] -> message, 0
+  | _ :: _ -> stripped, count
 ;;
 
 let purge_messages ~config messages =
-  if config.dup_threshold < 2
-  then
-    Error
-      (Invalid_config
-         (Printf.sprintf
-            "dup_threshold must be >= 2 (got %d): every group keeps its first \
-             and last occurrence"
-            config.dup_threshold))
-  else if config.keep_recent_messages < 0
+  if config.keep_recent_messages < 0
   then
     Error
       (Invalid_config
@@ -331,44 +328,41 @@ let purge_messages ~config messages =
              { unit_; flat_last = !flat_index })
           closed_prefix
       in
-      let protected_from = messages_before - config.keep_recent_messages in
+      (* The last atom is returned byte-exact along with the count-based tail.
+         Its opening message is what every position at the history's end is
+         keyed by (end_atom and the digest of that message), so leaving it
+         untouched is what keeps those positions valid. A turn that ends in
+         more tool messages than [keep_recent_messages] puts its opening
+         assistant message outside the count-based tail; this reaches it. *)
+      let last_atom_opener =
+        List.fold_left
+          (fun (index, found) message ->
+             index + 1, if opens_atom message then Some index else found)
+          (0, None)
+          messages
+        |> snd
+      in
+      let protected_from =
+        let count_based = messages_before - config.keep_recent_messages in
+        match last_atom_opener with
+        | Some opener -> min count_based opener
+        | None -> count_based
+      in
       let protected item = item.flat_last >= protected_from in
       let reasoning_blocks_stripped = ref 0 in
-      let reasoning_messages_dropped = ref 0 in
       let tool_results_cleared = ref 0 in
-      (* R2/R3 run before R1: stripping reasoning can turn previously
-         distinct assistant messages byte-identical, and only the stripped
-         form participates in duplicate grouping. This ordering is what makes
-         a single pass a fixpoint (verified by the idempotence test; measured
-         on the same checkpoint, R1-first left 229 duplicates for a second
-         pass to find). *)
-      let dedup_key_of message =
-        if is_text_only message
-        then Some (Agent_core.Types.show_message message)
-        else None
-      in
       let purge_item item =
         if protected item
-        then
-          { messages = Keeper_transcript_unit.messages_of_closed_unit item.unit_
-          ; dedup_key = None
-          }
+        then Keeper_transcript_unit.messages_of_closed_unit item.unit_
         else (
           match item.unit_ with
           | Keeper_transcript_unit.Ordinary_message message ->
             if config.strip_thinking && is_assistant message
             then (
-              let stripped_message, stripped = strip_reasoning_blocks message in
+              let kept, stripped = strip_reasoning_keeping_the_message message in
               reasoning_blocks_stripped := !reasoning_blocks_stripped + stripped;
-              match stripped_message.Agent_core.Types.content with
-              | [] ->
-                incr reasoning_messages_dropped;
-                { messages = []; dedup_key = None }
-              | _ :: _ ->
-                { messages = [ stripped_message ]
-                ; dedup_key = dedup_key_of stripped_message
-                })
-            else { messages = [ message ]; dedup_key = dedup_key_of message }
+              [ kept ])
+            else [ message ]
           | Keeper_transcript_unit.Closed_tool_cycle cycle_messages ->
             let cycle_messages =
               if config.clear_tool_results
@@ -383,67 +377,58 @@ let purge_messages ~config messages =
                   cycle_messages
               else cycle_messages
             in
-            (* R2 inside the cycle. The assistant message that OPENS a tool
+            (* The reasoning strip inside the cycle. The assistant message that OPENS a tool
                cycle is grouped here, never in [Ordinary_message], so before
-               this branch existed R2 could not reach it at all — the single
-               largest reason unsigned reasoning survived a full purge.
-               The opening ToolUse and matching ToolResult anchors always
-               survive. An interstitial assistant message containing only
-               unsigned reasoning has no anchor, so it can be removed without
-               breaking the indivisible ToolUse/ToolResult pair. *)
-            let cycle_messages =
-              if config.strip_thinking
-              then
-                List.filter_map
-                  (fun message ->
-                     if not (is_assistant message)
-                     then Some message
-                     else (
-                       let stripped, count = strip_reasoning_blocks message in
-                       match stripped.Agent_core.Types.content with
-                       | [] when count > 0 ->
-                         reasoning_blocks_stripped
-                         := !reasoning_blocks_stripped + count;
-                         incr reasoning_messages_dropped;
-                         None
-                       | [] -> Some stripped
-                       | _ :: _ ->
-                         reasoning_blocks_stripped
-                         := !reasoning_blocks_stripped + count;
-                         Some stripped))
-                  cycle_messages
-              else cycle_messages
-            in
-            { messages = cycle_messages; dedup_key = None })
+               this branch existed the strip could not reach it at all — the single
+               largest reason unsigned reasoning survived a full purge. An
+               interstitial assistant message that holds only unsigned
+               reasoning opens an atom too and stays whole, like any other. *)
+            if config.strip_thinking
+            then
+              List.map
+                (fun message ->
+                   if not (is_assistant message)
+                   then message
+                   else (
+                     let kept, stripped = strip_reasoning_keeping_the_message message in
+                     reasoning_blocks_stripped := !reasoning_blocks_stripped + stripped;
+                     kept))
+                cycle_messages
+            else cycle_messages)
       in
-      let transformed_items = List.map purge_item items in
-      let dropped_positions =
-        duplicate_positions_to_drop
-          ~dup_threshold:config.dup_threshold
-          transformed_items
+      let purged = List.concat_map purge_item items @ protected_suffix in
+      let history_end_kept () =
+        (* A recovery drops the broken tail, so its end moves by design; the
+           Librarian rebase says where the position goes. Every other purge
+           keeps each atom and the last one byte-exact, and this states it
+           rather than trusting the rules above to go on doing so. *)
+        if recovering
+        then Ok ()
+        else (
+          match
+            ( Keeper_turn_boundaries.position_of_messages messages
+            , Keeper_turn_boundaries.position_of_messages purged )
+          with
+          | Error detail, _ | _, Error detail -> Error (History_end_unreadable detail)
+          | Ok before, Ok after ->
+            if same_position before after
+            then Ok ()
+            else Error (History_end_moved { before; after }))
       in
-      let duplicates_dropped = Hashtbl.length dropped_positions in
-      let purged_prefix =
-        List.concat
-          (List.filteri
-             (fun position _item -> not (Hashtbl.mem dropped_positions position))
-             transformed_items
-           |> List.map (fun transformed -> transformed.messages))
-      in
-      let purged = purged_prefix @ protected_suffix in
       (match Keeper_transcript_unit.validate purged with
        | Error structural -> Error (Invalid_output_structure structural)
        | Ok () ->
-         Ok
-           ( purged
-           , { messages_before
-             ; messages_after = List.length purged
-             ; duplicates_dropped
-             ; reasoning_blocks_stripped = !reasoning_blocks_stripped
-             ; reasoning_messages_dropped = !reasoning_messages_dropped
-             ; tool_results_cleared = !tool_results_cleared
-             ; messages_dropped_at_structural_break = dropped_at_break
-             } )))
+         (match history_end_kept () with
+          | Error _ as error -> error
+          | Ok () ->
+            Ok
+              ( purged
+              , { messages_before
+                ; messages_after = List.length purged
+                ; reasoning_blocks_stripped = !reasoning_blocks_stripped
+                ; tool_results_cleared = !tool_results_cleared
+                ; messages_dropped_at_structural_break = dropped_at_break
+                } ))))
 ;;
 
 let purge ~config (ckpt : Agent_core.Checkpoint.t) =

@@ -392,10 +392,17 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
   | Incomplete_output | Missing_output | Ambiguous_output _
   | Unexpected_output_content | Invalid_json_output | Internal_non_json_output
   | Response_body_deadline_exceeded -> true
+  (* The provider was reached and what it said is unknown, which §4.3 reads
+     toward progress, as it reads Invalid_request. This is how a request too
+     large for the connection often ends: on 2026-09-22 at 13:35:09Z a
+     1,594-atom continuity pass got `completion failed raw_response=none` from
+     both API slots while the official client named ~1,198,667 tokens in
+     prose. Counting it as no evidence would keep that width and resend the
+     same range on every pass. *)
+  | Completion_failed -> true
   (* Nothing was judged: this process could not start, time, or match the
      attempt it held. *)
-  | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch
-  | Completion_failed -> false
+  | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch -> false
 ;;
 
 (* A candidate the flow turned away before dispatch. One reason is about the
@@ -1374,4 +1381,5 @@ module For_testing = struct
   let execute_exact_output_classified = execute_exact_output_classified
   let record_failure = record_failure
   let commit_continuity = commit_continuity
+  let cause_shows_size = cause_shows_size
 end

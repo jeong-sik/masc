@@ -103,6 +103,11 @@ val run_best_effort
     without submitting the completed-turn range again. *)
 
 module For_testing : sig
+  val cause_shows_size : Agent_core.Exact_output.execution_error_cause -> bool
+  (** The size verdict one provider cause gives, so the whole table can be
+      asserted cause by cause. A walk reads less when any of its failures
+      answers true. *)
+
   val commit_continuity
     : commit:(unit -> (Librarian_continuity_snapshot.t, string) result)
     -> observe:((Librarian_continuity_snapshot.t, string) result -> unit)

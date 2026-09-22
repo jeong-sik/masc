@@ -327,6 +327,45 @@ let test_prefit_real_continuity ~base_path () =
   Alcotest.(check bool) "source checkpoint is unchanged" true
     (List.equal Agent_core.Types.Message_value.equal canonical after)
 
+(* The size verdict, cause by cause. A walk reads less when any of its
+   failures answers true, so this table is the whole rule: a row that flips
+   changes what a keeper reads after a refusal. Completion_failed is pinned
+   because it answered false for one commit, which turned a 1,594-atom pass
+   that both API slots dropped without a response into one resent on every
+   pass (live, 2026-09-22 13:35:09Z). *)
+let test_size_verdict_table () =
+  let module E = Agent_core.Exact_output in
+  let refused refusal = E.Provider_response_refused { http_status = 400; refusal } in
+  List.iter
+    (fun (name, cause, expected) ->
+       Alcotest.(check bool) name expected (Runtime.For_testing.cause_shows_size cause))
+    [ "context overflow", refused E.Context_overflow, true
+    ; "input capacity", refused E.Input_capacity, true
+    ; "request body refused", refused E.Request_body_refused, true
+    ; "timeout", refused E.Timeout, true
+    ; "invalid request, reason unknown", refused E.Invalid_request, true
+    ; "refusal body not received", refused E.Refusal_body_not_received, true
+    ; "rate limited", refused E.Rate_limited, false
+    ; "overloaded", refused E.Overloaded, false
+    ; "server error", refused E.Server_error, false
+    ; "network error", refused E.Network_error, false
+    ; "authentication failed", refused E.Auth_failed, false
+    ; "authorization refused", refused E.Authorization_refused, false
+    ; "payment required", refused E.Payment_required, false
+    ; "model not found", refused E.Not_found, false
+    ; "completion failed, response unknown", E.Completion_failed, true
+    ; "incomplete output", E.Incomplete_output, true
+    ; "missing output", E.Missing_output, true
+    ; "ambiguous output", E.Ambiguous_output 2, true
+    ; "unexpected output content", E.Unexpected_output_content, true
+    ; "invalid json output", E.Invalid_json_output, true
+    ; "internal non-json output", E.Internal_non_json_output, true
+    ; "response body deadline exceeded", E.Response_body_deadline_exceeded, true
+    ; "attempt already started", E.Attempt_already_started, false
+    ; "clock required for timeout", E.Clock_required_for_timeout, false
+    ; "frozen request mismatch", E.Frozen_request_mismatch, false
+    ]
+
 let () =
   let base_path = Filename.temp_dir "librarian-capacity-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
@@ -355,7 +394,9 @@ let () =
     test_callback ~cli_errors ~base_path ~registry ~keeper_id:name
       ~first_overflow:false ~status:`Too_many_requests ~expected ()) in
   Alcotest.run "Librarian capacity callbacks"
-    ["continuity prefit", [Alcotest.test_case "atom groups commit and produce the next request" `Quick
+    ["size verdict", [Alcotest.test_case "every provider cause, one row each" `Quick
+       test_size_verdict_table];
+     "continuity prefit", [Alcotest.test_case "atom groups commit and produce the next request" `Quick
        (test_prefit_real_continuity ~base_path)];
      "actual HTTP outcomes", [
       (* An API slot states its limit in provider prose, which this process

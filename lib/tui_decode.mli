@@ -898,9 +898,16 @@ type memory_context_frontier = {
   mcf_end_atom : int;
   mcf_boundary_line : int;
 }
+type memory_context_position = {
+  mcpo_trace_id : string;
+  mcpo_end_atom : int;
+}
 type memory_context_input =
   | Context_summarized of memory_context_frontier
-  | Context_uncompressed
+  | Context_absorbed of memory_context_position
+      (** The request started at the Librarian's durable position; nothing
+          summarizes what lies before it. *)
+  | Context_without_snapshot
   | Context_not_applied
 
 type memory_context_prepared = {

@@ -4,9 +4,8 @@
     for 4 tools: masc_library_list, masc_library_read, masc_library_add,
     masc_library_search
 
-    Note: Tool_library uses MASC_BASE_PATH first for library_root().
-    Tests override MASC_BASE_PATH to a
-    temp directory with the expected structure.
+    The library lives under the context's [base_path]; each test hands the
+    tools a temp directory as that workspace.
 *)
 
 module Tool_library = Masc.Tool_library
@@ -80,6 +79,17 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+(* The library takes its workspace from the context, never from the process
+   environment. The suite still points MASC_BASE_PATH at a scratch directory of
+   its own: a regression that reads the variable again then writes there, where
+   [test_library_follows_context_base_path] looks, and not into the live
+   workspace a developer's shell exports. *)
+let decoy_base_path =
+  let dir = temp_dir () in
+  Unix.putenv "MASC_BASE_PATH" dir;
+  at_exit (fun () -> cleanup_dir dir);
+  dir
+
 (** Create the expected library directory structure under a temp base path. *)
 let setup_library_dirs base_path =
   let docs_dir = Filename.concat base_path "docs" in
@@ -88,24 +98,26 @@ let setup_library_dirs base_path =
   Unix.mkdir lib_dir 0o755;
   lib_dir
 
-let original_home = Sys.getenv_opt "HOME"
-let original_masc_base_path = Sys.getenv_opt "MASC_BASE_PATH"
-
-(** Run a test function with a temporary MASC_BASE_PATH containing library dirs. *)
+(** Run a test function with a temporary workspace containing library dirs. *)
 let with_temp_base_path ?(prepare_library=true) f =
   let base_path = temp_dir () in
-  Unix.putenv "MASC_BASE_PATH" base_path;
   if prepare_library then ignore (setup_library_dirs base_path);
-  let ctx : Tool_library.context = { agent_name = "test-agent" } in
-  Fun.protect ~finally:(fun () ->
-    (match original_masc_base_path with
-     | Some root -> Unix.putenv "MASC_BASE_PATH" root
-     | None -> Unix.putenv "MASC_BASE_PATH" "");
-    (match original_home with
-     | Some h -> Unix.putenv "HOME" h
-     | None -> Unix.putenv "HOME" "");
-    cleanup_dir base_path
-  ) (fun () -> f ctx)
+  let ctx : Tool_library.context = { base_path; agent_name = "test-agent" } in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () -> f ctx)
+
+let library_documents (ctx : Tool_library.context) =
+  let root = Tool_library.library_root ~base_path:ctx.base_path in
+  if Sys.file_exists root
+  then
+    Sys.readdir root |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".md")
+  else []
+
+let write_library_document (ctx : Tool_library.context) ~filename body =
+  let path =
+    Filename.concat (Tool_library.library_root ~base_path:ctx.base_path) filename
+  in
+  Out_channel.with_open_text path (fun oc -> Out_channel.output_string oc body)
 
 let dispatch_exn ctx ~name ~args =
   match Tool_library.dispatch ctx ~name ~args with
@@ -116,9 +128,10 @@ let test_add_on_fresh_base () =
   List.iter (fun title ->
     with_temp_base_path ~prepare_library:false (fun ctx ->
       Alcotest.(check bool) "library initially absent" false
-        (Sys.file_exists (Tool_library.library_root ()));
+        (Sys.file_exists (Tool_library.library_root ~base_path:ctx.base_path));
       let ok, _ = dispatch_exn ctx ~name:"masc_library_add"
-          ~args:(`Assoc ["title", `String title; "content", `String "fresh base evidence"]) in
+          ~args:(`Assoc ["title", `String title; "content", `String "fresh base evidence";
+                         "source", `String "experiment"]) in
       Alcotest.(check bool) "first add succeeds" true ok;
       let ok, content = dispatch_exn ctx ~name:"masc_library_read"
           ~args:(`Assoc ["topic", `String title]) in
@@ -206,6 +219,7 @@ let test_read_by_title_case_insensitive_partial () =
     let _ = dispatch_exn ctx ~name:"masc_library_add" ~args:(`Assoc [
       ("title", `String "Root Cause: Orphan Count Analysis");
       ("content", `String "details about orphan counting");
+      ("source", `String "observation");
     ]) in
     let read_args = `Assoc [("topic", `String "root cause: orphan count")] in
     let (ok, _) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
@@ -219,6 +233,7 @@ let test_read_by_slug_still_works () =
     let _ = dispatch_exn ctx ~name:"masc_library_add" ~args:(`Assoc [
       ("title", `String "Slug Query Doc");
       ("content", `String "slug body");
+      ("source", `String "research");
     ]) in
     let read_args = `Assoc [("topic", `String "slug-query")] in
     let (ok, _) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
@@ -257,6 +272,57 @@ let test_add_invalid_source () =
     Alcotest.(check bool) "mentions source" true (msg_contains ~needle:"source" msg)
   )
 
+(* The schema requires [source]. A document written without one would record a
+   kind of work its writer never named, so the call is refused and nothing is
+   written. *)
+let test_add_missing_source () =
+  with_temp_base_path (fun ctx ->
+    let args = `Assoc [
+      ("title", `String "unsourced doc");
+      ("content", `String "some content");
+    ] in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    Alcotest.(check bool) "missing source fails" false ok;
+    Alcotest.(check bool) "names the missing field" true
+      (msg_contains ~needle:"source is required" msg);
+    Alcotest.(check (list string)) "no document written" [] (library_documents ctx)
+  )
+
+(* The reader requires [author], so the writer refuses a caller with no name
+   instead of writing a document the library then reports as unreadable. *)
+let test_add_with_blank_author_is_refused () =
+  with_temp_base_path (fun ctx ->
+    let ctx = { ctx with Tool_library.agent_name = "  " } in
+    let args = `Assoc [
+      ("title", `String "unsigned doc");
+      ("content", `String "some content");
+      ("source", `String "research");
+    ] in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    Alcotest.(check bool) "blank author fails" false ok;
+    Alcotest.(check bool) "names the author" true
+      (msg_contains ~needle:"no agent name" msg);
+    Alcotest.(check (list string)) "no document written" [] (library_documents ctx)
+  )
+
+(* The library is the caller's workspace, not whatever MASC_BASE_PATH the
+   process happens to hold. *)
+let test_library_follows_context_base_path () =
+  with_temp_base_path (fun ctx ->
+    let (ok, _) =
+      dispatch_exn ctx ~name:"masc_library_add"
+        ~args:(`Assoc [
+          ("title", `String "Workspace Doc");
+          ("content", `String "body");
+          ("source", `String "observation");
+        ])
+    in
+    Alcotest.(check bool) "add succeeds" true ok;
+    Alcotest.(check int) "written under the context workspace" 1
+      (List.length (library_documents ctx));
+    Alcotest.(check bool) "nothing under MASC_BASE_PATH" false
+      (Sys.file_exists (Tool_library.library_root ~base_path:decoy_base_path)))
+
 let test_add_success () =
   with_temp_base_path (fun ctx ->
     let args = `Assoc [
@@ -274,6 +340,7 @@ let test_add_with_tags () =
     let args = `Assoc [
       ("title", `String "tagged knowledge");
       ("content", `String "Content with tags.");
+      ("source", `String "direct_experience");
       ("tags", `List [`String "ocaml"; `String "testing"]);
     ] in
     let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
@@ -368,12 +435,9 @@ let test_added_frontmatter_carries_only_observable_fields () =
         ])
     in
     Alcotest.(check bool) "add succeeds" true added;
-    let root = Tool_library.library_root () in
+    let root = Tool_library.library_root ~base_path:ctx.base_path in
     let path =
-      match
-        Sys.readdir root |> Array.to_list
-        |> List.filter (fun f -> Filename.check_suffix f ".md")
-      with
+      match library_documents ctx with
       | [ single ] -> Filename.concat root single
       | other ->
         Alcotest.failf "expected exactly one document, got %d" (List.length other)
@@ -388,6 +452,88 @@ let test_added_frontmatter_carries_only_observable_fields () =
     Alcotest.(check bool) "records the source" true
       (msg_contains ~needle:"source: direct_experience" written)
   )
+
+(* ============================================================
+   Documents whose frontmatter does not read
+   ============================================================
+
+   A document written by hand can carry any [source]. List, read and search
+   name such a document by filename with the reason; none of them prints the
+   raw value as if it were one of the four. *)
+
+let unknown_source_note =
+  "source \"operation\" is not one of: direct_experience, research, \
+   experiment, observation"
+
+let test_unknown_source_is_named_not_passed_through () =
+  with_temp_base_path (fun ctx ->
+    let (added, _) =
+      dispatch_exn ctx ~name:"masc_library_add"
+        ~args:(`Assoc [
+          ("title", `String "Readable Doc");
+          ("content", `String "shared marker");
+          ("source", `String "research");
+        ])
+    in
+    Alcotest.(check bool) "add succeeds" true added;
+    write_library_document ctx ~filename:"hand-written.md"
+      "---\ntitle: Hand Written\nsource: operation\nauthor: codex\n---\n\nshared marker\n";
+    write_library_document ctx ~filename:"no-source.md"
+      "---\ntitle: No Source\nauthor: codex\n---\n\nshared marker\n";
+    let (ok, listing) = dispatch_exn ctx ~name:"masc_library_list" ~args:(`Assoc []) in
+    Alcotest.(check bool) "list ok" true ok;
+    Alcotest.(check bool) "readable document shows its source" true
+      (msg_contains ~needle:"**Readable Doc** (research, test-agent" listing);
+    Alcotest.(check bool) "unknown source named with its reason" true
+      (msg_contains ~needle:("- hand-written.md (" ^ unknown_source_note ^ ")") listing);
+    Alcotest.(check bool) "unknown source never listed as a document title" false
+      (msg_contains ~needle:"**Hand Written**" listing);
+    Alcotest.(check bool) "absent source named" true
+      (msg_contains ~needle:"- no-source.md (no source in frontmatter)" listing);
+    let (ok, results) =
+      dispatch_exn ctx ~name:"masc_library_search"
+        ~args:(`Assoc [ ("query", `String "shared marker") ])
+    in
+    Alcotest.(check bool) "search ok" true ok;
+    Alcotest.(check bool) "search names the unknown source" true
+      (msg_contains ~needle:("- hand-written.md (" ^ unknown_source_note ^ ")") results);
+    let (ok, body) =
+      dispatch_exn ctx ~name:"masc_library_read"
+        ~args:(`Assoc [ ("topic", `String "hand-written") ])
+    in
+    Alcotest.(check bool) "read by filename ok" true ok;
+    Alcotest.(check bool) "read heading carries the reason" true
+      (msg_contains ~needle:("## hand-written.md (" ^ unknown_source_note ^ ")") body);
+    Alcotest.(check bool) "read returns the document" true
+      (msg_contains ~needle:"shared marker" body)
+  )
+
+(* A header missing a field the writer always writes, a block that never
+   closes, and a source outside ASCII. Each is named with its own reason: the
+   missing title is not printed as an empty bold title, the unclosed block is
+   not reported as a missing source although its source line is there, and the
+   non-ASCII source is quoted as written rather than as escaped bytes. *)
+let test_header_that_does_not_read_names_its_reason () =
+  with_temp_base_path (fun ctx ->
+    write_library_document ctx ~filename:"no-title.md"
+      "---\nsource: research\nauthor: codex\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
+    write_library_document ctx ~filename:"empty-author.md"
+      "---\ntitle: Empty Author\nsource: research\nauthor:\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
+    write_library_document ctx ~filename:"unclosed.md"
+      "---\ntitle: Unclosed\nsource: research\nauthor: codex\n\nbody\n";
+    write_library_document ctx ~filename:"korean-source.md"
+      "---\ntitle: Korean Source\nsource: 연구\nauthor: codex\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
+    let (ok, listing) = dispatch_exn ctx ~name:"masc_library_list" ~args:(`Assoc []) in
+    Alcotest.(check bool) "list ok" true ok;
+    Alcotest.(check bool) "missing title named" true
+      (msg_contains ~needle:"- no-title.md (no title in frontmatter)" listing);
+    Alcotest.(check bool) "no empty bold title" false (msg_contains ~needle:"****" listing);
+    Alcotest.(check bool) "empty author reads as missing" true
+      (msg_contains ~needle:"- empty-author.md (no author in frontmatter)" listing);
+    Alcotest.(check bool) "unclosed block named as unclosed" true
+      (msg_contains ~needle:"- unclosed.md (frontmatter has no closing ---)" listing);
+    Alcotest.(check bool) "non-ASCII source quoted as written" true
+      (msg_contains ~needle:"- korean-source.md (source \"연구\" is not one of:" listing))
 
 (* ============================================================
    Workflow: add → list → read → search
@@ -444,8 +590,18 @@ let () =
       Alcotest.test_case "missing title" `Quick test_add_missing_title;
       Alcotest.test_case "missing content" `Quick test_add_missing_content;
       Alcotest.test_case "invalid source" `Quick test_add_invalid_source;
+      Alcotest.test_case "missing source" `Quick test_add_missing_source;
+      Alcotest.test_case "blank author" `Quick test_add_with_blank_author_is_refused;
       Alcotest.test_case "success" `Quick test_add_success;
       Alcotest.test_case "with tags" `Quick test_add_with_tags;
+      Alcotest.test_case "library follows the context base path" `Quick
+        test_library_follows_context_base_path;
+    ]);
+    ("unreadable_source", [
+      Alcotest.test_case "unknown source is named, not passed through" `Quick
+        test_unknown_source_is_named_not_passed_through;
+      Alcotest.test_case "header that does not read names its reason" `Quick
+        test_header_that_does_not_read_names_its_reason;
     ]);
     ("library_search", [
       Alcotest.test_case "empty query" `Quick test_search_empty_query;

@@ -98,8 +98,13 @@ type wire_admission_error =
   | Measured_serving_constraint_rejected of token_capacity_rejection
   | Token_measurement_failed
   | Unsupported_target_model of { model_id : string }
-  | Target_request_rejected
-  | Request_serialization_rejected
+  | Target_request_rejected of Http_client.http_error
+      (** What the provider config or its credentials refused, kept as the
+          transport said it. *)
+  | Request_serialization_rejected of Http_client.http_error
+      (** What the serializer refused, kept as it said it. *)
+  | Measured_request_mismatch
+      (** The measured request is not the one the plan froze. *)
 
 type admission_error =
   | Provider_schema_unavailable

@@ -1854,6 +1854,34 @@ let test_a_call_row_names_the_call_a_press_opens () =
     (List.nth view.Pane.targets first_call_row
      = Pane.Target_call ("runner", Acting.Call_by_id "first"))
 
+(* Ctrl-W's cursor rests only where Enter would do something: the step
+   skips legend, rule, and padding rows, in both directions, and finds the
+   first row from before the frame. *)
+let cursor_targets =
+  [| Pane.Target_next_tab
+   ; Pane.Target_none
+   ; Pane.Target_keeper "rondo"
+   ; Pane.Target_none
+   ; Pane.Target_none
+   ; Pane.Target_call_order
+   ; Pane.Target_none |]
+
+let test_cursor_steps_over_rows_a_press_does_nothing_on () =
+  let step ~row ~step = Pane.next_target_row ~targets:cursor_targets ~row ~step in
+  check (option int) "first row from before the frame" (Some 0) (step ~row:(-1) ~step:1);
+  check (option int) "down skips the blank row" (Some 2) (step ~row:0 ~step:1);
+  check (option int) "down skips two blank rows" (Some 5) (step ~row:2 ~step:1);
+  check (option int) "up skips two blank rows" (Some 2) (step ~row:5 ~step:(-1));
+  check (option int) "up from a blank row lands above it" (Some 2) (step ~row:3 ~step:(-1))
+
+let test_cursor_stops_at_the_frames_edge () =
+  let step ~row ~step = Pane.next_target_row ~targets:cursor_targets ~row ~step in
+  check (option int) "nothing below the last target" None (step ~row:5 ~step:1);
+  check (option int) "nothing above the first target" None (step ~row:0 ~step:(-1));
+  check (option int) "a zero step goes nowhere" None (step ~row:2 ~step:0);
+  check (option int) "an empty frame has no row" None
+    (Pane.next_target_row ~targets:[||] ~row:(-1) ~step:1)
+
 let () =
   run "tui acting pane"
     [ ( "viewport allocation"
@@ -2013,6 +2041,12 @@ let () =
             test_only_offline_is_dropped
         ; test_case "a failing keeper is not dropped" `Quick
             test_a_failing_keeper_is_not_dropped
+        ] )
+    ; ( "keyboard cursor"
+      , [ test_case "the cursor steps over rows a press does nothing on" `Quick
+            test_cursor_steps_over_rows_a_press_does_nothing_on
+        ; test_case "the cursor stops at the frame's edge" `Quick
+            test_cursor_stops_at_the_frames_edge
         ] )
     ; ( "beside the roster"
       , [ test_case "only the selected keeper's record draws" `Quick

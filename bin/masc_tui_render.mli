@@ -68,6 +68,10 @@ val acting_pane_suppressed : Masc_tui_types.state -> bool
 
 val acting_pane_target_at : line:int -> Masc_tui_acting_pane.row_target
 
+val acting_pane_row_count : unit -> int
+(** How many rows the last frame drew in the Activity pane: the range
+    [acting_pane_target_at] answers for. Zero when the pane was not drawn. *)
+
 val acting_pane_scroll_limit : unit -> int
 
 (** What a press on this terminal row opens in the chat history the last frame

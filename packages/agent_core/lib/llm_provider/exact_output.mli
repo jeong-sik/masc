@@ -61,6 +61,16 @@ type catalog_document =
   ; contents : string
   }
 
+(** The credential a binding sends, as the binding resolved it. An exact
+    request on a binding sends the key that binding's ordinary requests carry
+    -- not a second read of an environment name, which the deployment's
+    credential selection may resolve differently. An environment name that
+    resolved to nothing stays named, so the refusal can say which one. *)
+type binding_credential =
+  | Credential_not_declared  (** The binding names no credential. *)
+  | Credential_resolved of Secret.t
+  | Credential_unresolved of { environment_variable : string }
+
 (** One exact-output slot: the binding it names. A caller that already holds
     that binding as the typed config its ordinary requests run on -- a
     deployment does -- passes it whole instead of copying a field list into
@@ -73,14 +83,11 @@ type catalog_document =
 type declared_target =
   { target_ref : string
   ; binding : Provider_config.t
+  ; credential : binding_credential
   ; body_timeout_s : float option
       (** The exact request's body deadline. It is the one request fact a
           binding does not carry: ordinary requests stream, and this one does
           not. *)
-  ; api_key_env : string option
-      (** Which environment name holds this slot's credential. [None] keeps the
-          catalog row's name; a deployment that reads a different one says so
-          in its binding, and that is the authority. *)
   }
 
 type resolver_catalog_input =

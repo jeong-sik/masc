@@ -7,11 +7,14 @@
     out of the answer's [absorbed] list and stays current; the new claim is
     still applied. The rest are absorbed as the answer said.
 
-    The gate only ever narrows [absorbed]. When the model cannot be asked --
-    no key, the lane or the gate turned off -- the answer is applied as it
-    came. When an enabled judgment fails, only completed positive verdicts
-    authorize absorption; unconfirmed sources stay current. New claims are
-    still applied, so judgment failure does not stop the Memory cycle. *)
+    The gate only ever narrows [absorbed]. When the gate is declared off, or
+    the Keeper is excluded, the answer is applied as it came. When the gate is
+    declared on but cannot be asked -- the lane is off, or no destination is
+    armed -- nothing is absorbed and every source stays current. When an
+    enabled judgment fails, only completed positive verdicts authorize
+    absorption; unconfirmed sources stay current. New claims are still
+    applied in every case, so neither misconfiguration nor judgment failure
+    stops the Memory cycle. *)
 
 (** {1 Statements} *)
 

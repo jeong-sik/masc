@@ -15,7 +15,8 @@ type seed =
 type origin =
   | Carried of source
   | Librarian_snapshot of { end_atom : int; boundary_line : int }
-  | Whole_history
+  | Librarian_progress of { end_atom : int }
+  | Turn_start of { end_atom : int }
 
 let of_ledger (ledger : Keeper_model_input_ledger.t) =
   match ledger.last.ends with
@@ -258,8 +259,9 @@ let seed_to_json (seed : seed) =
 
 let origin_to_string = function
   | Librarian_snapshot _ -> "librarian_snapshot"
+  | Librarian_progress _ -> "librarian_progress"
   | Carried source -> source_to_string source
-  | Whole_history -> "whole_history"
+  | Turn_start _ -> "turn_start"
 ;;
 
 let origin_to_json = function
@@ -273,5 +275,8 @@ let origin_to_json = function
     `Assoc [ "kind", `String "halved_after_refusal"; "retry", `Int retry ]
   | Carried (Evicted_after_refusal { retry }) ->
     `Assoc [ "kind", `String "evicted_after_refusal"; "retry", `Int retry ]
-  | Whole_history -> `Assoc [ "kind", `String "whole_history" ]
+  | Librarian_progress { end_atom } ->
+    `Assoc [ "kind", `String "librarian_progress"; "end_atom", `Int end_atom ]
+  | Turn_start { end_atom } ->
+    `Assoc [ "kind", `String "turn_start"; "end_atom", `Int end_atom ]
 ;;

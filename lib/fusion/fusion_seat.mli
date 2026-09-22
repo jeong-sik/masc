@@ -9,7 +9,7 @@
     설계: docs/rfc/RFC-fusion-seat-routes.md §2.1-2.3 *)
 
 type route_failure =
-  | Unknown_route of string  (** 적힌 이름이 lane 도 런타임도 아니다. *)
+  | Unknown_route of string  (** 적힌 이름이 로드된 lane 도 런타임도 아니다. *)
   | Route_unavailable of string
       (** 런타임의 카탈로그 행이 없다. payload 는
           [Runtime.missing_catalog_model_to_string] 이다. *)
@@ -22,10 +22,10 @@ type candidates =
   }
 
 val resolve : string -> (candidates, route_failure) result
-(** [Runtime.resolve_assignment] 로 푼다. 후보가 없는 lane 은 설정 로드가 거절하므로
-    [`Lane] 은 항상 후보가 있다. *)
-
-val candidate_list : candidates -> string list
+(** 앞뒤 공백을 뗀 이름을 [Runtime.resolve_assignment] 로 푼다. 후보가 없는 lane 은
+    설정 로드가 거절하므로 [`Lane] 은 항상 후보가 있다. [`Missing] 은 이름이 선언되지
+    않았을 때뿐 아니라, 선언된 lane 의 후보가 전부 카탈로그에서 빠져 lane 째로 떨어졌을
+    때도 온다. *)
 
 type ('answer, 'failure) walk =
   | Answered of

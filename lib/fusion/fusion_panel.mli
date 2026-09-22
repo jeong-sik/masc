@@ -18,7 +18,8 @@
       Agent_core 후보는 그룹의 [system_prompt]/[web_tools]/출력 예산/[timeout_s]로
       에이전트를 빌드하고, 공식 클라이언트 후보는 한 턴짜리 CLI 실행으로 돈다.
       실패는 종류와 상관없이 다음 후보로 넘어간다.
-    - 답한 자리의 usage 는 답한 시도와 그 전에 실패한 시도가 쓴 토큰의 합이다.
+    - 답한 자리의 usage 는 답한 시도와 그 전에 실패한 시도가 쓴 토큰의 합이다. 모든
+      후보가 실패한 자리는 [panel_error]에 usage 칸이 없어 그 토큰을 싣지 못한다.
     - 경로를 못 풀면 [Failed (Unknown_route _ | Route_unavailable _)]이고 후보를 시도하지
       않는다.
     - 패널 답변 계약은 free text다: 응답의 visible text 전체(trim)가 답변이 된다.

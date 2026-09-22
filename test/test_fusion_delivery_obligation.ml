@@ -270,16 +270,16 @@ let test_startup_cleanup_observes_atomic_orphans () =
         (List.length report.staging_cleanup.failures)))
 ;;
 
-let test_startup_recovery_remediates_missing_evidence () =
-  (* P1 remediation: a durably canonical [Done{ok=true; data=None}] can never
-     become projectable, so recovery must deliver a typed failure and clear
-     the obligation instead of retrying it on every startup. *)
+(* A durably canonical terminal that can never become projectable must be
+   delivered as a typed failure and cleared, not retried on every startup:
+   [Done{ok=true; data=None}] has no evidence, and evidence written in an
+   earlier shape never decodes because the settlement does not change. *)
+let startup_recovery_remediates ~prompt ~worker_result ~failure_code () =
   with_temp_base (fun base_path registry ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run (fun background_sw ->
         let settled, resolve_settled = Eio.Promise.create () in
-        let prompt = "recover this evidence-less fusion result" in
         let on_accepted request_id =
           match Obligation.Request_id.of_string request_id with
           | Error detail -> Error detail
@@ -296,9 +296,7 @@ let test_startup_recovery_remediates_missing_evidence () =
             ~on_worker_settled:(fun settlement ->
               Eio.Promise.resolve resolve_settled settlement)
             ~background_sw ~base_path ~caller:"delta" ~keeper_name:"delta"
-            ~f:(fun ~request_id:_ _request_sw ->
-              (* A plain string body settles [Done{ok=true; data=None}]. *)
-              Keeper_types_profile.tool_result_ok "done without evidence")
+            ~f:(fun ~request_id:_ _request_sw -> worker_result ())
             ()
         in
         let request_id_wire =
@@ -348,8 +346,8 @@ let test_startup_recovery_remediates_missing_evidence () =
             completion.Keeper_event_queue.run_id;
           (match completion.Keeper_event_queue.terminal with
            | Keeper_event_queue.Fusion_failed detail ->
-             check bool "typed evidence_unavailable failure" true
-               (let needle = "evidence_unavailable" in
+             check bool ("typed " ^ failure_code ^ " failure") true
+               (let needle = failure_code in
                 let nl = String.length needle and hl = String.length detail in
                 let rec go i =
                   i + nl <= hl
@@ -365,6 +363,27 @@ let test_startup_recovery_remediates_missing_evidence () =
                    | Keeper_event_queue.Fusion_cancelled -> "Fusion_cancelled")))
         | Some _ -> fail "startup remediation queued the wrong stimulus"
         | None -> fail "startup remediation did not durably queue a failure")))
+;;
+
+let test_startup_recovery_remediates_missing_evidence () =
+  startup_recovery_remediates
+    ~prompt:"recover this evidence-less fusion result"
+    ~worker_result:(fun () ->
+      (* A plain string body settles [Done{ok=true; data=None}]. *)
+      Keeper_types_profile.tool_result_ok "done without evidence")
+    ~failure_code:"evidence_unavailable"
+    ()
+;;
+
+let test_startup_recovery_remediates_unreadable_evidence () =
+  let prompt = "recover this fusion result written in an older evidence shape" in
+  startup_recovery_remediates
+    ~prompt
+    ~worker_result:(fun () ->
+      (* Data that is JSON but not this version's deliberation_evidence. *)
+      Keeper_types_profile.tool_result_ok_data (`Assoc [ "question", `String prompt ]))
+    ~failure_code:"evidence_unreadable"
+    ()
 ;;
 
 let test_evidence_unavailable_typed_failure_code () =
@@ -394,6 +413,8 @@ let () =
             test_startup_recovery_projects_canonical_terminal
         ; test_case "startup recovery remediates missing evidence" `Quick
             test_startup_recovery_remediates_missing_evidence
+        ; test_case "startup recovery remediates unreadable evidence" `Quick
+            test_startup_recovery_remediates_unreadable_evidence
         ; test_case "evidence_unavailable failure code is typed" `Quick
             test_evidence_unavailable_typed_failure_code
         ; test_case "startup cleanup observes atomic orphans" `Quick

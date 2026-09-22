@@ -391,7 +391,7 @@ let judge_failure_text = function
   | Build_error detail -> detail
   | Parse_error detail -> detail
   | Panels_unavailable reason -> render_skip_reason reason
-  | Unknown_route route -> Printf.sprintf "judge route %s names neither a lane nor a runtime" route
+  | Unknown_route route -> Printf.sprintf "judge route %s does not resolve to a loaded lane or runtime" route
   | Route_unavailable detail -> detail
   | Internal_error detail -> detail
 

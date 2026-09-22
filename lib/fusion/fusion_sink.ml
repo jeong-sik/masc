@@ -413,6 +413,7 @@ type delivery_failure =
       ; reason : string
       }
   | Evidence_unavailable
+  | Evidence_unreadable of string
 
 let delivery_failure_code = function
   | Computation_failed _ -> "computation_failed"
@@ -420,6 +421,7 @@ let delivery_failure_code = function
   | Cancelled _ -> "cancelled"
   | Persistence_failed _ -> "persistence_failed"
   | Evidence_unavailable -> "evidence_unavailable"
+  | Evidence_unreadable _ -> "evidence_unreadable"
 
 let delivery_failure_detail = function
   | Computation_failed detail | Lost detail -> detail
@@ -429,13 +431,17 @@ let delivery_failure_detail = function
     Printf.sprintf "%s (attempted_status=%s)" reason attempted_status
   | Evidence_unavailable ->
     "Fusion computation completed successfully without deliberation evidence"
+  | Evidence_unreadable detail ->
+    "Fusion computation completed, but its evidence does not decode in this version: "
+    ^ detail
 
 (* 취소만 [Fusion_cancelled] 로 간다. 나머지는 심의가 실패한 것이고, 취소는
    심의가 중단된 것이다 — 키퍼에게 다른 사실이다. *)
 let terminal_of_delivery_failure failure ~content =
   match failure with
   | Cancelled _ -> Keeper_event_queue.Fusion_cancelled
-  | Computation_failed _ | Lost _ | Persistence_failed _ | Evidence_unavailable ->
+  | Computation_failed _ | Lost _ | Persistence_failed _ | Evidence_unavailable
+  | Evidence_unreadable _ ->
     Keeper_event_queue.Fusion_failed content
 
 (* RFC-0266: 심의 완료 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.

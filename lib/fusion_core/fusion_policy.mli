@@ -9,7 +9,9 @@
 (** 한 패널 그룹 — 공통 설정으로 실행되는 모델 묶음. 한 preset이 이종
     그룹 여럿을 가질 수 있다 (RFC-0252-A). 닫힌 record. *)
 type panel_group =
-  { models : string list  (** provider.model ids *)
+  { models : string list
+      (** 자리마다 경로 이름 하나: [\[runtime.lanes\]] lane 이름 또는 런타임 id
+          (RFC fusion-seat-routes). *)
   ; label : string
       (** 패널 정체성 라벨 (RFC-0278). 같은 model을 다른 system_prompt로 여러 그룹에
           둘 때 패널을 구분한다. ""(기본)이면 정체성=model 그대로 → legacy byte-identical.
@@ -31,7 +33,7 @@ type panel_group =
     단수다(심판은 한 모델이 한 종합을 낸다). 필드는 [j] 접두 — panel_group의 동명 필드와
     타입 추론 충돌을 피한다. 정체성 derive는 {!panelist_id}([jlabel]/[jmodel]). *)
 type judge_spec =
-  { jmodel : string  (** provider.model id *)
+  { jmodel : string  (** 경로 이름: lane 이름 또는 런타임 id. *)
   ; jlabel : string  (** 정체성 라벨. ""면 정체성=jmodel *)
   ; jsystem_prompt : string  (** 이 1차 심판의 lens — config에서 필수(코드 default 없음). *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부. *)
@@ -43,7 +45,7 @@ type judge_spec =
 [@@deriving show, eq]
 
 (** 패널 preset — 이종 패널 그룹 리스트 + 단일 심판 (RFC-0252 §9, RFC-0252-A).
-    [judge]는 runtime.toml bindings와 동일한 opaque "provider.model" 문자열이며,
+    [judge]는 경로 이름(lane 이름 또는 런타임 id, RFC fusion-seat-routes)이며,
     simple/refine/conditional 위상의 심판이자 JOJ의 meta-judge(reducer)다 (RFC-0283).
     legacy flat 문법(panel=[...])은 {!Fusion_config}가 정확히 길이-1 그룹으로
     desugar한다 — 그 경우 오늘과 byte-identical 동작. *)

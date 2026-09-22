@@ -121,6 +121,9 @@ type delivery_failure =
       ; reason : string
       }
   | Evidence_unavailable
+  | Evidence_unreadable of string
+      (** 증거는 있지만 이 버전의 [deliberation_evidence]로 읽히지 않는다. 종결 기록은
+          바뀌지 않으므로 다시 읽어도 같다. payload 는 디코더의 문장이다. *)
 
 (** registry/대시보드가 읽는 안정 wire 라벨. *)
 val delivery_failure_code : delivery_failure -> string

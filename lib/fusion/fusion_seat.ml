@@ -10,7 +10,7 @@ type candidates =
   }
 
 let resolve route =
-  match Runtime.resolve_assignment route with
+  match Runtime.resolve_assignment (String.trim route) with
   | `Lane lane ->
     (match Runtime_lane.ordered_candidates lane with
      | first :: rest -> Ok { first; rest }
@@ -21,8 +21,6 @@ let resolve route =
     Error (Route_unavailable (Runtime.missing_catalog_model_to_string missing))
   | `Missing -> Error (Unknown_route route)
 ;;
-
-let candidate_list { first; rest } = first :: rest
 
 type ('answer, 'failure) walk =
   | Answered of

@@ -418,6 +418,53 @@ let test_judge_lane_walks_candidates_in_order () =
     | None -> fail "the judge seat did not report its route")
 ;;
 
+(* The same walk on a panel seat. Without it a panel that tried only the first
+   candidate would pass every other test. *)
+let test_panel_lane_walks_candidates_in_order () =
+  let base_dir = Filename.temp_dir "fusion-panel-lane" "" in
+  let log = Filename.concat base_dir "spawns" in
+  let claude_cli = Filename.concat base_dir "stub-claude" in
+  write_file ~path:claude_cli ~perm:0o700 (appending_cli_script ~log);
+  with_initialized_runtime ~claude_cli (fun () ->
+    let run_panel route on_routes =
+      with_eio (fun ~sw ~net ->
+        Masc.Fusion_panel.run
+          ~base_dir
+          ~sw
+          ~net
+          ~groups:[ panel_group [ route ] ]
+          ~prompt:"ping"
+          ~on_seat_routes:on_routes
+          ())
+    in
+    let _baseline = run_panel official_client_runtime ignore in
+    let per_candidate = count_lines log in
+    check bool "a one-candidate seat runs its client" true (per_candidate > 0);
+    let routes = ref [] in
+    let outcomes = run_panel judge_lane (fun seat_routes -> routes := seat_routes) in
+    check int "both lane candidates ran their client" (3 * per_candidate) (count_lines log);
+    (match outcomes with
+     | [ Fusion_types.Failed { failed_model; _ } ] ->
+       check string "the seat identity is the lane name" judge_lane failed_model
+     | other ->
+       failf "expected one failed seat, got [%s]"
+         (String.concat "; " (List.map Fusion_types.show_panel_outcome other)));
+    match !routes with
+    | [ { Fusion_types.seat = Fusion_types.Panel_seat seat; answered_by = None; failed_attempts; _ } ]
+      ->
+      check string "the route names the seat" judge_lane seat;
+      check
+        (list string)
+        "candidates are tried in lane order"
+        [ judge_lane_first; official_client_runtime ]
+        (List.map
+           (fun (attempt : Fusion_types.seat_attempt) -> attempt.attempt_runtime)
+           failed_attempts)
+    | other ->
+      failf "expected one seat route, got [%s]"
+        (String.concat "; " (List.map Fusion_types.show_seat_route other)))
+;;
+
 (* A route that names neither a lane nor a runtime fails the seat without an
    attempt, and says so in the typed reason rather than as a build error. *)
 let test_unknown_route_fails_without_an_attempt () =
@@ -573,6 +620,10 @@ let () =
             "judge lane walks candidates in order"
             `Quick
             test_judge_lane_walks_candidates_in_order
+        ; test_case
+            "panel lane walks candidates in order"
+            `Quick
+            test_panel_lane_walks_candidates_in_order
         ; test_case
             "unknown route fails without an attempt"
             `Quick

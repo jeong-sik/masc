@@ -236,7 +236,7 @@ let panel_failure_detail ~runtime_id (failure : Fusion_types.panel_failure) : st
     Printf.sprintf "invalid max_output_tokens %d" n
   | Fusion_types.Invalid_timeout_s s -> Printf.sprintf "invalid timeout_s %g" s
   | Fusion_types.Unknown_route route ->
-    Printf.sprintf "route %s names neither a lane nor a runtime" route
+    Printf.sprintf "route %s does not resolve to a loaded lane or runtime" route
   | Fusion_types.Route_unavailable detail -> detail
 
 (* 이미 attribution된 실패를 재-attribution 없이 렌더한다. Provider_error의 detail은
@@ -256,7 +256,7 @@ let panel_failure_text (failure : Fusion_types.panel_failure) : string =
     Printf.sprintf "invalid max_output_tokens %d" n
   | Fusion_types.Invalid_timeout_s s -> Printf.sprintf "invalid timeout_s %g" s
   | Fusion_types.Unknown_route route ->
-    Printf.sprintf "route %s names neither a lane nor a runtime" route
+    Printf.sprintf "route %s does not resolve to a loaded lane or runtime" route
   | Fusion_types.Route_unavailable detail -> detail
 
 (** [Keeper_tool_descriptor]에서 날것의 web tool descriptor를 찾아

@@ -148,7 +148,18 @@ type event =
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
   | Keeper_chat_stream_frame of
-      { keeper : string; frame : string option; at : float }
+      { keeper : string
+      ; operation_id : string
+          (** The chat operation the frame belongs to. The chat pane reads it
+              to follow a turn it did not open: a frame says that operation's
+              journal has grown, and the journal is what the pane draws. *)
+      ; seq : int option
+          (** The journal seq of the event this frame projects, when the
+              server attached one; a log already holding it has nothing to
+              read. [None] on the terminal the server synthesises at settle. *)
+      ; frame : string option
+      ; at : float
+      }
       (** One frame of a live chat stream ([keeper_chat_operation_event]).
           [frame] is the AG-UI event's own [type], plus its [name] when it
           carries one. A reply of any length sends one of these per token, so

@@ -12918,6 +12918,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          shows the whole history anyway, and the loader is generation-
          guarded, so the flag only remembers that a reload is due. *)
       let open_chat_gained_turn = ref false in
+      (* The chat operations the open pane's keeper streamed a frame for in
+         this batch, with the highest journal seq named and the earliest
+         frame clock: one follow-up read per operation per batch, decided
+         after the loop ([journal_follow_for_frame]), however many tokens
+         arrived. *)
+      let open_chat_stream_frames : (string * (int option * float)) list ref = ref [] in
       (* Same shape as [open_chat_gained_turn]: remember that a fusion run
          pushed a status, decide once per batch after the loop. The run id
          rides along so an open detail only refetches when it is the run
@@ -12964,6 +12970,34 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                       && state.msg_target_keeper_name = Some appended_keeper ->
                    open_chat_gained_turn := true
                | Some _ | None -> ());
+              (match event with
+               | Masc_tui_observer.Keeper_chat_stream_frame
+                   { keeper; operation_id; seq; at; _ }
+                 when state.view = Keepers Keeper_message
+                      && state.msg_target_keeper_name = Some keeper ->
+                   let highest =
+                     match List.assoc_opt operation_id !open_chat_stream_frames, seq with
+                     | Some (Some held, first_at), Some seq ->
+                         (Some (max held seq), first_at)
+                     | Some (Some held, first_at), None -> (Some held, first_at)
+                     | Some (None, first_at), seq -> (seq, first_at)
+                     | None, seq -> (seq, at)
+                   in
+                   open_chat_stream_frames :=
+                     (operation_id, highest)
+                     :: List.remove_assoc operation_id !open_chat_stream_frames
+               | Masc_tui_observer.Keeper_chat_stream_frame _
+               | Masc_tui_observer.Agent_core _
+               | Masc_tui_observer.Keeper_heartbeat _
+               | Masc_tui_observer.Keeper_tool_call _
+               | Masc_tui_observer.Keeper_turn_complete _
+               | Masc_tui_observer.Keeper_turn_observation _
+               | Masc_tui_observer.Keeper_composite_changed _
+               | Masc_tui_observer.Keeper_chat_appended _
+               | Masc_tui_observer.Keeper_waiting_inventory_changed _
+               | Masc_tui_observer.Fusion_run_status _
+               | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
+                   ());
               (match event with
                | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
                    fusion_status_seen := Some run_id
@@ -13035,6 +13069,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              launch_keeper_history_load ~load_file_changes:false state ~mailbox
                ~keeper_name
          | None -> ());
+      (* A frame of a turn this pane did not open: its journal grew, so read
+         it from where the pane's record ends. The frame itself is not
+         folded -- see [journal_follow_for_frame]. *)
+      (match state.msg_target_keeper_name with
+       | Some keeper_name ->
+           List.iter
+             (fun (operation_id, (seq, at)) ->
+               match
+                 journal_follow_for_frame state ~keeper_name ~operation_id ~seq ~at
+               with
+               | Follow_nothing -> ()
+               | Follow_read_after_inflight -> journal_read_wanted state operation_id
+               | Follow_read { started_at; since_seq } ->
+                   launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
+                     [ (operation_id, started_at, since_seq) ])
+             (List.rev !open_chat_stream_frames)
+       | None -> ());
       (* A fusion push reloads only the surface that shows it. The event
          says a run moved; HTTP says what it is now -- the same
          trigger/SSOT split the dashboard applies (sse-store). Both loaders
@@ -14629,7 +14680,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (* Not generation-guarded: a journal is the turn's record whichever
          keeper the pane shows now, and the log is kept per keeper. *)
       journal_read_finished state operation_id;
-      match journal with
+      (* A stream frame arrived while this read was in flight: the read may
+         have stopped short of the line it announced. Decided after the
+         result below is folded, so the next read starts past it and a turn
+         that just ended asks for nothing. *)
+      let read_again () =
+        if take_journal_wanted state operation_id then
+          match
+            journal_follow_for_frame state ~keeper_name ~operation_id ~seq:None
+              ~at:started_at
+          with
+          | Follow_nothing | Follow_read_after_inflight -> ()
+          | Follow_read { started_at; since_seq } ->
+              launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
+                [ (operation_id, started_at, since_seq) ]
+      in
+      (match journal with
       | Ok lines ->
           (* The lines join the session's record of the turn when it has one
              -- a cut live stream's partial log, an earlier read of a turn
@@ -14706,7 +14772,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "error"
             (Printf.sprintf "journal for %s not loaded: %s"
                (Keeper_chat.compact_request_id operation_id)
-               (Keeper_chat.terminal_safe_text detail)))
+               (Keeper_chat.terminal_safe_text detail)));
+      read_again ())
   | Tools_loaded (generation, keeper_name, result) ->
       settle_tools_read state ~generation Tools_inventory_read;
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in

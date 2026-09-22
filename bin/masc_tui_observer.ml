@@ -114,7 +114,12 @@ type event =
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
   | Keeper_chat_stream_frame of
-      { keeper : string; frame : string option; at : float }
+      { keeper : string
+      ; operation_id : string
+      ; seq : int option
+      ; frame : string option
+      ; at : float
+      }
   | Keeper_waiting_inventory_changed of
       { keeper : string; queue_kind : string option; at : float }
   (* Server push, not a keeper act: a fusion deliberation changed stage or
@@ -340,9 +345,14 @@ let stream_frame_label inner =
 let decode_keeper_chat_operation_event fields =
   let event = "keeper_chat_operation_event" in
   let* keeper = required string_field fields "name" ~event in
+  let* operation_id = required string_field fields "operation_id" ~event in
   let* at = required float_field fields "ts_unix" ~event in
   let frame = Option.bind (assoc_field fields "ag_ui_event") stream_frame_label in
-  Ok (Keeper_chat_stream_frame { keeper; frame; at })
+  (* The journal seq of the event this frame projects
+     ([Keeper_chat_broadcast.operation_event]); the wire terminal a settle
+     synthesises carries none. *)
+  let seq = int_field fields "seq" in
+  Ok (Keeper_chat_stream_frame { keeper; operation_id; seq; frame; at })
 
 (* Names the keeper in [keeper_name] rather than [name] -- the one broadcast
    in this family that does. Reading the field it actually sends is why this

@@ -5838,6 +5838,11 @@ type state = {
   (* Operations whose journal a fiber is reading right now, so a load that
      arrives before the read returns does not start a second one. *)
   mutable msg_journal_inflight: string list;
+  (* Operations a stream frame named while their journal was being read: the
+     read in flight may have stopped short of the line the frame announced,
+     so when it lands another read starts from where it stopped. One entry
+     per operation, however many frames arrived. *)
+  mutable msg_journal_wanted: string list;
   (* The server refused this client's credential for the journal endpoint.
      Said once; no journal is asked for again this session. *)
   mutable msg_journal_reads_refused: bool;
@@ -6154,6 +6159,26 @@ let journal_read_finished state operation_id =
       state.msg_journal_inflight
 ;;
 
+let journal_read_wanted state operation_id =
+  if not (List.exists (String.equal operation_id) state.msg_journal_wanted)
+  then state.msg_journal_wanted <- operation_id :: state.msg_journal_wanted
+;;
+
+(* Whether a read was wanted for this operation while one was in flight, and
+   the fact taken: the caller starts the read it stands for. *)
+let take_journal_wanted state operation_id =
+  if List.exists (String.equal operation_id) state.msg_journal_wanted
+  then begin
+    state.msg_journal_wanted <-
+      List.filter
+        (fun wanted -> not (String.equal wanted operation_id))
+        state.msg_journal_wanted;
+    true
+  end
+  else false
+;;
+
+
 (* Where a journal read starts for this operation: after what a held log of
    it already has (a cut live stream's partial log, or an earlier read of a
    turn still running), or the whole journal. *)
@@ -6162,6 +6187,64 @@ let journal_resume_position state ~keeper_name operation_id =
   | Some held when not (turn_log_holds_the_turn held) ->
       Masc_tui_keeper_chat_log.resume_position held.tl_log
   | Some _ | None -> Masc.Keeper_chat_event_log.Whole_turn
+;;
+
+(* What a stream frame for an operation asks of the pane.
+
+   The observer feed carries one frame per AG-UI event of every running chat
+   operation, with the journal seq of the event it projects. The pane does
+   not fold the frame: a frame is a projection of a journal line, and the
+   journal is what the pane draws a turn it did not open from (RFC-0412
+   §3.2). Two feeds into one log would have to agree on order -- a frame
+   lost while the observer stream was down, then read from the journal
+   after later frames had landed, would put the turn's words out of order --
+   and the journal alone already carries every line in order. So a frame is
+   the fact that the operation's journal has grown, and the answer is a read
+   from where the log's record of it ends: one round trip behind the token
+   instead of a refresh cadence behind it. *)
+type journal_follow =
+  | Follow_nothing
+      (** Not this pane's to read: a request of its own is streaming the
+          operation, the journal was declared unavailable or this credential
+          refused, the turn is over, or the log already holds the seq the
+          frame named. *)
+  | Follow_read of { started_at : float; since_seq : Masc.Keeper_chat_event_log.replay_position }
+  | Follow_read_after_inflight
+      (** A read is in flight; it may stop short of the line the frame
+          announced, so another starts when it lands. *)
+
+let journal_follow_for_frame state ~keeper_name ~operation_id ~seq ~at =
+  let own_request =
+    List.exists
+      (fun entry -> String.equal entry.sent_request.request_id operation_id)
+      state.msg_inflight
+  in
+  let held = settled_log_for_request state ~keeper_name operation_id in
+  if own_request
+     || state.msg_journal_reads_refused
+     || List.exists (String.equal operation_id) state.msg_journal_unavailable
+  then Follow_nothing
+  else
+    match held with
+    | Some held when turn_log_holds_the_turn held -> Follow_nothing
+    | held ->
+        let since_seq = journal_resume_position state ~keeper_name operation_id in
+        let already_held =
+          match seq with
+          | Some seq -> not (Masc.Keeper_chat_event_log.seq_is_after since_seq seq)
+          | None -> false
+        in
+        if already_held then Follow_nothing
+        else if List.exists (String.equal operation_id) state.msg_journal_inflight
+        then Follow_read_after_inflight
+        else
+          Follow_read
+            { started_at =
+                (match held with
+                 | Some held -> turn_log_started_at held
+                 | None -> at)
+            ; since_seq
+            }
 ;;
 
 (* Whether the loaded transcript says this turn is over: the keeper's reply,
@@ -7354,6 +7437,7 @@ let create_state
   msg_settled_logs = [];
   msg_journal_unavailable = [];
   msg_journal_inflight = [];
+  msg_journal_wanted = [];
   msg_journal_reads_refused = false;
   msg_scroll_pin_settled = [];
   detail_scroll = 0;

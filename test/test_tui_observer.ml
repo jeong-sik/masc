@@ -209,7 +209,7 @@ let test_keeper_events_decode_by_name () =
    "name", keeper_waiting_inventory_broadcast.ml in "keeper_name". *)
 let chat_stream_delta_frame =
   "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"test-keeper\",\
-   \"operation_id\":\"op-1\",\"ts_unix\":1787507570.5,\
+   \"operation_id\":\"op-1\",\"ts_unix\":1787507570.5,\"seq\":41,\
    \"ag_ui_event\":{\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"hi\"}}\n\n"
 
 let chat_stream_custom_frame =
@@ -239,7 +239,19 @@ let test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock () =
     (match decode_all [ chat_stream_delta_frame ] with
      | [ Observer.Event (Observer.Keeper_chat_stream_frame { at; _ }) ] ->
          Float.equal at 1787507570.5
-     | _ -> false)
+     | _ -> false);
+  (* The operation and its journal seq are what the chat pane follows a
+     foreign turn by; the settle-time terminal carries no seq and decodes to
+     [None] rather than failing the frame. *)
+  check (list string) "the frame names its operation and journal seq"
+    [ "op-1@41"; "op-1@-" ]
+    (List.map
+       (function
+         | Observer.Event (Observer.Keeper_chat_stream_frame { operation_id; seq; _ }) ->
+             operation_id ^ "@"
+             ^ (match seq with Some seq -> string_of_int seq | None -> "-")
+         | _ -> "?")
+       (decode_all [ chat_stream_delta_frame; chat_stream_custom_frame ]))
 
 let operator_digest_frame =
   "data: {\"type\":\"operator_digest\",\"ts_unix\":1787507573.0}\n\n"

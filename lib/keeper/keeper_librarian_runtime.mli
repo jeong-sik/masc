@@ -44,21 +44,23 @@ type write_scope = Context_only | Context_and_memory
 type not_committed =
   { detail : string
         (** The typed cause, for the caller's log. *)
-  ; walk_was_never_about_size : bool
-        (** No failure the walk recorded could be answered by sending less:
-            each was either a provider momentarily unable to serve a request
-            it accepted (quota, overload, server, network), or a refusal only
-            an operator can lift (authentication, authorization, payment, an
-            absent model). Its caller then waits for the next signal at the
-            width it already had, instead of reading less on a refusal a
-            smaller request would meet just as surely.
+  ; walk_shows_size : bool
+        (** Something this pass met says the range's size is what stopped it:
+            a provider that judged the request too large, one that refused it
+            for a reason it did not name, a refused output, or a candidate
+            whose projection did not fit a slot's declared window.
+
+            False covers everything else, and a caller reading less only when
+            this is true is what keeps an outage from shrinking its reads. A
+            provider that took the request and could not serve it (quota,
+            overload, server, network), a refusal only an operator can lift
+            (authentication, authorization, payment, an absent model), and
+            every failure that never reached a provider all answer false, as
+            does a pass that recorded no typed cause at all.
 
             The verdict covers every failed visit of the walk, not the last
             one, so the same set of causes answers the same way whatever order
-            the slots were tried in. A walk that ended in the CLI fallback, or
-            one that recorded no typed cause at all, is false: the pass reads
-            less rather than holding the whole range for a reason it cannot
-            name. *)
+            the slots were tried in. *)
   }
 
 val fit_continuity :

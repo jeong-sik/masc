@@ -552,9 +552,15 @@ let narrowing_fixture ~slot_count ~answer f =
   (* The rendered prompt carries the same atoms twice -- once as
      conversation_history and once inside the continuity block -- on top of a
      17 kB template, so a unit of n atoms sends roughly 2n * atom + 17 kB.
-     These four are sized so four atoms land well over the ceiling and two
-     well under it, with the template unable to decide either comparison. *)
-  let atoms = List.map (fun mark -> message (String.make 8_000 mark)) [ 'a'; 'b'; 'c'; 'd' ] in
+     These eight are sized so four atoms land well over the ceiling and two
+     well under it, with the template unable to decide either comparison.
+     Eight rather than four so that six remain after the first committed unit:
+     a pass that released the width on a commit would offer those six and be
+     refused, which four atoms could not have shown. *)
+  let atoms =
+    List.map (fun mark -> message (String.make 8_000 mark))
+      [ 'a'; 'b'; 'c'; 'd'; 'e'; 'f'; 'g'; 'h' ]
+  in
   save atoms;
   boundary ~fresh:true 1 atoms;
   ignore (Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1000.
@@ -597,11 +603,22 @@ let test_refused_width_carries_to_the_next_pass () =
     (List.hd !bodies > narrowing_ceiling);
   pass ();
   (* Without the carried width this pass prepares the whole source again and
-     refuses again, exactly as the live Keeper did ninety-six times. *)
-  check bool "the next pass sends a request the target accepts" true
-    (List.nth !bodies 1 <= narrowing_ceiling);
+     is refused again, exactly as the live keeper was ninety-six times. *)
+  check int "the second pass sends one request as well" 2 (List.length !bodies);
+  check bool "and it is smaller than the first" true
+    (List.nth !bodies 1 < List.nth !bodies 0);
+  check (option int) "still over the ceiling, so still nothing commits" None (coverage ());
+  pass ();
+  check bool "the third pass sends a request the target accepts" true
+    (List.nth !bodies 2 <= narrowing_ceiling);
   check (option int) "reading less commits, and the rest follows in the same pass"
-    (Some 4) (coverage ())
+    (Some 8) (coverage ());
+  (* Every request after the first commit stayed at the width. A pass that
+     released the width on a commit would have offered the six remaining
+     atoms, which the target refuses. *)
+  check bool "a commit does not release the width" true
+    (List.for_all (fun size -> size <= narrowing_ceiling)
+       (List.filteri (fun index _ -> index >= 2) !bodies))
 
 let test_a_refusal_that_is_not_about_size_keeps_the_width () =
   narrowing_fixture ~slot_count:1
@@ -623,15 +640,17 @@ let test_an_unreadable_source_keeps_the_width () =
   @@ fun ~bodies ~pass ~coverage ~hide_source ->
   pass ();
   check (option int) "the first pass is refused and commits nothing" None (coverage ());
-  (* prepare answers Ok None both for a drained backlog and for a checkpoint
-     it cannot read. Releasing the width on the second would send the pass
-     after it back at the whole backlog, which is the loop this fixes. *)
+  (* prepare answers with no source both for a backlog read to its end and for
+     a checkpoint it cannot read. Releasing the width on the second would send
+     the pass after it back at the whole backlog, which is the loop this
+     fixes. *)
   hide_source (fun () -> pass ());
   check int "a source it cannot read sends no request" 1 (List.length !bodies);
   pass ();
   check bool "the width survived the unreadable pass" true
-    (List.nth !bodies 1 <= narrowing_ceiling);
-  check (option int) "and the source is read to its end" (Some 4) (coverage ())
+    (List.nth !bodies 1 < List.nth !bodies 0);
+  pass ();
+  check (option int) "and the source is read to its end" (Some 8) (coverage ())
 
 let test_a_size_refusal_anywhere_in_the_walk_narrows () =
   narrowing_fixture ~slot_count:2

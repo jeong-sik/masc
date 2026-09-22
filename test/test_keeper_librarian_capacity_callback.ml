@@ -3,7 +3,7 @@ module Runtime = Keeper_librarian_runtime
 module Fixture = Exact_output_fixture
 module Runs = Exact_lane_run_registry
 
-let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
+let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = env#net and clock = env#clock in
@@ -51,12 +51,22 @@ let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_over
     cli_calls := !cli_calls @ [runtime_id];
     Error (List.assoc runtime_id cli_errors) in
   let refused = ref 0 and committed = ref false in
+  let verdict = ref None in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Runtime.run_best_effort ~cli_runner
     ~on_cli_input_limit:(fun _ -> incr refused)
+    ~on_not_committed:(fun outcome -> verdict := Some outcome.Runtime.walk_shows_size)
     ~on_memory_committed:(fun () -> committed := true)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
   Alcotest.(check int) "only a CLI slot reports an input limit" expected !refused;
+  (* The verdict the continuity pass reads to decide whether to read less. It
+     is taken from every failure of the walk, so the same set of causes
+     answers the same way in either order. *)
+  Option.iter
+    (fun shows_size ->
+       Alcotest.(check (option bool))
+         "the walk's size verdict" (Some shows_size) !verdict)
+    shows_size;
   Alcotest.(check (list string)) "CLI candidates ran in order"
     (List.map fst cli_errors) !cli_calls;
   Alcotest.(check int) "terminal provider really received the request" 1 !posts;
@@ -326,9 +336,10 @@ let () =
   let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Prompt_defaults.init ();
-  let case name first_overflow status expected =
+  let case name first_overflow status expected shows_size =
     Alcotest.test_case name `Quick
-      (test_callback ~base_path ~registry ~keeper_id:name ~first_overflow ~status ~expected) in
+      (test_callback ~shows_size ~base_path ~registry ~keeper_id:name ~first_overflow ~status
+         ~expected) in
   let codex_error data = Fusion_official_client.Codex_failure
     (Runtime_codex_app_server.Rpc_error
       { method_ = "turn/start"; code = Some (-32602);
@@ -350,10 +361,14 @@ let () =
       (* An API slot states its limit in provider prose, which this process
          cannot read back into a number, so it reports none. The pass no
          longer needs one: it narrows on any failure. *)
-      case "capacity-final" false `Request_entity_too_large 0;
-      case "quota-final" false `Too_many_requests 0;
-      case "capacity-then-quota" true `Too_many_requests 0;
-      case "capacity-then-auth" true `Unauthorized 0];
+      (* A body a provider refused for its size says so whether it came
+         first or last; a quota or an authorization refusal never does. The
+         four together are the order matrix: reading only the walk's last
+         cause answered rows two and three differently. *)
+      case "capacity-final" false `Request_entity_too_large 0 true;
+      case "quota-final" false `Too_many_requests 0 false;
+      case "capacity-then-quota" true `Too_many_requests 0 true;
+      case "capacity-then-auth" true `Unauthorized 0 true];
     "HTTP to CLI outcomes", [
       cli_case "quota-then-cli-capacity" [Fixture.cli_primary_runtime, capacity] 1;
       cli_case "quota-then-cli-generic-rpc" [Fixture.cli_primary_runtime, generic] 0;

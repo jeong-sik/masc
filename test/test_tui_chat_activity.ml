@@ -55,30 +55,88 @@ let test_the_band_does_not_repeat_the_admission () =
     | rows -> fail (String.concat " | " (texts rows)))
     [ None; Some Live.Running; Some Live.Settled; Some Live.Queued ]
 
-(* The band never names a blocker it did not observe: another keeper's turn,
-   this pane's own chat operation (the live row draws it), a failing poll, an
-   idle or unreadable keeper -- none puts an observed-turn row under a queued
-   request of this pane. *)
+(* The band names only a turn it observed for this keeper. With a line of
+   this pane queued: nothing for no turn, another keeper's turn, an idle or
+   an unreadable keeper; the turn it observed, by lane, for a running one --
+   a chat operation too, since this pane's own would be in flight and draw
+   the live row, so a running chat operation here is someone else's and the
+   pane waits behind it; and a failing poll's turn is named as last
+   observed, never as running now. *)
 let test_queue_does_not_invent_a_blocking_turn () =
+  let names_a_turn rows =
+    List.exists (fun text ->
+      List.exists (fun lane -> Astring.String.is_infix ~affix:lane text)
+        [ "autonomous"; "chat_operation"; "maintenance" ])
+      (texts rows)
+  in
   List.iter (fun (rows, error) ->
     let state = state () in
     state.keeper_turns <- rows;
     state.keeper_turns_error <- error;
     ignore (live state (Some Live.Queued));
-    check bool "no observed-turn row names a blocker" false
-      (List.exists (fun text -> Astring.String.is_infix ~affix:"autonomous" text)
-         (texts (Tui.keeper_message_activity_rows state))))
+    check bool "no row names a turn that was not observed" false
+      (names_a_turn (Tui.keeper_message_activity_rows state)))
     [ [], None
     ; [running ~keeper_name:"beta" Turn_lane_autonomous], None
     ; [{ Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_idle }], None
     ; [{ Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_unavailable "offline" }], None
     ];
+  List.iter (fun (lane, word) ->
+    let state = state () in
+    state.keeper_turns <- [running lane];
+    ignore (live state (Some Live.Queued));
+    check bool ("a running " ^ word ^ " turn is named as the one waited behind") true
+      (List.exists (fun text -> Astring.String.is_infix ~affix:word text)
+         (texts (Tui.keeper_message_activity_rows state))))
+    [ Turn_lane_autonomous, "autonomous"
+    ; Turn_lane_chat_operation, "chat_operation"
+    ; Turn_lane_maintenance, "maintenance" ];
   let state = state () in
-  state.keeper_turns <- [running Turn_lane_maintenance];
+  state.keeper_turns <- [running Turn_lane_autonomous];
+  state.keeper_turns_error <- Some "timeout";
   ignore (live state (Some Live.Queued));
-  check bool "same Keeper maintenance is observed background work" true
-    (List.exists (fun text -> Astring.String.is_infix ~affix:"maintenance" text)
-       (texts (Tui.keeper_message_activity_rows state)))
+  let rows = texts (Tui.keeper_message_activity_rows state) in
+  check bool "a failing poll's turn is marked last observed" true
+    (List.exists (fun text -> Astring.String.is_infix ~affix:"last observed autonomous" text) rows);
+  check bool "and the poll's failure is said" true
+    (List.exists (fun text -> Astring.String.is_infix ~affix:"Activity unavailable" text) rows)
+
+(* The stop keys ride the running turn's row. The turns poll does not promise
+   one row per keeper; with an unreadable row ahead of the running one, the
+   keys went to "Current turn unavailable" because they rode the first row. *)
+let test_stop_keys_ride_the_running_row () =
+  let state = state () in
+  state.keeper_turns <-
+    [ { Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
+      ; ktr_state = Keeper_turn_unavailable "offline" } ];
+  check bool "no running row, no keys" false
+    (List.exists (fun (row : Masc_tui_answering.chat_activity_row) -> row.keys <> "")
+       (Tui.keeper_message_activity_rows state));
+  state.keeper_turns <- [ running Turn_lane_chat_operation ];
+  match Tui.keeper_message_activity_rows state with
+  | [ row ] ->
+    check bool "the running row carries the keys" true
+      (Astring.String.is_infix ~affix:"Esc stops it" row.keys);
+    check bool "and they are not in the detail a narrow pane cuts" false
+      (Astring.String.is_infix ~affix:"Esc" row.rest)
+  | rows -> fail (String.concat " | " (texts rows))
+
+(* A request bound into the live request's batch is the live row's to draw.
+   Compared by request id, the band named it "in progress" while the live row
+   drew the same execution as WAITING TO START. *)
+let test_a_request_in_the_live_batch_is_the_live_rows () =
+  let state = state () in
+  let working = live state (Some Live.Running) in
+  Tui.turn_log_add ~now:4. working ~seq:(Some 1) Live.Run_started;
+  Tui.turn_log_add ~now:4. working ~seq:(Some 2)
+    (Live.Batch_bound {operation_id = "request-1"; execution_id = "shared-execution"});
+  let active = List.hd state.msg_inflight in
+  let newer = live ~request_id:"queued-2" state (Some Live.Queued) in
+  Tui.turn_log_add ~now:5. newer ~seq:(Some 1)
+    (Live.Batch_bound {operation_id = "queued-2"; execution_id = "shared-execution"});
+  state.msg_inflight <- state.msg_inflight @ [active];
+  check (list string) "one execution, drawn once, by the live row" []
+    (texts (Tui.keeper_message_activity_rows state))
 
 let test_started_and_finished_requests_stop_waiting () =
   let state = state () in
@@ -158,6 +216,10 @@ let () =
           test_the_band_does_not_repeat_the_admission
       ; test_case "queue does not invent its blocker" `Quick
           test_queue_does_not_invent_a_blocking_turn
+      ; test_case "stop keys ride the running row" `Quick
+          test_stop_keys_ride_the_running_row
+      ; test_case "a request in the live batch is the live row's" `Quick
+          test_a_request_in_the_live_batch_is_the_live_rows
       ; test_case "started, finished, and other Keeper requests" `Quick
           test_started_and_finished_requests_stop_waiting
       ; test_case "local queue is distinct from server admission" `Quick

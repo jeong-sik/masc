@@ -2737,11 +2737,22 @@ let render_keeper_message (state : state) =
     (* The lead -- the mark, the lane, the age -- in the status colour; the
        detail after it receded. Drawn whole in the status colour, five rows of
        band read as five warnings and none stood out. *)
+    (* The keys are fitted first and the detail takes what is left, so a
+       long preview status loses its tail rather than the keys after it. *)
     List.iter
       (fun (row : Masc_tui_answering.chat_activity_row) ->
+        let room =
+          framed_inner_width chat_cols - 2
+          - Message_layout.display_width row.lead
+          - Message_layout.display_width row.keys
+        in
+        let rest =
+          if Message_layout.display_width row.rest <= room then row.rest
+          else fit_width row.rest (max 0 room)
+        in
         box_line chat_buf chat_cols
-          (Printf.sprintf "  %s%s%s%s%s%s" (Theme.warn ()) row.lead Ansi.reset
-             (Theme.recede ()) row.rest Ansi.reset))
+          (Printf.sprintf "  %s%s%s%s%s%s%s" (Theme.warn ()) row.lead Ansi.reset
+             (Theme.recede ()) rest row.keys Ansi.reset))
       (Masc_tui_types.keeper_message_activity_rows state);
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       (Masc_tui_types.keeper_observed_interrupt_rows state);

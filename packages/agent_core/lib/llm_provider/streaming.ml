@@ -449,6 +449,17 @@ let non_blank_json_string = function
   | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> Error "not_string"
 ;;
 
+(* One streamed reasoning slice is a piece of a longer text, so a slice of
+   only spaces or a newline is that text's spacing: GLM-5.3 on z.ai sends 16
+   of its 148 [reasoning_content] slices as [" "] or ["\n"] (wire capture
+   manual-20260910-glm5.3-zai). Dropping them glues the words and paragraphs
+   around them. Only [""] carries nothing. *)
+let non_empty_json_string = function
+  | `String "" | `Null -> Ok None
+  | `String s -> Ok (Some s)
+  | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> Error "not_string"
+;;
+
 (* The two members OpenAI-compatible chat deltas carry readable reasoning
    under: the DeepSeek-direct [reasoning_content] and the OpenRouter /
    ollama.com [reasoning]. A catalog row declares exactly one of them and the
@@ -487,8 +498,8 @@ let parse_stream_reasoning_detail ~index = function
   | `Assoc fields as raw ->
     let text =
       match List.assoc_opt "text" fields with
-      | Some (`String s) when String.trim s <> "" -> Some s
-      | Some (`String _)
+      | Some (`String "") -> None
+      | Some (`String s) -> Some s
       | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
       | None -> None
     in
@@ -750,10 +761,10 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                | Some (`List (choice :: _)) ->
                  let delta = choice |> member "delta" in
                  let delta_content = delta |> member "content" |> to_string_option in
-                 let non_blank_delta_field field =
+                 let declared_delta_field field =
                    match delta |> member field |> to_string_option with
-                   | Some value when String.trim value <> "" -> Some value
-                   | Some _ | None -> None
+                   | Some "" | None -> None
+                   | Some _ as value -> value
                  in
                  let reasoning_result =
                    match streaming_reasoning with
@@ -770,7 +781,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                        match assoc_field_opt field delta with
                        | None -> Ok None
                        | Some value ->
-                         (match non_blank_json_string value with
+                         (match non_empty_json_string value with
                           | Ok _ as ok -> ok
                           | Error _ ->
                             Error
@@ -800,13 +811,17 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                         the other documented spelling is not picked up in its
                         place: that is a misdeclared catalog row, and reading
                         it silently is what kept the row wrong (F111). *)
-                     (match non_blank_delta_field field with
-                      | Some _ as reasoning -> Reasoning_delta_read (reasoning, None)
-                      | None ->
+                     (match declared_delta_field field with
+                      | Some value when not (Api_common.string_is_blank value) ->
+                        Reasoning_delta_read (Some value, None)
+                      | declared ->
+                        (* Absent or only spacing. Text under the other
+                           spelling is still the misdeclaration; without it the
+                           spacing is this member's own slice. *)
                         (match undeclared_reasoning_member ~declared:field delta with
                          | Some member ->
                            Reasoning_delta_undeclared_member { declared = field; member }
-                         | None -> Reasoning_delta_read (None, None)))
+                         | None -> Reasoning_delta_read (declared, None)))
                    | Reasoning_dialect.No_streaming_reasoning
                    | Reasoning_dialect.Template_parser -> Reasoning_delta_read (None, None)
                  in

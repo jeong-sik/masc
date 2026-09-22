@@ -453,33 +453,52 @@ type not_committed =
   ; walk_shows_size : bool
   }
 
+(* One official-client slot's failure. A slot that names the limit it refused
+   at is answered by [fit_continuity], not here. Of the rest, an answer that
+   came back unusable is a refused output, which RFC-librarian-lifecycle §4.3
+   counts among the failures reading less answers; an id this module cannot
+   run is a configuration error; and a client that simply failed does not say
+   why -- its quota and its input limit arrive in the same constructor -- so it
+   is no evidence either way. Reading less on it would let a CLI quota storm
+   walk the width down to one atom. *)
+let cli_failure_shows_size (failure : Keeper_lane_cli_oneshot.failure) =
+  match failure with
+  | Keeper_lane_cli_oneshot.Invalid_json_output _
+  | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> true
+  | Keeper_lane_cli_oneshot.Not_an_official_client _
+  | Keeper_lane_cli_oneshot.Execution_failed _ -> false
+;;
+
 (* Whether anything this pass met says the range's size stopped it. A failure
    that never involved a provider judging the request cannot: the prompt did
    not render, no transport was declared, the lane would not resolve, the
-   clock was missing, the official-client tail was exhausted, or the model
-   answered and the snapshot write failed. Reading less on those walks the
-   source down over an outage a smaller range meets identically, and only an
-   emptied backlog widens it again, so it would stay there. One mistyped CLI
-   slot id used to fold every pass this way.
+   clock was missing, or the model answered and the snapshot write failed.
+   Reading less on those walks the source down over an outage a smaller range
+   meets identically, and only an emptied backlog widens it again, so it would
+   stay there. One mistyped CLI slot id used to fold every pass this way.
 
-   A domain output this lane refused is the one exception:
-   RFC-librarian-lifecycle §4.3 counts a refused output among the failures
-   reading less answers. *)
+   The official-client tail keeps the API failure that sent the walk to it, and
+   both are asked: reading only the tail would answer a size refusal one way
+   when CLI slots were declared and the other way when they were not. *)
 let rec extraction_shows_size = function
   | Exact_execution_failed error -> error.walk_shows_size
   | Domain_output_invalid _ -> true
-  (* The official-client tail keeps the API failure that sent the walk to it.
-     Reading only the tail would answer a size refusal one way when the CLI
-     slots were declared and the other way when they were not, and the same
-     for a domain output the lane refused before the tail ran. *)
-  | Cli_slots_exhausted { prior_error = Some error; _ }
+  | Cli_slots_exhausted { prior_error; failures } ->
+    List.exists cli_failure_shows_size failures
+    || (match prior_error with
+        | Some error -> extraction_shows_size error
+        | None -> false)
   | Cli_prompt_unavailable { prior_error = Some error } -> extraction_shows_size error
-  | Cli_slots_exhausted { prior_error = None; _ }
   | Cli_prompt_unavailable { prior_error = None } -> false
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
   | No_transport_declared | Memory_snapshot_write_failed _ -> false
 ;;
 
+(* Only a CLI slot reports a limit this process can fit against: its refusal
+   carries the server's own character count. An API slot states its limit in
+   tokens inside provider prose, which this process cannot read back into a
+   number, so no fitting is possible from it -- a walk of API slots answers
+   its caller with the size verdict above instead. *)
 let extraction_cli_input_limit = function
   | Cli_slots_exhausted { failures; _ } ->
     (match List.rev failures with
@@ -515,7 +534,9 @@ let exact_execution_error ?(semantic_rejections = []) error =
   in
   let detail = Keeper_exact_flow_detail.flow_execution_error_detail error in
   { outward_effect
-  ; walk_shows_size = walk_shows_size_flow error || semantic_rejections <> []
+  ; walk_shows_size =
+      walk_shows_size_flow error
+      || (match semantic_rejections with [] -> false | _ :: _ -> true)
   ; detail
   }
 ;;

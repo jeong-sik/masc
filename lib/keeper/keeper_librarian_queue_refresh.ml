@@ -284,7 +284,19 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
           cli_limit := Some observed;
           remember_input_capacity ~config ~keeper_name observed;
           capacity := Some observed)
-        ~on_not_committed:(fun outcome -> cause := Some outcome)
+        ~on_not_committed:(fun outcome ->
+          (* A pass can report more than once -- a walk that failed and then a
+             snapshot that did not commit. Evidence of size from any of them
+             stands; the latest cause is the one logged. *)
+          cause :=
+            Some
+              (match !cause with
+               | None -> outcome
+               | Some earlier ->
+                 { outcome with
+                   Runtime.walk_shows_size =
+                     earlier.Runtime.walk_shows_size || outcome.Runtime.walk_shows_size
+                 }))
         ~on_continuity_committed:(fun _ -> saved := true; observe O.Committed)
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)

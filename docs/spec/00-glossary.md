@@ -794,8 +794,11 @@ status: reference
   "이어서 할 일의 설명" 절반이며, 같은 파일에 저장된 정확한 대화 범위와 한 쌍이다.
   큐 원본을 정리한 Working Context(`working_contexts`)나 장기 Memory facts와 다르다.
   모델의 출력만으로 범위가 소비된 것은 아니며, pair 저장과 소비 시 이력 검증이
-  필요하다.
-  → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli)
+  필요하다. 연속성 회차가 만든 이 값은 `Keeper_librarian_continuity.commit`의
+  `working_state` 인자이고 Continuity Snapshot 파일에 저장된다. 턴은 이 값이 덮는
+  atom들을 보내는 대신 이 값을 보낸다. 저장본이 덮는 범위와 이 값이 대신하는 범위는
+  같다.
+  → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
 **Continuity Synthesis Observation (대화 요약 진행 관측)**
 : 이번 서버 실행에서 Librarian이 마지막으로 선택한 Atom 구간, 그때 확인한
@@ -803,6 +806,52 @@ status: reference
   표시한다. 일반 Memory 소비자의 `drained`와 별개이며 다음 실행을 통제하지 않는다.
   `no_source`는 새로 읽을 완료 구간을 얻지 못했다는 뜻으로, 전체 요약 완료를
   증명하지 않는다. 구간이 없거나 관측 전이면 알 수 없음으로 표시한다.
+
+**Librarian Round (Librarian 회차)**
+: Librarian이 한 번 도는 일. Keeper마다 따로 돌고, 같은 신호(서버 기동·턴 끝·받은 일
+  변경)에 깨어난다. 두 가지가 있다.
+  - durable 회차(`Keeper_librarian_durable_consumer`): 끝난 턴을 읽어 Memory OS에 적고
+    읽은 위치(Read Position)를 옮긴다. Agent Core 턴은 checkpoint의 atom으로, 공식
+    클라이언트 턴은 그 trace의 history 파일에서 `turn_ref`가 가리키는 조각으로 읽는다.
+    두 위치(atom 위치·공식 클라이언트 위치)를 각각 옮기며, `commit`이 Memory OS snapshot
+    커밋을 보고할 때만 옮긴다.
+  - 연속성 회차(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 회차.
+    완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 커밋은 durable 회차의
+    위치를 바꾸지 않는다.
+  두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 규칙을 공유한다(RFC
+  librarian-lifecycle §4.3). durable 회차는 실패 표식을 루프 메모리에 두고 가장 오래된
+  한 턴으로 좁힌다. 연속성 회차는 좁힌 폭(Continuity Width)을 다음 회차로 넘긴다.
+  → [keeper_librarian_durable_consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
+
+**Continuity Lag (연속성 밀림)**
+: 연속성 회차가 얼마나 뒤처졌나 — Librarian의 읽은 위치(Read Position)의 `end_atom`에서
+  연속성 스냅숏이 덮은 끝(`Keeper_continuity_observation.frontier.end_atom`)을 뺀 atom 수.
+  같은 trace를 가리킬 때만 세고, 스냅숏이 앞서면 세지 않는다. health JSON의
+  `continuity_unread_atoms`이고 TUI는 `continuity behind <n>`으로 그린다. durable 회차의
+  밀림(`Keeper_librarian_durable_consumer.unread`의 `atoms`·`official`, health의
+  `unread_atom_turns`·`unread_official_turns`)과 다른 값이다 — 두 회차는 따로 밀리므로
+  한 숫자가 둘을 대신하지 못한다(RFC librarian-lifecycle §4.9). 스냅숏이 없거나, 두 파일
+  중 하나를 못 읽거나, 두 파일이 다른 trace를 가리키거나, 스냅숏이 앞서면 `null`
+  ("말할 수 없음")이다. 그 넷은 따라잡은 Keeper가 아니므로 0으로 적지 않는다. fleet
+  합계(`librarian_continuity_unread_atoms`)는 잴 수 있었던 Keeper만 더하고 못 잰 수를
+  옆에 센다(`librarian_continuity_unmeasured`) — 한 Keeper 때문에 합계가 null이 되면
+  잴 수 있는 Keeper가 다 가려진다.
+  → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
+
+**Continuity Width (연속성 회차의 폭)**
+: 연속성 회차가 한 번에 읽을 수 있는 atom 수의 상한. 크기 때문에 거절당한 회차가 좁힌
+  값을 다음 회차가 이어받는다. (keepers dir, keeper)별로 그 값을 잰 trace와 함께 루프
+  메모리에 둔다(`keeper_librarian_queue_refresh.ml`의 `limited_widths`). trace가 바뀌면
+  atom 번호가 다시 매겨지므로 비교하지 않고 새 값으로 바꾸고, 같은 trace 안에서는 더
+  좁은 값만 남는다. 끝 atom이 아니라 폭을 남기므로 커밋한 회차 다음에는 같은 자리가
+  아니라 그다음 자리를 읽는다. 좁히는 것은 작은 요청이 같은 벽을 피할 수 있는 실패뿐이고,
+  그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli:47`)가 들고, 원인별 판정
+  규칙은 RFC-librarian-lifecycle §4.3이 정한다. 판정은 걸음의 마지막 슬롯이 아니라 걸음
+  전체에 묻는다. 폭은 backlog를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
+  거절했던 범위가 이제 들어간다는 증거가 아니다. 루프
+  메모리에만 있으므로 서버가 재시작하면 폭은 사라지고 다시 전부 읽기부터 시작한다(RFC
+  librarian-lifecycle §4.3).
+  → [keeper_librarian_queue_refresh](../../lib/keeper/keeper_librarian_queue_refresh.ml)
 
 **Input Policy (입력 구성 방식)**
 : Keeper의 `input_policy` 설정. `small`은 Agent Core에 보내는 완료된 과거 도구 결과를

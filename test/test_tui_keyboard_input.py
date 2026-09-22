@@ -8829,10 +8829,23 @@ def run_tools_purpose_regression(executable: str) -> None:
         async_payload["summary"].update(active=1, ownership_unknown=1)
         send_and_wait(process, master_fd, output, b"r", b"request-unowned")
         send_and_wait(process, master_fd, output, b"p", b"Skill Use")
-        require("현재 세션에 보존된 Skill 증거", "호출·전달·이후 행동은 별도 증거", "0 receipts", "invoked=0")
-        send_and_wait(process, master_fd, output, b"p", b"bravo 12/12/9")
-        require("현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계", "inv/delivered/actions=호출/전달/이후 행동",
+        require("현재 세션에 보존된 Skill 증거", "호출·전달·이후 행동은 별도 증거", "0 receipts",
+                "instruction triggered 0 · delivered 0 · handed off 0 · actions 0")
+        # One keeper, one row, counts in their own columns. Joined onto one
+        # line, six keepers ran past the pane and the last of them could not
+        # be read at all.
+        send_and_wait(process, master_fd, output, b"p", b"TRIGGERED")
+        require("현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계",
+                "TRIGGERED/DELIVERED/ACTIONS=호출/전달/이후 행동",
                 "1 of 2 catalog Skills observed", "Activation ledgers loaded: 19; unavailable: 0")
+        usage_rows = screen_rows(bytes(output))
+        bravo = [text for text in usage_rows.values() if b"bravo" in text]
+        if not any(re.search(rb"bravo\s+12\s+12\s+9\s+\d{4}-", text) for text in bravo):
+            raise AssertionError(
+                f"the keeper's counts are not in their own columns: {bravo!r}"
+            )
+        if any(b"12/12/9" in text for text in usage_rows.values()):
+            raise AssertionError("the joined per-keeper reading is back")
         send_and_wait(process, master_fd, output, b"p", b"masc_board_post")
         require("MASC 전체 등록 도구 목록", "DIRECT=직접 호출 허용", "surfaces=none은 노출 경로 없음")
         send_and_wait(process, master_fd, output, b"p", b"keeper_status")

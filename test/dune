@@ -2154,7 +2154,7 @@
 (test
  (name test_server_auth_refusal_log)
  (modules test_server_auth_refusal_log)
- (libraries alcotest masc masc.auth masc_server masc_log yojson httpun bigstringaf))
+ (libraries alcotest masc masc.auth masc.masc_types masc_server masc_log yojson httpun bigstringaf))
 
 ; Dashboard actor attribution: rejected credentials cannot become anonymous hints.
 

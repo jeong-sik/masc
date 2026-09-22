@@ -237,7 +237,9 @@ Keeper pangyo-preachers). Continuity 절(426~703행)에서 찾은 것:
 - TUI 배선: 이 주에 Memory/Keeper 화면에 더해진 키 세 묶음(연속성 밀림, 요약 진행 관측, JEV 준비 상태)은
   서버 writer 와 TUI reader 가 file:line 단위로 짝이 맞고, reader 만 있거나 writer 만 있는 키는 없었다
   (별도 탐색 에이전트, origin/main 기준). `64f20a0187` 은 #37856 이 `.ml` 에만 필드를 더하고 `.mli` 를 빠뜨려
-  깨진 빌드를 다음 날 고친 것이다. "not measured"(`bin/masc_tui_render_memory.ml:132`)는 서버가 관측하지
+  깨진 빌드를 다음 날 고친 것이다. 같은 화면의 "config keepers dir 에서 progress 를 읽는" 실수는 #37856 과 #37840 에서
+  두 번 났고(#37870 이 하나를 고쳤고 #37896 이 나머지를 고치는 중), 두 번째 fix 규칙대로 reader 가 문자열 dir 대신
+  `config` 를 받게 하는 근본 수정이 [#37921](https://github.com/jeong-sik/masc/issues/37921) 에 있다. "not measured"(`bin/masc_tui_render_memory.ml:132`)는 서버가 관측하지
   못한 `None` 을 그대로 보여 주는 자리이고, 색 분기는 전부 typed variant 매치다. `String.starts_with` 는
   JSON 본문 판별과 경로 접두어 축약 두 곳뿐이다. lane declaration 화면과 dashboard(TypeScript)는 보지 않았다.
 

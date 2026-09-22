@@ -173,6 +173,15 @@ let test_without_snapshot_starts_at_the_turn_start () =
   (match continued.composed.origin with
    | Front.Turn_start {end_atom} when end_atom = completed_end -> ()
    | _ -> fail "the origin does not name the turn start");
+  (* A boundary at or past the newest atom: the range still carries that atom
+     and the origin names the boundary, not the atom it opened on. *)
+  let _, atom_count = Window.annotate messages in
+  let past_the_end = project ~completed_end_atom:(atom_count + 5) in
+  check int "a boundary past the newest atom still carries that atom" (atom_count - 1)
+    past_the_end.composed.projection.dropped_atoms;
+  (match past_the_end.composed.origin with
+   | Front.Turn_start {end_atom} when end_atom = atom_count + 5 -> ()
+   | _ -> fail "the origin does not name the boundary past the end");
   (match Driver.validate_continuity ~messages:[] Driver.without_snapshot with
    | Ok () -> () | Error _ -> fail "the snapshot-less path borrowed stale prefix obligations")
 ;;

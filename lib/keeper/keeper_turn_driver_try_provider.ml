@@ -687,11 +687,13 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
 ;;
 
 (* The carried range as one request composes it (RFC
-   keeper-context-window-in-tokens §10.4). The front comes from the ledger
-   or its cold-start seed; without either there is no atom to start from,
-   and the request is the newest suffix the request-body cap admits, or the
-   whole history when no cap is declared. Both of those hold only until the
-   first usage on the pair is counted.
+   keeper-context-window-in-tokens §10.4, §13.4, §13.6). With a Librarian
+   continuity that fits this history the front is its position: the
+   snapshot's, with the working state ahead of the range, or the read
+   position alone. Without one the front comes from the ledger or its
+   cold-start seed, and without either the range starts at the end of the
+   last completed turn on this history ([completed_end_atom]), so only this
+   turn's own atoms go out. Nothing here declares a cap.
 
    RFC-0363 demotion runs first over the unmodified history: the atoms older
    than the current turn — the [demote_before] boundary the caller computes
@@ -816,8 +818,8 @@ let compose_carried_model_input
   =
   let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
   (* A front whose index this history does not open with the same message
-     names no atom of it: the history is shorter than the front, or atoms
-     before the front were purged. The request starts over as with no front
+     names no atom of it: the history is shorter than the front, or a purge
+     rewrote the message that opens it. The request starts over as with no front
      rather than carrying the newest atom alone from a position that would
      never widen again. A history that only lost an unsaved attempt's tail
      keeps the position. *)
@@ -892,7 +894,8 @@ let compose_carried_model_input
          §13.4): the range begins where the last completed turn on this
          history ended, clamped so the newest atom always goes. The atoms
          before it wait for the Librarian's next pass. A history with no
-         completed turn starts at 0, which is everything it has. *)
+         completed turn starts at 0, which is everything it has. The origin
+         names the boundary itself, not the atom the clamp opened on. *)
       let first_atom =
         Keeper_carried_front.clamp ~atom_count:history_atom_count completed_end_atom
       in
@@ -902,7 +905,8 @@ let compose_carried_model_input
           ~first_atom
           planned.Keeper_model_input_demotion.messages
       in
-      projection, transmitted_bytes, Keeper_carried_front.Turn_start { end_atom = first_atom }
+      projection, transmitted_bytes,
+        Keeper_carried_front.Turn_start { end_atom = completed_end_atom }
   in
   { planned
   ; projection

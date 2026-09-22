@@ -642,6 +642,60 @@ let test_read_seed_keeps_boundary_errors_out_of_the_record_count () =
     (Option.is_some read.Front.boundary_error)
 ;;
 
+(* [since_seq] is exclusive and the ring's first entry carries seq 0. *)
+let ring_cursor () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+;;
+
+(* The WARN lines one report writes on [keeper]'s log, oldest first. *)
+let warnings_reported ~keeper read =
+  let cursor = ring_cursor () in
+  Front.warn_seed_read_failures ~keeper_name:keeper ~runtime_id:"glm" read;
+  Log.Ring.recent ~since_seq:cursor ~order:`Oldest_first ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+    Option.equal String.equal entry.Log.Ring.keeper_name (Some keeper)
+    && String.equal entry.Log.Ring.module_name "Keeper"
+    && (match entry.Log.Ring.level with
+        | Log.Warn -> true
+        | Log.Debug | Log.Info | Log.Error -> false))
+;;
+
+let test_a_seed_read_reports_each_failure_once () =
+  let unreadable = Some { Front.count = 2; first_reason = "fixture row" } in
+  let boundary_error = Some "turn boundary line 3: fixture" in
+  check int "a clean read writes nothing" 0
+    (List.length (warnings_reported ~keeper:"warn-clean" Front.no_seed_read));
+  check int "a seed alone writes nothing" 0
+    (List.length
+       (warnings_reported ~keeper:"warn-seed"
+          { Front.no_seed_read with
+            Front.seed =
+              Some
+                { Front.first_atom = 3
+                ; front_digest = recorded_digest 3
+                ; source = Front.Ledger
+                }
+          }));
+  check int "unreadable records write one line" 1
+    (List.length
+       (warnings_reported ~keeper:"warn-unreadable" { Front.no_seed_read with Front.unreadable }));
+  (match
+     warnings_reported ~keeper:"warn-boundary" { Front.no_seed_read with Front.boundary_error }
+   with
+   | [ entry ] ->
+     check bool "the boundary line carries the store's detail" true
+       (Astring.String.is_infix ~affix:"turn boundary line 3: fixture" entry.Log.Ring.message);
+     check bool "and the runtime whose request it started" true
+       (Astring.String.is_infix ~affix:"glm" entry.Log.Ring.message)
+   | other -> failf "expected one boundary line, got %d" (List.length other));
+  check int "both failures write a line each" 2
+    (List.length
+       (warnings_reported ~keeper:"warn-both"
+          { Front.no_seed_read with Front.unreadable; boundary_error }))
+;;
+
 let test_clamp_keeps_the_front_on_an_atom () =
   check int "below zero" 0 (Front.clamp ~atom_count:5 (-2));
   check int "past the newest" 4 (Front.clamp ~atom_count:5 9);
@@ -718,6 +772,8 @@ let () =
             test_read_seed_stops_at_previous_trace
         ; test_case "boundary errors are not TurnRecord errors" `Quick
             test_read_seed_keeps_boundary_errors_out_of_the_record_count
+        ; test_case "a seed read reports each failure once" `Quick
+            test_a_seed_read_reports_each_failure_once
         ] )
     ; ( "front"
       , [ test_case "of_ledger" `Quick test_of_ledger_reads_the_last_request_front

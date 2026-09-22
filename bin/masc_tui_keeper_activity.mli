@@ -10,7 +10,10 @@ type window = {
   aw_heartbeats : int;
   aw_input_tokens : int;
   aw_output_tokens : int;
-  aw_cost_usd : float;
+  aw_cost_usd : float option;
+      (** The window's cost, [None] where no row in it carried one: a provider
+          that prices nothing leaves the field unset on every turn row it
+          writes, and that is not a window that cost nothing. *)
   aw_tool_calls : int;
   aw_top_tools : tool_use list;
   aw_covered : bool;

@@ -1834,13 +1834,34 @@ Exit signals restore terminal modes and cursor state. Job-control suspension
 complete repaint.
 
 Every session writes one line saying why it ended to its own stderr log,
-`.masc/logs/masc-tui-<pid>.log`: `exit: normal (quit key)`, `exit: normal
-(signal SIGTERM)` or `exit: abnormal (exception ...)`. A normal end is the
-operator or the session's owner asking for it — the `q` key, a second `Ctrl-C`,
-or a terminate signal — and an abnormal one is the surface leaving without
-being asked, such as an uncaught exception. The line is the only record of the
-end: the log otherwise holds the boot lines, so a session that ended used to
-leave no reason behind.
+`.masc/logs/masc-tui-<pid>.log`, prefixed so it can be collected on its own:
+
+```
+[masc-tui] exit: normal (quit key)
+[masc-tui] exit: normal (interrupt)
+[masc-tui] exit: normal (signal SIGTERM)
+[masc-tui] exit: abnormal (exception Failure("..."))
+```
+
+A normal end is the operator or the session's owner asking for it — the `q`
+key, a second `Ctrl-C`, or a terminate signal — and an abnormal one is the
+surface leaving without being asked, such as an uncaught exception. A session
+that leaves without naming a cause reads as `abnormal (no cause was
+recorded)`, which is its own wording rather than a made-up exception. A cause
+longer than 200 bytes is cut on a character boundary and the row ends in
+`[+N bytes]`, so a backtrace cannot turn one session's row into a page.
+
+The line is the only record of the end: the log otherwise holds the boot
+lines, so a session that ended used to leave no reason behind. Counting a
+day's ends by cause is one command:
+
+```
+grep -h '\[masc-tui\] exit:' .masc/logs/masc-tui-*.log | sort | uniq -c | sort -rn
+```
+
+A session killed with `SIGKILL`, or one whose machine lost power, writes
+nothing — no handler runs — so the count covers ends the process survived
+long enough to name.
 
 Viewports below the fixed chrome budget render a compact resize gate instead of
 a clipped frame, and message editing is suppressed until the terminal grows.

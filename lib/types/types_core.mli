@@ -105,6 +105,14 @@ type verification_intent =
   | Cancel_task
 [@@deriving show]
 
+val verification_intent_to_string : verification_intent -> string
+(** The wire name the backlog and the verification projections carry:
+    ["complete"] or ["cancel"]. *)
+
+val verification_intent_of_string :
+  string -> (verification_intent, string) result
+(** Refuses any other name rather than defaulting to either intent. *)
+
 (** What the producer places before the authority. [verification_intent] is
     the projection the task status carries; the request record the authority
     reads carries the claim itself. *)

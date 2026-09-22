@@ -18,6 +18,13 @@ let glyph ~paused reading =
   | Some _ when paused -> paused_glyph
   | Some value -> health_glyph value
 
+type open_turn = Worked | Worked_while_failing | Left_open
+
+let open_turn = function
+  | Some Reading.Health_offline -> Left_open
+  | Some Reading.Health_failing -> Worked_while_failing
+  | Some (Reading.Health_running | Reading.Health_idle) | None -> Worked
+
 let legend =
   [ health_glyph Reading.Health_running, "healthy"
   ; health_glyph Reading.Health_failing, "failing"

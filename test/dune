@@ -2154,6 +2154,13 @@
  (modules test_server_auth_warn_log_bound)
  (libraries alcotest masc masc.auth masc_server eio_main))
 
+; A refused request leaves a line naming the endpoint that produced it.
+
+(test
+ (name test_server_auth_refusal_log)
+ (modules test_server_auth_refusal_log)
+ (libraries alcotest masc masc.auth masc.masc_types masc_server masc_log yojson httpun bigstringaf eio_main))
+
 ; Dashboard actor attribution: rejected credentials cannot become anonymous hints.
 
 (test
@@ -3429,6 +3436,16 @@
   (source_tree ../lib)
   (source_tree ../bin)
   %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
+
+; The footer of a detail-owning surface and the renderers that draw it. Reads
+; the key table for the contract and bin/ for the renderers, because the
+; renderer half is an optional argument -- omitting it compiles.
+
+(test
+ (name test_tui_footer_detail_state)
+ (modules test_tui_footer_detail_state)
+ (libraries alcotest ast_grep masc_tui_keys masc_tui_types)
+ (deps (source_tree ../bin)))
 
 (test
  (name test_tui_runtime_config_receipt)
@@ -5252,11 +5269,24 @@
  (name test_tui_connector_state)
  (modules test_tui_connector_state)
  (libraries alcotest masc masc_tui_connector_state))
+ (name test_tui_fleet_line)
+ (modules test_tui_fleet_line)
+ (libraries alcotest masc masc_tui_fleet_line))
 
 (test
  (name test_tui_table)
  (modules test_tui_table)
  (libraries alcotest masc_tui_message_layout masc_tui_table))
+
+(test
+ (name test_operator_attention_summary)
+ (modules test_operator_attention_summary)
+ (libraries alcotest masc.operator))
+
+(test
+ (name test_tui_fusion_state)
+ (modules test_tui_fusion_state)
+ (libraries alcotest masc masc_tui_render_prim masc_tui_types))
 
 (test
  (name test_tui_config_path)

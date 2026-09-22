@@ -108,6 +108,33 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
     (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
     [ "HEALTH"; "LIFECYCLE"; "TURN"; "Mode"; "S " ]
 
+(* An open turn draws the turn's mark, and that mark is the working mark. A
+   failing keeper keeps a turn open while its keepalive retries, so this is
+   where it would draw exactly what a working keeper draws; its health word
+   is what keeps the row findable under a header that counts it failing. *)
+let open_turn = Mark.open_turn
+
+let test_a_failing_keepers_open_turn_keeps_its_health_word () =
+  check_bool "a failing keeper's turn keeps the failing word" true
+    (open_turn (Some Reading.Health_failing) = Mark.Worked_while_failing);
+  check_bool "and does not draw what a working keeper's turn draws" true
+    (open_turn (Some Reading.Health_failing)
+     <> open_turn (Some Reading.Health_running))
+
+let test_an_offline_keepers_open_turn_is_left_open () =
+  check_bool "nothing works the turn of an offline keeper" true
+    (open_turn (Some Reading.Health_offline) = Mark.Left_open)
+
+let test_a_working_keepers_open_turn_shows_how_long () =
+  List.iter
+    (fun (name, reading) ->
+      check_bool (name ^ " draws the turn's elapsed time") true
+        (open_turn reading = Mark.Worked))
+    [ "running", Some Reading.Health_running
+    ; "idle", Some Reading.Health_idle
+    ; "unread", None
+    ]
+
 let () =
   Alcotest.run "tui_keeper_mark"
     [ ( "marks"
@@ -127,5 +154,13 @@ let () =
             test_the_legend_names_every_mark_once
         ; Alcotest.test_case "the column legend explains every letter" `Quick
             test_the_column_legend_explains_every_letter_the_cell_draws
+        ] )
+    ; ( "open turn"
+      , [ Alcotest.test_case "a failing keeper's open turn keeps its health word"
+            `Quick test_a_failing_keepers_open_turn_keeps_its_health_word
+        ; Alcotest.test_case "an offline keeper's open turn is left open" `Quick
+            test_an_offline_keepers_open_turn_is_left_open
+        ; Alcotest.test_case "a working keeper's open turn shows how long" `Quick
+            test_a_working_keepers_open_turn_shows_how_long
         ] )
     ]

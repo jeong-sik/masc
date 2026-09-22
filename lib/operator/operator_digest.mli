@@ -24,6 +24,17 @@ type recommended_action = {
   suggested_payload : Yojson.Safe.t;
 }
 
+val keeper_attention_summary :
+  name:string ->
+  reason:string option ->
+  runtime_blocker_summary:string option ->
+  string
+(** What one Keeper's attention row says: its name, the attention reason after
+    a colon, and the runtime blocker summary in parentheses --
+    ["lane-smith: paused"], ["sangsu: runtime_blocked (every candidate
+    refused)"], ["sangsu (keepalive lost)"]. With neither reading the row is
+    ["<name> needs operator attention"]. *)
+
 val severity_rank : operator_severity -> int
 
 val health_from_attention_items : attention_item list -> string

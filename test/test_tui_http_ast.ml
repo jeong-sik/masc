@@ -2049,6 +2049,24 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      .count_applications_with_exact_positional_identifier_in_value_binding
        ~module_path:main_path ~binding_name:"enter_terminal_session"
        ~callee:"at_exit" ~position:0 ~identifier:"cleanup");
+  (* Counting the registrations says there are three; only their order says
+     which one runs last. [at_exit] runs callbacks in reverse, so this list
+     read backwards is the run order: the terminal restore first, the frame
+     summary next, and the exit-reason writer last -- where the terminal is
+     already back and stderr is still the per-PID log. Swapping any two moves
+     the writer without changing the count, which is exactly what the
+     sequence check above cannot see. *)
+  check
+    (list (option string))
+    "the exit callbacks are registered in the order that runs the reason \
+     writer last"
+    [ Some "write_exit_reason"
+    ; Some "Masc_tui_frame_timing.report"
+    ; Some "cleanup"
+    ]
+    (Ast_grep.positional_identifier_sequence_in_value_binding
+       ~module_path:main_path ~binding_name:"enter_terminal_session"
+       ~callee:"at_exit" ~position:0);
   check int "main enters the guarded terminal session once" 1
     (Ast_grep
      .count_applications_with_exact_labelled_identifiers_in_value_binding

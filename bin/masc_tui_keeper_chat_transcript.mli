@@ -300,10 +300,21 @@ val note_tool_outcome :
     durable outcome that says less than the stream saw ([Never_returned],
     unrecorded) changes nothing. *)
 
+val note_skill_activity : t -> skill_activity -> unit
+(** Folds in the exact delivery record of one skill read -- the states the
+    wire has no event for ([Skill_served_only], [Skill_delivered],
+    [Skill_used]), the calls the read led to, and the proof ids -- keyed by
+    its [skill_tool_use_id]. A record in a state the stream speaks for
+    itself (calling, pending, failed) or an evidence gap changes nothing,
+    and neither does one without a tool-use id. A second record for the
+    same id replaces the first. {!drawn} lays the record over the skill item
+    derived from the same call, and draws it on its own when the trail never
+    saw that call. *)
+
 val revision : t -> int
 (** Bumped by every mutation ({!apply}, {!note_interrupt},
-    {!note_tool_outcome}): the memo key for anything drawn from this
-    transcript. *)
+    {!note_tool_outcome}, {!note_skill_activity}): the memo key for anything
+    drawn from this transcript. *)
 
 val phase : t -> phase
 val awaiting_continuation : t -> bool
@@ -432,7 +443,15 @@ val drawn : t -> drawn_item list
     projects is one operation's and both the stream and the journal reach it
     by that id; the two texts are not compared. With a blank [Visible_reply]
     or any control outcome, one [Drawn_status] is appended and the streamed
-    rows stay. *)
+    rows stay.
+
+    A skill item whose read call has a record from {!note_skill_activity} is
+    drawn as that record, unless the item is [Skill_failed]: the server
+    records a composition's delivery from an error tool result too, so a
+    record cannot turn a call the stream saw fail into a finished read.
+    Records no skill item carries form one more [Drawn_skill], ahead of the
+    stretch the reply stands for, or ahead of the appended reply or status
+    row when no stretch streamed. *)
 
 val of_log : now:float -> Masc_tui_keeper_chat_log.t -> t
 (** The transcript a log projects to: {!create} from the log's identity, then

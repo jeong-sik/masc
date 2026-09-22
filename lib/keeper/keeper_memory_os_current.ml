@@ -421,6 +421,11 @@ let read_durable_range_receipts ~keepers_dir ~keeper_id =
          (Printexc.to_string exn))
 ;;
 
+let validate_durable_range_receipts ~keepers_dir ~keeper_id =
+  (* See read_durable_range_receipts: the read is the validation; the receipt value is intentionally discarded. *)
+  read_durable_range_receipts ~keepers_dir ~keeper_id |> Result.map ignore
+;;
+
 let write_durable_range_receipts ~keepers_dir ~keeper_id receipts =
   let path = durable_range_receipt_path ~keepers_dir ~keeper_id in
   Fs_compat.save_file_atomic_strict path
@@ -509,6 +514,16 @@ let list_keeper_ids_for_keepers_dir ~keepers_dir =
     Sys.readdir keepers_dir
     |> Array.to_list
     |> List.filter_map keeper_id_of_filename
+    |> List.sort String.compare
+;;
+
+let list_durable_range_receipt_keeper_ids ~keepers_dir =
+  if not (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir)
+  then []
+  else
+    Sys.readdir keepers_dir
+    |> Array.to_list
+    |> List.filter_map (Filename.chop_suffix_opt ~suffix:durable_range_receipt_suffix)
     |> List.sort String.compare
 ;;
 

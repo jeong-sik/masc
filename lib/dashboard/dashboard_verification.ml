@@ -78,10 +78,15 @@ let requested_view_of_string = function
     [Backlog_unreadable] is carried instead of collapsing to an empty list:
     "the backlog names nothing" and "the backlog could not be read" are
     different answers, and only the first one means there is no work. *)
+type awaiting_task =
+  { request_id : string
+  ; intent : Masc_domain.verification_intent
+  }
+
 type awaiting_join =
-  | Backlog_read of { live_request_ids : string list }
+  | Backlog_read of { live : awaiting_task list }
   | Backlog_recovered of
-      { live_request_ids : string list
+      { live : awaiting_task list
       ; detail : string
       }
       (** The primary backlog did not read and a [.last-good] snapshot did.
@@ -110,12 +115,12 @@ let queue_view_requested = function
 
     Every status is named so a new one has to be given an answer here rather
     than inheriting "not waiting" from a catch-all. *)
-let awaiting_request_ids (backlog : Masc_domain.backlog) : string list =
+let awaiting_tasks (backlog : Masc_domain.backlog) : awaiting_task list =
   List.filter_map
     (fun (task : Masc_domain.task) ->
       match task.Masc_domain.task_status with
-      | Masc_domain.AwaitingVerification { verification_id; _ } ->
-        Some verification_id
+      | Masc_domain.AwaitingVerification { verification_id; intent; _ } ->
+        Some { request_id = verification_id; intent }
       | Masc_domain.Todo
       | Masc_domain.Claimed _
       | Masc_domain.InProgress _
@@ -168,7 +173,14 @@ let task_title_of_output (output : Yojson.Safe.t) : string =
   | _ -> ""
 
 (** Per-request JSON row. *)
-let request_to_json (req : V.verification_request) : Yojson.Safe.t =
+(* [intent] is the task's pending intent when the caller joined the backlog
+   (the awaiting view) and [None] when it did not (the history view). The
+   two are told apart on the wire as a name versus [null]: a cancellation
+   waits on this queue beside completions and only an operator's verdict
+   clears it, so a row that could not say which it is sent the operator to
+   the task file. *)
+let request_to_json ~(intent : Masc_domain.verification_intent option)
+    (req : V.verification_request) : Yojson.Safe.t =
   let contract = completion_contract_of_criteria req.criteria in
   let required_artifacts, required_artifacts_error =
     string_list_of_output "required_artifacts" req.output
@@ -211,6 +223,10 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     ("task_title", `String task_title);
     ("created_at", `String (Masc_domain.iso8601_of_unix_seconds req.created_at));
     ("submitted_by", `String req.worker);
+    ("intent",
+     (match intent with
+      | Some intent -> `String (Masc_domain.verification_intent_to_string intent)
+      | None -> `Null));
     ("completion_contract",
      `List (List.map (fun s -> `String s) contract));
     ("required_artifacts",
@@ -317,10 +333,15 @@ let awaiting_fields ~limit ~backlog_error ~backlog_recovery ~unresolved =
 let filter_by_view ~limit (view : queue_view)
     ~(store : V.verification_request list)
     (requests : V.verification_request list)
-  : V.verification_request list * (string * Yojson.Safe.t) list =
-  let join ~recovery live_request_ids =
-    let wanted = Hashtbl.create (List.length live_request_ids) in
-    List.iter (fun id -> Hashtbl.replace wanted id ()) live_request_ids;
+  : V.verification_request list
+    * (string * Yojson.Safe.t) list
+    * (string -> Masc_domain.verification_intent option) =
+  let no_join _ = None in
+  let join ~recovery (live : awaiting_task list) =
+    let wanted = Hashtbl.create (List.length live) in
+    List.iter
+      (fun (t : awaiting_task) -> Hashtbl.replace wanted t.request_id t.intent)
+      live;
     let kept =
       List.filter
         (fun (r : V.verification_request) -> Hashtbl.mem wanted r.V.id)
@@ -328,27 +349,31 @@ let filter_by_view ~limit (view : queue_view)
     in
     let present = id_set store in
     let unresolved =
-      List.filter (fun id -> not (Hashtbl.mem present id)) live_request_ids
+      List.filter_map
+        (fun (t : awaiting_task) ->
+          if Hashtbl.mem present t.request_id then None else Some t.request_id)
+        live
     in
     ( kept
     , awaiting_fields ~limit ~backlog_error:None ~backlog_recovery:recovery
-        ~unresolved )
+        ~unresolved
+    , Hashtbl.find_opt wanted )
   in
   match view with
-  | All_requests -> requests, []
+  | All_requests -> requests, [], no_join
   | Awaiting_operator (Backlog_unreadable detail) ->
     ( []
     , awaiting_fields ~limit ~backlog_error:(Some detail)
-        ~backlog_recovery:None ~unresolved:[] )
-  | Awaiting_operator (Backlog_read { live_request_ids }) ->
-    join ~recovery:None live_request_ids
-  | Awaiting_operator (Backlog_recovered { live_request_ids; detail }) ->
-    join ~recovery:(Some detail) live_request_ids
+        ~backlog_recovery:None ~unresolved:[]
+    , no_join )
+  | Awaiting_operator (Backlog_read { live }) -> join ~recovery:None live
+  | Awaiting_operator (Backlog_recovered { live; detail }) ->
+    join ~recovery:(Some detail) live
 
 let requests_json_of_requests ?task_id ~limit ~offset ~view
     (scan : V.request_scan) : Yojson.Safe.t =
   let filtered = filter_by_task_id scan.V.readable task_id in
-  let in_view, view_fields =
+  let in_view, view_fields, intent_of =
     filter_by_view ~limit view ~store:scan.V.readable filtered
   in
   let sorted = sort_desc in_view in
@@ -363,7 +388,12 @@ let requests_json_of_requests ?task_id ~limit ~offset ~view
      (* Whether a further page exists, computed here so a reader does not have
         to derive it from three numbers and get the boundary wrong. *)
      ; ("truncated", `Bool (total > offset + List.length page))
-     ; ("requests", `List (List.map request_to_json page))
+     ; ( "requests"
+       , `List
+           (List.map
+              (fun (r : V.verification_request) ->
+                request_to_json ~intent:(intent_of r.V.id) r)
+              page) )
      ]
      @ view_fields
      @ unreadable_fields scan

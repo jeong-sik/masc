@@ -262,6 +262,25 @@ v0.36.0 태그(09-22 12:02Z) 뒤에 병합된 다섯 PR(#37855·#37875·#37867·
   간다(msx 30건, `keeper_turn_driver.ml:1075-1096`). 성공한 walk 는 `keeper cycle OK` 줄에 attempts 가 없어 셀 수 없다.
 - 공통: keeper 14개의 `event-queue-v19.json` 해독 실패는 전부 04:29:43~04:42:11Z 창 안이다(#37900). 그 뒤 0.
 
+## Tick 별 닫힘 — 기능별 (09-22 UTC 하루, 라이브 store)
+
+각 기능의 durable 상태가 tick 을 거듭하면 닫힌 상태에 이르는지, 무엇이 닫고 무엇이 열어 두는지. 근거는 코드 file:line 과 09-22 로그·파일 수다.
+
+| 기능 | tick | 닫는 전이 | 열어 두는 것 | 판정 |
+|---|---|---|---|---|
+| Task | keeper 도구 호출 + completion authority 의 pending scan | `decide_verdict` approved→Done / rejected→InProgress (`workspace_task_lifecycle.ml:233-306`) | cancel-intent 는 `Human_operator` 만 닫음(:281-290); evaluator 불가 Stalled 는 타이머 없이 Board 승격·재제출·부팅 sweep 으로만(`completion_authority_agent.ml:1086-1100`) | 완료 의도: 닫힘(오늘 Stalled 10건 전부 뒤에 verdict 받음). 취소 의도: 운영자 표면 전까지 열림(7건, #37965 → #37970·#37973) |
+| HITL | 결정 시 `complete_delivery`, 부팅마다 `install_persistence` 재생(`keeper_approval_queue.ml:4586`) | `grant_consumed`(keeper 가 turn 에서 소비) 또는 keeper 부재 시 retire(`:4340-4350`) | 대상 keeper 가 offline 이면 소비될 때까지 부팅마다 재생, 상한 없음 | 닫힘(조건: keeper 가 돌아옴). 부작용이던 재생당 `resolved` 재기록은 #37981 이 닫음 |
+| Access Control | 요청마다 `Keeper_gate.decide` (`keeper_gate.ml:2266`) | 요청 단위 allow/defer, 상태 없음 | 라이브 `gate/mode.json = always_allow` 라 defer 경로가 오늘 0건 — 사람 큐의 닫힘은 관측 못 함 | 닫힘(요청 단위). 측정 공백: reject 경로 |
+| Multi Lane | turn 안 후보 walk(`keeper_turn_driver.ml:1010-1096`), 실패 뒤 다음 cycle 힌트 | 다음 cycle 이 힌트 후보에서 시작(`keeper_heartbeat_loop.ml:1579`, `Dispatch_now`) 또는 path rest 뒤 재개(`Wait_until`) | 결정적 입력 실패는 walk 를 다 태워도 입력이 안 줄어 매 cycle 반복(analyst 42회/2.4h, 넘침 사다리는 typed 신호에만 반응) | 힌트 루프는 닫힘(오늘 힌트 41건 중 40건이 바로 다음 cycle 에서 소비, `deferred its input to … next cycle takes it` 줄로 셈). 입력 크기 실패는 열림(#37963, 원인 기록 문제) |
+| Schedule | `schedule_runner` 15초 tick(`schedule_runner.ml`, `schedule_runner_interval_default_sec`) | 발생이 대상 keeper 큐에서 소비되면 다음 발생 | paused keeper 의 발생은 영영 보류(`Server_schedule_consumers.defer_wake`, lane-smith 6,821줄/일, #37912); `signal_keys.json` 은 지우는 코드 없음(8,846 키, #37919) | 열림: paused 대상·signal_keys 둘 다 상한 없음 |
+| Librarian 연속성 | keeper turn 마다 연속성 회차 | 스냅숏이 진행 위치를 따라잡음(RFC-librarian-lifecycle §4.3) | 폭 기억이 프로세스 로컬이라 재시작마다 재보행(goo-yang-bong 12756→797 두 번, 위 "Tick 별 상태" 절) | 닫힘(조건: 재시작이 멎음). 지렛대 = 재시작 수 |
+| Memory | keeper turn 뒤 Librarian 회차(생산·합성), 흡수 게이트, 검색 시 `Retrieved` 사건 | 회차가 성공해 읽기 위치가 전진 | 회차 실패는 위치를 안 옮기고 다음 turn 이 다시 깨운다, 연속 실패 수를 세는 표면 없음(goo-yang-bong journal failed 122 / committed 81, 원인 170/175 가 exact 실행 실패, #37874); fact 수·사이드카 크기 상한 없음(`keeper_librarian.mli:17,48`, 최대 223 fact); 강화는 `Retrieved` 기록까지이고 소비자는 대시보드뿐 — RFC-0418 은 "일주일 뒤 센다" 단계라 설계대로 | 닫힘(조건: Librarian 실행 성공). 측정 공백: 연속 실패 길이 |
+| Board | 게시·댓글은 즉시, attention 은 keeper worker 가 후보를 소비(오늘 730 중 722), 10초 sweeper(`board_core_persist.ml:171-173`) | 후보 consumed; 게시물은 `expires_at` 이 지나면 sweep | 기본 `default_ttl_hours = 0` = 영구(`board_types.ml:298`) 라 sweep 이 지울 것이 없고 줄이는 길은 운영자 리셋뿐(댓글 4.8 MB, 09-19 스냅숏 4,059개·10.8 MB); 격리 후보 2건은 자동 재시도 없이 운영자 대기(8.5h·12h, `keeper_board_attention_quarantine_command.mli:3-4`); 후보 원장은 live 의 2배까지 compaction 되지만 거절 행이 하나라도 있으면 append-only(`keeper_board_attention_candidate.ml:1700-1710`, 04:29Z analyst 3,044행) | 게시물: 설계상 영구(결정 사항). attention: 닫힘(조건: worker 살아 있고 exact 종단 실패 없음) |
+| Goal | verifier 데몬은 wake(keeper 의 `Request_complete`, 다른 worker 의 commit)로만 돈다(`goal_verification_agent.ml:530-535`) | Confirm_completion(HTTP 한 곳, `server_routes_http_routes_verification.ml:197`) | 반박 → Executing 뒤 재요청 주체 없음, verdict 는 `goal_events.jsonl` 에만 남고 keeper 큐엔 안 간다(`workspace_goals.ml:567-618`, `goal_phase.ml:170`); REJECT 2건이 18시간째 Executing | 닫힘(조건: keeper 재요청 + verifier + 사람 확인). → #37990 |
+| Keeper context | turn 마다 checkpoint 갱신, tail window 가 요청 바이트만 자름(goo-yang-bong 첫 요청 16.4 MB → 0.9 MB), dated store 30일 보존 | working state·연속성 스냅숏이 따라잡음 | checkpoint atom 은 단조 증가(msx 12,762→16,258, pr-updater 10,668→13,220), purge 는 오프라인·수동이고 atom 을 안 지움(`keeper_checkpoint_purge.mli:26-40`), history 3벌 통째(`runtime_settings.ml:279-283`), keepers 디렉터리 5,047 MB(msx 483 MB) | 요청 크기: 닫힘. 디스크·history: 열림 → #37036 |
+
+확인 못 한 것: memory journal 12 파일이 전부 05:40Z 이후인 이유(삭제 주체), attention 원장 일부가 04:42Z 뒤 사라진 경로, `checkpoint_history_retained` 의 라이브 값. Multi Lane 의 힌트 소비 수는 `keeper cycle OK` 줄에 후보 이름이 없어 heartbeat 의 "deferred its input to … next cycle takes it" 줄로 셌다.
+
 ## 아직 판정하지 못한 것
 
 - Terminal-Bench 4.0 전체 실행: 09-22 기록대로 GPU(H100) 3개 task 와 CPU 16개·메모리 16 GiB 를

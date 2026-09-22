@@ -1879,6 +1879,9 @@ type tagged_row =
    authority. Never evicted within a session, like the logs themselves. *)
 type settled_block_memo = {
   sbm_log : Masc_tui_types.turn_log;
+  sbm_committed : bool;
+      (** Which placement the block was projected with: a settled turn's,
+          or the open placement an observed turn takes. *)
   sbm_revision : int;
   sbm_timeline : (Masc_tui_types.msg_entry * float option) list;
   sbm_messages : Masc_tui_types.msg_entry list;
@@ -2300,7 +2303,12 @@ let render_keeper_message (state : state) =
       { lb_log = turn_log; lb_request_id = request_id; lb_insertion = insertion;
         lb_entries = entries }
     in
-    let settled_projection (turn_log : Masc_tui_types.turn_log) =
+    (* One projection per held log per change of its inputs, settled or
+       observed. The transcript's revision moves on every fold, so a journal
+       read that grew an observed log reprojects it once, and the frames
+       between reads -- every key, tick and async message -- reuse the
+       block. *)
+    let held_projection ~committed (turn_log : Masc_tui_types.turn_log) =
       let key =
         ( Masc_tui_types.turn_log_keeper_name turn_log
         , Masc_tui_types.turn_log_request_id turn_log )
@@ -2309,6 +2317,7 @@ let render_keeper_message (state : state) =
       match Hashtbl.find_opt settled_block_memo key with
       | Some memo
         when memo.sbm_log == turn_log
+             && memo.sbm_committed = committed
              && memo.sbm_revision = revision
              && memo.sbm_timeline == committed_visible_timeline
              && memo.sbm_messages == committed_timeline_messages
@@ -2317,9 +2326,10 @@ let render_keeper_message (state : state) =
              && memo.sbm_chat_cols = chat_cols ->
           memo.sbm_block
       | Some _ | None ->
-          let block = log_projection ~committed:true turn_log in
+          let block = log_projection ~committed turn_log in
           Hashtbl.replace settled_block_memo key
             { sbm_log = turn_log;
+              sbm_committed = committed;
               sbm_revision = revision;
               sbm_timeline = committed_visible_timeline;
               sbm_messages = committed_timeline_messages;
@@ -2340,7 +2350,7 @@ let render_keeper_message (state : state) =
           Masc_tui_types.turn_log_execution_id live <> Masc_tui_types.turn_log_execution_id settled
         | Some _ | None -> true)
       |> List.filter Masc_tui_types.turn_log_holds_the_turn
-      |> List.map settled_projection
+      |> List.map (held_projection ~committed:true)
       |> List.filter (fun block -> block.lb_entries <> [])
     in
     let live_block =
@@ -2354,12 +2364,13 @@ let render_keeper_message (state : state) =
     in
     (* Turns running that this pane did not open, drawn from the journal
        reads that feed their logs ([observed_logs_for_keeper]). Projected
-       the way the live block is -- uncommitted, so the block sits where a
-       running turn's rows go and its rail stays open -- and, like it, never
-       memoised: the log grows with every history load. *)
+       the way the live block is placed -- uncommitted, so the block sits
+       where a running turn's rows go and its rail stays open -- and
+       memoised the way a settled block is: the log changes only when a
+       journal read lands, not on every frame. *)
     let observed_blocks =
       Masc_tui_types.observed_logs_for_keeper state keeper_name
-      |> List.map (log_projection ~committed:false)
+      |> List.map (held_projection ~committed:false)
       |> List.filter (fun block -> block.lb_entries <> [])
     in
     let open_blocks = observed_blocks @ Option.to_list live_block in
@@ -2509,17 +2520,25 @@ let render_keeper_message (state : state) =
        taken: the ones on screen when the operator anchored are what they
        anchored to, not rows that arrived since. *)
     let rows_since_pin =
-      match state.msg_scroll_pin, open_blocks with
+      match state.msg_scroll_pin, live_block with
       | None, _ -> 0
-      | Some _, _ :: _ ->
+      | Some _, Some _ ->
           (* A live trail has no durable row identity and may already have
              many wrapped rows when the operator first leaves the bottom.
              Treating that existing height as newly arrived double-counts it
              on the first key press. Structural compensation resumes when the
-             trail settles into a block the pin can account for. An observed
-             turn's trail is the same kind of thing. *)
+             trail settles into a block the pin can account for.
+
+             An observed block is not this case: its log is among the settled
+             logs the pin remembered, so the branch below counts it the way it
+             counts any held log -- not at all while it was on screen when the
+             pin was taken, whole when it was held later. Rows it grows by
+             between the pin and its settle go uncounted, as a live trail's
+             do; the rows that arrive around it are counted as they land, so
+             the reader is not moved by them while the turn runs and not
+             jumped by them when it ends. *)
           0
-      | Some pin, [] ->
+      | Some pin, None ->
           let arrived_since_pin = function
             | Tagged_row _ -> true
             | Tagged_block log -> not (List.memq log state.msg_scroll_pin_settled)

@@ -677,12 +677,12 @@ override the initial modes.
 
 A turn this TUI did not open -- one running when the TUI started, or one
 another surface opened -- is drawn from its journal while it runs: each
-history refresh reads the journal from where the last read stopped and the
-pane draws the turn as an open block, the same shape as a turn it streams
-itself. The footer's turn line still says how long the turn has run and
-which tool it last touched; the `Latest output:` tail it used to carry is
-left out while the pane draws that text. A turn whose stream the TUI opened
-and lost is followed the same way.
+history load (a row appended to the transcript, `r`) reads the journal from
+where the last read stopped and the pane draws the turn as an open block,
+the same shape as a turn it streams itself. A turn the loaded transcript
+says is over, or whose journal the server can no longer serve, is drawn
+from its committed rows instead. A turn whose stream the TUI opened and
+lost is followed the same way.
 
 Memory journal rows open in summary mode, using producer-owned compact text
 instead of reconstructing a summary from rendered prose. The summary itself

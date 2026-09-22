@@ -562,6 +562,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                | Purge_librarian_cancel_failed _
                | Purge_librarian_position_not_written _
                | Purge_backup_failed _
+               | Purge_continuity_not_discarded _
                | Purge_install_failed _ -> `Internal_server_error
              in
              respond_error

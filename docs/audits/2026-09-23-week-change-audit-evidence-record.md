@@ -106,6 +106,14 @@ working state 약 2 KB, 완료 턴 atom 당 약 0.8 KB, 현재 턴 도구 결과
 recall 은 턴 첫 요청에 실린다. 창 투영과 Librarian 흡수로 위가 막히고, 아래는 §4.3 바닥 규칙이
 막는다. 열린 것은 위 표의 둘뿐이다.
 
+Keeper 쪽 넘침은 이 날 공식 클라이언트 레인에서만 났다: Codex typed overflow 8, Claude Code 3, 그 뒤
+`official-client session recovery … decision=restart_fresh` 4(critic 1, glossary-maniac 3, 01:53Z).
+Codex 레인은 시작 용량을 `unbounded_model_input_capacity_bytes = max_int` 로 두고 공급자 거절에서 다음 크기를
+배운다(`keeper_codex_runtime.ml:94,1316`). 이는 #36828(2026-09-16, "크기는 서버가 판정한다")의 결정대로다.
+Claude Code 레인만 선언된 `max-prompt-bytes` 를 시작 용량으로 읽는다(`keeper_claude_code_runtime.ml:1345-1362`).
+비대칭이지만 결정에 어긋나지는 않는다. 로그에 `previous_capacity_bytes=4611686018427387903` 로 찍히는 것은
+"선언 없음" 이 숫자로 보이는 것이라 읽는 사람이 헷갈린다.
+
 ## Glossary
 
 `docs/spec/00-glossary.md` 는 이 주에 74 커밋, 674줄 추가(41→703줄), 작성자 3(사용자 2계정,
@@ -158,7 +166,9 @@ Keeper pangyo-preachers). Continuity 절(426~703행)에서 찾은 것:
 
 - Terminal-Bench 4.0 전체 실행: 09-22 기록대로 GPU(H100) 3개 task 와 CPU 16개·메모리 16 GiB 를
   이 호스트가 주지 못한다. 어댑터(`benchmarks/terminal_bench`)와 pin(Harbor 0.23.0)은 그대로다.
-  이 세션은 실행하지 않았다.
+  이 세션에서 어댑터의 Python 테스트 193개는 통과했다(`.venv/bin/python -m pytest -q tests`, 20초).
+  `dist/manifest.json` 은 release 0.35.22 를 가리키고 최신 태그는 v0.36.0 이다. `dist/` 는 git 에 없고
+  `fetch_masc.sh` 가 실행 때 최신 릴리스를 받으므로 낡은 것은 로컬 사본뿐이다. 벤치 실행은 하지 않았다.
 - HITL·Access Control·Multi Lane·Schedule: 로그의 오류 모양만 봤다(위 "결함 아님" 셋).
   실제 전이·권한 거절·취소 경로는 이번에 읽지 않았다.
 - Skills 재생성: 09-19 기록의 "자동 생산 경로 미구현"(#37633) 이후 새 producer 를 찾지 못했다.

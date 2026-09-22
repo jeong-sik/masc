@@ -42,21 +42,26 @@ related: ["0454", "0371", "0004"]
   막힘은 실패 종류일 때만이고, 서버는 그것을 `Keeper_turn_end.t` 의 exhaustive match 로 정한다(§3.8).
 - **D9 RFC-0159 파일을 이 커밋에서 지운다.** 그 문서는 지금 없는 `Disp_pause_human` 과 문자열 갈래를 전제로 쓰였다.
   그 문서가 원한 것, 곧 내부 실패의 출처를 구별하는 일은 D1 의 typed 값이 싣는다(§3.2).
+- **D10 배포할 때 옛 receipt 디렉터리를 지운다** (2026-09-22 결정, Q3 닫힘). PR-3c 를 배포할 때
+  `<base>/.masc/keepers/*/execution-receipts/` 를 지운다. 2026-09-22 기준 keeper 27개, 파일 335개,
+  77,625줄, 207MB 다. 지우지 않아도 부팅은 막히지 않지만(§3.6), 남겨 두면 키퍼가 턴을 한 번 돌기 전까지
+  "receipt 를 읽을 수 없음" 으로 보이고 그 줄은 이미 여러 세대 어휘가 섞여 있다(§2.3).
+  constitution `runtime_data` 가 이 삭제를 허용한다.
+- **D11 #37580 은 닫고 PR-1 이 대신한다** (2026-09-22 결정, Q4 닫힘). #37580 은
+  `"turn_failed:" ^ reason` 콜론 코드를 새로 만든다. 이 RFC 는 같은 정보를 typed 필드로 싣는다.
+  둘 다 들어가면 곧 지울 문자열이 한 칸 더 늘어난다. #37580 이 고치려던 것 — CLI 가 스스로 적은
+  종료 사유가 다른 turn_failed 와 뭉뚱그려지는 일 — 은 D3 이 닫는다.
 
 운영자에게 확인받을 것:
 
 - **Q1** D3 을 어디에 둘지. masc_internal_error 에 싣는 안(A)을 권한다. 다른 두 안을 기각한 이유는 §3.3 에 있다.
 - **Q2** D4 는 RFC-0454 P2 와 같은 일이다. 어느 쪽이 먼저 PR 을 열지 정해야 한다. 같은 투영을 두 번 만들지 않는다.
-- **Q3** 배포할 때 옛 receipt 디렉터리를 지울지. 2026-09-22 기준 keeper 27개, 파일 335개, 77,625줄, 207MB 다.
-  지우지 않아도 부팅은 막히지 않는다(§3.6).
-- **Q4** 열린 PR #37580 을 닫고 PR-1 로 흡수할지. #37580 은 `"turn_failed:" ^ reason` 콜론 코드를 새로 만든다.
-  이 RFC 는 같은 정보를 typed 필드로 싣는다.
-  열린 PR #37584 는 `ProviderReportedError` 의 route 이름을 `Rotate_now Provider_reported_failure` 로 바꾼다.
+- **Q6** 열린 PR #37584 는 `ProviderReportedError` 의 route 이름을 `Rotate_now Provider_reported_failure` 로 바꾼다.
   흐름은 그대로다. walk 는 그 전에도 `Keeper_runtime_attempt.ml:71` → `ProviderFailure` →
   `Runtime_attempt_fsm.should_try_next = true` 로 회전했고, route 를 읽는 자리
   (`route_resumes_on_same_path`, `response_observed`, `keeper_turn_driver.ml:910` 의 backpressure 기록,
   `:424`·`:450` 의 deferred lane)는 옛 이름과 새 이름에서 같은 값을 낸다.
-  #37584 가 먼저 들어가면 PR-1 은 그때의 route 를 그대로 옮긴다.
+  #37584 를 먼저 넣을지만 정하면 된다. 먼저 들어가면 PR-1 은 그때의 route 를 그대로 옮긴다.
 - **Q5** §3.8 의 막힘 표. `Registry_phase_missing` 과 runtime build 실패를 막힘으로, supervisor stop·external cancel·실행 불가 phase 를 막힘 아님으로 두는 안이다.
 
 ## 2. 문제와 실측

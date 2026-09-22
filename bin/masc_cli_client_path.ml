@@ -1,4 +1,4 @@
-module Install = Masc.Runtime_official_cli_install
+module Install = Runtime_official_cli_install
 
 let client_arg =
   Cmdliner.Arg.enum

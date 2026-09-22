@@ -302,10 +302,18 @@ type detail_part =
    block splits the record into responses, the call row draws it in the
    border cell: a bracket per response, [\xe2\x94\x8c] over the first call,
    [\xe2\x94\x82] beside the ones between, [\xe2\x94\x94] at the last, and
-   [\xe2\x94\x80] beside a response of one call. Measured on the ledger
-   (2026-09, 21,250 records with more than one response), a response holds
-   1.38 calls on average: a line of its own over each would have been close
-   to half the list, and the bracket costs no row. *)
+   [\xe2\x94\x80] beside a response of one call. The bracket costs no row.
+   Measured on the September ledger, a record keyed by (keeper,
+   keeper_turn_id) -- [keeper_turn_id] counts per keeper, and alone it
+   merges different keepers' turns: 21,273 records hold more than one
+   response, a response holds 1.38 calls on average, 80.7% hold one. A line
+   of its own over each response would have been close to half the list.
+
+   The lone call's mark is drawn although it is most of the marks (58.7% of
+   the call rows): 45.2% of those records are all lone calls, and without
+   the mark such a record would look like one whose responses are unknown
+   or single -- a CLI lane, a sort, an unnumbered call. It is drawn dim, as
+   quiet as the edge, and only the brackets that bind calls are plain. *)
 type response_place =
   | Ungrouped
   | Alone
@@ -640,10 +648,11 @@ let dispatch_marks (tool : Acting.chunk_tool) =
 
 (* The border cell of a call row. Out of a bracket it is the pane's edge
    like every other row; in one it is the bracket, drawn plain so it reads
-   over the dim edge, the calls between included. *)
+   over the dim edge, the calls between included. A lone call's mark stays
+   dim: it says the boundary is known, not that anything binds. *)
 let rail_span = function
   | Ungrouped -> border
-  | Alone -> { text = rule_glyph; tone = Plain }
+  | Alone -> { text = rule_glyph; tone = Dim }
   | Opens -> { text = "\xe2\x94\x8c"; tone = Plain }
   | Inside -> { border with tone = Plain }
   | Closes -> { text = "\xe2\x94\x94"; tone = Plain }

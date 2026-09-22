@@ -226,8 +226,9 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     Under either receipt order, a record whose calls came from more than one
     model response brackets each response in the call rows' border cell:
     [\xe2\x94\x8c] beside its first call, [\xe2\x94\x82] beside the calls
-    between, [\xe2\x94\x94] beside its last, [\xe2\x94\x80] beside a
-    response of one call, all plain over the dim edge. No row is added. A
+    between, [\xe2\x94\x94] beside its last, the three plain over the dim
+    edge, and a dim [\xe2\x94\x80] beside a response of one call, so a
+    record of lone calls still reads as split. No row is added. A
     composition's calls sit with the response that asked for the
     composition. The response is the call's session ordinal, not its
     planned index. Call rows keep the plain edge under the two sorts, which

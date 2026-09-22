@@ -1502,22 +1502,30 @@ let test_each_model_response_gets_a_bracket_beside_its_calls () =
       (* The four calls take the four rows under the heading: the bracket
          added none. *)
       List.iteri
-        (fun i (glyph, tool) ->
+        (fun i (glyph, tone, tool) ->
           let row = List.nth view.Pane.rows (first_call_row + i) in
           check bool (Printf.sprintf "%s: row %d is %s" label i tool) true
             (contains tool (text row));
-          check bool (Printf.sprintf "%s: %s wears its place, plain" label tool) true
-            (rail row = (glyph, Pane.Plain));
+          check bool (Printf.sprintf "%s: %s wears its place" label tool) true
+            (rail row = (glyph, tone));
           check int (Printf.sprintf "%s: row %d width" label i) cols (width row))
         expected;
       check bool (label ^ ": the heading keeps the dim edge") true
         (rail (List.nth view.Pane.rows (first_call_row - 1)) = (inside, Pane.Dim)))
     [ ( Pane.Oldest_first
       , "oldest first"
-      , [ (opens, "Read"); (inside, "Grep"); (closes, "Glob"); (alone, "Execute") ] )
+      , [ (opens, Pane.Plain, "Read")
+        ; (inside, Pane.Plain, "Grep")
+        ; (closes, Pane.Plain, "Glob")
+        ; (alone, Pane.Dim, "Execute")
+        ] )
     ; ( Pane.Newest_first
       , "newest first"
-      , [ (alone, "Execute"); (opens, "Glob"); (inside, "Grep"); (closes, "Read") ] )
+      , [ (alone, Pane.Dim, "Execute")
+        ; (opens, Pane.Plain, "Glob")
+        ; (inside, Pane.Plain, "Grep")
+        ; (closes, Pane.Plain, "Read")
+        ] )
     ]
 
 (* An opened call's detail rows are the call's, not the response's: they
@@ -1595,9 +1603,9 @@ let test_wire_calls_split_into_responses_too () =
   let view = responses_view ~order:Pane.Oldest_first calls in
   let row i = List.nth view.Pane.rows (first_call_row + i) in
   check bool "the first response, alone" true
-    (rail (row 0) = (alone, Pane.Plain) && contains "Read" (text (row 0)));
+    (rail (row 0) = (alone, Pane.Dim) && contains "Read" (text (row 0)));
   check bool "the second, alone" true
-    (rail (row 1) = (alone, Pane.Plain) && contains "Execute" (text (row 1)))
+    (rail (row 1) = (alone, Pane.Dim) && contains "Execute" (text (row 1)))
 
 let test_a_call_row_names_the_call_a_press_opens () =
   let view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ()) in

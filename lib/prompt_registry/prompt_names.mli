@@ -391,13 +391,6 @@ val tool_guidance_reject_verdict_requires_reason : string
 val tool_guidance_no_metrics_found_for_agent : string
 val tool_guidance_invalid_agent_card_action : string
 
-(** media_degrade.* — what the model reads in place of media the dispatched
-    runtime cannot take, rendered by [Runtime_agent]'s media strip. *)
-
-val media_degrade_tool_result_media_omitted : string
-(** A tool result whose every block was refused media and whose own [content]
-    string is blank. Variable: [modalities]. *)
-
 (** agent_core.* — templates the host installs into
     [Agent_core.Tool_guidance_text] at prompt-init time; agent_core itself
     stays config-free. *)

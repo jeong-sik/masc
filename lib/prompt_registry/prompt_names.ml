@@ -646,10 +646,6 @@ let tool_guidance_reject_verdict_requires_reason =
 let tool_guidance_no_metrics_found_for_agent = "tool_guidance.no_metrics_found_for_agent"
 let tool_guidance_invalid_agent_card_action = "tool_guidance.invalid_agent_card_action"
 
-(* media_degrade.* — what the model reads in place of media the dispatched
-   runtime cannot take, rendered by [Runtime_agent]'s media strip. *)
-let media_degrade_tool_result_media_omitted = "media_degrade.tool_result_media_omitted"
-
 (* agent_core.* — templates the host installs into
    [Agent_core.Tool_guidance_text] at prompt-init time; agent_core itself
    stays config-free. *)

@@ -1510,13 +1510,10 @@
  (libraries masc_test_deps))
 
 ; RFC-0265: capability-driven proactive runtime reroute (modality-gated decision).
-; The media strip renders its omission line from config/prompts at run time,
-; so an edit there has to rerun this suite.
 
 (test
  (name test_runtime_modality_reroute)
  (modules test_runtime_modality_reroute)
- (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps))
 
 ; A terminal-contract tool completion is a success carrying its receipt's

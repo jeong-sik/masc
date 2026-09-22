@@ -73,6 +73,13 @@ let string_of_tool_call_outcome = function
   | Unknown -> "unknown"
 ;;
 
+let tool_call_outcome_of_string = function
+  | "ok" -> Result.Ok Ok
+  | "error" -> Result.Ok Error
+  | "unknown" -> Result.Ok Unknown
+  | value -> Result.Error (Printf.sprintf "unknown tool call outcome: %S" value)
+;;
+
 let log_level_of_tool_call_outcome = function
   | Error -> Log.Error
   | Ok | Unknown -> Log.Info
@@ -108,6 +115,36 @@ let unit_disposition_of_string = function
   | "deferred" -> Result.Ok (Deferred ())
   | "failed" -> Result.Ok (Failed ())
   | value -> Result.Error (Printf.sprintf "unknown tool disposition: %S" value)
+;;
+
+type recorded_call_outcome =
+  | Recorded_succeeded
+  | Recorded_deferred
+  | Recorded_failed
+  | Recorded_unsettled
+  | Recorded_malformed
+
+let recorded_call_outcome = function
+  | `Assoc fields ->
+    (match List.assoc_opt "disposition" fields with
+     | Some (`String raw) ->
+       (match unit_disposition_of_string raw with
+        | Result.Ok (Completed ()) -> Recorded_succeeded
+        | Result.Ok (Deferred ()) -> Recorded_deferred
+        | Result.Ok (Failed ()) -> Recorded_failed
+        | Result.Error _ -> Recorded_malformed)
+     | Some _ -> Recorded_malformed
+     | None ->
+       (match List.assoc_opt "wire_outcome" fields with
+        | Some (`String raw) ->
+          (match tool_call_outcome_of_string raw with
+           | Result.Ok Ok -> Recorded_succeeded
+           | Result.Ok Error -> Recorded_failed
+           | Result.Ok Unknown -> Recorded_unsettled
+           | Result.Error _ -> Recorded_malformed)
+        | Some _ -> Recorded_malformed
+        | None -> Recorded_unsettled))
+  | _ -> Recorded_malformed
 ;;
 
 type output_payload =

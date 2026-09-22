@@ -1662,7 +1662,7 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
                     [ "ts", `Float 1_790_053_724.; "keeper", `String "alpha"
                     ; "tool", `String "Execute"
                     ; "input", `Assoc [ "argv", `List [ `String "git"; `String "log" ] ]
-                    ; "output", `String result; "success", `Bool true
+                    ; "output", `String result; "wire_outcome", `String "ok"
                     ; "duration_ms", `Float 808.; "execution_id", `String "exec-1"
                     ; "tool_use_id", `String "call-1"; "result_bytes", `Int 1405
                     ] ] ) ]

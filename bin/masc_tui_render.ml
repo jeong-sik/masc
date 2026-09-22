@@ -11888,8 +11888,12 @@ let render_keeper_calls (state : state) =
     |> List.mapi (fun call_index (call : Masc.Tui_decode.keeper_call) ->
          let open Masc.Tui_decode in
          let glyph, style =
-           if call.kc_success then ("✓", Ansi.reset)
-           else ("✗", (Theme.bad ()))
+           match call.kc_outcome with
+           | Tool_result.Recorded_succeeded -> ("✓", Ansi.reset)
+           | Tool_result.Recorded_failed -> ("✗", (Theme.bad ()))
+           | Tool_result.Recorded_deferred -> ("◌", (Theme.info ()))
+           | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
+             ("?", Ansi.reset)
          in
          let duration =
            match call.kc_duration_ms with
@@ -11918,7 +11922,12 @@ let render_keeper_calls (state : state) =
            | None -> []
            | Some output ->
              labeled_rows ~call_index
-               ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
+               ~style:
+                 (match call.kc_outcome with
+                  | Tool_result.Recorded_failed -> Theme.bad ()
+                  | Tool_result.Recorded_succeeded | Tool_result.Recorded_deferred
+                  | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
+                    Ansi.dim)
                ~label:"output" output
          in
          (call_index, style, summary) :: exact_rows @ output_rows)

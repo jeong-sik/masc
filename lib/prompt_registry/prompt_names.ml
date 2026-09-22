@@ -330,6 +330,14 @@ let keeper_world_own_recent_actions_turn_rejected_detail_row =
   "keeper.world.own_recent_actions.turn_rejected_detail_row"
 ;;
 
+let keeper_world_own_recent_actions_turn_deferred_row =
+  "keeper.world.own_recent_actions.turn_deferred_row"
+;;
+
+let keeper_world_own_recent_actions_turn_unrecorded_row =
+  "keeper.world.own_recent_actions.turn_unrecorded_row"
+;;
+
 let keeper_world_own_recent_actions_unavailable =
   "keeper.world.own_recent_actions.unavailable"
 ;;

@@ -60,15 +60,33 @@ let judge_candidate ?clock ~api_key ~candidate () =
     Keeper_board_attention_candidate.singleton_judgment_request
       candidate
   in
+  let destination =
+    { Typesafeai_client.endpoint = Typesafeai_config.endpoint ()
+    ; model = Typesafeai_config.model ()
+    ; api_key
+    }
+  in
   let* evaluated =
     Typesafeai_client.evaluate
       ?clock
-      ~api_key
+      ~destinations:(destination, [])
       ~state
       ~questions:[ relevance_question_id, relevance_question ~choices candidate ]
       ()
     |> Result.map_error Typesafeai_client.failure_to_string
   in
+  (* The candidate's provenance names the destination that answered; the ones
+     asked before it are said here, where the keeper's log is read. *)
+  (match evaluated.Typesafeai_client.passed_over with
+   | [] -> ()
+   | passed_over ->
+     Log.Keeper.warn
+       ~keeper_name:candidate.Keeper_board_attention_candidate.keeper_name
+       "board attention Jev: %s answered after %d destination(s) refused: %s"
+       evaluated.destination.destination_uri
+       (List.length passed_over)
+       (Yojson.Safe.to_string
+          (`List (List.map Typesafeai_client.attempt_to_yojson passed_over))));
   let response = evaluated.Typesafeai_client.response in
   let* answer =
     match List.assoc_opt relevance_question_id response.answers with
@@ -85,7 +103,7 @@ let judge_candidate ?clock ~api_key ~candidate () =
         }
     ; provenance =
         { Keeper_board_attention_candidate.destination_uri =
-            evaluated.destination_uri
+            evaluated.destination.destination_uri
         ; answering_model_id = response.model
         ; request_body_sha256 = evaluated.request_body_sha256
         }

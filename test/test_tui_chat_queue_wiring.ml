@@ -1751,8 +1751,12 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
     in
     let running_screen = screen () in
     check int "the question stays" 1 (count "asked" running_screen);
-    check bool "the journal's reply text is in the pane" true
-      (count "said" running_screen >= 1);
+    check bool "the pane draws the turn's text" true
+      (Tui_types.observed_turn_text_drawn state "alpha");
+    check int "the journal's reply text is in the pane once" 1
+      (count "said" running_screen);
+    check int "the footer does not repeat the tail as Latest output" 0
+      (count "Latest output" running_screen);
     check bool "the footer still says a turn is running" true
       (Astring.String.is_infix ~affix:"chat_operation turn" running_screen);
     check int "the turn's rail has not closed" 0
@@ -1878,6 +1882,160 @@ let test_a_journal_log_of_the_live_execution_is_not_observed () =
   check (list string) "and is not observed beside the live block" []
     (List.map Tui_types.turn_log_request_id
        (Tui_types.observed_logs_for_keeper state "alpha"))
+;;
+
+let fresh_state_with_running_log () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  Tui_types.hold_settled_log state
+    (journal_log ~request_id:"op-1" ~started_at:100. ~finished:false ());
+  state
+;;
+
+(* A stream frame of a turn this pane did not open is the fact that the
+   turn's journal grew; the answer is a read from where the pane's record
+   ends, not a fold of the frame. What the frame asks depends on what the
+   pane already knows about the operation. *)
+let test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends () =
+  let follow ?(seq = Some 7) ?(at = 300.) state =
+    Tui_types.journal_follow_for_frame state ~keeper_name:"alpha"
+      ~operation_id:"op-1" ~seq ~at
+  in
+  let fresh () =
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.msg_target_keeper_name <- Some "alpha";
+    state
+  in
+  (match follow (fresh ()) with
+   | Tui_types.Follow_read { started_at; since_seq } ->
+       (* The frame's clock is the fallback the read carries; the log the
+          read creates takes the journal head's own time
+          ([journal_log_started_at]). *)
+       check (float 0.) "an operation the pane knows nothing of: the whole journal" 300. started_at;
+       check bool "from the start" true (since_seq = Masc.Keeper_chat_event_log.Whole_turn)
+   | Follow_nothing | Follow_read_after_inflight -> fail "a fresh operation is read");
+  let held_state = fresh_state_with_running_log in
+  (match follow ~seq:(Some 2) (held_state ()) with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "a seq the log already holds asks for nothing");
+  (match follow ~seq:(Some 3) (held_state ()) with
+   | Tui_types.Follow_read { started_at; since_seq } ->
+       check (float 0.) "a held log keeps its own start" 100. started_at;
+       check bool "and the read resumes after what it holds" true
+         (since_seq = Masc.Keeper_chat_event_log.After_seq 2)
+   | Follow_nothing | Follow_read_after_inflight ->
+       fail "a seq past the record is read");
+  (match follow ~seq:None (held_state ()) with
+   | Tui_types.Follow_read _ -> ()
+   | Follow_nothing | Follow_read_after_inflight ->
+       fail "a frame with no seq (the settle-time terminal) is read");
+  let inflight_state = held_state () in
+  Tui_types.journal_read_started inflight_state "op-1";
+  (match follow inflight_state with
+   | Tui_types.Follow_read_after_inflight -> ()
+   | Follow_nothing | Follow_read _ -> fail "a read in flight is not doubled");
+  let finished_state = fresh () in
+  Tui_types.hold_settled_log finished_state
+    (journal_log ~request_id:"op-1" ~started_at:100. ());
+  (match follow finished_state with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight -> fail "a turn that ended is over");
+  let unavailable_state = fresh () in
+  Tui_types.remember_journal_unavailable unavailable_state "op-1";
+  (match follow unavailable_state with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "a journal the server cannot serve is not asked for");
+  let refused_state = fresh () in
+  refused_state.msg_journal_reads_refused <- true;
+  (match follow refused_state with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "a refused credential asks for nothing");
+  let own_state = fresh () in
+  let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:10. [ Live.Run_started ] in
+  own_state.msg_inflight <- [ entry ];
+  (match
+     Tui_types.journal_follow_for_frame own_state ~keeper_name:"alpha"
+       ~operation_id:entry.sent_request.request_id ~seq:(Some 7) ~at:300.
+   with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "the pane's own stream feeds its own request")
+;;
+
+(* One wanted mark per operation carrying the highest seq the frames named,
+   taken once. A read that lands having reached that seq ends the chain; the
+   seq-less settle terminal never lowers it. *)
+let test_a_wanted_journal_read_is_remembered_once_and_taken_once () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+  in
+  Tui_types.journal_read_wanted state "op-1" (Some 4);
+  Tui_types.journal_read_wanted state "op-1" (Some 9);
+  Tui_types.journal_read_wanted state "op-1" None;
+  Tui_types.journal_read_wanted state "op-2" None;
+  check (list string) "one entry per operation" [ "op-2"; "op-1" ]
+    (List.map fst state.msg_journal_wanted);
+  (match Tui_types.take_journal_wanted state "op-1" with
+   | Tui_types.Wanted { highest_seq } ->
+       check (option int) "the highest seq named" (Some 9) highest_seq
+   | Not_wanted -> fail "op-1 was wanted");
+  check bool "taken once" true
+    (Tui_types.take_journal_wanted state "op-1" = Tui_types.Not_wanted);
+  check (list string) "the other stays" [ "op-2" ] (List.map fst state.msg_journal_wanted);
+  (* The landed read reached the line the frames named: the pane holds
+     seq 2 of op-1 and the frames named 2, so nothing more is read. *)
+  let held = fresh_state_with_running_log () in
+  (match
+     Tui_types.journal_follow_for_frame held ~keeper_name:"alpha"
+       ~operation_id:"op-1" ~seq:(Some 2) ~at:300.
+   with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "a read that reached the named seq ends the chain")
+;;
+
+(* A log built from a journal read stands at the journal head's own time,
+   not at the moment the read was asked for. *)
+let test_a_journal_built_log_starts_at_the_journal_head () =
+  let head = line 0 100. (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" }) in
+  let later = line 3 100.3 (E.Text_delta "said") in
+  check (float 0.) "a read from the head takes the head's time" 100.
+    (Tui_types.journal_log_started_at ~fallback:300. [ head; later ]);
+  check (float 0.) "a read that resumes past the head keeps the fallback" 300.
+    (Tui_types.journal_log_started_at ~fallback:300. [ later ]);
+  check (float 0.) "an empty read keeps the fallback" 300.
+    (Tui_types.journal_log_started_at ~fallback:300. [])
+;;
+
+(* The frame reaches the read: the observer batch decides per operation
+   through [journal_follow_for_frame] and launches the read; a landed read
+   takes the wanted mark and reads again. *)
+let test_stream_frames_are_wired_to_journal_reads () =
+  let in_binding ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+      ~binding_name ~callee
+  in
+  let decides = in_binding ~binding_name:"apply_async_message" ~callee:"journal_follow_for_frame" in
+  let wants = in_binding ~binding_name:"apply_async_message" ~callee:"journal_read_wanted" in
+  let takes = in_binding ~binding_name:"apply_async_message" ~callee:"take_journal_wanted" in
+  let heads = in_binding ~binding_name:"apply_async_message" ~callee:"journal_log_started_at" in
+  (* Two launch sites: the frame's own, and the read-again after a landing. *)
+  let launches =
+    in_binding ~binding_name:"apply_async_message"
+      ~callee:"launch_keeper_chat_journal_loads"
+  in
+  if decides < 2 || wants < 1 || takes < 1 || launches < 3 || heads < 1
+  then
+    failf
+      "stream frames must reach the journal reads: decides=%d wants=%d takes=%d launches=%d heads=%d"
+      decides wants takes launches heads
 ;;
 
 (* The renderer knows the wrapped transcript's real maximum only after it has
@@ -3091,6 +3249,14 @@ let () =
             test_a_working_log_that_cannot_end_is_not_observed
         ; test_case "a journal log of the live execution is not observed" `Quick
             test_a_journal_log_of_the_live_execution_is_not_observed
+        ; test_case "a stream frame asks for a journal read from where the record ends" `Quick
+            test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends
+        ; test_case "a wanted journal read is remembered once and taken once" `Quick
+            test_a_wanted_journal_read_is_remembered_once_and_taken_once
+        ; test_case "a journal-built log starts at the journal head" `Quick
+            test_a_journal_built_log_starts_at_the_journal_head
+        ; test_case "stream frames are wired to journal reads" `Quick
+            test_stream_frames_are_wired_to_journal_reads
         ; test_case "promoted queue request owns a typed slot" `Quick
             test_promoted_queue_request_keeps_its_user_in_transcript
         ; test_case "message scroll accepts the rendered clamp" `Quick

@@ -86,6 +86,9 @@ type measurement =
   }
 
 let measurements : ((string * string), measurement) Hashtbl.t = Hashtbl.create 16
+let input_capacities :
+    ((string * string), Keeper_lane_cli_oneshot.input_capacity) Hashtbl.t =
+  Hashtbl.create 16
 let measurements_mu = Stdlib.Mutex.create ()
 
 let measurement_key ~config ~keeper_name =
@@ -99,7 +102,19 @@ let last_measurement ~config ~keeper_name =
 
 let forget_measurement ~config ~keeper_name =
   let key = measurement_key ~config ~keeper_name in
-  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove measurements key)
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    Hashtbl.remove measurements key;
+    Hashtbl.remove input_capacities key)
+;;
+
+let last_input_capacity ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt input_capacities key)
+;;
+
+let remember_input_capacity ~config ~keeper_name capacity =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace input_capacities key capacity)
 ;;
 
 let publish_measurement ~config ~keeper_name ~last_pass ~unread =
@@ -194,9 +209,11 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
   let report state detail =
     observe state;
     Log.Keeper.warn ~keeper_name "continuity pass stopped: %s" detail in
-  (* A provider observation belongs to this drain, not a durable atom budget.
-     Re-render every chunk: previous state, Memory and queued context can grow. *)
-  let capacity = ref None in
+  (* Keep the server's measured character limit across wakes in this process.
+     A domain-output failure must not make the next drain rediscover it with
+     another oversized request. Fitting still checks the runtime is selected
+     and re-renders every chunk; neither an atom count nor a prompt is cached. *)
+  let capacity = ref (last_input_capacity ~config ~keeper_name) in
   let rec next () =
     observe O.Checking;
     match Env_config.KeeperMemoryOs.librarian_config_state () with
@@ -262,7 +279,9 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
           capacity_refused := Some refusal;
           match refusal with
           | Runtime.Input_limit_unknown -> ()
-          | Runtime.Cli_input_limit observed -> capacity := Some observed)
+          | Runtime.Cli_input_limit observed ->
+            remember_input_capacity ~config ~keeper_name observed;
+            capacity := Some observed)
         ~on_continuity_committed:(fun _ -> saved := true; observe O.Committed)
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)

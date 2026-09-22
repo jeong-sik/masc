@@ -536,6 +536,40 @@ class ToolCallSequenceMinerTest(unittest.TestCase):
             ):
                 MINER.analyze(root)
 
+    def test_lifecycle_progress_is_not_a_call_or_turn_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            # record_vision_candidate_start writes this known kind with an
+            # unknown outcome before provider work. It does not end a turn.
+            lifecycle = {
+                "record_kind": "lifecycle_event",
+                "ts": 1.5,
+                "keeper": "system",
+                "tool": "vision_candidate",
+                "input": {"result": "started", "attempt_index": 0},
+                "output": "",
+                "wire_outcome": "unknown",
+            }
+            write_rows(
+                root / "mixed.jsonl",
+                [
+                    fixture_call("first", 1.0),
+                    lifecycle,
+                    {"record_kind": "composition_run", "ts": 1.6},
+                    fixture_call("second", 2.0),
+                    lifecycle,
+                    fixture_call("next-turn", 3.0, turn_id=8),
+                ],
+            )
+            report = MINER.analyze(root)
+            self.assertEqual(report["summary"]["rows_read"], 6)
+            self.assertEqual(report["summary"]["selected_tool_calls"], 3)
+            self.assertEqual(report["summary"]["ignored_non_tool_records"], 3)
+            self.assertEqual(
+                [item["tools"] for item in report["pairs"]], [["first", "second"]]
+            )
+            self.assertEqual(report["triplets"], [])
+
     def test_unknown_non_null_record_kind_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

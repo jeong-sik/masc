@@ -93,7 +93,7 @@ let absorbed_into claim facts : Types.absorbed_statement list =
 
 let judged = function
   | Gate.Judged judged -> judged
-  | Gate.Open { reason; _ } -> Alcotest.fail ("gate open: " ^ reason)
+  | Gate.Failed { reason; _ } -> Alcotest.fail ("judgment failed: " ^ reason)
 ;;
 
 let test_every_statement_conveyed_absorbs_as_answered () =
@@ -145,18 +145,18 @@ let test_the_boundary_is_inclusive () =
   Alcotest.(check int) "exactly the boundary is conveyed" 1 (List.length j.absorbed)
 ;;
 
-let test_the_model_not_answering_applies_the_answer () =
+let test_the_model_not_answering_keeps_the_sources () =
   let facts = List.map fact sources in
   let absorbed = absorbed_into merged facts in
   let evaluate ~state:_ ~questions:_ = Error "HTTP 529" in
   (match Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
-   | Gate.Open { reason; absorbed = applied; _ } ->
+   | Gate.Failed { reason; absorbed = applied; _ } ->
      Alcotest.(check string) "the reason is carried" "HTTP 529" reason;
-     Alcotest.(check int) "and every absorption is still applied" 2 (List.length applied)
-   | Gate.Judged _ -> Alcotest.fail "expected the gate to stay open");
+     Alcotest.(check int) "unconfirmed sources stay current" 0 (List.length applied)
+   | Gate.Judged _ -> Alcotest.fail "expected failed judgment");
   let missing ~state:_ ~questions:_ = Ok { T.model = "jev-test"; answers = []; usage = None } in
   match Gate.judge ~evaluate:missing ~facts ~new_claims:[ merged ] ~absorbed with
-  | Gate.Open _ -> ()
+  | Gate.Failed _ -> ()
   | Gate.Judged _ -> Alcotest.fail "an answer without the questions is not a judgment"
 ;;
 
@@ -457,7 +457,7 @@ let run_runtime_evidence ?fixture_dir () =
     let expected_status = match scenario with
       | Judged_run | Memory_write_failure -> "judged"
       | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run -> "skipped"
-      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> "open" in
+      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> "failed" in
     Alcotest.(check string) "gate status" expected_status (member "status" gate |> string);
     (match scenario with
      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run ->
@@ -562,7 +562,8 @@ let run_runtime_evidence ?fixture_dir () =
       | None -> Alcotest.fail "current snapshot is missing" in
     let expected_facts = match scenario with
       | Judged_run -> b :: untouched :: selection.new_claims
-      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> untouched :: selection.new_claims
+      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run -> untouched :: selection.new_claims
+      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> seeded.facts @ selection.new_claims
       | Memory_write_failure -> seeded.facts in
     Alcotest.(check (list string)) "correct originals remain current"
       (List.sort String.compare (List.map id expected_facts))
@@ -573,7 +574,8 @@ let run_runtime_evidence ?fixture_dir () =
       | Error error -> Alcotest.fail (Absorbed.read_error_to_string error)) records in
     let archived = match scenario with
       | Judged_run -> [ a.claim ]
-      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> [ a.claim; b.claim ]
+      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run -> [ a.claim; b.claim ]
+      | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> []
       | Memory_write_failure -> [] in
     Alcotest.(check (list string)) "only applied originals are archived"
       (List.sort String.compare archived)
@@ -600,19 +602,19 @@ let test_selection_gate_and_store_keep_the_unconveyed_original () =
 ;;
 
 (* A noul is a probability. A value outside [0, 1] is a response-shape
-   failure, and the gate opens rather than reading 2.0 as "conveyed". *)
-let test_a_noul_outside_the_unit_interval_opens_the_gate () =
+   failure; it cannot authorize absorption by reading 2.0 as "conveyed". *)
+let test_a_noul_outside_the_unit_interval_keeps_the_source () =
   let facts = [ fact (List.hd sources) ] in
   let absorbed = absorbed_into merged facts in
   let evaluate, _, _ = table ~noul_of:(fun _ -> 2.0) in
   match Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
-  | Gate.Open _ -> ()
+  | Gate.Failed _ -> ()
   | Gate.Judged _ -> Alcotest.fail "2.0 is not a probability"
 ;;
 
 (* A verdict reached before a later request fails stays reached: the source
    a completed answer showed not conveyed is kept current, the source the
-   failure left unresolved is applied as answered. *)
+   failure left unresolved also stays current. *)
 let test_a_rejection_completed_before_a_later_failure_is_kept () =
   let first = fact (List.nth sources 0) in
   let second = fact (List.nth sources 1) in
@@ -633,14 +635,14 @@ let test_a_rejection_completed_before_a_later_failure_is_kept () =
   match
     Gate.judge ~evaluate ~facts:[ first; second ] ~new_claims:[ merged; other ] ~absorbed
   with
-  | Gate.Open { absorbed = applied; left; _ } ->
+  | Gate.Failed { absorbed = applied; left; _ } ->
     Alcotest.(check (list string)) "the rejected source stays current"
       [ id first ]
       (List.map (fun (v : Gate.source_verdict) -> v.memory_id) left);
-    Alcotest.(check (list string)) "the unresolved source is applied as answered"
-      [ id second ]
+    Alcotest.(check (list string)) "the unresolved source also stays current"
+      []
       (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) applied)
-  | Gate.Judged _ -> Alcotest.fail "expected the gate to stay open"
+  | Gate.Judged _ -> Alcotest.fail "expected failed judgment"
 ;;
 
 let test_a_conveyed_verdict_survives_a_later_failure () =
@@ -659,21 +661,21 @@ let test_a_conveyed_verdict_survives_a_later_failure () =
   let outcome = Gate.judge ~evaluate ~facts:[ first; second ]
       ~new_claims:[ merged; other ] ~absorbed in
   let run = Gate.Evaluated { outcome; evaluations = [] } in
-  Alcotest.(check (list string)) "both completed and fail-open absorptions still apply"
-    [ id first; id second ]
+  Alcotest.(check (list string)) "only completed positive absorptions apply"
+    [ id first ]
     (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) (Gate.absorbed_of_run run));
   let report = Gate.run_result_to_yojson run in
   let open Yojson.Safe.Util in
-  Alcotest.(check string) "the failed second request opens the gate" "open"
+  Alcotest.(check string) "the failed second request remains observable" "failed"
     (member "status" report |> to_string);
   let conveyed = match member "conveyed" report with
     | `List verdicts -> List.map (fun verdict -> member "memory_id" verdict |> to_string) verdicts
-    | _ -> Alcotest.fail "open report lost the completed positive verdict" in
+    | _ -> Alcotest.fail "failed report lost the completed positive verdict" in
   Alcotest.(check (list string)) "only the completed positive verdict is reported"
     [ id first ] conveyed
 ;;
 
-let test_open_preserves_unjudged_from_unvisited_groups () =
+let test_failure_preserves_unjudged_from_unvisited_groups () =
   let source = fact (List.hd sources) in
   let missing_source : Types.absorbed_statement = { absorbed = "absent-source"; into = id merged } in
   let missing_claim : Types.absorbed_statement = { absorbed = id source; into = "absent-claim" } in
@@ -681,14 +683,14 @@ let test_open_preserves_unjudged_from_unvisited_groups () =
   let outcome = Gate.judge ~evaluate:(fun ~state:_ ~questions:_ -> Error "HTTP 503")
       ~facts:[ source ] ~new_claims:[ merged ] ~absorbed in
   let run = Gate.Evaluated { outcome; evaluations = [] } in
-  Alcotest.(check int) "all three retain the existing fail-open application" 3
+  Alcotest.(check int) "all unconfirmed sources remain current" 0
     (List.length (Gate.absorbed_of_run run));
   let report = Gate.run_result_to_yojson run in
   let open Yojson.Safe.Util in
   let actual = match member "unjudged" report with
     | `List values -> List.map (fun value ->
         member "absorbed" value |> to_string, member "into" value |> to_string) values
-    | _ -> Alcotest.fail "open report lost classified unjudged absorptions" in
+    | _ -> Alcotest.fail "failed report lost classified unjudged absorptions" in
   Alcotest.(check (list (pair string string)))
     "classified missing source and later missing claim are distinct from request failure"
     [ missing_source.absorbed, missing_source.into; missing_claim.absorbed, missing_claim.into ] actual
@@ -1067,11 +1069,11 @@ let test_rejected_response_retains_every_typed_answer () =
   List.iter (fun (label, expected) ->
     let run = Gate.run ~clock ~keeper_id:"invalid-answer-fixture" ~facts
         ~new_claims:[ merged ] ~absorbed:(absorbed_into merged facts) () in
-    Alcotest.(check int) "existing fail-open application is unchanged" 2
+    Alcotest.(check int) "invalid responses cannot authorize absorption" 0
       (List.length (Gate.absorbed_of_run run));
     let open Yojson.Safe.Util in
     let report = Gate.run_result_to_yojson run in
-    Alcotest.(check string) (label ^ " opens the gate") "open" (member "status" report |> to_string);
+    Alcotest.(check string) (label ^ " fails judgment") "failed" (member "status" report |> to_string);
     let evaluation = member "evaluations" report |> to_list |> List.hd in
     Alcotest.(check string) (label ^ " is explicitly invalid") "invalid_answer"
       (member "status" evaluation |> to_string);
@@ -1084,7 +1086,7 @@ let test_rejected_response_retains_every_typed_answer () =
 
 (* The same inside one source: a statement not conveyed in an answered
    request keeps the source current when the next request fails. *)
-let test_a_rejection_in_an_answered_request_survives_the_next_failing () =
+let test_partial_source_before_failure ~first_rejected () =
   let long =
     fact
       (String.concat " "
@@ -1102,7 +1104,7 @@ let test_a_rejection_in_an_answered_request_survives_the_next_failing () =
         ; usage = None
         ; answers =
             List.mapi
-              (fun k (qid, _) -> qid, T.Noul_answer { T.noul = (if k = 0 then 0.0 else 1.0) })
+              (fun k (qid, _) -> qid, T.Noul_answer { T.noul = (if first_rejected && k = 0 then 0.0 else 1.0) })
               questions
         }
     else Error "HTTP 529"
@@ -1111,13 +1113,13 @@ let test_a_rejection_in_an_answered_request_survives_the_next_failing () =
     (Gate.questions_per_request + 1)
     (List.length (Gate.statements long.claim));
   match Gate.judge ~evaluate ~facts:[ long ] ~new_claims:[ merged ] ~absorbed with
-  | Gate.Open { absorbed = applied; left; _ } ->
+  | Gate.Failed { absorbed = applied; left; _ } ->
     Alcotest.(check int) "two requests were attempted" 2 !calls;
-    Alcotest.(check (list string)) "the source stays current"
-      [ id long ]
+    Alcotest.(check (list string)) "only completed negative evidence is reported"
+      (if first_rejected then [ id long ] else [])
       (List.map (fun (v : Gate.source_verdict) -> v.memory_id) left);
     Alcotest.(check int) "nothing is applied" 0 (List.length applied)
-  | Gate.Judged _ -> Alcotest.fail "expected the gate to stay open"
+  | Gate.Judged _ -> Alcotest.fail "expected failed judgment"
 ;;
 
 (* A claim over the state bound cannot be asked about at all: every memory
@@ -1142,11 +1144,11 @@ let test_an_oversized_memory_stays_current_when_another_request_fails () =
   let absorbed = absorbed_into merged [ huge; small ] in
   let evaluate ~state:_ ~questions:_ = Error "HTTP 529" in
   match Gate.judge ~evaluate ~facts:[ huge; small ] ~new_claims:[ merged ] ~absorbed with
-  | Gate.Open { absorbed = applied; _ } ->
-    Alcotest.(check (list string)) "only the small memory's absorption is applied"
-      [ id small ]
+  | Gate.Failed { absorbed = applied; _ } ->
+    Alcotest.(check (list string)) "neither oversized nor unconfirmed memory is absorbed"
+      []
       (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) applied)
-  | Gate.Judged _ -> Alcotest.fail "expected the gate to stay open"
+  | Gate.Judged _ -> Alcotest.fail "expected failed judgment"
 ;;
 
 (* A statement that does not fit a request cannot be judged; its memory
@@ -1182,14 +1184,14 @@ let () =
         ; Alcotest.test_case "a statement not conveyed keeps its memory current" `Quick
             test_a_statement_not_conveyed_keeps_its_memory_current
         ; Alcotest.test_case "the boundary is inclusive" `Quick test_the_boundary_is_inclusive
-        ; Alcotest.test_case "the model not answering applies the answer" `Quick
-            test_the_model_not_answering_applies_the_answer
+        ; Alcotest.test_case "the model not answering preserves the originals" `Quick
+            test_the_model_not_answering_keeps_the_sources
         ; Alcotest.test_case "an absorption the pass cannot place goes through unjudged" `Quick
             test_an_absorption_the_pass_cannot_place_goes_through_unjudged
         ; Alcotest.test_case "statements are asked in bounded requests" `Quick
             test_statements_are_asked_in_bounded_requests
-        ; Alcotest.test_case "a noul outside the unit interval opens the gate" `Quick
-            test_a_noul_outside_the_unit_interval_opens_the_gate
+        ; Alcotest.test_case "a noul outside the unit interval keeps the source" `Quick
+            test_a_noul_outside_the_unit_interval_keeps_the_source
         ; Alcotest.test_case "a statement too large to judge keeps its memory current" `Quick
             test_a_statement_too_large_to_judge_keeps_its_memory_current
         ; Alcotest.test_case "an oversized memory stays current when another request fails" `Quick
@@ -1200,8 +1202,8 @@ let () =
             test_a_rejection_completed_before_a_later_failure_is_kept
         ; Alcotest.test_case "a conveyed verdict survives a later failure" `Quick
             test_a_conveyed_verdict_survives_a_later_failure
-        ; Alcotest.test_case "open retains unjudged from unvisited groups" `Quick
-            test_open_preserves_unjudged_from_unvisited_groups
+        ; Alcotest.test_case "failure retains unjudged from unvisited groups" `Quick
+            test_failure_preserves_unjudged_from_unvisited_groups
         ; Alcotest.test_case "one run uses one endpoint and model snapshot" `Quick
             test_run_uses_one_destination_and_model_snapshot
         ; Alcotest.test_case "a run records the destination passed over" `Quick
@@ -1219,7 +1221,9 @@ let () =
         ; Alcotest.test_case "invalid responses retain all typed answers" `Quick
             test_rejected_response_retains_every_typed_answer
         ; Alcotest.test_case "a rejection in an answered request survives the next failing" `Quick
-            test_a_rejection_in_an_answered_request_survives_the_next_failing
+            (test_partial_source_before_failure ~first_rejected:true)
+        ; Alcotest.test_case "partly conveyed source stays current after next request fails" `Quick
+            (test_partial_source_before_failure ~first_rejected:false)
         ; Alcotest.test_case "a missing seventeenth statement keeps the original" `Quick
             test_a_missing_seventeenth_statement_keeps_the_whole_memory
         ; Alcotest.test_case "selection gate and store preserve the original" `Quick

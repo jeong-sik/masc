@@ -2685,10 +2685,77 @@ let test_every_request_of_a_held_batch_is_held_for_journal_reads () =
     (List.mem "being-read" (Tui_types.journal_held_request_ids state "alpha"))
 ;;
 
+let test_link_cards_use_actual_message_body_width () =
+  let module Layout = Masc_tui_message_layout in
+  let module Render = Masc_tui_render_chat in
+  let module Preview = Masc_tui_link_preview in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let url = "https://github.com/jeong-sik/masc/pull/37632" in
+  let message = { (entry_at 42.0) with me_text = url } in
+  let messages = [message] in
+  let entries () = Render.keeper_message_layout_entries ~messages
+      state ~keeper_name:"alpha" ~chat_cols:120 in
+  let entry = List.hd (entries ()) in
+  let theme = Masc_tui_ansi.Chat_theme.snapshot () in
+  List.iter (fun inner_width ->
+    List.iter (fun origin ->
+      List.iter (fun turn_rail ->
+        let entry = { entry with Layout.timestamp = "12:34:56"; turn_rail } in
+        let markdown ~entry ~width =
+          let source = Render.chat_body_with_previews ~preview:Preview.get_preview ~mode:`Rich ~entry ~width in
+          let cards = List.tl (String.split_on_char '\n' source) in
+          check bool "preview present" true (cards <> []);
+          List.iter (fun line ->
+            check bool "card fits actual body budget" true
+              (Layout.display_width line <= width)) cards;
+          let rendered = Render.cached_chat_markdown ~link_previews_mode:`Rich
+              ~theme ~entry ~width in
+          List.iter (fun border ->
+            check bool "complete border survives Markdown without wrapping" true
+              (List.exists (fun line -> Astring.String.is_infix ~affix:border line) rendered))
+            [List.hd cards; List.hd (List.rev cards)];
+          rendered
+        in
+        ignore (Layout.total_rows ~markdown ~origin ~inner_width [entry]))
+        [Layout.Rail_none; Rail_opens; Rail_says; Rail_does])
+      [Layout.Origin_row; Origin_inline; Origin_bare])
+    [20; 40; 80; 120; 160];
+  let render mode entry = Render.cached_chat_markdown ~link_previews_mode:mode
+      ~theme ~entry ~width:90 in
+  let plain = render `Off entry in
+  let rich = render `Rich entry in
+  check bool "mode changes invalidate Markdown" true (plain <> rich);
+  check (list string) "return to off restores plain rendering" plain (render `Off entry);
+  let preview = Preview.get_preview url in
+  let frame = Render.cached_chat_markdown ~link_previews_mode:`Rich ~theme in
+  let measured = frame ~entry ~width:90 in
+  Preview.cache_store { preview with title = Some "Changed preview metadata" };
+  check (list string) "one frame freezes preview metadata between measure and draw"
+    measured (frame ~entry ~width:90);
+  check bool "metadata changes invalidate Markdown" true (rich <> render `Rich entry);
+  List.iter (fun style ->
+    let excluded = { entry with Layout.style } in
+    check (list string) "tool and skill remain plain" (render `Off excluded) (render `Rich excluded))
+    [Layout.Tool; Skill Layout.Skill_used];
+  List.iter (fun markdown_source ->
+    let growing = { entry with Layout.markdown_source } in
+    check (list string) "unsettled source retains original rendering"
+      (render `Off growing) (render `Rich growing))
+    [Layout.Markdown_streaming;
+     Markdown_growing {keeper_name="alpha"; request_id=""; entry_index=0}];
+  let before = entries () in
+  check bool "unchanged metadata reuses layout identity" true (before == entries ());
+  state.link_previews_mode <- `Off;
+  check bool "mode invalidates layout identity" false (before == entries ());
+  let before = entries () in
+  Preview.cache_store { preview with title = Some "Another metadata update" };
+  check bool "metadata invalidates layout identity" false (before == entries ())
+
 let () =
   run
     "tui_chat_queue_wiring"
-    [ ( "wiring"
+    [ ( "link card layout", [test_case "actual body width and preview cache changes" `Quick test_link_cards_use_actual_message_body_width] )
+    ; ( "wiring"
       , [ test_case "checkpoint watcher allows new input" `Quick test_checkpoint_watcher_allows_new_input
         ; test_case "older queued watcher cannot rearm acknowledged stop" `Quick
             test_old_queued_watcher_does_not_rearm_esc

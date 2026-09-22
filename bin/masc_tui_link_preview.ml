@@ -28,12 +28,19 @@ let preview_cache_mu = Stdlib.Mutex.create ()
 let preview_cache : (string, og_preview) Masc_tui_lru.t ref =
   ref (Masc_tui_lru.create ~capacity:preview_cache_capacity)
 
+let preview_generation = ref 0
+
+let cache_generation () =
+  Stdlib.Mutex.protect preview_cache_mu (fun () -> !preview_generation)
+
 let cache_lookup url =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
       Masc_tui_lru.find !preview_cache url)
 
 let cache_store preview =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
+      if Masc_tui_lru.find !preview_cache preview.url <> Some preview then
+        incr preview_generation;
       Masc_tui_lru.set !preview_cache preview.url preview)
 
 type mosaic_refusal =
@@ -549,7 +556,7 @@ let render_og_banner ~width p =
       ]
 
 let render_narrow_card ~width p =
-  let card_w = max 24 (width - 2) in
+  let card_w = max 4 (width - 2) in
   let content_w = card_w - 4 in
   let icon = site_icon p in
   let site = site_label p in

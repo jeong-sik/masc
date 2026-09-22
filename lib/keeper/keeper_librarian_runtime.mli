@@ -38,7 +38,8 @@ type preflight_selection =
   }
 
 val preflight_slots
-  :  selected_slots:Runtime_exact_output_registry.selected_slot list
+  :  requirement:Agent_core.Exact_output.output_requirement
+  -> selected_slots:Runtime_exact_output_registry.selected_slot list
   -> messages:Agent_core.Types.message list
   -> (preflight_selection, extraction_error) result
 (** The pre-flight over the ladder: the selected slots whose request projected

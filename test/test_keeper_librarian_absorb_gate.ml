@@ -412,7 +412,6 @@ let run_runtime_evidence ?fixture_dir () =
         }
         (fun () ->
           Masc.Keeper_librarian_runtime.run_best_effort
-            ~trigger:Masc.Keeper_librarian_runtime.Queue_changed
             ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input));
     Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
     Alcotest.(check int) "JEV request count"

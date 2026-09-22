@@ -67,8 +67,7 @@ let test_failure_and_commit_project_to_different_shapes () =
       ~trace_id:"trace-a"
       ~kind:Exact_execution_failure
       ~detail:"provider returned 503"
-      ~snapshot_present:true
-      ~cadence_deferred:true;
+      ~snapshot_present:true;
     let fact : Types.fact =
       Types.observed ~claim:"a claim" ~category:Fact ~now:1_700_000_000.0
         ~origin:{ kind = Authored; trace_id = "" }
@@ -106,7 +105,7 @@ let test_failure_and_commit_project_to_different_shapes () =
 
 (* The whole reason the failure line exists: an operator asking why memory did
    not advance needs the detail, not just that something failed. *)
-let test_failure_carries_its_detail_and_deferral () =
+let test_failure_carries_its_detail () =
   with_keepers_dir (fun keepers_dir ->
     Current.append_librarian_failure
       ~keepers_dir
@@ -115,8 +114,7 @@ let test_failure_carries_its_detail_and_deferral () =
       ~trace_id:"trace-a"
       ~kind:Runtime_context_unavailable
       ~detail:"Eio net/clock context unavailable"
-      ~snapshot_present:false
-      ~cadence_deferred:false;
+      ~snapshot_present:false;
     match read_json ~keepers_dir with
     | [ line ] ->
       Alcotest.(check string) "detail survives"
@@ -124,8 +122,6 @@ let test_failure_carries_its_detail_and_deferral () =
         (U.to_string (field line "detail"));
       Alcotest.(check bool) "snapshot presence is stated" false
         (U.to_bool (field line "snapshot_present"));
-      Alcotest.(check bool) "cadence deferral is stated" false
-        (U.to_bool (field line "cadence_deferred"));
       Alcotest.(check string) "trace id survives" "trace-a"
         (U.to_string (field line "trace_id"))
     | lines -> Alcotest.failf "expected one line, got %d" (List.length lines))
@@ -138,13 +134,11 @@ let test_undecodable_line_keeps_its_position_and_reason () =
   with_keepers_dir (fun keepers_dir ->
     Current.append_librarian_failure
       ~keepers_dir ~keeper_id:keeper ~now:1.0 ~trace_id:"before"
-      ~kind:Domain_output_invalid ~detail:"d" ~snapshot_present:true
-      ~cadence_deferred:false;
+      ~kind:Domain_output_invalid ~detail:"d" ~snapshot_present:true;
     append_raw ~keepers_dir "{not json";
     Current.append_librarian_failure
       ~keepers_dir ~keeper_id:keeper ~now:2.0 ~trace_id:"after"
-      ~kind:Domain_output_invalid ~detail:"d" ~snapshot_present:true
-      ~cadence_deferred:false;
+      ~kind:Domain_output_invalid ~detail:"d" ~snapshot_present:true;
     match read_json ~keepers_dir with
     | [ before; torn; after ] ->
       Alcotest.(check string) "first is intact" "before"
@@ -180,7 +174,6 @@ let test_a_long_journal_names_each_tail_row_by_its_offset () =
         ~keepers_dir ~keeper_id:keeper ~now:(float_of_int index)
         ~trace_id:(Printf.sprintf "trace-%03d" index)
         ~kind:Domain_output_invalid ~detail:"d" ~snapshot_present:true
-        ~cadence_deferred:false
     done;
     let contents =
       In_channel.with_open_bin
@@ -271,8 +264,7 @@ let test_cancelled_pass_is_recorded_and_named () =
       ~trace_id:"trace-cancelled"
       ~kind:Lane_cancelled
       ~detail:"memory os librarian cancelled lane=librarian_exact before commit"
-      ~snapshot_present:true
-      ~cadence_deferred:false;
+      ~snapshot_present:true;
     match read_json ~keepers_dir with
     | [ line ] ->
       Alcotest.(check bool) "the pass is on the record" true (U.to_bool (field line "ok"));
@@ -300,8 +292,8 @@ let () =
     [ ( "shape"
       , [ Alcotest.test_case "failure and commit project to different shapes" `Quick
             test_failure_and_commit_project_to_different_shapes
-        ; Alcotest.test_case "failure carries its detail and deferral" `Quick
-            test_failure_carries_its_detail_and_deferral
+        ; Alcotest.test_case "failure carries its detail" `Quick
+            test_failure_carries_its_detail
         ] )
     ; ( "honesty"
       , [ Alcotest.test_case "undecodable line keeps its position and reason" `Quick

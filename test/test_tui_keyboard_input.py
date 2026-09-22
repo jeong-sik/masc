@@ -6886,7 +6886,6 @@ def memory_journal_backfill_fixture() -> HttpResponse:
             "kind": "backfilled_probe",
             "detail": "older Journal observation",
             "snapshot_present": True,
-            "cadence_deferred": False,
         },
     )
     payload["returned"] = 2

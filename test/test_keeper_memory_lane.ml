@@ -6,7 +6,6 @@
 
 module Lane = Masc.Keeper_memory_lane
 module Keeper_lane = Masc.Keeper_lane
-module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Post_turn_memory = Masc.Keeper_agent_run_post_turn_memory
 module Queue_refresh = Masc.Keeper_librarian_queue_refresh
 module Queue_signal = Masc.Keeper_librarian_queue_signal
@@ -81,46 +80,16 @@ let test_either_checkpoint_owner_wakes_the_durable_consumer () =
        ignore (Masc.Workspace.init config ~agent_name:None);
        Config_dir_resolver.reset ();
        Unix.putenv env_key "true";
-       let direct_runs = ref 0 in
        let wakes = ref [] in
        Queue_signal.install (fun ~base_path ~keeper_name ->
          wakes := (base_path, keeper_name) :: !wakes);
        let core_name = "agent-core-owner" in
        let core_meta = make_meta core_name in
-       let core_trace_id =
-         Keeper_id.Trace_id.to_string core_meta.runtime.trace_id
-       in
-       Queue_refresh.remember_turn
-         ~base_path:config.base_path
-         ~keeper_name:core_name
-         ~trace_id:core_trace_id
-         (fun ~meta:_ _ -> incr direct_runs; Queue_refresh.Entered);
        run_post_turn
          ~checkpoint_owner:Runtime_execution.Masc_agent_core
          ~config
          ~meta:core_meta
          ~turn:1;
-       Alcotest.(check bool)
-         "Agent Core handoff attempts pending direct evidence"
-         true
-         (Queue_refresh.For_testing.attempt_remembered
-            ~base_path:config.base_path
-            ~keeper_name:core_name
-            ~trace_id:core_trace_id
-            ~meta:core_meta
-            ~sources_changed:false
-            ~trigger:Librarian_runtime.Queue_changed);
-       Alcotest.(check int) "Agent Core runs the pending direct producer once" 1 !direct_runs;
-       Alcotest.(check bool)
-         "Agent Core retires direct evidence after the handoff attempt"
-         false
-         (Queue_refresh.For_testing.attempt_remembered
-            ~base_path:config.base_path
-            ~keeper_name:core_name
-            ~trace_id:core_trace_id
-            ~meta:core_meta
-            ~sources_changed:true
-            ~trigger:Librarian_runtime.Queue_changed);
        Alcotest.(check (list (pair string string)))
          "Agent Core emits one durable wake"
          [ config.base_path, core_name ]
@@ -138,20 +107,18 @@ let test_either_checkpoint_owner_wakes_the_durable_consumer () =
          ~config
          ~meta:official_meta
          ~turn:1;
-       Unix.putenv env_key "false";
-       Alcotest.(check bool)
-         "official client hands over no direct evidence"
-         false
-         (Queue_refresh.For_testing.attempt_remembered
-            ~base_path:config.base_path
-            ~keeper_name:official_name
-            ~trace_id:
-              (Keeper_id.Trace_id.to_string official_meta.runtime.trace_id)
-            ~meta:official_meta
-            ~sources_changed:false
-            ~trigger:Librarian_runtime.Queue_changed);
        Alcotest.(check (list (pair string string)))
          "official client emits one durable wake as well"
+         [ config.base_path, core_name; config.base_path, official_name ]
+         (List.rev !wakes);
+       Unix.putenv env_key "false";
+       run_post_turn
+         ~checkpoint_owner:Runtime_execution.Official_client
+         ~config
+         ~meta:official_meta
+         ~turn:2;
+       Alcotest.(check (list (pair string string)))
+         "a disabled librarian wakes nothing"
          [ config.base_path, core_name; config.base_path, official_name ]
          (List.rev !wakes))
 ;;
@@ -620,115 +587,6 @@ let test_finished_switch_drops_without_leak () =
   | None -> Alcotest.fail "keeper entry missing after finished switch submit"
 ;;
 
-(* A queue signal may replace the pending post-turn closure even when source
-   coverage is unchanged. The replacement must still attempt the remembered
-   conversation, while repeated unchanged signals need no further attempt. *)
-let test_queue_coalescing_preserves_completed_turn () =
-  let module Refresh = Masc.Keeper_librarian_queue_refresh in
-  Lane.For_testing.reset ();
-  let keeper_name = "queue-completed-turn" in
-  let trace_id = "queue-trace" in
-  let seen = ref [] in
-  let attempt trigger () =
-    ignore (Refresh.For_testing.attempt_remembered ~base_path ~keeper_name
-      ~trace_id ~meta:(make_meta keeper_name) ~sources_changed:false ~trigger)
-  in
-  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
-    Lane.init ~sw;
-    let started, set_started = Eio.Promise.create () in
-    let release, set_release = Eio.Promise.create () in
-    ignore (Lane.submit ~base_path ~keeper_name (fun () ->
-      Eio.Promise.resolve set_started ();
-      Eio.Promise.await release));
-    Eio.Promise.await started;
-    Refresh.remember_turn ~base_path ~keeper_name ~trace_id
-      (fun ~meta:_ trigger -> seen := trigger :: !seen; Refresh.Entered);
-    ignore (Lane.submit ~base_path ~keeper_name
-      (attempt Librarian_runtime.Conversation_completed));
-    let outcome = Lane.submit ~base_path ~keeper_name
-      (attempt Librarian_runtime.Queue_changed) in
-    (match outcome with
-     | Lane.Coalesced -> ()
-     | _ -> Alcotest.fail "queue signal did not replace pending post-turn work");
-    Eio.Promise.resolve set_release ()));
-  (match !seen with
-   | [Librarian_runtime.Queue_changed] -> ()
-   | _ -> Alcotest.fail "unchanged queue lost or duplicated remembered turn");
-  attempt Librarian_runtime.Queue_changed ();
-  Alcotest.(check int) "attempted unchanged evidence is not retried" 1 (List.length !seen)
-;;
-
-let test_remembered_turn_replacement_and_cancellation () =
-  let module Refresh = Masc.Keeper_librarian_queue_refresh in
-  let keeper_name = "queue-turn-replacement" in
-  let trace_id = "trace-current" in
-  let seen = ref [] in
-  let remember = Refresh.remember_turn ~base_path ~keeper_name ~trace_id in
-  let attempt ?(sources_changed = false) trace_id =
-    Refresh.For_testing.attempt_remembered ~base_path ~keeper_name
-      ~trace_id ~meta:(make_meta keeper_name) ~sources_changed ~trigger:Librarian_runtime.Queue_changed
-  in
-  remember (fun ~meta:_ _ ->
-    seen := "old" :: !seen;
-    remember (fun ~meta:_ _ -> seen := "new" :: !seen; Refresh.Entered);
-    Refresh.Entered);
-  ignore (attempt trace_id);
-  ignore (attempt trace_id);
-  Alcotest.(check (list string)) "new evidence stays pending during old attempt"
-    ["new"; "old"] !seen;
-  let cancel_once = ref true in
-  remember (fun ~meta:_ _ ->
-    if !cancel_once then (
-      cancel_once := false;
-      raise (Eio.Cancel.Cancelled Test_boom));
-    seen := "resumed" :: !seen;
-    Refresh.Entered);
-  (try ignore (attempt trace_id); Alcotest.fail "expected cancellation"
-   with Eio.Cancel.Cancelled _ -> ());
-  Alcotest.(check bool) "old trace cannot run latest evidence" false
-    (attempt "trace-obsolete");
-  ignore (attempt trace_id);
-  Alcotest.(check (list string)) "cancellation preserves pending evidence"
-    ["resumed"; "new"; "old"] !seen;
-  ignore (attempt trace_id);
-  Alcotest.(check int) "normal return records only one attempt" 3 (List.length !seen);
-  ignore (attempt ~sources_changed:true trace_id);
-  Alcotest.(check int) "changed sources reuse completed-turn evidence" 4 (List.length !seen)
-;;
-
-let test_remembered_turn_uses_current_policy () =
-  let module Refresh = Masc.Keeper_librarian_queue_refresh in
-  let keeper_name = "queue-policy-change" in
-  let trace_id = "same-trace" in
-  let meta = make_meta keeper_name in
-  let seen = ref [] in
-  let completed_evidence = ["completed user message"; "completed tool result"] in
-  Refresh.remember_turn ~base_path ~keeper_name ~trace_id
-    (fun ~meta _ ->
-      seen := (meta.Masc.Keeper_meta_contract.instructions,
-               meta.current_task_id, completed_evidence) :: !seen;
-      Refresh.Entered);
-  let attempt meta =
-    Refresh.For_testing.attempt_remembered ~base_path ~keeper_name ~trace_id
-      ~meta ~sources_changed:false ~trigger:Librarian_runtime.Queue_changed
-  in
-  Alcotest.(check bool) "first evidence handled" true (attempt meta);
-  let changed = {meta with instructions = "explain only; do not execute"} in
-  Alcotest.(check bool) "same trace policy change handled" true (attempt changed);
-  let task_id = Keeper_id.Task_id.of_string "task-42" |> Result.get_ok in
-  let changed = {changed with current_task_id = Some task_id} in
-  Alcotest.(check bool) "same trace task change handled" true (attempt changed);
-  Alcotest.(check bool) "unchanged policy handled" true (attempt changed);
-  Alcotest.(check int) "only policy changes repeat extraction" 3 (List.length !seen);
-  match !seen with
-  | (instructions, Some task, evidence) :: _ ->
-    Alcotest.(check string) "current instructions" changed.instructions instructions;
-    Alcotest.(check bool) "current task" true (Keeper_id.Task_id.equal task_id task);
-    Alcotest.(check (list string)) "completed evidence survives policy refresh"
-      completed_evidence evidence
-  | _ -> Alcotest.fail "current policy was not delivered with completed evidence"
-;;
-
 let test_durable_drain_publishes_scoped_health () =
   let root = temp_dir "test-durable-health-" in
   let env_key = Env_config.KeeperMemoryOs.librarian_env_key in
@@ -852,15 +710,6 @@ let () =
     [ ( "lane"
       , [ Alcotest.test_case "durable drain publishes scoped health" `Quick
             test_durable_drain_publishes_scoped_health
-        ; Alcotest.test_case
-            "queue coalescing preserves completed-turn evidence"
-            `Quick test_queue_coalescing_preserves_completed_turn
-        ; Alcotest.test_case
-            "current policy preserves remembered evidence"
-            `Quick test_remembered_turn_uses_current_policy
-        ; Alcotest.test_case
-            "remembered turn replacement and cancellation"
-            `Quick test_remembered_turn_replacement_and_cancellation
         ; Alcotest.test_case
             "either checkpoint owner wakes the durable consumer"
             `Quick

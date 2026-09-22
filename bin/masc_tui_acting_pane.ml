@@ -28,13 +28,47 @@ let surface_floor_cols =
   Masc_tui_roster_pane.threshold_cols - Masc_tui_roster_pane.pane_cols
 
 let threshold_cols = pane_cols + surface_floor_cols
-let shown ~hidden ~cols = (not hidden) && cols >= threshold_cols
 
-let toggle_hidden ~hidden ~cols =
-  if cols < threshold_cols then None else Some (not hidden)
+(* The wide pane spends its extra cells where the narrow one cuts: the
+   keeper's name in a fleet row, and a call's age at the end of a call row.
+   Eighteen more name cells hold the longest name on the live roster whole
+   (kidsnote-slack-context-collector, 32 of 34); the calls' own column is
+   the call row's remaining width, so the tool names gain the rest. *)
+let wide_extra_cols = 18
+let wide_pane_cols = pane_cols + wide_extra_cols
+let wide_threshold_cols = wide_pane_cols + surface_floor_cols
 
-let content_cols ~hidden ~cols =
-  if shown ~hidden ~cols then cols - pane_cols else cols
+type layout =
+  | Narrow
+  | Wide
+  | Hidden
+
+(* What a width the pane was handed can hold. The renderer hands it the
+   columns {!drawn_cols} reserved, so this is the layout the reader chose
+   whenever the terminal fits it. *)
+let is_wide ~cols = cols >= wide_pane_cols
+
+let drawn_cols ~layout ~cols =
+  match layout with
+  | Hidden -> 0
+  | Wide when cols >= wide_threshold_cols -> wide_pane_cols
+  | Wide | Narrow -> if cols >= threshold_cols then pane_cols else 0
+
+let next_layout ~layout ~cols =
+  if cols < threshold_cols then None
+  else
+    Some
+      (match layout with
+       | Narrow -> if cols >= wide_threshold_cols then Wide else Hidden
+       | Wide -> Hidden
+       | Hidden -> Narrow)
+
+let layout_label = function
+  | Narrow -> "narrow"
+  | Wide -> "wide"
+  | Hidden -> "hidden"
+
+let content_cols ~layout ~cols = cols - drawn_cols ~layout ~cols
 
 (* ── Input ─────────────────────────────────────────────────────────────── *)
 
@@ -580,6 +614,10 @@ let fleet_order input newest =
   in
   List.stable_sort (fun a b -> compare (rank a) (rank b)) (working_keepers input)
 
+(* The fleet row's name column: the wide pane's extra cells, all of them. *)
+let name_cells_for ~cols =
+  if is_wide ~cols then name_cells + wide_extra_cols else name_cells
+
 let fleet_row ~cols input keeper chunk =
   let approval = approval_for input.approvals keeper.name in
   let selected =
@@ -590,7 +628,7 @@ let fleet_row ~cols input keeper chunk =
   ( fit_line ~cols
       (with_border
          ([ { text = Layout.fit_width keeper.mark mark_cells; tone = keeper.mark_tone }
-          ; { text = Layout.fit_middle name_cells keeper.name
+          ; { text = Layout.fit_middle (name_cells_for ~cols) keeper.name
             ; tone = (if selected then Accent else Plain)
             }
           ; { text = String.make gap_cells ' '; tone = Plain }
@@ -657,7 +695,13 @@ let rail_span = function
   | Inside -> { border with tone = Plain }
   | Closes -> { text = "\xe2\x94\x94"; tone = Plain }
 
-let tool_line ~cols ~state ~place (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
+(* A call's age in the wide pane, at the row's end: the span since the
+   call's receipt, in the one ladder the TUI spells spans with, padded to
+   its widest reading so the ages and the durations before them each line
+   up down the list. *)
+let age_cells = 6
+
+let tool_line ~cols ~now ~state ~place (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
   let duration =
     match tool.Acting.ct_duration_ms with
     | Some ms -> { text = Acting.elapsed_text ms; tone = Dim }
@@ -677,8 +721,18 @@ let tool_line ~cols ~state ~place (chunk : Acting.chunk) (tool : Acting.chunk_to
            | Record_open | Record_settled -> { text = open_record_glyph ^ " "; tone = Dim })
         else { text = settled_glyph ^ " "; tone = Dim }
   in
+  let age =
+    if is_wide ~cols then
+      [ { text = String.make gap_cells ' '; tone = Plain }
+      ; { text = pad_left age_cells (Layout.span_text (now -. tool.Acting.ct_at)); tone = Dim }
+      ]
+    else []
+  in
   let inner = cols - border_cells - mark_cells - dispatch_cells - gap_cells in
-  let right = Layout.display_width duration.text in
+  let right =
+    Layout.display_width duration.text
+    + (match age with [] -> 0 | _ :: _ -> gap_cells + age_cells)
+  in
   let name_room = max 0 (inner - right - (if right > 0 then gap_cells else 0)) in
   fit_line ~cols
     (rail_span place
@@ -686,7 +740,8 @@ let tool_line ~cols ~state ~place (chunk : Acting.chunk) (tool : Acting.chunk_to
      @ [ { text = Layout.fit_width tool.Acting.ct_tool name_room; tone = Plain }
        ; { text = (if right > 0 then String.make gap_cells ' ' else ""); tone = Plain }
        ; duration
-       ])
+       ]
+     @ age)
 
 (* The heading over the calls: which order they are in. Beside it the
    order is a press away, so the heading is the control as well as the
@@ -1229,7 +1284,7 @@ let materialize_row ~cols input = function
   | Approval_row tool -> approval_line ~cols tool, Target_none
   | Calls_heading -> calls_heading_line ~cols input.call_order, Target_call_order
   | Tool_row (chunk, tool, state, place) ->
-      ( tool_line ~cols ~state ~place chunk tool
+      ( tool_line ~cols ~now:input.now ~state ~place chunk tool
       , Target_call (chunk.Acting.ck_keeper, Acting.call_key tool) )
   | Call_detail (chunk, tool, part) ->
       ( call_detail_line ~cols ~now:input.now tool part
@@ -1252,8 +1307,8 @@ let materialize_row ~cols input = function
    once for the whole list instead of a glyph key the reader has to carry
    down every row. Built from the same widths, so a change to one moves both
    the heading and the column under it. *)
-let legend =
-  String.make (mark_cells + name_cells + gap_cells) ' '
+let legend ~cols =
+  String.make (mark_cells + name_cells_for ~cols + gap_cells) ' '
   ^ pad_right state_cells "state"
   ^ pad_right tool_cells "tool"
   ^ pad_left calls_cells "calls"
@@ -1271,7 +1326,7 @@ let lines ~rows ~cols ~scroll input =
     let headers =
       match fleet with
       | Some (body, _) when rows >= 2 && List.exists row_uses_the_columns body ->
-        [ header; (fit_line ~cols (with_border [ { text = legend; tone = Dim } ]), Target_none) ]
+        [ header; (fit_line ~cols (with_border [ { text = legend ~cols; tone = Dim } ]), Target_none) ]
       | Some _ | None -> [ header ]
     in
     let below = rows - List.length headers in

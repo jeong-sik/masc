@@ -119,9 +119,7 @@ let acting_pane_columns (state : state) ~terminal_cols =
      || Masc_tui_types.on_activity_screen state.view
      || Option.is_some (browser_lane_on_screen state)
   then 0
-  else if Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden ~cols:terminal_cols
-  then Masc_tui_acting_pane.pane_cols
-  else 0
+  else Masc_tui_acting_pane.drawn_cols ~layout:state.acting_pane_layout ~cols:terminal_cols
 
 (* The runtime picker measures this string to decide its column widths, so the
    format lives beside that arithmetic. *)

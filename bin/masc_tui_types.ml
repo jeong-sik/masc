@@ -4757,10 +4757,11 @@ type state = {
      width the terminal forces, so it survives resizing. *)
   mutable roster_pane_hidden: bool;
   (* The Activity pane on the right edge costs a surface
-     [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed. Same
-     contract as the roster: hidden is the reader's choice and survives a
-     resize; the width is the terminal's. *)
-  mutable acting_pane_hidden: bool;
+     [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
+     [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
+     hidden is the reader's choice and survives a resize; whether the
+     terminal holds it is the terminal's. *)
+  mutable acting_pane_layout: Masc_tui_acting_pane.layout;
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
@@ -6775,7 +6776,7 @@ let create_state
      cost of being wrong here -- whereas the column was drawn on every frame
      whether or not anyone read it. *)
   roster_pane_hidden = true;
-  acting_pane_hidden = false;
+  acting_pane_layout = Masc_tui_acting_pane.Narrow;
   acting_pane_scroll = 0;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
   acting_pane_call_order = Masc_tui_acting_pane.Newest_first;

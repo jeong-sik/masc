@@ -216,7 +216,7 @@ let catalog =
   ; { word = "activity"
     ; aliases = []
     ; args = "[fleet|changes]"
-    ; summary = "show or hide the Activity pane beside this surface, or show one of its tabs"
+    ; summary = "walk the Activity pane beside this surface narrow, wide, hidden, or show one of its tabs"
     }
   ; { word = "preview"
     ; aliases = []

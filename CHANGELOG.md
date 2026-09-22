@@ -27,7 +27,7 @@
 
 ### Changed
 
-- A keeper request with no Librarian snapshot that fits the current history, and no seed, starts at the end of the last completed turn instead of carrying the whole history; official-client lanes without a seed start there too. The turn-record and forecast origin `whole_history` is replaced by `turn_start` with its `end_atom`, and the Memory screen's continuity input `uncompressed` by `without_snapshot` (#37734).
+- A keeper request with no Librarian snapshot that fits the current history starts at the Librarian's read position when that position is a place in the history, and otherwise, with no seed, at the end of the last completed turn, instead of carrying the whole history; official-client lanes without a seed start at that boundary too. The Memory screen and dashboard show the position-only case as `absorbed`. The turn-record and forecast origin `whole_history` is replaced by `turn_start` with its `end_atom`, and the Memory screen's continuity input `uncompressed` by `without_snapshot` (#37734).
 - The TUI chat header labels a model the stream named without a runtime id as `model:`, and only an announced runtime id as `turn:`; a model name is no longer shown as the runtime.
 - The next-request band names the wake line in the same estimated tokens as its other figures instead of bytes.
 - The Context pane's title says how long ago its reading was received; the pane refreshes only by hand, so a reading from before the current turn is no longer indistinguishable from a current one.

@@ -55,12 +55,17 @@ type seed =
 type origin =
   | Carried of source  (** The front came from a seed. *)
   | Librarian_snapshot of { end_atom : int; boundary_line : int }
+  | Librarian_progress of { end_atom : int }
+      (** The Librarian's durable position: the atoms before [end_atom] are
+          read into memory, and nothing in the request summarizes them. Taken
+          when no saved continuity snapshot fits this history and the
+          position does (RFC keeper-context-window-in-tokens §13.6). *)
   | Turn_start of { end_atom : int }
       (** No absorbed point and no seed: the range begins where the last
           completed turn on this history ended, so only this turn's own
-          atoms go out and the atoms before them wait for the Librarian.
-          [end_atom] is 0 on a history with no completed turn, where that
-          is the short history a fresh keeper has. *)
+          atoms go out and the atoms before them wait for the Librarian
+          (§13.4). [end_atom] is 0 on a history with no completed turn,
+          where that is the short history a fresh keeper has. *)
 
 val of_ledger : Keeper_model_input_ledger.t -> seed option
 (** The ledger's front with the digest the ledger recorded for it; [None]

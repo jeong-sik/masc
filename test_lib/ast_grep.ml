@@ -712,6 +712,36 @@ let direct_call_sequence_matches_in_value_binding
   | [] | _ :: _ :: _ -> false
 ;;
 
+(* The identifiers a binding hands to [callee] at [position], in the order its
+   direct sequence makes the calls. Counting the calls says how many there
+   are; only the order says which one runs last -- and for [at_exit], whose
+   callbacks run in reverse of registration, that order is the whole
+   guarantee. An argument that is not a plain identifier reads as [None]
+   rather than being dropped, so a call never silently leaves the sequence. *)
+let positional_identifier_sequence_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~position
+  =
+  match expressions_of_value_binding ~module_path ~binding_name with
+  | [ expression ] ->
+      expression
+      |> strip_function_parameters
+      |> flatten_direct_sequence
+      |> List.filter_map (fun (statement : Parsetree.expression) ->
+           match statement.pexp_desc with
+           | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
+             when String.equal (longident_to_string txt) callee ->
+               Some
+                 (match positional_argument args position with
+                  | Some { pexp_desc = Pexp_ident { txt = argument; _ }; _ } ->
+                      Some (longident_to_string argument)
+                  | Some _ | None -> None)
+           | _ -> None)
+  | [] | _ :: _ :: _ -> []
+;;
+
 let unit_lambda_body (expression : Parsetree.expression) =
   match expression.pexp_desc with
   | Pexp_function

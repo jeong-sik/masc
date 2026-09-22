@@ -1377,24 +1377,34 @@ let keeper_fleet_safety_health_json
      lists ship in this response. The subtraction belongs to whoever reads
      them, so it is not precomputed here. *)
   let blocker =
-    if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
-    else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
-    else if turn_configuration_error_count > 0 then Some "turn_configuration_error"
+    if keeper_bootstrap_blocked then Some Keeper_fleet_blocker.Keeper_bootstrap_disabled
+    else if no_executable_keeper_fibers
+    then Some Keeper_fleet_blocker.No_executable_keeper_fibers
+    else if turn_configuration_error_count > 0
+    then Some Keeper_fleet_blocker.Turn_configuration_error
     else if official_client_recovery_required_count > 0
-    then Some "official_client_recovery_required"
-    else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
+    then Some Keeper_fleet_blocker.Official_client_recovery_required
+    else if reaction_capacity_below_target
+    then Some Keeper_fleet_blocker.Reaction_capacity_below_target
     else if active_task_owner_without_executable_fiber
-    then Some "active_task_owner_without_executable_fiber"
-    else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
+    then Some Keeper_fleet_blocker.Active_task_owner_without_executable_fiber
+    else if paused_autoboot_count > 0
+    then Some Keeper_fleet_blocker.Durable_paused_autoboot_enabled
     else None
   in
   `Assoc
     [ "schema", `String "masc.keeper_fleet_operator.v1"
     ; "status", `String status
-    ; ("blocker", Json_util.string_opt_to_json blocker)
+    ; ( "blocker"
+      , Json_util.string_opt_to_json (Option.map Keeper_fleet_blocker.wire_name blocker) )
     ; "keeper_bootstrap_enabled", `Bool keeper_bootstrap_enabled
     ; ( "keeper_bootstrap_blocker"
-      , if keeper_bootstrap_blocked then `String "keeper_bootstrap_disabled" else `Null )
+      , if keeper_bootstrap_blocked
+        then
+          `String
+            (Keeper_fleet_blocker.wire_name
+               Keeper_fleet_blocker.Keeper_bootstrap_disabled)
+        else `Null )
     ; "bootable_keeper_count", `Int bootable_count
     ; ( "bootable_keeper_names"
       , `List (List.map (fun name -> `String name) bootable_names) )

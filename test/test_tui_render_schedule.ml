@@ -802,10 +802,9 @@ let test_memory_columns_never_exceed_their_width () =
       (used <= max inner_width memory_minimum_row_width)
   done
 
-(* The Δ column carries a pair, and a cell past its width is cut in the
-   middle: at six cells the fleet's own [+12 -23] drew as [+… -23] and the
-   added count was gone. Two digits each is the daily shape (the widest pair
-   on the live fleet was +11 -16); three each is what a large revision
+(* The Δ column carries a pair, and a cell past its width folds in the middle,
+   which takes the first count. Two digits each is the daily shape (the widest
+   pair on the live fleet was +11 -16); three each is what a large revision
    needs. *)
 let test_the_memory_delta_column_holds_a_pair_of_counts () =
   let columns = Schedule.allocate_memory_columns ~inner_width:240 in
@@ -1515,6 +1514,22 @@ let test_fusion_keeper_growth_comes_out_of_the_run_id () =
   check bool "the local start date remains whole" true
     (String.starts_with ~prefix:"2026-09-07 11:08" row)
 
+(* A failed run's STATE cell draws its failure code, and the codes come from
+   two closed sets the server writes: the judge's and the delivery's. The
+   widest of them is [evidence_unavailable]; folded, it would read as some
+   other code. *)
+let test_the_widest_failure_code_fits_the_state_cell () =
+  let code = "evidence_unavailable" in
+  let columns =
+    Schedule.allocate_fusion_columns ~inner_width:110 ~keeper_width:16
+  in
+  let row =
+    Schedule.fusion_row ~state_style:"" columns
+      { fusion_probe with frow_state = code }
+  in
+  check bool (Printf.sprintf "%s is drawn whole: %s" code row) true
+    (Option.is_some (index_of row code))
+
 let test_fusion_sidebar_label_format () =
   let label =
     Schedule.fusion_sidebar_label ~status:"done" ~time:"14:20:05"
@@ -2085,6 +2100,8 @@ let () =
             test_fusion_columns_hold_their_offsets
         ; test_case "fusion keeper growth comes out of the run id" `Quick
             test_fusion_keeper_growth_comes_out_of_the_run_id
+        ; test_case "the widest failure code fits the state cell" `Quick
+            test_the_widest_failure_code_fits_the_state_cell
         ; test_case "fusion sidebar label format" `Quick
             test_fusion_sidebar_label_format
         ; test_case "fusion pipeline diagram stages" `Quick

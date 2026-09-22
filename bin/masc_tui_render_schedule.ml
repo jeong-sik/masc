@@ -346,10 +346,10 @@ let memory_updated_width = 16
 let memory_facts_width = 5
 let memory_size_width = 9
 let memory_source_width = 20
-(* [+12 -23] is 7 cells, and a cell that overruns is cut in the middle: the
-   column drew [+\xe2\x80\xa6 -23] and the added count was gone. Measured on the
-   live fleet (2026-09-22): the widest pair was [+11 -16]. Three digits each
-   keeps a large revision whole. *)
+(* The column carries a pair of counts, and a cell that overruns folds in the
+   middle, which takes the first count. Three digits each keeps a large
+   revision whole; the widest pair on the live fleet (2026-09-22) was
+   [+11 -16]. *)
 let memory_delta_width = 9
 
 type memory_columns = {
@@ -885,7 +885,10 @@ let change_row ~op_style ~result_style ~summary_width values =
 
 let fusion_time_width = 16
 let fusion_age_width = 7
-let fusion_state_width = 18
+(* A running stage ("recording(3/1)") or how the run ended. A failed run
+   draws its failure code, and the widest the server writes is
+   [evidence_unavailable]. *)
+let fusion_state_width = 20
 let fusion_preset_width = 10
 let fusion_minimum_run_width = 12
 

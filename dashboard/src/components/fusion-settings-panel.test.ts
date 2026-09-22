@@ -97,6 +97,10 @@ const input = (sel: string) => q(sel) as HTMLInputElement
 const select = (sel: string) => q(sel) as HTMLSelectElement
 const button = (sel: string) => q(sel) as HTMLButtonElement
 const realConfirm = window.confirm
+// A notice is only in the right place if it is *not* in the other one, so
+// every notice assertion names its site. The two sites share their testids.
+const notice = (kind: 'error' | 'saved' | 'reload', site: 'settings' | 'preset') =>
+  q(`[data-testid="fusion-settings-${kind}"][data-site="${site}"]`)
 
 function setConfirm(value: ((message?: string) => boolean) | undefined): void {
   Object.defineProperty(window, 'confirm', { value, configurable: true, writable: true })
@@ -137,9 +141,9 @@ async function mount() {
   await vi.waitFor(() => expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull())
 }
 
-async function savedNotice() {
-  await vi.waitFor(() => expect(q('[data-testid="fusion-settings-saved"]')).not.toBeNull())
-  return q('[data-testid="fusion-settings-saved"]')?.textContent ?? ''
+async function savedNotice(site: 'settings' | 'preset') {
+  await vi.waitFor(() => expect(notice('saved', site)).not.toBeNull())
+  return notice('saved', site)?.textContent ?? ''
 }
 
 describe('FusionSettingsPanel', () => {
@@ -181,8 +185,7 @@ describe('FusionSettingsPanel', () => {
       defaultPreset: 'duo',
       stagedJudgeGroupSize: 4,
     }])
-    const notice = await savedNotice()
-    expect(notice).toContain('Skill catalog 게시됨')
+    expect(await savedNotice('settings')).toContain('Skill catalog 게시됨')
     expect(fusionConfigMock).toHaveBeenCalledTimes(2)
     expect(runtimeRefreshMock).toHaveBeenCalledTimes(1)
   })
@@ -213,7 +216,7 @@ describe('FusionSettingsPanel', () => {
         ],
       }),
     }])
-    await savedNotice()
+    await savedNotice('preset')
     expect(q('[data-testid="fusion-settings-revision"]')?.textContent).toBe('rev-2')
 
     button('[data-testid="fusion-preset-save"]').click()
@@ -227,7 +230,7 @@ describe('FusionSettingsPanel', () => {
     await fireEvent.click(input('[data-testid="fusion-enabled"]'))
     await typeInto('[data-testid="fusion-panel-label"]', 'wide')
     button('[data-testid="fusion-preset-save"]').click()
-    await savedNotice()
+    await savedNotice('preset')
     expect(input('[data-testid="fusion-enabled"]').checked).toBe(false)
     // The preset draft now reflects the refetched config (label '' in the fixture).
     expect(input('[data-testid="fusion-panel-label"]').value).toBe('')
@@ -235,7 +238,7 @@ describe('FusionSettingsPanel', () => {
     await typeInto('[data-testid="fusion-panel-label"]', 'again')
     button('[data-testid="fusion-settings-save"]').click()
     await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(2))
-    await savedNotice()
+    await savedNotice('settings')
     expect(input('[data-testid="fusion-panel-label"]').value).toBe('again')
     expect(input('[data-testid="fusion-enabled"]').checked).toBe(true)
   })
@@ -255,13 +258,16 @@ describe('FusionSettingsPanel', () => {
     await typeInto('[data-testid="fusion-panel-label"]', 'wide')
     button('[data-testid="fusion-preset-save"]').click()
 
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
-    expect(q('[data-testid="fusion-settings-error"]')?.textContent)
+    await vi.waitFor(() => expect(notice('error', 'preset')).not.toBeNull())
+    expect(notice('error', 'preset')?.textContent)
       .toBe('runtime.toml changed after it was read; reload the settings and apply again')
+    // The preset write was the one refused, so the settings site stays silent.
+    expect(notice('error', 'settings')).toBeNull()
+    expect(notice('reload', 'settings')).toBeNull()
     expect(q('[data-testid="fusion-settings-saved"]')).toBeNull()
     expect(runtimeRefreshMock).not.toHaveBeenCalled()
 
-    button('[data-testid="fusion-settings-reload"]').click()
+    button('[data-testid="fusion-settings-reload"][data-site="preset"]').click()
     await vi.waitFor(() => expect(q('[data-testid="fusion-settings-revision"]')?.textContent).toBe('rev-9'))
     expect(fusionConfigMock).toHaveBeenCalledTimes(2)
     expect(resolvedMock).toHaveBeenCalledTimes(2)
@@ -283,9 +289,10 @@ describe('FusionSettingsPanel', () => {
     await mount()
     button('[data-testid="fusion-preset-save"]').click()
 
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
-    expect(q('[data-testid="fusion-settings-error"]')?.textContent)
+    await vi.waitFor(() => expect(notice('error', 'preset')).not.toBeNull())
+    expect(notice('error', 'preset')?.textContent)
       .toBe('preset trio names ghost, which is not a loaded lane or runtime')
+    expect(notice('error', 'settings')).toBeNull()
     expect(q('[data-testid="fusion-settings-reload"]')).toBeNull()
   })
 
@@ -301,7 +308,7 @@ describe('FusionSettingsPanel', () => {
 
     await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(1))
     expect(applyMock.mock.calls[0]).toEqual(['rev-1', { kind: 'upsert_preset', preset: preset('trio-copy') }])
-    await savedNotice()
+    await savedNotice('preset')
     expect(select('[data-testid="fusion-preset-select"]').value).toBe('trio-copy')
     expect(input('[data-testid="fusion-preset-name"]').value).toBe('trio-copy')
   })
@@ -311,8 +318,9 @@ describe('FusionSettingsPanel', () => {
     await typeInto('[data-testid="fusion-preset-name"]', 'duo')
     button('[data-testid="fusion-preset-create"]').click()
 
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
-    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('duo')
+    await vi.waitFor(() => expect(notice('error', 'preset')).not.toBeNull())
+    expect(notice('error', 'preset')?.textContent).toContain('duo')
+    expect(notice('error', 'settings')).toBeNull()
     expect(applyMock).not.toHaveBeenCalled()
   })
 
@@ -327,7 +335,7 @@ describe('FusionSettingsPanel', () => {
 
     await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(1))
     expect(applyMock.mock.calls[0]).toEqual(['rev-1', { kind: 'rename_preset', from: 'trio', to: 'quartet' }])
-    await savedNotice()
+    await savedNotice('preset')
     expect(select('[data-testid="fusion-preset-select"]').value).toBe('quartet')
     expect(input('[data-testid="fusion-panel-label"]').value).toBe('wide')
     expect(button('[data-testid="fusion-preset-save"]').disabled).toBe(false)
@@ -349,7 +357,7 @@ describe('FusionSettingsPanel', () => {
     button('[data-testid="fusion-preset-delete"]').click()
     await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(1))
     expect(applyMock.mock.calls[0]).toEqual(['rev-1', { kind: 'delete_preset', name: 'trio' }])
-    await savedNotice()
+    await savedNotice('preset')
     expect(select('[data-testid="fusion-preset-select"]').value).toBe('duo')
   })
 
@@ -358,14 +366,17 @@ describe('FusionSettingsPanel', () => {
     await typeInto('[data-testid="fusion-min-answered"]', '0')
     button('[data-testid="fusion-preset-save"]').click()
 
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
-    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('min_answered')
+    await vi.waitFor(() => expect(notice('error', 'preset')).not.toBeNull())
+    expect(notice('error', 'preset')?.textContent).toContain('min_answered')
     expect(applyMock).not.toHaveBeenCalled()
 
     await typeInto('[data-testid="fusion-staged-judge-group-size"]', '2.5')
     button('[data-testid="fusion-settings-save"]').click()
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')?.textContent)
+    await vi.waitFor(() => expect(notice('error', 'settings')?.textContent)
       .toContain('staged_judge_group_size'))
+    // Typing into the settings form cleared the preset notice; the refusal
+    // lands only where the rejected write was made.
+    expect(notice('error', 'preset')).toBeNull()
     expect(applyMock).not.toHaveBeenCalled()
   })
 
@@ -384,8 +395,49 @@ describe('FusionSettingsPanel', () => {
     const { FusionSettingsPanel } = await import('./fusion-settings-panel')
     render(h(FusionSettingsPanel, {}), container)
 
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-load-error"]')).not.toBeNull())
     expect(q('[data-testid="fusion-settings-loading"]')).toBeNull()
-    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('network down')
+    expect(q('[data-testid="fusion-settings-load-error"]')?.textContent).toContain('network down')
+  })
+
+  it('refuses to open the editor when the route resolver is unavailable', async () => {
+    // Every preset seat is picked from a route the resolver reports. An editor
+    // that opened without them would show empty dropdowns on a screen that
+    // looks healthy, and the operator would find out on save, from a server
+    // refusal. Both reads or neither.
+    resolvedMock.mockRejectedValue(new Error('resolved runtime unavailable'))
+    const { FusionSettingsPanel } = await import('./fusion-settings-panel')
+    render(h(FusionSettingsPanel, {}), container)
+
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-load-error"]')).not.toBeNull())
+    expect(q('[data-testid="fusion-settings-load-error"]')?.textContent).toContain('resolved runtime unavailable')
+    expect(q('[data-testid="fusion-settings-editor"]')).toBeNull()
+    expect(q('[data-testid="fusion-preset-editor"]')).toBeNull()
+  })
+
+  it('takes one write at a time: a second click while one is in flight posts nothing', async () => {
+    // Two writes from one screen carry the same revision, so the second is
+    // refused with configuration_changed — a conflict the operator caused by
+    // double-clicking, not by anyone else editing the file.
+    let release: (receipt: unknown) => void = () => {}
+    applyMock.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    await mount()
+
+    button('[data-testid="fusion-settings-save"]').click()
+    await vi.waitFor(() => expect(button('[data-testid="fusion-settings-save"]').disabled).toBe(true))
+    // The whole editor is held, not just the button that was clicked: the
+    // preset write would carry the same revision.
+    expect(button('[data-testid="fusion-preset-save"]').disabled).toBe(true)
+    expect(button('[data-testid="fusion-settings-refresh"]').disabled).toBe(true)
+    expect(input('[data-testid="fusion-staged-judge-group-size"]').disabled).toBe(true)
+
+    button('[data-testid="fusion-settings-save"]').click()
+    button('[data-testid="fusion-preset-save"]').click()
+    expect(applyMock).toHaveBeenCalledTimes(1)
+
+    release(receipt())
+    await savedNotice('settings')
+    expect(applyMock).toHaveBeenCalledTimes(1)
+    expect(button('[data-testid="fusion-settings-save"]').disabled).toBe(false)
   })
 })

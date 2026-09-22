@@ -475,13 +475,22 @@ let () =
     | "--web-tools" :: rest ->
       web_tools := true;
       parse rest
+    (* The tool path reads a route through [Fusion_types.route_name], so the
+       flags do too: " sonnet" and "sonnet" name one route, and a panel that
+       spelled both would carry two seats for it. *)
     | "--judge" :: v :: rest ->
-      judge_route := Some v;
-      parse rest
+      (match Fusion_types.route_name v with
+       | None -> Error "--judge needs a route name"
+       | Some route ->
+         judge_route := Some route;
+         parse rest)
     | [ "--judge" ] -> Error "missing value for --judge"
     | "--panel" :: v :: rest ->
-      panel_routes_rev := v :: !panel_routes_rev;
-      parse rest
+      (match Fusion_types.route_name v with
+       | None -> Error "--panel needs a route name"
+       | Some route ->
+         panel_routes_rev := route :: !panel_routes_rev;
+         parse rest)
     | [ "--panel" ] -> Error "missing value for --panel"
     | "--" :: rest ->
       prompt_parts := List.rev_append rest !prompt_parts;

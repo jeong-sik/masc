@@ -63,9 +63,7 @@ let panel_arg_error =
 ;;
 
 let route_name = function
-  | `String value ->
-    let route = String.trim value in
-    if String.equal route "" then None else Some route
+  | `String value -> Fusion_types.route_name value
   | _ -> None
 ;;
 

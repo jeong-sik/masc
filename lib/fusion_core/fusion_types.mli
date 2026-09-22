@@ -494,6 +494,12 @@ type roster =
 val preset_roster : roster
 (** 두 칸 모두 [None]: preset 명단을 그대로 쓴다. *)
 
+val route_name : string -> string option
+(** 명단에 적힌 자리 경로를 이름으로 읽는다: 앞뒤 공백을 떼고, 남은 것이 없으면
+    [None]. 공백만 다른 두 이름은 같은 경로를 가리키지만 {!Fusion_policy.panelist_id}
+    는 다른 자리로 세므로, 명단을 만드는 자리(도구 인자, CLI 플래그)는 모두 이 함수를
+    지나야 한다. *)
+
 (** out-of-band 오케스트레이터에 전달되는 심의 요청. *)
 type fusion_request =
   { run_id : string  (** correlation: 패널 N + 심판 + board post를 하나로 묶음 *)

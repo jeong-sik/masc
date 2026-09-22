@@ -109,6 +109,68 @@ let test_task_author_uses_keeper_name () =
       failf "expected one fallback-created task, got %d" (List.length tasks))
 ;;
 
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path |> Array.iter (fun f -> remove_tree (Filename.concat path f));
+      Unix.rmdir path
+    end else Sys.remove path
+
+(* The library follows the keeper's workspace config, not MASC_BASE_PATH.
+   [Workspace.default_config] points the variable at [config.base_path] in a
+   test executable, so the decoy is set after [with_workspace] built the
+   config: from here on the two disagree, as they do in a process whose
+   environment names a different workspace than the request. *)
+let test_library_follows_config_not_env () =
+  with_workspace (fun config ->
+    let decoy =
+      Filename.concat (Filename.get_temp_dir_name ())
+        (Printf.sprintf "test_keeper_tag_dispatch_decoy_%d" (Random.int 1_000_000))
+    in
+    Unix.mkdir decoy 0o755;
+    let original = Sys.getenv_opt "MASC_BASE_PATH" in
+    Unix.putenv "MASC_BASE_PATH" decoy;
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.putenv "MASC_BASE_PATH" (Option.value original ~default:"");
+        remove_tree decoy)
+      (fun () ->
+        let dispatch_library name args =
+          Keeper_tag_dispatch.dispatch
+            ~config ~keeper_name:"test-keeper" ~agent_name:"test-keeper"
+            ~tag:Tool_dispatch.Mod_library ~name ~args
+        in
+        (match
+           dispatch_library "masc_library_add"
+             (`Assoc
+               [ "title", `String "Keeper Workspace Doc"
+               ; "content", `String "written through the keeper path"
+               ; "source", `String "observation"
+               ])
+         with
+         | Some tr when Tool_result.is_success tr -> ()
+         | Some tr -> failf "masc_library_add should succeed: %s" (Tool_result.message tr)
+         | None -> fail "masc_library_add returned None");
+        let config_library = Tool_library.library_root ~base_path:config.base_path in
+        check bool "document written under the config workspace" true
+          (Sys.file_exists config_library
+           && Array.exists
+                (fun f -> Filename.check_suffix f ".md")
+                (Sys.readdir config_library));
+        check bool "nothing written under MASC_BASE_PATH" false
+          (Sys.file_exists (Tool_library.library_root ~base_path:decoy));
+        match
+          dispatch_library "masc_library_read"
+            (`Assoc [ "topic", `String "Keeper Workspace Doc" ])
+        with
+        | Some tr when Tool_result.is_success tr ->
+          check bool "read finds it in the config workspace" true
+            (String_util.contains_substring (Tool_result.message tr)
+               "written through the keeper path")
+        | Some tr -> failf "masc_library_read should succeed: %s" (Tool_result.message tr)
+        | None -> fail "masc_library_read returned None"))
+;;
+
 let () =
   Alcotest.run "Keeper_tag_dispatch" [
     "Mod_control routing", [
@@ -124,5 +186,11 @@ let () =
         "fallback task author uses keeper handle"
         `Quick
         test_task_author_uses_keeper_name;
+    ];
+    "Mod_library workspace", [
+      test_case
+        "library follows the config, not MASC_BASE_PATH"
+        `Quick
+        test_library_follows_config_not_env;
     ];
   ]

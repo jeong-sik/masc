@@ -237,33 +237,13 @@ let handle_read_resource_eio state id params =
                  || s = library_index_json_id
                  || String.starts_with s ~prefix:library_topic_prefix ->
               run_blocking_resource_io (fun () ->
-                let library_dir = Filename.concat config.base_path "docs/library" in
+                let base_path = config.base_path in
+                let library_dir = Tool_library.library_root ~base_path in
                 if not (Sys.file_exists library_dir)
                 then
                   ( "text/markdown"
                   , Some "Library directory not found. Create docs/library/ first." )
                 else begin
-                let parse_frontmatter path fallback_name =
-                  try
-                    let parsed = Frontmatter.parse (Fs_compat.load_file path) in
-                    if parsed.Frontmatter.fields = []
-                       && not (Frontmatter.has_frontmatter (Fs_compat.load_file path))
-                    then fallback_name, "", "", "", []
-                    else (
-                      let field name = Frontmatter.field parsed name in
-                      let title =
-                        match field "title" with
-                        | "" -> fallback_name
-                        | value -> value
-                      in
-                      ( title
-                      , field "source"
-                      , field "verified_by"
-                      , field "date"
-                      , Frontmatter.list_field parsed "tags" ))
-                  with
-                  | Sys_error _ -> fallback_name, "", "", "", []
-                in
                 (* Trimmed here, not in the parser. The three readers this
                    replaced disagreed: prompt_registry kept the body verbatim
                    and this one trimmed it. Frontmatter.parse follows the
@@ -289,10 +269,29 @@ let handle_read_resource_eio state id params =
                       (true, Filename.chop_suffix rest ".json")
                     else (false, rest)
                 in
-                let library_files () =
-                  Sys.readdir library_dir |> Array.to_list
-                    |> List.filter (fun f -> Filename.check_suffix f ".md" && f <> "README.md")
-                    |> List.sort String.compare
+                let topic_of path = Filename.chop_suffix (Filename.basename path) ".md" in
+                let uri_of path = "masc://library/" ^ topic_of path in
+                (* The same header rules as the library tools: a document that
+                   does not read is named with its reason, never given a title
+                   or a source it does not have. A file that vanishes between
+                   the listing and the read is left out, as the tools do. *)
+                let read_documents () =
+                  Tool_library.list_documents ~base_path
+                  |> List.filter_map (fun path ->
+                    match Fs_compat.load_file path with
+                    | content -> Some (path, Tool_library.parse_frontmatter content)
+                    | exception Sys_error _ -> None)
+                in
+                let metadata_fields (fm : Tool_library.frontmatter) =
+                  [ ("title", `String fm.title)
+                  ; ("source", `String (Tool_library.source_to_string fm.source))
+                  ; ("author", `String fm.author)
+                  ; ("created", `String fm.created)
+                  ; ("tags", `List (List.map (fun t -> `String t) fm.tags))
+                  ]
+                in
+                let unreadable_fields error =
+                  [ ("unreadable", `String (Tool_library.frontmatter_error_to_string error)) ]
                 in
                 (* [topic] arrives from the client's URI. Resolving it against
                    the listing rather than concatenating it onto [library_dir]
@@ -300,41 +299,37 @@ let handle_read_resource_eio state id params =
                    readdir never returns a name with a separator in it. *)
                 let library_doc_path topic =
                   let want = topic ^ ".md" in
-                  if List.exists (String.equal want) (library_files ()) then
-                    Some (Filename.concat library_dir want)
-                  else None
+                  List.find_opt
+                    (fun path -> String.equal (Filename.basename path) want)
+                    (Tool_library.list_documents ~base_path)
                 in
                 if topic = "" && not is_json then begin
-                  let files = library_files () in
-                  let entries = List.map (fun f ->
-                    let name = Filename.chop_suffix f ".md" in
-                    let path = Filename.concat library_dir f in
-                    let (title, source, _verified, _date, tags) = parse_frontmatter path name in
-                    let tag_str = if tags = [] then ""
-                      else " -- " ^ String.concat ", " (List.map (fun t -> "`" ^ t ^ "`") tags) in
-                    let src_str = if source = "" then "" else " ([source](" ^ source ^ "))" in
-                    Printf.sprintf "- **%s** -- `masc://library/%s`%s%s" title name src_str tag_str
-                  ) files in
+                  let entries = List.map (fun (path, header) ->
+                    match header with
+                    | Ok (fm : Tool_library.frontmatter) ->
+                      let tag_str = if fm.tags = [] then ""
+                        else " -- " ^ String.concat ", " (List.map (fun t -> "`" ^ t ^ "`") fm.tags) in
+                      Printf.sprintf "- **%s** -- `%s` (%s)%s" fm.title (uri_of path)
+                        (Tool_library.source_to_string fm.source) tag_str
+                    | Error error ->
+                      Printf.sprintf "- %s -- `%s`"
+                        (Tool_library.describe_unreadable path error) (uri_of path)
+                  ) (read_documents ()) in
                   let body = if entries = [] then "Library is empty."
                     else "# Library Index\n\n" ^ String.concat "\n" entries ^ "\n"
                   in
                   ("text/markdown", Some body)
                 end else if topic = "" && is_json then begin
-                  let files = library_files () in
-                  let docs = List.map (fun f ->
-                    let name = Filename.chop_suffix f ".md" in
-                    let path = Filename.concat library_dir f in
-                    let (title, source, verified_by, date, tags) = parse_frontmatter path name in
-                    `Assoc [
-                      ("topic", `String name);
-                      ("title", `String title);
-                      ("source", `String source);
-                      ("verified_by", `String verified_by);
-                      ("date", `String date);
-                      ("tags", `List (List.map (fun t -> `String t) tags));
-                      ("uri", `String ("masc://library/" ^ name));
-                    ]
-                  ) files in
+                  let docs = List.map (fun (path, header) ->
+                    let described =
+                      match header with
+                      | Ok fm -> metadata_fields fm
+                      | Error error -> unreadable_fields error
+                    in
+                    `Assoc
+                      ((("topic", `String (topic_of path)) :: described)
+                       @ [ ("uri", `String (uri_of path)) ])
+                  ) (read_documents ()) in
                   let json = `Assoc [
                     ("documents", `List docs);
                     ("count", `Int (List.length docs));
@@ -344,17 +339,16 @@ let handle_read_resource_eio state id params =
                   match library_doc_path topic with
                   | Some path -> begin
                     let raw = Fs_compat.load_file path in
-                    let (title, source, verified_by, date, tags) = parse_frontmatter path topic in
-                    let body = strip_frontmatter raw in
-                    let json = `Assoc [
-                      ("topic", `String topic);
-                      ("title", `String title);
-                      ("source", `String source);
-                      ("verified_by", `String verified_by);
-                      ("date", `String date);
-                      ("tags", `List (List.map (fun t -> `String t) tags));
-                      ("content", `String body);
-                    ] in
+                    let described =
+                      match Tool_library.parse_frontmatter raw with
+                      | Ok fm -> metadata_fields fm
+                      | Error error -> unreadable_fields error
+                    in
+                    let json =
+                      `Assoc
+                        ((("topic", `String topic) :: described)
+                         @ [ ("content", `String (strip_frontmatter raw)) ])
+                    in
                     ("application/json", Some (Yojson.Safe.to_string json))
                   end
                   | None ->

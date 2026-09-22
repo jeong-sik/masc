@@ -21,6 +21,7 @@
 
 ### Fixed
 
+- Transcript tail recovery reads a missing checkpoint ref as `Already_dispatchable`, as its interface promised, instead of failing the recovery as `Checkpoint_unavailable` on a keeper whose session directory holds no checkpoint yet. A ref that cannot be read, names another identity or session, or cannot be locked still fails it (#37904).
 - A Librarian working state carried into a keeper's next request no longer wears the extra-system-context tag. The prompt-context check counted that tag and found two carriers, so it reported `prompt_context_presence_mismatch` or `prompt_context_carrier_repeated` on every request and left the turn record's `input_components` empty. The working state now carries its own `masc.librarian_working_state.v1` tag, and the tail window pins it the same way (#37894).
 
 

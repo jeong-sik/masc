@@ -226,8 +226,11 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
                   ~trace_id:current_trace ()) with
               | Error detail -> report O.Input_unavailable detail
               | Ok (P.No_source _) ->
-                (* The width names no readable prefix: an exact Memory receipt
-                   owns this range and is reapplied whole or not at all. *)
+                (* Only a race reaches this: prepare_source honours a pending
+                   Memory receipt over the requested end, so the cut above
+                   answers Ready whenever the first prepare did, unless the
+                   checkpoint changed between the two reads. The range the
+                   first read returned is still a readable unit. *)
                 attempt meta prepared
               | Ok (P.Ready one_unit) ->
                 (* completed_end_atom names the last completed turn inside the
@@ -460,6 +463,7 @@ let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
 ;;
 
 module For_testing = struct
+  let limited_width = limited_width
   let run_continuity = run_continuity
   let run_durable_with_commit = run_durable_with_commit
 end

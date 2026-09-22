@@ -581,7 +581,7 @@ let narrowing_fixture ~slot_count ~answer f =
   in
   (* What a server restart does to the loop's memory. *)
   let restart () = Masc.Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name in
-  f ~bodies ~pass ~coverage ~hide_source ~restart
+  f ~bodies ~pass ~coverage ~hide_source ~restart ~config
 
 let narrowing_ceiling = 65_000
 let accepted_answer =
@@ -596,7 +596,7 @@ let test_refused_width_carries_to_the_next_pass () =
       if String.length body > narrowing_ceiling
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
-  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config:_ ->
   pass ();
   check (option int) "a refused source commits nothing" None (coverage ());
   check int "the refused pass sends one request and does not retry in place" 1
@@ -625,7 +625,7 @@ let test_refused_width_carries_to_the_next_pass () =
 let test_a_refusal_that_is_not_about_size_keeps_the_width () =
   narrowing_fixture ~slot_count:1
     ~answer:(fun _index _body -> `Too_many_requests, refused "rate_limit_error")
-  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config:_ ->
   pass ();
   pass ();
   check int "each pass sends one request" 2 (List.length !bodies);
@@ -639,7 +639,7 @@ let test_an_unreadable_source_keeps_the_width () =
       if String.length body > narrowing_ceiling
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
-  @@ fun ~bodies ~pass ~coverage ~hide_source ~restart:_ ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source ~restart:_ ~config:_ ->
   pass ();
   check (option int) "the first pass is refused and commits nothing" None (coverage ());
   (* prepare answers with no source both for a backlog read to its end and for
@@ -663,7 +663,7 @@ let test_a_restart_forgets_the_width () =
       if String.length body > narrowing_ceiling
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
-  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart ~config:_ ->
   pass ();
   restart ();
   pass ();
@@ -671,6 +671,51 @@ let test_a_restart_forgets_the_width () =
   check bool "after a restart the pass offers the whole backlog again" true
     (List.nth !bodies 1 = List.nth !bodies 0);
   check (option int) "and is refused again" None (coverage ())
+
+(* Two ways a pass can end without a verdict from any provider, and the two
+   this follow-up exists for: before it, both halved the width, because a pass
+   that reported nothing was read as one that should read less. *)
+let answer_without_state =
+  Exact_output_fixture.openai_response
+    (Yojson.Safe.from_string
+       {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":null}|})
+
+let test_an_answer_without_a_working_state_keeps_the_width () =
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun index _body ->
+      if index = 0
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else `OK, answer_without_state)
+  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let width () =
+    Masc.Keeper_librarian_queue_refresh.For_testing.limited_width ~config ~keeper_name ~trace_id in
+  pass ();
+  let refused = width () in
+  check bool "the size refusal left a width" true (Option.is_some refused);
+  pass ();
+  check (option int) "an answer with no working state leaves it where it was" refused (width ());
+  check (option int) "and commits no continuity" None (coverage ())
+
+let test_a_snapshot_that_fails_to_commit_keeps_the_width () =
+  let break_the_commit = ref (fun () -> ()) in
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun index _body ->
+      if index = 0
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else (!break_the_commit (); `OK, accepted_answer))
+  @@ fun ~bodies:_ ~pass ~coverage:_ ~hide_source:_ ~restart:_ ~config ->
+  let width () =
+    Masc.Keeper_librarian_queue_refresh.For_testing.limited_width ~config ~keeper_name ~trace_id in
+  (* While the model is answering, put a directory where the snapshot is about
+     to be written, so the commit fails on disk after a good answer. It fails
+     in the same branch a CAS the history moved under does. Coverage is not
+     read afterwards: the snapshot path is no longer a file. *)
+  break_the_commit := (fun () -> Fs_compat.mkdir_p (P.path ~config ~keeper_name));
+  pass ();
+  let refused = width () in
+  check bool "the size refusal left a width" true (Option.is_some refused);
+  pass ();
+  check (option int) "a snapshot that failed to commit leaves it where it was" refused (width ())
 
 let test_a_size_refusal_anywhere_in_the_walk_narrows () =
   narrowing_fixture ~slot_count:2
@@ -682,7 +727,7 @@ let test_a_size_refusal_anywhere_in_the_walk_narrows () =
       if index = 0
       then `Request_entity_too_large, refused "invalid_request_error"
       else `Too_many_requests, refused "rate_limit_error")
-  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config:_ ->
   pass ();
   check int "the walk tried both slots" 2 (List.length !bodies);
   pass ();
@@ -701,6 +746,10 @@ let () = run "production continuity pair"
     test_case "a size refusal anywhere in the walk narrows" `Quick test_a_size_refusal_anywhere_in_the_walk_narrows;
     test_case "an unreadable source keeps the width" `Quick test_an_unreadable_source_keeps_the_width;
     test_case "a restart forgets the width" `Quick test_a_restart_forgets_the_width;
+    test_case "an answer without a working state keeps the width" `Quick
+      test_an_answer_without_a_working_state_keeps_the_width;
+    test_case "a snapshot that fails to commit keeps the width" `Quick
+      test_a_snapshot_that_fails_to_commit_keeps_the_width;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
     test_case "split only an oversized work unit" `Quick test_fit_splits_only_oversized_work_unit;
     test_case "fit preserves exact Memory recovery" `Quick test_fit_keeps_exact_recovery_range;

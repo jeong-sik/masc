@@ -672,30 +672,28 @@ let test_a_restart_forgets_the_width () =
     (List.nth !bodies 1 = List.nth !bodies 0);
   check (option int) "and is refused again" None (coverage ())
 
-(* Two ways a pass can end without a verdict from any provider, and the two
-   this follow-up exists for: before it, both halved the width, because a pass
-   that reported nothing was read as one that should read less. *)
+(* A continuity answer that leaves out the working state never reaches
+   publication: validate_selection refuses it as Domain_output_invalid, and
+   RFC-librarian-lifecycle §4.3 counts a refused output among the failures
+   reading less answers. *)
 let answer_without_state =
   Exact_output_fixture.openai_response
     (Yojson.Safe.from_string
        {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":null}|})
 
-let test_an_answer_without_a_working_state_keeps_the_width () =
+let test_an_answer_without_a_working_state_reads_less () =
   narrowing_fixture ~slot_count:1
-    ~answer:(fun index _body ->
-      if index = 0
-      then `Request_entity_too_large, refused "invalid_request_error"
-      else `OK, answer_without_state)
-  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
-  let width () =
-    Masc.Keeper_librarian_queue_refresh.For_testing.limited_width ~config ~keeper_name ~trace_id in
+    ~answer:(fun _index _body -> `OK, answer_without_state)
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config:_ ->
   pass ();
-  let refused = width () in
-  check bool "the size refusal left a width" true (Option.is_some refused);
   pass ();
-  check (option int) "an answer with no working state leaves it where it was" refused (width ());
+  check bool "an answer without a working state reads less next time" true
+    (List.nth !bodies 1 < List.nth !bodies 0);
   check (option int) "and commits no continuity" None (coverage ())
 
+(* The answer validated and only the snapshot failed to land, so no provider
+   gave a verdict. Before this follow-up that halved the width, because a pass
+   that reported nothing was read as one that should read less. *)
 let test_a_snapshot_that_fails_to_commit_keeps_the_width () =
   let break_the_commit = ref (fun () -> ()) in
   narrowing_fixture ~slot_count:1
@@ -746,8 +744,8 @@ let () = run "production continuity pair"
     test_case "a size refusal anywhere in the walk narrows" `Quick test_a_size_refusal_anywhere_in_the_walk_narrows;
     test_case "an unreadable source keeps the width" `Quick test_an_unreadable_source_keeps_the_width;
     test_case "a restart forgets the width" `Quick test_a_restart_forgets_the_width;
-    test_case "an answer without a working state keeps the width" `Quick
-      test_an_answer_without_a_working_state_keeps_the_width;
+    test_case "an answer without a working state reads less" `Quick
+      test_an_answer_without_a_working_state_reads_less;
     test_case "a snapshot that fails to commit keeps the width" `Quick
       test_a_snapshot_that_fails_to_commit_keeps_the_width;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;

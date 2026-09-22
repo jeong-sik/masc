@@ -1089,19 +1089,7 @@ let run_best_effort
              let publish_continuity () =
                match continuity, selection.working_state with
               | None, _ -> ()
-              | Some _, None ->
-                continuity_write := `Assoc ["status", `String "not_provided"];
-                (* The model answered, the answer validated, and it carried no
-                   working state. That is not the refused output that
-                   Domain_output_invalid is: there the lane rejected what came
-                   back, which RFC-librarian-lifecycle §4.3 counts among the
-                   failures reading less answers; here nothing was rejected
-                   and the model simply chose not to summarise. A smaller range
-                   gives it no more reason to, so the caller keeps the width. *)
-                on_not_committed
-                  { detail = "librarian answered without a continuity working state"
-                  ; walk_shows_size = false
-                  }
+              | Some _, None -> continuity_write := `Assoc ["status", `String "not_provided"]
               | Some prepared, Some working_state ->
                 continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
                 commit_continuity

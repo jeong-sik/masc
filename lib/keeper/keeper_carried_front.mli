@@ -28,8 +28,8 @@
     ({!Runtime_model_input_tail_window.atom_opening_digest}). A seed is used
     only while the history in hand opens the same index with the same
     message ({!for_history}); the history's atom count is not compared. A
-    history one unsaved atom shorter keeps the position, and a purge before
-    the front moves another message under the index and drops it. *)
+    history one unsaved atom shorter keeps the position, and a checkpoint
+    purge that rewrote the message opening the front drops it. *)
 
 type source =
   | Ledger  (** The pair's ledger, moved by every eviction since its last request. *)

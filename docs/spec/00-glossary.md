@@ -219,8 +219,18 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli)
 
 **Lane**
-: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다.
+: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다. 이
+  개념의 화면 이름은 **Runtime Candidate Order**다 — TUI help와 상태 줄은
+  "lane" 대신 이 이름으로 읽힌다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
+
+**media_failover**
+: Vision fleet이 이미지 작업을 부르는 순서로, `[runtime].media_failover`
+  설정 키 하나로 선언된다. 개명된 Runtime Candidate Order(런타임 failover,
+  후보 순회)와는 다른 메카니즘이다 — 이름에 옛 단어 "failover"가 남는 곳은
+  이 키가 유일하며, 키는 운영자 설정 파일 호환을 위해 동결되었다.
+  → [Runtime.media_failover_references](../../lib/runtime/runtime.ml) ·
+  [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존

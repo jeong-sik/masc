@@ -133,7 +133,7 @@ let run ~base_dir ~sw ~net ~groups ~prompt ?on_tool_trace ()
         그래서 반환 name(=카드명=정체성)에 의존하지 않고 [built]와 위치로 짝지어
         (panelist, model) 둘 다 확보한다 — provider 에러 attribution에 정체성이 아닌
         raw model을 쓰기 위함 (RFC-0278). *)
-  let answered =
+  let run_agent_core () =
     match
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_panel (fun () ->
         Ok
@@ -166,7 +166,7 @@ let run ~base_dir ~sw ~net ~groups ~prompt ?on_tool_trace ()
 
      usage 는 [zero_usage] 다. 공식 클라이언트는 토큰 회계를 돌려주지 않으므로,
      추정치를 지어내는 대신 "측정하지 않음" 을 0 으로 남긴다. *)
-  let official_answered =
+  let run_official () =
     Eio.Fiber.List.map
       (fun (panelist, model, system_prompt, timeout_s) ->
         match
@@ -189,6 +189,8 @@ let run ~base_dir ~sw ~net ~groups ~prompt ?on_tool_trace ()
               { model = panelist; answer; usage = Fusion_types.zero_usage })
       official
   in
+  (* 두 묶음을 한 번에 띄운다. panel 단계는 느린 쪽 묶음의 시간만큼 걸린다. *)
+  let answered, official_answered = Eio.Fiber.pair run_agent_core run_official in
   Option.iter
     (fun send ->
        let official_gaps =

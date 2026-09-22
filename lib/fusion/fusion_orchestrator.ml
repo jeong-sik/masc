@@ -73,7 +73,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
               groups
           in
           let run_single_judge () =
-            Fusion_judge.run ~sw ~net
+            Fusion_judge.run ~base_dir ~sw ~net
               ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
               ?timeout_s:preset.Fusion_policy.judge_timeout_s
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -89,7 +89,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                 { Fusion_types.role = Single; synthesis = s1; usage = u1 }
             in
             match
-              Fusion_judge.run_refine ~sw ~net
+              Fusion_judge.run_refine ~base_dir ~sw ~net
                 ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                 ?timeout_s:preset.Fusion_policy.judge_timeout_s
                 ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -130,6 +130,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
           in
           let run_first_judges judges =
             Fusion_orchestrator_judge_wave.run_first_judges
+              ~base_dir
               ~sw
               ~net
               ~preset
@@ -178,7 +179,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                  let firsts_usage = firsts_usage firsts in
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
                  (match
-                    Fusion_judge.run_meta ~sw ~net
+                    Fusion_judge.run_meta ~base_dir ~sw ~net
                       ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                       ?timeout_s:preset.Fusion_policy.judge_timeout_s
                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -263,7 +264,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                   let firsts_usage = firsts_usage stage_firsts in
                   let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
                   (match
-                     Fusion_judge.run_meta ~sw ~net
+                     Fusion_judge.run_meta ~base_dir ~sw ~net
                        ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                        ?timeout_s:preset.Fusion_policy.judge_timeout_s
                        ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -322,7 +323,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                  let stage_usage = Fusion_types.sum_all_usage stage_results in
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_stages in
                  (match
-                    Fusion_judge.run_meta ~sw ~net
+                    Fusion_judge.run_meta ~base_dir ~sw ~net
                       ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
                       ?timeout_s:preset.Fusion_policy.judge_timeout_s
                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt

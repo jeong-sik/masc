@@ -43,7 +43,7 @@ def run(binary, *, quit_from_history=False, disconnected=False):
         digest = hashlib.sha256(raw).hexdigest()
         envelope = {"sha256": digest, "bytes": len(raw), "mime": "text/plain", "content": content}
         rows.append({"ts": 1789225500., "keeper": "alpha", "tool": "BrowserRead", "input": {},
-                     "output": "truncated preview", "success": True, "execution_id": "exec-" + name,
+                     "output": "truncated preview", "wire_outcome": "ok", "execution_id": "exec-" + name,
                      "artifact_refs": [{"_blob": {"sha256": digest, "bytes": len(raw),
                          "mime": "application/vnd.masc.browser-scene+json", "preview": ""}}]})
         if name == "Beta":

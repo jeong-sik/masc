@@ -191,6 +191,7 @@ type t =
   | WireCaptureRecordSkipped
   | TurnBoundaryFailures
   | HistoryFragmentFailures
+  | WorkingStateNotCarried
 
 val to_string : t -> string
 

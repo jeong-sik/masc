@@ -311,6 +311,18 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
   | Keeper_tool_descriptor.Tool_browser_interact
   | Keeper_tool_descriptor.Tool_analyze_image -> Ok None
 
+(* The call's own outcome, read by the rule every tool-call log reader shares.
+   A deferred write has not changed the file yet. A row that does not say how
+   the call ended is unreadable: projecting it as either outcome invents one. *)
+let succeeded_of_row row =
+  match Tool_result.recorded_call_outcome row with
+  | Tool_result.Recorded_succeeded -> Ok true
+  | Tool_result.Recorded_failed | Tool_result.Recorded_deferred -> Ok false
+  | Tool_result.Recorded_unsettled ->
+      Error (Malformed "file change row does not say how the call ended")
+  | Tool_result.Recorded_malformed ->
+      Error (Malformed "file change row carries an outcome this build cannot read")
+
 let classify row =
   match named_tool_of_row row with
   | Not_descriptor_backed -> Not_a_file_change
@@ -323,10 +335,7 @@ let classify row =
         Result.bind (kind_of_row ~handler row) (function
           | None -> Ok None
           | Some (keeper, kind) ->
-                    let succeeded =
-                      Option.value ~default:false
-                        (Json_field.to_option (Json_field.bool row "success"))
-                    in
+                    Result.bind (succeeded_of_row row) @@ fun succeeded ->
                     let execution_id = optional_string row "execution_id" in
                     Result.bind (line_evidence_of_row row) (fun line_evidence ->
                       Result.bind

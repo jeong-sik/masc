@@ -291,7 +291,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('sessions')
   })
 
-  it('surfaces six primary Monitor lanes and keeps support diagnostics routeable', () => {
+  it('surfaces the primary Monitor lanes and keeps support diagnostics routeable', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const allSections = sectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
@@ -299,7 +299,7 @@ describe('monitoring navigation labels', () => {
 
     expect(defaultParamsForTab('monitoring')).toEqual({ section: 'agents' })
     expect(ids).toEqual([
-      'agents', 'internal-agents', 'fleet-health', 'runtime', 'observatory', 'skills', 'lanes',
+      'agents', 'internal-agents', 'fleet-health', 'runtime', 'observatory', 'skills', 'lane-addons', 'lanes',
     ])
     expect(ids).toContain('agents')
     expect(ids).toContain('fleet-health')
@@ -331,6 +331,7 @@ describe('monitoring navigation labels', () => {
       'runtime',
       'observatory',
       'skills',
+      'lane-addons',
       'lanes',
     ])
   })

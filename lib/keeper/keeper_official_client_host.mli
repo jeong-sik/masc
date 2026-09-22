@@ -337,6 +337,67 @@ val carried_start_range
     whose index this history does not open with the seed's message is
     dropped and reported, and the range starts over as with no seed. *)
 
+(** {1 One window, one decision (RFC-0460)} *)
+
+type windowed_range =
+  { carried : carried_start
+  ; sent : Agent_core.Types.message list  (** What goes out after the lane's window. *)
+  ; atoms_kept : int  (** How many of the range's durable atoms are in [sent]. *)
+  }
+
+val carried_atoms : carried_start -> int
+(** The durable atoms a range carries, before any window. *)
+
+val window_carried_range
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> capacity_bytes:int
+  -> reserved_bytes:int
+  -> ?source_projection:
+       (Agent_core.Types.message list
+        -> (Agent_core.Types.message list, Agent_core.Error.t) result)
+  -> carried_start
+  -> (windowed_range, Agent_core.Error.t) result
+(** The range under a declared ceiling. [source_projection] runs first, on
+    the range as composed. An omission preamble the range opened on is taken
+    off before the window, which charges one itself, and put back when the
+    window dropped nothing; a range that fit therefore goes exactly as cut.
+    [atoms_kept] counts the range's durable atoms only: what the source
+    projection appends is reached by a drop only after all of them. *)
+
+val read_seed_once
+  :  (unit -> Keeper_carried_front.seed_read) option
+  -> (unit -> Keeper_carried_front.seed_read) option
+(** The same seed read, taken at most once, for a lane that composes a range
+    more than once in a turn ({!compose_librarian_range}). Sequential use on
+    one fiber only. *)
+
+val windowed_projection : windowed_range -> Runtime_model_input_tail_window.projection
+(** The window reading counted against the whole history, for
+    {!Runtime_model_input_tail_window.observe}: the front it names is an atom
+    a later seed can reopen. *)
+
+val compose_librarian_range
+  :  keeper_name:string
+  -> runtime_id:string
+  -> compose:(librarian_position -> (windowed_range, Agent_core.Error.t) result)
+  -> librarian_position
+  -> (windowed_range, Agent_core.Error.t) result
+(** Compose and window the range from the turn's Librarian position, with
+    [compose] doing both the way the lane does them.
+
+    A working state goes out only where it displaces none of the atoms after
+    the range it leads. A [Librarian_snapshot] position is composed with it
+    first, and kept when the window left every atom of the range. Otherwise
+    the same position is composed alone ([Librarian_progress] at the
+    snapshot's end), and the working state goes only when the window kept at
+    least the newest atom and as many atoms with it as without it. When it
+    stays out, the request goes with the position alone, a WARN names the
+    reason and the first atom sent, and
+    [masc_keeper_librarian_working_state_not_carried_total] counts it -- the turn is not
+    refused, because that band is usually a Librarian that has not caught up
+    yet. A composition the position alone cannot carry is refused with its
+    own error. Other positions are composed once, as given. *)
+
 val prepare_turn :
   runtime_label:string ->
   keeper_name:string ->

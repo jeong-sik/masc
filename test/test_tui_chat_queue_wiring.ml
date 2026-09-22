@@ -1356,6 +1356,160 @@ let test_loaded_tool_facts_are_folded_into_the_held_log () =
   | other -> failf "expected one call, got %d" (List.length other)
 ;;
 
+let drawn_skills_of (log : Tui_types.turn_log) =
+  List.concat_map
+    (fun (item : Keeper_chat_transcript.drawn_item) ->
+      match item.Keeper_chat_transcript.drawn with
+      | Keeper_chat_transcript.Drawn_skill skills -> skills
+      | Keeper_chat_transcript.Drawn_thinking _ | Keeper_chat_transcript.Drawn_tools _
+      | Keeper_chat_transcript.Drawn_text _ | Keeper_chat_transcript.Drawn_reply _
+      | Keeper_chat_transcript.Drawn_status _ ->
+          [])
+    (Keeper_chat_transcript.drawn log.Tui_types.tl_transcript)
+;;
+
+(* The loaded skill row of one turn as a cold history decodes it: the exact
+   delivery record, the call the read led to, and the proof ids -- none of
+   which the wire carries -- next to an evidence gap that names no read. *)
+let skill_evidence_row ~request_id ~at =
+  let evidence =
+    Keeper_chat_transcript.make_skill_activity
+      ~invocation:Keeper_chat_transcript.Instruction_read ~skill_tool_use_id:"c1"
+      ~turn_ref:"trace-1#1" ~content_revision:"sha256:abc" ~runtime_id:"rt-1"
+      ~skill_name:"ci-red-attribution" ~state:Keeper_chat_transcript.Skill_used
+      ~actions:[ "read_file" ] ()
+  in
+  let gap =
+    Keeper_chat_transcript.make_skill_activity ~skill_name:"Skill evidence"
+      ~state:Keeper_chat_transcript.Skill_evidence_unavailable ~actions:[]
+      ~detail:"Skill evidence schema is unavailable to this TUI" ()
+  in
+  { (chat_entry ~request_id
+       ~role:(Tui_types.Message_skill Keeper_chat_transcript.Skill_used)
+       ~text:"**ci-red-attribution**" ~at ())
+    with me_skill_block = [ evidence; gap ] }
+;;
+
+(* The loaded skill row of a held turn leaves the timeline the way the tool
+   row does, and what it knew has to reach the log's own skill row the same
+   way -- or the log's copy stays at "읽음, 전달 확인 중", with no action and
+   no proof, while the exact row is already gone (#36882). *)
+let test_loaded_skill_evidence_is_folded_into_the_held_log () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let occurrence =
+    { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
+  in
+  let log =
+    settled_log ~request_id:"op-1"
+      [ Live.Run_started
+      ; Live.Tool_started { occurrence; tool_name = "keeper_skill" }
+      ; Live.Tool_ended { occurrence }
+      ; Live.Tool_result { occurrence; execution_id = "exec-1" }
+      ; visible_reply "done"
+      ; Live.Run_finished
+      ]
+  in
+  state.msg_settled_logs <- [ log ];
+  (match drawn_skills_of log with
+   | [ skill ] ->
+       check bool "the wire alone leaves the delivery pending" true
+         (skill.Keeper_chat_transcript.state = Keeper_chat_transcript.Skill_served_pending)
+   | skills -> failf "expected one drawn skill, got %d" (List.length skills));
+  Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha"
+    [ skill_evidence_row ~request_id:"op-1" ~at:101. ];
+  match drawn_skills_of log with
+  | [ skill ] ->
+      check bool "the held log's skill row carries the exact state" true
+        (skill.Keeper_chat_transcript.state = Keeper_chat_transcript.Skill_used);
+      check (list string) "and the call the read led to" [ "read_file" ]
+        skill.Keeper_chat_transcript.actions;
+      check (option string) "and the proof's turn" (Some "trace-1#1")
+        skill.Keeper_chat_transcript.turn_ref;
+      check (option string) "on the same read call" (Some "c1")
+        skill.Keeper_chat_transcript.skill_tool_use_id
+  | skills -> failf "expected one drawn skill, got %d" (List.length skills)
+;;
+
+(* A log whose trail never saw the read -- a cut stream, a gap in the journal
+   -- still draws the skill once the exact record arrives, ahead of the reply:
+   the loaded row the log leaves out cannot take the skill with it. *)
+let test_skill_evidence_stands_for_a_read_the_trail_missed () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let log =
+    settled_log ~request_id:"op-1"
+      [ Live.Run_started; Live.Text "done"; visible_reply "done"; Live.Run_finished ]
+  in
+  state.msg_settled_logs <- [ log ];
+  check int "the trail has nothing to draw the skill from" 0
+    (List.length (drawn_skills_of log));
+  Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha"
+    [ skill_evidence_row ~request_id:"op-1" ~at:101. ];
+  (match drawn_skills_of log with
+   | [ skill ] ->
+       check bool "the skill is drawn from the record" true
+         (skill.Keeper_chat_transcript.state = Keeper_chat_transcript.Skill_used);
+       check (list string) "with its action" [ "read_file" ]
+         skill.Keeper_chat_transcript.actions
+   | skills -> failf "expected one drawn skill, got %d" (List.length skills));
+  match
+    List.map
+      (fun (item : Keeper_chat_transcript.drawn_item) -> item.Keeper_chat_transcript.drawn)
+      (Keeper_chat_transcript.drawn log.Tui_types.tl_transcript)
+  with
+  | [ Keeper_chat_transcript.Drawn_skill _; Keeper_chat_transcript.Drawn_reply reply ] ->
+      check string "the turn still ends on its reply" "done" reply
+  | drawn -> failf "expected the skill then the reply, got %d rows" (List.length drawn)
+;;
+
+(* A composition writes its activation before its plan runs, and the server
+   counts the error tool result of a failed plan as a delivery, so the exact
+   record says delivered for a call the stream saw fail. The failure is the
+   fact about that call, and it stands. *)
+let test_a_failed_skill_call_keeps_its_failure () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let occurrence =
+    { Live.stream_scope = 0; block_index = 1; provider_message_id = None; tool_call_id = Some "c1" }
+  in
+  let log =
+    settled_log ~request_id:"op-1"
+      [ Live.Run_started
+      ; Live.Tool_started { occurrence; tool_name = "keeper_skill" }
+      ; Live.Tool_ended { occurrence }
+      ; Live.Tool_result { occurrence; execution_id = "exec-1" }
+      ; visible_reply "done"
+      ; Live.Run_finished
+      ]
+  in
+  state.msg_settled_logs <- [ log ];
+  let failed_call =
+    { (chat_entry ~request_id:"op-1" ~role:Tui_types.Message_tool
+         ~text:"keeper_skill" ~at:101. ())
+      with
+      me_tool_block =
+        Some
+          (Keeper_chat_transcript.tool_block
+             [ Keeper_chat_transcript.make_tool_activity ~execution_id:"exec-1"
+                 ~call_id:(Some "c1") ~tool_name:"keeper_skill" ~args:"{}"
+                 ~outcome:Keeper_chat_transcript.Failed ~duration:(Some "32ms") () ])
+    }
+  in
+  Tui_types.enrich_held_logs_from_rows state ~keeper_name:"alpha"
+    [ failed_call; skill_evidence_row ~request_id:"op-1" ~at:102. ];
+  match drawn_skills_of log with
+  | [ skill ] ->
+      check bool "the failed read is not drawn as a delivered one" true
+        (skill.Keeper_chat_transcript.state = Keeper_chat_transcript.Skill_failed);
+      check (list string) "and the record's actions do not land on it" []
+        skill.Keeper_chat_transcript.actions
+  | skills -> failf "expected one drawn skill, got %d" (List.length skills)
+;;
+
 (* The reload is wired: a history page names its targets, one fiber per load
    reads their journals in turn, and the handler builds and holds the log. *)
 let test_the_reload_rebuilds_loaded_turns_from_their_journals () =
@@ -1662,7 +1816,7 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
                     [ "ts", `Float 1_790_053_724.; "keeper", `String "alpha"
                     ; "tool", `String "Execute"
                     ; "input", `Assoc [ "argv", `List [ `String "git"; `String "log" ] ]
-                    ; "output", `String result; "success", `Bool true
+                    ; "output", `String result; "wire_outcome", `String "ok"
                     ; "duration_ms", `Float 808.; "execution_id", `String "exec-1"
                     ; "tool_use_id", `String "call-1"; "result_bytes", `Int 1405
                     ] ] ) ]
@@ -3687,6 +3841,12 @@ let () =
             test_a_settled_block_sits_before_its_requests_output_rows
         ; test_case "loaded tool facts are folded into the held log" `Quick
             test_loaded_tool_facts_are_folded_into_the_held_log
+        ; test_case "loaded skill evidence is folded into the held log" `Quick
+            test_loaded_skill_evidence_is_folded_into_the_held_log
+        ; test_case "skill evidence stands for a read the trail missed" `Quick
+            test_skill_evidence_stands_for_a_read_the_trail_missed
+        ; test_case "a failed skill call keeps its failure" `Quick
+            test_a_failed_skill_call_keeps_its_failure
         ; test_case "settled logs are read per keeper" `Quick
             test_settled_logs_are_read_per_keeper
         ; test_case "journal fetch targets choose the newest unheld turns" `Quick

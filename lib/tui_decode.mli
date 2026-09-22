@@ -265,7 +265,9 @@ type keeper_call = {
           call that returned an empty one. *)
   kc_artifact_refs : Tool_output.artifact_ref list;
       (** Validated durable references, independent of the output preview. *)
-  kc_success : bool;
+  kc_outcome : Tool_result.recorded_call_outcome;
+      (** How the call ended, read by {!Tool_result.recorded_call_outcome}.
+          Never [Recorded_malformed]: the decoder refuses that row. *)
   kc_duration_ms : float option;
   kc_turn : int option;
   kc_task_id : string option;
@@ -925,6 +927,18 @@ type memory_context_prepared = {
 type memory_context_cycle = {
   mcc_saved : memory_context_frontier option;
   mcc_saved_unreadable : bool;
+  mcc_read_position : int option;
+      (** Where the Librarian has read to, beside where its snapshot cuts
+          ([mcc_saved]). A request starts at the cut and carries the atoms up
+          to here, so the two apart is what the turn pays; the distance is the
+          subtraction and is not a field (#37793). *)
+  mcc_read_position_unreadable : bool;
+      (** The position file could not be read, which is why there is no
+          number. A keeper that has read nothing has neither. *)
+  mcc_rewriting_through : int option;
+      (** Where a snapshot being rewritten from atom 0 has to reach before a
+          request starts from it. Always past [mcc_saved]'s cut; [None] on a
+          snapshot that is not being rewritten. *)
   mcc_prepared : memory_context_prepared option;
   mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }
@@ -1262,15 +1276,23 @@ type keeper_lane_last_outcome = {
   klo_selected_model : string option;
 }
 
+(** The phase conditions that can each put a keeper in the same phase:
+    either health reading makes it failing, and a pending launch is one of
+    the ways it is offline. The other conditions each have a phase of their
+    own, which [kl_phase] already names. *)
+type keeper_lane_conditions = {
+  klc_launch_pending : bool;
+  klc_heartbeat_healthy : bool;
+  klc_turn_healthy : bool;  (** [false] once a turn fails, until one succeeds. *)
+}
+
 type keeper_lane = {
   kl_keeper : string;
   kl_phase : keeper_lane_phase;
   kl_turn_phase : keeper_lane_turn_phase;
   kl_idle_seconds : int;
   kl_last_outcome : keeper_lane_last_outcome option;
-  kl_diagnosis : string option;
-      (** The producer's determining condition, or [None] when no condition
-          currently determines the phase. *)
+  kl_conditions : keeper_lane_conditions;
 }
 
 type keeper_lanes_snapshot = {
@@ -1991,9 +2013,16 @@ val decode_runtime_resolved :
 (** Decode the shared resolved-runtime document once, then project its runtime
     catalogue and keeper assignments for the picker, both in server order. *)
 
+(** The fleet scan's [blocker], read as the reason it names. A name this
+    build does not know is kept by name: a newer server's reason is still a
+    reason, and is drawn as the server wrote it rather than dropped. *)
+type fleet_blocker =
+  | Blocker of Keeper_fleet_blocker.t
+  | Unrecognised_blocker of string
+
 type fleet_safety = {
   fs_status : string;
-  fs_blocker : string option;
+  fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
   fs_running_count : int;

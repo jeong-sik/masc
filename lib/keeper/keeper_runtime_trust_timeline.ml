@@ -70,14 +70,18 @@ let severity_of_decision = function
   | _ -> "warn"
 
 let severity_of_tool_call = function
-  | Some true -> "ok"
-  | Some false -> "bad"
-  | None -> "warn"
+  | Tool_result.Recorded_succeeded -> "ok"
+  | Tool_result.Recorded_failed -> "bad"
+  | Tool_result.Recorded_deferred | Tool_result.Recorded_unsettled
+  | Tool_result.Recorded_malformed ->
+      "warn"
 
 let outcome_word_of_tool_call = function
-  | Some true -> "succeeded"
-  | Some false -> "failed"
-  | None -> "outcome unknown"
+  | Tool_result.Recorded_succeeded -> "succeeded"
+  | Tool_result.Recorded_failed -> "failed"
+  | Tool_result.Recorded_deferred -> "deferred"
+  | Tool_result.Recorded_unsettled -> "outcome unknown"
+  | Tool_result.Recorded_malformed -> "outcome unreadable"
 
 (* Severities follow how the writer already treats each event: [Log.Keeper.error]
    at the site becomes "bad", [Log.Keeper.warn] becomes "warn", and the paths
@@ -106,8 +110,8 @@ let severity_of_approval_event (event : Keeper_approval.Audit.event)
 let tool_call_timeline_event json =
   match json_float_opt_member "ts" json, json_string_opt_member "tool" json with
   | Some ts_unix, Some tool_name ->
-      let success = json_bool_opt_member "success" json in
-      let outcome_word = outcome_word_of_tool_call success in
+      let outcome = Tool_result.recorded_call_outcome json in
+      let outcome_word = outcome_word_of_tool_call outcome in
       let duration_ms = json_float_opt_member "duration_ms" json in
       let summary =
         match duration_ms with
@@ -123,7 +127,7 @@ let tool_call_timeline_event json =
            ~goal_ids:(goal_ids_of_json json)
            ~ts_unix ~kind:"tool_call"
            ~title:(Printf.sprintf "Tool · %s" tool_name)
-           ~summary ~severity:(severity_of_tool_call success) ())
+           ~summary ~severity:(severity_of_tool_call outcome) ())
   | _ -> None
 
 let live_pending_approval_timeline_event json =

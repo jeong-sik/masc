@@ -739,6 +739,79 @@ let test_rewrite_posts_failure_stays_scheduled () =
     store.Board.dirty_posts
 ;;
 
+let test_snapshot_waiting_after_edit_keeps_edited_post
+    ?(check_reloaded = fun (_ : Board.post) -> ()) prepare_snapshot () =
+  let author = "snapshot-order-author" in
+  let post = create_post_exn ~author ~content:"before the edit" in
+  let post_id = Board.Post_id.to_string post.id in
+  let store =
+    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
+  in
+  let write_snapshot = prepare_snapshot store ~post_id in
+  Board.with_lock store (fun () -> store.Board.dirty_posts <- true);
+  let completed = ref [] in
+  Eio.Switch.run (fun sw ->
+    Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
+      let enqueue f =
+        let started, signal_started = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Promise.resolve signal_started ();
+          f ());
+        Eio.Promise.await started;
+        (* Both paths do only non-yielding work before the held persistence
+           mutex. Yield lets this fiber reach that mutex before the next one
+           is started; no wall-clock delay chooses the interleaving. *)
+        Eio.Fiber.yield ()
+      in
+      enqueue (fun () ->
+        (match
+           Board_dispatch.update_post ~post_id ~editor:author
+             ~content:"after the edit" ()
+         with
+         | Ok _ -> ()
+         | Error error -> Alcotest.fail (Board.show_board_error error));
+        completed := "edit" :: !completed);
+      enqueue (fun () ->
+        write_snapshot ();
+        completed := "snapshot" :: !completed)));
+  Alcotest.(check (list string))
+    "edit commits before the queued snapshot writer"
+    [ "edit"; "snapshot" ] (List.rev !completed);
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  match Board_dispatch.get_post ~post_id with
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok loaded ->
+    Alcotest.(check string)
+      "restart retains the committed edit"
+      "after the edit" loaded.body;
+    check_reloaded loaded
+
+let test_pin_waiting_after_edit_keeps_edited_post () =
+  test_snapshot_waiting_after_edit_keeps_edited_post
+    ~check_reloaded:(fun loaded ->
+      Alcotest.(check bool) "restart also retains the pin" true loaded.pinned)
+    (fun store ~post_id () ->
+      match Board.set_pinned store ~post_id ~pinned:true with
+      | Ok () -> ()
+      | Error error -> Alcotest.fail (Board.show_board_error error))
+    ()
+
+let test_delete_waiting_after_edit_keeps_other_edited_post () =
+  let victim = create_post_exn ~author:"delete-author" ~content:"delete this post" in
+  let victim_id = Board.Post_id.to_string victim.id in
+  test_snapshot_waiting_after_edit_keeps_edited_post
+    (fun store ~post_id:_ () ->
+      match Board.delete_post store ~post_id:victim_id with
+      | Ok () -> ()
+      | Error error -> Alcotest.fail (Board.show_board_error error))
+    ();
+  match Board_dispatch.get_post ~post_id:victim_id with
+  | Error (Board.Post_not_found _) -> ()
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok _ -> Alcotest.fail "deleted post returned after restart"
+
 let () =
   Alcotest.run "board_vote_persistence"
     [
@@ -759,6 +832,24 @@ let () =
         ] );
       ( "durability",
         [
+          Alcotest.test_case
+            "flush queued after an edit preserves it across restart"
+            `Quick
+            (with_eio (test_snapshot_waiting_after_edit_keeps_edited_post
+               (fun store ~post_id:_ () -> Board.flush_dirty store)));
+          Alcotest.test_case
+            "rewrite queued after an edit preserves it across restart"
+            `Quick
+            (with_eio (test_snapshot_waiting_after_edit_keeps_edited_post
+               (fun store ~post_id:_ () -> Board.rewrite_posts store)));
+          Alcotest.test_case
+            "pin queued after an edit preserves both across restart"
+            `Quick
+            (with_eio test_pin_waiting_after_edit_keeps_edited_post);
+          Alcotest.test_case
+            "delete queued after an edit preserves the other post across restart"
+            `Quick
+            (with_eio test_delete_waiting_after_edit_keeps_other_edited_post);
           Alcotest.test_case "new vote: failed append leaves nothing committed" `Quick
             (with_eio test_vote_persistence_failure_leaves_nothing_committed);
           Alcotest.test_case

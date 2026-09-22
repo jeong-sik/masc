@@ -663,8 +663,9 @@ let save_sub_boards_jsonl content =
 ;;
 
 let rewrite_sub_boards store =
-  let content = with_lock store (fun () -> sub_boards_jsonl_unlocked store) in
-  with_persist_lock store (fun () -> save_sub_boards_jsonl content)
+  with_persist_lock store (fun () ->
+    let content = with_lock store (fun () -> sub_boards_jsonl_unlocked store) in
+    save_sub_boards_jsonl content)
 ;;
 
 let append_sub_board (sb : sub_board) =
@@ -851,6 +852,7 @@ let list_sub_boards store : sub_board list =
 
 let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
   let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
+  with_persist_lock store (fun () ->
   let snapshot =
     with_lock store (fun () ->
     let resolved_opt =
@@ -888,8 +890,8 @@ let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
   match snapshot with
   | Error _ as e -> e
   | Ok content ->
-    with_persist_lock store (fun () -> save_sub_boards_jsonl content);
-    Ok ()
+    save_sub_boards_jsonl content;
+    Ok ())
 ;;
 
 (** {1 Voting - Deduplicated} *)

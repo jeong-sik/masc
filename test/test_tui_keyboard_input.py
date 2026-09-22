@@ -6740,6 +6740,9 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                     "context_cycle": {
                         "saved": None,
                         "saved_read_error": None,
+                        "read_position": None,
+                        "read_position_read_error": None,
+                        "rewriting_through": None,
                         "prepared": None,
                         "synthesis": None,
                     },

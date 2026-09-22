@@ -31,7 +31,7 @@ function makeEntry(
     added: 2,
     removed: 1,
     snapshot_present: true,
-    context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
+    context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared: null, synthesis: null },
     librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
       unread_atom_turns: 0, unread_official_turns: 0,
       continuity_unread_atoms: 0,

@@ -767,6 +767,62 @@ let test_context_cycle_separates_saved_and_prepared () =
   Alcotest.(check bool) "forgotten request is unknown" true (is_null (member "prepared" (cycle ())))
 ;;
 
+(* A snapshot that stopped moving while the Librarian kept reading is what a
+   request pays for: it starts at the cut and carries every atom up to the
+   position. The cut alone cannot say that, so the position is read from its
+   own file and reported beside it (#37793). *)
+let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
+  let module S = Masc.Librarian_continuity_snapshot in
+  let module B = Masc.Keeper_turn_boundaries in
+  let module P = Masc.Keeper_librarian_progress in
+  let base = fresh_dir "masc-context-lag" in
+  let config = Masc.Workspace.default_config base in
+  let keeper_name = "context-lagging" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
+  let cycle () = member "context_cycle"
+    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+  Alcotest.(check bool) "a keeper that has read nothing has no position" true
+    (is_null (member "read_position" (cycle ())));
+  Alcotest.(check bool) "and no read error to explain it" true
+    (is_null (member "read_position_read_error" (cycle ())));
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
+    [Agent_core.Types.Text "the turn the snapshot covers"]] in
+  let position = B.position_of_messages messages |> get in
+  let trace_id = "lagging-trace" in
+  let lines = [1, Ok {B.recorded_at = test_now; event = B.Turn_ended
+    {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+     history_at_start = B.Fresh_history; position}}] in
+  let snapshot = S.capture ~trace_id ~lines ~messages ~working_state:"a working state"
+    |> Result.map_error S.error_to_string |> get in
+  let path = Masc.Keeper_librarian_continuity.path ~config ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Yojson.Safe.to_file path (S.to_json snapshot);
+  (* The Librarian read past its own cut: the durable round moved while the
+     continuity round did not commit. *)
+  P.write ~keepers_dir ~keeper_id:keeper_name
+    {P.position = {trace_id; end_atom = 12887; last_atom_digest = String.make 64 'a'};
+     boundary_lines_seen = 385}
+  |> Result.map_error P.write_error_to_string |> get;
+  let observed = cycle () in
+  Alcotest.(check int) "the cut the request starts at" snapshot.S.end_atom
+    (int_field "end_atom" (member "saved" observed));
+  Alcotest.(check int) "the position that cut is read against" 12887
+    (int_field "read_position" observed);
+  Alcotest.(check bool) "a snapshot that is not being rewritten says nothing about it" true
+    (is_null (member "rewriting_through" observed));
+  (* An unreadable position file is why there is no number, which a keeper
+     that has read nothing does not say. *)
+  Out_channel.with_open_bin (P.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+    (fun oc -> output_string oc "{not json");
+  let unreadable = cycle () in
+  Alcotest.(check string) "an unreadable position says so" "progress_unreadable"
+    (string_field "read_position_read_error" unreadable);
+  Alcotest.(check bool) "and carries no number" true (is_null (member "read_position" unreadable));
+  Alcotest.(check int) "the cut is read independently of it" snapshot.S.end_atom
+    (int_field "end_atom" (member "saved" unreadable))
 (* RFC librarian-lifecycle §4.9: the durable round and the continuity round
    fall behind separately, so the screen carries both. A lag it cannot take
    reads as "cannot say" rather than as zero -- zero is what a caught-up
@@ -856,6 +912,8 @@ let () =
     [ ( "current snapshot"
       , [ Alcotest.test_case "saved versus prepared context" `Quick
             test_context_cycle_separates_saved_and_prepared
+        ; Alcotest.test_case "the Librarian position is read beside the cut" `Quick
+            test_context_cycle_reads_the_librarian_position_beside_the_cut
         ; Alcotest.test_case "continuity lag measured or unknown" `Quick
             test_the_continuity_lag_is_measured_or_says_it_cannot_be
         ; Alcotest.test_case "curator canonical owners and malformed config" `Quick

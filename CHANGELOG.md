@@ -23,6 +23,13 @@
 
 - A Librarian working state carried into a keeper's next request no longer wears the extra-system-context tag. The prompt-context check counted that tag and found two carriers, so it reported `prompt_context_presence_mismatch` or `prompt_context_carrier_repeated` on every request and left the turn record's `input_components` empty. The working state now carries its own `masc.librarian_working_state.v1` tag, and the tail window pins it the same way (#37894).
 
+### Internal
+
+- The `tui-chat-design` Skill's `Origin_row` density row now matches the header
+  the TUI draws: the speaker's whole name, a receding clock at the right edge
+  and a rule between them; a row whose time cell is empty draws no clock and no
+  `--:--:--` placeholder, and a row continuing the same speaker draws only the
+  rule and clock (#37892).
 
 ## [0.36.0] - 2026-09-22
 

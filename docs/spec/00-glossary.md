@@ -166,7 +166,10 @@ status: reference
   (`Keeper_registry.Turn_configuration_error { code; field; detail }`). 현재 프로세스는
   운영자가 설정이나 환경을 바꾸지 않고는 이 실패를 고칠 수 없다. `code`는
   `missing_env_var`·`unsupported_provider`·`credential_unavailable`·
-  `sensitive_value_in_config` 넷이고, `field`는 관련 설정 키다. Fleet는 일시정지되지
+  `sensitive_value_in_config` 넷이고, `field`는 관련 설정 키다. `code`는 닫힌
+  타입이 아니라 문자열이므로 이 "넷"은 타입이 아니라 생산 지점
+  (`keeper_unified_turn_types.ml`)의 목록이다 — 생산자가 늘면 이 문장이 먼저
+  낡는다. Fleet는 일시정지되지
   않은 `Failing` Keeper의 이 원인을 `turn_configuration_error_keeper_count/names`로
   표시하고, 다른 차단 사유가 없으면 `degraded`로 표시하며 `operator_action_required`를
   참으로 만든다. autoboot 대상만 세는 `configuration_blocked_*`와 달리 이 값은 autoboot
@@ -253,7 +256,8 @@ status: reference
     `librarian`·`hitl_auto_judge`·`board_attention`·`verifier`가 있다. 설정은
     `[runtime.exact_output_lanes.<name>]`의 `slots`, durable 기록은
     `Exact_lane_run_registry.lane`(`Librarian`·`Hitl_auto_judge`·`Board_attention`·
-    `Workspace_curator`)이다. 제품 SSOT는 이들을 "sub-lanes"라 부른다(§4).
+    `Workspace_curator`)이다 — verifier exact lane은 이 registry 밖에 있다. 제품
+    SSOT는 이들을 "sub-lanes"라 부른다(§4).
     → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
   - **관측·조작 Lane** — `Browser Lane`·`MSX Lane`·`DOS Lane`·`Slack Lane`처럼 Keeper가
     공유 머신·세션을 관찰·조작하는 대상.
@@ -331,7 +335,8 @@ status: reference
   `browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
   검사·표시한다.
   → [설계 계약](../design/lane-addon-v0.md),
-  [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli)
+  [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
+  [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.ml)
 
 **Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.

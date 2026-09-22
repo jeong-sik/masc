@@ -245,6 +245,21 @@ let test_collect_matching_stops_without_loading_the_day () =
     (allocated < Float.of_int (4 * 1024 * 1024))
 ;;
 
+let test_collect_matching_skips_a_retained_file_pruned_mid_scan () =
+  let dir = tmpdir "dated_jsonl_collect_matching_pruned" in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
+  write_dated_file dir "2026-01" "02" [ {|{"i":2}|} ];
+  let older = Filename.concat (Filename.concat dir "2026-01") "01.jsonl" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let values =
+    Dated_jsonl.collect_matching store 2 ~f:(fun json ->
+      let value = json_i json in
+      if value = 2 then Unix.unlink older;
+      Some value)
+  in
+  check (list int) "the vanished older day is skipped" [ 2 ] values
+;;
+
 let test_read_recent_result_counts_malformed_physical_row () =
   let dir = tmpdir "dated_jsonl_recent_result_malformed" in
   write_dated_file
@@ -1502,6 +1517,8 @@ let () =
             test_collect_matching_range_skips_out_of_range_files;
           test_case "reverse scan keeps day-file allocation bounded" `Quick
             test_collect_matching_stops_without_loading_the_day;
+          test_case "retention may remove a later file during the scan" `Quick
+            test_collect_matching_skips_a_retained_file_pruned_mid_scan;
         ] );
       ( "read_recent_lines",
         [

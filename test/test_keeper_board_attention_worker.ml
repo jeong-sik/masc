@@ -2073,7 +2073,13 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   let exact = provenance "manual-requeue-success" in
   let execute ~before_dispatch ~before_advance:_ _candidate =
     ok "bind manual requeue attempt" (before_dispatch exact);
-    Ok (judgment exact J.Not_relevant)
+    (* Relevant, not Not_relevant: task-1666 makes the worker settle a
+       Not_relevant completion right in the worker fiber, so the boundary
+       assertion below (Requeued + Completed, not yet settled) would see
+       Settled instead. This test's subject is the owner-turn settlement
+       path after an authorized manual requeue; the direct path is
+       test_a_not_relevant_judgment_settles_without_an_owner_turn. *)
+    Ok (judgment exact J.Relevant)
   in
   (match
      ok
@@ -2102,7 +2108,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
    | W.No_completed_partition -> Alcotest.fail "completed judgment was not settled");
   (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
-   | A.Consumed { delivery = A.Not_relevant; _ }, P.Settled _ -> ()
+   | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
    | _ -> Alcotest.fail "manual requeue did not normalize, consume, and settle");
   (match (Q.inventory ~base_path ~keeper_names:[ "alpha" ]).items with
    | [] -> ()

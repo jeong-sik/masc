@@ -191,7 +191,6 @@ let judge ~clock (request : R.judge_request) =
              Error
                (Printf.sprintf "the measurement judge has no key in %s" named.api_key_env))
   in
-  let destination = { Masc.Typesafeai_client.endpoint; model = request.model; api_key } in
   let* evaluated =
     Masc.Typesafeai_client.evaluate ~clock ~destinations:(destination, [])
       ~state:(R.judge_state request) ~questions:(R.judge_questions request) ()

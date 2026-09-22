@@ -10678,7 +10678,7 @@ def keeper_lane_row(
     idle_seconds: int,
     runtime_state: str | None,
     selected_model: str | None,
-    diagnosis: str | None,
+    turn_healthy: bool = True,
 ) -> dict[str, object]:
     last_outcome: object = None
     if runtime_state is not None:
@@ -10692,7 +10692,13 @@ def keeper_lane_row(
         "turn_phase": turn_phase,
         "idle_seconds": idle_seconds,
         "last_outcome": last_outcome,
-        "phase_diagnosis": {"determining_condition": diagnosis},
+        "phase_diagnosis": {
+            "conditions": {
+                "launch_pending": False,
+                "heartbeat_healthy": True,
+                "turn_healthy": turn_healthy,
+            }
+        },
     }
 
 
@@ -10725,11 +10731,10 @@ def keeper_lanes_ia_interaction(
         keepers_plain = CSI_RE.sub(b"", keepers).decode("utf-8")
         for needle in (
             "OPERATIONS",
-            "lifecycle failing",
+            "lifecycle failing (last turn failed)",
             "turn executing",
             "idle 59m",
             "last done",
-            "failing_unhealthy",
         ):
             if needle not in keepers_plain:
                 raise AssertionError(
@@ -14074,7 +14079,6 @@ def run_keyboard_regression(executable: str) -> None:
                     idle_seconds=75,
                     runtime_state="done",
                     selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
                 ),
                 keeper_lane_row(
                     "beta",
@@ -14083,7 +14087,7 @@ def run_keyboard_regression(executable: str) -> None:
                     idle_seconds=3599,
                     runtime_state="done",
                     selected_model=None,
-                    diagnosis="failing_unhealthy",
+                    turn_healthy=False,
                 ),
             ]
         )
@@ -16658,7 +16662,6 @@ def run_keeper_lanes_regression(executable: str) -> None:
                     idle_seconds=75,
                     runtime_state="done",
                     selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
                 ),
                 keeper_lane_row(
                     "beta",
@@ -16667,7 +16670,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
                     idle_seconds=3599,
                     runtime_state="done",
                     selected_model=None,
-                    diagnosis="failing_unhealthy",
+                    turn_healthy=False,
                 ),
             ]
         )

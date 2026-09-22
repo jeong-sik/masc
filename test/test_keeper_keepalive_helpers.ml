@@ -391,6 +391,8 @@ let test_board_goal_keyword_overlap_is_not_wake_reason () =
   let signal : Board_dispatch.board_signal =
     { kind = Board_dispatch.Board_post_created
     ; post_id = "post-keyword-overlap"
+    ; comment_id = None
+    ; parent_id = None
     ; author = "external-author"
     ; title = "test"
     ; content = "this test overlaps the keeper goal but does not address it"
@@ -410,6 +412,8 @@ let check_exact_board_mention ~content ~expected =
   let signal : Board_dispatch.board_signal =
     { kind = Board_dispatch.Board_post_created
     ; post_id = "post-exact-mention"
+    ; comment_id = None
+    ; parent_id = None
     ; author = "external-author"
     ; title = "test"
     ; content
@@ -430,6 +434,13 @@ let audience_signal ?(kind = Board_dispatch.Board_post_created) ~author content 
   =
   { kind
   ; post_id = "post-audience"
+  ; comment_id =
+      (match kind with
+       | Board_dispatch.Board_comment_added -> Some "c-audience"
+       | Board_dispatch.Board_post_created
+       | Board_dispatch.Board_reaction_changed _
+       | Board_dispatch.Board_vote_cast _ -> None)
+  ; parent_id = None
   ; author
   ; title = "audience"
   ; content
@@ -588,7 +599,19 @@ let test_closed_board_audience_routes_only_its_authority () =
      | Ok KBA.Broadcast -> true
      | Error _ | Ok _ -> false)
 
+let write_board_lane_config config (meta : Keeper_meta_contract.keeper_meta) =
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  Out_channel.with_open_text (Filename.concat keepers_dir (meta.name ^ ".toml"))
+    (fun oc -> Printf.fprintf oc
+      "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nboard_interests = [%s]\n"
+      (String.concat ", " (List.map (Printf.sprintf "%S") meta.board_interests)))
+;;
+
 let persist_and_register_board_lane config meta =
+  write_board_lane_config config meta;
   (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error detail -> fail ("write_meta failed: " ^ detail));
@@ -668,6 +691,8 @@ let test_exact_mentions_deliver_and_wake_each_lane_independently () =
        let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-multi-lane"
+         ; comment_id = None
+         ; parent_id = None
          ; author = "external-author"
          ; title = "addressed"
          ; content = "@alpha @beta inspect independently"
@@ -749,6 +774,8 @@ let test_paused_exact_mention_is_durable_without_wake () =
        let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-paused-lane"
+         ; comment_id = None
+         ; parent_id = None
          ; author = "external-author"
          ; title = "addressed"
          ; content = "@pausedlane retain this"
@@ -773,6 +800,7 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
     ~finally:Keeper_registry.For_testing.clear
     (fun () ->
        let meta = make_board_resume_meta "restartlane" in
+       write_board_lane_config config meta;
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail ("write_meta failed: " ^ detail));
@@ -787,6 +815,8 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
        let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-restarting-lane"
+         ; comment_id = None
+         ; parent_id = None
          ; author = "external-author"
          ; title = "addressed"
          ; content = "@restartlane retain this while relaunching"
@@ -825,6 +855,8 @@ let test_lane_meta_failure_does_not_block_next_durable_delivery () =
        let signal : Board_dispatch.addressed_board_signal =
          { kind = Board_dispatch.Board_post_created
          ; post_id = "post-lane-isolation"
+         ; comment_id = None
+         ; parent_id = None
          ; author = "external-author"
          ; title = "addressed"
          ; content = "@zzzbroken @aaahealthy inspect independently"
@@ -865,14 +897,16 @@ let create_thread_fixture config ~keeper_name =
   let add_comment ~author ~content =
     match Board_dispatch.add_comment ~post_id ~author ~content () with
     | Error error -> fail (Board.show_board_error error)
-    | Ok _comment -> ()
+    | Ok comment -> comment
   in
-  add_comment ~author:meta.Keeper_meta_contract.name ~content:"keeper was here";
-  add_comment ~author:"external-author" ~content:"follow up";
+  ignore (add_comment ~author:meta.Keeper_meta_contract.name ~content:"keeper was here");
+  let comment = add_comment ~author:"external-author" ~content:"follow up" in
   let signal : Board_dispatch.addressed_board_signal =
     { signal =
         { kind = Board_dispatch.Board_comment_added
         ; post_id
+        ; comment_id = Some (Board.Comment_id.to_string comment.id)
+        ; parent_id = Option.map Board.Comment_id.to_string comment.parent_id
         ; author = "external-author"
         ; title = "thread"
         ; content = "follow up"
@@ -931,19 +965,23 @@ let create_self_post_fixture config ~keeper_name =
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
-  (match
-     Board_dispatch.add_comment
-       ~post_id
-       ~author:"external-author"
-       ~content:"it is empty because the loader skips it"
-       ()
-   with
-   | Error error -> fail (Board.show_board_error error)
-   | Ok _comment -> ());
+  let comment =
+    match
+      Board_dispatch.add_comment
+        ~post_id
+        ~author:"external-author"
+        ~content:"it is empty because the loader skips it"
+        ()
+    with
+    | Error error -> fail (Board.show_board_error error)
+    | Ok comment -> comment
+  in
   let signal : Board_dispatch.addressed_board_signal =
     { signal =
         { kind = Board_dispatch.Board_comment_added
         ; post_id
+        ; comment_id = Some (Board.Comment_id.to_string comment.id)
+        ; parent_id = Option.map Board.Comment_id.to_string comment.parent_id
         ; author = "external-author"
         ; title = "question from the keeper"
         ; content = "it is empty because the loader skips it"
@@ -1173,6 +1211,14 @@ let test_comment_routes_bystander_lane_to_attention_judgment () =
          }
        in
        persist_and_register_board_lane config bystander;
+       let bystander =
+         match Keeper_meta_store.read_effective_meta config bystander.name with
+         | Ok (Some meta) -> meta
+         | Ok None -> fail "configured bystander metadata missing"
+         | Error detail -> fail detail
+       in
+       check (list string) "bystander interests come from actual TOML"
+         [ "thread review" ] bystander.board_interests;
        let audience =
          match KBA.of_board_audience addressed.Board_dispatch.audience with
          | Ok audience -> audience

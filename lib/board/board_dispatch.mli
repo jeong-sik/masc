@@ -66,6 +66,8 @@ and board_vote_change = {
 type board_signal = {
   kind : board_signal_kind;
   post_id : string;
+  comment_id : string option;
+  parent_id : string option;
   author : string;
   title : string;
   content : string;

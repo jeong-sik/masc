@@ -420,54 +420,42 @@ let record_board_attention_candidate
       ~(meta : keeper_meta)
       (signal : Board_dispatch.board_signal)
   =
-  match
+  let candidate =
     Keeper_board_attention_candidate.of_board_signal
       ~meta
       ~recorded_at:(Time_compat.now ())
       signal
+  in
+  match
+    Keeper_board_attention_candidate.record_and_wake
+      ~base_path:config.base_path
+      candidate
   with
-  | Keeper_world_observation_board_signal.Unavailable unavailable ->
+  | Ok acceptance ->
+    let persistence =
+      match acceptance.persistence with
+      | Keeper_board_attention_candidate.Candidate_recorded -> "recorded"
+      | Keeper_board_attention_candidate.Candidate_already_present -> "duplicate"
+    in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+      ~labels:
+        [ ("keeper", meta.name)
+        ; ("kind", signal_kind_label)
+        ; ("audience", audience_label)
+        ; ("persistence", persistence)
+        ]
+      ()
+  | Error err ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string KeepaliveSignalFailures)
-      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_evidence_read") ]
+      ~labels:[ ("keeper", meta.name); ("phase", "board_attention_candidate_record") ]
       ();
     Log.Keeper.warn
-      "board attention evidence unavailable: keeper=%s post=%s error=%s"
+      "board attention candidate record failed: keeper=%s post=%s error=%s"
       meta.name
       signal.post_id
-      (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-  | Keeper_world_observation_board_signal.Available candidate ->
-    (match
-       Keeper_board_attention_candidate.record_and_wake
-         ~base_path:config.base_path
-         candidate
-     with
-     | Ok acceptance ->
-       let persistence =
-         match acceptance.persistence with
-         | Keeper_board_attention_candidate.Candidate_recorded -> "recorded"
-         | Keeper_board_attention_candidate.Candidate_already_present -> "duplicate"
-       in
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
-         ~labels:
-           [ ("keeper", meta.name)
-           ; ("kind", signal_kind_label)
-           ; ("audience", audience_label)
-           ; ("persistence", persistence)
-           ]
-         ()
-     | Error err ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string KeepaliveSignalFailures)
-         ~labels:
-           [ ("keeper", meta.name); ("phase", "board_attention_candidate_record") ]
-         ();
-       Log.Keeper.warn
-         "board attention candidate record failed: keeper=%s post=%s error=%s"
-         meta.name
-         signal.post_id
-         err)
+      err
 ;;
 
 let deliver_addressed_board_signal
@@ -628,7 +616,7 @@ let wakeup_relevant_keeper_for_board_signal
        let board_ym = Eio_guard.create_yield_meter () in
        List.iter
          (fun (entry : Keeper_registry.registry_entry) ->
-            (match read_meta config entry.name with
+            (match read_effective_meta config entry.name with
              | Error detail ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string KeepaliveSignalFailures)
@@ -649,17 +637,6 @@ let wakeup_relevant_keeper_for_board_signal
                  "board signal Keeper metadata missing: keeper=%s"
                  entry.name
              | Ok (Some meta) ->
-               (* [read_meta] is the raw durable snapshot, where config-owned
-                  fields decode as placeholders ([board_interests] among them
-                  since #37586 -- see Keeper_meta_json_parse's "eleven config
-                  fields" comment, pinned by test_keeper_meta_config_not_durable).
-                  [Keeper_board_audience.route_for_keeper] now reads
-                  [board_interests] to gate the Discoverable audience, so the
-                  raw snapshot always routed to [Ignore]. The registry entry
-                  already carries the live meta this Keeper registered with;
-                  borrow just that one field rather than the whole snapshot,
-                  which stays authoritative for everything else here. *)
-               let meta = { meta with board_interests = entry.meta.board_interests } in
                (match route_for_keeper_with_bounded_retry ~audience ~meta signal with
                 | Keeper_world_observation_board_signal.Available
                     Keeper_board_audience.Judge_discoverable ->
@@ -711,7 +688,7 @@ let wakeup_relevant_keeper_for_board_signal
        List.iter
       (fun (entry : Keeper_registry.registry_entry) ->
          (try
-            match read_meta config entry.name with
+            match read_effective_meta config entry.name with
         | Error detail ->
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string KeepaliveSignalFailures)
@@ -730,11 +707,6 @@ let wakeup_relevant_keeper_for_board_signal
             "board signal Keeper metadata missing: keeper=%s"
             entry.name
         | Ok (Some meta) ->
-          (* Same restoration as the Discoverable branch above: [read_meta]
-             cannot carry [board_interests] (a config-owned placeholder), and
-             the [Board_comment_added] check in [route_for_keeper] needs the
-             registering Keeper's actual value. *)
-          let meta = { meta with board_interests = entry.meta.board_interests } in
           (match route_for_keeper_with_bounded_retry ~audience ~meta signal with
            | Keeper_world_observation_board_signal.Unavailable unavailable ->
              Otel_metric_store.inc_counter
@@ -947,4 +919,3 @@ let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path keeper_name event
-

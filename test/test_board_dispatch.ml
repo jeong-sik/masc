@@ -567,7 +567,10 @@ let test_first_board_observation_starts_at_current_head () =
 let test_dashboard_projection_does_not_produce_attention_candidate () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   let keeper_name = "projection-read-only" in
-  let meta = board_observation_meta keeper_name in
+  let meta =
+    { (board_observation_meta keeper_name) with
+      board_interests = [ "Ambient Board evidence" ] }
+  in
   let entry = Keeper_registry.For_testing.register ~base_path keeper_name meta in
   Fun.protect
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
@@ -858,6 +861,62 @@ let test_add_and_get_comments () =
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok comments ->
           Alcotest.(check bool) "has comment" true (List.length comments >= 1)
+
+let test_comment_signal_preserves_comment_and_parent_identity () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"commenter"
+        ~content:"post for nested comments"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let parent =
+    match
+      Board_dispatch.add_comment
+        ~post_id
+        ~author:"first-responder"
+        ~content:"parent comment"
+        ()
+    with
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Ok comment -> comment
+  in
+  let seen = ref None in
+  Board_dispatch.set_board_signal_hook (fun signal -> seen := Some signal);
+  let reply =
+    match
+      Board_dispatch.add_comment
+        ~post_id
+        ~author:"second-responder"
+        ~content:"child comment"
+        ~parent_id:(Board.Comment_id.to_string parent.id)
+        ()
+    with
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+    | Ok comment -> comment
+  in
+  match !seen with
+  | Some { Board_dispatch.signal; _ } ->
+    (match signal.kind with
+     | Board_dispatch.Board_comment_added ->
+       Alcotest.(check (option string))
+         "comment id comes from the accepted comment"
+         (Some (Board.Comment_id.to_string reply.id))
+         signal.comment_id;
+       Alcotest.(check (option string))
+         "parent id comes from the accepted comment"
+         (Some (Board.Comment_id.to_string parent.id))
+         signal.parent_id
+     | Board_dispatch.Board_post_created
+     | Board_dispatch.Board_reaction_changed _
+     | Board_dispatch.Board_vote_cast _ ->
+       Alcotest.fail "comment write emitted the wrong Board signal kind")
+  | None -> Alcotest.fail "comment write emitted no Board signal"
 
 let test_comment_persists_post_reply_count () =
   let post =
@@ -2333,6 +2392,8 @@ let () =
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);
+      Alcotest.test_case "signal preserves comment and parent identity" `Quick
+        (with_eio test_comment_signal_preserves_comment_and_parent_identity);
       Alcotest.test_case "comment persists post reply_count" `Quick
         (with_eio test_comment_persists_post_reply_count);
       Alcotest.test_case "comment append failure rolls back without fanout" `Quick

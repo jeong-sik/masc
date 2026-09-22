@@ -746,13 +746,29 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
            Alcotest.fail "fixture checkpoint was not saved"
        | Error detail -> Alcotest.failf "fixture checkpoint: %s" detail);
       let original = In_channel.with_open_bin checkpoint_path In_channel.input_all in
+      (* The keeper is not the checkpoint's [agent_name]: that field holds the
+         agent-core agent's name (the runtime id on a live keeper). The CLI
+         finds the keeper's Librarian files by the name the operator passes,
+         and its meta names the trace (#37770). *)
+      let keeper_name = "purge-cli-keeper" in
+      (match
+         Masc.Keeper_meta_store.replace_snapshot config
+           (match
+              Masc_test_deps.meta_of_json_fixture
+                (`Assoc [ "name", `String keeper_name; "trace_id", `String checkpoint.session_id ])
+            with
+            | Ok meta -> meta
+            | Error detail -> Alcotest.failf "keeper meta fixture: %s" detail)
+       with
+       | Ok () -> ()
+       | Error detail -> Alcotest.failf "keeper meta: %s" detail);
       let before = workspace_contents owner_root in
       let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
       let write_progress ~end_atom =
         match
           Progress.write
             ~keepers_dir:runtime_keepers_dir
-            ~keeper_id:checkpoint.agent_name
+            ~keeper_id:keeper_name
             (progress_at checkpoint.messages ~end_atom)
         with
         | Ok () -> ()
@@ -760,13 +776,15 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
       in
       let read_progress () =
         match
-          Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:checkpoint.agent_name
+          Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
         with
         | Ok (Some progress) -> progress
         | Ok None -> Alcotest.fail "the Librarian position is gone"
         | Error error -> Alcotest.fail (Progress.read_error_to_string error)
       in
-      let run_cli ?(from_cwd = false) ?(exit_code = 0) args =
+      let run_cli
+            ?(from_cwd = false) ?(exit_code = 0) ?(reports_checkpoint = true)
+            ?(identity = [ "--keeper"; keeper_name ]) args =
         let runtime_base_path =
           Masc.Workspace.runtime_base_path (Masc.Workspace.Explicit base_path)
         in
@@ -792,20 +810,31 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
             ~env:(Array.of_list child_env)
             ~is_success:(Int.equal exit_code)
             (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
-            ([ executable
-             ; "--trace"; checkpoint.session_id; "--keep-recent"; "0"
-             ] @ args)
+            ([ executable ] @ identity @ [ "--keep-recent"; "0" ] @ args)
         in
-        Alcotest.(check bool) "CLI reports the producer checkpoint" true
+        Alcotest.(check bool) "CLI reports the producer checkpoint" reports_checkpoint
           (List.mem ("checkpoint: " ^ checkpoint_path)
              (String.split_on_char '\n' output));
         print_string output;
         output
       in
-      let run_cli ?from_cwd ?exit_code args =
-        let (_ : string) = run_cli ?from_cwd ?exit_code args in
+      let run_cli ?from_cwd ?exit_code ?reports_checkpoint ?identity args =
+        let (_ : string) = run_cli ?from_cwd ?exit_code ?reports_checkpoint ?identity args in
         ()
       in
+      (* The keeper names the trace; a trace argument only cross-checks it. *)
+      run_cli ~exit_code:1 ~reports_checkpoint:false
+        ~identity:[ "--trace"; checkpoint.session_id ] [ "--base"; base_path ];
+      run_cli ~exit_code:1 ~reports_checkpoint:false
+        ~identity:[ "--keeper"; "no-such-keeper" ] [ "--base"; base_path ];
+      run_cli ~exit_code:1 ~reports_checkpoint:false
+        ~identity:[ "--keeper"; keeper_name; "--trace"; "trace-of-another-keeper" ]
+        [ "--base"; base_path ];
+      run_cli ~identity:[ "--keeper"; keeper_name; "--trace"; checkpoint.session_id ]
+        [ "--base"; base_path ];
+      Alcotest.(check (list (pair string (option string))))
+        "refused and cross-checked runs leave the workspace unchanged"
+        before (workspace_contents owner_root);
       run_cli [ "--base"; base_path ];
       Alcotest.(check (list (pair string (option string))))
         "dry-run leaves all workspace files and directories unchanged"
@@ -964,6 +993,7 @@ let test_a_fitting_working_state_keeps_its_prefix () =
     match
       Masc.Librarian_continuity_snapshot.capture_checkpoint_prefix
         ~end_atom:3
+        ~catch_up_end_atom:None
         ~trace_id:fixture_trace
         ~lines
         ~messages

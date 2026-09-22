@@ -103,7 +103,14 @@ val binding_to_provider_config
 
     Returns [Error reason] (no silent fallback) when the provider or model id
     is unresolved, or when the provider transport/kind cannot be mapped to a
-    concrete provider config. *)
+    concrete provider config.
+
+    An official-client command ([claude-code], [codex-app-server],
+    [antigravity-cli]) is spawned from where
+    {!Runtime_official_cli_install.locate} finds it at this call: PATH first,
+    then the vendor installer's directory for the client's own name. A
+    command found nowhere is kept as configured; its absence surfaces when
+    the client is spawned, not here. *)
 
 val binding_to_execution
   :  Runtime_schema.config

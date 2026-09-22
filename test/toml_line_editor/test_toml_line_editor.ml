@@ -530,7 +530,24 @@ let test_a_value_line_renders_each_type () =
   Alcotest.(check string) "a whole float keeps a point" "t = 35.0"
     (render "t" (Toml_line_editor.Float 35.0));
   Alcotest.(check string) "a fractional float is not padded out" "t = 0.5"
-    (render "t" (Toml_line_editor.Float 0.5))
+    (render "t" (Toml_line_editor.Float 0.5));
+  Alcotest.(check string) "a whole float of three digits has no exponent" "t = 120.0"
+    (render "t" (Toml_line_editor.Float 120.0));
+  Alcotest.(check string) "nor does a larger one" "t = 3600.0"
+    (render "t" (Toml_line_editor.Float 3600.0));
+  Alcotest.(check string) "a fraction keeps its shortest form" "t = 90.5"
+    (render "t" (Toml_line_editor.Float 90.5))
+
+let test_a_header_comment_is_read_by_the_grammar () =
+  let comment = Toml_line_editor.header_trailing_comment in
+  Alcotest.(check (option string)) "spaces and comment" (Some "  # the note")
+    (comment "[fusion.presets.trio]  # the note");
+  Alcotest.(check (option string)) "a table array" (Some " #n")
+    (comment "[[fusion.presets.trio.judges]] #n");
+  Alcotest.(check (option string)) "a # inside a quoted key is part of the key"
+    (Some " # real") (comment {|[a."b#c"] # real|});
+  Alcotest.(check (option string)) "no comment" None (comment "[a.b]");
+  Alcotest.(check (option string)) "not a header" None (comment "key = 1 # note")
 
 (* Found by running the editor against a live 2000-line runtime.toml while every
    fixture case above was passing: adding an entry put its separating blank line
@@ -930,6 +947,8 @@ let () =
             test_an_entry_without_the_id_key_is_skipped
         ; Alcotest.test_case "a value line renders each type" `Quick
             test_a_value_line_renders_each_type
+        ; Alcotest.test_case "a header comment is read by the grammar" `Quick
+            test_a_header_comment_is_read_by_the_grammar
         ; Alcotest.test_case "add then remove restores the file" `Quick
             test_add_then_remove_restores_the_file
         ; Alcotest.test_case "a None field is dropped from the entry" `Quick

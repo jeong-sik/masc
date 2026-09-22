@@ -67,8 +67,10 @@ val run_panelist
     On all three clients the turn timeout is the longest silence allowed
     between stream messages, not a whole-turn limit: a client that keeps
     streaming outlives it, bounded only by the adapter's wall-clock ceiling
-    (left at its default here). The same preset key on an Agent_core runtime
-    is a whole-call deadline ([body_timeout_s]).
+    (left at its default here). On Codex the window is suspended while a tool
+    item runs, since the app-server may write nothing until it completes. The
+    same preset key on an Agent_core runtime is a whole-call deadline
+    ([body_timeout_s]).
 
     [output_schema] is a JSON Schema the client holds its own answer to. Every
     official client has a channel for one and no two are the same shape:
@@ -134,5 +136,8 @@ val run_with_images
   -> (response, failure) result
 (** Stateless official-client turn using the same admission, quota accounting,
     deadlines and output-schema channels as [run_panelist]. Codex and Claude
-    execute the admitted runtime snapshot and carry the supplied image bytes through their native transports. Antigravity
-    rejects nonempty image input. [model] is the transport's response identity. *)
+    execute the admitted runtime snapshot and carry the supplied image bytes
+    through their native transports. Antigravity rejects nonempty image input
+    and, having no system-prompt channel, gets a nonempty [system_prompt]
+    framed into its input ({!Antigravity_input_frame}); a missing frame label
+    asset is a [Setup_failure]. [model] is the transport's response identity. *)

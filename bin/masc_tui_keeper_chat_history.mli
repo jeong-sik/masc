@@ -137,13 +137,16 @@ type kind =
   | Memory_activity of
       { summary : string option
       ; journal : Masc_tui_message_layout.journal_line list
+      ; pass : Masc_tui_message_layout.memory_pass
       }
       (** A committed or failed Memory OS journal pass. [journal] is a
           committed revision's added, removed and dropped lines, typed, for
           the pane to draw in columns; [row.text] says the same in plain text
           for readers of text, or carries the typed failure detail. [summary]
           is the producer-built one-line projection. Neutral system rows reuse
-          this lane with [None] and therefore remain whole in summary mode. *)
+          this lane with [None] and therefore remain whole in summary mode.
+          [pass] says whether the row is a committed pass, a failed one, or
+          no pass at all, so the pane never reads it back out of [summary]. *)
   | Fusion_conclusion of fusion_conclusion
       (** A [Fusion] block the assistant row carried: the deliberation
           conclusion is the row's own [content], and this names the run and

@@ -724,6 +724,13 @@ cycles those rows through summary, full, and hidden; the header names the two
 non-default states as `journal:full` and `journal:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
 
+A failed Librarian pass is not a row in summary mode. While the passes after
+the last commit keep failing, the header's second row names the run once, in
+every journal mode: `Librarian failing ×5 since 14:02:13 ·
+exact_execution_failure` - how many in a row, when the first was recorded,
+and the server's word for how the newest failed. The next commit ends it.
+`journal:full` still draws every failed pass as a row of its own.
+
 Under `journal:full` a committed revision draws its summary, then each fact
 in two columns: the sign and category at the left, padded to the revision's
 widest category, and the claim wrapped under itself. A blank row separates
@@ -752,8 +759,10 @@ call whose result reads as the output schema its descriptor declares draws
 command's `output`, and any `stderr`. Output too large to ride inline is named
 by the artifact that holds it (`artifact sha256:9f3a12c4d5e6… · 48213 bytes`).
 Where the command ran and the sandbox around it are not drawn; a result that
-does not read is drawn as it arrived. The Keeper Calls view (`t`) keeps the
-stored result whole. A held tool call
+does not read is drawn as it arrived. A served `input` or `output` longer
+than eight lines keeps its first eight and closes on `… +N lines · Keeper
+Calls (t)`; one line over is drawn rather than folded. The Keeper Calls view
+(`t`) keeps the stored result whole. A held tool call
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.

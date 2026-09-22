@@ -512,8 +512,36 @@ PROTOCOL_CHOICES = {'ollama-http': 'ollama', 'openai-compatible-http': 'openai_c
                     'claude-code': 'claude_code', 'codex-app-server': 'codex',
                     'antigravity-cli': 'antigravity'}
 
+# The three official clients, by the name `masc prerequisite-actions` and
+# `masc runtime-client-path` take.
+OFFICIAL_CLIENTS = {'claude_code': 'claude-code', 'codex': 'codex', 'antigravity': 'antigravity'}
 
-def connection_sources(inventory):
+
+def official_client_path(binary, choice, command):
+    """Where the client for `choice` runs from, or None when it is nowhere.
+
+    Asked of `masc runtime-client-path`, which answers with the path the
+    runtime will spawn: on PATH as the shell finds it, else in the vendor
+    installer's directory for the client's own name. The wizard does not look
+    for a client itself, so what it lists, what it lets the operator select
+    and what the runtime then starts cannot disagree (#37747).
+    """
+    client = OFFICIAL_CLIENTS.get(choice)
+    if client is None or not command:
+        return None
+    result = subprocess.run([str(binary), 'runtime-client-path', '--client', client, '--command', command],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        receipt = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        receipt = None
+    if result.returncode or not isinstance(receipt, dict) or receipt.get('schema') != 'masc.runtime_client_path.v1':
+        raise SetupError('MASC could not look for the ' + client + ' client. Inspect the installed executable before retrying.')
+    path = receipt.get('path')
+    return path if isinstance(path, str) and path else None
+
+
+def connection_sources(binary, inventory):
     sources = []
     for row in inventory['runtimes']:
         source = next((item for item in sources if item['provider_id'] == row['provider_id']), None)
@@ -556,11 +584,15 @@ def connection_sources(inventory):
             sources.append(dict(provider_id=None, label=label, choice=choice, endpoint=endpoint,
                                 command='', api_key_env='', rows=[]))
     for choice, command, label in [('codex', 'codex', 'Codex'), ('claude_code', 'claude', 'Claude Code')]:
-        if not any(item['choice'] == choice for item in sources) and shutil.which(command):
+        if not any(item['choice'] == choice for item in sources) and official_client_path(binary, choice, command):
             sources.append(dict(provider_id=None, label=label, choice=choice, endpoint='',
                                 command=command, api_key_env='', rows=[]))
     for source in sources:
         source['model_release_catalog'] = inventory.get('model_release_catalog')
+        # Where the client runs from, for the list and the fast-setup filter.
+        # A source with no command (an HTTP connection) has no path to find.
+        source['command_path'] = (official_client_path(binary, source['choice'], source['command'])
+                                  if source.get('command') else None)
     return sources
 
 
@@ -571,7 +603,7 @@ def source_label(source):
     elif source.get('credential_file'):
         status = 'saved private API key; access will be checked'
     elif command:
-        status = 'CLI found; sign-in checked after selection' if shutil.which(command) else 'CLI needs installation'
+        status = 'CLI found; sign-in checked after selection' if source.get('command_path') else 'CLI needs installation'
     elif key:
         status = 'API key found; account access will be checked' if os.environ.get(key) else 'API key needed; enter it privately after selection'
     else:
@@ -1006,29 +1038,22 @@ def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_
     return state
 
 
-def installed_client(command, choice):
-    found = shutil.which(command)
-    if found:
-        return found
-    standard = {'codex': 'codex', 'claude_code': 'claude', 'antigravity': 'agy'}.get(choice)
-    if standard is None or command != standard:
-        return None  # An explicit custom executable path is not a vendor alias.
-    directory = (os.environ.get('CODEX_INSTALL_DIR') if choice == 'codex' else None) or str(Path.home() / '.local/bin')
-    candidate = Path(directory) / standard
-    return str(candidate.resolve()) if candidate.is_file() and os.access(candidate, os.X_OK) else None
-
-
-def prepare_connection(source, credentials):
+def prepare_connection(binary, source, credentials):
     source = dict(source)
     if source.get('setup_support') == 'unsupported' or source['choice'] is None:
         raise SetupError(source['label'] + ' is listed for visibility but its setup integration is not available yet')
     if CHOICES[source['choice']][1] is not None:
         command = source.get('command') or CHOICES[source['choice']][1]
-        while not installed_client(command, source['choice']):
-            client = {'claude_code': 'claude-code', 'codex': 'codex', 'antigravity': 'antigravity'}.get(source['choice'])
+        # Looked for again after each installer run, and stored as found: the
+        # runtime spawns this path, and a link stays a link so a client update
+        # that replaces the link's target does not orphan the configuration.
+        path = official_client_path(binary, source['choice'], command)
+        while path is None:
+            client = OFFICIAL_CLIENTS.get(source['choice'])
             if credentials is None or client is None or not prerequisite_menu(credentials.binary, client):
                 raise SetupError('Install the selected client, then return to connection setup')
-        source['command'] = installed_client(command, source['choice'])
+            path = official_client_path(binary, source['choice'], command)
+        source['command'] = path
         if source['choice'] == 'antigravity':
             return prepare_antigravity_account(source, credentials)
         return source
@@ -1312,7 +1337,7 @@ def resolve_model_spec(source, model, timeout, binary=None):
 def pick_connection_sources(sources):
     def detected(source):
         return (source.get('setup_support') != 'unsupported' and source.get('choice') is not None
-                and (bool(source.get('command') and shutil.which(source['command']))
+                and (bool(source.get('command_path'))
                      or bool(source.get('credential_file'))
                      or bool(source.get('api_key_env') and os.environ.get(source['api_key_env']))))
     found = [source for source in sources if detected(source)]
@@ -1334,7 +1359,7 @@ def pick_connection_sources(sources):
 
 
 def select_connections(binary, inventory, timeout, credentials=None):
-    sources, chosen = pick_connection_sources(connection_sources(inventory))
+    sources, chosen = pick_connection_sources(connection_sources(binary, inventory))
     if len(sources) + 1 in chosen:
         if len(chosen) != 1:
             raise SetupError('choose Configure later alone, or select connections')
@@ -1360,7 +1385,7 @@ def select_connections(binary, inventory, timeout, credentials=None):
                 source.update(credential_file=credentials.save(), credential_kind='file')
         else:
             source = sources[index]
-        source = prepare_connection(source, credentials)
+        source = prepare_connection(binary, source, credentials)
         refresh_models = False
         while True:
             models, origin = source_models(binary, source, timeout, refresh=refresh_models)
@@ -1428,11 +1453,11 @@ def quick_connection(binary, inventory, timeout, credentials, model_id):
     or the installed catalog does not list the model. The reason is printed so
     the screen that follows does not look like quick setup forgot itself.
     """
-    source = next((item for item in connection_sources(inventory) if item.get('choice') == 'claude_code'), None)
+    source = next((item for item in connection_sources(binary, inventory) if item.get('choice') == 'claude_code'), None)
     if source is None:
         print('Claude Code was not found. Choose a model connection.', file=sys.stderr)
         return None
-    source = prepare_connection(source, credentials)
+    source = prepare_connection(binary, source, credentials)
     models, _ = source_models(binary, source, timeout)
     model = next((item for item in models if item['id'] == model_id), None)
     if model is None:
@@ -1989,14 +2014,15 @@ QUICK_APPLE_MISSING_ORDER = ('apple_container_build_without_rosetta', 'apple_con
 def quick_plan(binary, base_path):
     """What quick setup would do here, or None when there is no plan to offer.
 
-    A plan needs a model to go straight to (Claude Code on PATH) and a sandbox
-    observation to choose from. Without either, the journey opens at step 1 as
-    it always did. This only reads: `sandbox-catalog` changes nothing, even for
-    a workspace that does not exist yet.
+    A plan needs a model to go straight to (Claude Code where the runtime
+    will find it) and a sandbox observation to choose from. Without either,
+    the journey opens at step 1 as it always did. This only reads:
+    `runtime-client-path` and `sandbox-catalog` change nothing, even for a
+    workspace that does not exist yet.
     """
-    if not shutil.which('claude'):
-        return None
     try:
+        if not official_client_path(binary, 'claude_code', 'claude'):
+            return None
         catalog = sandbox_catalog(binary, base_path)
     except (SetupError, OSError):
         return None

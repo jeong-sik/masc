@@ -107,7 +107,7 @@ let core_error_detail (e : Agent_core.Error.t) : string =
    모두 [Timeout]으로 propagate한다: 외곽 실행 래퍼 [Api (Retry.Timeout _)]와
    provider-level [Provider (Llm_provider.Error.Timeout _)](비스트리밍 sync 경로의
    connect_timeout이 본문 전체를 바운드해 발생, detail "timeout phase=http_operation").
-   후자는 [Fusion_panel.outcome_of_result]와 대칭으로, 이전에는 [_] catch-all에서
+   후자는 [Fusion_panel.attempt_of_result]와 대칭으로, 이전에는 [_] catch-all에서
    [Provider_error]로 오귀속됐다. 그 외는 [Provider_error]에 사람-가독 detail을 보존한다.
    Non-timeout detail은 표시용이며 재분류에 쓰지 않는다; provider 오류는
    [Llm_provider.Error.to_string] 경로로 렌더해 provider/status/retry/phase metadata를
@@ -157,8 +157,16 @@ let judge_failure_of_official_failure
     Fusion_types.Build_error (Printf.sprintf "invalid max_output_tokens %d" n)
   | Fusion_types.Invalid_timeout_s s ->
     Fusion_types.Build_error (Printf.sprintf "invalid timeout_s %g" s)
+  | Fusion_types.Unknown_route route -> Fusion_types.Unknown_route route
+  | Fusion_types.Route_unavailable detail -> Fusion_types.Route_unavailable detail
 
-(* 공식 클라이언트(Claude Code·Codex·Antigravity) 심판. 이 런타임은 spawn 되는
+let judge_failure_of_route_failure
+  : Fusion_seat.route_failure -> Fusion_types.judge_failure
+  = function
+  | Fusion_seat.Unknown_route route -> Fusion_types.Unknown_route route
+  | Fusion_seat.Route_unavailable detail -> Fusion_types.Route_unavailable detail
+
+(* 공식 클라이언트(Claude Code·Codex·Antigravity) 후보 한 번. 이 런타임은 spawn 되는
    프로세스라 [build_agent] 가 Agent 를 만들 수 없으므로, 여기서 한 턴을 직접 돌린다.
 
    출력 계약은 HTTP 심판과 같다: 프롬프트의 [fusion.judge.output] 지시 + strict
@@ -166,133 +174,180 @@ let judge_failure_of_official_failure
    HTTP 쪽이 wire response format 을 싣지 않는 것과 같은 한 가지 계약을 유지한다.
 
    공식 클라이언트는 토큰 회계를 돌려주지 않으므로 usage 는 [zero_usage] 다(패널과
-   같은 규약). 도구 기록은 "없음"이 아니라 "관측 불가"여야 한다: 빈 ledger 는 도구를
-   안 불렀다는 증명으로 읽히므로, 이 심판은 [Official_client_uninstrumented] gap 을
-   남긴다. [max_tokens] 와 masc web 도구는 이 경로에 실을 곳이 없다. *)
-let run_official ~base_dir ?timeout_s ~judge_system_prompt ~judge_model ~prompt
-    ?tool_trace () :
+   같은 규약). [max_tokens] 와 masc web 도구는 이 경로에 실을 곳이 없다. *)
+let attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prompt () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
-  let result =
-    match
-      Fusion_official_client.run_panelist ~base_dir ~runtime_id:judge_model
-        ~system_prompt:judge_system_prompt ?timeout_s ~prompt ()
-    with
-    | Error failure ->
-      Error (judge_failure_of_official_failure failure, Fusion_types.zero_usage)
-    | Ok text when String.length (String.trim text) = 0 ->
-      Error
-        ( Fusion_types.Empty_response
-            (Printf.sprintf "judge: %s: official client returned no text" judge_model)
-        , Fusion_types.zero_usage )
-    | Ok text -> attach_usage (Fusion_judge_parse.of_string text) Fusion_types.zero_usage
-  in
-  Option.iter
-    (fun (actor, send) ->
-       send
-         { Fusion_types.empty_tool_trace with
-           gaps = [ { Fusion_types.actor; reason = Fusion_types.Official_client_uninstrumented } ]
-         })
-    tool_trace;
-  result
+  match
+    Fusion_official_client.run_panelist ~base_dir ~runtime_id
+      ~system_prompt:judge_system_prompt ?timeout_s ~prompt ()
+  with
+  | Error failure ->
+    Error (judge_failure_of_official_failure failure, Fusion_types.zero_usage)
+  | Ok text when String.length (String.trim text) = 0 ->
+    Error
+      ( Fusion_types.Empty_response
+          (Printf.sprintf "judge: %s: official client returned no text" runtime_id)
+      , Fusion_types.zero_usage )
+  | Ok text -> attach_usage (Fusion_judge_parse.of_string text) Fusion_types.zero_usage
 
-(* 합성된 프롬프트를 받아 심판 에이전트를 빌드·실행·파싱한다. [run]/[run_refine]가
-   서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체 — 프롬프트 구성만 다르고
-   실행/usage/파싱 경로는 동일하다(2 인스턴스에서 추출, N-of-M 회피).
-
-   에러도 usage를 동반한다: 토큰을 태운 뒤 실패(빈 응답/파싱 실패)는 소비분을, 토큰
-   소비 전 실패(빌드/실행/빈 결과/provider 에러)는 [zero_usage]를 싣는다. 호출자는
-   실패 경로에서도 비용을 회계할 수 있다. *)
-let run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt
-    ~judge_model ~web_tools ~prompt ?tool_trace () :
+(* Agent_core 후보 한 번. 에러도 usage를 동반한다: 토큰을 태운 뒤 실패(빈 응답/파싱
+   실패)는 소비분을, 토큰 소비 전 실패(빌드/실행/빈 결과/provider 에러)는
+   [zero_usage]를 싣는다. *)
+let attempt_agent_core ~sw ~net ?max_tokens ?timeout_s ?event_bus ~judge_system_prompt
+    ~runtime_id ~web_tools ~prompt () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
-  if Fusion_official_client.is_official_client ~runtime_id:judge_model
-  then run_official ~base_dir ?timeout_s ~judge_system_prompt ~judge_model ~prompt ?tool_trace ()
-  else
   let tools = if web_tools then Fusion_agent_core.web_tool_bundle () else [] in
-  let observer =
-    Option.map
-      (fun (actor, _send) -> Fusion_agent_core.create_tool_observer ~actor)
-      tool_trace
-  in
-  let event_bus = Option.map Fusion_agent_core.tool_observer_event_bus observer in
-  let result =
-    match
-      Fusion_agent_core.build_agent ~sw ~net ~system_prompt:judge_system_prompt
-        ?event_bus ~tools ?max_tokens ?timeout_s
-        ~provider_config_transform:apply_fusion_judge_output_contract
-        judge_model
-    with
-    | Error reason ->
-      Error
-        ( Fusion_types.Build_error
-            (Printf.sprintf "judge build failed: %s"
-               (Fusion_agent_core.panel_failure_detail ~runtime_id:judge_model reason))
-        , Fusion_types.zero_usage )
-    | Ok agent ->
-      (match
-         Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_judge (fun () ->
-           Ok
-             (Agent_core.Async_agent.all ~sw
-                ?clock:(Fusion_agent_core.deadline_clock ())
-                [ (agent, prompt) ]))
-       with
-       | Error e ->
+  match
+    Fusion_agent_core.build_agent ~sw ~net ~system_prompt:judge_system_prompt
+      ?event_bus ~tools ?max_tokens ?timeout_s
+      ~provider_config_transform:apply_fusion_judge_output_contract
+      runtime_id
+  with
+  | Error reason ->
+    Error
+      ( Fusion_types.Build_error
+          (Printf.sprintf "judge build failed: %s"
+             (Fusion_agent_core.panel_failure_detail ~runtime_id reason))
+      , Fusion_types.zero_usage )
+  | Ok agent ->
+    (match
+       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_judge (fun () ->
+         Ok
+           (Agent_core.Async_agent.all ~sw
+              ?clock:(Fusion_agent_core.deadline_clock ())
+              [ (agent, prompt) ]))
+     with
+     | Error e ->
+       Error
+         ( failure_of_core_error ~runtime_id ~prefix:"judge run failed: " e
+         , Fusion_types.zero_usage )
+     | Ok [] -> Error (Fusion_types.Empty_result, Fusion_types.zero_usage)
+     | Ok ((_name, Ok resp) :: _) ->
+       let text = Fusion_agent_core.answer_text resp in
+       (* 응답은 받았으므로 소비 토큰을 회계한다 — 빈 응답이든 파싱 실패든 동일. *)
+       let usage = Fusion_agent_core.usage_of resp in
+       if String.length (String.trim text) = 0 then
          Error
-           ( failure_of_core_error ~runtime_id:judge_model
-               ~prefix:"judge run failed: " e
-           , Fusion_types.zero_usage )
-       | Ok [] -> Error (Fusion_types.Empty_result, Fusion_types.zero_usage)
-       | Ok ((_name, Ok resp) :: _) ->
-         let text = Fusion_agent_core.answer_text resp in
-         (* 응답은 받았으므로 소비 토큰을 회계한다 — 빈 응답이든 파싱 실패든 동일. *)
-         let usage = Fusion_agent_core.usage_of resp in
-         if String.length (String.trim text) = 0 then
-           Error
-             ( Empty_response
-                 ("judge: " ^ Fusion_agent_core.empty_response_detail resp)
-             , usage )
-         else
-           (* 성공 종합·파싱 실패 모두에 심판이 소비한 토큰을 묶는다(panel_answer.usage와 대칭). *)
-           attach_usage (Fusion_judge_parse.of_string text) usage
-       | Ok ((_name, Error e) :: _) ->
-         Error
-           ( failure_of_core_error ~runtime_id:judge_model
-               ~prefix:"judge provider error: " e
-           , Fusion_types.zero_usage ))
+           ( Empty_response
+               ("judge: " ^ Fusion_agent_core.empty_response_detail resp)
+           , usage )
+       else
+         (* 성공 종합·파싱 실패 모두에 심판이 소비한 토큰을 묶는다(panel_answer.usage와 대칭). *)
+         attach_usage (Fusion_judge_parse.of_string text) usage
+     | Ok ((_name, Error e) :: _) ->
+       Error
+         ( failure_of_core_error ~runtime_id ~prefix:"judge provider error: " e
+         , Fusion_types.zero_usage ))
+
+(* 합성된 프롬프트를 받아 심판 자리를 실행한다. [run]/[run_refine]/[run_meta]가
+   서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체.
+
+   [judge_model] 은 자리에 적힌 경로 이름이다(Fusion_seat). 후보를 차례로 시도하고
+   처음 파싱을 통과한 종합에서 멈춘다 — 파싱 실패도 다음 후보로 넘어간다. 실패한
+   시도가 쓴 토큰도 결과 usage 에 더한다.
+
+   도구 기록은 시도마다 한 조각이다. Agent_core 시도는 private EventBus 관측을,
+   공식 클라이언트 시도는 [Official_client_uninstrumented] gap 을 남긴다 — 빈 ledger 는
+   도구를 안 불렀다는 증명으로 읽히므로 관측할 수 없는 시도를 빈칸으로 두지 않는다. *)
+let run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt
+    ~judge_model ~web_tools ~prompt ?tool_trace ?seat_route () :
+    ( Fusion_types.judge_synthesis * Fusion_types.usage
+    , Fusion_types.judge_failure * Fusion_types.usage )
+    result =
+  let route = judge_model in
+  let report build =
+    Option.iter
+      (fun (role, send) -> send (build ~seat:(Fusion_types.Judge_seat role)))
+      seat_route
   in
-  (match observer, tool_trace with
-   | Some observer, Some (_actor, send) ->
-     send (Fusion_agent_core.finish_tool_observer observer)
-   | (Some _ | None), (Some _ | None) -> ());
-  result
+  match Fusion_seat.resolve route with
+  | Error failure ->
+    report (fun ~seat -> Fusion_seat.unresolved_seat_route ~seat ~route);
+    Error (judge_failure_of_route_failure failure, Fusion_types.zero_usage)
+  | Ok candidates ->
+    let actor = Option.map fst tool_trace in
+    let traces = ref [] in
+    let attempt runtime_id =
+      if Fusion_official_client.is_official_client ~runtime_id
+      then (
+        Option.iter
+          (fun actor ->
+             traces :=
+               { Fusion_types.empty_tool_trace with
+                 gaps =
+                   [ { Fusion_types.actor
+                     ; reason = Fusion_types.Official_client_uninstrumented
+                     }
+                   ]
+               }
+               :: !traces)
+          actor;
+        attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prompt ())
+      else (
+        let observer =
+          Option.map (fun actor -> Fusion_agent_core.create_tool_observer ~actor) actor
+        in
+        let event_bus = Option.map Fusion_agent_core.tool_observer_event_bus observer in
+        let result =
+          attempt_agent_core ~sw ~net ?max_tokens ?timeout_s ?event_bus
+            ~judge_system_prompt ~runtime_id ~web_tools ~prompt ()
+        in
+        Option.iter
+          (fun observer ->
+             traces := Fusion_agent_core.finish_tool_observer observer :: !traces)
+          observer;
+        result)
+    in
+    let walk = Fusion_seat.walk candidates ~attempt in
+    Option.iter
+      (fun (_actor, send) -> send (Fusion_types.merge_tool_traces (List.rev !traces)))
+      tool_trace;
+    report (fun ~seat ->
+      Fusion_seat.seat_route ~seat ~route
+        ~to_attempt_failure:(fun (failure, _usage) ->
+          Fusion_types.Judge_attempt_failed failure)
+        walk);
+    let failed_usage failed =
+      List.fold_left
+        (fun total (_runtime, (_failure, usage)) -> Fusion_types.add_usage total usage)
+        Fusion_types.zero_usage failed
+    in
+    (match walk with
+     | Fusion_seat.Answered { answer = (synthesis, usage); failed; runtime = _ } ->
+       Ok (synthesis, Fusion_types.add_usage usage (failed_usage failed))
+     | Fusion_seat.Exhausted { last = (failure, _usage); failed } ->
+       Error (failure, failed_usage failed))
 
 let run ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~question ~panel ~web_tools ?tool_trace () :
+    ~question ~panel ~web_tools ?tool_trace ?seat_route () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~web_tools ~prompt:(compose_prompt ~question ~panel) ?tool_trace ()
+    ~web_tools ~prompt:(compose_prompt ~question ~panel) ?tool_trace
+    ?seat_route ()
 
 let run_refine ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~question ~panel ~prior ~web_tools ?tool_trace () :
+    ~question ~panel ~prior ~web_tools ?tool_trace ?seat_route () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~web_tools ~prompt:(compose_refine_prompt ~question ~panel ~prior) ?tool_trace ()
+    ~web_tools ~prompt:(compose_refine_prompt ~question ~panel ~prior) ?tool_trace
+    ?seat_route ()
 
 let run_meta ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~question ~panel ~priors ~web_tools ?tool_trace () :
+    ~question ~panel ~priors ~web_tools ?tool_trace ?seat_route () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
     , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
-    ~web_tools ~prompt:(compose_meta_prompt ~question ~panel ~priors) ?tool_trace ()
+    ~web_tools ~prompt:(compose_meta_prompt ~question ~panel ~priors) ?tool_trace
+    ?seat_route ()
 
 module For_testing = struct
   let apply_output_contract = apply_fusion_judge_output_contract

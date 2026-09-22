@@ -70,6 +70,7 @@ let run_first_judge
       ~clock
       ~judge_web_tools
       ~on_tool_trace
+      ~on_seat_route
       (j : Fusion_policy.judge_spec)
   : judge_run
   =
@@ -90,6 +91,7 @@ let run_first_judge
       ~panel
       ~web_tools:(first_judge_web_tools ~judge_web_tools j)
       ~tool_trace:(tool_actor, on_tool_trace)
+      ~seat_route:(Fusion_types.First id, on_seat_route)
       ()
   in
   let elapsed_s = elapsed_since_t0 clock in
@@ -106,6 +108,7 @@ let run_first_judges
       ~clock
       ~judge_web_tools
       ~on_tool_trace
+      ~on_seat_route
       judges
   =
   let run_first_judge =
@@ -119,6 +122,7 @@ let run_first_judges
       ~clock
       ~judge_web_tools
       ~on_tool_trace
+      ~on_seat_route
   in
   Eio.Fiber.List.map run_first_judge judges
 ;;

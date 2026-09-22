@@ -143,6 +143,11 @@ val continuity_for_request :
     round, so a snapshot whose covered bytes changed was never written again.
     An unreadable snapshot file or boundary log stops the Librarian's
     continuity pass too, so it stays until the file is fixed.
+    A snapshot the Librarian is rewriting from atom 0 is not used until its
+    end reaches its catch-up target
+    ([Librarian_continuity_snapshot.t.catch_up_end_atom]); until then the
+    request starts as it would with no snapshot, so the rewrite never moves
+    the start back.
     [lines] is read only when a snapshot is saved. *)
 
 type try_provider_ctx =

@@ -884,6 +884,12 @@ let keeper_call_association state ~keeper_name
    rather than held: the palette behind [Theme.*] is resolved against the
    terminal's answers and can change, and a cached record would keep drawing
    the colours the last answer produced. *)
+(* How much of a served input or output the full calls draw before folding
+   the rest. Enough to say what the payload is -- a member list, the head of
+   a table -- on a pane that draws about twenty rows; a whole result runs to
+   hundreds, and the Keeper Calls view is where it is read whole. *)
+let tool_document_rows_shown = 8
+
 let tool_detail_palette () : Tool_detail.palette =
   { Tool_detail.branch = Theme.recede ()
     (* A field's name and a document member's name are the same kind of
@@ -896,6 +902,7 @@ let tool_detail_palette () : Tool_detail.palette =
   ; number = Masc_tui_theme.Syntax.json_number
   ; literal = Masc_tui_theme.Syntax.json_literal
   ; punctuation = Masc_tui_theme.Syntax.json_punctuation
+  ; note = Theme.recede ()
     (* The pane opens these rows dim; a bare reset after the first painted
        span would drop every following byte back to full weight. Close the
        way the markdown palette closes: reset, then reopen the rung the tree
@@ -1085,7 +1092,15 @@ let keeper_message_tool_activity_details state ~keeper_name
       ]
     |> List.filter_map Fun.id
   in
-  Tool_detail.tree ~palette:(tool_detail_palette ()) fields
+  Tool_detail.tree ~palette:(tool_detail_palette ())
+    ~fold:
+      { Tool_detail.fold_rows = tool_document_rows_shown
+      ; fold_note =
+          (fun hidden ->
+            Printf.sprintf "\xe2\x80\xa6 +%d lines \xc2\xb7 Keeper Calls (%s)" hidden
+              Masc_tui_keys.keeper_calls_key)
+      }
+    fields
 
 
 (* How one finished turn's tool block becomes rows: the operator's
@@ -1239,7 +1254,7 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
         |> List.filter (fun (message, _) ->
           message.me_role <> Message_thinking
           || Masc_tui_types.reasoning_drawn state.msg_reasoning_visibility)
-        |> Masc_tui_types.fold_memory_summary_runs
+        |> Masc_tui_types.project_memory_history
              ~visibility:state.msg_memory_visibility
         |> Masc_tui_types.project_gate_history ~visibility:state.msg_tool_visibility
       in
@@ -2177,15 +2192,44 @@ let render_keeper_message (state : state) =
           Message_layout.display_width context_separator
           + Message_layout.display_width item
     in
+    (* A Librarian that keeps failing is a state of this keeper's memory. It
+       is said here, once, for as long as the run lasts, instead of as a row
+       between every pair of turns ([project_memory_history]). It takes at
+       most half of what the context item leaves; the runtime id in the
+       identity yields first, as it does to the context item. *)
+    let librarian_item =
+      Option.map
+        (fun (failing : Masc_tui_types.librarian_failing) ->
+          fit_width
+            (Masc_tui_types.librarian_failing_text
+               ~since:(keeper_message_clock failing.lf_since) failing)
+            (max 0 ((inner_cells - context_cells) / 2)))
+        (Masc_tui_types.librarian_failing (chat_rows_for state keeper_name))
+    in
+    let librarian_cells =
+      match librarian_item with
+      | None -> 0
+      | Some item ->
+          Message_layout.display_width context_separator
+          + Message_layout.display_width item
+    in
     let identity =
       keeper_message_identity
-        ~max_cells:(max 0 (inner_cells - context_cells)) state keeper_name
+        ~max_cells:(max 0 (inner_cells - context_cells - librarian_cells))
+        state keeper_name
     in
     let identity_row =
-      match context_item with
-      | None -> identity
-      | Some item ->
-          identity ^ context_separator ^ Ansi.dim ^ item ^ Ansi.reset
+      String.concat ""
+        (identity
+         :: List.filter_map Fun.id
+              [ Option.map
+                  (fun item ->
+                    context_separator ^ Theme.warn () ^ item ^ Ansi.reset)
+                  librarian_item
+              ; Option.map
+                  (fun item -> context_separator ^ Ansi.dim ^ item ^ Ansi.reset)
+                  context_item
+              ])
     in
     if
       not

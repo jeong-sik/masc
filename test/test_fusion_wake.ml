@@ -458,11 +458,23 @@ let test_emit_success_projects_board_chat_and_registry () =
       ]
     in
     let tool_trace = Fusion_types.empty_tool_trace in
+    let seat_routes =
+      [ { Fusion_types.seat = Fusion_types.Panel_seat "skeptic (claude)"
+        ; route = "claude"
+        ; answered_by = Some "claude_code.claude-sonnet-5"
+        ; failed_attempts =
+            [ { Fusion_types.attempt_runtime = "ollama_cloud.deepseek-v4-pro"
+              ; attempt_failure = Fusion_types.Panel_attempt_failed Fusion_types.Timeout
+              }
+            ]
+        }
+      ]
+    in
     Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"unit-test" ~topology:Fusion_types.Simple
       ~started_at:2.0;
     let result =
       Fusion_sink.emit ~source_context:None ~registry ~base_dir ~keeper ~run_id ~channel:discord_channel
-        ~question ~panel ~judge:(Ok synthesis) ~judges ~judge_usage ~tool_trace
+        ~question ~panel ~judge:(Ok synthesis) ~judges ~judge_usage ~tool_trace ~seat_routes
     in
     check bool "emit succeeds" true (Result.is_ok result);
     let post =
@@ -495,6 +507,23 @@ let test_emit_success_projects_board_chat_and_registry () =
        check string "panel status" "answered"
          (string_field "board.meta.panel[0]" p "status")
      | other -> fail (Printf.sprintf "expected exactly one panel row, got %d" (List.length other)));
+    (match list_field "board.meta" meta "seat_routes" with
+     | [ route_json ] ->
+       let r = assoc_fields "board.meta.seat_routes[0]" route_json in
+       check string "seat route names the seat" "skeptic (claude)"
+         (string_field "board.meta.seat_routes[0]" r "seat");
+       check string "seat route names who answered" "claude_code.claude-sonnet-5"
+         (string_field "board.meta.seat_routes[0]" r "answered_by");
+       (match list_field "board.meta.seat_routes[0]" r "failed_attempts" with
+        | [ attempt_json ] ->
+          let a = assoc_fields "board.meta.seat_routes[0].failed_attempts[0]" attempt_json in
+          check string "failed attempt runtime" "ollama_cloud.deepseek-v4-pro"
+            (string_field "board.meta.seat_routes[0].failed_attempts[0]" a "runtime");
+          check string "failed attempt code" "timeout"
+            (string_field "board.meta.seat_routes[0].failed_attempts[0]" a "code")
+        | other ->
+          fail (Printf.sprintf "expected one failed attempt, got %d" (List.length other)))
+     | other -> fail (Printf.sprintf "expected one seat route, got %d" (List.length other)));
     let judge = assoc_fields "board.meta.judge" (field "board.meta" meta "judge") in
     check string "judge status" "synthesized"
       (string_field "board.meta.judge" judge "status");
@@ -567,7 +596,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     let replay =
       Fusion_sink.emit ~source_context:None ~registry ~base_dir ~keeper ~run_id
         ~channel:discord_channel ~question ~panel ~judge:(Ok synthesis) ~judges
-        ~judge_usage ~tool_trace
+        ~judge_usage ~tool_trace ~seat_routes
     in
     check bool "same completion replay succeeds" true (Result.is_ok replay);
     let posts_for_run =
@@ -595,7 +624,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     let conflicting_replay =
       Fusion_sink.emit ~source_context:None ~registry ~base_dir ~keeper ~run_id
         ~channel:discord_channel ~question:(question ^ " changed") ~panel
-        ~judge:(Ok synthesis) ~judges ~judge_usage ~tool_trace
+        ~judge:(Ok synthesis) ~judges ~judge_usage ~tool_trace ~seat_routes
     in
     check bool "changed completion replay is rejected" true
       (Result.is_error conflicting_replay);
@@ -1016,6 +1045,7 @@ let test_tool_handle_async_success_projects_running_then_completed ?(with_contex
         ; judges
         ; judge_usage
         ; tool_trace = Fusion_types.empty_tool_trace
+        ; seat_routes = []
         }
       in
       Eio.Promise.resolve resolve_computed ();

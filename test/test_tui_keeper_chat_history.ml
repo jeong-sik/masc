@@ -316,8 +316,13 @@ let test_roles_map_to_what_the_pane_draws () =
     (List.map (fun r -> r.History.text) decoded.History.rows);
   (match (List.nth decoded.History.rows 3).History.kind with
    | History.Gate_activity _ -> failf "unexpected gate row"
-   | History.Memory_activity { summary; journal = _ } ->
-       check (option string) "a neutral system row stays whole" None summary
+   | History.Memory_activity { summary; journal = _; pass } ->
+       check (option string) "a neutral system row stays whole" None summary;
+       check bool "a neutral system row reports no pass" true
+         (match pass with
+          | Masc_tui_message_layout.No_pass -> true
+          | Masc_tui_message_layout.Pass_failed _
+          | Masc_tui_message_layout.Pass_committed -> false)
    | History.Addressed_to_keeper _ | History.Said_by_keeper
    | History.Autonomous_reply | History.Delivery_failed _
    | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
@@ -1571,7 +1576,12 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
         (Option.is_some row.structural_id);
       (match row.kind with
        | History.Gate_activity _ -> failf "unexpected gate row"
-   | History.Memory_activity { summary; journal } ->
+   | History.Memory_activity { summary; journal; pass } ->
+           check bool "a committed revision is a committed pass" true
+             (match pass with
+              | Masc_tui_message_layout.Pass_committed -> true
+              | Masc_tui_message_layout.Pass_failed _
+              | Masc_tui_message_layout.No_pass -> false);
            check (option string) "typed summary is producer-built"
              (Some
                 "Librarian \xc2\xb7 revision 7 \xc2\xb7 +1 \xe2\x88\x921 \xc2\xb7 3 retained")
@@ -1688,9 +1698,16 @@ let test_memory_failure_keeps_kind_and_detail () =
         (Option.is_some row.structural_id);
       (match row.kind with
        | History.Gate_activity _ -> failf "unexpected gate row"
-   | History.Memory_activity { summary; journal = _ } ->
+   | History.Memory_activity { summary; journal = _; pass } ->
            check (option string) "failure summary omits the detail body"
-             (Some "Librarian failed \xc2\xb7 exact_execution_failure") summary
+             (Some "Librarian failed \xc2\xb7 exact_execution_failure") summary;
+           check bool "the pass is typed as failed, with the server's kind" true
+             (match pass with
+              | Masc_tui_message_layout.Pass_failed { kind = "exact_execution_failure" } ->
+                  true
+              | Masc_tui_message_layout.Pass_failed _
+              | Masc_tui_message_layout.Pass_committed
+              | Masc_tui_message_layout.No_pass -> false)
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply | History.Delivery_failed _
        | History.Tool_calls _ | History.Skill_activity _

@@ -89,18 +89,17 @@ let extra_system_context_messages messages =
     messages
 ;;
 
-let prompt_label key =
-  let prompt = Prompt_registry.get_prompt key in
-  if String.trim prompt = "" then invalid_arg ("missing required Antigravity prompt: " ^ key)
-  else String.trim prompt ^ "\n"
+(* A keeper turn cannot start without its labels; the missing asset is a
+   packaging fault, raised where the turn is framed. *)
+let required_label = function
+  | Ok label -> label
+  | Error message -> invalid_arg message
 
 let system_instructions_label () =
-  prompt_label Prompt_names.keeper_antigravity_system_instructions_label
+  required_label (Antigravity_input_frame.system_instructions_label ())
 
-let current_goal_label () =
-  prompt_label Prompt_names.keeper_antigravity_current_goal_label
-
-let prompt_section_separator = "\n\n"
+let current_goal_label () = required_label (Antigravity_input_frame.current_goal_label ())
+let prompt_section_separator = Antigravity_input_frame.section_separator
 
 let measure_model_input_message_bytes (message : Agent_core.Types.message) =
   String.length (history_role_label message.role)

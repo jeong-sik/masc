@@ -159,28 +159,23 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   }
 ;;
 
-(* Antigravity has no system-prompt channel. The keeper path
-   (keeper_antigravity_runtime.ml) puts the instructions at the head of the
-   input under the SYSTEM INSTRUCTIONS / CURRENT GOAL labels; a one-shot turn
-   uses the same labels. Without this the panel or judge system prompt — for a
-   judge-of-judges first judge, its whole lens — never reaches the model. *)
+(* Antigravity has no system-prompt channel. A one-shot turn puts the
+   instructions at the head of the input in the frame a keeper turn uses
+   ({!Antigravity_input_frame}). Without this the panel or judge system prompt
+   — for a judge-of-judges first judge, its whole lens — never reaches the
+   model. *)
 let antigravity_prompt ~runtime_id ~system_prompt ~prompt =
-  let label key =
-    match String.trim (Prompt_registry.get_prompt key) with
-    | "" ->
-      Error (provider_error ~runtime_id (Printf.sprintf "missing prompt asset %s" key))
-    | text -> Ok (text ^ "\n")
-  in
   match system_prompt with
   | None -> Ok prompt
   | Some instructions ->
-    Result.bind (label Prompt_names.keeper_antigravity_system_instructions_label)
-      (fun system_label ->
+    Result.map_error
+      (fun detail -> provider_error ~runtime_id detail)
+      (Result.bind (Antigravity_input_frame.system_instructions_label ()) (fun system_label ->
          Result.map
            (fun goal_label ->
-              String.concat "\n\n"
+              String.concat Antigravity_input_frame.section_separator
                 [ system_label ^ instructions; goal_label ^ prompt ])
-           (label Prompt_names.keeper_antigravity_current_goal_label))
+           (Antigravity_input_frame.current_goal_label ())))
 ;;
 
 type image_input = { media_type : string; base64_data : string }
@@ -204,7 +199,7 @@ let failure_detail ~runtime_id = function
 
 (* 세 어댑터 모두 자기 [Timeout] 갈래를 갖는다. 그것을 문자열로 접으면 Fusion
    증거에서 "CLI 가 시간 안에 답을 못 냈다" 가 provider 실패와 구분되지 않는다 —
-   HTTP 쪽 [Fusion_panel.outcome_of_result] 가 두 timeout 갈래를 [Timeout] 으로
+   HTTP 쪽 [Fusion_panel.attempt_of_result] 가 두 timeout 갈래를 [Timeout] 으로
    올리는 것과 같은 규칙을 여기에도 적용한다. *)
 let panel_failure ~runtime_id = function
   | Setup_failure failure -> failure
@@ -219,9 +214,10 @@ let panel_failure ~runtime_id = function
 
 let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let ( let* ) = Result.bind in
-  (* Both adapters take the system prompt as an option and treat [None] as
-     "client default". An empty group prompt is not an instruction, so it
-     becomes [None] rather than an empty instruction the client must obey. *)
+  (* The Codex and Claude adapters take the system prompt as an option and
+     treat [None] as "client default"; Antigravity gets it framed into the
+     input. An empty group prompt is not an instruction, so it becomes [None]
+     rather than an empty instruction the client must obey. *)
   let system_prompt =
     match String.trim system_prompt with "" -> None | text -> Some text
   in

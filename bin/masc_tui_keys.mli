@@ -39,6 +39,10 @@ val voice_listen_key : string
 val roster_toggle_key : string
 (** Ctrl-B, as the roster pane's title names it. *)
 
+val keeper_calls_key : string
+(** [t] on a keeper: the Keeper Calls view, where a call's served input and
+    output are drawn whole. *)
+
 val context_inspector_key : string
 val context_inspector_label : string
 (** Ctrl-X: the byte the chat matches and the name the context header prints

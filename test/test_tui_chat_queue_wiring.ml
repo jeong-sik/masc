@@ -54,6 +54,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
   ; me_journal = []
+  ; me_memory_pass = Masc_tui_message_layout.No_pass
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
@@ -80,6 +81,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = memory_summary
   ; me_journal = []
+  ; me_memory_pass = Masc_tui_message_layout.No_pass
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
@@ -1711,7 +1713,84 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
       (List.exists
          (Astring.String.is_infix
             ~affix:"artifact sha256:9f3a12c4d5e6\xe2\x80\xa6 \xc2\xb7 48213 bytes")
-         plain))
+         plain);
+    (* A long output keeps its head; the rest is a count and where to read
+       it whole. *)
+    let printed = String.concat "\\n" (List.init 30 (Printf.sprintf "row %02d")) in
+    let plain =
+      draw
+        (Printf.sprintf
+           {|{"ok":true,"status":{"kind":"exit","code":0},"output":"%s","typed":true,"execution_time_ms":5}|}
+           printed)
+    in
+    let screen = String.concat "\n" plain in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool ("the head is drawn:\n" ^ screen) true (has "row 07");
+    check bool "the rest is not" false (has "row 08");
+    check bool "the fold says how much and where" true
+      (has "\xe2\x80\xa6 +22 lines \xc2\xb7 Keeper Calls (t)"))
+;;
+
+(* A Librarian that keeps failing is named once on the header while it
+   lasts; in summary mode the failures are not rows between the turns. A
+   commit after them ends the run, and the header says nothing. *)
+let test_a_failing_librarian_is_named_on_the_header () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 140);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    let failed at =
+      { (chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+           ~memory_summary:"Librarian failed \xc2\xb7 exact_execution_failure"
+           ~text:"Librarian failed \xc2\xb7 exact_execution_failure" ~at ())
+        with Tui_types.me_memory_pass =
+               Masc_tui_message_layout.Pass_failed { kind = "exact_execution_failure" } }
+    in
+    let committed at =
+      { (chat_entry ~request_id:"" ~role:Tui_types.Message_memory
+           ~memory_summary:"Librarian \xc2\xb7 revision 9" ~text:"revision 9" ~at ())
+        with Tui_types.me_memory_pass = Masc_tui_message_layout.Pass_committed }
+    in
+    let said at text =
+      chat_entry ~request_id:(Printf.sprintf "tui-%.0f" at) ~role:Tui_types.Message_keeper
+        ~text ~at ()
+    in
+    let draw history =
+      state.msg_history <- history;
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines
+    in
+    let at = 1_790_053_724. in
+    let plain =
+      draw
+        [ committed at; said (at +. 10.) "FIRST_TURN"; failed (at +. 20.)
+        ; said (at +. 30.) "SECOND_TURN"; failed (at +. 40.) ]
+    in
+    let screen = String.concat "\n" plain in
+    let saying affix = List.filter (Astring.String.is_infix ~affix) plain in
+    check int ("the header names the run once:\n" ^ screen) 1
+      (List.length (saying "Librarian failing \xc3\x972 since"));
+    check bool "with the server's word for how" true
+      (List.exists (Astring.String.is_infix ~affix:"exact_execution_failure")
+         (saying "Librarian failing"));
+    check (list string) "no failure is a row between the turns" []
+      (saying "Librarian failed");
+    let plain =
+      draw [ failed at; said (at +. 10.) "FIRST_TURN"; committed (at +. 20.) ]
+    in
+    check (list string) "a commit ends the run" []
+      (List.filter (Astring.String.is_infix ~affix:"Librarian failing") plain))
 ;;
 
 (* A committed Memory revision under journal:full: the one-line summary, then
@@ -3628,6 +3707,8 @@ let () =
             test_promoted_live_output_survives_settlement_and_replay
         ; test_case "a journal revision draws its facts in columns" `Quick
             test_a_journal_revision_draws_its_facts_in_columns
+        ; test_case "a failing librarian is named on the header" `Quick
+            test_a_failing_librarian_is_named_on_the_header
         ; test_case "a folded reasoning block is the count and the key" `Quick
             test_a_folded_reasoning_block_is_the_count_and_the_key
         ; test_case "an arrival reads behind a bar" `Quick

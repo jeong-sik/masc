@@ -21,4 +21,4 @@ let load ~base_path : (Fusion_policy.t, string) result =
          Error
            (Printf.sprintf
               "fusion config invalid: %s"
-              (String.concat "; " (List.map Fusion_config.show_config_error errs))))
+              (String.concat "; " (List.map Fusion_config.config_error_message errs))))

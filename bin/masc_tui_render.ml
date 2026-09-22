@@ -2776,7 +2776,7 @@ let render_planning_list (state : state) =
   box_bottom tail cols;
   Buffer.add_string tail
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
@@ -3403,7 +3403,7 @@ let render_planning_detail (state : state)
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints state.view));
+         (Masc_tui_keys.footer_hints ~detail_open:true state.view));
   finish_surface state ~clamped:(Planning_detail_scroll scroll)
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
 
@@ -3520,7 +3520,7 @@ let render_schedule_list (state : state) =
     (connection_badge state) in
 
   surface_chrome state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
-    ~hints:(Masc_tui_keys.footer_hints Schedules)
+    ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Schedules)
     ~body:(fun ~budget c ->
   (match state.schedules with
    | None ->
@@ -4073,7 +4073,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints Schedules));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true Schedules));
   finish_surface state ~clamped:(Schedule_detail_scroll scroll)
     ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols buf
 
@@ -4192,44 +4192,46 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
 let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ~now ~frame ~yolo ~paused ~health ~turn ~next_action ~keeper ~runtime =
   let status_color = keeper_action_color next_action in
-  (* A running turn takes the cell whole -- both the mark and the word.
-     Split, the mark and the word can answer from different readings and
-     the row argues with itself.
+  (* A keeper with an open turn draws the turn's mark in the HEALTH cell. The
+     mark moves while the turn is being worked: it is the one thing on the
+     screen that is changing as the reader looks at it.
 
-     The word is the elapsed time rather than "answering". The mark already
-     says it is answering, and it says so by moving; spending eight columns
-     to repeat that leaves no room for the fact the mark cannot carry, which
-     is how long. Eight seconds and forty minutes are different situations
-     and they used to be the same row. It also ends the truncation: this
-     column is cut for "healthy", and "answering" never fit in it.
+     The word beside it is how long the turn has run. The moving mark already
+     says the keeper is answering, and eight seconds and forty minutes are
+     different situations. It also fits: this column is cut for "healthy",
+     and "answering" does not.
+
+     A failing keeper keeps its health word. Its keepalive is running the
+     next attempt, so the mark still moves, but the roster header counts it
+     as failing and its row is where the reader looks for it. Beside the
+     elapsed time it would draw exactly what a working keeper draws. The
+     colour stays the one its next action gives it, as on its idle row.
+
+     A turn whose keeper the health reading calls offline was never closed
+     and nothing works it: the mark stops, the elapsed stays -- how long it
+     has been open is the fact -- and the cell takes the failure colour.
 
      Idle and unavailable rows keep the health word -- unavailable is the
      owner lookup failing, which the health column describes better than a
      blank would. *)
-  (* A turn record that outlives the process it belongs to. The summary above
-     this table read "2 offline / not running" while
-     one listed keeper's own row drew a turning mark and a climbing clock: its turn
-     had started and never been closed, and the process behind it had gone.
-     The row that most needed reading looked like the healthiest kind.
-
-     The elapsed stays -- a turn open two minutes is the fact -- but the mark
-     stops. Motion here means work is progressing, and for a keeper the health
-     reading calls offline, nothing is. A failing keeper's keepalive still runs
-     its turns, so its open turn is being worked; whether it fails is known
-     only when it ends. *)
-  let turn_is_being_worked =
-    match Option.map Tui_decode.keeper_health_reading health with
-    | Some Tui_decode.Health_offline -> false
-    | Some (Tui_decode.Health_running | Tui_decode.Health_idle | Tui_decode.Health_failing)
-    | None -> true
-  in
   let glyph, status_word, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
-    | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) ->
-      ( Masc_tui_answering.running_glyph
-          ~frame:(if turn_is_being_worked then frame else -1)
-      , Masc_tui_answering.elapsed_text ~now started_at_unix
-      , if turn_is_being_worked then (Theme.info ()) else (Theme.bad ()) )
+    | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) -> (
+        let elapsed = Masc_tui_answering.elapsed_text ~now started_at_unix in
+        match
+          Masc_tui_keeper_mark.open_turn
+            (Option.map Tui_decode.keeper_health_reading health)
+        with
+        | Masc_tui_keeper_mark.Worked ->
+            (Masc_tui_answering.running_glyph ~frame, elapsed, Theme.info ())
+        | Masc_tui_keeper_mark.Worked_while_failing ->
+            ( Masc_tui_answering.running_glyph ~frame
+            , keeper_health_deviation_word health
+            , status_color )
+        | Masc_tui_keeper_mark.Left_open ->
+            ( Masc_tui_answering.running_glyph ~frame:(-1)
+            , elapsed
+            , Theme.bad () ))
     | Some Tui_decode.Keeper_turn_idle
     | Some (Tui_decode.Keeper_turn_unavailable _)
     | None ->
@@ -6348,16 +6350,6 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
      row it says the coverage, and on an unattached one it says the service
      is already in use somewhere, which is the row an operator is most likely
      to have lost track of. *)
-  let switch_of id =
-    List.find_map
-      (function
-        | Masc_tui_types.Identity_declared
-            { idp_id; idp_enabled; idp_switch_problem; _ }
-          when String.equal idp_id id -> Some (idp_enabled, idp_switch_problem)
-        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _
-          -> None)
-      providers
-  in
   let also_on id =
     List.find_map
       (function
@@ -6372,24 +6364,22 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     List.mapi
       (fun index (id, label) ->
         (* Attached-and-offering-nothing is a third state. Reading it as "not
-           attached" would tell an operator to consent again for no reason. *)
+           attached" would tell an operator to consent again for no reason.
+           The reading itself is [Masc_tui_types.identity_row_state], which
+           is also what the summary above the list counts, so the line and
+           the rows cannot disagree about what this Keeper holds. *)
         let row_state =
-          match tools_of id with
-          | None -> Ansi.dim ^ "not attached" ^ Ansi.reset
-          | Some [] -> Ansi.dim ^ "attached, no tools" ^ Ansi.reset
-          | Some names -> (
-              (* The switch outranks the tool count: a service an operator
-                 turned off is handing this keeper nothing, however many
-                 tools its catalog names, and an unreadable switch store
-                 must not render as on. *)
-              match switch_of id with
-              | Some (_, Some _) ->
-                  (Theme.bad ()) ^ "switch unreadable" ^ Ansi.reset
-              | Some (Some false, None) ->
-                  (Theme.warn ()) ^ "off" ^ Ansi.reset
-              | Some ((Some true | None), None) | None ->
-                  Printf.sprintf "%s%s%s" (Theme.ok ())
-                    (Masc_tui_message_layout.count_noun (List.length names) "tool") Ansi.reset)
+          match Masc_tui_types.identity_row_state ~providers ~id with
+          | Masc_tui_types.Identity_not_attached ->
+              Ansi.dim ^ "not attached" ^ Ansi.reset
+          | Identity_attached_without_tools ->
+              Ansi.dim ^ "attached, no tools" ^ Ansi.reset
+          | Identity_switch_unreadable ->
+              (Theme.bad ()) ^ "switch unreadable" ^ Ansi.reset
+          | Identity_switched_off -> (Theme.warn ()) ^ "off" ^ Ansi.reset
+          | Identity_attached tools ->
+              Printf.sprintf "%s%s%s" (Theme.ok ())
+                (Masc_tui_message_layout.count_noun tools "tool") Ansi.reset
         in
         (* The row the arrows are on is marked rather than merely numbered:
            past nine the number is no longer a key an operator can press,
@@ -6507,6 +6497,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   if numbered = [] && rejected = [] && state.identity_filter <> None then
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
+      ~summary:(Masc_tui_types.identity_summary ~providers ~query)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
@@ -6516,6 +6507,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   else
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
+      ~summary:(Masc_tui_types.identity_summary ~providers ~query)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
@@ -8025,6 +8017,11 @@ let render_verification_list (state : state) =
             ^ Render_schedule.verification_row ~submitter_width ~title_width
                 { Render_schedule.vrow_task =
                     Terminal_text.single_line r.vr_task_id
+                ; vrow_verdict =
+                    (match r.vr_intent with
+                     | Some intent ->
+                         Masc_domain.verification_intent_to_string intent
+                     | None -> "")
                 ; vrow_submitted_by =
                     Terminal_text.single_line r.vr_submitted_by
                 ; vrow_evidence = evidence
@@ -8126,7 +8123,7 @@ let render_verification_list (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
 let verification_detail_lines ~width
@@ -8159,6 +8156,12 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
+  ; field "Waits on"
+      (match request.vr_intent with
+       | Some Masc_domain.Cancel_task ->
+           "cancel -- only an operator's verdict clears it"
+       | Some Masc_domain.Complete_task -> "complete"
+       | None -> "not joined (history view)")
     (* In the terminal's zone, like every other Created on a detail. This
        one printed the server's RFC 3339 text, offset and all, under a header
        clock in local time. *)
@@ -8310,7 +8313,9 @@ let render_verification_detail (state : state) request =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf "%s  %s" (Masc_tui_keys.footer_hints state.view) position));
+         (Printf.sprintf "%s  %s"
+            (Masc_tui_keys.footer_hints ~detail_open:true state.view)
+            position));
   finish_surface state
     ~clamped:(Verification_detail_scroll scroll)
     ~surface_key:"verification-detail" ~rows:terminal_rows ~cols buf
@@ -14263,24 +14268,11 @@ let render_themes (state : state) =
        ~hints:(Masc_tui_keys.footer_hints_config ~pane:state.config_pane));
   finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
 
-(* The model knobs sit in different tables -- [reasoning-effort] and
-   [temperature] under [models.NAME], [max-tokens] under
-   [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
-   bottom never puts them side by side. On 2026-08-29 nine of ten
-   ollama_cloud bindings carried neither; a request with no reasoning_effort
-   has Ollama turn thinking on by itself, and one keeper spent a turn
-   producing 2,000 characters of reasoning and no answer. This pane is the
-   same source the runtime.toml pane shows, arranged so a missing knob is a
-   column and not an absence.
-
-   Read-only. Editing lands in the runtime.toml pane next door, which already
-   has the preview-checked write path. *)
 (* Where the config file being read lives, for the title row beside the strip
-   that already names the file. Said from the server's masc root: the prefix is
-   the same for every screen in the session, the Config pane's identity row
-   names it, and spending it here cut the reading in the middle -- the row read
-   "/Users/d\xe2\x80\xa6onfig/runtime.toml". Until the server has said where
-   its root is, the whole path is the only honest reading. *)
+   that already names the file. Said from the server's masc root, which is the
+   same for every screen in the session and named on the Config pane's identity
+   row. Until the server has said where its root is, the whole path is the only
+   honest reading. *)
 let config_path_note (state : state) =
   match state.runtime_config_view with
   | Some reading ->
@@ -14295,6 +14287,18 @@ let config_path_note (state : state) =
   | None ->
       Ansi.dim ^ title_missing_reading ~error:state.runtime_config_view_error ^ Ansi.reset
 
+(* The model knobs sit in different tables -- [reasoning-effort] and
+   [temperature] under [models.NAME], [max-tokens] under
+   [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
+   bottom never puts them side by side. On 2026-08-29 nine of ten
+   ollama_cloud bindings carried neither; a request with no reasoning_effort
+   has Ollama turn thinking on by itself, and one keeper spent a turn
+   producing 2,000 characters of reasoning and no answer. This pane is the
+   same source the runtime.toml pane shows, arranged so a missing knob is a
+   column and not an absence.
+
+   Read-only. Editing lands in the runtime.toml pane next door, which already
+   has the preview-checked write path. *)
 let render_config_models (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in

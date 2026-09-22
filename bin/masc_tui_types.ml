@@ -2232,6 +2232,79 @@ let identity_connectable ?(query = "") providers =
       | Identity_unreadable _ -> None)
     providers
 
+(** What the Identity pane says about one service.
+
+    The rows and the summary above them read this one function, so the line
+    and the list cannot disagree about what this Keeper holds. *)
+type identity_row_state =
+  | Identity_not_attached
+  | Identity_attached_without_tools
+  | Identity_switch_unreadable
+  | Identity_switched_off
+  | Identity_attached of int  (** how many tools it offers *)
+
+(* The pane's precedence: a service offering nothing says so whatever its
+   switch says, then a switch that cannot be read outranks the switch's
+   value, which outranks the tool count -- a service an operator turned off
+   hands this Keeper nothing, however many tools its catalog names. *)
+let identity_row_state ~providers ~id =
+  let readings =
+    List.find_map
+      (function
+        | Identity_declared { idp_id; idp_tools; idp_enabled; idp_switch_problem; _ }
+          when String.equal idp_id id ->
+          Some (idp_tools, idp_enabled, idp_switch_problem)
+        | Identity_declared _ | Identity_unreadable _ -> None)
+      providers
+  in
+  match readings with
+  | None | Some (None, _, _) -> Identity_not_attached
+  | Some (Some [], _, _) -> Identity_attached_without_tools
+  | Some (Some _, _, Some _) -> Identity_switch_unreadable
+  | Some (Some _, Some false, None) -> Identity_switched_off
+  | Some (Some tools, (Some true | None), None) ->
+    Identity_attached (List.length tools)
+
+(** The line above the provider list: how many services it draws, out of how
+    many this Keeper has, and what the drawn ones report. The states a row
+    already spells one by one are summed here only where one holds: a pane of
+    nothing but unattached services says so by having no tally to print. *)
+let identity_summary ~providers ~query =
+  let shown = identity_connectable ~query providers in
+  let total = List.length (identity_connectable ~query:"" providers) in
+  let states =
+    List.map (fun (id, _) -> identity_row_state ~providers ~id) shown
+  in
+  let count wanted =
+    List.length (List.filter (fun state -> state = wanted) states)
+  in
+  let attached =
+    List.length
+      (List.filter
+         (function Identity_attached _ -> true | _ -> false)
+         states)
+  in
+  let parts =
+    List.filter_map
+      (fun (label, n) ->
+        if n > 0 then Some (Masc_tui_message_layout.count_noun n label) else None)
+      [ ("attached", attached)
+      ; ("switched off", count Identity_switched_off)
+      ; ("attached with no tools", count Identity_attached_without_tools)
+      ; ("with an unreadable switch", count Identity_switch_unreadable)
+      ]
+  in
+  let drawn = List.length shown in
+  let head =
+    if drawn = total then Masc_tui_message_layout.count_noun total "service"
+    else
+      Printf.sprintf "%d of %s" drawn
+        (Masc_tui_message_layout.count_noun total "service")
+  in
+  match parts with
+  | [] -> "  " ^ head
+  | parts -> "  " ^ head ^ " \xc2\xb7 " ^ String.concat " \xc2\xb7 " parts
+
 (** The lines the Identity pane prints above the provider rows.
 
     Here rather than in the renderer because the key handler has to know how
@@ -2327,10 +2400,10 @@ let identity_filter_rows ~providers filter =
    before the hint starts, so the title is cut inside "Automation" and the
    keys are never drawn. Until that row is fixed this sentence is the only
    place an operator can read them -- #35539. *)
-let identity_preamble ~keeper ~notice =
+let identity_preamble ~keeper ~summary ~notice =
   ("  Move with arrows, enter to connect " ^ keeper
    ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
-  :: "" :: notice
+  :: summary :: "" :: notice
 
 (** Which pane line the provider at [index] is drawn on.
 
@@ -2338,8 +2411,8 @@ let identity_preamble ~keeper ~notice =
     just made belongs where the operator is looking rather than below
     fifty-odd rows they would have to scroll past. It moves the list down,
     so the row a keypress scrolls to moves with it. *)
-let identity_provider_line ~notice ~index =
-  List.length (identity_preamble ~keeper:"" ~notice) + index
+let identity_provider_line ~summary ~notice ~index =
+  List.length (identity_preamble ~keeper:"" ~summary ~notice) + index
 
 (** The cursor held inside the list it names. A cursor left behind by a
     shorter list answers from the last row rather than from one that is no
@@ -2537,11 +2610,24 @@ let nothing =
     needs_asks = false;
   }
 
-(* Each datum is read by the one surface that draws it, so a refresh spends a
-   request and a decode on it only while that surface is open. The planning and
+(* Each datum is read by the surfaces that draw it, so a refresh spends a
+   request and a decode on it only while one of them is open. The planning and
    system-log payloads are tens of kilobytes each, and fetching them behind
-   every other surface cost that on every tick for rows nobody was looking at. *)
-let surface_needs : surface -> surface_needs = function
+   every other surface cost that on every tick for rows nobody was looking at.
+
+   [keeper_pane_drawn] is the reading a surface cannot answer for itself: the
+   Keeper pane on the right of the screen draws a health mark per Keeper and
+   is up on every surface but Activity, and behind a modal on none of them.
+   Read from the surface alone, its marks were the unread dash on every
+   screen but Keepers and Metrics, under a count taken from the event feed
+   instead of the roster. The roster is 8.4 KB and answers in about a
+   millisecond, which is what makes this affordable where planning is not. *)
+let rec surface_needs ~keeper_pane_drawn surface =
+  let needs = surface_needs_of_surface surface in
+  if keeper_pane_drawn then { needs with needs_keeper_roster = true }
+  else needs
+
+and surface_needs_of_surface : surface -> surface_needs = function
   | Overview -> { nothing with needs_transport = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -2598,8 +2684,9 @@ let surface_needs_delta ~previous ~next =
 
 let surface_needs_any needs = needs <> nothing
 
-let full_refresh_needs ~scoped_refresh_inflight surface =
-  if scoped_refresh_inflight then nothing else surface_needs surface
+let full_refresh_needs ~scoped_refresh_inflight ~keeper_pane_drawn surface =
+  if scoped_refresh_inflight then nothing
+  else surface_needs ~keeper_pane_drawn surface
 
 type full_refresh_intent = Cadence | Revalidate
 
@@ -6568,10 +6655,11 @@ let held_turn_of_log turn_log =
 
 (* The rows a turn's log draws itself: the keeper's words, its tool blocks
    (with the durable outcome and duration folded in by
-   [enrich_held_logs_from_rows]), its skills, and its reasoning when it has
-   any. What a person said, what the server said about the turn (gate rows),
-   what the pane said, and a failure are drawn from the committed rows whether
-   or not a log holds the turn -- the log draws none of them. *)
+   [enrich_held_logs_from_rows]), its skills (with the exact delivery record
+   folded in by the same pass), and its reasoning when it has any. What a
+   person said, what the server said about the turn (gate rows), what the
+   pane said, and a failure are drawn from the committed rows whether or not
+   a log holds the turn -- the log draws none of them. *)
 let log_draws_row (held : held_turn) (row : msg_entry) =
   String.equal row.me_request_id held.ht_request_id
   &&
@@ -6596,11 +6684,14 @@ let rows_the_logs_do_not_draw ~held rows =
         rows
 ;;
 
-(* What the durable transcript knows about a held turn's calls that the wire
-   did not carry -- outcome and duration -- folded into the log's transcript
-   by execution id, so the block a held turn is drawn from says what the
-   loaded row it replaces would have said. Run where loaded rows arrive and
-   where a journal log is held. *)
+(* What the durable transcript knows about a held turn that the wire did not
+   carry, folded into the log's transcript by the identity both records
+   share: a call's outcome and duration by its execution id, and a skill
+   read's exact delivery record by the read call's tool-use id. The block a
+   held turn is drawn from then says what the loaded rows it replaces said
+   about those calls and reads. A skill evidence gap on a loaded row
+   (missing, unreadable) names no read and is not carried over. Run where
+   loaded rows arrive and where a journal log is held. *)
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
@@ -6621,6 +6712,17 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
                   | None -> ())
                 block.Masc_tui_keeper_chat_transcript.activities
           | Some _ | None -> ())
+        rows;
+      (* The stream has no event for a delivery, so without this the log's
+         skill row stays at what the read call alone says while the loaded
+         row that knew better is left out of the timeline (#36882). *)
+      List.iter
+        (fun (row : msg_entry) ->
+          if String.equal row.me_request_id request_id then
+            List.iter
+              (Masc_tui_keeper_chat_transcript.note_skill_activity
+                 turn_log.tl_transcript)
+              row.me_skill_block)
         rows)
     (List.filter turn_log_holds_the_turn (settled_logs_for_keeper state keeper_name))
 ;;

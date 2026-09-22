@@ -346,10 +346,10 @@ let memory_updated_width = 16
 let memory_facts_width = 5
 let memory_size_width = 9
 let memory_source_width = 20
-(* [+12 -23] is 7 cells, and a cell that overruns is cut in the middle: the
-   column drew [+\xe2\x80\xa6 -23] and the added count was gone. Measured on the
-   live fleet (2026-09-22): the widest pair was [+11 -16]. Three digits each
-   keeps a large revision whole. *)
+(* The column carries a pair of counts, and a cell that overruns folds in the
+   middle, which takes the first count. Three digits each keeps a large
+   revision whole; the widest pair on the live fleet (2026-09-22) was
+   [+11 -16]. *)
 let memory_delta_width = 9
 
 type memory_columns = {
@@ -624,13 +624,20 @@ let system_log_row ~styles ~level_style ~message_width values =
    capitals.
 
    The last column carries the task's own title, which is what a verification
-   request asks for: that this task be verified. *)
+   request asks for: that this task be verified.
+
+   VERDICT says which verdict the row waits on. A cancellation waits on this
+   queue beside completions and only an operator's verdict clears it; without
+   the column the two read as the same row and seven cancellations sat for
+   three days. *)
 let verification_task_width = 14
+let verification_verdict_width = String.length "complete"
 let verification_evidence_width = 9
 let verification_minimum_title_width = 16
 
 type verification_row_values = {
   vrow_task : string;
+  vrow_verdict : string;
   vrow_submitted_by : string;
   vrow_evidence : string;
   vrow_title : string;
@@ -638,6 +645,7 @@ type verification_row_values = {
 
 let verification_no_values =
   { vrow_task = ""
+  ; vrow_verdict = ""
   ; vrow_submitted_by = ""
   ; vrow_evidence = ""
   ; vrow_title = ""
@@ -645,6 +653,8 @@ let verification_no_values =
 
 let verification_cells ~submitter_width ~title_width values =
   [ Table.cell ~header:"TASK" ~width:verification_task_width values.vrow_task
+  ; Table.cell ~header:"VERDICT" ~width:verification_verdict_width
+      values.vrow_verdict
   ; Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
       values.vrow_submitted_by
   ; Table.cell ~header:"EVIDENCE" ~width:verification_evidence_width

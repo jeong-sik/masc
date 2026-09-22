@@ -234,6 +234,34 @@ v0.36.0 태그(09-22 12:02Z) 뒤에 병합된 다섯 PR(#37855·#37875·#37867·
 (세션 A 발견, [#37925](https://github.com/jeong-sik/masc/issues/37925)). #37918 이 `[Unreleased]` 절을 만든 뒤 옮긴다.
 이 기록의 PR 넷(#37894·#37904·#37908·#37913)은 CHANGELOG 를 건드리지 않았고, 항목은 `[Unreleased]` 가 생긴 뒤에 더한다.
 
+## 전이 감사 (Task·Goal·Access Control·Multi Lane, 09-22 UTC 하루)
+
+하위 에이전트가 시스템 로그(167,050줄)·이벤트 원장·감사 원장을 세고 코드 위치를 읽었다. 빌드 없음.
+전이 판정 함수는 넷 다 `_ ->` 없이 쌍을 전부 적는다: Task `Workspace_task_lifecycle.decide`
+(`lib/workspace/workspace_task_lifecycle.ml:56-198`, action 6×status 6), Goal `Goal_phase.decide_transition`
+(`lib/goal/goal_phase.ml:149-190`, 30쌍), HTTP 인증 오류→status `server_auth.ml:713-742`, lane walk
+`keeper_turn_driver_try_runtime.ml`·`keeper_runtime_failure_route.ml`(둘 다 `_ ->` 0). 관측된 전이는 모두 명시 arm 이 있다.
+
+- Task: 전이 92(submit 29·start 21·claim 21·verdict approved 14·release 5·cancel 2), verdict rejected 15, 실패 7.
+  실패 중 ERROR 2 는 `board_posts.jsonl` 1행 손상(04:29~05:11Z, #37900 창) 으로 verification record 를 못 써서
+  상태를 안 옮긴 것(의도된 순서, `workspace_task_transitions.ml:371-383`). **결함**: `awaiting_verification` 7건이
+  전부 `intent=cancel` 이고 운영자만 승인할 수 있는데(`workspace_task_lifecycle.ml:281-290`) TUI 검증 행에
+  intent 가 없다(`dashboard_verification.ml:209-220`, `tui_decode.mli:1127-1135`). authority 는 53분마다 INFO 한 줄
+  (164줄/일). 가장 오래된 건 09-19 → #37965.
+- Goal: 전이 9(→Verifying 3, refuted→Executing 3, →Dropped 3)+created 1. 결함 없음. drop 에 evidence_refs 를 붙인
+  `validation_error` 2건은 도구 사용 오류. TUI 발 전이(`POST /api/v1/tools/masc_goal_transition`)는 서버 로그 줄이 없다.
+- Access Control: gate_allowed 11,614(전부 `workspace_always_allow`, 라이브 `gate/mode.json` = always_allow), 거절 0.
+  human approve `resolved` 19줄은 **같은 승인 하나**(sangsu connector_post)를 전달 재생마다 다시 쓴 것 — 클릭 1회,
+  부팅 21회 → #37964. HTTP actor auth 거절은 로그 자체가 없어 0건인지 알 수 없다(`server_auth.ml:858-867` 무로그;
+  ocaml-agent-ic 가 `test/test_server_auth_refusal_log.ml` 을 쓰는 중). 열린 기본값 둘은 설정 갈래다:
+  auth 꺼짐→Admin, 토큰 없음+require_token=false→Worker (`lib/auth/auth.ml:209-234`).
+- Multi Lane: `keeper cycle FAILED` 206 중 같은 turn 안 walk 56(step 81), 다음 cycle 힌트 33, 이미지 입력 reroute 64.
+  walk 원인: codex usage limit 42, prompt-too-long 26(analyst), 429 4, timeout 5. **결함**: walk 뒤 terminal reason 이
+  마지막 후보의 일시 오류다 — analyst 24 turn 의 첫 원인은 1.8M 토큰 프롬프트(결정적)인데 17건이 "Rate limited" 로
+  기록됐다 → #37963. `Generation_repeated` 는 route 가 Rotate_now 인데 walk arm 이 없어 다음 cycle 힌트로만
+  간다(msx 30건, `keeper_turn_driver.ml:1075-1096`). 성공한 walk 는 `keeper cycle OK` 줄에 attempts 가 없어 셀 수 없다.
+- 공통: keeper 14개의 `event-queue-v19.json` 해독 실패는 전부 04:29:43~04:42:11Z 창 안이다(#37900). 그 뒤 0.
+
 ## 아직 판정하지 못한 것
 
 - Terminal-Bench 4.0 전체 실행: 09-22 기록대로 GPU(H100) 3개 task 와 CPU 16개·메모리 16 GiB 를
@@ -252,8 +280,7 @@ v0.36.0 태그(09-22 12:02Z) 뒤에 병합된 다섯 PR(#37855·#37875·#37867·
   벤치 keeper 는 `render_configs.py` 가 만든 모델 행 하나에 묶이고 `[runtime.lanes]` 가 없어서,
   "다음 후보는 다른 모델이어야 한다" 는 거절(`error.ml:173`)이 나오면 trial 이 그대로 실패한다.
   Runtime Candidate Order 는 벤치 arm 어느 것도 지나지 않는다(#37952).
-- HITL·Access Control·Multi Lane·Schedule: 로그의 오류 모양만 봤다(위 "결함 아님" 셋).
-  실제 전이·권한 거절·취소 경로는 이번에 읽지 않았다.
+- Schedule: 로그의 오류 모양만 봤다. 취소 경로는 읽지 않았다. HITL 의 사람 거절(reject)은 오늘 0건이라 경로를 못 봤다.
 - Skills 재생성: 09-19 기록의 "자동 생산 경로 미구현"(#37633) 이후 새 producer 를 찾지 못했다.
 - TUI 배선: 이 주에 Memory/Keeper 화면에 더해진 키 세 묶음(연속성 밀림, 요약 진행 관측, JEV 준비 상태)은
   서버 writer 와 TUI reader 가 file:line 단위로 짝이 맞고, reader 만 있거나 writer 만 있는 키는 없었다

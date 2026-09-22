@@ -519,24 +519,7 @@ let carried_start_range
       ( Runtime_model_input_tail_window.atom_opening_digest messages
       , snd (Runtime_model_input_tail_window.annotate messages) ))
   in
-  Option.iter
-    (fun (unreadable : Keeper_carried_front.unreadable_records) ->
-       Log.Keeper.warn
-         ~keeper_name
-         "model input carried range seed read skipped unreadable turn records \
-          runtime=%s unreadable=%d first_reason=%s"
-         runtime_id
-         unreadable.Keeper_carried_front.count
-         unreadable.Keeper_carried_front.first_reason)
-    seed_read.Keeper_carried_front.unreadable;
-  Option.iter
-    (fun detail ->
-       Log.Keeper.warn
-         ~keeper_name
-         "model input carried range seed read refused the turn-boundary store runtime=%s detail=%s"
-         runtime_id
-         detail)
-    seed_read.Keeper_carried_front.boundary_error;
+  Keeper_carried_front.warn_seed_read_failures ~keeper_name ~runtime_id seed_read;
   let seeded_first_atom =
     match seed_read.Keeper_carried_front.seed with
     | None -> None

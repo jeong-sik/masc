@@ -542,6 +542,29 @@ let count_applications_with_exact_positional_identifier_in_value_binding
     ~arguments_match
 ;;
 
+(* Whether [callee] is called in [binding_name] with [label] given at all,
+   whatever value it carries. The identifier and constructor matchers below
+   cannot stand in: a labelled [true]/[false] is a constructor, and an
+   optional argument that a caller simply omits is exactly what this is for --
+   the call still compiles, so only a check like this one sees the omission. *)
+let count_applications_with_labelled_argument_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~label
+  =
+  let arguments_match args =
+    List.exists
+      (fun (argument_label, _) ->
+        match argument_label with
+        | Asttypes.Labelled name -> String.equal name label
+        | Asttypes.Nolabel | Asttypes.Optional _ -> false)
+      args
+  in
+  count_exact_applications_in_value_binding ~module_path ~binding_name ~callee
+    ~arguments_match
+;;
+
 let count_applications_with_exact_identifier_and_constructor_in_value_binding
       ~module_path
       ~binding_name

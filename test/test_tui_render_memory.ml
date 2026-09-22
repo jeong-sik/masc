@@ -131,6 +131,61 @@ let test_detail_lines () =
     (contains "Revised from 0" history)
 ;;
 
+(* #37017: a claim written as paragraphs and a list used to reach the pane as
+   one run with a printed \x0A at every break, cut mid-word at the edge. *)
+let multi_line_claim =
+  "The chat pane keeps the model's reply verbatim.\n\n**Why**:\n1. first reason\n\
+   2. second reason\x07 rings"
+
+let claim_rows lines =
+  List.map Masc_tui_theme.strip_sgr lines |> List.map String.trim
+
+let check_claim_rows ~what lines =
+  let rows = claim_rows lines in
+  check bool (what ^ ": no newline is printed as \\x0A") false
+    (List.exists (contains "\\x0A") rows);
+  check bool (what ^ ": each line of the claim is its own row") true
+    (List.mem "**Why**:" rows && List.mem "1. first reason" rows);
+  check bool (what ^ ": the paragraph break stays a blank row") true
+    (List.mem "" rows);
+  check bool (what ^ ": other control bytes are still escaped") true
+    (List.exists (contains "\\x07") rows);
+  List.iter
+    (fun line ->
+      check bool (what ^ ": row bounded at 40 cells") true
+        (Layout.display_width line <= 40))
+    lines;
+  List.iter
+    (fun word ->
+      check bool (what ^ ": " ^ word ^ " is not cut at the edge") true
+        (List.exists (contains word) rows))
+    [ "verbatim."; "reply"; "second" ]
+
+let test_detail_keeps_the_claim_line_breaks () =
+  let fact : Decode.memory_fact =
+    { mf_claim = multi_line_claim
+    ; mf_category = "rule"
+    ; mf_origin = "manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-lines-1"
+    ; mf_events = Decode.no_memory_fact_events
+    }
+  in
+  check_claim_rows ~what:"fact"
+    (Render_memory.memory_fact_detail_lines ~cols:40 (Types.Memory_row_fact fact));
+  let sfact : Decode.memory_source_fact =
+    { msf_claim = multi_line_claim
+    ; msf_first_seen = 100.0
+    ; msf_path = "config/runtime.toml"
+    ; msf_sha256 = "abc123sha"
+    }
+  in
+  check_claim_rows ~what:"source-bound fact"
+    (Render_memory.memory_fact_detail_lines ~cols:40
+       (Types.Memory_row_source_fact sfact))
+;;
+
 let test_detail_lines_source_and_invalidation () =
   let sfact : Decode.memory_source_fact =
     { msf_claim = "Config specifies runtime ports"
@@ -1014,6 +1069,8 @@ let () =
     ; ( "detail_lines"
       , [ test_case "detail_lines_bounded" `Quick test_detail_lines
         ; test_case "detail_lines_source_and_invalidation" `Quick test_detail_lines_source_and_invalidation
+        ; test_case "the detail keeps the claim's line breaks" `Quick
+            test_detail_keeps_the_claim_line_breaks
         ; test_case "every detail block starts its values in one column" `Quick
             test_every_detail_block_starts_its_values_in_one_column
         ] )

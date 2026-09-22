@@ -1739,7 +1739,7 @@ let approval_decision_unverified = function
   | Deny -> "Denial outcome unverified"
 
 type approval_observation = {
-  ao_generation: Approval.Flow.generation;
+  ao_ticket: Approval.Listing_order.ticket;
   ao_result: (approval_snapshot, string) result;
 }
 
@@ -1780,10 +1780,10 @@ type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
   | Refresh_server_booting of
       { identity : (Tui_decode.server_identity, string) result
-      ; (* The generation [start_http_refresh] reserved before the probe went
+      ; (* The ticket [start_http_refresh] took before the probe went
            out. Carried so the approvals panel learns why its rows are stale,
            the same way a failed refresh tells it. *)
-        approval_generation : Approval.Flow.generation option
+        approval_ticket : Approval.Listing_order.ticket option
       }
 
 type preset_sink =
@@ -1840,10 +1840,10 @@ type async_msg =
   | Voice_discarded of { keeper : string; reason : string }
   | Voice_failed of { keeper : string; error : string }
   | Http_refresh_done of http_refresh_outcome
-  | Http_refresh_failed of string * Approval.Flow.generation option
+  | Http_refresh_failed of string * Approval.Listing_order.ticket option
   | Http_scoped_refresh_done of http_scoped_surface_results
   | Http_scoped_refresh_failed of
-      string * Approval.Flow.generation option
+      string * Approval.Listing_order.ticket option
   | Board_post_refresh_done of
       Board_detail.request * (board_post * board_comment list, string) result
   | Board_post_refresh_failed of Board_detail.request * string
@@ -1851,7 +1851,8 @@ type async_msg =
       approval_item
       * approval_decision
       * (Approval.confirm_outcome, string) result
-      * approval_observation
+      * Approval.Flow.generation
+      * (approval_snapshot, string) result
   (* The answer that came back, and the list re-read behind it. The store
      settles on first write, so the response says what was actually recorded
      -- which may be someone else's answer. The first field is the human
@@ -2043,12 +2044,22 @@ type async_msg =
       (((string * string) list * (string * string) list), string) result
   | Keeper_tool_modes_loaded of
       ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
-      * Approval.Flow.generation
+      * Approval.Listing_order.ticket
       (** The stance listing replaces the whole yolo set, so a fetch that
           started before an operator armed a gate would put the pre-press
-          answer back. The generation says which flow the answer belongs to
-          and a stale one is dropped, the same guard the held-call listing
-          already rides. *)
+          answer back. This no longer rides a generation that every reader
+          advances for itself: that made two unrelated listings invalidate
+          each other, so a tool-modes fetch racing any unrelated background
+          poll (not only a press) was dropped even with no press ever armed
+          (#37461). The generation carried here is only ever advanced by
+          [Approval.Flow.begin_action] (a press), and is observed -- not
+          reserved -- at dispatch time, so [Approval.Flow.is_current] at
+          arrival answers exactly "did a press open since this fetch went
+          out", including one that opened and closed in between (#37609
+          review: a dispatch-time-only [action_inflight] check cannot see
+          that). The ticket also numbers the fetch: a full and a scoped
+          refresh each launch one, so two can be out at once and the older
+          answer may land last (task-1672). *)
   | Keeper_tool_mode_set of
       string
       * Masc.Keeper_tool_approval_mode.mode
@@ -3260,42 +3271,49 @@ let launch_gate_mode_set state ~mailbox ~lane ~mode =
         (Gate_mode_set (lane, mode, Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
-  (* [reserve_refresh] declines while the operator's own press is still in
-     flight: the answer on the way back would be the stance from before it. *)
-  let flow, reserved = Approval.Flow.reserve_refresh state.approval_flow in
-  state.approval_flow <- flow;
-  match reserved with
-  | None -> ()
-  | Some generation -> (
-      let host = server_peer_host in
-      let port = state.port in
-      let run () =
-        let result =
-          try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Keeper_tool_modes_loaded (result, generation));
-        (* Same trip, because both answer "what did somebody set about this
-           Keeper" and a detail pane showing one fresh and one stale would be
-           two different moments beside each other. No generation guard: this
-           listing has no operator press to be superseded by. *)
-        let settings =
-          try Masc_tui_loader.load_keeper_gate_settings ~host ~port with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
-        in
-        enqueue_async mailbox (Keeper_gate_settings_loaded settings)
+  (* Declines while the operator's own press is still in flight: the answer
+     on the way back would be the stance from before it. This checks the
+     press slot directly rather than reserving a shared refresh generation
+     -- see [Keeper_tool_modes_loaded]'s doc comment for why sharing that
+     counter with the background poll dropped answers no press ever
+     raced (#37461). The generation observed here (not reserved: observing
+     does not advance it) is carried to the arrival handler so a press that
+     opens after this check but before the answer lands is still caught
+     (#37609 review). *)
+  if Approval.Flow.action_inflight state.approval_flow then ()
+  else
+    let order, ticket =
+      Approval.Listing_order.dispatch state.tool_modes_order state.approval_flow
+    in
+    state.tool_modes_order <- order;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
       in
-      match Eio_context.get_switch_opt () with
-      | Some sw ->
-          Eio.Fiber.fork_daemon ~sw (fun () ->
-              run ();
-              `Stop_daemon)
-      | None ->
-          enqueue_async mailbox
-            (Keeper_tool_modes_loaded
-               (Error "Eio switch is unavailable", generation)))
+      enqueue_async mailbox (Keeper_tool_modes_loaded (result, ticket));
+      (* Same trip, because both answer "what did somebody set about this
+         Keeper" and a detail pane showing one fresh and one stale would be
+         two different moments beside each other. No generation guard: this
+         listing has no operator press to be superseded by. *)
+      let settings =
+        try Masc_tui_loader.load_keeper_gate_settings ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Keeper_gate_settings_loaded settings)
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw ->
+         Eio.Fiber.fork_daemon ~sw (fun () ->
+             run ();
+             `Stop_daemon)
+     | None ->
+         enqueue_async mailbox
+           (Keeper_tool_modes_loaded (Error "Eio switch is unavailable", ticket)))
 
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
   (* [begin_action] takes the newest generation, so a stance listing already
@@ -9094,36 +9112,46 @@ let seek_in_chat state ~target ~restart =
                  "/find %s \xe2\x80\x94 no older match; /find %s starts again"
                  state.msg_find state.msg_find))
 
-(* The Activity pane's toggle, shared by Ctrl-L and [/activity]. Measured
+(* The Activity pane's cycle, narrow to wide to hidden, shared by Ctrl-L
+   and [/activity]. Measured
    against the terminal's own width, not the width the surfaces lay out
    against: with the pane showing, that width is already short by the pane,
    and a threshold read from it could refuse to hide the very pane that
    narrowed it. *)
 let toggle_acting_pane (state : state) =
   let _rows, cols = Masc_tui_ansi.get_terminal_size () in
+  if Masc_tui_render.acting_pane_suppressed state then
+    (* The same rule as the width check below, for a surface the pane never
+       draws beside: a press here would move narrow to wide unseen, and the
+       reader would meet the change on the next surface. *)
+    Error "Activity pane is not drawn over this surface; preference unchanged"
+  else
   match
-    Masc_tui_acting_pane.toggle_hidden ~hidden:state.acting_pane_hidden ~cols
+    Masc_tui_acting_pane.next_layout ~layout:state.acting_pane_layout ~cols
   with
   | None ->
       Error
         (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
            Masc_tui_acting_pane.threshold_cols)
-  | Some hidden ->
-      state.acting_pane_hidden <- hidden;
+  | Some layout ->
+      state.acting_pane_layout <- layout;
       state.acting_pane_scroll <- 0;
-      Ok hidden
+      Ok layout
 
 (* Show one of the pane's tabs. Where the pane cannot show, the tab is not
    set either: a preference with no visible effect would surprise the
    reader after a later resize, the same rule the toggle follows. *)
 let show_acting_pane_tab (state : state) tab =
   let _rows, cols = Masc_tui_ansi.get_terminal_size () in
-  if not (Masc_tui_acting_pane.shown ~hidden:false ~cols) then
+  if Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols = 0 then
     Error
       (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
          Masc_tui_acting_pane.threshold_cols)
   else begin
-    state.acting_pane_hidden <- false;
+    (match state.acting_pane_layout with
+     | Masc_tui_acting_pane.Hidden ->
+         state.acting_pane_layout <- Masc_tui_acting_pane.Narrow
+     | Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide -> ());
     state.acting_pane_tab <- tab;
     state.acting_pane_scroll <- 0;
     Ok ()
@@ -9451,9 +9479,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Toggle_acting_pane ->
       Buffer.clear state.msg_input;
       (match toggle_acting_pane state with
-       | Ok hidden ->
+       | Ok layout ->
            notice ~role:Message_local
-             (if hidden then "Activity pane hidden" else "Activity pane shown")
+             ("Activity pane " ^ Masc_tui_acting_pane.layout_label layout)
        | Error reason -> notice ~role:Message_error reason)
   | Masc_tui_command.Show_acting_pane_tab tab ->
       Buffer.clear state.msg_input;
@@ -9471,7 +9499,32 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Acting_pane_tab_unknown word ->
       Buffer.clear state.msg_input;
       notice ~role:Message_error
-        (Printf.sprintf "/activity takes fleet or changes, not %s" word)
+        (Printf.sprintf "/activity takes fleet, changes or order, not %s" word)
+  | Masc_tui_command.Set_acting_pane_call_order which ->
+      Buffer.clear state.msg_input;
+      (* The calls are drawn on the fleet tab, so the order is set with that
+         tab up: turning an order the reader cannot see would surprise them
+         after the next switch, the rule [show_acting_pane_tab] keeps for
+         the tab itself. *)
+      (match show_acting_pane_tab state Masc_tui_acting_pane.Tab_fleet with
+       | Ok () ->
+           let order =
+             match which with
+             | `Next -> Masc_tui_acting_pane.next_call_order state.acting_pane_call_order
+             | `Newest -> Masc_tui_acting_pane.Newest_first
+             | `Oldest -> Masc_tui_acting_pane.Oldest_first
+             | `Longest -> Masc_tui_acting_pane.Longest_first
+             | `By_tool -> Masc_tui_acting_pane.By_tool
+           in
+           state.acting_pane_call_order <- order;
+           notice ~role:Message_local
+             ("Activity calls " ^ Masc_tui_acting_pane.call_order_label order)
+       | Error reason -> notice ~role:Message_error reason)
+  | Masc_tui_command.Acting_pane_call_order_unknown word ->
+      Buffer.clear state.msg_input;
+      notice ~role:Message_error
+        (Printf.sprintf
+           "/activity order takes newest, oldest, longest or tool, not %s" word)
   | Masc_tui_command.Lane_addons input ->
       Buffer.clear state.msg_input;
       (match Masc_tui_lane_addons.parse_request input with
@@ -9948,8 +10001,26 @@ let apply_asks_load state = function
         err
 
 let apply_approval_observation state observation =
-  if Approval.Flow.is_current state.approval_flow observation.ao_generation then
-    apply_approvals_load state observation.ao_result
+  let order, admitted =
+    Approval.Listing_order.admit state.approvals_order state.approval_flow
+      observation.ao_ticket
+  in
+  state.approvals_order <- order;
+  if admitted then apply_approvals_load state observation.ao_result
+
+(* The held-call listing goes out from both the full and the scoped refresh,
+   which run on separate in-flight flags, so two of its fetches can overlap.
+   No ticket while a press is open: the panel is about to change underneath
+   this fetch. *)
+let dispatch_approvals_listing state =
+  if Approval.Flow.action_inflight state.approval_flow then None
+  else begin
+    let order, ticket =
+      Approval.Listing_order.dispatch state.approvals_order state.approval_flow
+    in
+    state.approvals_order <- order;
+    Some ticket
+  end
 
 let replace_board_posts state posts =
   let source =
@@ -10204,7 +10275,7 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
+let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   (* Only the Overview row shows this, so a refresh on another surface does not
@@ -10215,9 +10286,9 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
   in
   let http_approvals =
     Option.map
-      (fun ao_generation ->
-         { ao_generation; ao_result = load_approvals ~host ~port })
-      approval_generation
+      (fun ao_ticket ->
+         { ao_ticket; ao_result = load_approvals ~host ~port })
+      approval_ticket
   in
   let http_asks =
     when_needed needs.needs_asks (fun () ->
@@ -10257,7 +10328,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_generation ~board_sort
   ; http_keeper_roster
   }
 
-let load_http_surfaces ~host ~port ~approval_generation ~board_sort
+let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
@@ -10266,14 +10337,14 @@ let load_http_surfaces ~host ~port ~approval_generation ~board_sort
      surface asked of it would only wait out its timeout. *)
   let http_server_identity = load_server_identity ~host ~port in
   if Masc_tui_types.server_is_booting http_server_identity
-  then Refresh_server_booting { identity = http_server_identity; approval_generation }
+  then Refresh_server_booting { identity = http_server_identity; approval_ticket }
   else begin
     let http_overview = load_overview ~host ~port in
     let http_approvals =
       Option.map
-        (fun ao_generation ->
-           { ao_generation; ao_result = load_approvals ~host ~port })
-        approval_generation
+        (fun ao_ticket ->
+           { ao_ticket; ao_result = load_approvals ~host ~port })
+        approval_ticket
     in
     let http_scoped =
       (* Asks ride every refresh, not just the Approvals surface. A question
@@ -10281,7 +10352,7 @@ let load_http_surfaces ~host ~port ~approval_generation ~board_sort
          announced, so the periodic refresh always fetches them; the surface
          still decides whether the panel renders, only the fetch is
          unconditional. Targeted scoped refreshes keep their own needs. *)
-      load_http_scoped_surfaces ~host ~port ~approval_generation:None
+      load_http_scoped_surfaces ~host ~port ~approval_ticket:None
         ~board_sort ~board_hearth ~system_log_level
         ~needs:{ needs with needs_asks = true }
     in
@@ -10339,23 +10410,23 @@ let apply_http_surfaces state results =
             results.http_approvals
           |> Option.to_list))
 
-let apply_server_booting state ~identity ~approval_generation =
+let apply_server_booting state ~identity ~approval_ticket =
   (* The identity is read the same way a full refresh reads it, so a same-port
      replacement is noticed even while the new process is still booting. No
      surface was asked. The approvals panel is told why its rows are stale,
      as a failed refresh tells it; nothing else changes. *)
   apply_server_identity_reading state identity;
   Option.iter
-    (fun ao_generation ->
+    (fun ao_ticket ->
        apply_approval_observation state
-         { ao_generation; ao_result = Error "server booting" })
-    approval_generation;
+         { ao_ticket; ao_result = Error "server booting" })
+    approval_ticket;
   state.connection_status <- Masc_tui_types.Booting
 
 let apply_http_refresh_outcome state = function
   | Refresh_surfaces results -> apply_http_surfaces state results
-  | Refresh_server_booting { identity; approval_generation } ->
-    apply_server_booting state ~identity ~approval_generation
+  | Refresh_server_booting { identity; approval_ticket } ->
+    apply_server_booting state ~identity ~approval_ticket
 
 let load_local_workspace_if_safe state base_path =
   match state.workspace_identity with
@@ -10592,10 +10663,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       !scoped_refresh_followup;
   if not !refresh_inflight then begin
     refresh_inflight := true;
-    let flow, approval_generation =
-      Approval.Flow.reserve_refresh state.approval_flow
-    in
-    state.approval_flow <- flow;
+    let approval_ticket = dispatch_approvals_listing state in
     (* Read before the label below moves. While the last probe said the
        server is booting, only the probe goes out this tick: the side loads
        below would each wait out a timeout against a process that has not
@@ -10677,7 +10745,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_generation
+             (load_http_surfaces ~host ~port ~approval_ticket
                 ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -10690,7 +10758,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         enqueue_async mailbox
           (Http_refresh_failed
              ( Printf.sprintf "HTTP refresh failed: %s" (Printexc.to_string exn)
-             , approval_generation ))
+             , approval_ticket ))
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
@@ -10700,7 +10768,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_refresh_outcome state
-               (load_http_surfaces ~host ~port ~approval_generation
+               (load_http_surfaces ~host ~port ~approval_ticket
                   ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
@@ -10713,13 +10781,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
     ~(needs : Masc_tui_types.surface_needs) =
   if not !refresh_inflight then begin
     refresh_inflight := true;
-    let approval_generation =
-      if needs.needs_operator_approvals then begin
-        let flow, generation = Approval.Flow.reserve_refresh state.approval_flow in
-        state.approval_flow <- flow;
-        generation
-      end
-      else None
+    let approval_ticket =
+      if not needs.needs_operator_approvals then None
+      else dispatch_approvals_listing state
     in
     (* Chat history has its own generation-guarded loader rather than a field
        in the HTTP surface record. It still follows the same delta: entering
@@ -10734,7 +10798,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
         enqueue_async mailbox
           (Http_scoped_refresh_done
              (load_http_scoped_surfaces ~host ~port
-                ~approval_generation ~board_sort:state.board_sort
+                ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
                   (Option.map Masc.Tui_decode.system_log_level_query
@@ -10747,7 +10811,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (Http_scoped_refresh_failed
              ( Printf.sprintf "HTTP surface refresh failed: %s"
                  (Printexc.to_string exn)
-             , approval_generation ))
+             , approval_ticket ))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork ~sw run_refresh
@@ -10757,7 +10821,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight ~mailbox
           (fun () ->
              apply_http_scoped_surfaces state
                (load_http_scoped_surfaces ~host ~port
-                  ~approval_generation ~board_sort:state.board_sort
+                  ~approval_ticket ~board_sort:state.board_sort
                 ~board_hearth:state.board_hearth
                 ~system_log_level:
                   (Option.map Masc.Tui_decode.system_log_level_query
@@ -10933,9 +10997,8 @@ let start_approval_decision state approval decision ~mailbox =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error ("approvals reload failed: " ^ Printexc.to_string exn)
       in
-      let approvals = { ao_generation = generation; ao_result = approvals } in
       enqueue_async mailbox
-        (Approval_decision_done (approval, decision, result, approvals))
+        (Approval_decision_done (approval, decision, result, generation, approvals))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork ~sw run_action
@@ -12196,6 +12259,8 @@ let handle_composer_key state ~base_path ~mailbox key =
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
          | Masc_tui_command.Acting_pane_tab_unknown _
+         | Masc_tui_command.Set_acting_pane_call_order _
+         | Masc_tui_command.Acting_pane_call_order_unknown _
          | Masc_tui_command.Lane_addons _
          | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
          | Masc_tui_command.Open_link_preview _
@@ -12706,13 +12771,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         chat_notice state ~keeper_name:(Some keeper) ~role:Message_error
           ("voice failed: " ^ error);
         state.last_action <- Some ("voice failed: " ^ error, Unix.gettimeofday ()))
-  | Http_refresh_done (Refresh_server_booting { identity; approval_generation }) ->
+  | Http_refresh_done (Refresh_server_booting { identity; approval_ticket }) ->
       http_refresh_inflight := false;
       (* Nothing else was asked of a booting server, so nothing else follows:
          no held-call listing, no observer. The scoped follow-up is left
          queued on purpose -- draining it now would send surface loads to the
          booting server -- and the first non-booting completion drains it. *)
-      apply_server_booting state ~identity ~approval_generation
+      apply_server_booting state ~identity ~approval_ticket
   | Http_refresh_done (Refresh_surfaces results) ->
       http_refresh_inflight := false;
       apply_http_surfaces state results;
@@ -12936,13 +13001,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       state.observer <-
         Observer_closed { reason; at = Unix.gettimeofday (); events };
       add_event state "observer" ("runtime event feed closed: " ^ reason)
-  | Http_refresh_failed (err, approval_generation) ->
+  | Http_refresh_failed (err, approval_ticket) ->
       http_refresh_inflight := false;
       Option.iter
-        (fun ao_generation ->
+        (fun ao_ticket ->
            apply_approval_observation state
-             { ao_generation; ao_result = Error err })
-      approval_generation;
+             { ao_ticket; ao_result = Error err })
+      approval_ticket;
       state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err;
@@ -12964,13 +13029,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Http_scoped_refresh_failed (err, approval_generation) ->
+  | Http_scoped_refresh_failed (err, approval_ticket) ->
       http_scoped_refresh_inflight := false;
       Option.iter
-        (fun ao_generation ->
+        (fun ao_ticket ->
            apply_approval_observation state
-             { ao_generation; ao_result = Error err })
-        approval_generation;
+             { ao_ticket; ao_result = Error err })
+        approval_ticket;
       (* A scoped surface read cannot establish that the server disappeared:
          only the full refresh owns /health and connection status. Keep the
          last observed connection and expose the failed dataset read. *)
@@ -13831,9 +13896,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       match result with
       | Ok message -> add_event state "system" ("Harness: " ^ message)
       | Error err -> add_event state "error" ("Harness label: " ^ err))
-  | Approval_decision_done (approval, decision, result, approvals) ->
-      apply_approval_decision_completion state approvals.ao_generation approval
-        decision result approvals.ao_result
+  | Approval_decision_done (approval, decision, result, generation, approvals) ->
+      apply_approval_decision_completion state generation approval decision
+        result approvals
   | Ask_answer_done (answered_label, result, asks) ->
       apply_ask_answer_completion state answered_label result asks
   | Keeper_chat_dispatch_started (request, was_replay, acknowledge) ->
@@ -14208,11 +14273,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               following the workspace, which is the looser reading and the one
               an operator would act on. *)
            ())
-  | Keeper_tool_modes_loaded (result, generation) ->
-      (* A listing from an older flow describes the stance before the press
-         that superseded it. Dropping it is what keeps an armed gate armed
-         on screen. *)
-      if Approval.Flow.is_current state.approval_flow generation then
+  | Keeper_tool_modes_loaded (result, ticket) ->
+      (* Dropped when a press has opened since the fetch went out -- it
+         describes the stance from before that press, including a press that
+         opened and closed in between (#37609 review) -- and when a later
+         fetch of the stance listing already landed, since the older answer
+         would put a stance back that the screen had moved past (task-1672). *)
+      let order, admitted =
+        Approval.Listing_order.admit state.tool_modes_order state.approval_flow
+          ticket
+      in
+      state.tool_modes_order <- order;
+      if admitted then
         (match result with
          | Ok overrides ->
              state.keeper_tool_modes_observed <- true;
@@ -15220,9 +15292,10 @@ let toggle_roster_pane_key = "\002"
 
 (* Ctrl-L, beside Ctrl-B: the Activity pane is the side bar on the other
    edge. It costs the surface [Masc_tui_acting_pane.pane_cols] columns for
-   the fleet's live feed, and a reader who wants the width back, or the feed
-   beside a chat, toggles it. A letter would not do -- in the composer every
-   letter is text. *)
+   the fleet's live feed, or [wide_pane_cols] for whole names and each
+   call's age, and a reader who wants the width back, or the feed beside a
+   chat, walks it narrow, wide, hidden. One key for the three: every other
+   Ctrl letter is taken, and in the composer every plain letter is text. *)
 let toggle_acting_pane_key = "\012"
 
 (* Ctrl-^ keeps a reader one key away without consuming a typed letter. *)

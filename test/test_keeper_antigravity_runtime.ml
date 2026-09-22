@@ -1199,6 +1199,7 @@ let test_appended_gate_reference_is_inside_the_window () =
           ; source = Keeper_carried_front.Turn_record { turn = 40 }
           }
     ; unreadable = None
+    ; boundary_error = None
     }
   in
   match
@@ -1304,6 +1305,7 @@ let seed_read_at ~messages first_atom =
         ; source = Keeper_carried_front.Turn_record { turn = 41 }
         }
   ; unreadable = None
+  ; boundary_error = None
   }
 ;;
 

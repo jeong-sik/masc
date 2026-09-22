@@ -36,11 +36,7 @@ let generic_provider_rejection =
 ;;
 
 let prompt_too_long_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400}|}
-;;
-
-let prompt_too_long_statusless_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-overflow-1","result":"Prompt is too long"}|}
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400,"terminal_reason":"prompt_too_long"}|}
 ;;
 
 (* CLI 2.1.278 refuses to send when its count reaches the window minus 3000:
@@ -1018,7 +1014,7 @@ let history_uses_current_schema history =
 
 let test_keeper_shrinks_history_after_statusless_context_error
     ?(native_gate=false)
-    ?(overflow_frames = [ prompt_too_long_statusless_result ])
+    ~overflow_frames
     () =
   let base_path = temp_workspace () in
   let first_system_marker = Filename.concat base_path "full-system.txt" in
@@ -2071,6 +2067,7 @@ let seed_read_of records =
         ~trace_id:"trace-1"
         records
   ; unreadable = None
+  ; boundary_error = None
   }
 ;;
 
@@ -2226,12 +2223,10 @@ let () =
             "Agent Core checkpoint starts official-client turn"
             `Quick
             test_agent_core_checkpoint_starts_official_client_turn
-        ; test_case
-            "shrinks history after statusless context error"
-            `Quick
-            (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:false)
         ; test_case "native Gate retains its session across overflow shrink" `Quick
-            (test_keeper_shrinks_history_after_statusless_context_error ~native_gate:true)
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~native_gate:true
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
         ; test_case
             "shrinks history after the CLI's blocking_limit refusal"
             `Quick

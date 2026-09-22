@@ -51,8 +51,12 @@ related: ["0454", "0371", "0004"]
   지우지 않아도 부팅은 막히지 않는다(§3.6).
 - **Q4** 열린 PR #37580 을 닫고 PR-1 로 흡수할지. #37580 은 `"turn_failed:" ^ reason` 콜론 코드를 새로 만든다.
   이 RFC 는 같은 정보를 typed 필드로 싣는다.
-  열린 PR #37584 는 `ProviderReportedError` 의 route 를 rotation 으로 바꾼다. 이건 흐름 변경이다.
-  #37584 가 먼저 들어가면 PR-1 은 그 route 를 그대로 옮긴다.
+  열린 PR #37584 는 `ProviderReportedError` 의 route 이름을 `Rotate_now Provider_reported_failure` 로 바꾼다.
+  흐름은 그대로다. walk 는 그 전에도 `Keeper_runtime_attempt.ml:71` → `ProviderFailure` →
+  `Runtime_attempt_fsm.should_try_next = true` 로 회전했고, route 를 읽는 자리
+  (`route_resumes_on_same_path`, `response_observed`, `keeper_turn_driver.ml:910` 의 backpressure 기록,
+  `:424`·`:450` 의 deferred lane)는 옛 이름과 새 이름에서 같은 값을 낸다.
+  #37584 가 먼저 들어가면 PR-1 은 그때의 route 를 그대로 옮긴다.
 - **Q5** §3.8 의 막힘 표. `Registry_phase_missing` 과 runtime build 실패를 막힘으로, supervisor stop·external cancel·실행 불가 phase 를 막힘 아님으로 두는 안이다.
 
 ## 2. 문제와 실측

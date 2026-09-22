@@ -265,7 +265,7 @@ let prepare = function
     then Ok (fun contents -> refused (Fusion_config_writer.rename_preset contents ~from ~target))
     else Error (Name_invalid target)
   | Set_settings settings ->
-    Ok (fun contents -> Fusion_config_writer.set_settings contents settings)
+    Ok (fun contents -> refused (Fusion_config_writer.set_settings contents settings))
   | Delete_preset name -> Ok (fun contents -> delete_checked contents name)
 ;;
 

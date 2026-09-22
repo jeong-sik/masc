@@ -273,6 +273,9 @@ let test_accepted_roster_reaches_compute_obligation_and_registry () =
         Fs_compat.set_fs (Eio.Stdenv.fs env);
         Eio.Switch.run (fun sw ->
           let computed, resolve_computed = Eio.Promise.create () in
+          (* 계산은 도구가 돌려준 뒤 뒤쪽 fiber 에서 돈다. 계산이 끝나면 배달 투영이
+             전달 약속을 지우므로, 약속과 실행 기록을 다 읽을 때까지 계산을 붙잡는다. *)
+          let released, release = Eio.Promise.create () in
           let prompt = "Which route should judge this?" in
           let evidence : Fusion_types.deliberation_evidence =
             { question = prompt
@@ -286,6 +289,7 @@ let test_accepted_roster_reaches_compute_obligation_and_registry () =
           in
           let compute ~sw:_ ~net:_ ~policy:_ ~topology:_
                 ~(request : Fusion_types.fusion_request) () =
+            Eio.Promise.await released;
             Eio.Promise.resolve resolve_computed request.roster;
             Fusion_orchestrator.Computed evidence
           in
@@ -317,6 +321,7 @@ let test_accepted_roster_reaches_compute_obligation_and_registry () =
           (match Fusion_run_registry.get registry ~run_id with
            | Some run -> check roster_t "the run registry carries the roster" expected run.roster
            | None -> fail "accepted run is not registered");
+          Eio.Promise.resolve release ();
           let received =
             Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) compute_deadline_s (fun () ->
               Eio.Promise.await computed)

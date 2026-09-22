@@ -493,12 +493,13 @@ status: reference
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
-  이 위치의 출처(`Keeper_carried_front.origin`)는 넷이다 — `Carried`(seed에서 온
+  이 위치의 출처(`Keeper_carried_front.origin`)는 다섯이다 — `Carried`(seed에서 온
   위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기),
   `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),
   `Librarian_progress`(저장본이 이 History에 맞지 않을 때 Librarian의 durable Read
   Position), `Turn_start`(앞머리도 맞는 저장본도 없음: 이 History에서 마지막으로
-  끝난 turn이 끝난 자리에서 시작한다). 고르는 순서는 맞는 저장본 → Librarian이 읽은
+  끝난 turn이 끝난 자리에서 시작한다), `Turn_start_unknown`(그 경계마저 못 읽음:
+  가장 새 Atom 하나에서 시작한다). 고르는 순서는 맞는 저장본 → Librarian이 읽은
   위치 → 씨앗(원장·turn 기록) → 마지막으로 끝난 turn의 경계다
   (`RFC-keeper-context-window-in-tokens` §13.4·§13.6).
   `Librarian_progress`는 그 위치가 이 trace를 지목하고 그 앞 Atom이 위치가 기록한
@@ -507,9 +508,10 @@ status: reference
   Librarian의 다음 회차를 기다린다. `Turn_start`의 `end_atom`은 그 경계 자체를 적는다 —
   범위가 열린 Atom이 아니라 turn-boundary 저장소가 말하는 완료 경계다. 그래서 경계가
   가장 새 Atom과 같거나 그보다 뒤여도(옛 번호로 남은 경계) 그 값을 그대로 적고, 범위가
-  어디서 열릴지는 clamp가 정한다. `end_atom`이 0이면 두 경우다 — 끝난 turn이 없는 새
-  Keeper의 짧은 History 전체이거나, 경계 저장소를 못 읽었거나 경계가 이 History를 덮지
-  않을 때다. 뒤의 경우는 긴 History 전체다.
+  어디서 열릴지는 clamp가 정한다. `end_atom`이 0인 경우는 하나다 — 끝난 turn이 없는 새
+  Keeper의 짧은 History 전체다. 경계 저장소를 못 읽었거나 어떤 경계도 이 History와 맞지
+  않으면 그 값은 `Turn_boundary_unknown`이고, 출처는 `Turn_start_unknown`이며 요청은
+  가장 새 Atom 하나만 싣는다 — 모르는 시작을 0으로 접어 이력 전체를 보내지 않는다.
 
   저장된 응답 관측의 범위는 당시의 사실이다. 현재 카탈로그에서 그 runtime을
   지우거나 바꾸어도 이 사실을 취소하지 않으며, 현재 History의 같은 위치·digest로 검증한다.
@@ -597,7 +599,8 @@ status: reference
   `Summarized of frontier`(하던 일 저장본이 대신하는 경계까지 요약; frontier는 trace·
   끝 Atom·경계 줄), `Absorbed of { trace_id; end_atom }`(Librarian의 durable Read
   Position에서 시작하고 그 앞을 요약하지 않음), `Without_snapshot`(맞는 저장본도,
-  이 History의 자리인 읽은 위치도 없어 이 turn 자신의 Atom만 실음),
+  이 History의 자리인 읽은 위치도 없어 마지막으로 끝난 turn의 경계부터 실음 — 그
+  경계마저 못 읽으면 가장 새 Atom 하나만 실음),
   `Not_applied`(저장된 맥락을 적용하지 않음). `Absorbed`는 경계 줄이 없어 모양이
   trace와 Atom뿐이다. Dashboard의 `context_cycle.prepared.input.kind`가
   `summarized`·`absorbed`·`without_snapshot`·`not_applied`로, TUI Memory 화면이

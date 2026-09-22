@@ -49,7 +49,7 @@ val redacted_tool_output_json : tool_name:string -> string -> Yojson.Safe.t opti
 val truncate_json_document : ?max_len:int -> string -> string
 (** Truncate a tool-output string to [max_len] (default 200) without breaking a
     JSON document. When the input parses as JSON, the document is shrunk at
-    member/element boundaries and marked with [\"_truncated\": true] so the
-    stored value stays valid JSON; a non-JSON input falls back to
+    member/element boundaries and marked with a top-level [_truncated] key so
+    the stored value stays valid JSON; a non-JSON input falls back to
     {!redact_preview}. *)
 

@@ -1848,6 +1848,19 @@ candidates = [
   "deepseek.deepseek-v4-pro",
 ]
 
+# The judge seat of the shipped Fusion presets. A seat names a route and walks
+# its candidates in order (RFC fusion-seat-routes §2.2), so a judge whose first
+# runtime is rate-limited, timing out or refusing the request still answers from
+# the next one instead of failing the whole deliberation. The candidates sit on
+# three different providers on purpose: one provider's outage takes one
+# candidate, not the seat.
+[runtime.lanes.fusion-judge]
+candidates = [
+  "ollama_cloud.minimax-m3",
+  "ollama_cloud.ollama-cloud-deepseek-v4-pro",
+  "deepseek.deepseek-v4-pro",
+]
+
 # ── Keeper assignments ──────────────────────────────────────────────
 # Keepers are assigned to a model by provider.model key. Unassigned
 # keepers fall back to [runtime].default. Per-keeper overrides in the
@@ -1927,7 +1940,9 @@ panel = [
 # keys the schema never named, while local Ollama honoured the same request. So
 # a judge runtime does not need supports-structured-output; pick it for answer
 # quality, and keep the judges on different models so the lenses stay independent.
-judge = "ollama_cloud.minimax-m3"
+# The seat names the fusion-judge lane, so one unavailable runtime does not end
+# the run.
+judge = "fusion-judge"
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
 with your best independent analysis. Do not defer to other models; give your \

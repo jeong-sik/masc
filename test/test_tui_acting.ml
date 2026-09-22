@@ -1139,6 +1139,7 @@ let test_call_key_prefers_the_provider_id () =
     ; ct_duration_ms = None
     ; ct_at = at
     ; ct_tool_use_id = id
+    ; ct_session_turn = None
     ; ct_disposition = None
     ; ct_schedule = None
     ; ct_input = None

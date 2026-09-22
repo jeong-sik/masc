@@ -19,7 +19,11 @@
     decision survives a resize. *)
 
 val pane_cols : int
-(** The columns the pane takes when it shows. *)
+(** The columns the narrow pane takes. *)
+
+val wide_pane_cols : int
+(** The columns the wide pane takes: the narrow pane's, plus eighteen that
+    go to the fleet row's name column and the call row's age. *)
 
 val reading_cells : int
 (** The cells a fleet row's reading gets, after the mark, the name and the gap.
@@ -32,15 +36,32 @@ val threshold_cols : int
     plus what the roster pane leaves a surface, so the two panes sharing one
     screen leave the surface no narrower than the roster alone would. *)
 
-val shown : hidden:bool -> cols:int -> bool
-(** [hidden] is the reader's answer, [cols] the terminal's. Both must agree. *)
+val wide_threshold_cols : int
+(** The width from which a surface can afford the wide pane: the wide pane
+    plus the same floor {!threshold_cols} leaves. *)
 
-val toggle_hidden : hidden:bool -> cols:int -> bool option
-(** Toggle the reader's preference only where the pane can actually show.
-    [None] below {!threshold_cols} leaves the preference untouched, so a key
-    with no visible effect cannot surprise the reader after a later resize. *)
+(** The reader's answer to how the pane should sit beside a surface. *)
+type layout =
+  | Narrow
+  | Wide
+  | Hidden
 
-val content_cols : hidden:bool -> cols:int -> int
+val drawn_cols : layout:layout -> cols:int -> int
+(** The columns the pane takes beside a terminal [cols] wide: the layout the
+    reader chose when the terminal holds it, the narrow pane when a wide
+    choice meets a terminal that holds only the narrow one, and none when
+    hidden or when not even the narrow pane fits. The choice survives the
+    resize; a wider terminal draws it again. *)
+
+val next_layout : layout:layout -> cols:int -> layout option
+(** Ctrl-L: narrow, wide, hidden, in turn. A terminal that holds the narrow
+    pane but not the wide one goes narrow to hidden. [None] below
+    {!threshold_cols} leaves the choice untouched, so a key with no visible
+    effect cannot surprise the reader after a later resize. *)
+
+val layout_label : layout -> string
+
+val content_cols : layout:layout -> cols:int -> int
 (** What the surface beside the pane lays out against. *)
 
 (** Which of the pane's two readings is up. *)
@@ -221,7 +242,22 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     in that order with an open call's three detail rows under it, then the
     earlier turns. A call row wears the record glyph, or the failure glyph
     when the ledger said the call failed, then two dispatch cells: [&] when
-    it ran in a batch with others, [>] when it returned a deferral.
+    it ran in a batch with others, [>] when it returned a deferral. At
+    {!wide_pane_cols} and wider the call row ends with the call's age since
+    receipt in {!age_text}'s wording, padded to six cells, and the fleet
+    row's name column holds eighteen more cells.
+
+    Under either receipt order, a record whose calls came from more than one
+    model response brackets each response in the call rows' border cell:
+    [\xe2\x94\x8c] beside its first call, [\xe2\x94\x82] beside the calls
+    between, [\xe2\x94\x94] beside its last, the three plain over the dim
+    edge, and a dim [\xe2\x94\x80] beside a response of one call, so a
+    record of lone calls still reads as split. No row is added. A
+    composition's calls sit with the response that asked for the
+    composition. The response is the call's session ordinal, not its
+    planned index. Call rows keep the plain edge under the two sorts, which
+    interleave responses, for a single response, and when any call states
+    no ordinal.
 
     Recent tab under [Selected_only]: the fleet rows of keepers waiting on
     an approval, then the selected keeper's focus block, windowed like the
@@ -261,8 +297,9 @@ val tokens_sum_text : int option * int option -> string
 (** The same tokens summed ([74.2k tok]), for a row that cannot afford the
     parts. *)
 
-val legend : string
-(** The legend row, as drawn. *)
+val legend : cols:int -> string
+(** The legend row, as drawn at that width: the column names sit over the
+    fleet row's columns, which start after the name column the width gives. *)
 
 val age_text : now:float -> float -> string
 (** How long ago, in the feed's own duration shape ([12.4s], [2m05s]). *)

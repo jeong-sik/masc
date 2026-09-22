@@ -389,6 +389,7 @@ type chunk_tool = {
   ct_duration_ms : float option;
   ct_at : float;
   ct_tool_use_id : string option;
+  ct_session_turn : int option;
   ct_disposition : (Masc.Tui_decode.keeper_call_disposition, string) result option;
   ct_schedule : (Agent_core.Tool_contract.schedule, string) result option;
   ct_input : string option;
@@ -419,6 +420,7 @@ type wire_tool = {
   wt_started : float;
   wt_tool : string;
   wt_duration_ms : float option;
+  wt_session_turn : int option;
 }
 
 type chunk = {
@@ -529,7 +531,7 @@ let apply_member chunk ~at member =
   match member with
   | Member_quiet -> chunk
   | Member_turn_marker _ -> chunk
-  | Member_wire_call { tool; tool_use_id; turn = _ } ->
+  | Member_wire_call { tool; tool_use_id; turn } ->
       { chunk with
         ck_wire_tools =
           chunk.ck_wire_tools
@@ -537,10 +539,11 @@ let apply_member chunk ~at member =
               ; wt_started = at
               ; wt_tool = tool
               ; wt_duration_ms = None
+              ; wt_session_turn = turn
               }
             ]
       }
-  | Member_wire_return { tool; tool_use_id; turn = _ } ->
+  | Member_wire_return { tool; tool_use_id; turn } ->
       (* Settle the newest still-open call with this id in place; a return
          whose call was never held (the feed opened mid-turn) appends with
          no duration rather than being dropped. *)
@@ -568,12 +571,13 @@ let apply_member chunk ~at member =
               ; wt_started = at
               ; wt_tool = tool
               ; wt_duration_ms = None
+              ; wt_session_turn = turn
               }
             ]
       in
       { chunk with ck_wire_tools }
   | Member_ledger_tool
-      { tool; duration_ms; turn = _; tool_use_id; disposition; schedule; input; output } ->
+      { tool; duration_ms; turn; tool_use_id; disposition; schedule; input; output } ->
       { chunk with
         ck_ledger_tools =
           chunk.ck_ledger_tools
@@ -581,6 +585,7 @@ let apply_member chunk ~at member =
               ; ct_duration_ms = duration_ms
               ; ct_at = at
               ; ct_tool_use_id = tool_use_id
+              ; ct_session_turn = turn
               ; ct_disposition = disposition
               ; ct_schedule = schedule
               ; ct_input = input
@@ -620,6 +625,7 @@ let chunk_tools chunk =
           ; ct_duration_ms = wt.wt_duration_ms
           ; ct_at = wt.wt_started
           ; ct_tool_use_id = wt.wt_id
+          ; ct_session_turn = wt.wt_session_turn
           ; ct_disposition = None
           ; ct_schedule = None
           ; ct_input = None

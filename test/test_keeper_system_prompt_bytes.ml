@@ -28,8 +28,8 @@ let repo_source_root () =
   | Some root -> root
   | None -> Sys.getcwd ()
 
-(* The assembled prompt renders registry slots (keeper.md: identity,
-   workspace, instructions.custom, and the tags slots), so resolution must be
+(* The assembled prompt renders registry slots (keeper.md: worldview,
+   identity, workspace, and the tags slots), so resolution must be
    pinned to the repo's own prompt files; otherwise the build raises on a
    missing prompt inside the dune sandbox. Same pinning idiom as
    test_fusion_wake. *)
@@ -126,7 +126,10 @@ let test_assembled_prompt_carries_system_anchor () =
   check bool "<system> anchor present" true (contains "<system>");
   check bool "</system> anchor present" true (contains "</system>");
   check bool "identity anchor names the keeper" true
-    (contains ("You are " ^ golden_keeper_name ^ "."));
+    (contains ("당신은 " ^ golden_keeper_name ^ "이다."));
+  check bool "the world block reaches the prompt" true (contains "<world>");
+  check bool "the role sits in the role tags" true
+    (contains "<role>\nGolden custom instruction line one.");
   check bool "workspace block carries the sandbox root" true
     (contains golden_workspace_root);
   check bool "custom instructions reach the prompt" true
@@ -134,10 +137,53 @@ let test_assembled_prompt_carries_system_anchor () =
   check bool "GH_CONFIG_DIR preauth guidance reaches the prompt" true
     (contains "GH_CONFIG_DIR")
 
+(* The operator gives a world its values by overriding [keeper.worldview].
+   That text has to replace the distribution default, and it has to sit where
+   every keeper in the world shares it: after the shared body, before the
+   keeper's own identity. *)
+let test_operator_worldview_replaces_the_default () =
+  let find needle haystack =
+    let n = String.length needle in
+    let rec scan i =
+      if i + n > String.length haystack then None
+      else if String.equal (String.sub haystack i n) needle then Some i
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  let default_line = "이 세계는 따로 정한 가치관이 없다." in
+  let operator_line = "Golden world values finished work that others can reuse." in
+  (match
+     Prompt_registry.set_override Prompt_names.keeper_worldview
+       ("<world>\n" ^ operator_line ^ "\n</world>")
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("worldview override refused: " ^ detail));
+  let prompt =
+    Fun.protect
+      ~finally:(fun () ->
+        Prompt_registry.clear_prompt_override Prompt_names.keeper_worldview)
+      build_golden_prompt
+  in
+  check bool "the default sentence is gone" true
+    (Option.is_none (find default_line prompt));
+  match
+    ( find "</system>" prompt
+    , find operator_line prompt
+    , find ("당신은 " ^ golden_keeper_name) prompt )
+  with
+  | Some system_end, Some world_at, Some identity_at ->
+    check bool "the world follows the shared body" true (system_end < world_at);
+    check bool "the world precedes the keeper's identity" true
+      (world_at < identity_at)
+  | _ -> fail "the assembled prompt lost a block"
+
 let () =
   run "keeper_system_prompt_bytes"
     [ ( "golden",
         [ test_case "assembled prompt matches golden bytes" `Quick
             test_assembled_prompt_matches_golden;
           test_case "assembled prompt carries required anchors" `Quick
-            test_assembled_prompt_carries_system_anchor ] ) ]
+            test_assembled_prompt_carries_system_anchor;
+          test_case "an operator worldview replaces the default" `Quick
+            test_operator_worldview_replaces_the_default ] ) ]

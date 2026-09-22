@@ -609,7 +609,7 @@ let test_profile_defaults_feed_identity_prompt () =
     system_prompt ~profile_defaults base_observation
   in
   check bool "profile instructions in system prompt" true
-    (contains ~needle:"Custom instructions:\nsoul instructions" system)
+    (contains ~needle:"<role>\nsoul instructions\n</role>" system)
 
 (* The section is rendered from Keeper_sandbox, so the assertion compares
    against that SSOT rather than a sentence. Rewording the prompt keeps this

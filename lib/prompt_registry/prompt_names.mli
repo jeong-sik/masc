@@ -101,8 +101,10 @@ val mcp_tool_help_doc_ref_row : string
 val keeper_workspace : string
 val keeper_identity : string
 
-val keeper_instructions_custom : string
-(** The operator-instructions block. Variable: [instructions]. *)
+val keeper_worldview : string
+(** What this world values, written by the operator. Every keeper in the
+    world reads the same text. The distribution default says no value system
+    is set and that each keeper's role decides. *)
 
 val keeper_constitution : string
 (** The norms this world's keepers wrote for themselves (RFC-0442). Variable:
@@ -112,7 +114,7 @@ val keeper_tags_system_open : string
 val keeper_tags_system_close : string
 val keeper_tags_instructions_open : string
 val keeper_tags_instructions_close : string
-(** The structural tags wrapping the shared prefix and the instructions. *)
+(** The structural tags wrapping the shared prefix and the keeper's role. *)
 
 val keeper_capability_probe : string
 val lane_cli_probe_librarian_system : string

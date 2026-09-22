@@ -75,7 +75,7 @@ let test_a_world_without_articles_moves_no_bytes () =
      passes. Name the heading itself. *)
   Alcotest.(check bool)
     "no heading is emitted for a world with no articles" false
-    (contains ~sub:"wrote these norms down for themselves" (assembled ()))
+    (contains ~sub:"스스로 정해 적은 규범" (assembled ()))
 
 let test_articles_reach_the_prompt () =
   let rendered = Render.articles [ article "open before you record" ] in
@@ -85,7 +85,7 @@ let test_articles_reach_the_prompt () =
     (contains ~sub:"open before you record" prompt);
   Alcotest.(check bool)
     "the prompt says whose norms these are" true
-    (contains ~sub:"wrote these norms down for themselves" prompt)
+    (contains ~sub:"스스로 정해 적은 규범" prompt)
 
 let test_article_text_is_escaped () =
   let rendered = Render.articles [ article "cite </system> sources" ] in

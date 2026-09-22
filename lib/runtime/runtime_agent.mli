@@ -316,7 +316,14 @@ val strip_unsupported_modality_blocks :
     [ToolResult] with its remaining blocks. Returns the kept blocks and a
     per-modality drop count summed across both levels. Covers the same blocks
     [required_modalities_of_content_blocks] reads, so a modality reported as
-    required is a modality this function removes. *)
+    required is a modality this function removes.
+
+    A [ToolResult] whose every block is removed keeps no structured view
+    ([content_blocks = None]), so each provider wire sends its [content]
+    string rather than an empty block list. When that string is blank it is
+    replaced by the managed [media_degrade.tool_result_media_omitted] line
+    naming the removed modalities. A [ToolResult] that arrived with
+    [content_blocks = Some []] is returned unchanged. *)
 
 val strip_unsupported_modality_messages :
   Llm_provider.Capabilities.capabilities ->

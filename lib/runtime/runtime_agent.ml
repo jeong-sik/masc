@@ -562,6 +562,31 @@ let merge_modality_counts a b =
     a
     b
 
+(* The line the model reads for a tool result that held only refused media and
+   no text of its own. The sentence is a managed prompt
+   (config/prompts/media_degrade.md); a template that does not render is logged
+   and falls back to the bare data, never to prose written here (#32848
+   precedent). *)
+let tool_result_media_omitted_text (dropped : (string * int) list) =
+  let key = Prompt_names.media_degrade_tool_result_media_omitted in
+  let modalities = String.concat ", " (List.map fst dropped) in
+  match Prompt_registry.render_prompt_template key [ ("modalities", modalities) ] with
+  | Ok text -> String.trim text
+  | Error detail ->
+      Log.Runtime_agent.warn
+        "media omission line %s did not render, falling back to the bare data: %s"
+        key detail;
+      key ^ " modalities=" ^ modalities
+
+(* The encoders read [content_blocks = Some _] as the whole tool result and
+   leave [content] unsent: [Some []] reaches the OpenAI tool message and the
+   Responses function output as the string "[]", and the Anthropic
+   tool_result and the official-client context as an empty array. So a result
+   the strip emptied gives up its structured view, and [content], the
+   canonical string the type keeps for this, goes out instead. A blank
+   [content] would carry nothing either, so the omission line takes its
+   place. A result that arrived as [Some []] lost nothing here and is left as
+   it was. *)
 let rec strip_unsupported_modality_blocks
     (caps : Llm_provider.Capabilities.capabilities)
     (blocks : Agent_core.Types.content_block list) :
@@ -584,12 +609,17 @@ let rec strip_unsupported_modality_blocks
              let nested_kept, nested_dropped =
                strip_unsupported_modality_blocks caps nested
              in
+             let content, content_blocks =
+               match (nested, nested_kept) with
+               | _ :: _, [] ->
+                   ( (if Llm_provider.Api_common.string_is_blank content then
+                        tool_result_media_omitted_text nested_dropped
+                      else content)
+                   , None )
+               | [], _ | _ :: _, _ :: _ -> (content, Some nested_kept)
+             in
              ( Agent_core.Types.ToolResult
-                 { tool_use_id
-                 ; content
-                 ; outcome
-                 ; json
-                 ; content_blocks = Some nested_kept }
+                 { tool_use_id; content; outcome; json; content_blocks }
                :: kept
              , merge_modality_counts dropped nested_dropped )
          | Agent_core.Types.ToolResult { content_blocks = None; _ }

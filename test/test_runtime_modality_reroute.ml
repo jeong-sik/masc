@@ -439,7 +439,76 @@ let test_strip_messages_descends_into_tool_result () =
   check int "nested history image dropped" 1 (dropped_count "image" dropped);
   let msg : Agent_core.Types.message = List.hd kept in
   check int "the tool result is retained" 1 (List.length msg.content);
-  check int "its image is gone" 0 (List.length (tool_result_blocks (List.hd msg.content)))
+  check (list string) "its image is gone"
+    []
+    (Runtime_agent.For_testing.required_modalities_of_content_blocks msg.content)
+
+let prompt_dir () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> Filename.concat root "config/prompts"
+  | None -> Filename.concat (Sys.getcwd ()) "config/prompts"
+
+let tool_result_fields = function
+  | Agent_core.Types.ToolResult { content; content_blocks; _ } ->
+      (content, content_blocks)
+  | Agent_core.Types.Text _
+  | Agent_core.Types.Thinking _
+  | Agent_core.Types.ReasoningDetails _
+  | Agent_core.Types.RedactedThinking _
+  | Agent_core.Types.ToolUse _
+  | Agent_core.Types.Image _
+  | Agent_core.Types.Document _
+  | Agent_core.Types.Audio _ -> fail "expected a ToolResult"
+
+let only_tool_result_fields = function
+  | [ block ] -> tool_result_fields block
+  | blocks -> failf "expected the tool result alone, got %d blocks" (List.length blocks)
+
+(* Every provider wire reads [content_blocks = Some _] as the whole tool
+   result. A result whose only block was refused media used to leave [Some []],
+   so the OpenAI tool message and the Responses function output carried the
+   string "[]" where the tool's output belongs. *)
+let test_emptied_tool_result_sends_its_content () =
+  let kept, dropped =
+    Runtime_agent.strip_unsupported_modality_blocks (caps ())
+      [ tool_result_with_blocks
+          [ Agent_core.Types.document_block
+              ~media_type:"application/pdf" ~data:"pdf" () ] ]
+  in
+  check int "the document is dropped" 1 (dropped_count "document" dropped);
+  let content, content_blocks = only_tool_result_fields kept in
+  check bool "no empty structured view is left" true (content_blocks = None);
+  check string "the tool's own content string goes out" "tool output" content
+
+(* With a blank [content] there is nothing of the tool's own to send, so the
+   managed omission line goes out in its place. *)
+let test_emptied_blank_tool_result_states_the_omission () =
+  Prompt_registry.set_markdown_dir (prompt_dir ());
+  let expected =
+    match
+      Prompt_registry.render_prompt_template
+        Prompt_names.media_degrade_tool_result_media_omitted
+        [ ("modalities", "audio") ]
+    with
+    | Ok text -> String.trim text
+    | Error detail -> failf "the omission line does not render: %s" detail
+  in
+  let blank_result =
+    Agent_core.Types.ToolResult
+      { tool_use_id = "call_audio"
+      ; content = ""
+      ; outcome = Agent_core.Types.Tool_succeeded
+      ; json = None
+      ; content_blocks =
+          Some [ Agent_core.Types.audio_block ~media_type:"audio/wav" ~data:"wav" () ]
+      }
+  in
+  let kept, _dropped =
+    Runtime_agent.strip_unsupported_modality_blocks (caps ()) [ blank_result ]
+  in
+  let content, content_blocks = only_tool_result_fields kept in
+  check bool "no empty structured view is left" true (content_blocks = None);
+  check string "the managed omission line replaces the blank content" expected content
 
 (* A reroute names a runtime that satisfies the required modality. When the only
    entry offered is the assigned runtime's own binding — which by definition does
@@ -821,6 +890,10 @@ let () =
             test_stripped_blocks_pass_the_capability_floor
         ; test_case "strip messages descends into tool result" `Quick
             test_strip_messages_descends_into_tool_result
+        ; test_case "an emptied tool result sends its content" `Quick
+            test_emptied_tool_result_sends_its_content
+        ; test_case "an emptied blank tool result states the omission" `Quick
+            test_emptied_blank_tool_result_states_the_omission
         ; test_case "degrade note when dropped" `Quick
             test_degrade_note_some_when_dropped
         ; test_case "degrade note none when empty" `Quick

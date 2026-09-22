@@ -318,8 +318,10 @@ let profile_update_command (meta : keeper_meta) =
     ; microvm_cpus = meta.microvm_cpus
     ; network_mode = meta.network_mode
     ; mention_targets = meta.mention_targets
+    ; board_interests = meta.board_interests
     ; max_context_override = meta.max_context_override
     ; activation_mode = meta.activation_mode
+    ; input_policy = meta.input_policy
     ; telemetry_feedback_enabled = meta.telemetry_feedback_enabled
     ; telemetry_feedback_window_hours = meta.telemetry_feedback_window_hours
     ; always_allow = meta.always_allow
@@ -367,7 +369,6 @@ let finish_published_update ~supersession ctx updated =
           | ( Keepalive_lifecycle_denied _
             | Keepalive_registration_rejected _
             | Keepalive_fiber_start_rejected _
-            | Keepalive_memory_lane_not_ready _
             | Keepalive_launch_callback_failed _
             | Keepalive_lane_ownership_lost
             | Keepalive_fork_rejected _ ) as rejected ->
@@ -439,6 +440,9 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
   with
   | Error msg -> tool_result_error ~class_:Tool_result.Policy_rejection msg
   | Ok network_mode ->
+  let input_policy = match p.input_policy_opt, p.profile_defaults.input_policy with
+    | Some policy, _ | None, Some policy -> policy
+    | None, None -> old.input_policy in
   let activation_mode =
     match p.activation_mode_opt, p.profile_defaults.activation_mode with
     | Some value, _ -> value
@@ -452,6 +456,11 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
         (if old.mention_targets <> [] then old.mention_targets
          else p.profile_defaults.mention_targets)
       ~name:p.name
+  in
+  let board_interests =
+    resolve_board_interests
+      ~board_interests_opt:p.board_interests_opt
+      ~fallback_interests:p.profile_defaults.board_interests
   in
   let source_meta = old in
   let updated = { source_meta with
@@ -478,10 +487,12 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
     microvm_memory = p.profile_defaults.microvm_memory;
     microvm_cpus = p.profile_defaults.microvm_cpus;
     activation_mode;
+    input_policy;
     paused = old.paused;
     latched_reason = source_meta.latched_reason;
     runtime = source_meta.runtime;
     mention_targets;
+    board_interests;
     telemetry_feedback_enabled =
       Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_enabled
         old.telemetry_feedback_enabled;

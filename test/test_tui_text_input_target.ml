@@ -200,7 +200,7 @@ let test_a_new_lane_name_claims_typing_on_runtime () =
   let state = fresh_state () in
   state.Tui_types.view <- Tui_types.Runtime;
   check target "reading lanes" None (resolved state);
-  state.Tui_types.runtime_lane_name_draft <- Some "";
+  state.Tui_types.runtime_lane_name_draft <- Some (Tui_types.Naming_new_lane "");
   check target "naming a lane" (Some Tui_types.Text_runtime_lane_name) (resolved state);
   state.Tui_types.view <- Tui_types.Lanes;
   check target "another surface" None (resolved state)

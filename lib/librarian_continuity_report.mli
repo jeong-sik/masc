@@ -97,6 +97,9 @@ val question_text : question -> string
 val question_prompt : source_turn -> prompt
 val answer_prompt : question:string -> answer_context -> prompt
 (** This boundary cannot access the reference source turn. *)
+val judge_request_for : endpoint:string -> model:string -> question_id:string ->
+  reference:string -> question:string -> answer:string -> judge_request
+(** Shared Noul request for a question and its reference, with no score threshold. *)
 val judge_request : endpoint:string -> model:string -> case ->
   question:string -> answer:string -> judge_request
 val judge_state : judge_request -> Yojson.Safe.t

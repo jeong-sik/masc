@@ -91,6 +91,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       runtime_assignment: { state: 'runtime_config_missing' },
     },
     activation_mode: 'autonomous',
+    input_policy: 'small',
     max_context_override: null,
     sandbox_profile: 'docker',
     network_mode: 'inherit',
@@ -126,6 +127,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     },
     workspace: {
       mention_targets: ['sangsu'],
+      board_interests: [],
       bound_workspace_ids: ['default'],
     },
     sources: {
@@ -582,6 +584,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       runtime_assignment: { state: 'runtime_config_missing' },
     },
     activation_mode: 'on_demand',
+    input_policy: 'small',
     max_context_override: null,
     sandbox_profile: 'docker',
     network_mode: 'inherit',
@@ -592,6 +595,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     runtime: {} as KeeperConfig['runtime'],
     workspace: {
       mention_targets: [],
+      board_interests: [],
       bound_workspace_ids: [],
     },
     sources: {} as KeeperConfig['sources'],
@@ -646,6 +650,18 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
       ...initRuntimeDraftFromConfig(c),
       activation_mode: 'autonomous',
     }, c)).toEqual({ activation_mode: 'autonomous' })
+  })
+
+  it('diffs context policy and preserves only explicit policy edits on rebase', () => {
+    const c = makeKeeperConfigForSandbox({ input_policy: 'small' })
+    const draft = initRuntimeDraftFromConfig(c)
+    expect(draft.input_policy).toBe('small')
+    expect(buildRuntimePayload(draft, c)).not.toHaveProperty('input_policy')
+    const edited = { ...draft, input_policy: 'wide' as const }
+    expect(buildRuntimePayload(edited, c)).toEqual({ input_policy: 'wide' })
+    expect(rebaseRuntimeDraftOnFreshConfig(edited, c, c).input_policy).toBe('wide')
+    expect(rebaseRuntimeDraftOnFreshConfig(draft, c,
+      makeKeeperConfigForSandbox({ input_policy: 'wide' })).input_policy).toBe('wide')
   })
 
   it('diffs and rebases voice_always_allow correctly', () => {
@@ -709,6 +725,7 @@ describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
   const seen = makeKeeperConfigForSandbox({
     workspace: {
       mention_targets: ['old-target'],
+      board_interests: [],
       bound_workspace_ids: [],
     },
   })
@@ -716,6 +733,7 @@ describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
     // The other writer changed this field; the user never touched it.
     workspace: {
       mention_targets: ['remote-writer-change'],
+      board_interests: [],
       bound_workspace_ids: [],
     },
   })
@@ -756,7 +774,7 @@ describe('rebaseRuntimeDraftOnFreshConfig — conflict rebase', () => {
     const freshSsh = makeKeeperConfigForSandbox({
       sandbox_profile: 'remote_ssh',
       remote_endpoint: 'builder',
-      workspace: { mention_targets: ['remote-writer-change'], bound_workspace_ids: [] },
+      workspace: { mention_targets: ['remote-writer-change'], board_interests: [], bound_workspace_ids: [] },
     })
     const draft = { ...initRuntimeDraftFromConfig(seenSsh), remote_endpoint: 'gondolin' }
     const rebased = rebaseRuntimeDraftOnFreshConfig(draft, seenSsh, freshSsh)
@@ -934,6 +952,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     const c = makeKeeperConfigForSandbox({
       workspace: {
         mention_targets: ['sangsu'],
+        board_interests: [],
         bound_workspace_ids: [],
       },
     })
@@ -948,6 +967,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     const c = makeKeeperConfigForSandbox({
       workspace: {
         mention_targets: ['sangsu'],
+        board_interests: [],
         bound_workspace_ids: [],
       },
     })
@@ -958,9 +978,27 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.mention_targets).toEqual([])
   })
 
+  it('sorts Board interests and emits an explicit clear', () => {
+    const c = makeKeeperConfigForSandbox({
+      workspace: {
+        mention_targets: [],
+        board_interests: ['MASC runtime'],
+        bound_workspace_ids: [],
+      },
+    })
+    const changed = buildRuntimePayload(draftFrom(c, {
+      board_interests_text: 'Keeper lifecycle\nMASC runtime\n',
+    }), c)
+    expect(changed.board_interests).toEqual(['Keeper lifecycle', 'MASC runtime'])
+
+    const cleared = buildRuntimePayload(draftFrom(c, { board_interests_text: '' }), c)
+    expect(cleared.board_interests).toEqual([])
+  })
+
   it('emits autoboot and max_context_override edits', () => {
     const c = makeKeeperConfigForSandbox({
       activation_mode: 'autonomous',
+      input_policy: 'small',
       max_context_override: null,
     })
     const payload = buildRuntimePayload(draftFrom(c, {
@@ -981,6 +1019,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
 
   it('preserves an explicit positive max_context_override before PATCH', () => {
     const c = makeKeeperConfigForSandbox({
+      input_policy: 'small',
       max_context_override: null,
     })
     const payload = buildRuntimePayload(draftFrom(c, {
@@ -1712,6 +1751,28 @@ describe('KeeperConfigPanel', () => {
       }),
       makeKeeperConfig().config_revision,
     )
+  })
+
+  it('renders and saves the wide context policy independently of its cap', async () => {
+    mocks.patchKeeperConfig.mockResolvedValueOnce(makeKeeperConfig({ input_policy: 'wide' }))
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '런타임')
+    await flush()
+    const policy = container.querySelector('select[aria-label="컨텍스트 정책"]') as HTMLSelectElement
+    expect(policy.value).toBe('small')
+    expect(Array.from(policy.options).map(option => option.text)).toEqual(['작은 컨텍스트', '넓은 컨텍스트'])
+    policy.value = 'wide'
+    policy.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('Keeper 설정 저장'))
+    saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+    expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
+      'keeper-sangsu', { input_policy: 'wide' }, makeKeeperConfig().config_revision)
   })
 
   it('patches mention targets without re-emitting retired compaction gates', async () => {

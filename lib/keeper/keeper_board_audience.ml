@@ -90,9 +90,13 @@ let route_for_keeper ~audience ~(meta : Keeper_meta_contract.keeper_meta) ~signa
             the lane records an attention candidate; every other kind keeps
             the [Ignore] fold. *)
          if signal.Board_dispatch.kind = Board_dispatch.Board_comment_added
+            && meta.board_interests <> []
          then Board_signal.Available Judge_discoverable
          else Board_signal.Available Ignore)
-    | Discoverable -> Board_signal.Available Judge_discoverable
+    | Discoverable ->
+      if meta.board_interests = []
+      then Board_signal.Available Ignore
+      else Board_signal.Available Judge_discoverable
 ;;
 
 let label = function

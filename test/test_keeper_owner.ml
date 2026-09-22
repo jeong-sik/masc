@@ -321,7 +321,9 @@ let test_profile_update_preserves_owner_runtime_state () =
     ; microvm_cpus = profile_update_cpus
     ; network_mode = current.network_mode
     ; mention_targets = [ "profile-target" ]
+    ; board_interests = [ "MASC runtime" ]
     ; activation_mode = Masc.Keeper_activation_mode.Autonomous
+    ; input_policy = Masc.Keeper_input_policy.Wide
     ; max_context_override = Some 32_000
     ; telemetry_feedback_enabled = Some true
     ; telemetry_feedback_window_hours = Some 24
@@ -333,6 +335,7 @@ let test_profile_update_preserves_owner_runtime_state () =
   in
   let state = reducer_ok (Reducer.apply_meta state (Update_profile update)) in
   let committed = Option.get (Reducer.projection state).meta in
+  check bool "input policy reaches owner" true (committed.input_policy = Masc.Keeper_input_policy.Wide);
   check string "profile instructions updated" update.instructions committed.instructions;
   check bool "profile backend reaches owner projection" true
     (committed.microvm_backend = Some Keeper_microvm_backend.Nerdctl_kata);
@@ -345,6 +348,8 @@ let test_profile_update_preserves_owner_runtime_state () =
     current.runtime.usage.total_turns
     committed.runtime.usage.total_turns;
   check bool "profile update changes autoboot" true (Masc.Keeper_activation_mode.restore_owner committed.activation_mode);
+  check (list string) "profile Board interests reach owner projection"
+    update.board_interests committed.board_interests;
   check bool "profile update changes voice_always_allow" true (committed.voice_always_allow = Some false)
 ;;
 

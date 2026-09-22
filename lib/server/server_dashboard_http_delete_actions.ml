@@ -430,6 +430,11 @@ let keeper_artifact_path config keeper_name artifact =
       (Keeper_librarian_progress.path_for_keepers_dir
          ~keepers_dir:(Workspace.keepers_runtime_dir config)
          ~keeper_id:keeper_name)
+  | Keeper_librarian_official_progress_artifact ->
+    Some
+      (Keeper_librarian_official_progress.path_for_keepers_dir
+         ~keepers_dir:(Workspace.keepers_runtime_dir config)
+         ~keeper_id:keeper_name)
   | Keeper_playground_bundles_artifact -> None
   | Keeper_configuration_artifact ->
     Some
@@ -497,6 +502,15 @@ let purge_keeper_root_logs config keeper_name =
 
 let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
   let open Keeper_shutdown_types in
+  (* The Librarian lane is the server's and outlives the Keeper, so a unit for
+     this Keeper may still be running whichever operation asks for the purge
+     (dashboard purge completion, configuration removal). It is cancelled and
+     waited for before any file goes, or it could write the progress file back
+     after the purge deleted it (RFC librarian-lifecycle section 8).
+     [request_cancel] only accepts a request from the lane's owner domain. *)
+  let remove_artifacts () =
+    Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name;
+    Keeper_continuity_observation.forget ~config ~keeper_name;
     let artifacts =
       Keeper_shutdown_types.dashboard_purge_artifact_plan
         ~keeper_name:keeper_name
@@ -564,6 +578,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_memory_absorbed_artifact
             | Keeper_turn_boundaries_artifact
             | Keeper_librarian_progress_artifact
+            | Keeper_librarian_official_progress_artifact
             | Keeper_playground_bundles_artifact
             | Keeper_runtime_configuration_artifact
             | Keeper_configuration_artifact
@@ -592,6 +607,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_memory_absorbed_artifact
                | Keeper_turn_boundaries_artifact
                | Keeper_librarian_progress_artifact
+               | Keeper_librarian_official_progress_artifact
                | Keeper_playground_bundles_artifact
                | Keeper_runtime_configuration_artifact
                | Keeper_configuration_artifact
@@ -607,6 +623,14 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
               remove rest))
     in
     remove artifacts
+  in
+  match Eio_context.run_on_owner_domain (fun () ->
+    Keeper_memory_lane.with_librarian_purge
+      ~base_path:config.Workspace.base_path ~keeper_name remove_artifacts)
+  with
+  | Ok result -> result
+  | Error error -> Error ("Librarian lane could not be stopped before purge: "
+      ^ Keeper_memory_lane.purge_cancel_error_to_string error)
 ;;
 
 let handle_dashboard_keeper_purge_completion config operation =

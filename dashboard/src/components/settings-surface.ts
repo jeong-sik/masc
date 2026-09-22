@@ -1415,11 +1415,13 @@ export function SettingsSurface() {
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
-  // Configured runtime lanes with their ordered candidate chains — the live
+  // Declared runtime lanes with their ordered candidate chains — the live
   // counterpart of the design's failover section (runtime-editor.jsx:191-229,
   // .rt-fo-*). Read-only: the routing PATCH writer covers default +
   // media_failover only, so no reorder/add/remove controls are rendered.
-  const runtimeLanes = runtimeResolved?.lanes ?? []
+  // Assignment-only routes belong to Keeper assignment truth and must not be
+  // mislabeled as [runtime].<id> declarations on this configuration surface.
+  const runtimeLanes = runtimeResolved?.lanes.filter(lane => lane.declared) ?? []
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
   const runtimeRoutingDisabled = runtimeRoutingStatus === 'saving' || runtimeResolvedStatus !== 'ready'
   const runtimeResolution = shellRuntimeResolution.value

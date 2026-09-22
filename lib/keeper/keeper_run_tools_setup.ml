@@ -338,6 +338,7 @@ let prepare_agent_setup
       ~(task_skill_selection :
           (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result)
       ~(trajectory_acc : Trajectory.accumulator option)
+      ?dynamic_context_for_tools
       ?repetition_execution
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -944,6 +945,7 @@ let prepare_agent_setup
     }
   in
   Keeper_run_tools_hooks.assemble_hooks
+    ?dynamic_context_for_tools
     ?repetition_execution
     ~ctx ~session ~turn_system_prompt ~model_message ~dynamic_context
     ~history_messages ~prompt_metrics ~shared_context

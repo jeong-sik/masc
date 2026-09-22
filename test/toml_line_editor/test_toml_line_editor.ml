@@ -441,6 +441,45 @@ let test_remove_table_drops_one_lane () =
   Alcotest.(check bool) "the note above the removed header stays" true
     (has_line out "# polisher.")
 
+(* A rename touches the header line and nothing else: the body stays where it
+   is, and so do the comments around it. A file that already declares the new
+   name is refused rather than left declaring it twice, which fails the load. *)
+let test_rename_table_moves_only_the_header () =
+  match
+    Toml_line_editor.rename_table lanes_fixture
+      ~path:{|runtime.lanes."a.one"|} ~to_path:"pairing"
+  with
+  | Toml_line_editor.Table_rename_absent -> Alcotest.fail "the header was not found"
+  | Toml_line_editor.Table_rename_conflict -> Alcotest.fail "the new name is free"
+  | Toml_line_editor.Table_renamed out ->
+    Alcotest.(check bool) "the old header is gone" false
+      (has_line out {|[runtime.lanes."a.one"]|});
+    Alcotest.(check bool) "the new header is there" true (has_line out "[pairing]");
+    Alcotest.(check bool) "the candidates stayed" true (has_line out {|  "a.one",|});
+    Alcotest.(check bool) "the note above the header stayed" true
+      (has_line out "# polisher.");
+    Alcotest.(check bool) "the next lane is untouched" true
+      (has_line out "[runtime.lanes.coding]")
+
+let test_rename_table_refuses_a_name_the_file_declares () =
+  match
+    Toml_line_editor.rename_table lanes_fixture
+      ~path:{|runtime.lanes."a.one"|} ~to_path:"runtime.lanes.coding"
+  with
+  | Toml_line_editor.Table_rename_conflict -> ()
+  | Toml_line_editor.Table_renamed _ ->
+    Alcotest.fail "renaming onto a declared table went through"
+  | Toml_line_editor.Table_rename_absent -> Alcotest.fail "the header was not found"
+
+let test_rename_table_of_an_absent_path_is_absent () =
+  match
+    Toml_line_editor.rename_table lanes_fixture ~path:"runtime.lanes.absent"
+      ~to_path:"runtime.lanes.present"
+  with
+  | Toml_line_editor.Table_rename_absent -> ()
+  | Toml_line_editor.Table_renamed _ | Toml_line_editor.Table_rename_conflict ->
+    Alcotest.fail "an absent table was renamed"
+
 let is_absent content ~path =
   match Toml_line_editor.remove_table content ~path with
   | Toml_line_editor.Table_absent -> true
@@ -933,6 +972,12 @@ let () =
             test_an_inline_table_without_a_final_newline_is_absent
         ; Alcotest.test_case "a table without a final newline is removed" `Quick
             test_a_table_without_a_final_newline_is_removed
+        ; Alcotest.test_case "rename_table moves only the header" `Quick
+            test_rename_table_moves_only_the_header
+        ; Alcotest.test_case "rename_table refuses a name the file declares" `Quick
+            test_rename_table_refuses_a_name_the_file_declares
+        ; Alcotest.test_case "rename_table of an absent path is absent" `Quick
+            test_rename_table_of_an_absent_path_is_absent
         ] )
     ; ( "keys the writer has to quote"
       , [ Alcotest.test_case "a key that is not bare is quoted" `Quick

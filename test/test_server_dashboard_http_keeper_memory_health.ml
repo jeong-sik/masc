@@ -112,6 +112,25 @@ let list_field name json =
   | _ -> Alcotest.failf "expected list field %S" name
 ;;
 
+let member name json =
+  match assoc_field name json with
+  | Some value -> value
+  | None -> Alcotest.failf "expected field %S" name
+;;
+
+let is_null = function
+  | `Null -> true
+  | _ -> false
+;;
+
+let float_option_field name json =
+  match assoc_field name json with
+  | Some `Null -> None
+  | Some (`Float f) -> Some f
+  | Some (`Int n) -> Some (float_of_int n)
+  | _ -> Alcotest.failf "expected float-or-null field %S" name
+;;
+
 let totals json =
   match assoc_field "totals" json with
   | Some value -> value
@@ -190,7 +209,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v4"
+    "keeper.memory_os.current_health.v7"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -319,28 +338,57 @@ let test_corrupt_source_snapshot_is_visible () =
     (int_field "source_snapshot_read_error_keepers" (alert_summary json))
 ;;
 
-let test_reports_librarian_lane_busy_alert () =
-  let base = fresh_dir "masc-memory-health-lane" in
+(* RFC librarian-lifecycle §4.9. No loop runs in this test process, so the
+   keeper has no measurement: the row says "not measured" rather than zero,
+   and the counts are absent rather than a number nothing took. The journal
+   and the snapshot's own source still say when the Librarian last succeeded
+   and what it last failed with. *)
+let test_reports_the_librarian_position_without_a_loop () =
+  let base = fresh_dir "masc-memory-health-librarian" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
-  let keeper_id = "lane-" ^ Filename.basename base in
-  ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "lane fact" ]);
-  Metrics.inc_counter
-    KeeperMetrics.(to_string MemoryLaneCoalesced)
-    ~labels:[ "keeper", keeper_id; "lane", "librarian" ]
-    ~delta:3.0
-    ();
+  let keeper_id = "librarian-" ^ Filename.basename base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "librarian fact" ]);
   let json = Health.keeper_memory_health_http_json ~base_path:base in
   let keeper = keeper_obj keeper_id json in
-  Alcotest.(check int) "busy count" 3 (int_field "librarian_lane_busy" keeper);
-  let alerts = list_field "alerts" keeper in
-  Alcotest.(check (list string))
-    "alert code"
-    [ "librarian_lane_busy" ]
-    (List.map (string_field "code") alerts);
+  let librarian = member "librarian" keeper in
+  Alcotest.(check bool) "state is not measured" true (is_null (member "state" librarian));
+  Alcotest.(check bool)
+    "atoms are not counted"
+    true
+    (is_null (member "unread_atom_turns" librarian));
+  Alcotest.(check bool)
+    "official turns are not counted"
+    true
+    (is_null (member "unread_official_turns" librarian));
+  Alcotest.(check (option (float 0.)))
+    "the snapshot the Librarian wrote is its last success"
+    (Some test_now)
+    (float_option_field "last_success_at" librarian);
+  Alcotest.(check bool)
+    "no failure is newer than that success"
+    true
+    (is_null (member "last_failure_kind" librarian));
+  Alcotest.(check bool) "unknown keeper makes fleet unread unknown" true
+    (is_null (member "librarian_unread_turns" (totals json)));
   Alcotest.(check int)
-    "summary busy keepers"
-    1
-    (int_field "librarian_lane_busy_keepers" (alert_summary json))
+    "a keeper with no measurement is not a stopped one"
+    0
+    (int_field "librarian_stopped_keepers" (alert_summary json));
+  Alcotest.(check (list string)) "no alert" [] (List.map (string_field "code") (list_field "alerts" keeper));
+  Current.append_librarian_failure
+    ~keepers_dir
+    ~keeper_id
+    ~now:(test_now +. 60.)
+    ~trace_id:"health-test"
+    ~kind:Current.Exact_execution_failure
+    ~detail:"the lane refused"
+    ~snapshot_present:true
+    ~cadence_deferred:false;
+  let after_failure = Health.keeper_memory_health_http_json ~base_path:base in
+  Alcotest.(check string)
+    "the journal's last line names the failure"
+    "exact_execution_failure"
+    (string_field "last_failure_kind" (member "librarian" (keeper_obj keeper_id after_failure)))
 ;;
 
 let test_corrupt_snapshot_is_visible_as_read_error () =
@@ -383,6 +431,7 @@ let test_sorts_by_snapshot_bytes_and_handles_empty_store () =
   let empty_base = fresh_dir "masc-memory-health-empty" in
   let empty = Health.keeper_memory_health_http_json ~base_path:empty_base in
   Alcotest.(check (list string)) "empty keepers" [] (keeper_ids empty);
+  Alcotest.(check int) "empty unread total" 0 (int_field "librarian_unread_turns" (totals empty));
   Alcotest.(check int) "empty bytes" 0 (int_field "snapshot_bytes" (totals empty))
 ;;
 
@@ -658,11 +707,74 @@ let test_curator_inventory_binds_actual_commits () =
         && string_field "status" (Yojson.Safe.Util.member "observation" row) = "unavailable")))
 ;;
 
+let test_context_cycle_separates_saved_and_prepared () =
+  let module O = Masc.Keeper_continuity_observation in
+  let module S = Masc.Librarian_continuity_snapshot in
+  let module B = Masc.Keeper_turn_boundaries in
+  let base = fresh_dir "masc-context-health" in
+  let config = Masc.Workspace.default_config base in
+  let keeper_name = "context-observed" in
+  Fun.protect ~finally:(fun () -> O.forget ~config ~keeper_name; Fs_compat.remove_tree base) @@ fun () ->
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
+  let cycle () = member "context_cycle"
+    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+  Alcotest.(check bool) "no prepared request inferred from saved state" true
+    (is_null (member "prepared" (cycle ())));
+  let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
+    [Agent_core.Types.Text "PRIVATE_CONVERSATION_TEXT"]] in
+  let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let position = B.position_of_messages messages |> get in
+  let trace_id = "saved-trace" in
+  let lines = [1, Ok {B.recorded_at = test_now; event = B.Turn_ended
+    {turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+     history_at_start = B.Fresh_history; position}}] in
+  let snapshot = S.capture ~trace_id ~lines ~messages ~working_state:"PRIVATE_WORKING_STATE"
+    |> Result.map_error S.error_to_string |> get in
+  let path = Masc.Keeper_librarian_continuity.path ~config ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Yojson.Safe.to_file path (S.to_json snapshot);
+  O.record ~config ~keeper_name
+    {prepared_at = test_now; runtime_id = "fixture-runtime";
+     input = O.Summarized {trace_id = "previous-trace"; end_atom = 4; boundary_line = 7}; request_bytes = 2048};
+  O.record_synthesis ~config ~keeper_name
+    {observed_at=test_now; trace_id=Some trace_id; state=O.Running;
+     range=Some {start_atom=1;end_atom=2;completed_end_atom=8}};
+  let observed = cycle () in
+  Alcotest.(check string) "synthesis is independent of ordinary drain" "running"
+    (string_field "state" (member "synthesis" observed));
+  O.record_synthesis ~config ~keeper_name
+    {observed_at=test_now; trace_id=Some trace_id; state=O.Cancelled;
+     range=Some {start_atom=1;end_atom=2;completed_end_atom=8}};
+  Alcotest.(check string) "cancellation replaces running observation" "cancelled"
+    (string_field "state" (member "synthesis" (cycle ())));
+  Alcotest.(check string) "saved identity comes from disk" trace_id
+    (string_field "trace_id" (member "saved" observed));
+  let prepared = member "prepared" observed in
+  Alcotest.(check int) "prepared bytes are observed" 2048 (int_field "request_bytes" prepared);
+  Alcotest.(check string) "prepared frontier is not replaced by newer saved frontier" "previous-trace"
+    (string_field "trace_id" (member "frontier" (member "input" prepared)));
+  let other = Masc.Workspace.default_config (Filename.concat base "other-runtime") in
+  Alcotest.(check bool) "observation does not cross runtimes" true
+    (Option.is_none (O.latest ~config:other ~keeper_name));
+  Out_channel.with_open_bin path (fun oc -> output_string oc "{PRIVATE_WORKING_STATE");
+  let unreadable = cycle () in
+  Alcotest.(check string) "corrupt state error exposes no source text" "snapshot_unreadable"
+    (string_field "saved_read_error" unreadable);
+  Alcotest.(check bool) "corrupt state has no saved frontier" true (is_null (member "saved" unreadable));
+  Alcotest.(check bool) "prepared observation survives independent disk read failure" false
+    (is_null (member "prepared" unreadable));
+  O.forget ~config ~keeper_name;
+  Alcotest.(check bool) "forgotten request is unknown" true (is_null (member "prepared" (cycle ())))
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
     [ ( "current snapshot"
-      , [ Alcotest.test_case "curator canonical owners and malformed config" `Quick
+      , [ Alcotest.test_case "saved versus prepared context" `Quick
+            test_context_cycle_separates_saved_and_prepared
+        ; Alcotest.test_case "curator canonical owners and malformed config" `Quick
             test_curator_inventory_canonical_owner_discovery
         ; Alcotest.test_case "curator inventory binds committed sources and retractions" `Quick
             test_curator_inventory_binds_actual_commits
@@ -678,8 +790,8 @@ let () =
             test_reports_revision_snapshot_bytes_and_latest_delta
         ; Alcotest.test_case "derived facts and support invalidations" `Quick
             test_reports_derived_facts_and_support_invalidations
-        ; Alcotest.test_case "librarian lane busy alert" `Quick
-            test_reports_librarian_lane_busy_alert
+        ; Alcotest.test_case "librarian position without a loop" `Quick
+            test_reports_the_librarian_position_without_a_loop
         ; Alcotest.test_case "corrupt snapshot visible" `Quick
             test_corrupt_snapshot_is_visible_as_read_error
         ; Alcotest.test_case "sort and empty store" `Quick

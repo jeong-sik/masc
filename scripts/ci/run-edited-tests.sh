@@ -73,6 +73,31 @@ suite_timeout() {
   esac
 }
 
+# The shortfall gate's pieces, kept as functions so --self-test drives the
+# ones the pull-request path runs rather than a second copy.
+count_edited_lib_sources() {
+  printf '%s\n' "$1" | grep -E '^lib/.*\.mli?$' \
+    | sed -E 's/\.mli?$//' | sort -u | grep -c . || true
+}
+
+count_suites() {
+  printf '%s\n' "$1" | grep -cv '^[[:space:]]*$' || true
+}
+
+# Fewer suites than library modules edited. The call site says where the
+# threshold comes from.
+selection_is_short() {
+  local selected="$1" lib_edited="$2"
+  [ "${lib_edited}" -gt 0 ] && [ "${selected}" -lt "${lib_edited}" ]
+}
+
+# Suites the author named in the pull request body, space separated.
+named_suites() {
+  printf '%s\n' "$1" | tr -d '\r' \
+    | sed -n 's/^[[:space:]]*Test-suites:[[:space:]]*//p' \
+    | tr ',' ' '
+}
+
 # Which suites this pull request runs, from its changed-file list in
 # ${changed}. Sets ${sources} and returns 1 when there is nothing to run, so
 # --self-test can exercise the same code the pull-request path does rather
@@ -447,6 +472,27 @@ NAMEDFILES
   named_file_suites=$( { printf '%s\n' "${named_file_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
+  # exactpath candidates: a suite that spells the changed file's exact path,
+  # in either quote style. The file rule above skips a shared basename and
+  # the quoted-literal mapping matches only double quotes; #37396's incident
+  # 4 changed scripts/fixtures/release-evidence/runtime.toml -- a basename
+  # shared with transport-harness -- while test_setup_cli.py opens it with
+  # single quotes, and neither rule reached the suite. An exact path is the
+  # claim the file rule waits for, whatever the basename or the quote.
+  exactpath_candidates=$(printf '%s\n' "${referenced}" | sed -n 's/^exactpath //p')
+  exactpath_suites=""
+  while IFS= read -r candidate; do
+    [ -n "${candidate}" ] || continue
+    case "${candidate}" in
+      *.py) python_suite_is_runnable "${candidate}" || continue ;;
+    esac
+    exactpath_suites=$(printf '%s\n%s\n' "${exactpath_suites}" "${candidate}")
+  done <<EXACTPATHS
+${exactpath_candidates}
+EXACTPATHS
+  exactpath_suites=$( { printf '%s\n' "${exactpath_suites}" \
+    | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+
   # [themes_changed] stands beside [assets] here: the tool and prompt triggers
   # ride that variable, which matches config/(prompts|tools|mcp), and a theme
   # is none of those. Left out, a theme-only pull request returned here before
@@ -454,7 +500,7 @@ NAMEDFILES
   if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${themes_changed}" ] \
     && [ -z "${module_suites}" ] && [ -z "${library_suites}" ] \
     && [ -z "${declared_suites}" ] && [ -z "${referencing_suites}" ] \
-    && [ -z "${named_file_suites}" ]; then
+    && [ -z "${named_file_suites}" ] && [ -z "${exactpath_suites}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -523,6 +569,13 @@ NAMEDFILES
     echo "suites that name a file this pull request edits:"
     printf '%s\n' "${named_file_suites}" | sed 's/^/  /'
     sources=$(printf '%s\n%s\n' "${sources}" "${named_file_suites}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${exactpath_suites}" ]; then
+    echo "suites that open a file this pull request edits by exact path:"
+    printf '%s\n' "${exactpath_suites}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${exactpath_suites}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
@@ -1287,6 +1340,44 @@ FAKE
     "test/test_ok (not built: the step budget ran out);test/test_failing (not built: the step budget ran out);" \
     8 3 test_ok test_failing
 
+  # The shortfall gate. Both directions are needed: that it blocks the case it
+  # was built for, and that it stays quiet on an ordinary pull request. A gate
+  # only shown to pass has not been shown to catch anything.
+  gate_check() {
+    local label="$1" want="$2" selected="$3" lib_edited="$4" body="${5:-}"
+    local got="allow"
+    if selection_is_short "${selected}" "${lib_edited}"; then
+      got="block"
+      [ -n "$(named_suites "${body}")" ] && got="named"
+    fi
+    if [ "${got}" != "${want}" ]; then
+      echo "FAIL ${label}: expected ${want}, got ${got}"
+      failures=$((failures + 1))
+    fi
+  }
+  counted_modules=$(count_edited_lib_sources \
+    $'lib/paired.ml\nlib/paired.mli\nlib/implementation_only.ml\nREADME.md')
+  if [ "${counted_modules}" -ne 2 ]; then
+    echo "FAIL library source count: expected 2 modules, got ${counted_modules}"
+    failures=$((failures + 1))
+  fi
+  # #37473 as it stood: four library modules, one suite selected, green.
+  gate_check "under-selected pull request is blocked" block 1 4
+  # The same pull request once its body answers. The named suites are added to
+  # the run, so this is an answer rather than a waiver.
+  gate_check "named suites clear the gate" named 1 4 \
+    "Test-suites: test_fs_compat test_fs_compat_publication_reconciliation"
+  # 2b18c1fa31: one library source, nothing selected at all.
+  gate_check "nothing selected is blocked" block 0 1
+  # The thirteen that were not under-selected. The lowest was two suites for
+  # two sources (#37481); the widest, 119 for 19, is what a real sweep looks
+  # like.
+  gate_check "proportionate selection is quiet" allow 2 2
+  gate_check "wide selection is quiet" allow 119 19
+  gate_check "single source, four suites" allow 4 1
+  # A pull request that edits no library source is not this gate's business.
+  gate_check "no library modules edited" allow 0 0
+
   if [ "${failures}" -eq 0 ]; then
     echo "run-edited-tests self-test: all cases pass"
     return 0
@@ -1307,7 +1398,59 @@ fi
 changed=$(gh api "repos/${repo}/pulls/${pr_number}/files" \
   --paginate --jq '.[] | select(.status != "removed") | .filename')
 
-select_sources || exit 0
+# A pull request that edits library modules and comes out with fewer suites
+# than modules edited has probably not been seen, rather than not been affected.
+# [select_sources] cannot tell those apart and answered both by exiting 0 in
+# silence: #37473 edited four library modules, selected one suite, went green,
+# and was covered only because a dispatch was fired by hand.
+#
+# The threshold is suites < library modules edited. Measured over the last 300
+# first-parent commits on main: fifteen changed library modules and no test
+# file, and this separates exactly the two that were under-selected -- 0
+# suites for 1 module, 1 for 4 -- from the thirteen that were not. The next
+# value up is 2 suites for 2 sources, so the line is not drawn around the
+# first example.
+#
+# The way past it is to name the suites in the pull request body:
+#
+#   Test-suites: test_fs_compat test_fs_compat_publication_reconciliation
+#
+# Those are added to this run, so answering the gate makes them execute.
+# There is no skip flag: a flag is what the next person reaches for, and it
+# records nothing about what was decided.
+lib_edited=$(count_edited_lib_sources "${changed}")
+
+if select_sources; then
+  selected=$(count_suites "${sources}")
+else
+  selected=0
+  sources=""
+fi
+
+if selection_is_short "${selected}" "${lib_edited}"; then
+  pr_body=${pr_body-$(gh api "repos/${repo}/pulls/${pr_number}" --jq '.body // ""')}
+  named=$(named_suites "${pr_body}")
+  if [ -z "${named}" ]; then
+    echo "selection is short: ${selected} suite(s) for ${lib_edited} edited library module(s)." >&2
+    echo "  The rules that map a source to a suite answer by name, and a module" >&2
+    echo "  reached only through an alias never appears under its own. Here that" >&2
+    echo "  reads the same as a change nothing covers, so this asks rather than" >&2
+    echo "  guessing which one it is." >&2
+    echo "  Name the suites in the pull request body and they will run:" >&2
+    echo "    Test-suites: test_one test_two" >&2
+    exit 1
+  fi
+  echo "pull request body names suites for the shortfall: ${named}"
+  for suite in ${named}; do
+    suite=${suite#test/}
+    suite=${suite%.ml}
+    sources=$(printf '%s\n%s\n' "${sources}" "test/${suite}.ml")
+  done
+  sources=$(printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$' | sort -u)
+  selected=$(count_suites "${sources}")
+fi
+
+[ "${selected}" -gt 0 ] || exit 0
 
 run_selected
 

@@ -351,6 +351,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
          ("name", `String m.name);
          ("config_revision", keeper_config_revision_json config_revision);
          ("activation_mode", Keeper_activation_mode.to_yojson m.activation_mode);
+         ("input_policy", Keeper_input_policy.to_yojson m.input_policy);
          ("max_context_override", Json_util.int_opt_to_json m.max_context_override);
          ( "sandbox_profile"
          , `String

@@ -24,7 +24,9 @@ let keeper_toml_fields =
   [ "name", Field_string
   ; "instructions", Field_string
   ; "activation_mode", Field_string
+  ; "input_policy", Field_string
   ; "mention_targets", Field_string_array
+  ; "board_interests", Field_string_array
   ; "sandbox_profile", Field_string
   ; "sandbox_image", Field_string
   ; "network_mode", Field_string
@@ -324,6 +326,13 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       match Keeper_activation_mode.of_string raw with
       | Some _ -> Ok ()
       | None -> Error "keeper.activation_mode must be manual, on_demand, or autonomous") in
+  let result = Result.bind result (fun () ->
+    match str "input_policy" with
+    | None -> Ok ()
+    | Some raw ->
+      match Keeper_input_policy.of_string raw with
+      | Some _ -> Ok ()
+      | None -> Error "keeper.input_policy must be small or wide") in
   let max_context_override_result =
     match int_ "max_context_override" with
     | None -> Ok None
@@ -368,7 +377,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         manifest_path = None;
         instructions = str "instructions";
         activation_mode = Option.bind (str "activation_mode") Keeper_activation_mode.of_string;
+        input_policy = Option.bind (str "input_policy") Keeper_input_policy.of_string;
         mention_targets = strs "mention_targets";
+        board_interests = normalize_board_interests (strs "board_interests");
         sandbox_profile =
           Option.bind (str "sandbox_profile") sandbox_profile_of_string;
         sandbox_image = str "sandbox_image";
@@ -421,8 +432,10 @@ let merge_keeper_profile_defaults
     manifest_path = prefer overlay.manifest_path base.manifest_path;
     instructions = prefer overlay.instructions base.instructions;
     activation_mode = prefer overlay.activation_mode base.activation_mode;
+    input_policy = prefer overlay.input_policy base.input_policy;
     mention_targets =
       merge_string_list ~base:base.mention_targets overlay.mention_targets;
+    board_interests = overlay.board_interests;
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;

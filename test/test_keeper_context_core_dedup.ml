@@ -377,7 +377,11 @@ let test_persist_message_writes_single_ts_unix_key () =
     ~finally:(fun () -> Fs_compat.remove_tree base_dir)
     (fun () ->
       let session = C.create_session ~session_id:"history-ts" ~base_dir in
-      C.persist_message session (text_message "hello");
+      C.persist_message
+        ~keeper_name:"history-ts"
+        ~turn_ref:(Ids.Turn_ref.make ~trace_id:"history-ts" ~absolute_turn:1)
+        session
+        (text_message "hello");
       let path =
         Filename.concat session.session_dir "history.jsonl"
       in

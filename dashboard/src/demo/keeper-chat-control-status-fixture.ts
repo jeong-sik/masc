@@ -20,7 +20,7 @@ const deliveredSurfacePost: ToolCallEntry = {
   execution_id: 'exec-surface-post',
   input: { surface: 'dashboard' },
   output: '{"delivered":true}',
-  success: true,
+  wire_outcome: 'ok',
   duration_ms: 18,
 }
 

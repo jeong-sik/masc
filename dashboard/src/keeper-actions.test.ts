@@ -106,7 +106,7 @@ describe('tool-output hydration credential scope', () => {
     setStoredToken('fixture-worker')
     complete({ entries: [{
       ts: 1, keeper: 'echo', tool: 'Read', input: {}, output: 'private',
-      success: true, duration_ms: 1, execution_id: 'late-admin',
+      wire_outcome: 'ok', duration_ms: 1, execution_id: 'late-admin',
     }] })
     await hydration
     expect(lookupToolCallOutput('echo', 'late-admin')).toBeNull()
@@ -291,7 +291,7 @@ describe('hydrateKeeperChatHistory', () => {
           tool: 'keeper_context_status',
           input: {},
           output: 'ok',
-          success: true,
+          wire_outcome: 'ok',
           duration_ms: 12,
           tool_use_id: 'toolu_recent',
         },

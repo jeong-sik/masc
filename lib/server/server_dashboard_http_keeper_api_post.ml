@@ -555,9 +555,12 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                | Checkpoints.Purge_keeper_not_found _ -> `Not_found
                | Purge_keeper_active _
                | Purge_checkpoint_invalid _
-               | Purge_librarian_coordinates_present
+               | Purge_librarian_rebase_refused _
                | Purge_source_changed -> `Conflict
                | Purge_checkpoint_unavailable _
+               | Purge_librarian_position_unreadable _
+               | Purge_librarian_cancel_failed _
+               | Purge_librarian_position_not_written _
                | Purge_backup_failed _
                | Purge_install_failed _ -> `Internal_server_error
              in
@@ -660,11 +663,13 @@ let dashboard_config_string_fields =
     "sandbox_profile";
     "network_mode";
     "activation_mode";
+    "input_policy";
   ]
 
 let dashboard_config_string_list_fields =
   [
     "mention_targets";
+    "board_interests";
   ]
 
 (* Accepts a string or an explicit null, so it cannot join
@@ -831,6 +836,10 @@ let validate_dashboard_config_field key value =
     (match value with
      | `Assoc _ -> Ok ()
      | other -> dashboard_field_type_error key "an object" other)
+  else if key = "input_policy" then
+    (match value with
+     | `String raw when Option.is_some (Keeper_input_policy.of_string raw) -> Ok ()
+     | other -> dashboard_field_type_error key "small or wide" other)
   else if key = "max_context_override" then
     validate_dashboard_max_context_override value
   else if key = confirm_context_shrink_field then

@@ -9,11 +9,9 @@
 
     The gate only ever narrows [absorbed]. When the model cannot be asked --
     no key, the lane or the gate turned off -- the answer is applied as it
-    came, which is what happened before the gate. When it was asked and did
-    not answer -- a transport or decoding failure -- the answer is applied
-    except for what could not have been judged for its size
-    ({!request_bytes_limit}), which stays current: that part of the verdict
-    is the gate's own and does not depend on the model. *)
+    came. When an enabled judgment fails, only completed positive verdicts
+    authorize absorption; unconfirmed sources stay current. New claims are
+    still applied, so judgment failure does not stop the Memory cycle. *)
 
 (** {1 Statements} *)
 
@@ -63,7 +61,7 @@ type judged =
   }
 
 type outcome =
-  | Open of
+  | Failed of
       { reason : string
       ; absorbed : Keeper_memory_os_types.absorbed_statement list
       ; left : source_verdict list
@@ -71,14 +69,11 @@ type outcome =
       ; unjudged : Keeper_memory_os_types.absorbed_statement list
       ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
       }
-      (** the model stopped answering. What the gate had decided by then
-          stays decided: [unjudgeable] (too large to ask,
-          {!request_bytes_limit}) and [left] (a completed answer showed a
-          statement not conveyed) stay current; [absorbed] is the answer's
-          list without them, applied as answered. [conveyed] retains completed
-          positive verdicts separately from fail-open absorptions. [unjudged]
-          includes every source or claim classified as absent before requests,
-          including groups not visited after the failure. *)
+      (** Judgment failed. [absorbed] contains only [conveyed] sources for
+          which every statement was positively answered before the failure.
+          All other sources stay current. [left] records completed negative
+          evidence, [unjudgeable] records oversize inputs, and [unjudged]
+          records missing source/claim identities, including unvisited groups. *)
   | Judged of judged
 
 val conveyed_boundary : float

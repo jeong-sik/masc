@@ -7,11 +7,10 @@
     — 71% of all message bytes — exactly one exceeded that threshold. The rest
     ride in history and are re-serialized into every later request.
 
-    {!Runtime_model_input_tail_window} already fits each request to the
-    target's capacity, so this does not shrink requests; it buys atoms. Only
-    1.9-4.7% of that history is transmitted, and old tool output consumes most
-    of it. Replacing a median 2,862-byte body with its marker raises how much
-    conversation fits the same budget.
+    The caller selects the conversation range and verified completed boundary.
+    Substitution reduces body bytes inside that range without adding or removing
+    atoms. Small Keeper input policy uses this with Librarian continuity; spare
+    capacity is not a reason to widen the conversation range.
 
     Durable state is untouched. This runs on the provider-bound copy, like the
     window, so a blob written here has no durable referrer — see

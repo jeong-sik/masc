@@ -1651,7 +1651,7 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
   | Retry.Timeout _ -> Timeout
 ;;
 
-let execution_error_cause = function
+let execution_error_cause ~http_status = function
   | Exec.Clock_required_for_timeout -> Clock_required_for_timeout
   | Exec.Frozen_request_mismatch -> Frozen_request_mismatch
   | Exec.Response_body_deadline_exceeded -> Response_body_deadline_exceeded
@@ -1662,6 +1662,11 @@ let execution_error_cause = function
           provider_refusal_of_api_error
             (Retry.classify_refusal ~retry_after_header ~status:code ~body)
       }
+  | Exec.Provider_error
+      (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ }) ->
+    (match http_status with
+     | Some http_status -> Provider_response_refused { http_status; refusal = Context_overflow }
+     | None -> Completion_failed)
   (* Other transport, provider parsing or observer failures remain distinct
      from an owned body deadline, even when their receipt has headers. *)
   | Exec.Provider_error _ -> Completion_failed
@@ -1712,7 +1717,7 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
       Error
         { call_id = receipt_call_id receipt
         ; receipt
-        ; cause = execution_error_cause cause
+        ; cause = execution_error_cause ~http_status:(receipt_http_status receipt) cause
         ; raw_response = Option.map raw_response evidence
         }
     | Ok { outcome; raw_response = evidence } ->

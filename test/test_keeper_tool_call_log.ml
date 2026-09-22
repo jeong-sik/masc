@@ -241,7 +241,7 @@ let test_read_window_keeps_the_keepers_rows_in_order () =
       Keeper_tool_call_log.log_call
         ~keeper_name:keeper ~tool_name:tool
         ~input:(`Assoc []) ~output_text:"out"
-        ~success:true ~duration_ms:1.0 ()
+        ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ()
     in
     log "alice" "first";
     log "bob" "between";
@@ -287,7 +287,7 @@ let test_file_change_tally_matches_a_whole_read () =
       Keeper_tool_call_log.log_call
         ~keeper_name:keeper ~tool_name:tool
         ~input:(`Assoc []) ~output_text:"out"
-        ~success:true ~duration_ms:1.0 ()
+        ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ()
     in
     log "alice" "first";
     log "bob" "other";
@@ -410,7 +410,7 @@ let test_file_change_tally_drops_rows_that_aged_out () =
            [ "ts", `Float ts
            ; "keeper", `String "alice"
            ; "tool", `String tool
-           ; "success", `Bool true
+           ; "wire_outcome", `String "ok"
            ])
     in
     let counted ~window_hours =
@@ -458,7 +458,7 @@ let test_read_recent_n_zero () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_a"
       ~input:(`Assoc []) ~output_text:"ok"
-      ~success:true ~duration_ms:1.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
     let result = read_recent ~n:0 () in
     Alcotest.(check int) "n=0 returns empty" 0 (List.length result))
 
@@ -467,7 +467,7 @@ let test_read_recent_n_negative () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_a"
       ~input:(`Assoc []) ~output_text:"ok"
-      ~success:true ~duration_ms:1.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
     let result = read_recent ~n:(-1) () in
     Alcotest.(check int) "n<0 returns empty" 0 (List.length result))
 
@@ -476,11 +476,11 @@ let test_read_recent_keeper_filter () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"alice" ~tool_name:"tool_x"
       ~input:(`Assoc []) ~output_text:"out"
-      ~success:true ~duration_ms:5.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:5.0 ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"bob" ~tool_name:"tool_y"
       ~input:(`Assoc []) ~output_text:"out"
-      ~success:true ~duration_ms:5.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:5.0 ();
     let alice_entries = read_recent ~keeper_name:"alice" () in
     let bob_entries = read_recent ~keeper_name:"bob" () in
     let all_entries = read_recent () in
@@ -503,7 +503,7 @@ let test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n () =
         Keeper_tool_call_log.log_call
           ~keeper_name:keeper ~tool_name:tool
           ~input:(`Assoc []) ~output_text:"out"
-          ~success:true ~duration_ms:1.0 ())
+          ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ())
       [ ("alice", "t1"); ("bob", "t2"); ("bob", "t3"); ("bob", "t4")
       ; ("bob", "t5"); ("bob", "t6"); ("bob", "t7"); ("bob", "t8")
       ; ("bob", "t9"); ("alice", "t10")
@@ -535,7 +535,7 @@ let test_fleet_rows_derivation_matches_read_recent () =
         Keeper_tool_call_log.log_call
           ~keeper_name:keeper ~tool_name:tool
           ~input:(`Assoc []) ~output_text:"out"
-          ~success:true ~duration_ms:1.0 ())
+          ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ())
       [ ("alice", "t1"); ("bob", "t2"); ("alice", "t3");
         ("carol", "t4"); ("alice", "t5"); ("bob", "t6") ];
     let n = 2 in
@@ -565,7 +565,7 @@ let test_exact_agent_core_occurrence_persisted () =
       ~tool_name:"tool_a"
       ~input:(`Assoc [])
       ~output_text:"ok"
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:1.0
       ~tool_use_id:""
       ~turn:9
@@ -613,7 +613,7 @@ let test_ordinary_path_disposition_persisted () =
       ~tool_name:"keeper_fs_read"
       ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
       ~output_text:"refused"
-      ~success:false
+      ~wire_outcome:Tool_result.Error
       ~duration_ms:3.0
       ~disposition:(Tool_result.Failed Tool_result.Policy_rejection)
       ();
@@ -641,7 +641,7 @@ let test_file_change_evidence_persists_with_execution_identity () =
       ~tool_name:"keeper_fs_edit"
       ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
       ~output_text:(String.make 5000 'x')
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:3.0
       ~execution_id
       ~file_change_evidence:evidence
@@ -676,7 +676,6 @@ let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
       ~tool_name:"keeper_fs_read"
       ~input:(`Assoc [])
       ~output_text:"ok"
-      ~success:true
       ~duration_ms:1.0
       ();
     match read_recent ~n:1 () with
@@ -688,7 +687,13 @@ let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
       Alcotest.(check (option string))
         "an unobserved wire outcome is explicit"
         (Some "unknown")
-        (Safe_ops.json_string_opt "wire_outcome" entry)
+        (Safe_ops.json_string_opt "wire_outcome" entry);
+      Alcotest.(check bool)
+        "no parallel success shadow is persisted"
+        false
+        (match entry with
+         | `Assoc fields -> List.mem_assoc "success" fields
+         | _ -> false)
     | _ -> Alcotest.fail "expected exactly one entry")
 
 let test_composition_action_context_persisted () =
@@ -721,7 +726,7 @@ let test_composition_action_context_persisted () =
       ~tool_name:"keeper_fs_read"
       ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
       ~output_text:"typed output"
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:12.5
       ~typed_result
       ~composition_tool:"keeper_research_pipeline"
@@ -788,7 +793,7 @@ let test_composition_rows_separate_submitted_from_autonomous_turn () =
              ~tool_name:"masc_board_stats"
              ~input:(`Assoc [])
              ~output_text:"ok"
-             ~success:true
+             ~wire_outcome:Tool_result.Ok
              ~duration_ms:1.0
              ?agent_name:context.agent_name
              ?turn_kind:context.turn_kind
@@ -855,7 +860,7 @@ let test_sensitive_named_tool_logged_with_redaction () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"mcp_auth_create"
       ~input:(`Assoc [("token", `String "secret123")]) ~output_text:"done"
-      ~success:true ~duration_ms:1.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
     let result = read_recent () in
     Alcotest.(check int) "tool call logged" 1 (List.length result);
     let encoded = Yojson.Safe.to_string (List.hd result) in
@@ -875,7 +880,7 @@ let test_sensitive_input_fields_redacted () =
         ("content", `String "hello");
       ])
       ~output_text:"done"
-      ~success:true ~duration_ms:1.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
     let entries = read_recent () in
     Alcotest.(check int) "one entry logged" 1 (List.length entries);
     let entry_str = Yojson.Safe.to_string (List.hd entries) in
@@ -889,7 +894,7 @@ let test_model_field_stored () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
-      ~success:true ~duration_ms:2.0
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0
       ~model:"glm-4-9b"
       ~runtime_profile:"local_qwen3_27b_only"
       ();
@@ -936,7 +941,7 @@ let test_turn_context_fields_stored () =
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc [("path", `String "/tmp/k-sandbox/status.json")])
       ~output_text:"ok"
-      ~success:true ~duration_ms:2.0
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0
       ?agent_name:tctx.agent_name
       ?lane:tctx.lane ?tool_choice:tctx.tool_choice
       ?thinking_enabled:tctx.thinking_enabled
@@ -1086,7 +1091,7 @@ let test_turn_context_fields_absent_without_context () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
-      ~success:true ~duration_ms:2.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0 ();
     let entries = read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry = List.hd entries in
@@ -1139,7 +1144,7 @@ let test_route_evidence_stored_for_git_push () =
            ])
       ~output_text:
         {|{"ok":true,"via":"docker","cwd":"repos/masc-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:42.0
       ();
     let entries = read_recent ~n:1 () in
@@ -1209,7 +1214,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
              ("cwd", `String "repos/masc-keeper-direct-proof");
            ])
       ~output_text:marker
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:42.0
       ();
     let entries = read_recent ~n:1 () in
@@ -1247,7 +1252,7 @@ let test_route_evidence_redacts_wrapped_git_push () =
            ])
       ~output_text:
         {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:42.0
       ();
     let entries = read_recent ~n:1 () in
@@ -1277,7 +1282,7 @@ let test_route_evidence_command_redaction_fails_closed () =
            ~input:(`Assoc [ ("cmd", `String command) ])
            ~output_text:
              {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
-           ~success:true
+           ~wire_outcome:Tool_result.Ok
            ~duration_ms:42.0
            ();
          match read_recent ~n:1 () with
@@ -1312,7 +1317,7 @@ let test_route_evidence_records_descriptor_for_filesystem_calls () =
       ~tool_name:"Read"
       ~input:(`Assoc [ ("file_path", `String "README.md") ])
       ~output_text:"file contents"
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:4.0
       ();
     let entries = read_recent ~n:1 () in
@@ -1351,7 +1356,7 @@ let test_route_evidence_records_internal_descriptor () =
       ~input:(`Assoc [])
       ~output_text:
         {|{"profile":"docker","lane":null,"endpoint":null,"operator_action":null}|}
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:1.0
       ();
     let entries = read_recent ~n:1 () in
@@ -1392,7 +1397,7 @@ let test_route_evidence_records_masc_board_descriptor () =
       ~tool_name:"mcp__masc__masc_board_post"
       ~input:(`Assoc [ "body", `String "descriptor evidence test" ])
       ~output_text:{|{"ok":true,"post_id":"post-1"}|}
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:2.0
       ();
     let entries = read_recent ~n:1 () in
@@ -1453,7 +1458,7 @@ let test_non_object_input_still_logs_action_radius () =
       ~tool_name:"tool_write_file"
       ~input:(`String "raw pre-tool gate payload")
       ~output_text:"gate_waiting_for_operator"
-      ~success:false
+      ~wire_outcome:Tool_result.Error
       ~duration_ms:3.0
       ();
     let entries = read_recent ~n:1 () in
@@ -1484,7 +1489,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k1" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
-      ~success:true ~duration_ms:2.0
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0
       ~model:"glm-5.1" ~lane:"tool_optional"
       ~tool_choice:"auto"
       ~thinking_enabled:false
@@ -1494,7 +1499,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~keeper_name:"k2" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:failure_output
       ~result_bytes:(String.length failure_output)
-      ~success:false ~duration_ms:3.0
+      ~wire_outcome:Tool_result.Error ~duration_ms:3.0
       ~model:"qwen3.5-27b-unified" ~lane:"retry"
       ~tool_choice:"auto"
       ~thinking_enabled:true
@@ -1557,7 +1562,7 @@ let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
       ~input:(`Assoc [])
       ~output_text:"ok"
       ~result_bytes:2
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:1.0
       ();
     let summary = aggregate ~n:10 () in
@@ -1584,7 +1589,8 @@ let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
       ~tool_name:"keeper_wait"
       ~input:(`Assoc [])
       ~output_text:(Tool_result.message result)
-      ~success:(Tool_result.is_success result)
+      ~result_bytes:(String.length (Tool_result.message result))
+      ~wire_outcome:Tool_result.Unknown
       ~duration_ms:(Tool_result.duration_ms result)
       ~typed_result:result
       ();
@@ -1606,6 +1612,44 @@ let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
       true
       Yojson.Safe.Util.(member "by_tool" summary |> to_list |> List.is_empty))
 
+let test_dashboard_aggregate_separates_unsettled_from_malformed () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    let row fields =
+      `Assoc
+        ([ ("ts", `Float (Unix.gettimeofday ()))
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "pending")
+         ; ("result_bytes", `Int 7)
+         ; ("duration_ms", `Float 2.0)
+         ]
+         @ fields)
+    in
+    Dated_jsonl.append store (row [ "wire_outcome", `String "unknown" ]);
+    Dated_jsonl.append store (row []);
+    Dated_jsonl.append store (row [ "disposition", `String "future_state" ]);
+    Dated_jsonl.append store
+      (`Assoc
+         [ "ts", `Float (Unix.gettimeofday ())
+         ; "record_kind", `String "lifecycle_event"
+         ; "keeper", `String "k"
+         ; "tool", `String "vision_candidate"
+         ; "wire_outcome", `String "unknown"
+         ]);
+    let summary = aggregate ~n:10 () in
+    Alcotest.(check int) "known unknown wire outcomes stay readable" 2
+      (Safe_ops.json_int ~default:(-1) "unsettled" summary);
+    Alcotest.(check int) "unknown disposition token is malformed" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "unsettled rows stay out of settled total" 0
+      (Safe_ops.json_int ~default:(-1) "total" summary))
+
 let test_dashboard_hourly_trend_numeric_ts () =
   with_tmp_log_dir (fun dir ->
     let store =
@@ -1622,7 +1666,7 @@ let test_dashboard_hourly_trend_numeric_ts () =
          ; ("input", `Assoc [])
          ; ("output", `String "ok")
          ; ("result_bytes", `Int 2)
-         ; ("success", `Bool true)
+         ; ("wire_outcome", `String "ok")
          ; ("duration_ms", `Float 2.0)
          ]);
     let expected_hour =
@@ -1666,7 +1710,7 @@ let test_dashboard_aggregate_window_hours () =
          ; ("input", `Assoc [])
          ; ("output", `String "ok")
          ; ("result_bytes", `Int 2)
-         ; ("success", `Bool true)
+         ; ("wire_outcome", `String "ok")
          ; ("duration_ms", `Float 2.0)
          ]);
     Dated_jsonl.append store
@@ -1677,7 +1721,7 @@ let test_dashboard_aggregate_window_hours () =
          ; ("input", `Assoc [])
          ; ("output", `String "error: {\"ok\":false,\"error\":\"stale\"}")
          ; ("result_bytes", `Int 35)
-         ; ("success", `Bool false)
+         ; ("wire_outcome", `String "error")
          ; ("duration_ms", `Float 5.0)
          ]);
     let summary = aggregate ~n:10 ~window_hours:24.0 () in
@@ -1709,7 +1753,7 @@ let test_dashboard_aggregate_drops_rows_without_result_bytes () =
          ; ("input", `Assoc [])
          ; ("output", `String "ok")
          ; ("result_bytes", `Int 2)
-         ; ("success", `Bool true)
+         ; ("wire_outcome", `String "ok")
          ; ("duration_ms", `Float 2.0)
          ]);
     (* No [result_bytes]: an inline output string must not stand in for it. *)
@@ -1720,7 +1764,7 @@ let test_dashboard_aggregate_drops_rows_without_result_bytes () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "error: {\"ok\":false,\"error\":\"boom\"}")
-         ; ("success", `Bool false)
+         ; ("wire_outcome", `String "error")
          ; ("duration_ms", `Float 5.0)
          ]);
     let summary = aggregate ~n:10 () in
@@ -1752,7 +1796,7 @@ let test_dashboard_aggregate_only_malformed_rows_is_empty_summary () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "ok")
-         ; ("success", `Bool true)
+         ; ("wire_outcome", `String "ok")
          ; ("duration_ms", `Float 2.0)
          ]);
     let summary = aggregate ~n:10 () in
@@ -1766,7 +1810,7 @@ let test_append_failure_records_coverage_gap () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
-      ~success:true ~duration_ms:2.0
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0
       ~trace_id:"trace-gap" ();
     let gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:10 in
     Alcotest.(check int) "one coverage gap" 1 (List.length gaps);
@@ -1825,7 +1869,7 @@ let test_dashboard_aggregate_ignores_recovered_coverage_gap () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
-      ~success:true ~duration_ms:2.0
+      ~wire_outcome:Tool_result.Ok ~duration_ms:2.0
       ~trace_id:"trace-recovered" ();
     let summary = aggregate ~n:10 () in
     Alcotest.(check (option string)) "recovered gap health"
@@ -1852,7 +1896,7 @@ let test_output_invalid_utf8_sanitized () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_bin"
       ~input:(`Assoc []) ~output_text:raw_output
-      ~success:true ~duration_ms:1.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
     let results = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length results);
     let today =
@@ -1892,7 +1936,7 @@ let test_output_valid_utf8_untouched () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_ok"
       ~input:(`Assoc []) ~output_text:korean
-      ~success:true ~duration_ms:1.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
     let results = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length results);
     match results with
@@ -1920,7 +1964,7 @@ let test_output_blob_marker_normalized () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_blob"
       ~input:(`Assoc []) ~output_text:marker
-      ~success:true ~duration_ms:1.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
     let results = read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length results);
     match results with
@@ -1954,7 +1998,7 @@ let test_output_inline_string_preserved () =
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_inline"
       ~input:(`Assoc []) ~output_text:"small inline result"
-      ~success:true ~duration_ms:1.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
     let results = read_recent ~n:1 () in
     match results with
     | [ json ] ->
@@ -1972,7 +2016,7 @@ let test_output_preview_derives_truncation_metadata () =
       ~input:(`Assoc [])
       ~output_text
       ~result_bytes:(String.length output_text)
-      ~success:true
+      ~wire_outcome:Tool_result.Ok
       ~duration_ms:1.0
       ();
     match read_recent ~n:1 () with
@@ -1995,7 +2039,7 @@ let test_action_radius_tells_a_file_from_a_directory () =
     let radius_of_input input =
       Keeper_tool_call_log.log_call
         ~keeper_name:"k" ~tool_name:"probe" ~input ~output_text:"ok"
-        ~success:true ~duration_ms:1.0 ();
+        ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
       match read_recent ~n:1 () with
       | [ json ] ->
         let radius =
@@ -2036,7 +2080,7 @@ let test_string_input_keeps_action_radius () =
       ~keeper_name:"k" ~tool_name:"tool_large_input"
       ~input:(`String "{\"action\":\"write\"}")
       ~output_text:"ok"
-      ~success:true ~duration_ms:1.0 ();
+      ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
     let results = read_recent ~n:1 () in
     match results with
     | [ json ] ->
@@ -2070,7 +2114,7 @@ let test_async_append_defers_until_flush env =
         ~tool_name:"masc_status"
         ~input:(`Assoc [])
         ~output_text:"ok"
-        ~success:true
+        ~wire_outcome:Tool_result.Ok
         ~duration_ms:1.0
         ();
       Alcotest.(check int)
@@ -2113,7 +2157,7 @@ let test_a_keepers_revision_moves_with_its_own_appends_only env =
           ~tool_name:"masc_status"
           ~input:(`Assoc [])
           ~output_text:"ready"
-          ~success:true
+          ~wire_outcome:Tool_result.Ok
           ~duration_ms:1.0
           ~on_committed:(fun () -> incr committed)
           ()
@@ -2141,7 +2185,7 @@ let test_commit_callback_bypasses_async_queue ~success env =
         ~tool_name:"masc_status"
         ~input:(`Assoc [])
         ~output_text:"ready"
-        ~success
+        ~wire_outcome:(if success then Tool_result.Ok else Tool_result.Error)
         ~duration_ms:1.0
         ~on_committed:(fun () ->
           (* Publication may trigger an immediate history read from here. *)
@@ -2170,7 +2214,7 @@ let test_commit_callback_fails_closed_without_store () =
         ~tool_name:"masc_status"
         ~input:(`Assoc [])
         ~output_text:"unavailable"
-        ~success:true
+        ~wire_outcome:Tool_result.Ok
         ~duration_ms:1.0
         ~on_committed:(fun () -> Alcotest.fail "callback must not run")
         ();
@@ -2190,7 +2234,7 @@ let write_rows store ~keeper ~count ~base_ts ~label =
          [ "ts", `Float (base_ts +. float_of_int i)
          ; "keeper", `String keeper
          ; "tool", `String (Printf.sprintf "%s-%s-%d" keeper label i)
-         ; "success", `Bool true
+         ; "wire_outcome", `String "ok"
          ])
   done
 ;;
@@ -2672,6 +2716,8 @@ let () =
             test_dashboard_aggregate_missing_runtime_profile_is_unknown
         ; eio_test "dashboard aggregate keeps deferred neutral"
             test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate
+        ; eio_test "dashboard aggregate separates unsettled and malformed"
+            test_dashboard_aggregate_separates_unsettled_from_malformed
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"

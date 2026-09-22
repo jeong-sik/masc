@@ -493,12 +493,20 @@ status: reference
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
+  이 위치의 출처(`Keeper_carried_front.origin`)는 넷이다 — `Carried`(seed에서 온
+  위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기),
+  `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),
+  `Librarian_progress`(저장본이 이 History에 맞지 않을 때 Librarian의 durable Read
+  Position), `Whole_history`(앞머리 없음). `Librarian_progress`는 그 위치가 이 trace를
+  지목하고 그 앞 Atom이 위치가 기록한 Message로 열릴 때만 채택하며, 그때 요청은 읽지
+  않은 Atom부터 실리고 그 앞을 요약하지 않는다.
 
   저장된 응답 관측의 범위는 당시의 사실이다. 현재 카탈로그에서 그 runtime을
   지우거나 바꾸어도 이 사실을 취소하지 않으며, 현재 History의 같은 위치·digest로 검증한다.
   원장이 없으면 보관 중인 기록에서 같은 trace의 마지막 응답 관측까지 거슬러 찾는다.
   응답 없는 기록이 쌓여도 이 관측을 가리지 않는다. 재시도가 같은 turn 번호를 쓰면
   나중에 저장한 응답 관측을 선택한다. 다음 요청 예측도 같은 reader를 쓴다.
+  → [Keeper_carried_front](../../lib/keeper/keeper_carried_front.mli)
 
 **Model Input Ledger (모델 입력 원장)**
 : Keeper·runtime·trace별로 응답에서 확인한 Atom 범위와 제공된 usage를 기록한 프로세스 내 원장.
@@ -571,6 +579,23 @@ status: reference
   표시한다. 일반 Memory 소비자의 `drained`와 별개이며 다음 실행을 통제하지 않는다.
   `no_source`는 새로 읽을 완료 구간을 얻지 못했다는 뜻으로, 전체 요약 완료를
   증명하지 않는다. 구간이 없거나 관측 전이면 알 수 없음으로 표시한다.
+
+**Continuity Request Observation (요청 입력 관측)**
+: 직렬화된 Agent Core 요청 하나가 무엇을 실었는지에 대한 읽기 전용 관측
+  (`Keeper_continuity_observation.input`). 이 관측은 History 삭제를 승인하지 않고
+  provider가 요청을 받아들였음을 증명하지도 않는다. 종류는 넷이다 —
+  `Summarized of frontier`(하던 일 저장본이 대신하는 경계까지 요약; frontier는 trace·
+  끝 Atom·경계 줄), `Absorbed of { trace_id; end_atom }`(Librarian의 durable Read
+  Position에서 시작하고 그 앞을 요약하지 않음), `Uncompressed`(이력 전체),
+  `Not_applied`(저장된 맥락을 적용하지 않음). `Absorbed`는 경계 줄이 없어 모양이
+  trace와 Atom뿐이다. Dashboard의 `context_cycle.prepared.input.kind`가
+  `summarized`·`absorbed`·`uncompressed`·`not_applied`로, TUI Memory 화면이
+  `summary …`·`absorbed to atom N · trace X · no summary`·`full history`·
+  `saved context not applied`로 그린다. 같은 `context_cycle`의 `synthesis`를 담는
+  Continuity Synthesis Observation과 다른 필드이고, 저장된 파일인 Continuity
+  Snapshot과도 다르다.
+  → [Keeper_continuity_observation](../../lib/keeper/keeper_continuity_observation.mli),
+  [dashboard 투영](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
 
 **Input Policy (입력 구성 방식)**
 : Keeper의 `input_policy` 설정. `small`은 Agent Core에 보내는 완료된 과거 도구 결과를

@@ -183,7 +183,11 @@ Keeper pangyo-preachers). Continuity 절(426~703행)에서 찾은 것:
    코드는 `Keeper_librarian.selection.working_contexts : Keeper_librarian_context.pocket list` 다.
 3. "Continuity" 가 붙은 항목이 넷(Snapshot·Synthesis Observation·Measurement·CLI 이름)이고 뜻이 다 다르다.
 
-셋을 glossary-maniac Keeper 에게 근거와 함께 전달했다(2026-09-23 00:35 KST). 제안이며 결정은 아니다.
+셋을 glossary-maniac Keeper 에게 근거와 함께 전달했다(2026-09-23 00:35 KST). Keeper 는 #37911
+(병합 2026-09-22T15:34Z) 로 셋 다 반영했다. main 에서 확인한 것: `###` 제목 0개, **Working State**
+굵은 항목이 **Continuity Snapshot** 바로 뒤에 있고 서로를 가리킨다, **받은 일 정리** 와 **Working Context**
+가 `working_contexts` 로 서로를 가리킨다, `Librarian Continuity` CLI 항목은 **Continuity Measurement**
+안의 한 줄로 접혔다. "Continuity" 항목은 Snapshot·Synthesis Observation·Measurement 셋이 남는다.
 
 ## Runtime Failover 근거 경로
 
@@ -268,7 +272,7 @@ v0.36.0 태그(09-22 12:02Z) 뒤에 병합된 다섯 PR(#37855·#37875·#37867·
 
 ## 불확실성
 
-- 미확인 항목: 세 PR 의 배포 효과, 재시작 비용의 다른 날 재현, Glossary 제안의 채택.
+- 미확인 항목: 세 PR 의 배포 효과, 재시작 비용의 다른 날 재현.
 - 영향: 이 기록은 결함 셋과 열린 순환 하나를 말할 뿐 전체 하네스의 올바름을 말하지 않는다.
 - 추가 확인 필요: 병합·배포 뒤 같은 로그 지표(`prompt_context_presence_mismatch`, `canonical checkpoint unavailable`, `cwd_not_directory: masc`)가 0인지.
 

@@ -26,6 +26,11 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_keeper_transcript_tail_recovery)
+ (modules test_keeper_transcript_tail_recovery)
+ (libraries alcotest masc masc_test_deps eio_main unix))
+
+(test
  (name test_typesafeai_destinations)
  (modules test_typesafeai_destinations)
  (libraries alcotest masc masc_test_deps eio_main))

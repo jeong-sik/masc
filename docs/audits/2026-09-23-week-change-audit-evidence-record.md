@@ -222,6 +222,13 @@ Keeper pangyo-preachers). Continuity 절(426~703행)에서 찾은 것:
   멎었다(polisher 08:40Z, edgar 04:29Z) — 그쪽은 결함이 아니다.
   v18→v19 사건 창의 일정 dispatch 실패 925줄은 #37900 에 덧붙였다.
 
+## 릴리스 위생
+
+v0.36.0 태그(09-22 12:02Z) 뒤에 병합된 다섯 PR(#37855·#37875·#37867·#37821·#37840)이 CHANGELOG 항목을 이미 공개된
+`[0.36.0]` 절 안에 넣었다. `release.yml` 은 버전 절만 뽑으므로 이 항목들은 어느 릴리스 노트에도 실리지 않는다
+(세션 A 발견, [#37925](https://github.com/jeong-sik/masc/issues/37925)). #37918 이 `[Unreleased]` 절을 만든 뒤 옮긴다.
+이 기록의 PR 넷(#37894·#37904·#37908·#37913)은 CHANGELOG 를 건드리지 않았고, 항목은 `[Unreleased]` 가 생긴 뒤에 더한다.
+
 ## 아직 판정하지 못한 것
 
 - Terminal-Bench 4.0 전체 실행: 09-22 기록대로 GPU(H100) 3개 task 와 CPU 16개·메모리 16 GiB 를

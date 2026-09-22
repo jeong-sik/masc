@@ -1199,6 +1199,17 @@ let rec ocaml_source_files path =
 let string_literals_of_ocaml source =
   let n = String.length source in
   let buf = Buffer.create 256 in
+  (* A char literal is 'X' or '\X'; a type variable 'a is not. Returns the
+     index just past the closing quote, or i when this is not a char literal.
+     Without this, a char literal holding a quote -- '"' -- opens a string
+     that runs to the next quote in the file. *)
+  let char_literal_end i =
+    if i + 2 < n && source.[i] = '\'' && source.[i + 2] = '\''
+    then i + 3
+    else if i + 3 < n && source.[i] = '\'' && source.[i + 1] = '\\' && source.[i + 3] = '\''
+    then i + 4
+    else i
+  in
   let rec scan i =
     if i >= n
     then ()
@@ -1208,6 +1219,8 @@ let string_literals_of_ocaml source =
     then quoted (i + 1)
     else if i + 1 < n && source.[i] = '{' && source.[i + 1] = '|'
     then braced (i + 2)
+    else if char_literal_end i > i
+    then scan (char_literal_end i)
     else scan (i + 1)
   and comment i depth =
     if i >= n
@@ -1218,6 +1231,8 @@ let string_literals_of_ocaml source =
     then comment (i + 2) (depth + 1)
     else if source.[i] = '"'
     then comment_quoted (i + 1) depth
+    else if char_literal_end i > i
+    then comment (char_literal_end i) depth
     else comment (i + 1) depth
   and comment_quoted i depth =
     if i >= n
@@ -1289,7 +1304,7 @@ let test_ocaml_sources_exclude_declared_concrete_keeper_identities () =
    this says it for the scanner itself. The token is deliberately not a
    concrete Keeper identity: this file is part of the tree discovery 17
    reads, so a real name here would be the very collision it forbids. *)
-let test_string_literals_of_ocaml_skips_comments () =
+let test_string_literals_of_ocaml_lexing () =
   check string "a comment is skipped" ""
     (string_literals_of_ocaml "(* \"example\" *)");
   check string "a nested comment is skipped" ""
@@ -1301,7 +1316,13 @@ let test_string_literals_of_ocaml_skips_comments () =
   check string "a braced literal is read" "example\n"
     (string_literals_of_ocaml "let x = {|example|}");
   check string "a comment between literals is skipped" "a\nb\n"
-    (string_literals_of_ocaml "let a = \"a\" (* \"example\" *) let b = \"b\"")
+    (string_literals_of_ocaml "let a = \"a\" (* \"example\" *) let b = \"b\"");
+  (* A char literal holding a quote must not open a string that runs to the
+     next quote in the file. *)
+  check string "a char literal in a comment does not open a string" "example\n"
+    (string_literals_of_ocaml "(* '\"' *) \"example\"");
+  check string "a char literal outside a comment is skipped" "example\n"
+    (string_literals_of_ocaml "let c = '\"' in \"example\"")
 ;;
 
 let with_temp_dir prefix f =
@@ -2284,7 +2305,7 @@ let () =
             test_default_roster_does_not_autoboot;
           test_case "OCaml sources exclude concrete Keeper identities" `Quick
             test_ocaml_sources_exclude_declared_concrete_keeper_identities;
-          test_case "string literal scanner skips comments" `Quick
-            test_string_literals_of_ocaml_skips_comments;
+          test_case "string literal scanner skips comments and char literals" `Quick
+            test_string_literals_of_ocaml_lexing;
         ] );
     ]

@@ -1711,7 +1711,22 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
       (List.exists
          (Astring.String.is_infix
             ~affix:"artifact sha256:9f3a12c4d5e6\xe2\x80\xa6 \xc2\xb7 48213 bytes")
-         plain))
+         plain);
+    (* A long output keeps its head; the rest is a count and where to read
+       it whole. *)
+    let printed = String.concat "\\n" (List.init 30 (Printf.sprintf "row %02d")) in
+    let plain =
+      draw
+        (Printf.sprintf
+           {|{"ok":true,"status":{"kind":"exit","code":0},"output":"%s","typed":true,"execution_time_ms":5}|}
+           printed)
+    in
+    let screen = String.concat "\n" plain in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool ("the head is drawn:\n" ^ screen) true (has "row 07");
+    check bool "the rest is not" false (has "row 08");
+    check bool "the fold says how much and where" true
+      (has "\xe2\x80\xa6 +22 lines \xc2\xb7 Keeper Calls (t)"))
 ;;
 
 (* A committed Memory revision under journal:full: the one-line summary, then

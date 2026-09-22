@@ -884,6 +884,12 @@ let keeper_call_association state ~keeper_name
    rather than held: the palette behind [Theme.*] is resolved against the
    terminal's answers and can change, and a cached record would keep drawing
    the colours the last answer produced. *)
+(* How much of a served input or output the full calls draw before folding
+   the rest. Enough to say what the payload is -- a member list, the head of
+   a table -- on a pane that draws about twenty rows; a whole result runs to
+   hundreds, and the Keeper Calls view is where it is read whole. *)
+let tool_document_rows_shown = 8
+
 let tool_detail_palette () : Tool_detail.palette =
   { Tool_detail.branch = Theme.recede ()
     (* A field's name and a document member's name are the same kind of
@@ -896,6 +902,7 @@ let tool_detail_palette () : Tool_detail.palette =
   ; number = Masc_tui_theme.Syntax.json_number
   ; literal = Masc_tui_theme.Syntax.json_literal
   ; punctuation = Masc_tui_theme.Syntax.json_punctuation
+  ; note = Theme.recede ()
     (* The pane opens these rows dim; a bare reset after the first painted
        span would drop every following byte back to full weight. Close the
        way the markdown palette closes: reset, then reopen the rung the tree
@@ -1085,7 +1092,15 @@ let keeper_message_tool_activity_details state ~keeper_name
       ]
     |> List.filter_map Fun.id
   in
-  Tool_detail.tree ~palette:(tool_detail_palette ()) fields
+  Tool_detail.tree ~palette:(tool_detail_palette ())
+    ~fold:
+      { Tool_detail.fold_rows = tool_document_rows_shown
+      ; fold_note =
+          (fun hidden ->
+            Printf.sprintf "\xe2\x80\xa6 +%d lines \xc2\xb7 Keeper Calls (%s)" hidden
+              Masc_tui_keys.keeper_calls_key)
+      }
+    fields
 
 
 (* How one finished turn's tool block becomes rows: the operator's

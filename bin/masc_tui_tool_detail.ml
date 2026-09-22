@@ -12,6 +12,7 @@ type palette = {
   number : string;
   literal : string;
   punctuation : string;
+  note : string;
   reset : string;
 }
 
@@ -24,8 +25,11 @@ let plain =
   ; number = ""
   ; literal = ""
   ; punctuation = ""
+  ; note = ""
   ; reset = ""
   }
+
+type fold = { fold_rows : int; fold_note : int -> string }
 
 type value =
   | Text of string
@@ -175,7 +179,16 @@ let structured ?(palette = plain) value =
    edge. The width is per-tree, not a constant: a tree whose fields are all
    short stays narrow. Terminal cells, not bytes -- a label is operator-facing
    text and a byte count would misalign the moment one is not ASCII. *)
-let tree ?(palette = plain) fields =
+(* The first [fold_rows] lines and a note for the rest. One line over is
+   drawn: a note standing for one line takes the row it saved. *)
+let folded palette fold lines =
+  let total = List.length lines in
+  if total <= fold.fold_rows + 1 then lines
+  else
+    List.filteri (fun index _ -> index < fold.fold_rows) lines
+    @ [ paint palette palette.note (fold.fold_note (total - fold.fold_rows)) ]
+
+let tree ?(palette = plain) ?fold fields =
   let field_count = List.length fields in
   let label_cells =
     List.fold_left
@@ -198,8 +211,11 @@ let tree ?(palette = plain) fields =
         String.split_on_char '\n'
           (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
         |> List.map (paint palette fd_tone)
-      | Document payload ->
-        String.split_on_char '\n' (structured ~palette payload)
+      | Document payload -> (
+        let lines = String.split_on_char '\n' (structured ~palette payload) in
+        match fold with
+        | None -> lines
+        | Some fold -> folded palette fold lines)
     in
     let padding =
       String.make (max 0 (label_cells - Message_layout.display_width label)) ' '

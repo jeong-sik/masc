@@ -179,6 +179,11 @@ let voice_speak_key = "Ctrl-Y"
 let voice_listen_key = "Ctrl-A"
 let roster_toggle_key = "Ctrl-B"
 
+(* [t] on a keeper: the Keeper Calls view, where a call's served input and
+   output are drawn whole. Named for the rows that fold a long payload and
+   say where the rest is. *)
+let keeper_calls_key = "t"
+
 (* Ctrl-X opens the context inspector from the chat. It is named on the
    context header, beside the figure it explains, and nowhere else: the
    footer has no room for a key whose home is that row. *)
@@ -229,7 +234,7 @@ let listing_meta = [ b Meta "r" "refresh"; b Meta "Tab" "next"; b Meta "q" "quit
 let keeper_actions =
   [ b Act "c" "chat" ~help:"chat with the keeper"
   ; b Act "l" "logs"
-  ; b Act "t" "calls" ~help:"tool calls"
+  ; b Act keeper_calls_key "calls" ~help:"tool calls"
   ; b Act "u" "runtime" ~help:"pick a runtime lane"
   ; b Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
   ; b Act "p / w" "pause / wake"

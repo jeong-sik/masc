@@ -1043,8 +1043,9 @@ footer. Nothing takes the screen to report a failure.
 
 #### Lines typed during a turn
 
-Enter during a running turn is the explicit **queue next** action. It holds the
-line for a later turn rather than pretending the running model saw it. Pending
+Enter during a running turn is the explicit **queue next** action — the footer
+labels it `Enter:send update`. It holds the line for a later turn rather than
+pretending the running model saw it. Pending
 input is not inserted between the active turn's user, status/tool, and reply
 rows. It has its own `NEXT` lane below the causal transcript, oldest first:
 
@@ -1053,7 +1054,7 @@ rows. It has its own `NEXT` lane below the causal transcript, oldest first:
    NEXT 1 · 10:42:13 · check the CI run too
    NEXT 2 · 10:42:18 · and the rebase
    > _
-  Enter:queue (2 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last  …
+  Enter:send update (2 local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit  …
 ```
 
 A count on its own is not enough - an operator who typed three lines during a

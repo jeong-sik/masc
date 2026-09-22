@@ -5547,25 +5547,36 @@ let decode_keeper_call json =
      built to match it therefore hit the [`Null] arm below unconditionally,
      so [decode_keeper_call] always errored and the calls detail view never
      rendered a single keeper's tool calls (#37461). [success] is still read
-     first for any caller that does send it explicitly; [disposition]
-     (the typed completed/deferred/failed outcome) and [wire_outcome]
+     first for any caller that does send it explicitly. Next, [disposition]
+     is decoded through [keeper_call_disposition_of_string] -- the same
+     parse [kc_disposition] below reuses, and already documented as
+     [Tool_result.string_of_disposition]'s inverse -- instead of matching
+     its three spellings a second time in this function. [wire_outcome]
      (the untyped wire projection -- explicitly not an outcome SSOT per
-     [Tool_result], but the only field several real rows carry) are tried
-     next, oldest-first, as the closest available approximations. A row
-     naming none of the three still errors, as before. *)
+     [Tool_result], but the only field several real rows carry) is tried
+     last, and its own ["unknown"] spelling is not folded into success: a
+     wire that says it does not know the outcome is not evidence that the
+     call completed. A row naming none of the three still errors, as
+     before. *)
+  let* disposition = optional_string_field json "disposition" in
+  let* kc_disposition =
+    match disposition with
+    | None -> Ok None
+    | Some raw when String.trim raw = "" -> Ok None
+    | Some word -> Result.map Option.some (keeper_call_disposition_of_string word)
+  in
   let* kc_success =
     match member "success" json with
     | `Bool value -> Ok value
     | `Null -> (
-      match member "disposition" json with
-      | `String "completed" -> Ok true
-      | `String "failed" -> Ok false
-      | `String "deferred" -> Ok true
-      | _ -> (
+      match kc_disposition with
+      | Some Keeper_call_completed | Some Keeper_call_deferred -> Ok true
+      | Some Keeper_call_failed -> Ok false
+      | None -> (
         match member "wire_outcome" json with
         | `String "ok" -> Ok true
         | `String "error" -> Ok false
-        | `String "unknown" -> Ok true
+        | `String "unknown" -> Error "keeper call wire_outcome is unknown"
         | _ -> Error "keeper call has no success, disposition, or wire_outcome field"))
     | _ -> Error "keeper call success is not a bool"
   in
@@ -5640,12 +5651,6 @@ let decode_keeper_call json =
   in
   let* kc_result_bytes = optional_nonnegative_int "result_bytes" in
   let* kc_truncated_to = optional_nonnegative_int "truncated_to" in
-  let* disposition = optional_string_field json "disposition" in
-  let* kc_disposition =
-    match nonblank disposition with
-    | None -> Ok None
-    | Some word -> Result.map Option.some (keeper_call_disposition_of_string word)
-  in
   Ok
     ( keeper
     , { kc_at

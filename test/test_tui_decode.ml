@@ -482,16 +482,17 @@ let test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition () =
        ]
       @ extra)
   in
+  let snapshot_of extra =
+    Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
+      (`Assoc
+         [ "keeper", `String "largo"
+         ; "count", `Int 1
+         ; "health", `String "ok"
+         ; "entries", `List [ row extra ]
+         ])
+  in
   let success_of extra =
-    match
-      Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
-        (`Assoc
-           [ "keeper", `String "largo"
-           ; "count", `Int 1
-           ; "health", `String "ok"
-           ; "entries", `List [ row extra ]
-           ])
-    with
+    match snapshot_of extra with
     | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
     | Ok snapshot -> (
       match snapshot.Tui_decode.kcs_entries with
@@ -502,8 +503,15 @@ let test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition () =
     (success_of [ "wire_outcome", `String "ok" ]);
   Alcotest.(check bool) "wire_outcome error reads as failure" false
     (success_of [ "wire_outcome", `String "error" ]);
-  Alcotest.(check bool) "wire_outcome unknown is not a known failure" true
-    (success_of [ "wire_outcome", `String "unknown" ]);
+  (* A wire that says it does not know the outcome is not evidence that the
+     call completed: unlike "ok"/"error" this spelling refuses instead of
+     defaulting to success (Unknown -> Permissive Default is the antipattern
+     the earlier fallback fell into; #37650 review caught it). *)
+  (match snapshot_of [ "wire_outcome", `String "unknown" ] with
+   | Ok _ -> Alcotest.fail "wire_outcome unknown must not decode to a call"
+   | Error detail ->
+     Alcotest.(check string) "the refusal names the unknown wire_outcome"
+       "entries[0]: keeper call wire_outcome is unknown" detail);
   Alcotest.(check bool) "disposition completed reads as success" true
     (success_of [ "disposition", `String "completed" ]);
   Alcotest.(check bool) "disposition failed reads as failure" false

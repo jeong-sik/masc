@@ -31,7 +31,7 @@ function makeEntry(
     added: 2,
     removed: 1,
     snapshot_present: true,
-    context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
+    context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared: null, synthesis: null },
     librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
       unread_atom_turns: 0, unread_official_turns: 0,
       continuity_unread_atoms: 0,
@@ -271,6 +271,30 @@ describe('KeeperMemoryHealth', () => {
     const { container } = render(html`<${KeeperMemoryHealth} />`)
     await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
     expect(statValue(container, 'librarian-unread-turns')).toBe('?')
+  })
+
+  it('renders the continuity lag with how many keepers it could not be taken for', async () => {
+    mockFetch.mockResolvedValue(makeResponse(
+      [ makeEntry({ librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
+          unread_atom_turns: 0, unread_official_turns: 0,
+          continuity_unread_atoms: null,
+          last_success_at: null, last_failure_kind: null } }),
+        makeEntry({ keeper_id: 'beta', librarian: { state: 'drained', detail: null,
+          measured_at: 1_699_999_950, unread_atom_turns: 0, unread_official_turns: 0,
+          continuity_unread_atoms: 3,
+          last_success_at: null, last_failure_kind: null } }) ],
+      { librarian_continuity_unread_atoms: 3, librarian_continuity_unmeasured: 1 },
+    ))
+    const { container } = render(html`<${KeeperMemoryHealth} />`)
+    await waitFor(() => expect(screen.getByText('beta')).not.toBeNull())
+    expect(statValue(container, 'librarian-continuity-behind')).toBe('3 (1 못 잼)')
+  })
+
+  it('renders a fully measured continuity lag without an unmeasured count', async () => {
+    mockFetch.mockResolvedValue(makeResponse([makeEntry()], {}))
+    const { container } = render(html`<${KeeperMemoryHealth} />`)
+    await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
+    expect(statValue(container, 'librarian-continuity-behind')).toBe('0')
   })
 
   it('renders librarian starvation as an error row, not a warning', async () => {

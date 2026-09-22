@@ -331,7 +331,7 @@ the count stays so a stream that dropped after a thousand events and one that
 never opened do not read alike. The feed is opened after the first refresh
 that reaches the server and reopened on the refresh cadence after it closes;
 both transitions land in Recent Events. Every keeper's tool calls, turn
-boundaries, heartbeats, and turn settlements arrive on it; this build keeps
+boundaries, heartbeats, and turn done rows arrive on it; this build keeps
 the last 1,000 and counts what falls off the end.
 
 Tasks show terminal states in Planning rollups but not in this list. A task
@@ -341,7 +341,7 @@ the full backlog rows, not the active projection.
 ### Activity
 
 Every keeper's actions as the runtime event feed delivers them, newest first:
-tool calls and their returns, turn boundaries and settlements, chat rows
+tool calls and their returns, turn boundaries and turn done rows, chat rows
 landing. This is the surface for watching ten keepers at once without
 opening ten chats.
 
@@ -366,7 +366,7 @@ call that began before the feed opened shows none.
 
 `f` cycles three explicit scopes. `turns` is the default and folds each Keeper
 turn to one row while leaving internal agent runs and approvals separate.
-`actions` shows the flat calls, returns, turn boundaries, settlements, and chat
+`actions` shows the flat calls, returns, turn boundaries, turn done rows, and chat
 events. `everything` additionally shows heartbeats, composite/snapshot pushes,
 chat stream frames, waiting-queue changes, and telemetry. Its quiet gray rows
 carry no mark at all, and are state observations rather than failures;
@@ -1043,8 +1043,9 @@ footer. Nothing takes the screen to report a failure.
 
 #### Lines typed during a turn
 
-Enter during a running turn is the explicit **queue next** action. It holds the
-line for a later turn rather than pretending the running model saw it. Pending
+Enter during a running turn is the explicit **queue next** action — the footer
+labels it `Enter:send update`. It holds the line for a later turn rather than
+pretending the running model saw it. Pending
 input is not inserted between the active turn's user, status/tool, and reply
 rows. It has its own `NEXT` lane below the causal transcript, oldest first:
 
@@ -1053,7 +1054,7 @@ rows. It has its own `NEXT` lane below the causal transcript, oldest first:
    NEXT 1 · 10:42:13 · check the CI run too
    NEXT 2 · 10:42:18 · and the rebase
    > _
-  Enter:queue (2 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last  …
+  Enter:send update (2 local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit  …
 ```
 
 A count on its own is not enough - an operator who typed three lines during a

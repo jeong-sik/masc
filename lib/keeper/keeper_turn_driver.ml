@@ -1600,17 +1600,21 @@ let run_named
 	       | None -> Keeper_carried_front.no_seed_read)
 	  in
 	  (* The official-client branches take the continuity the Agent Core branch
-	     takes ([continuity] above): one choice per turn for every lane, so the
-	     order -- a fitting working state, else the Librarian's read position,
-	     else the turn start -- is the same on both. These lanes cut their start
-	     seed themselves, so the choice is handed over as a position in the
-	     exact list each composition cuts, and checked against that list on
-	     every call, because a lane composes more than once in a turn and the
-	     list grows between compositions. A list that no longer holds what the
-	     choice covered refuses the request, as the same check refuses an
-	     Agent Core request ([validate_continuity]): one rule on both lanes
-	     for a history that moved under the turn.
-
+	     takes ([continuity] above): one choice per turn for every lane, so a
+	     fitting working state, else the Librarian's read position, is the same
+	     absorbed point on both. What each lane weighs it against differs: the
+	     Agent Core branch composes from the absorbed point whenever there is
+	     one ([compose_carried_model_input]), while these lanes cut their start
+	     seed themselves and keep a seed or a lane cut that sits past it
+	     ([Keeper_official_client_host.carried_start_range]). The choice is
+	     handed over as a position in the exact list each composition cuts,
+	     and checked against that list on every call, because a lane composes
+	     more than once in a turn and the list grows between compositions. A
+	     list that no longer holds what the choice covered refuses the request,
+	     as the same check refuses an Agent Core request
+	     ([validate_continuity]): one rule on both lanes for a history that
+	     moved under the turn.
+	
 	     [attempt_messages] is the list this candidate starts from, which is
 	     the turn's history as this candidate sees it: a runtime that cannot
 	     see an image is handed a reading of it in the image's place

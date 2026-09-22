@@ -310,7 +310,9 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
   ; mkh_removed = 0
   ; mkh_snapshot_present = true
   ; mkh_context_cycle =
-      { mcc_saved = None; mcc_saved_unreadable = false; mcc_prepared = None; mcc_synthesis = None }
+      { mcc_saved = None; mcc_saved_unreadable = false; mcc_read_position = None;
+        mcc_read_position_unreadable = false; mcc_rewriting_through = None;
+        mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
       { Decode.mlh_state = Some "drained"
       ; mlh_detail = None
@@ -385,6 +387,9 @@ let test_render_memory_body_with_keepers () =
   let keeper = {keeper with mkh_context_cycle =
     {mcc_saved = Some {mcf_trace_id = "saved-trace"; mcf_end_atom = 5; mcf_boundary_line = 9};
      mcc_saved_unreadable = false;
+     mcc_read_position = Some 11;
+     mcc_read_position_unreadable = false;
+     mcc_rewriting_through = None;
      mcc_synthesis = Some {Masc.Keeper_continuity_observation.observed_at=1000.;
        trace_id=Some "saved-trace"; state=Masc.Keeper_continuity_observation.Not_committed;
        range=Some {start_atom=5; end_atom=8; completed_end_atom=12}};
@@ -432,6 +437,10 @@ let test_render_memory_body_with_keepers () =
   check bool "synthesis stop and unfinished atom range are visible" true
     (contains "Context synthesis · not_committed · last selected atoms [5,8) / observed completed 12" text);
   check bool "saved context shown independently" true (contains "Context saved · atom 5" text);
+  (* The distance between the cut and the read position is what a request
+     pays for, so the line has to carry both (#37793). *)
+  check bool "the read position sits beside the cut" true
+    (contains "read to atom 11, 6 atoms past the cut" text);
   check bool "prepared context names observation boundary" true (contains "Request prepared (not provider success)" text);
   check bool "serialized request bytes shown" true (contains "2048 request bytes" text);
   check bool "an absorbed front names the position and says nothing summarizes it" true
@@ -439,6 +448,62 @@ let test_render_memory_body_with_keepers () =
   check bool "selected row was called" true !selected_called;
   check string "push_selected received stripped string" (Masc_tui_theme.strip_sgr !selected_str) !selected_str;
   check bool "rows rendered" true (!count > 0 && !count <= 20)
+;;
+
+(* RFC librarian-lifecycle §4.9: a continuity lag the server could not take
+   prints as "?", since zero is what a caught-up keeper shows, and the fleet
+   header carries the measured sum beside how many keepers it left out. *)
+let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
+  let with_lag (keeper : Decode.memory_keeper_health) lag =
+    { keeper with
+      mkh_librarian = { keeper.mkh_librarian with Decode.mlh_continuity_unread_atoms = lag } }
+  in
+  let unmeasured = with_lag (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024) None in
+  let behind = with_lag (make_keeper_health ~keeper_id:"beta" ~facts:4 ~snapshot_bytes:512) (Some 3) in
+  let health : Decode.memory_health_snapshot =
+    { mhs_generated_at = 1000.0
+    ; mhs_keepers = [ unmeasured; behind ]
+    ; mhs_total_facts = 14
+    ; mhs_total_observed_facts = 14
+    ; mhs_total_derived_facts = 0
+    ; mhs_total_support_invalidations = 0
+    ; mhs_total_snapshot_bytes = 1536
+    ; mhs_total_source_facts = 0
+    ; mhs_total_source_invalidations = 0
+    ; mhs_total_source_snapshot_bytes = 0
+    ; mhs_total_librarian_failures = 0
+    ; mhs_total_librarian_unread_turns = Some 0
+    ; mhs_total_librarian_continuity_unread_atoms = 3
+    ; mhs_total_librarian_continuity_unmeasured = 1
+    ; mhs_total_vision_ingest_errors = 0
+    ; mhs_total_read_errors = 0
+    ; mhs_total_source_read_errors = 0
+    ; mhs_warn_alerts = 0
+    ; mhs_error_alerts = 0
+    ; mhs_starving_keepers = 0
+    }
+  in
+  (* The Librarian line is drawn for the selected keeper only, so each keeper
+     is read at its own cursor. *)
+  let render cursor =
+    let state = make_state () in
+    state.memory_health <- Some health;
+    state.memory_health_cursor <- cursor;
+    let lines = ref [] in
+    Render_memory.render_memory_body ~cols:100 ~budget:20 state
+      ~push:(fun line -> lines := line :: !lines)
+      ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
+      ~push_selected:(fun line -> lines := line :: !lines)
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" !lines
+  in
+  let both = render 0 ^ "\n" ^ render 1 in
+  check bool "an unmeasured lag prints as a question, not as zero" true
+    (contains "continuity behind ?" both);
+  check bool "a measured lag prints its number" true (contains "continuity behind 3" both);
+  check bool "the header sums the measured keepers and counts the rest" true
+    (contains "3 atoms behind in continuity (1 keepers not measured)" both)
 ;;
 
 let test_render_memory_body_cursor_clamping () =
@@ -1100,6 +1165,8 @@ let () =
     ; ( "render_body"
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
+        ; test_case "the librarian line says when the continuity lag is unknown" `Quick
+            test_the_librarian_line_says_when_the_continuity_lag_is_unknown
         ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping

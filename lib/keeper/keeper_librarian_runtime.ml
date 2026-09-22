@@ -366,11 +366,7 @@ let prepare_attempt ~requirement ~selected_slots messages =
 
 (* Whether a failure is evidence that the range's size is what stopped the
    pass. Only such evidence moves the width: a pass that saw none keeps what
-   it had, because reading less answers nothing it met. The question is asked
-   this way round on purpose. The earlier form asked whether every failure was
-   something else, so a pass that could not name any of its failures read less
-   by default, and a snapshot write that failed on disk halved the width while
-   the log said no provider had settled the pass.
+   it had, because reading less answers nothing it met.
 
    Every constructor is listed. A new provider failure kind has to be placed
    here rather than fall into a default. *)
@@ -392,13 +388,14 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
   | Incomplete_output | Missing_output | Ambiguous_output _
   | Unexpected_output_content | Invalid_json_output | Internal_non_json_output
   | Response_body_deadline_exceeded -> true
-  (* The provider was reached and what it said is unknown, which §4.3 reads
-     toward progress, as it reads Invalid_request. This is how a request too
-     large for the connection often ends: on 2026-09-22 at 13:35:09Z a
-     1,594-atom continuity pass got `completion failed raw_response=none` from
-     both API slots while the official client named ~1,198,667 tokens in
-     prose. Counting it as no evidence would keep that width and resend the
-     same range on every pass. *)
+  (* Agent_core reports every provider error other than an HTTP refusal and a
+     typed context overflow as this one cause: a connection the provider
+     dropped, a DNS or TLS failure, a hard quota, an unparsable reply. §4.3
+     reads a failure that does not say why toward progress, as it reads
+     Invalid_request, so it narrows, and a transport outage reported here
+     narrows with it. A request too large for the connection ends here too,
+     with no response to read. Telling those apart needs the cause split
+     where it is produced (#37899). *)
   | Completion_failed -> true
   (* Nothing was judged: this process could not start, time, or match the
      attempt it held. *)
@@ -410,14 +407,16 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
    rest name the slot or this process -- it is unavailable, its contract
    cannot carry the input or the output, the request could not be prepared --
    and a smaller range gets the same answer, so they are evidence neither way.
-   Counting them as a reason to read less made the verdict order-dependent
-   again: a lane holding one candidate that refuses every request would read
-   less on every quota storm until the width reached one atom. *)
-let rejection_shows_size rejection =
-  match Exact_output.candidate_rejection_disposition rejection with
+   Counting them would make a lane whose one candidate refuses every request
+   read less on every quota storm until the width reached one atom. *)
+let disposition_shows_size (disposition : Exact_output.candidate_rejection_disposition) =
+  match disposition with
   | Input_capacity _ -> true
   | Runtime_slot_unavailable | Runtime_contract_rejected | Input_contract_rejected
   | Output_requirement_rejected | Request_preparation_failed -> false
+
+let rejection_shows_size rejection =
+  disposition_shows_size (Exact_output.candidate_rejection_disposition rejection)
 ;;
 
 let advance_shows_size (receipt : Exact_output.flow_advance_receipt) =
@@ -482,7 +481,7 @@ let cli_failure_shows_size (failure : Keeper_lane_cli_oneshot.failure) =
    clock was missing, or the model answered and the snapshot write failed.
    Reading less on those walks the source down over an outage a smaller range
    meets identically, and only an emptied backlog widens it again, so it would
-   stay there. One mistyped CLI slot id used to fold every pass this way.
+   stay there.
 
    The official-client tail keeps the API failure that sent the walk to it, and
    both are asked: reading only the tail would answer a size refusal one way
@@ -533,7 +532,7 @@ let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
     Ok (actual_chars <= capacity.capacity.max_chars))
 ;;
 
-let exact_execution_error ?(semantic_rejections = []) error =
+let exact_execution_error ~semantic_rejections error =
   let outward_effect =
     match Exact_output.flow_execution_error_generation_dispatch error with
     | Exact_output.No_generation_dispatch -> No_outward_effect
@@ -755,7 +754,8 @@ let execute_exact_output_classified
         | Error cli_failure ->
           Error
             (with_cli_failure
-               (Exact_execution_failed (exact_execution_error cause))
+               (Exact_execution_failed
+                  (exact_execution_error ~semantic_rejections:prior_rejections cause))
                cli_failure))
      | Exact_output.Non_advanceable_terminal -> terminal ())
   | Error
@@ -1121,9 +1121,8 @@ let run_best_effort
                  | Error detail ->
                    continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
                    (* A snapshot that did not commit -- a CAS the history moved
-                      under, a disk error -- is not the range's size, and a
-                      caller told nothing would have read less on the next
-                      pass and logged that no provider settled it. *)
+                      under, a disk error -- is not the range's size, so the
+                      caller keeps the width and logs this cause. *)
                    on_not_committed
                      { detail = "continuity state not committed: " ^ detail
                      ; walk_shows_size = false
@@ -1390,4 +1389,5 @@ module For_testing = struct
   let commit_continuity = commit_continuity
   let cause_shows_size = cause_shows_size
   let cli_failure_shows_size = cli_failure_shows_size
+  let disposition_shows_size = disposition_shows_size
 end

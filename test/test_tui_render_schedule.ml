@@ -802,6 +802,22 @@ let test_memory_columns_never_exceed_their_width () =
       (used <= max inner_width memory_minimum_row_width)
   done
 
+(* The Δ column carries a pair, and a cell past its width is cut in the
+   middle: at six cells the fleet's own [+12 -23] drew as [+… -23] and the
+   added count was gone. Two digits each is the daily shape (the widest pair
+   on the live fleet was +11 -16); three each is what a large revision
+   needs. *)
+let test_the_memory_delta_column_holds_a_pair_of_counts () =
+  let columns = Schedule.allocate_memory_columns ~inner_width:240 in
+  List.iter
+    (fun delta ->
+      let row = Schedule.memory_row columns { memory_probe with mrow_delta = delta } in
+      check bool
+        (Printf.sprintf "%s is drawn whole: %s" delta row)
+        true
+        (Option.is_some (index_of row delta)))
+    [ "+12 -23"; "+999 -999" ]
+
 (* The defect this pair replaces: a header naming a column the row drew
    somewhere else. Every visible column is checked at every width. *)
 let test_memory_header_and_row_share_their_offsets () =
@@ -1748,6 +1764,83 @@ let test_board_columns_with_styles_hold_their_offsets () =
     check_left_cell "REPLIES" "G" ~header ~row ~inner_width
   done
 
+(* The title is the one column on these two screens that carries a sentence.
+   A post's subject is at the front of its title, so the title keeps its head
+   and gives way at the tail. Every other column here names a thing -- an id,
+   a hearth, an author -- and keeps both ends. *)
+let test_a_title_gives_way_at_its_tail () =
+  let title =
+    "Verify: run-exact-output-lane-board-attention-9e327af211400cba719b59128"
+  in
+  (* The pane the Board draws in beside the roster: 114 cells. *)
+  let title_width = Schedule.board_title_width ~inner_width:114 in
+  let board = board_row_of ~title_width { board_probe with brow_title = title } in
+  let planning =
+    planning_row_of
+      ~title_width:
+        (Schedule.planning_title_width ~inner_width:114
+           ~phase_width:planning_phase_width)
+      { planning_probe with prow_title = title }
+  in
+  List.iter
+    (fun (screen, row) ->
+      check bool
+        (Printf.sprintf "%s keeps the subject: %s" screen row)
+        true
+        (Option.is_some (index_of row "Verify: run-exact"));
+      check bool
+        (Printf.sprintf "%s does not keep the tail instead: %s" screen row)
+        false
+        (Option.is_some (index_of row "719b59128")))
+    [ ("board", board); ("planning", planning) ]
+
+(* The other four readings that are sentences rather than names. They are laid
+   out on the same contract, and each is the last column of its screen, so the
+   fold is the only thing that decides what a reader gets. *)
+let test_every_sentence_column_gives_way_at_its_tail () =
+  let sentence =
+    "Verify: run-exact-output-lane-board-attention-9e327af211400cba719b59128"
+  in
+  let prose_width = 24 in
+  let rows =
+    [ ( "system log"
+      , Schedule.system_log_row ~message_width:prose_width ~level_style:""
+          ~styles:Schedule.system_log_plain_styles
+          { system_log_probe with slog_message = sentence } )
+    ; ( "verification"
+      , Schedule.verification_row ~submitter_width:16
+          ~title_width:prose_width
+          { verification_probe with vrow_title = sentence } )
+    ; ( "changes"
+      , Schedule.change_row ~op_style:"" ~result_style:""
+          ~summary_width:prose_width
+          { change_probe with crow_summary = sentence } )
+    ; ( "harness"
+      , Schedule.harness_row ~verdict_style:"" ~reason_width:prose_width
+          { harness_probe with hrow_reason = sentence } )
+    ]
+  in
+  List.iter
+    (fun (screen, row) ->
+      check bool
+        (Printf.sprintf "%s keeps the front: %s" screen row)
+        true
+        (Option.is_some (index_of row "Verify: run-"));
+      check bool
+        (Printf.sprintf "%s does not keep the tail instead: %s" screen row)
+        false
+        (Option.is_some (index_of row "719b59128")))
+    rows
+
+(* The id beside it is the reading whose two ends say which run it is. *)
+let test_a_board_id_keeps_both_ends () =
+  let row =
+    board_row_of ~title_width:40
+      { board_probe with brow_id = "p-6dc0a4e7eb813cc1" }
+  in
+  check bool "the head is drawn" true (Option.is_some (index_of row "p-6"));
+  check bool "and so is the tail" true (Option.is_some (index_of row "813cc1"))
+
 (* The defect this closes. The rows sized the title to the terminal minus a
    hand-summed constant and the header claimed its own, so at eighty columns
    the header ran long, pushed SCORE into the frame and REPLIES off it. Both
@@ -1922,6 +2015,8 @@ let () =
             test_keeper_columns_grow_identifiers_first
         ; test_case "memory columns never exceed their width" `Quick
             test_memory_columns_never_exceed_their_width
+        ; test_case "the memory delta column holds a pair of counts" `Quick
+            test_the_memory_delta_column_holds_a_pair_of_counts
         ; test_case "memory header and row share their offsets" `Quick
             test_memory_header_and_row_share_their_offsets
         ; test_case "memory row width ignores its readings" `Quick
@@ -1970,6 +2065,12 @@ let () =
             test_board_columns_hold_their_offsets
         ; test_case "board columns with styles hold their offsets" `Quick
             test_board_columns_with_styles_hold_their_offsets
+        ; test_case "a title gives way at its tail" `Quick
+            test_a_title_gives_way_at_its_tail
+        ; test_case "every sentence column gives way at its tail" `Quick
+            test_every_sentence_column_gives_way_at_its_tail
+        ; test_case "a board id keeps both ends" `Quick
+            test_a_board_id_keeps_both_ends
         ; test_case "a board row is as wide as its header" `Quick
             test_a_board_row_is_as_wide_as_its_header
         ; test_case "board spaces its columns like every other table" `Quick

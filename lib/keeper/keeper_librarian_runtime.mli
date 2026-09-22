@@ -51,12 +51,15 @@ type not_committed =
             whose projection did not fit a slot's declared window.
 
             False covers everything else, and a caller reading less only when
-            this is true is what keeps an outage from shrinking its reads. A
-            provider that took the request and could not serve it (quota,
-            overload, server, network), a refusal only an operator can lift
-            (authentication, authorization, payment, an absent model), and
-            every failure that never reached a provider all answer false, as
-            does a pass that recorded no typed cause at all.
+            this is true is what keeps an outage from shrinking its reads. An
+            HTTP refusal from a provider that took the request and could not
+            serve it (quota, overload, server, network), a refusal only an
+            operator can lift (authentication, authorization, payment, an
+            absent model), and every failure that never reached a provider all
+            answer false, as does a pass that recorded no typed cause at all.
+            A provider error that is not an HTTP refusal arrives as
+            [Completion_failed], which answers true whatever it held,
+            a dropped connection or a hard quota included (#37899).
 
             The verdict covers every failed visit of the walk, not the last
             one, so the same set of causes answers the same way whatever order
@@ -124,6 +127,9 @@ module For_testing : sig
 
   val cli_failure_shows_size : Keeper_lane_cli_oneshot.failure -> bool
   (** The same verdict for one official-client slot's failure. *)
+
+  val disposition_shows_size : Agent_core.Exact_output.candidate_rejection_disposition -> bool
+  (** The same verdict for a candidate the flow turned away before dispatch. *)
 
   val commit_continuity
     : commit:(unit -> (Librarian_continuity_snapshot.t, string) result)

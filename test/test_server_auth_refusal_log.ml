@@ -3,10 +3,9 @@
     A 401/403 is about the credential the client presented, and the client is
     not where it is decided: the TUI's refresh path reaches
     [Server_auth.respond_auth_error] (h1) and the h2 gateway reaches its twin,
-    and a refusal that came and went in a refresh left no line naming the
-    endpoint. Both protocols now emit one line through
-    [Server_auth.log_auth_refusal], whose details carry the protocol, the path
-    and the status. The raw bearer is never part of it. *)
+    so both protocols emit one line through [Server_auth.log_auth_refusal],
+    whose details carry the protocol, the path and the status. The raw bearer
+    is never part of it. *)
 
 open Alcotest
 
@@ -25,38 +24,58 @@ let test_message_names_both () =
     "HTTP auth rejected: h2 /mcp -> 403"
     (Server_auth.auth_refusal_message ~protocol:"h2" ~path:"/mcp" ~status:403)
 
+(* A fresh test process starts the ring empty with [total = 0], so the first
+   entry pushed here gets seq 0. A [since_seq] cursor of 0 means "strictly
+   newer than 0" and would drop that very entry, so only pass a cursor when
+   the ring already held something. *)
+let recent_auth_lines () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ ->
+    Log.Ring.recent ~limit:10 ~module_filter:"Auth" ~since_seq:entry.seq ()
+  | [] -> Log.Ring.recent ~limit:10 ~module_filter:"Auth" ()
+
+let has_refusal_line entries =
+  List.exists
+    (fun (entry : Log.Ring.entry) ->
+      String.equal entry.message "HTTP auth rejected: h1 /api/v1/keeper/chat -> 401")
+    entries
+
 (* The emit itself, not just the pure helpers: a refused request must reach the
    dashboard log ring the operator reads. *)
 let test_log_auth_refusal_emits_line () =
-  (* A fresh test process starts the ring empty with [total = 0], so the first
-     entry pushed here gets seq 0. A [since_seq] cursor of 0 means "strictly
-     newer than 0" and would drop that very entry, so only pass a cursor when
-     the ring already held something. *)
-  let baseline =
-    match Log.Ring.recent ~limit:1 () with
-    | (entry : Log.Ring.entry) :: _ -> Some entry.seq
-    | [] -> None
-  in
   Server_auth.log_auth_refusal ~protocol:"h1" ~path:"/api/v1/keeper/chat" ~status:401;
-  let entries =
-    match baseline with
-    | Some seq -> Log.Ring.recent ~limit:10 ~module_filter:"Auth" ~since_seq:seq ()
-    | None -> Log.Ring.recent ~limit:10 ~module_filter:"Auth" ()
-  in
-  let found =
+  let entries = recent_auth_lines () in
+  check bool "refusal line reached the log ring" true (has_refusal_line entries);
+  match
     List.find_opt
       (fun (entry : Log.Ring.entry) ->
         String.equal entry.message "HTTP auth rejected: h1 /api/v1/keeper/chat -> 401")
       entries
-  in
-  check bool "refusal line reached the log ring" true (Option.is_some found);
-  match found with
+  with
   | None -> ()
   | Some (entry : Log.Ring.entry) ->
     let open Yojson.Safe.Util in
     check string "details carry the path" "/api/v1/keeper/chat"
       (entry.details |> member "path" |> to_string);
     check int "details carry the status" 401 (entry.details |> member "status" |> to_int)
+
+(* The responder, not just the helper: this drives [respond_auth_error] itself
+   over a real [Httpun.Reqd], so deleting its logging call fails the test. *)
+let test_respond_auth_error_emits_line () =
+  let reqd_ref = ref None in
+  let conn =
+    Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd)
+  in
+  let request_text = "GET /api/v1/keeper/chat HTTP/1.1\r\nHost: localhost\r\n\r\n" in
+  let len = String.length request_text in
+  let bs = Bigstringaf.of_string request_text ~off:0 ~len in
+  ignore (Httpun.Server_connection.read conn bs ~off:0 ~len);
+  let reqd = Option.get !reqd_ref in
+  let request = Httpun.Reqd.request reqd in
+  Server_auth.respond_auth_error request reqd
+    (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken "stale-token-x"));
+  check bool "respond_auth_error left a refusal line" true
+    (has_refusal_line (recent_auth_lines ()))
 
 let () =
   run "server_auth_refusal_log"
@@ -67,5 +86,6 @@ let () =
             test_message_names_both
         ; test_case "the emit reaches the log ring" `Quick
             test_log_auth_refusal_emits_line
-        ] )
-    ]
+        ; test_case "respond_auth_error reaches the log ring" `Quick
+            test_respond_auth_error_emits_line
+        ] ) ]

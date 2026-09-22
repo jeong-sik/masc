@@ -187,14 +187,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             ~status:`Internal_server_error ~extra_headers:cors
     in
     let h2_respond_auth_error h2_reqd err =
-      let status = http_status_of_auth_error err in
-      Server_auth.log_auth_refusal
-        ~protocol:"h2"
-        ~path:(Http.Request.path httpun_request)
-        ~status:(H2.Status.to_code (status :> H2.Status.t));
+      let status, body =
+        Server_auth.auth_refusal_response ~protocol:"h2"
+          ~path:(Http.Request.path httpun_request) err
+      in
       h2_respond_json
         h2_reqd
-        (auth_error_json err)
+        body
         ~status:(status :> H2.Status.t)
         (* One policy for both protocols (#28166). Same result as the [cors]
            computed above for this request; naming it here keeps H1 and H2

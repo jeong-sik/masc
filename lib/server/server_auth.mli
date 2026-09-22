@@ -278,6 +278,23 @@ val auth_error_cors_headers : Httpun.Request.t -> (string * string) list
     left the server with different CORS headers depending on the protocol
     (#28166). *)
 
+val auth_refusal_response :
+  protocol:string ->
+  path:string ->
+  Masc_domain.masc_error ->
+  [> `Bad_request
+  | `Forbidden
+  | `Internal_server_error
+  | `Not_found
+  | `Too_many_requests
+  | `Unauthorized ]
+  * string
+(** Log the refusal and hand back the status and body. Every responder that
+    answers a refusal — the h1 responder, the h2 gateway, and the h2 route
+    dispatcher — builds its response from here, so a refusal cannot be answered
+    without a line. The status stays row-polymorphic so each protocol narrows
+    it to [Httpun.Status.t] or [H2.Status.t] at the use site. *)
+
 val respond_auth_error :
   Httpun.Request.t -> Httpun.Reqd.t -> Masc_domain.masc_error -> unit
 (** Compose [http_status_of_auth_error] + [auth_error_json] + generic Bearer
@@ -285,9 +302,9 @@ val respond_auth_error :
     protocols. *)
 
 val log_auth_refusal : protocol:string -> path:string -> status:int -> unit
-(** Log a refused request's endpoint and status. The h2 gateway answers through
-    its own responder and calls this so both protocols leave the same line. The
-    raw bearer is never logged. *)
+(** Log a refused request's endpoint and status. [auth_refusal_response] calls
+    this, and the h2 gateway's own responder goes through it too, so both
+    protocols leave the same line. The raw bearer is never logged. *)
 
 val auth_refusal_details : protocol:string -> path:string -> status:int -> Yojson.Safe.t
 (** The structured details [log_auth_refusal] emits: the protocol, the refused

@@ -614,6 +614,7 @@ let create_post_with_audience
                 ; meta_json = normalized_meta
                 ; visibility
                 ; created_at = now
+                ; content_updated_at = now
                 ; updated_at = now
                 ; expires_at
                 ; votes_up = 0
@@ -882,6 +883,13 @@ let update_post_with_outcome
                   ; title = normalized_title
                   ; body = normalized_body
                   ; meta_json = normalized_meta
+                  ; content_updated_at =
+                      if String.equal existing.title normalized_title
+                         && String.equal existing.body normalized_body
+                         && String.equal (Agent_id.to_string existing.author)
+                              (Agent_id.to_string next_author)
+                      then existing.content_updated_at
+                      else now
                   ; updated_at = now
                   }
                 in

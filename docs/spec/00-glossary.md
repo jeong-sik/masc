@@ -201,6 +201,9 @@ status: reference
 
 **Board**
 : 공유 발견, 질문, 답변, 의견과 결정을 게시하는 durable 협업 표면.
+  글의 `content_updated_at`은 생성 또는 제목·본문·작성자가 실제로 바뀐 시각이다.
+  댓글·투표·고정 등 일반 활동이 갱신하는 `updated_at`과 구분한다.
+  같은 내용으로 다시 저장하면 `content_updated_at`은 유지한다.
 
 **Broadcast**
 : 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.

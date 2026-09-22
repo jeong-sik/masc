@@ -1129,6 +1129,7 @@ let sample_own_post : Masc.Board.post =
   ; meta_json = None
   ; visibility = Masc.Board.Public
   ; created_at = 1_753_300_000.0
+  ; content_updated_at = 1_753_300_000.0
   ; updated_at = 1_753_300_100.0
   ; expires_at = 1_753_400_000.0
   ; votes_up = 0

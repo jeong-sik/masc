@@ -237,7 +237,7 @@ let test_preview_line_marks_breaks_and_escapes_the_rest () =
   Alcotest.(check bool) "the result is one row" false
     (String.contains (Tui_decode.preview_line "x\ny\nz") '\n')
 
-let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn
+let keeper_call_row ~keeper ~tool ?(wire_outcome = "ok") ?duration_ms ?turn
     ?execution_id ?tool_use_id ?planned_index ?batch_index ?batch_size
     ?execution_mode ?result_bytes ?truncated_to ?disposition () =
   `Assoc
@@ -245,7 +245,7 @@ let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn
      ; "keeper", `String keeper
      ; "tool", `String tool
      ; "input", `String "{\"file_path\": \"lib/a.ml\"}"
-     ; "success", `Bool success
+     ; "wire_outcome", `String wire_outcome
      ]
     @ (match duration_ms with None -> [] | Some d -> [ "duration_ms", `Float d ])
     @ (match turn with None -> [] | Some t -> [ "turn", `Int t ])
@@ -371,7 +371,7 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
                 ~turn:2143 ()
             ; keeper_call_row ~keeper:"analyst" ~tool:"Edit" ()
             ; keeper_call_row ~keeper:"largo" ~tool:"tool_execute"
-                ~success:false ()
+                ~wire_outcome:"error" ()
             ] )
       ]
   in
@@ -387,8 +387,8 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
       (match snapshot.Tui_decode.kcs_entries with
        | [ first; second ] ->
            Alcotest.(check string) "order kept" "Read" first.Tui_decode.kc_tool;
-           Alcotest.(check bool) "failure carried" false
-             second.Tui_decode.kc_success;
+           Alcotest.(check bool) "failure carried" true
+             (second.Tui_decode.kc_outcome = Tool_result.Recorded_failed);
            Alcotest.(check (option (Alcotest.float 0.01))) "duration optional"
              (Some 28.4) first.Tui_decode.kc_duration_ms;
            Alcotest.(check (option Alcotest.int)) "turn optional" (Some 2143)
@@ -409,7 +409,7 @@ let test_keeper_calls_carry_what_the_call_answered () =
       ; "keeper", `String "largo"
       ; "tool", `String "Execute"
       ; "input", `String {|{"argv": ["ls"]}|}
-      ; "success", `Bool true
+      ; "disposition", `String "completed"
       ; "output", output
       ]
   in
@@ -451,7 +451,7 @@ let test_keeper_calls_require_the_envelope () =
              ; "count", `Int 0
              ; "health", `String "ok"
              ])));
-  Alcotest.(check bool) "a row without success is an error" true
+  Alcotest.(check bool) "an outcome of the wrong type is an error" true
     (Result.is_error
        (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
           (`Assoc
@@ -464,15 +464,13 @@ let test_keeper_calls_require_the_envelope () =
                        [ "ts", `Float 1.0
                        ; "keeper", `String "largo"
                        ; "tool", `String "Read"
+                       ; "wire_outcome", `Int 1
                        ]
                    ] )
              ])))
 
-(* [Keeper_tool_call_log]'s real durable record never writes a [success]
-   key -- only [wire_outcome], and sometimes [disposition]. A row naming
-   neither carries no success signal and still errors (the case above); a
-   row naming either must decode, or every real keeper's calls detail view
-   is unrenderable (#37461). *)
+(* The row's outcome is read by [Tool_result.recorded_call_outcome]: the
+   [disposition] first, the [wire_outcome] when the row has none. *)
 let test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition () =
   let row extra =
     `Assoc
@@ -491,35 +489,41 @@ let test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition () =
          ; "entries", `List [ row extra ]
          ])
   in
-  let success_of extra =
+  let outcome_of extra =
     match snapshot_of extra with
     | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
     | Ok snapshot -> (
       match snapshot.Tui_decode.kcs_entries with
-      | [ call ] -> call.Tui_decode.kc_success
+      | [ call ] -> (
+        match call.Tui_decode.kc_outcome with
+        | Tool_result.Recorded_succeeded -> "succeeded"
+        | Tool_result.Recorded_deferred -> "deferred"
+        | Tool_result.Recorded_failed -> "failed"
+        | Tool_result.Recorded_unsettled -> "unsettled"
+        | Tool_result.Recorded_malformed -> "malformed")
       | _ -> Alcotest.fail "expected one call")
   in
-  Alcotest.(check bool) "wire_outcome ok reads as success" true
-    (success_of [ "wire_outcome", `String "ok" ]);
-  Alcotest.(check bool) "wire_outcome error reads as failure" false
-    (success_of [ "wire_outcome", `String "error" ]);
-  (* A wire that says it does not know the outcome is not evidence that the
-     call completed: unlike "ok"/"error" this spelling refuses instead of
-     defaulting to success (Unknown -> Permissive Default is the antipattern
-     the earlier fallback fell into; #37650 review caught it). *)
-  (match snapshot_of [ "wire_outcome", `String "unknown" ] with
-   | Ok _ -> Alcotest.fail "wire_outcome unknown must not decode to a call"
+  let check label expected extra =
+    Alcotest.(check string) label expected (outcome_of extra)
+  in
+  check "wire_outcome ok" "succeeded" [ "wire_outcome", `String "ok" ];
+  check "wire_outcome error" "failed" [ "wire_outcome", `String "error" ];
+  (* A wire that does not know the outcome is kept and says so: it is not
+     evidence that the call completed, and not a reason to drop the row. *)
+  check "wire_outcome unknown" "unsettled" [ "wire_outcome", `String "unknown" ];
+  check "no outcome field" "unsettled" [];
+  check "disposition completed" "succeeded" [ "disposition", `String "completed" ];
+  check "disposition failed" "failed" [ "disposition", `String "failed" ];
+  check "disposition deferred is its own case" "deferred"
+    [ "disposition", `String "deferred" ];
+  check "the disposition decides over the wire" "succeeded"
+    [ "disposition", `String "completed"; "wire_outcome", `String "error" ];
+  check "a success flag is not an outcome" "unsettled" [ "success", `Bool true ];
+  (match snapshot_of [ "wire_outcome", `String "maybe" ] with
+   | Ok _ -> Alcotest.fail "an undecodable wire_outcome must not decode to a call"
    | Error detail ->
-     Alcotest.(check string) "the refusal names the unknown wire_outcome"
-       "entries[0]: keeper call wire_outcome is unknown" detail);
-  Alcotest.(check bool) "disposition completed reads as success" true
-    (success_of [ "disposition", `String "completed" ]);
-  Alcotest.(check bool) "disposition failed reads as failure" false
-    (success_of [ "disposition", `String "failed" ]);
-  Alcotest.(check bool) "disposition deferred is not a known failure" true
-    (success_of [ "disposition", `String "deferred" ]);
-  Alcotest.(check bool) "an explicit success still wins over wire_outcome" false
-    (success_of [ "success", `Bool false; "wire_outcome", `String "ok" ])
+     Alcotest.(check string) "the refusal names the malformed outcome"
+       "entries[0]: keeper call outcome is malformed" detail)
 
 let test_timestamp_slices_are_sanitized_after_selection () =
   Alcotest.(check string) "normal clock timestamp, in the zone asked for"

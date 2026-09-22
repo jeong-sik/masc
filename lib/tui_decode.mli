@@ -265,7 +265,9 @@ type keeper_call = {
           call that returned an empty one. *)
   kc_artifact_refs : Tool_output.artifact_ref list;
       (** Validated durable references, independent of the output preview. *)
-  kc_success : bool;
+  kc_outcome : Tool_result.recorded_call_outcome;
+      (** How the call ended, read by {!Tool_result.recorded_call_outcome}.
+          Never [Recorded_malformed]: the decoder refuses that row. *)
   kc_duration_ms : float option;
   kc_turn : int option;
   kc_task_id : string option;

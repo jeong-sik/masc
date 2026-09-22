@@ -28,6 +28,10 @@ let origin_sentence = function
       Printf.sprintf
         "no front to start from: this turn's own atoms; the last completed turn ended at atom %d"
         end_atom
+  | Inspector.Carried_turn_start_unknown { reason } ->
+      Printf.sprintf
+        "no front, and where this turn began could not be read: the newest atom alone (%s)"
+        reason
 ;;
 
 (* A Unix epoch as a UTC clock reading, the day dropped: the band compares

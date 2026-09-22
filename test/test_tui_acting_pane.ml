@@ -279,7 +279,7 @@ let test_a_settle_without_a_number_names_no_turn () =
   in
   let texts = List.map text drawn.Pane.rows in
   let header = List.nth texts (last_index_of_in texts "mute") in
-  check bool "settles with its state" true (contains "done" header);
+  check bool "the state word is done" true (contains "done" header);
   check bool "no turn is named" false (contains "turn" header)
 
 (* An offline keeper has no fleet row any more, but the operator can still
@@ -294,7 +294,7 @@ let test_a_gone_keepers_turn_is_not_read_as_running () =
   let header = find_row_in dead_texts "goner" in
   check bool "the focus header says the process is gone" true
     (contains "process gone" header);
-  check bool "and that the turn never settled" true (contains "no end" header);
+  check bool "and that the turn never ended" true (contains "no end" header);
   check bool "the focus block does not say running" false
     (contains "running" header);
   let body = find_row_in dead_texts "Read" in
@@ -1172,7 +1172,7 @@ let test_beside_the_roster_keepers_waiting_on_approval_still_draw () =
     (target_text (List.nth view.Pane.targets 6))
 
 (* A sixteen-cell name, a four-digit settled turn and the clock share one
-   row: the number already says the turn settled, so no word is drawn and
+   row: the number already says the turn is done, so no word is drawn and
    the clock stays whole. *)
 let test_focus_header_keeps_its_clock_behind_a_wide_name_and_a_named_turn () =
   let name = "sixteen-charname" in

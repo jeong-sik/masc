@@ -1623,7 +1623,7 @@ let run_direct_attempt
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
                   in
                   Keeper_claude_code_runtime.run
-                    ~turn_start:0
+                    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
                     ~pre_tool_rejects:(ref [])
@@ -2082,7 +2082,7 @@ let agent_core_range ?(turn_start = 0) ~front messages =
      ~last_resort:false
      ~base_path:""
      ~demote_before:0
-     ~completed_end_atom:turn_start
+     ~turn_boundary:(Keeper_carried_front.Turn_boundary { end_atom = turn_start })
      messages)
     .Keeper_turn_driver_try_provider.projection
     .Runtime_model_input_tail_window.messages
@@ -2098,7 +2098,7 @@ let test_a_start_seed_begins_at_the_carried_front () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read)
-      ~turn_start:0
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2162,7 +2162,7 @@ let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes
       ~carried_front_seed:(fun () -> seed_read)
-      ~turn_start:0
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2194,7 +2194,7 @@ let test_a_cold_start_with_no_completed_turn_carries_everything () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read_of [])
-      ~turn_start:0
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2223,7 +2223,7 @@ let test_a_cold_start_begins_at_the_turn_start () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~carried_front_seed:(fun () -> seed_read_of [])
-      ~turn_start:112
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 112 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"

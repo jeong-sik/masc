@@ -9,7 +9,9 @@
 (** 한 패널 그룹 — 공통 설정으로 실행되는 모델 묶음. 한 preset이 이종
     그룹 여럿을 가질 수 있다 (RFC-0252-A). 닫힌 record. *)
 type panel_group =
-  { models : string list  (** provider.model ids *)
+  { models : string list
+      (** 자리마다 경로 이름 하나: [\[runtime.lanes\]] lane 이름 또는 런타임 id
+          (RFC fusion-seat-routes). *)
   ; label : string
       (** 패널 정체성 라벨 (RFC-0278). 같은 model을 다른 system_prompt로 여러 그룹에
           둘 때 패널을 구분한다. ""(기본)이면 정체성=model 그대로 → legacy byte-identical.
@@ -20,8 +22,10 @@ type panel_group =
   ; max_output_tokens : int option
       (** 그룹 모델당 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
   ; timeout_s : float option
-      (** 그룹 모델당 응답 데드라인(초) — Agent_core 경로는 [body_timeout_s],
-          official-client 경로는 어댑터 turn timeout 으로 집행된다. [None]이면
+      (** 그룹 모델당 응답 데드라인(초) — Agent_core 경로는 [body_timeout_s](호출
+          전체 상한), official-client 경로는 어댑터 turn timeout(스트림 메시지 사이
+          최대 무응답 시간. 계속 스트리밍하는 턴은 이 값을 넘길 수 있다)으로
+          집행된다. [None]이면
           런타임/provider 가 이미 선언한 값이 그대로 쓰인다: preset 은 그 위에
           얹는 소비자 override 이며 별도 SSOT 가 아니다. *)
   }
@@ -31,7 +35,7 @@ type panel_group =
     단수다(심판은 한 모델이 한 종합을 낸다). 필드는 [j] 접두 — panel_group의 동명 필드와
     타입 추론 충돌을 피한다. 정체성 derive는 {!panelist_id}([jlabel]/[jmodel]). *)
 type judge_spec =
-  { jmodel : string  (** provider.model id *)
+  { jmodel : string  (** 경로 이름: lane 이름 또는 런타임 id. *)
   ; jlabel : string  (** 정체성 라벨. ""면 정체성=jmodel *)
   ; jsystem_prompt : string  (** 이 1차 심판의 lens — config에서 필수(코드 default 없음). *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부. *)
@@ -43,7 +47,7 @@ type judge_spec =
 [@@deriving show, eq]
 
 (** 패널 preset — 이종 패널 그룹 리스트 + 단일 심판 (RFC-0252 §9, RFC-0252-A).
-    [judge]는 runtime.toml bindings와 동일한 opaque "provider.model" 문자열이며,
+    [judge]는 경로 이름(lane 이름 또는 런타임 id, RFC fusion-seat-routes)이며,
     simple/refine/conditional 위상의 심판이자 JOJ의 meta-judge(reducer)다 (RFC-0283).
     legacy flat 문법(panel=[...])은 {!Fusion_config}가 정확히 길이-1 그룹으로
     desugar한다 — 그 경우 오늘과 byte-identical 동작. *)
@@ -57,7 +61,9 @@ type preset =
       (** 단일/refine/meta 심판 출력 토큰 예산 override. [None]이면 기본값. *)
   ; judge_timeout_s : float option
       (** 심판 응답 데드라인(초). single/refine/meta/stage-meta 와, 자기
-          [jtimeout_s] 가 없는 1차 심판에 적용된다. [None]이면 런타임/provider 설정. *)
+          [jtimeout_s] 가 없는 1차 심판에 적용된다. 집행 방식은 {!panel_group}의
+          [timeout_s]와 같다(official-client 는 스트림 무응답 한도). [None]이면
+          런타임/provider 설정. *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)

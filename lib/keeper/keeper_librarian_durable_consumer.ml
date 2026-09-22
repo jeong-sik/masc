@@ -143,53 +143,6 @@ let error_to_string = function
       (Keeper_turn_fragments.read_error_to_string error)
 ;;
 
-let turn_boundary_for_position ?through ~trace_id ~end_atom ~last_atom_digest lines =
-  let latest =
-    List.fold_left
-      (fun latest (line, decoded) ->
-       let admitted =
-         match through with
-         | None -> true
-         | Some last_seen -> line <= last_seen
-       in
-       if not admitted
-       then latest
-       else
-       match decoded with
-       | Error _ -> latest
-       | Ok ({ B.event = B.History_restarted _; _ } : B.record) -> latest
-       | Ok
-           ({ recorded_at
-            ; event =
-                B.Turn_ended
-                  { turn_ref
-                  ; history_at_start = _
-                  ; position = B.Atom_history boundary
-                  }
-            } : B.record) ->
-         if
-           String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id
-           && boundary.end_atom = end_atom
-           && String.equal boundary.last_atom_digest last_atom_digest
-         then Some (line, recorded_at, turn_ref)
-         else latest
-       | Ok
-           { B.event =
-               B.Turn_ended
-                 { turn_ref = _
-                 ; history_at_start = _
-                 ; position = B.Empty_atom_history | B.No_atom_history | B.Stale_noop
-                 }
-           ; _
-           } -> latest)
-      None
-      lines
-  in
-  match latest with
-  | None -> None
-  | Some (line, recorded_at, turn_ref) -> Some (line, recorded_at, turn_ref)
-;;
-
 let has_history_start_witness ~trace_id lines =
   List.exists
     (fun (_, decoded) ->
@@ -718,7 +671,7 @@ let consume_one_with_extent
       | R.Read { range; boundary_lines_seen } ->
         let* end_boundary_line, ended_at, turn_ref =
           match
-            turn_boundary_for_position
+            B.witness_line
               ~trace_id
               ~end_atom:range.end_atom
               ~last_atom_digest:range.last_atom_digest
@@ -759,7 +712,7 @@ let consume_one_with_extent
           with
           | R.Read { range; boundary_lines_seen } ->
             (match
-               turn_boundary_for_position
+               B.witness_line
                  ~trace_id
                  ~end_atom:range.end_atom
                  ~last_atom_digest:range.last_atom_digest
@@ -796,7 +749,7 @@ let consume_one_with_extent
       | None -> Ok None
       | Some { P.position; boundary_lines_seen } ->
         (match
-           turn_boundary_for_position
+           B.witness_line
              ~through:boundary_lines_seen
              ~trace_id:position.trace_id
              ~end_atom:position.end_atom

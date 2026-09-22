@@ -200,9 +200,10 @@ type carried_start_front =
   | Lane_cut
       (** The lane's own cut, passed as [own_first_atom], sits at or past the
           seed's position. *)
-  | Whole_history
-      (** No seed held and the lane cut nothing, so the range starts at the
-          oldest atom and the provider judges it. *)
+  | Turn_start
+      (** No seed held and the lane cut nothing later, so the range starts
+          where the last completed turn on this history ended: this turn's
+          own atoms (RFC keeper-context-window-in-tokens §13.4). *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -223,6 +224,7 @@ val carried_start_range
   -> runtime_id:string
   -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
   -> own_first_atom:int
+  -> turn_start:int
   -> Agent_core.Types.message list
   -> carried_start
 (** Where an official client's start seed begins
@@ -235,9 +237,11 @@ val carried_start_range
 
     These lanes hold no ledger — it is written from the usage of a request
     this process composed, and an official client composes its own — so the
-    caller's seed is the whole answer. Without one the range is the whole
-    history, which the provider then judges: the same two outcomes the Agent
-    Core path has when no ledger answers.
+    caller's seed is the whole answer. Without one the range starts at
+    [turn_start], the end of the last completed turn on this history, where
+    the Agent Core path starts when no ledger answers either (RFC
+    keeper-context-window-in-tokens §13.4); a history with no completed turn
+    has [turn_start] 0.
 
     [own_first_atom] is the front the lane already chose for its own reason
     (Claude Code cuts its seed to the runtime's declared max-prompt-bytes).

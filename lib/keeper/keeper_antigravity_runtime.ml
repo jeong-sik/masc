@@ -121,7 +121,7 @@ let prompt_section_framing_reserved_bytes () =
    a source-only atom is transmitted context, but cannot become a front that
    a later checkpoint history is expected to open. *)
 let bounded_history_projection ~capacity_bytes ~reserved_bytes
-    ?on_model_input_window_observation ?carried_front_seed ~keeper_name
+    ?on_model_input_window_observation ?carried_front_seed ~turn_start ~keeper_name
     ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
   =
@@ -132,6 +132,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
       ~runtime_id
       ~carried_front_seed
       ~own_first_atom:0
+      ~turn_start
       history_messages
   in
   let* projected_messages =
@@ -176,7 +177,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
     ~system_prompt ~goal ?on_model_input_window_observation ?carried_front_seed
-    ~keeper_name ~runtime_id source_projection
+    ~turn_start ~keeper_name ~runtime_id source_projection
   =
   match declared_max_prompt_bytes with
   | None ->
@@ -207,6 +208,7 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
               ~reserved_bytes
               ?on_model_input_window_observation
               ?carried_front_seed
+              ~turn_start
               ~keeper_name
               ~runtime_id
               source_projection))
@@ -380,6 +382,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
+    ~turn_start
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -535,6 +538,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ~goal
             ?on_model_input_window_observation
             ?carried_front_seed
+            ~turn_start
             ~keeper_name
             ~runtime_id
             model_input_projection
@@ -1160,6 +1164,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
     ?carried_front_seed
+    ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
@@ -1180,6 +1185,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~keeper_name
         ~on_model_input_window_observation
         ~carried_front_seed
+        ~turn_start
     ~pre_tool_rejects
         ~base_path
         ~goal

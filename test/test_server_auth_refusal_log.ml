@@ -66,21 +66,24 @@ let test_log_auth_refusal_emits_line () =
     check int "details carry the status" 401 (entry.details |> member "status" |> to_int)
 
 (* The responder, not just the helper: this drives [respond_auth_error] itself
-   over a real [Httpun.Reqd], so deleting its logging call fails the test. *)
+   over a real [Httpun.Reqd], so deleting its logging call fails the test. The
+   responder reads the request authority through a fiber-local, so it runs
+   inside an Eio context. *)
 let test_respond_auth_error_emits_line () =
   let baseline = baseline_seq () in
-  let reqd_ref = ref None in
-  let conn =
-    Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd)
-  in
-  let request_text = "GET /api/v1/keeper/chat HTTP/1.1\r\nHost: localhost\r\n\r\n" in
-  let len = String.length request_text in
-  let bs = Bigstringaf.of_string request_text ~off:0 ~len in
-  ignore (Httpun.Server_connection.read conn bs ~off:0 ~len);
-  let reqd = Option.get !reqd_ref in
-  let request = Httpun.Reqd.request reqd in
-  Server_auth.respond_auth_error request reqd
-    (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken "stale-token-x"));
+  Eio_main.run (fun _env ->
+    let reqd_ref = ref None in
+    let conn =
+      Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd)
+    in
+    let request_text = "GET /api/v1/keeper/chat HTTP/1.1\r\nHost: localhost\r\n\r\n" in
+    let len = String.length request_text in
+    let bs = Bigstringaf.of_string request_text ~off:0 ~len in
+    ignore (Httpun.Server_connection.read conn bs ~off:0 ~len);
+    let reqd = Option.get !reqd_ref in
+    let request = Httpun.Reqd.request reqd in
+    Server_auth.respond_auth_error request reqd
+      (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken "stale-token-x")));
   check bool "respond_auth_error left a refusal line" true
     (has_refusal_line (auth_lines_since baseline))
 

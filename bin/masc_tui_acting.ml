@@ -45,6 +45,13 @@ let visible filter (event : Observer.event) =
   | Everything -> true
   | Turns | Actions -> (
       match event with
+      (* A container that would not start, or whose removal nobody can show,
+         is a failure the operator acts on. One that started or was removed
+         is the lane runtime doing its job, and is state. *)
+      | Observer.Lane_resource { Observer.lr_lifecycle; _ } -> (
+          match lr_lifecycle with
+          | Masc.Lane_addon_resource_events.Acquire_failed | Masc.Lane_addon_resource_events.Release_incomplete -> true
+          | Masc.Lane_addon_resource_events.Acquired | Masc.Lane_addon_resource_events.Release_confirmed -> false)
       | Observer.Agent_core { Observer.kind = Observer.Telemetry; _ } -> false
       | Observer.Agent_core _ -> true
       | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
@@ -98,7 +105,7 @@ let retained_as_action (event : Observer.event) =
   | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
-  | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
       visible Actions event
 
 let retain ~actions ~quiet ~event_of entries =
@@ -256,8 +263,8 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_waiting_inventory_changed { keeper; _ }
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
-  | Observer.Internal_agent_runs_changed | Observer.Snapshot _
-  | Observer.Other _ ->
+  | Observer.Internal_agent_runs_changed | Observer.Lane_resource _
+  | Observer.Snapshot _ | Observer.Other _ ->
       "server"
 
 let row_of_event ~at ~duration_ms (event : Observer.event) =
@@ -361,6 +368,22 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; label = "fusion"
       ; detail = status ^ " \xc2\xb7 " ^ run_id
       }
+  | Observer.Lane_resource resource ->
+      let glyph, label =
+        match resource.Observer.lr_lifecycle with
+        | Masc.Lane_addon_resource_events.Acquired -> (Quiet, "container up")
+        | Masc.Lane_addon_resource_events.Acquire_failed -> (Failure, "container failed")
+        | Masc.Lane_addon_resource_events.Release_confirmed -> (Quiet, "container removed")
+        | Masc.Lane_addon_resource_events.Release_incomplete -> (Failure, "removal unproven")
+      in
+      (* The package says which add-on; the reason is the server's own words,
+         and it is the part a failure row exists to carry. *)
+      let detail =
+        match resource.Observer.lr_detail with
+        | Some reason -> resource.Observer.lr_package ^ " \xc2\xb7 " ^ reason
+        | None -> resource.Observer.lr_package
+      in
+      { at; keeper = "server"; glyph; label; detail }
   | Observer.Internal_agent_runs_changed ->
       { at
       ; keeper = "server"
@@ -536,7 +559,7 @@ let member_of_event (event : Observer.event) =
   | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Snapshot _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
-  | Observer.Other _ ->
+  | Observer.Lane_resource _ | Observer.Other _ ->
       None
 
 let empty_chunk ~keeper ~at =
@@ -710,7 +733,7 @@ let observation_of_event (event : Observer.event) =
   | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
-  | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
       None
 
 (* The agent session's ordinal a member states, if it states one. *)
@@ -977,7 +1000,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_chat_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _
           | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
-          | Observer.Snapshot _ | Observer.Other _ ->
+          | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before
 

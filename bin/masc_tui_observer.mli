@@ -77,6 +77,15 @@ type agent_core = {
   execution_id : string option;
 }
 
+type lane_resource = {
+  lr_lifecycle : Masc.Lane_addon_resource_events.lifecycle;
+  lr_package : string;  (** the add-on package the instance runs *)
+  lr_instance : string;  (** the instance whose container this is *)
+  lr_detail : string option;
+      (** why it failed, for [Acquire_failed] and [Release_incomplete] *)
+  lr_at : float;
+}
+
 type keeper_heartbeat = {
   hb_keeper : string;
   hb_phase : string option;  (** absent on the bare liveness beat *)
@@ -183,6 +192,12 @@ type event =
       (** An internal agent run registry -- verification, goal verification,
           exact lanes -- changed. A server push with no payload, named by
           {!Masc.Internal_agent_runs_event}. *)
+  | Lane_resource of lane_resource
+      (** A Lane Add-on container was acquired, failed to start, was removed,
+          or could not be shown removed. It arrives in the agent-core family
+          and is recognised by the names {!Masc.Lane_addon_resource_events}
+          mints, as {!Masc.Keeper_event_bridge.public_custom_event_type}
+          spells them on the wire. *)
   | Snapshot of string
       (** A whole-projection push; the name is kept, the payload is not. Which
           types these are comes from the wire's own routing table

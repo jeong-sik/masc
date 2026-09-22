@@ -324,6 +324,41 @@ let test_the_internal_runs_push_is_not_a_keepers_act () =
   check string "and it says what changed" "a run registry changed"
     row.Acting.detail
 
+module Lane_events = Masc.Lane_addon_resource_events
+
+let lane_resource ?detail lifecycle =
+  Observer.Lane_resource
+    { Observer.lr_lifecycle = lifecycle
+    ; lr_package = "masc-dos"
+    ; lr_instance = "inst-7"
+    ; lr_detail = detail
+    ; lr_at = 100.
+    }
+
+(* A container that would not start, or whose removal nobody can show, is a
+   failure the operator acts on, so the scopes that show what happened draw
+   it -- with the failure mark, the package, and the reason in the server's
+   own words. A container that started or was removed is the lane runtime
+   doing its job: state, shown under everything. *)
+let test_a_lane_container_failure_is_drawn_with_its_reason () =
+  let failed = lane_resource ~detail:"image not found" Lane_events.Acquire_failed in
+  check bool "turns draws a failed start" true (Acting.visible Acting.Turns failed);
+  let row = Acting.row_of_event ~at:100. ~duration_ms:None failed in
+  check bool "with the failure mark" true (row.Acting.glyph = Acting.Failure);
+  check string "naming the package and the reason"
+    "masc-dos \xc2\xb7 image not found" row.Acting.detail;
+  List.iter
+    (fun (name, lifecycle, shown) ->
+      check bool (name ^ " under turns") shown
+        (Acting.visible Acting.Turns (lane_resource lifecycle));
+      check bool (name ^ " under everything") true
+        (Acting.visible Acting.Everything (lane_resource lifecycle)))
+    [ ("a started container", Lane_events.Acquired, false)
+    ; ("a failed start", Lane_events.Acquire_failed, true)
+    ; ("a removed container", Lane_events.Release_confirmed, false)
+    ; ("an unproven removal", Lane_events.Release_incomplete, true)
+    ]
+
 (* A reply sends one stream frame per token, so a single keeper answering fills
    the retained ring on its own. Before these frames were decoded they arrived
    as Other, which the actions filter admits, and a screen asked for actions
@@ -1210,7 +1245,9 @@ let test_call_key_prefers_the_provider_id () =
 let () =
   run "tui acting"
     [ ( "rows"
-      , [ test_case "the internal runs push is not a keeper's act" `Quick
+      , [ test_case "a lane container failure is drawn with its reason" `Quick
+            test_a_lane_container_failure_is_drawn_with_its_reason
+        ; test_case "the internal runs push is not a keeper's act" `Quick
             test_the_internal_runs_push_is_not_a_keepers_act
         ; test_case "actions hide what says nothing a row can act on" `Quick
             test_actions_hide_what_says_nothing_a_row_can_act_on

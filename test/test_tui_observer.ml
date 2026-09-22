@@ -109,6 +109,10 @@ let summary = function
   | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
   | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
+  | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
+    ->
+      Printf.sprintf "lane_resource(%s,%s,%s)" lr_package lr_instance
+        (Option.value ~default:"-" lr_detail)
   | Observer.Event (Observer.Snapshot name) -> "snapshot:" ^ name
   | Observer.Event (Observer.Other name) -> "other:" ^ name
   | Observer.Undecodable detail -> "undecodable:" ^ detail
@@ -404,6 +408,53 @@ let test_the_internal_runs_push_is_read_by_the_servers_name () =
             ^ "\n\n"
           ]))
 
+(* The frame the bridge makes of the event the lane runtime publishes, so the
+   test reads what the wire carries rather than a hand-built copy of it. *)
+module Lane_events = Masc.Lane_addon_resource_events
+
+let lane_resource_frame ?detail lifecycle =
+  let resource =
+    { Lane_events.instance_id = "inst-7"
+    ; run_id = "run-7"
+    ; package_id = "masc-dos"
+    ; package_revision = "rev-1"
+    ; container_id = None
+    ; detail
+    }
+  in
+  match
+    Masc.Keeper_event_bridge.native_event_to_json
+      (Lane_events.event lifecycle resource)
+  with
+  | Some json -> "data: " ^ Yojson.Safe.to_string json ^ "\n\n"
+  | None -> fail "the bridge relays no frame for a lane resource event"
+
+(* Every lifecycle the lane runtime publishes is read as what it is, with the
+   package, the instance and the failure reason the payload carries. *)
+let test_every_lane_resource_lifecycle_is_read_with_its_payload () =
+  List.iter
+    (fun lifecycle ->
+      let name = Lane_events.wire_name lifecycle in
+      match decode_all [ lane_resource_frame ~detail:"image not found" lifecycle ] with
+      | [ Observer.Event (Observer.Lane_resource resource) ] ->
+          check bool (name ^ " keeps its lifecycle") true
+            (resource.Observer.lr_lifecycle = lifecycle);
+          check string (name ^ " names its package") "masc-dos"
+            resource.Observer.lr_package;
+          check string (name ^ " names its instance") "inst-7"
+            resource.Observer.lr_instance;
+          check (option string) (name ^ " keeps the reason") (Some "image not found")
+            resource.Observer.lr_detail
+      | decoded ->
+          failf "%s decoded as %s" name
+            (String.concat "; " (List.map summary decoded)))
+    Lane_events.all
+
+let test_a_lane_resource_without_a_reason_says_so () =
+  check (list string) "an acquisition carries no reason"
+    [ "lane_resource(masc-dos,inst-7,-)" ]
+    (List.map summary (decode_all [ lane_resource_frame Lane_events.Acquired ]))
+
 let test_what_this_build_was_not_taught_keeps_its_name () =
   check (list string) "snapshots are named, not retained; unknown types are named"
     [ "snapshot:execution_snapshot"
@@ -608,6 +659,10 @@ let () =
             test_a_line_cut_by_the_chunk_boundary_is_held
         ; test_case "the internal runs push is read by the server's name" `Quick
             test_the_internal_runs_push_is_read_by_the_servers_name
+        ; test_case "every lane resource lifecycle is read with its payload"
+            `Quick test_every_lane_resource_lifecycle_is_read_with_its_payload
+        ; test_case "a lane resource without a reason says so" `Quick
+            test_a_lane_resource_without_a_reason_says_so
         ; test_case "what this build was not taught keeps its name" `Quick
             test_what_this_build_was_not_taught_keeps_its_name
         ; test_case "streaming telemetry names no agent" `Quick

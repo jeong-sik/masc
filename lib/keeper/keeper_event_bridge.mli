@@ -26,6 +26,12 @@ val start :
   bus:Agent_core.Event_bus.t ->
   unit
 
+(** The [event_type] a Custom event named [name] carries on the SSE wire: a
+    [masc.*] name with every dot turned into [:], any other name unchanged. A
+    reader that recognises a MASC Custom event matches against this, not a
+    copy of the rule. *)
+val public_custom_event_type : string -> string
+
 (** Serialize a single AGENT_CORE event to SSE JSON.
     Exposed for unit testing. *)
 val native_event_to_json : Agent_core.Event_bus.event -> Yojson.Safe.t option

@@ -14,6 +14,13 @@ type t =
   | Terminate of string
       (** SIGTERM, SIGHUP, SIGQUIT: the session was told to end. *)
   | Exception of string  (** An uncaught exception left the loop. *)
+  | Unrecorded
+      (** The loop was left without recording a cause. Its own case rather
+          than an {!Exception} carrying that sentence: nothing here observed
+          an exception, and a row that names one where none was seen sends a
+          reader looking for a failure that did not happen. Abnormal all the
+          same -- every way out this build has records a cause, so reaching
+          this means one stopped doing it. *)
 
 val label : t -> string
 (** The cause alone, without the normal/abnormal split. *)
@@ -22,6 +29,11 @@ val is_normal : t -> bool
 (** [true] when the operator or the session's owner ended it on purpose. *)
 
 val line : t -> string
-(** The one line written to the exit log, e.g. ["exit: normal (quit key)"]. A
-    detail carrying a control byte is flattened to one row first, because the
-    log is read a line at a time. *)
+(** The one line written to the exit log, e.g. ["exit: normal (quit key)"].
+    The writer prefixes it with ["[masc-tui] "]; grep for the whole prefix to
+    find these rows and nothing else.
+
+    A detail carrying a control byte is flattened to one row first, because
+    the log is read a line at a time. A cause longer than 200 bytes is cut on
+    a UTF-8 character boundary and the row ends in ["[+N bytes]"], so a reader
+    can see that the text continues and by how much. *)

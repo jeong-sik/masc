@@ -1,100 +1,134 @@
 import { h, render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { FusionConfigSnapshot, FusionPresetConfigView, RuntimeResolvedResponse } from '../api/dashboard'
 import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
 
-const SAMPLE = `[fusion]
-enabled = true
-default_preset = "trio"
-
-[fusion.gate]
-per_hour_budget = 20
-
-[fusion.presets.trio]
-panel = ["a", "b", "c"]
-judge = "j"
-min_answered = 2
-`
-
-const SAMPLE_WITH_DUO = `${SAMPLE}
-[fusion.presets.duo]
-panel = ["a", "b"]
-judge = "j"
-min_answered = 1
-`
-
-const SAMPLE_WITH_RUNTIME_OPTIONS = `${SAMPLE}
-[new.x]
-is-default = false
-
-[meta.judge]
-is-default = false
-`
-
-const cfg = (over: { ok?: boolean; source_text?: string; reloaded?: boolean }) => ({
-  ok: over.ok ?? true,
-  path: null,
-  file_name: 'runtime.toml',
-  source_text: over.source_text ?? SAMPLE,
-  reloaded: over.reloaded ?? false,
-  provider_protocols: [],
-})
-
-const committedCfg = (over: { source_text?: string } = {}) =>
-  committedRuntimeTomlConfigFixture({
-    ...cfg({
-      ok: true,
-      reloaded: true,
-      source_text: over.source_text,
-    }),
-    path: '/tmp/.masc/config/runtime.toml',
-  })
-
-const fetchMock = vi.fn()
-const saveMock = vi.fn<typeof import('../api/dashboard').saveRuntimeTomlConfig>()
+const fusionConfigMock = vi.fn<() => Promise<FusionConfigSnapshot>>()
+const resolvedMock = vi.fn<() => Promise<RuntimeResolvedResponse>>()
+const applyMock = vi.fn<(revision: string, operation: unknown) => Promise<unknown>>()
 const runtimeRefreshMock = vi.fn(async () => undefined)
-// The panel now also reads the typed policy projection. Default it to "no
-// config" so the existing cases keep exercising the editor alone; cases that
-// assert on the composition card set it explicitly.
-const fusionConfigMock = vi.fn<() => Promise<unknown>>()
-vi.mock('../api/dashboard', () => ({
-  fetchRuntimeTomlConfig: () => fetchMock(),
-  saveRuntimeTomlConfig: (text: string) => saveMock(text),
-  fetchFusionConfig: () => fusionConfigMock(),
-  runnableTopologies: (
-    preset: { judges: readonly unknown[] },
-    stagedGroupSize: number,
-  ): readonly string[] => {
-    const base = ['simple', 'refine', 'conditional']
-    const judges = preset.judges.length
-    if (judges >= 2) base.push('judge_of_judges')
-    if (stagedGroupSize >= 2 && judges >= stagedGroupSize * 2 && judges % stagedGroupSize === 0) {
-      base.push('staged_judge_of_judges')
-    }
-    return base
-  },
-}))
+
+vi.mock('../api/dashboard', async () => {
+  // The panel decides "conflict or not" with instanceof, so the class it sees
+  // must be the one the test throws: the real one, through the mock.
+  const fusion = await vi.importActual<typeof import('../api/dashboard-fusion')>('../api/dashboard-fusion')
+  return {
+    fetchFusionConfig: () => fusionConfigMock(),
+    fetchRuntimeResolved: () => resolvedMock(),
+    applyFusionConfigEdit: (revision: string, operation: unknown) => applyMock(revision, operation),
+    FusionConfigEditError: fusion.FusionConfigEditError,
+    runnableTopologies: fusion.runnableTopologies,
+  }
+})
 vi.mock('../lib/runtime-config-refresh', () => ({
   refreshRuntimeConfigConsumers: () => runtimeRefreshMock(),
 }))
 
+const { FusionConfigEditError } = await import('../api/dashboard')
+
+function preset(name: string, over: Partial<FusionPresetConfigView> = {}): FusionPresetConfigView {
+  return {
+    name,
+    panels: [
+      {
+        models: ['p.one', 'p.two'],
+        label: '',
+        systemPrompt: 'panelist',
+        webTools: false,
+        maxOutputTokens: null,
+        timeoutS: 240,
+      },
+    ],
+    judge: 'meta.judge',
+    judgeSystemPrompt: 'judge',
+    judgeMaxOutputTokens: null,
+    judgeTimeoutS: null,
+    judges: [],
+    minAnswered: 2,
+    ...over,
+  }
+}
+
+function snapshot(over: Partial<FusionConfigSnapshot> = {}): FusionConfigSnapshot {
+  return {
+    enabled: true,
+    defaultPreset: 'trio',
+    stagedJudgeGroupSize: 3,
+    presets: [preset('trio'), preset('duo', { minAnswered: 1 })],
+    sourceRevision: 'rev-1',
+    ...over,
+  }
+}
+
+function runtime(id: string): RuntimeResolvedResponse['runtimes'][number] {
+  return {
+    id,
+    provider: 'p',
+    model: 'm',
+    effective_max_context: 1,
+    max_context_source: 'capability',
+    max_output_tokens: null,
+    is_local: false,
+    is_default: false,
+  }
+}
+
+const RESOLVED: RuntimeResolvedResponse = {
+  config_path: null,
+  default_runtime: null,
+  runtimes: [runtime('p.one'), runtime('p.two'), runtime('p.three'), runtime('meta.judge')],
+  lanes: [{ id: 'lane.fast', declared: true, runtime_ids: ['p.one', 'p.two'] }],
+  assignments: [],
+}
+
+const receipt = () =>
+  committedRuntimeTomlConfigFixture({
+    ok: true,
+    path: '/tmp/.masc/config/runtime.toml',
+    file_name: 'runtime.toml',
+    source_text: '[fusion]\nenabled = true\n',
+  })
+
 let container: HTMLDivElement
 const q = (sel: string) => container.querySelector(sel)
+const qa = (sel: string) => Array.from(container.querySelectorAll(sel))
+const input = (sel: string) => q(sel) as HTMLInputElement
+const select = (sel: string) => q(sel) as HTMLSelectElement
+const button = (sel: string) => q(sel) as HTMLButtonElement
+const realConfirm = window.confirm
+
+function setConfirm(value: ((message?: string) => boolean) | undefined): void {
+  Object.defineProperty(window, 'confirm', { value, configurable: true, writable: true })
+}
+
+async function typeInto(sel: string, value: string) {
+  const field = input(sel)
+  field.value = value
+  await fireEvent.input(field)
+}
+
+async function choose(sel: string, value: string) {
+  const field = select(sel)
+  field.value = value
+  await fireEvent.change(field)
+}
 
 beforeEach(() => {
-  fetchMock.mockReset()
-  saveMock.mockReset()
-  runtimeRefreshMock.mockClear()
-  // Back to "no projection" between cases: a leaked config from a previous
-  // case would render the composition card in a test that asserts its absence.
   fusionConfigMock.mockReset()
-  fusionConfigMock.mockRejectedValue(new Error('no fusion config in this test'))
+  resolvedMock.mockReset()
+  applyMock.mockReset()
+  runtimeRefreshMock.mockClear()
+  fusionConfigMock.mockResolvedValue(snapshot())
+  resolvedMock.mockResolvedValue(RESOLVED)
+  applyMock.mockResolvedValue(receipt())
   container = document.createElement('div')
   document.body.appendChild(container)
 })
 afterEach(() => {
   render(null, container)
   container.remove()
+  setConfirm(realConfirm)
 })
 
 async function mount() {
@@ -103,298 +137,255 @@ async function mount() {
   await vi.waitFor(() => expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull())
 }
 
-
-// The composition card now renders the typed policy projection, not a regex
-// pass over the source text, so a card assertion has to supply that projection.
-// Kept as a builder so each case states only the axes it is about.
-function fusionConfig(preset: {
-  name: string
-  panel: readonly string[]
-  judge: string
-  judges?: readonly { model: string; label?: string }[]
-  panelTimeoutS?: number | null
-  judgeTimeoutS?: number | null
-}) {
-  return {
-    enabled: true,
-    defaultPreset: preset.name,
-    stagedJudgeGroupSize: 3,
-    presets: [
-      {
-        name: preset.name,
-        panels: [
-          {
-            models: preset.panel,
-            label: '',
-            systemPrompt: 'panelist',
-            webTools: false,
-            maxOutputTokens: null,
-            timeoutS: preset.panelTimeoutS ?? null,
-          },
-        ],
-        judge: preset.judge,
-        judgeSystemPrompt: 'judge',
-        judgeMaxOutputTokens: null,
-        judgeTimeoutS: preset.judgeTimeoutS ?? null,
-        judges: (preset.judges ?? []).map(judge => ({
-          model: judge.model,
-          label: judge.label ?? '',
-          systemPrompt: 'lens',
-          webTools: false,
-          maxOutputTokens: null,
-          timeoutS: null,
-        })),
-        minAnswered: 1,
-      },
-    ],
-  }
+async function savedNotice() {
+  await vi.waitFor(() => expect(q('[data-testid="fusion-settings-saved"]')).not.toBeNull())
+  return q('[data-testid="fusion-settings-saved"]')?.textContent ?? ''
 }
 
 describe('FusionSettingsPanel', () => {
-  it('loads live config and renders the editor with the current min_answered', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
+  it('opens the default preset from the typed config with its routes and revision', async () => {
     await mount()
-    const minInput = q('[data-testid="fusion-min-answered"]') as HTMLInputElement
-    expect(minInput.value).toBe('2')
+    expect(q('[data-testid="fusion-settings-revision"]')?.textContent).toBe('rev-1')
+    expect(input('[data-testid="fusion-enabled"]').checked).toBe(true)
+    expect(select('[data-testid="fusion-default-preset"]').value).toBe('trio')
+    expect(qa('[data-testid="fusion-default-preset"] option').map(o => (o as HTMLOptionElement).value))
+      .toEqual(['', 'trio', 'duo'])
+    expect(input('[data-testid="fusion-staged-judge-group-size"]').value).toBe('3')
+    expect(select('[data-testid="fusion-preset-select"]').value).toBe('trio')
+    expect(input('[data-testid="fusion-preset-name"]').value).toBe('trio')
+    expect(qa('[data-testid="fusion-panel-models-chip"]').map(chip => chip.textContent?.replace('×', '').trim()))
+      .toEqual(['p.one', 'p.two'])
+    expect(input('[data-testid="fusion-panel-timeout-s"]').value).toBe('240')
+    expect(select('[data-testid="fusion-judge-route"]').value).toBe('meta.judge')
+    expect(input('[data-testid="fusion-min-answered"]').value).toBe('2')
+    // Routes come grouped: lanes first, then runtimes; picked models leave the add list.
+    expect(qa('[data-testid="fusion-judge-route"] optgroup').map(g => (g as HTMLOptGroupElement).label))
+      .toEqual(['lane', 'runtime'])
+    expect(qa('[data-testid="fusion-panel-models-add"] option').map(o => (o as HTMLOptionElement).value))
+      .toEqual(['', 'lane.fast', 'p.three', 'meta.judge'])
+    // The saved composition card reads the same value.
+    expect(q('[data-testid="fusion-preset-view"]')).not.toBeNull()
   })
 
-  it('save posts the applied runtime.toml text (min_answered in the preset table)', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    saveMock.mockResolvedValue(committedCfg())
+  it('saves settings as set_settings against the loaded revision', async () => {
     await mount()
-    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
-    const posted = saveMock.mock.calls[0]?.[0] as string
-    expect(posted.split('[fusion.presets.trio]')[1]).toContain('min_answered = 2')
+    await fireEvent.click(input('[data-testid="fusion-enabled"]'))
+    await typeInto('[data-testid="fusion-staged-judge-group-size"]', '4')
+    await choose('[data-testid="fusion-default-preset"]', 'duo')
+    button('[data-testid="fusion-settings-save"]').click()
+
+    await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(1))
+    expect(applyMock.mock.calls[0]).toEqual(['rev-1', {
+      kind: 'set_settings',
+      enabled: false,
+      defaultPreset: 'duo',
+      stagedJudgeGroupSize: 4,
+    }])
+    const notice = await savedNotice()
+    expect(notice).toContain('Skill catalog 게시됨')
+    expect(fusionConfigMock).toHaveBeenCalledTimes(2)
     expect(runtimeRefreshMock).toHaveBeenCalledTimes(1)
   })
 
-  it('edits the active flat preset panel runtimes and judge runtime', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE_WITH_RUNTIME_OPTIONS }))
-    saveMock.mockImplementation(async (sourceText: string) => committedCfg({ source_text: sourceText }))
+  it('saves the preset as upsert_preset and uses the refetched revision for the next save', async () => {
+    fusionConfigMock
+      .mockResolvedValueOnce(snapshot())
+      .mockResolvedValueOnce(snapshot({ sourceRevision: 'rev-2' }))
+      .mockResolvedValueOnce(snapshot({ sourceRevision: 'rev-3' }))
     await mount()
+    await typeInto('[data-testid="fusion-panel-label"]', 'wide')
+    await choose('[data-testid="fusion-panel-models-add"]', 'lane.fast')
+    button('[data-testid="fusion-preset-save"]').click()
 
-    const add = q('[data-testid="fusion-panel-runtime-add"]') as HTMLSelectElement
-    add.value = 'new.x'
-    await fireEvent.change(add)
+    await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(1))
+    expect(applyMock.mock.calls[0]).toEqual(['rev-1', {
+      kind: 'upsert_preset',
+      preset: preset('trio', {
+        panels: [
+          {
+            models: ['p.one', 'p.two', 'lane.fast'],
+            label: 'wide',
+            systemPrompt: 'panelist',
+            webTools: false,
+            maxOutputTokens: null,
+            timeoutS: 240,
+          },
+        ],
+      }),
+    }])
+    await savedNotice()
+    expect(q('[data-testid="fusion-settings-revision"]')?.textContent).toBe('rev-2')
 
-    const judge = q('[data-testid="fusion-judge-runtime"]') as HTMLSelectElement
-    judge.value = 'meta.judge'
-    await fireEvent.change(judge)
-
-    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
-    const posted = saveMock.mock.calls[0]?.[0] as string
-    const trio = posted.split('[fusion.presets.trio]')[1] ?? ''
-    expect(trio).toContain('panel = ["a", "b", "c", "new.x"]')
-    expect(trio).toContain('judge = "meta.judge"')
-    expect(runtimeRefreshMock).toHaveBeenCalledTimes(1)
+    button('[data-testid="fusion-preset-save"]').click()
+    await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(2))
+    expect(applyMock.mock.calls[1]?.[0]).toBe('rev-2')
   })
 
-  it('surfaces the strict API rejection instead of claiming success', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    saveMock.mockRejectedValue(new Error(
-      'fusion.presets.trio.min_answered: must be <= 2',
+  it('replaces only the draft a write came from', async () => {
+    await mount()
+    // An unsaved settings edit must survive a preset write, and vice versa.
+    await fireEvent.click(input('[data-testid="fusion-enabled"]'))
+    await typeInto('[data-testid="fusion-panel-label"]', 'wide')
+    button('[data-testid="fusion-preset-save"]').click()
+    await savedNotice()
+    expect(input('[data-testid="fusion-enabled"]').checked).toBe(false)
+    // The preset draft now reflects the refetched config (label '' in the fixture).
+    expect(input('[data-testid="fusion-panel-label"]').value).toBe('')
+
+    await typeInto('[data-testid="fusion-panel-label"]', 'again')
+    button('[data-testid="fusion-settings-save"]').click()
+    await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(2))
+    await savedNotice()
+    expect(input('[data-testid="fusion-panel-label"]').value).toBe('again')
+    expect(input('[data-testid="fusion-enabled"]').checked).toBe(true)
+  })
+
+  it('shows the server sentence on a conflict and reloads on request, discarding the draft', async () => {
+    applyMock.mockRejectedValue(new FusionConfigEditError(
+      {
+        code: 'configuration_changed',
+        message: 'runtime.toml changed after it was read; reload the settings and apply again',
+      },
+      409,
+    ))
+    fusionConfigMock
+      .mockResolvedValueOnce(snapshot())
+      .mockResolvedValueOnce(snapshot({ sourceRevision: 'rev-9' }))
+    await mount()
+    await typeInto('[data-testid="fusion-panel-label"]', 'wide')
+    button('[data-testid="fusion-preset-save"]').click()
+
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent)
+      .toBe('runtime.toml changed after it was read; reload the settings and apply again')
+    expect(q('[data-testid="fusion-settings-saved"]')).toBeNull()
+    expect(runtimeRefreshMock).not.toHaveBeenCalled()
+
+    button('[data-testid="fusion-settings-reload"]').click()
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-revision"]')?.textContent).toBe('rev-9'))
+    expect(fusionConfigMock).toHaveBeenCalledTimes(2)
+    expect(resolvedMock).toHaveBeenCalledTimes(2)
+    expect(input('[data-testid="fusion-panel-label"]').value).toBe('')
+    expect(q('[data-testid="fusion-settings-error"]')).toBeNull()
+  })
+
+  it('shows other refusals verbatim without a reload button', async () => {
+    applyMock.mockRejectedValue(new FusionConfigEditError(
+      {
+        code: 'route_unresolved',
+        message: 'preset trio names ghost, which is not a loaded lane or runtime',
+        preset: 'trio',
+        route: 'ghost',
+        reason: 'route_missing',
+      },
+      400,
     ))
     await mount()
-    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
-    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('fusion.presets.trio.min_answered')
-    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('must be <= 2')
-    expect(q('[data-testid="fusion-settings-saved"]')).toBeNull()
-  })
-
-  it('uses the selected preset existing min_answered when default_preset changes', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE_WITH_DUO }))
-    saveMock.mockResolvedValue(committedCfg({
-      source_text: SAMPLE_WITH_DUO.replace('default_preset = "trio"', 'default_preset = "duo"'),
-    }))
-    await mount()
-    const presetInput = q('input[type="text"]') as HTMLInputElement
-    const minInput = q('[data-testid="fusion-min-answered"]') as HTMLInputElement
-    expect(minInput.value).toBe('2')
-
-    presetInput.value = 'duo'
-    await fireEvent.input(presetInput)
-
-    expect(minInput.value).toBe('1')
-    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
-    const posted = saveMock.mock.calls[0]?.[0] as string
-    expect(posted).toContain('default_preset = "duo"')
-    expect(posted.split('[fusion.presets.duo]')[1]).toContain('min_answered = 1')
-  })
-
-  it('does not claim reload when backend saved without reload', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    saveMock.mockResolvedValue(committedCfg())
-    await mount()
-    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-saved"]')).not.toBeNull())
-    expect(q('[data-testid="fusion-settings-saved"]')?.textContent).toContain('Skill catalog 게시됨')
-    expect(q('[data-testid="fusion-settings-saved"]')?.textContent).toContain('파일 내구성 확인됨')
-  })
-
-  it('does not POST whitespace-only default_preset values', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    await mount()
-    const presetInput = q('input[type="text"]') as HTMLInputElement
-    presetInput.value = '   '
-    await fireEvent.input(presetInput)
-
-    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('default_preset'))
-    expect(saveMock).not.toHaveBeenCalled()
-  })
-
-  it('surfaces malformed live TOML instead of rendering fallback values', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: '[fusion]\nenabled = maybe\n' }))
-    const { FusionSettingsPanel } = await import('./fusion-settings-panel')
-    render(h(FusionSettingsPanel, {}), container)
+    button('[data-testid="fusion-preset-save"]').click()
 
     await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
-    expect(q('[data-testid="fusion-settings-editor"]')).toBeNull()
-    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('fusion.enabled')
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent)
+      .toBe('preset trio names ghost, which is not a loaded lane or runtime')
+    expect(q('[data-testid="fusion-settings-reload"]')).toBeNull()
   })
 
-  it('surfaces fetch failures instead of staying on the loading guard', async () => {
-    fetchMock.mockRejectedValue(new Error('network down'))
+  it('creates a new preset by copying the draft under the typed name', async () => {
+    fusionConfigMock
+      .mockResolvedValueOnce(snapshot())
+      .mockResolvedValueOnce(snapshot({ presets: [preset('trio'), preset('duo'), preset('trio-copy')] }))
+    await mount()
+    await typeInto('[data-testid="fusion-preset-name"]', 'trio-copy')
+    expect(button('[data-testid="fusion-preset-save"]').disabled).toBe(true)
+    expect(button('[data-testid="fusion-preset-create"]').disabled).toBe(false)
+    button('[data-testid="fusion-preset-create"]').click()
+
+    await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(1))
+    expect(applyMock.mock.calls[0]).toEqual(['rev-1', { kind: 'upsert_preset', preset: preset('trio-copy') }])
+    await savedNotice()
+    expect(select('[data-testid="fusion-preset-select"]').value).toBe('trio-copy')
+    expect(input('[data-testid="fusion-preset-name"]').value).toBe('trio-copy')
+  })
+
+  it('refuses to create a preset under a name that already exists', async () => {
+    await mount()
+    await typeInto('[data-testid="fusion-preset-name"]', 'duo')
+    button('[data-testid="fusion-preset-create"]').click()
+
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('duo')
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('renames with rename_preset, keeps the edited draft, and rereads the moved default', async () => {
+    fusionConfigMock
+      .mockResolvedValueOnce(snapshot())
+      .mockResolvedValueOnce(snapshot({ defaultPreset: 'quartet', presets: [preset('quartet'), preset('duo')] }))
+    await mount()
+    await typeInto('[data-testid="fusion-panel-label"]', 'wide')
+    await typeInto('[data-testid="fusion-preset-name"]', 'quartet')
+    button('[data-testid="fusion-preset-rename"]').click()
+
+    await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(1))
+    expect(applyMock.mock.calls[0]).toEqual(['rev-1', { kind: 'rename_preset', from: 'trio', to: 'quartet' }])
+    await savedNotice()
+    expect(select('[data-testid="fusion-preset-select"]').value).toBe('quartet')
+    expect(input('[data-testid="fusion-panel-label"]').value).toBe('wide')
+    expect(button('[data-testid="fusion-preset-save"]').disabled).toBe(false)
+    // Renaming the default moves [fusion].default_preset, so the settings draft
+    // must follow the file rather than write the old name back.
+    expect(select('[data-testid="fusion-default-preset"]').value).toBe('quartet')
+  })
+
+  it('deletes only after confirmation', async () => {
+    const confirmSpy = vi.fn(() => false)
+    setConfirm(confirmSpy)
+    await mount()
+    button('[data-testid="fusion-preset-delete"]').click()
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(applyMock).not.toHaveBeenCalled()
+
+    setConfirm(() => true)
+    fusionConfigMock.mockResolvedValueOnce(snapshot({ presets: [preset('duo')], defaultPreset: 'duo' }))
+    button('[data-testid="fusion-preset-delete"]').click()
+    await vi.waitFor(() => expect(applyMock).toHaveBeenCalledTimes(1))
+    expect(applyMock.mock.calls[0]).toEqual(['rev-1', { kind: 'delete_preset', name: 'trio' }])
+    await savedNotice()
+    expect(select('[data-testid="fusion-preset-select"]').value).toBe('duo')
+  })
+
+  it('rejects a malformed number locally and does not POST', async () => {
+    await mount()
+    await typeInto('[data-testid="fusion-min-answered"]', '0')
+    button('[data-testid="fusion-preset-save"]').click()
+
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('min_answered')
+    expect(applyMock).not.toHaveBeenCalled()
+
+    await typeInto('[data-testid="fusion-staged-judge-group-size"]', '2.5')
+    button('[data-testid="fusion-settings-save"]').click()
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')?.textContent)
+      .toContain('staged_judge_group_size'))
+    expect(applyMock).not.toHaveBeenCalled()
+  })
+
+  it('opens an empty draft when the config declares no preset', async () => {
+    fusionConfigMock.mockResolvedValue(snapshot({ presets: [], defaultPreset: '', enabled: false }))
+    await mount()
+    expect(input('[data-testid="fusion-preset-name"]').value).toBe('')
+    expect(qa('[data-testid="fusion-panel-group"]')).toHaveLength(1)
+    expect(button('[data-testid="fusion-preset-save"]').disabled).toBe(true)
+    expect(button('[data-testid="fusion-preset-delete"]').disabled).toBe(true)
+    expect(q('[data-testid="fusion-preset-view"]')).toBeNull()
+  })
+
+  it('surfaces load failures instead of staying on the loading guard', async () => {
+    fusionConfigMock.mockRejectedValue(new Error('network down'))
     const { FusionSettingsPanel } = await import('./fusion-settings-panel')
     render(h(FusionSettingsPanel, {}), container)
 
     await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
     expect(q('[data-testid="fusion-settings-loading"]')).toBeNull()
     expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('network down')
-  })
-
-  it('renders the read-only preset composition parsed from the loaded config', async () => {
-    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    fusionConfigMock.mockResolvedValue(
-      fusionConfig({ name: 'trio', panel: ['a', 'b', 'c'], judge: 'j', panelTimeoutS: 240 }),
-    )
-    await mount()
-
-    expect(q('[data-testid="fusion-preset-view"]')).not.toBeNull()
-    const models = Array.from(container.querySelectorAll('[data-testid="fusion-preset-panel-model"]')).map(m => m.textContent)
-    expect(models).toEqual(['a', 'b', 'c'])
-    expect(q('[data-testid="fusion-preset-judge"]')?.textContent?.trim()).toBe('j')
-    // The deadline axis is the reason this card moved off the raw-text reader:
-    // it exists in the parsed policy and was invisible before.
-    expect(q('[data-testid="fusion-preset-panel-group"]')?.textContent).toContain('240s')
-  })
-
-  it('omits the preset card when the default preset has no backing section', async () => {
-    // enabled=false keeps the editor valid even though default_preset is unknown;
-    // the read-only card is data-driven, so it must not appear.
-    const noSection = `[fusion]
-enabled = false
-default_preset = "ghost"
-`
-    fetchMock.mockResolvedValue(cfg({ source_text: noSection }))
-    await mount()
-
-    expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull()
-    expect(q('[data-testid="fusion-preset-view"]')).toBeNull()
-  })
-
-  it('omits the preset card when the preset declares no panel models', async () => {
-    // A preset with only min_answered has no composition to display; the card is
-    // gated on panel models so the live writer stays lane-free for such configs.
-    const noPanel = `[fusion]
-enabled = true
-default_preset = "trio"
-
-[fusion.presets.trio]
-min_answered = 2
-`
-    fetchMock.mockResolvedValue(cfg({ source_text: noPanel }))
-    await mount()
-
-    expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull()
-    expect(q('[data-testid="fusion-preset-view"]')).toBeNull()
-    expect(q('[data-testid="fusion-preset-composition-editor"]')).not.toBeNull()
-    expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
-  })
-
-  it('does not synthesize an empty panel array on unchanged no-panel preset saves', async () => {
-    const noPanel = `[fusion]
-enabled = true
-default_preset = "trio"
-
-[fusion.presets.trio]
-min_answered = 2
-`
-    fetchMock.mockResolvedValue(cfg({ source_text: noPanel }))
-    saveMock.mockImplementation(async (sourceText: string) => committedCfg({ source_text: sourceText }))
-    await mount()
-
-    ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
-    await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
-    const posted = saveMock.mock.calls[0]?.[0] as string
-    const trio = posted.split('[fusion.presets.trio]')[1] ?? ''
-    expect(trio).toContain('min_answered = 2')
-    expect(trio).not.toContain('panel = []')
-  })
-
-  it('shows a fail-visible note (not a partial panel) for grouped presets', async () => {
-    const grouped = `[fusion]
-enabled = true
-default_preset = "mixed"
-
-[fusion.presets.mixed]
-judge = "j"
-[[fusion.presets.mixed.panels]]
-panel = ["fast1", "fast2"]
-[[fusion.presets.mixed.panels]]
-panel = ["careful1"]
-`
-    fetchMock.mockResolvedValue(cfg({ source_text: grouped }))
-    await mount()
-
-    expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull()
-    // Grouped note shown; the flat lane card is NOT rendered.
-    expect(q('[data-testid="fusion-preset-grouped"]')?.textContent).toContain('2개 그룹')
-    expect(q('[data-testid="fusion-preset-composition-editor"]')).toBeNull()
-    expect(q('[data-testid="fusion-preset-view"]')).toBeNull()
-    expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
-    // Must never leak the first group's model as the preset panel (the P1 bug).
-    expect(container.textContent).not.toContain('fast1')
-  })
-
-  it('renders a flat-panel preset with a judge-of-judges note when first-pass judges exist', async () => {
-    const quorumLike = `[fusion]
-enabled = true
-default_preset = "quorum"
-
-[fusion.presets.quorum]
-panel = ["p1", "p2"]
-judge = "meta_model"
-[[fusion.presets.quorum.judges]]
-model = "evidence_model"
-[[fusion.presets.quorum.judges]]
-model = "coverage_model"
-`
-    fetchMock.mockResolvedValue(cfg({ source_text: quorumLike }))
-    fusionConfigMock.mockResolvedValue(
-      fusionConfig({
-        name: 'quorum',
-        panel: ['p1', 'p2'],
-        judge: 'meta_model',
-        judges: [{ model: 'evidence_model' }, { model: 'coverage_model' }],
-      }),
-    )
-    await mount()
-
-    // Flat panels are shown normally.
-    expect(q('[data-testid="fusion-preset-view"]')).not.toBeNull()
-    const models = Array.from(container.querySelectorAll('[data-testid="fusion-preset-panel-model"]')).map(m => m.textContent)
-    expect(models).toEqual(['p1', 'p2'])
-    expect(q('[data-testid="fusion-preset-judge"]')?.textContent?.trim()).toBe('meta_model')
-    // Two first-pass judges make judge-of-judges runnable; the card says so
-    // rather than leaving the operator to discover it via a refusal.
-    expect(q('[data-testid="fusion-preset-topologies"]')?.textContent).toContain('judge of judges')
-    // The judge lane honestly notes the first-pass judges rather than implying one.
-    expect(q('[data-testid="fusion-preset-judge-lane-h"]')?.textContent).toContain('1차 심판 2')
-    expect(q('[data-testid="fusion-preset-composition-editor"]')?.textContent).toContain('Judge-of-judges runtime')
   })
 })

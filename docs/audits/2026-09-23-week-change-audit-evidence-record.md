@@ -83,6 +83,24 @@ tick = Librarian 회차 하나.
 앞의 20번은 병합 뒤 배포 주기다. 뒤의 7번은 다른 시작 경로(supervisor·deploy.sh·수동)이며
 04:29Z 의 v18→v19 사건(#37900)이 여기 든다. 재시작을 줄이는 쪽(배포 묶음)이 폭 기억보다 큰 레버다.
 
+같은 날 msx-retro-mania 의 turn-record 145건은 순환이 어디서 벌어지는지 보여 준다(표는 시간대별 요청 본문 중앙값과
+실어 보낸 atom 수):
+
+| UTC | 요청 본문 중앙값 | 실어 보낸 atom | 전체 atom |
+|---|---|---|---|
+| 01~03 | 150~169 KB | 1~57 | 12,764~12,910 |
+| 08 | 216 KB (최대 1,001 KB) | 55~494 | 14,012~14,102 |
+| 13 | 641 KB | 222~273 | 14,999~15,050 |
+| 15 | 615 KB | 485~492 | 15,262~15,280 |
+
+이 Keeper 의 Librarian 은 하루 42번 실패했다(glm 429 `rate_limited` 35, deepseek `completion failed raw_response=none` 7).
+실패마다 사다리가 접혀 폭이 `130→65→32→16` 이 됐고, 15:17Z 에야 16 atom 단위 커밋이 시작됐다(`14777→14793→14808`).
+그동안 Keeper 는 시간당 약 100 atom 을 더해 스냅숏이 487 atom 뒤처졌고 요청이 615~806 KB 로 커졌다.
+빈 응답(`Completion_failed`, raw_response 없음)을 크기 증거로 읽어 접는 것이 이 비용의 절반이다.
+그 갈래를 가르는 일은 [#37899](https://github.com/jeong-sik/masc/issues/37899)(agent_core)로 분리돼 있고, 이 수치를 거기 남겼다.
+`continuity pass reads one unit … -> N` 줄은 계획이지 커밋 결과가 아니라서, 실패한 회차도 같은 줄을 남긴다. 읽는 사람이
+결과로 오해하기 쉽다.
+
 요청 구성(09-22 실측, agent-core 레인): 고정 약 88 KB(지시문 14 KB + 도구 스키마 74 KB),
 working state 약 2 KB, 완료 턴 atom 당 약 0.8 KB, 현재 턴 도구 결과 25~131 KB.
 recall 은 턴 첫 요청에 실린다. 창 투영과 Librarian 흡수로 위가 막히고, 아래는 §4.3 바닥 규칙이

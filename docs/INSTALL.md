@@ -143,7 +143,7 @@ To install one specific release instead of the latest one, take that tag's
 installer and pin it. Check that the tag is listed on GitHub Releases first:
 
 ```bash
-TAG=v0.35.21
+TAG=v0.35.22
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -498,7 +498,8 @@ For prompts, there are only three places to tell apart.
 
 | What you want to change | Where to edit |
 |---|---|
-| How every Keeper works, verifies, and writes | `keeper` in the prompt editor |
+| How this world works, the same for every Keeper | `keeper` in the prompt editor |
+| What this world values | `keeper.worldview` in the prompt editor |
 | One Keeper's role | `instructions` in `.masc/config/keepers/<name>.toml` |
 | The detailed procedure for one tool | That skill |
 

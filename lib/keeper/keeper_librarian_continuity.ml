@@ -18,9 +18,24 @@ type prepared =
   ; end_atom : int
   ; unread : Agent_core.Types.message list
   }
+let path_for_keepers_dir ~keepers_dir ~keeper_name =
+  Filename.concat (Filename.concat keepers_dir keeper_name) "librarian-continuity.json"
 let path ~config ~keeper_name =
-  Filename.concat (Filename.concat (Workspace.keepers_runtime_dir config) keeper_name)
-    "librarian-continuity.json"
+  path_for_keepers_dir ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+
+type removal = Snapshot_removed | Snapshot_absent
+
+(* One unlink, no read: the file's contents are not what decides, its
+   numbering is. The read position stays; it is the purge's to move. *)
+let remove ~keepers_dir ~keeper_name =
+  let file = path_for_keepers_dir ~keepers_dir ~keeper_name in
+  match Unix.unlink file with
+  | () -> Ok Snapshot_removed
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Snapshot_absent
+  | exception Unix.Unix_error (code, _, _) ->
+    Error
+      (Printf.sprintf "continuity snapshot %s was not removed: %s" file
+         (Unix.error_message code))
 let read ~config ~keeper_name =
   let file = path ~config ~keeper_name in
   match Fs_compat.exact_path_kind ~follow:false file with

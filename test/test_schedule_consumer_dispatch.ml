@@ -1782,7 +1782,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-transitions-v8.jsonl"
+          "event-queue-transitions-v9.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists transition_wal_path

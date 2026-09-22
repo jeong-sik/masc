@@ -30,7 +30,15 @@ type post_id = string
 
 type board_stimulus_kind =
   | Post_created
-  | Comment_added
+  | Post_updated of { content_updated_at : float }
+      (** A content edit identified by its finite producer-issued timestamp.
+          Board activity timestamps and display text do not change edit identity. *)
+  | Comment_added of { comment_id : string; parent_id : string option }
+      (** Unverified wire strings: the queue is a leaf and cannot depend on
+          Board, so decoding only checks that they are non-empty. They become
+          [Board.Comment_id.t] at the keeper boundary
+          ([Keeper_world_observation_board_signal.board_observation_of_board_stimulus]);
+          do not treat them as validated identities before that. *)
   | Reaction_changed of board_reaction_change
   | Vote_cast of board_vote_change
       (** A vote landed on the post or on one of its comments. The queue is a
@@ -378,7 +386,10 @@ val enqueue : t -> stimulus -> t
 val stimulus_identity_equal : stimulus -> stimulus -> bool
 (** [true] when two stimuli describe the same durable event. The comparison
     intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
-    not create an unbounded backlog of otherwise identical stimuli. For a
+    not create an unbounded backlog of otherwise identical stimuli. Board
+    creation uses post identity, comments use comment identity, and edits use
+    the content update time; changed display fields do not redeliver one event.
+    Urgency remains part of the queue identity. For a
     [Fusion_completed] event, [channel] is also excluded: the first committed
     row owns recipient authority, and a replay sources the channel from the
     durable delivery obligation, so an [Unrouted] first commit followed by a

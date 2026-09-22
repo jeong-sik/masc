@@ -37,6 +37,32 @@ type retract_error =
   | Retract_fact_not_found of string
   | Retract_persistence_failed of string
 
+type retraction =
+  { memory_id : string
+  ; reason : string
+  }
+
+type retract_batch_error =
+  | Retract_batch_empty
+  | Retract_batch_memory_id_invalid of { index : int }
+  | Retract_batch_reason_empty of { index : int }
+  | Retract_batch_duplicate_memory_id of string
+  | Retract_batch_snapshot_sha256_invalid
+  | Retract_batch_snapshot_conflict of
+      { expected_revision : int
+      ; observed_revision : int option
+      ; expected_snapshot_sha256 : string
+      ; observed_snapshot_sha256 : string option
+      }
+  | Retract_batch_fact_not_found of string
+  | Retract_batch_plan_evidence_pending of
+      { plan_id : string
+      ; snapshot_revision : int
+      ; snapshot_sha256 : string
+      ; detail : string
+      }
+  | Retract_batch_persistence_failed of string
+
 let upsert_error_to_string = function
   | Unsupported_derivation invalidation ->
     Printf.sprintf
@@ -79,7 +105,6 @@ type journal_entry =
       ; kind : librarian_failure_kind
       ; detail : string
       ; snapshot_present : bool
-      ; cadence_deferred : bool
       }
   | Journal_quarantined of
       { recorded_at : float
@@ -101,6 +126,12 @@ let durable_range_receipt_suffix = ".librarian-range-commit.json"
 
 let durable_range_receipt_path ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ durable_range_receipt_suffix)
+;;
+
+let retraction_plan_receipt_suffix = ".memory-retraction-plan.json"
+
+let retraction_plan_receipt_path ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ retraction_plan_receipt_suffix)
 ;;
 
 type durable_range_id =
@@ -926,6 +957,12 @@ let to_json snapshot =
     ]
 ;;
 
+let snapshot_bytes snapshot =
+  Yojson.Safe.pretty_to_string (to_json snapshot) ^ "\n"
+;;
+
+let snapshot_sha256 snapshot = sha256 (snapshot_bytes snapshot)
+
 let of_json json =
   let wire result = Result.map_error (fun error -> Snapshot_undecodable error) result in
   match json with
@@ -1002,14 +1039,14 @@ let parse path content =
     Error (Printf.sprintf "%s: invalid JSON: %s" path message)
 ;;
 
-let read_for_keepers_dir ~keepers_dir ~keeper_id =
+let read_with_content ~keepers_dir ~keeper_id =
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
   try
     match Fs_compat.load_file_opt snapshot_path with
     | None -> Ok None
     | Some content ->
       let+ snapshot = parse snapshot_path content in
-      Some snapshot
+      Some (snapshot, content)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Sys_error message ->
@@ -1018,6 +1055,17 @@ let read_for_keepers_dir ~keepers_dir ~keeper_id =
          "current Memory OS read failed path=%s: %s"
          snapshot_path
          message)
+;;
+
+let read_for_keepers_dir ~keepers_dir ~keeper_id =
+  read_with_content ~keepers_dir ~keeper_id
+  |> Result.map (Option.map fst)
+;;
+
+let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
+  read_with_content ~keepers_dir ~keeper_id
+  |> Result.map
+       (Option.map (fun (snapshot, content) -> snapshot, sha256 content))
 ;;
 
 let map_facts facts =
@@ -1187,14 +1235,7 @@ let journal_entry_to_json ~dropped_statements snapshot =
        ])
 ;;
 
-let journal_failure_to_json
-      ~now
-      ~trace_id
-      ~kind
-      ~detail
-      ~snapshot_present
-      ~cadence_deferred
-  =
+let journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present =
   `Assoc
     [ "outcome", `String failed_outcome
     ; "recorded_at", `Float now
@@ -1202,13 +1243,14 @@ let journal_failure_to_json
     ; "kind", `String (librarian_failure_kind_to_string kind)
     ; "detail", `String detail
     ; "snapshot_present", `Bool snapshot_present
-    ; "cadence_deferred", `Bool cadence_deferred
     ]
 ;;
 
-(* The journal is observation only: the snapshot commit it describes already
-   reached disk, so an append failure degrades to a warning instead of
-   vetoing the commit. Cancellation is never absorbed. *)
+(* Ordinary producers retain the historical observation-only behavior: their
+   snapshot already reached disk, so append failure warns. The destructive
+   batch boundary below uses [append_journal_line_strict] plus a prepared plan
+   receipt instead; its exact reasons are part of that API's success contract.
+   Cancellation is never absorbed. *)
 let append_journal_line ~keepers_dir ~keeper_id json =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   try Fs_compat.append_jsonl path json with
@@ -1235,18 +1277,11 @@ let append_librarian_failure
       ~kind
       ~detail
       ~snapshot_present
-      ~cadence_deferred
   =
   append_journal_line
     ~keepers_dir
     ~keeper_id
-    (journal_failure_to_json
-       ~now
-       ~trace_id
-       ~kind
-       ~detail
-       ~snapshot_present
-       ~cadence_deferred)
+    (journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present)
 ;;
 
 (* A snapshot this build cannot decode is durable state no producer can leave:
@@ -1371,7 +1406,6 @@ let failed_entry_of_fields fields =
          ; "kind"
          ; "detail"
          ; "snapshot_present"
-         ; "cadence_deferred"
          ]
          fields)
   then Error "failed line has unknown, duplicate, or missing fields"
@@ -1381,24 +1415,19 @@ let failed_entry_of_fields fields =
     , List.assoc_opt "trace_id" fields
     , List.assoc_opt "kind" fields
     , List.assoc_opt "detail" fields
-    , List.assoc_opt "snapshot_present" fields
-    , List.assoc_opt "cadence_deferred" fields )
+    , List.assoc_opt "snapshot_present" fields )
   with
   | ( Some (`Float recorded_at)
     , Some (`String trace_id)
     , Some (`String kind)
     , Some (`String detail)
-    , Some (`Bool snapshot_present)
-    , Some (`Bool cadence_deferred) ) ->
+    , Some (`Bool snapshot_present) ) ->
     (match librarian_failure_kind_of_string kind with
      | Some kind ->
-       Ok
-         (Journal_failed
-            { recorded_at; trace_id; kind; detail; snapshot_present; cadence_deferred })
+       Ok (Journal_failed { recorded_at; trace_id; kind; detail; snapshot_present })
      | None -> Error (Printf.sprintf "failed line has an unknown kind %S" kind))
   | _ ->
-    Error
-      "failed line is missing recorded_at/trace_id/kind/detail/snapshot_present/cadence_deferred"
+    Error "failed line is missing recorded_at/trace_id/kind/detail/snapshot_present"
 ;;
 
 let quarantined_entry_of_fields fields =
@@ -1438,6 +1467,281 @@ let journal_entry_of_json = function
   | _ -> Error "journal line is not a JSON object"
 ;;
 
+type retraction_plan_receipt =
+  { plan_id : string
+  ; prior_revision : int
+  ; prior_snapshot_sha256 : string
+  ; target_revision : int
+  ; target_snapshot_sha256 : string
+  ; dropped_statements : Keeper_memory_os_types.dropped_statement list
+  }
+
+let retraction_plan_receipt_to_json receipt =
+  `Assoc
+    [ "state", `String "prepared"
+    ; "plan_id", `String receipt.plan_id
+    ; "prior_revision", `Int receipt.prior_revision
+    ; "prior_snapshot_sha256", `String receipt.prior_snapshot_sha256
+    ; "target_revision", `Int receipt.target_revision
+    ; "target_snapshot_sha256", `String receipt.target_snapshot_sha256
+    ; ( "dropped"
+      , `List
+          (List.map
+             dropped_statement_to_json
+             receipt.dropped_statements) )
+    ]
+;;
+
+let retraction_plan_receipt_of_json = function
+  | `Assoc fields
+    when exact_object_fields
+           [ "plan_id"
+           ; "state"
+           ; "prior_revision"
+           ; "prior_snapshot_sha256"
+           ; "target_revision"
+           ; "target_snapshot_sha256"
+           ; "dropped"
+           ]
+           fields ->
+    (match
+       ( List.assoc_opt "plan_id" fields
+       , List.assoc_opt "state" fields
+       , List.assoc_opt "prior_revision" fields
+       , List.assoc_opt "prior_snapshot_sha256" fields
+       , List.assoc_opt "target_revision" fields
+       , List.assoc_opt "target_snapshot_sha256" fields
+       , List.assoc_opt "dropped" fields )
+     with
+     | ( Some (`String plan_id)
+       , Some (`String "prepared")
+       , Some (`Int prior_revision)
+       , Some (`String prior_snapshot_sha256)
+       , Some (`Int target_revision)
+       , Some (`String target_snapshot_sha256)
+       , Some (`List dropped_json) )
+       when String.trim plan_id <> ""
+            && String.equal plan_id (String.trim plan_id)
+            && prior_revision > 0
+            && target_revision = prior_revision + 1
+            && String_util.is_lowercase_sha256_hex prior_snapshot_sha256
+            && String_util.is_lowercase_sha256_hex target_snapshot_sha256 ->
+       let rec decode_dropped index seen acc = function
+         | [] -> Ok (List.rev acc)
+         | json :: rest ->
+           (match Keeper_memory_os_types.dropped_statement_of_json json with
+            | Ok statement
+              when not
+                     (Set_util.StringSet.mem statement.memory_id seen) ->
+              decode_dropped
+                (index + 1)
+                (Set_util.StringSet.add statement.memory_id seen)
+                (statement :: acc)
+                rest
+            | Ok statement ->
+              Error
+                (Printf.sprintf
+                   "retraction plan dropped repeats memory_id %s"
+                   statement.memory_id)
+            | Error error ->
+              Error
+                (Printf.sprintf
+                   "retraction plan dropped[%d] is invalid: %s"
+                   index
+                   (Keeper_memory_os_types.wire_error_to_string error)))
+       in
+       (match decode_dropped 0 Set_util.StringSet.empty [] dropped_json with
+        | Ok (_ :: _ as dropped_statements) ->
+          Ok
+            { plan_id
+            ; prior_revision
+            ; prior_snapshot_sha256
+            ; target_revision
+            ; target_snapshot_sha256
+            ; dropped_statements
+            }
+        | Ok [] -> Error "retraction plan dropped reasons are empty"
+        | Error _ as error -> error)
+     | _ -> Error "retraction plan receipt fields are invalid")
+  | _ ->
+    Error "retraction plan receipt has unknown, duplicate, or missing fields"
+;;
+
+let read_retraction_plan_receipt ~keepers_dir ~keeper_id =
+  let path = retraction_plan_receipt_path ~keepers_dir ~keeper_id in
+  match Fs_compat.load_file_opt path with
+  | None -> Ok None
+  | Some content ->
+    (match Yojson.Safe.from_string content with
+     | json -> Result.map Option.some (retraction_plan_receipt_of_json json)
+     | exception Yojson.Json_error detail ->
+       Error
+         (Printf.sprintf
+            "retraction plan receipt is not JSON path=%s: %s"
+            path
+            detail))
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    Error
+      (Printf.sprintf
+         "retraction plan receipt unreadable path=%s: %s"
+         path
+         (Printexc.to_string exn))
+;;
+
+let write_retraction_plan_receipt ~keepers_dir ~keeper_id receipt =
+  let path = retraction_plan_receipt_path ~keepers_dir ~keeper_id in
+  Fs_compat.save_file_atomic_strict path
+    (Yojson.Safe.to_string (retraction_plan_receipt_to_json receipt))
+  |> Result.map_error (fun detail ->
+       Printf.sprintf
+         "retraction plan receipt write failed path=%s: %s"
+         path
+         detail)
+;;
+
+let remove_retraction_plan_receipt ~keepers_dir ~keeper_id =
+  let path = retraction_plan_receipt_path ~keepers_dir ~keeper_id in
+  match Sys.remove path with
+  | () -> Ok ()
+  | exception Sys_error _ when not (Sys.file_exists path) -> Ok ()
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    Error
+      (Printf.sprintf
+         "retraction plan receipt removal failed path=%s: %s"
+         path
+         (Printexc.to_string exn))
+;;
+
+let append_journal_line_strict ~keepers_dir ~keeper_id json =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let suffix = Yojson.Safe.to_string json ^ "\n" in
+  match Fs_compat.append_private_jsonl_durable_locked_result path suffix with
+  | Fs_compat.Private_file_succeeded () -> Ok ()
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure
+      { cleanup_failure; _ } ->
+    Error
+      (Printf.sprintf
+         "memory journal append committed but descriptor cleanup failed path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+  | Fs_compat.Private_file_failed error ->
+    Error
+      (Printf.sprintf
+         "memory journal durable append failed path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_append_error_to_string error))
+  | Fs_compat.Private_file_failed_with_cleanup_failure
+      { error; cleanup_failure } ->
+    Error
+      (Printf.sprintf
+         "memory journal durable append failed path=%s: %s; descriptor cleanup also failed: %s"
+         path
+         (Fs_compat.private_jsonl_append_error_to_string error)
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+;;
+
+let journal_contains_entry ~keepers_dir ~keeper_id expected =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+  | Ok snapshot ->
+    let content = snapshot.Fs_compat.bytes in
+    let rec scan line_number = function
+      | [] -> Ok false
+      | line :: rest when String.equal (String.trim line) "" ->
+        scan (line_number + 1) rest
+      | line :: rest ->
+        (match Yojson.Safe.from_string line with
+         | json ->
+           (match journal_entry_of_json json with
+            | Ok observed when observed = expected -> Ok true
+            | Ok _ -> scan (line_number + 1) rest
+            | Error detail ->
+              Error
+                (Printf.sprintf
+                   "memory journal line %d is undecodable during retraction reconciliation path=%s: %s"
+                   line_number
+                   path
+                   detail))
+         | exception Yojson.Json_error detail ->
+           Error
+             (Printf.sprintf
+                "memory journal line %d is not JSON during retraction reconciliation path=%s: %s"
+                line_number
+                path
+                detail))
+    in
+    scan 1 (String.split_on_char '\n' content)
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "memory journal unreadable during retraction reconciliation path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_transaction_error_to_string error))
+;;
+
+let reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot =
+  let* receipt = read_retraction_plan_receipt ~keepers_dir ~keeper_id in
+  match receipt with
+  | None -> Ok ()
+  | Some receipt ->
+    (match snapshot with
+     | Some (current, content)
+       when current.revision = receipt.prior_revision
+            && String.equal (sha256 content) receipt.prior_snapshot_sha256 ->
+      (* Preparation reached disk but replacement did not. Nothing was
+         retracted, so the plan can be removed without journal evidence. *)
+      remove_retraction_plan_receipt ~keepers_dir ~keeper_id
+     | Some (current, content)
+       when current.revision = receipt.target_revision
+            && String.equal (sha256 content) receipt.target_snapshot_sha256 ->
+      let* () =
+        match current.source with
+        | { kind = Explicit_retract; trace_id }
+          when String.equal trace_id receipt.plan_id -> Ok ()
+        | _ ->
+          Error
+            (Printf.sprintf
+               "retraction plan target snapshot has another source plan_id=%s"
+               receipt.plan_id)
+      in
+      let journal_entry =
+        Journal_committed
+          { recorded_at = current.updated_at
+          ; revision = current.revision
+          ; source = current.source
+          ; change = current.change
+          ; dropped = Some receipt.dropped_statements
+          }
+      in
+      let* present =
+        journal_contains_entry
+          ~keepers_dir
+          ~keeper_id
+          journal_entry
+      in
+      let* () =
+        if present
+        then Ok ()
+        else
+          append_journal_line_strict
+            ~keepers_dir
+            ~keeper_id
+            (journal_entry_to_json
+               ~dropped_statements:(Some receipt.dropped_statements)
+               current)
+      in
+      remove_retraction_plan_receipt ~keepers_dir ~keeper_id
+     | None | Some _ ->
+      Error
+        (Printf.sprintf
+           "retraction plan receipt conflicts with current snapshot plan_id=%s prior_revision=%d target_revision=%d"
+           receipt.plan_id
+           receipt.prior_revision
+           receipt.target_revision))
+;;
+
 (* The journal only grows (10-13 MB on live keepers) and a reader asks for its
    last 20-500 lines. Reading the whole file and splitting every line on each
    dashboard or TUI request put that copy and split on the scheduler domain;
@@ -1467,6 +1771,7 @@ let update_locked_with_error
       ?before_replace
       ?durable_range_id
       ?official_range_id
+      ?retraction_plan
       ~store_error
       ~keepers_dir
       ~keeper_id
@@ -1491,8 +1796,16 @@ let update_locked_with_error
            && not (String.equal (String.trim statement.reason) ""))
         statements
   in
+  let retraction_plan_is_valid =
+    match retraction_plan with
+    | None -> true
+    | Some (plan_id, _) ->
+      String.trim plan_id <> "" && String.equal plan_id (String.trim plan_id)
+  in
   if not dropped_statements_are_valid
   then Error (store_error "dropped statements must carry canonical identities and reasons")
+  else if not retraction_plan_is_valid
+  then Error (store_error "retraction plan id must be non-empty and already trimmed")
   else (
     Fs_compat.mkdir_p keepers_dir;
     let notification_keepers_dir = Unix.realpath keepers_dir in
@@ -1562,6 +1875,13 @@ let update_locked_with_error
            | None, None -> None
            | Some _, None | None, Some _ -> None
          in
+         let* () =
+           reconcile_retraction_plan_receipt
+             ~keepers_dir
+             ~keeper_id
+             ~snapshot
+           |> Result.map_error store_error
+         in
          let* durable_range_receipts =
            reconcile_durable_range_receipts
              ~keepers_dir
@@ -1569,7 +1889,7 @@ let update_locked_with_error
              ~snapshot
            |> Result.map_error store_error
          in
-         let* next = build previous in
+         let* next = build ~snapshot_content previous in
          (* The file is 150-330 KB per keeper and every commit reads it, parses
             it, prints it and replaces it. On the scheduler domain that was one
             11-24 ms run per commit (rtev, 2026-09-16), about 80 commits an
@@ -1578,8 +1898,7 @@ let update_locked_with_error
             in pool jobs. The locks are held across the wait, which delays
             another writer of this same keeper's memory and nothing else. *)
          let content =
-           Domain_pool_ref.submit_cpu_or_inline (fun () ->
-             Yojson.Safe.pretty_to_string (to_json next) ^ "\n")
+           Domain_pool_ref.submit_cpu_or_inline (fun () -> snapshot_bytes next)
          in
          (* Last before the replace, after the pool wait: a write made here and
             a snapshot that is then not replaced are split only by the replace
@@ -1590,6 +1909,41 @@ let update_locked_with_error
            | Some write -> write ~previous ~next
          in
          let snapshot_sha256 = sha256 content in
+         let* retraction_receipt =
+           match retraction_plan with
+           | None -> Ok None
+           | Some (plan_id, _) ->
+             (match snapshot, dropped_statements with
+              | Some (prior, prior_content), Some ((_ :: _) as reasons) ->
+                (match next.source with
+                 | { kind = Explicit_retract; trace_id }
+                   when String.equal trace_id plan_id ->
+                   let receipt =
+                     { plan_id
+                     ; prior_revision = prior.revision
+                     ; prior_snapshot_sha256 = sha256 prior_content
+                     ; target_revision = next.revision
+                     ; target_snapshot_sha256 = snapshot_sha256
+                     ; dropped_statements = reasons
+                     }
+                   in
+                   let+ () =
+                     write_retraction_plan_receipt
+                       ~keepers_dir
+                       ~keeper_id
+                       receipt
+                     |> Result.map_error store_error
+                   in
+                   Some receipt
+                 | _ ->
+                   Error
+                     (store_error
+                        "retraction plan source must be an exact explicit-retract plan"))
+              | None, _ | _, None | _, Some [] ->
+                Error
+                  (store_error
+                     "retraction plan requires one existing snapshot and non-empty exact reasons"))
+         in
          let ranges =
            Option.to_list (Option.map (fun range -> Atom_range range) durable_range_id)
            @ Option.to_list (Option.map (fun range -> Official_range range) official_range_id)
@@ -1618,9 +1972,29 @@ let update_locked_with_error
                ; keeper_id
                ; store = Ordinary
                ; revision = next.revision
-               };
+             };
              Option.iter (fun observe -> observe next) on_committed;
-             append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
+             let journal_result =
+               match retraction_receipt, retraction_plan with
+               | None, _ ->
+                 append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements next;
+                 Ok ()
+               | Some receipt, Some (_, evidence_error) ->
+                 reconcile_retraction_plan_receipt
+                   ~keepers_dir
+                   ~keeper_id
+                   ~snapshot:(Some (next, content))
+                 |> Result.map_error (fun detail ->
+                      evidence_error
+                        ~plan_id:receipt.plan_id
+                        ~snapshot_revision:receipt.target_revision
+                        ~snapshot_sha256:receipt.target_snapshot_sha256
+                        ~detail)
+               | Some _, None ->
+                 Error
+                   (store_error
+                      "retraction receipt was prepared without an owning plan")
+             in
              (match ranges with
               | [] -> ()
               | _ :: _ ->
@@ -1632,6 +2006,7 @@ let update_locked_with_error
                  | Error detail ->
                    Log.Keeper.warn ~keeper_name:keeper_id
                      "%s; prepared receipt remains recoverable" detail));
+             let+ () = journal_result in
              List.iter
                (fun invalidation ->
                   Log.Keeper.info
@@ -1641,7 +2016,7 @@ let update_locked_with_error
                     (memory_id invalidation.fact)
                     (String.concat "," invalidation.missing_premise_ids))
                next.change.invalidated;
-             Ok next
+             next
            | Error message ->
              Error
                (store_error
@@ -1865,7 +2240,7 @@ let apply_disposition
     ~keepers_dir
     ~keeper_id
     ~now
-    (fun previous ->
+    (fun ~snapshot_content:_ previous ->
        let current =
          match previous with
          | None -> []
@@ -1918,7 +2293,7 @@ let replace
     ~keepers_dir
     ~keeper_id
     ~now
-    (fun previous ->
+    (fun ~snapshot_content:_ previous ->
     let observed_revision =
       Option.map (fun snapshot -> snapshot.revision) previous
     in
@@ -1952,7 +2327,7 @@ let upsert_fact
     ~keepers_dir
     ~keeper_id
     ~now
-    (fun previous ->
+    (fun ~snapshot_content:_ previous ->
     let current_facts =
       match previous with
       | None -> []
@@ -2021,6 +2396,34 @@ let upsert_fact
       |> Result.map_error (fun detail -> Upsert_persistence_failed detail))
 ;;
 
+let retract_current_facts ~target_ids current_facts =
+  match
+    Set_util.StringSet.to_seq target_ids
+    |> Seq.find_map (fun target_memory_id ->
+         if
+           List.exists
+             (fun fact ->
+                String.equal
+                  (Keeper_memory_os_types.memory_id fact)
+                  target_memory_id)
+             current_facts
+         then None
+         else Some target_memory_id)
+  with
+  | Some missing -> Error missing
+  | None ->
+    let candidates =
+      List.filter
+        (fun fact ->
+           not
+             (Set_util.StringSet.mem
+                (Keeper_memory_os_types.memory_id fact)
+                target_ids))
+        current_facts
+    in
+    Ok (maintain_supported_facts candidates)
+;;
+
 let retract_fact
       ?clock
       ~keepers_dir
@@ -2044,32 +2447,18 @@ let retract_fact
       ~keepers_dir
       ~keeper_id
       ~now
-      (fun previous ->
+      (fun ~snapshot_content:_ previous ->
       let current_facts =
         match previous with
         | None -> []
         | Some snapshot -> snapshot.facts
       in
-      if
-        not
-          (List.exists
-             (fun fact ->
-                String.equal
-                  (Keeper_memory_os_types.memory_id fact)
-                  target_memory_id)
-             current_facts)
-      then Error (Retract_fact_not_found target_memory_id)
-      else
-        let candidates =
-          List.filter
-            (fun fact ->
-               not
-                 (String.equal
-                    (Keeper_memory_os_types.memory_id fact)
-                    target_memory_id))
-            current_facts
-        in
-        let facts, invalidated = maintain_supported_facts candidates in
+      let* facts, invalidated =
+        retract_current_facts
+          ~target_ids:(Set_util.StringSet.singleton target_memory_id)
+          current_facts
+        |> Result.map_error (fun missing -> Retract_fact_not_found missing)
+      in
         make_snapshot_from_maintained
           ~previous
           ~now
@@ -2080,10 +2469,94 @@ let retract_fact
         |> Result.map_error (fun detail -> Retract_persistence_failed detail))
 ;;
 
-(* Read-side projection. The write-side [journal_entry_to_json] above encodes a
-   committed snapshot for the append; this projects a line that was read back,
-   including the shapes that only exist on the failure path. Reusing the
-   existing field encoders keeps one owner for source/change on the wire. *)
+let retract_facts
+      ?clock
+      ~keepers_dir
+      ~keeper_id
+      ~expected_revision
+      ~expected_snapshot_sha256
+      ~now
+      ~(source : source)
+      retractions
+  =
+  let rec validate index seen = function
+    | [] -> Ok seen
+    | ({ memory_id; reason } : retraction) :: rest ->
+      if not (Keeper_memory_os_types.is_memory_id memory_id)
+      then Error (Retract_batch_memory_id_invalid { index })
+      else if String.equal (String.trim reason) ""
+      then Error (Retract_batch_reason_empty { index })
+      else if Set_util.StringSet.mem memory_id seen
+      then Error (Retract_batch_duplicate_memory_id memory_id)
+      else
+        validate
+          (index + 1)
+          (Set_util.StringSet.add memory_id seen)
+          rest
+  in
+  if not (String_util.is_lowercase_sha256_hex expected_snapshot_sha256)
+  then Error Retract_batch_snapshot_sha256_invalid
+  else match retractions with
+  | [] -> Error Retract_batch_empty
+  | _ :: _ ->
+    let* target_ids = validate 0 Set_util.StringSet.empty retractions in
+    let dropped_statements =
+      List.map
+        (fun ({ memory_id; reason } : retraction) ->
+           { Keeper_memory_os_types.memory_id; reason })
+        retractions
+    in
+    update_locked_with_error
+      ?clock
+      ~dropped_statements
+      ~retraction_plan:
+        ( source.trace_id
+        , fun ~plan_id ~snapshot_revision ~snapshot_sha256 ~detail ->
+            Retract_batch_plan_evidence_pending
+              { plan_id; snapshot_revision; snapshot_sha256; detail } )
+      ~store_error:(fun detail -> Retract_batch_persistence_failed detail)
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      (fun ~snapshot_content previous ->
+      let observed_revision =
+        Option.map (fun snapshot -> snapshot.revision) previous
+      in
+      let observed_snapshot_sha256 = Option.map sha256 snapshot_content in
+      if
+        observed_revision <> Some expected_revision
+        || observed_snapshot_sha256 <> Some expected_snapshot_sha256
+      then
+        Error
+          (Retract_batch_snapshot_conflict
+             { expected_revision
+             ; observed_revision
+             ; expected_snapshot_sha256
+             ; observed_snapshot_sha256
+             })
+      else
+        let current_facts =
+          match previous with
+          | None -> []
+          | Some snapshot -> snapshot.facts
+        in
+        let* facts, invalidated =
+          retract_current_facts ~target_ids current_facts
+          |> Result.map_error (fun missing ->
+               Retract_batch_fact_not_found missing)
+        in
+        make_snapshot_from_maintained
+          ~previous
+          ~now
+          ~source
+          ~facts
+          ~invalidated
+          ()
+        |> Result.map_error (fun detail ->
+             Retract_batch_persistence_failed detail))
+;;
+
+(* Read-side projection of every closed journal shape. *)
 let decoded_journal_entry_to_json = function
   | Journal_committed { recorded_at; revision; source; change; dropped } ->
     `Assoc
@@ -2098,8 +2571,7 @@ let decoded_journal_entry_to_json = function
        | None -> []
        | Some statements ->
          [ "dropped", `List (List.map dropped_statement_to_json statements) ])
-  | Journal_failed
-      { recorded_at; trace_id; kind; detail; snapshot_present; cadence_deferred } ->
+  | Journal_failed { recorded_at; trace_id; kind; detail; snapshot_present } ->
     `Assoc
       [ "outcome", `String failed_outcome
       ; "recorded_at", `Float recorded_at
@@ -2107,7 +2579,6 @@ let decoded_journal_entry_to_json = function
       ; "kind", `String (librarian_failure_kind_to_string kind)
       ; "detail", `String detail
       ; "snapshot_present", `Bool snapshot_present
-      ; "cadence_deferred", `Bool cadence_deferred
       ]
   | Journal_quarantined { recorded_at; rejection; rejected_path } ->
     journal_quarantine_to_json ~now:recorded_at ~rejection ~rejected_path

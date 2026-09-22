@@ -52,8 +52,7 @@ let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_over
     Error (List.assoc runtime_id cli_errors) in
   let refused = ref 0 and committed = ref false in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Runtime.run_best_effort ~trigger:Runtime.Durable_range
-    ~input_projection:Runtime.Already_selected_range ~cli_runner
+  Runtime.run_best_effort ~cli_runner
     ~on_capacity_refused:(fun _ -> incr refused)
     ~on_memory_committed:(fun () -> committed := true)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
@@ -181,8 +180,7 @@ let test_prefit_real_continuity ~base_path () =
     Ok (Yojson.Safe.to_string
       (if runtime_id = Fixture.cli_primary_runtime then null_state else missing_state)) in
   let invalid_committed = ref false in
-  Runtime.run_best_effort ~trigger:Runtime.Durable_range
-    ~input_projection:Runtime.Already_selected_range ~continuity:half
+  Runtime.run_best_effort ~continuity:half
     ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id half |> get)
     ~cli_runner:invalid_runner ~on_memory_committed:(fun () -> invalid_committed := true)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input half);
@@ -250,8 +248,7 @@ let test_prefit_real_continuity ~base_path () =
         "working_state", `String state]))) in
     let committed = ref false and memory_committed = ref false in
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
-    Runtime.run_best_effort ~trigger:Runtime.Durable_range
-      ~input_projection:Runtime.Already_selected_range ~continuity:prepared
+    Runtime.run_best_effort ~continuity:prepared
       ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id prepared |> get)
       ~cli_runner:runner ~on_continuity_committed:(fun _ -> committed:=true)
       ~on_memory_committed:(fun () -> memory_committed:=true)
@@ -296,14 +293,16 @@ let test_prefit_real_continuity ~base_path () =
   let provider_config = Agent_core.Llm_provider.Provider_config.make
     ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
     ~model_id:"continuity-cycle-fixture" ~base_url:"https://provider.example" () in
+  let completed_end =
+    Driver.completed_history_end ~trace_id ~lines ~messages:canonical
+    |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
   let view = Driver.For_testing.request_view
     ~input_policy:Keeper_input_policy.Small ~continuity ~provider_config
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
     ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
     ~last_resort:false ~base_path
-    ~demote_before:(Driver.completed_history_end ~trace_id ~lines ~messages:canonical
-      |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get)
+    ~demote_before:completed_end ~completed_end_atom:completed_end
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in
   let wire = view.wire
     |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in

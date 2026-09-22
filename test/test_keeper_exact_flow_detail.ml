@@ -187,13 +187,18 @@ let require_ok label = function
 let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
   let declared target_ref : Exact_output.declared_target =
     { target_ref
-    ; provider_ref = "openai-responses"
-    ; model_id = "gpt-5.6-luna"
-    ; enable_thinking = None
-    ; reasoning_effort = None
-    ; connect_timeout_s = Some 1.0
+    ; binding =
+        Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.OpenAI_compat
+          ~provider_id:"openai-responses"
+          ~model_id:"gpt-5.6-luna"
+          ~base_url:"https://api.openai.com"
+          ~request_path:"/v1/responses"
+          ~connect_timeout_s:1.0
+          ()
+    ; credential =
+        Exact_output.Credential_unresolved { environment_variable = "MISSING_FLOW_KEY" }
     ; body_timeout_s = None
-    ; api_key_env = Some "MISSING_FLOW_KEY"
     }
   in
   let snapshot =

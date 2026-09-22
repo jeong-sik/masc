@@ -167,8 +167,10 @@ def main() -> None:
                 "http://127.0.0.1:9/v1", f"http://127.0.0.1:{port}/v1"
             )
             + "\n[typesafeai]\n"
-            + f'endpoint = "http://127.0.0.1:{port}/judge"\n'
-            + 'model = "fixture-configured-judge"\n'
+            + "destinations = [\n"
+            + f'  {{ endpoint = "http://127.0.0.1:{port}/judge", '
+            + 'model = "fixture-configured-judge", api_key_env = "TYPESAFEAI_API_KEY" },\n'
+            + "]\n"
         )
         cases = []
         provided_question = "What is the cabinet code?"

@@ -138,7 +138,7 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 먼저 GitHub Releases 에 그 태그가 있는지 확인하세요.
 
 ```bash
-TAG=v0.35.21
+TAG=v0.35.22
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -449,7 +449,8 @@ SSH client, 모델 CLI는 포함하지 않습니다.** 프로젝트 빌드·테�
 
 | 바꾸려는 내용 | 편집 위치 |
 |---|---|
-| 모든 Keeper의 작업·검증·글쓰기 방식 | 프롬프트 편집기의 `keeper` |
+| 이 세계가 돌아가는 방식 (모든 Keeper 공통) | 프롬프트 편집기의 `keeper` |
+| 이 세계가 귀하게 여기는 것 | 프롬프트 편집기의 `keeper.worldview` |
 | 특정 Keeper의 역할 | `.masc/config/keepers/<name>.toml`의 `instructions` |
 | 도구별 상세 절차 | 해당 스킬 |
 

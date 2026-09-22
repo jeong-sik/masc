@@ -48,6 +48,32 @@ type retract_error =
   | Retract_fact_not_found of string
   | Retract_persistence_failed of string
 
+type retraction =
+  { memory_id : string
+  ; reason : string
+  }
+
+type retract_batch_error =
+  | Retract_batch_empty
+  | Retract_batch_memory_id_invalid of { index : int }
+  | Retract_batch_reason_empty of { index : int }
+  | Retract_batch_duplicate_memory_id of string
+  | Retract_batch_snapshot_sha256_invalid
+  | Retract_batch_snapshot_conflict of
+      { expected_revision : int
+      ; observed_revision : int option
+      ; expected_snapshot_sha256 : string
+      ; observed_snapshot_sha256 : string option
+      }
+  | Retract_batch_fact_not_found of string
+  | Retract_batch_plan_evidence_pending of
+      { plan_id : string
+      ; snapshot_revision : int
+      ; snapshot_sha256 : string
+      ; detail : string
+      }
+  | Retract_batch_persistence_failed of string
+
 type t =
   { revision : int
   ; updated_at : float
@@ -120,7 +146,6 @@ type journal_entry =
       ; kind : librarian_failure_kind
       ; detail : string
       ; snapshot_present : bool
-      ; cadence_deferred : bool
       }
   | Journal_quarantined of
       { recorded_at : float
@@ -144,10 +169,15 @@ val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
     Never read on the turn path. *)
 val journal_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
-val durable_range_receipt_path : keepers_dir:string -> keeper_id:string -> string
 (** WAL sidecar joining each runtime cluster's typed durable completed-turn
     range identity to the exact shared Memory snapshot revision and bytes
     produced from it. *)
+val durable_range_receipt_path : keepers_dir:string -> keeper_id:string -> string
+
+(** Durable recovery evidence for one destructive ordinary-current batch. The
+    file exists only between plan preparation and exact journal finalization,
+    and is included in whole-Keeper purge. *)
+val retraction_plan_receipt_path : keepers_dir:string -> keeper_id:string -> string
 
 (** Record a librarian pass that produced no snapshot. The commit path already
     journals its own line, so this is the failure counterpart and never runs
@@ -162,7 +192,6 @@ val append_librarian_failure :
   -> kind:librarian_failure_kind
   -> detail:string
   -> snapshot_present:bool
-  -> cadence_deferred:bool
   -> unit
 
 (** Last [limit] journal lines, oldest first, one result per line. A line this
@@ -191,6 +220,17 @@ val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
 val read_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (t option, string) result
+
+val read_with_snapshot_sha256 :
+  keepers_dir:string -> keeper_id:string -> ((t * string) option, string) result
+(** Read one atomically replaced snapshot and return the lowercase SHA-256 of
+    its exact stored bytes alongside the decoded value. The pair is one
+    observation suitable for a later revision+hash CAS. *)
+
+val snapshot_sha256 : t -> string
+(** SHA-256 of the exact canonical bytes the writer stores for [t]. A
+    successful exact cleanup can return the next CAS coordinate without a
+    second read. *)
 
 val committed_durable_range
   :  keepers_dir:string
@@ -333,6 +373,29 @@ val retract_fact
     reason are written to the same journal commit as the resulting snapshot;
     cascaded removals are represented by [change.invalidated]. Invalid input
     and a missing target fail before any snapshot or journal write. *)
+
+val retract_facts
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> expected_revision:int
+  -> expected_snapshot_sha256:string
+  -> now:float
+  -> source:source
+  -> retraction list
+  -> (t, retract_batch_error) result
+(** Atomically retract a non-empty batch of exact ordinary-current facts.
+    Every identity and reason is validated, identities must be unique, and the
+    locked snapshot must have both [expected_revision] and the exact lowercase
+    SHA-256 [expected_snapshot_sha256]. Every target must then be current
+    before the one replacement is written. Consequently a validation, CAS, or
+    missing-target failure removes none of the batch. Support invalidations are
+    computed once from the complete post-retraction set and the exact direct
+    reasons share the snapshot's journal commit. A prepared plan receipt is
+    durable before replacement. Ordinary success is returned only after the
+    exact journal entry is durable and the receipt is cleared; an interruption
+    after replacement returns [Retract_batch_plan_evidence_pending] and the
+    next locked writer reconciles that receipt before making another change. *)
 
 val to_json : t -> Yojson.Safe.t
 

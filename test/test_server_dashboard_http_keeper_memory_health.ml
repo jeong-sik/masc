@@ -382,8 +382,7 @@ let test_reports_the_librarian_position_without_a_loop () =
     ~trace_id:"health-test"
     ~kind:Current.Exact_execution_failure
     ~detail:"the lane refused"
-    ~snapshot_present:true
-    ~cadence_deferred:false;
+    ~snapshot_present:true;
   let after_failure = Health.keeper_memory_health_http_json ~base_path:base in
   Alcotest.(check string)
     "the journal's last line names the failure"

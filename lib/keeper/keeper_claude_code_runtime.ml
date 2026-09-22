@@ -82,6 +82,7 @@ let model_input_projection_for_capacity
     ?on_model_input_window_observation
     ?carried_front_seed
     ?librarian_front
+    ~turn_start
     ~keeper_name
     ~runtime_id
     source_projection
@@ -149,6 +150,7 @@ let model_input_projection_for_capacity
           ~carried_front_seed
           ~librarian_front:(Host.librarian_front_or_absent librarian_front)
           ~own_first_atom
+          ~turn_start
           messages
       in
       (* No cut is still a reading: what was carried, reported with the atom
@@ -429,7 +431,7 @@ module For_testing = struct
   let host_stop_turn_identity = host_stop_turn_identity
   let recovery_failure_of_client_error = recovery_failure_of_client_error
 
-  let start_seed_projection ~capacity_bytes ?carried_front_seed ?librarian_front
+  let start_seed_projection ~capacity_bytes ?carried_front_seed ?librarian_front ~turn_start
         ?on_model_input_window_observation ~keeper_name ~runtime_id messages
     =
     model_input_projection_for_capacity
@@ -439,6 +441,7 @@ module For_testing = struct
       ?on_model_input_window_observation
       ?carried_front_seed
       ?librarian_front
+      ~turn_start
       ~keeper_name
       ~runtime_id
       None
@@ -1252,6 +1255,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_model_input_window_observation
     ?carried_front_seed
     ?librarian_front
+    ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action
@@ -1344,6 +1348,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
                     ?on_model_input_window_observation
                     ?carried_front_seed
                     ?librarian_front
+                    ~turn_start
                     ~keeper_name
                     ~runtime_id
                     model_input_projection))

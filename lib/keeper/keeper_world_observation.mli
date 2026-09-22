@@ -19,7 +19,8 @@ type board_reaction_event = {
 
 type pending_board_event_kind =
   | Board_post_created
-  | Board_comment_added
+  | Board_post_updated
+  | Board_comment_added of Board_dispatch.board_comment_identity
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
       (** A vote landed on a post or comment this Keeper wrote. Payload-carrying
@@ -111,6 +112,9 @@ type pending_board_event = {
 
     A new event kind placed on the wrong side compiles cleanly and fails
     silently. Classify by its source contract and pin the answer in a test. *)
+val same_board_event_identity : pending_board_event -> pending_board_event -> bool
+(** Compare the underlying event, retaining distinct comments and edits on one post. *)
+
 val is_board_activity_event : pending_board_event -> bool
 
 val is_scheduled_automation_event : pending_board_event -> bool
@@ -353,9 +357,12 @@ type board_signal_match = {
   matched_targets : string list;
 }
 
-(** Collect board activity after the keeper's durable cursor. A keeper without
-    a cursor starts at the beginning of Board history; no time window may hide
-    undelivered posts.
+(** Collect Board source changes after the Keeper registry cursor. A Keeper
+    without a cursor initializes at the current Board head; pending durable
+    queue entries are admitted separately. Posts, content edits and comments
+    use the same audience routing as live delivery. Directly addressed events
+    enter the durable queue before cursor advancement and are returned through
+    normal queue intake, not as unadmitted prompt observations.
     Returns [(events, new_post_count, mention_count)].
     Used by both the world observation builder and the deliberation triage
     in keepalive to populate board-related triggers. *)

@@ -84,8 +84,8 @@ val create_store : unit -> store
 val with_lock : store -> (unit -> 'a) -> 'a
 
 (** [with_persist_lock store f] serializes JSONL writes. Callers must not hold
-    [with_lock] while acquiring it; compute any state snapshot under
-    [with_lock], release it, then acquire [with_persist_lock]. *)
+    [with_lock] while acquiring it. Acquire this lock before capturing a
+    snapshot under [with_lock], and retain it through the corresponding write. *)
 val with_persist_lock : store -> (unit -> 'a) -> 'a
 
 (** Clears [karma_cache] and [sorted_posts_cache].  Called
@@ -201,6 +201,8 @@ val reaction_key
     empty/oversized content or invalid [new_author].  When provided by the
     current owner, [new_author] transfers persisted ownership.
     [post_kind]/[visibility]/[hearth] are preserved. *)
+(** Returns the persisted post and whether its normalized title, body or author
+    changed, compared under the store lock. *)
 val update_post_with_outcome
   :  store
   -> post_id:string
@@ -210,7 +212,7 @@ val update_post_with_outcome
   -> ?body:string
   -> ?new_author:string
   -> unit
-  -> (post, board_error) Result.t
+  -> (post * bool, board_error) Result.t
 
 (** Creates a new post.  Validates [author] via
     {!Agent_id.of_string}, normalises [hearth] (lowercased +

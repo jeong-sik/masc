@@ -26,9 +26,16 @@ export interface StandaloneLaneSlotCount {
   count: number
 }
 
+/** One armed Jev destination. Two destinations may share a model id, so the
+ *  URL is what tells them apart. */
+export interface StandaloneLaneJevDestination {
+  destinationUri: string
+  model: string
+}
+
 export type StandaloneLaneJev =
   | { state: 'off' }
-  | { state: 'configured'; model: string }
+  | { state: 'configured'; destinations: StandaloneLaneJevDestination[] }
   | { state: 'cli_only' }
   | { state: 'lane_unavailable' }
 
@@ -119,7 +126,22 @@ function parseJev(value: unknown, context: string): StandaloneLaneJev {
   if (state === 'off') return { state: 'off' }
   if (state === 'cli_only') return { state: 'cli_only' }
   if (state === 'lane_unavailable') return { state: 'lane_unavailable' }
-  if (state === 'configured') return { state: 'configured', model: string(value.model, `${context}.model`).trim() }
+  if (state === 'configured') {
+    if (!Array.isArray(value.destinations) || value.destinations.length === 0) {
+      fail(`${context}.destinations must be a non-empty array`)
+    }
+    return {
+      state: 'configured',
+      destinations: value.destinations.map((destination: unknown, index) => {
+        const at = `${context}.destinations[${index}]`
+        if (!isRecord(destination)) fail(`${at} must be an object`)
+        return {
+          destinationUri: string(destination.destination_uri, `${at}.destination_uri`).trim(),
+          model: string(destination.model, `${at}.model`).trim(),
+        }
+      }),
+    }
+  }
   fail(`${context}.state is unknown`)
 }
 

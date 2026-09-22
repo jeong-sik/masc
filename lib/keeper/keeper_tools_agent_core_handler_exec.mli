@@ -22,6 +22,7 @@ val execute_with_observers
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
+  -> keeper_turn_id:int option
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -45,6 +46,7 @@ val execute_with_observers_from_meta
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
+  -> keeper_turn_id:int option
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

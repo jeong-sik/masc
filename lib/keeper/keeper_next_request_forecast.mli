@@ -169,13 +169,16 @@ val declared_at : declared:string list -> string -> int option
 val carry
   :  measure:(Agent_core.Types.message -> int)
   -> front:Keeper_carried_front.seed option
+  -> turn_start:int
   -> counted_tokens:int option
   -> Agent_core.Types.message list
   -> carried
 (** The pure arithmetic, for tests: {!Runtime_model_input_tail_window.project_from_atom}
     from the seeded front, once {!Keeper_carried_front.for_history} admits it
     against this history (the index opens with the seed's message); without
-    one, or with one it drops, the whole history. *)
+    one, or with one it drops, from [turn_start]: the end of the last
+    completed turn on this history (RFC keeper-context-window-in-tokens
+    §13.4). *)
 
 
 type composition =

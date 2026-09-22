@@ -317,14 +317,16 @@ opening ten chats.
    TIME     KEEPER             EVENT            DETAIL
    01:12:03 analyst          ▶ call             read_file [1/2] · turn 2086 · task-494
    01:12:03 analyst          ✓ returned         read_file · 32ms [1/2] · task-494
-   01:11:58 rondo            ■ turn settled     turn 2086 · in 73877 out 358 · $0.0258 · 0 calls
+   01:11:58 rondo            ■ turn done        turn 2086 · in 73877 out 358 · $0.0258 · 0 calls
    01:11:51 taskmaster       ● turn start       turn 1738
   j/k:scroll  g:newest  G:oldest  f:filter  Tab:next  q:quit  | Port: 8935
 ```
 
 The glyphs are the same vocabulary the Keepers roster uses: `▶` a call
-started, `✓` a call returned, `✗` a failure, `●` a turn boundary, `■` a turn
-settled, `?` something needing attention, `·` the quiet kinds. A returned
+started, `✓` a call returned, `✗` a failure, `●` a boundary inside a turn
+(a provider call's start or end, an internal agent run's start), `■` done
+(the keeper's turn, or an internal agent run), `?` something needing
+attention, `·` the quiet kinds. A returned
 call shows how long it took when its start is among the events held; a
 call that began before the feed opened shows none.
 
@@ -596,6 +598,14 @@ drawn rather than attributed by file position.
 
 ### Keeper message
 
+The pane's five regions and what draws each:
+
+![The chat pane, top to bottom: header, transcript, status band, composer, key footer](diagrams/tui-chat-pane-anatomy.svg)
+
+What the transcript draws for a live, an observed and a settled turn is the
+table under the same diagram in
+[`diagrams/tui-chat-pane-anatomy.html`](diagrams/tui-chat-pane-anatomy.html).
+
 `c` (or `m`) from the roster or detail. Sends to the keeper over
 `POST /api/v1/keepers/chat/stream` with a durable UUIDv7 request ID. The send
 runs in the background, so refresh and navigation stay responsive while the
@@ -604,13 +614,23 @@ when chat opened from detail.
 
 ```
  Message to: sangsu  ● active · running anthropic.claude-opus-5  (port 8935)
-   [14:35:01] From [you             ] tui-019...
+   ► YOU · tui-019... ──────────────────────────────────────── 14:35:01
      hello, how are you?
-   [14:35:03] From [sangsu          ] tui-019...
+   ● tui-019... ────────────────────────────────────────────── 14:35:03
+   │ ✓ Read a.ml
      ...reply text...
    > type here_
   Enter:send  Ctrl-G:next Keeper  Esc:list  Ctrl-U:clear
 ```
+
+That is the `metadata:full` heading (`Ctrl-F`): the speaker whole at the
+left, the request id after it, the clock at the right edge and a rule
+between. A heading opens a turn, not a block: the keeper's reasoning, tool
+calls and reply in one request share it, and a later minute of that turn
+draws only the rule and its clock. The pane's own keeper is not named on
+its headings, since the header already says whose chat it is; the operator,
+another keeper writing in, `STATUS` and `AUTO` still are. A row without a
+trustworthy time draws no clock and the rule runs to the edge.
 
 The header joins the selected Keeper's published status with its typed runtime
 phase and producer-owned canonical `runtime_id`, using the same roster reading
@@ -631,7 +651,7 @@ switched away or left and returned is discarded instead of replacing the
 newer transcript. The shortcut is withdrawn while a turn is in flight or the
 roster cannot be read.
 
-`From` is a fixed-width reverse-video badge for conversation sources: operator
+The speaker is a reverse-video badge for conversation sources: operator
 sources are cyan, Keepers blue, status yellow, and errors red. Tool and
 reasoning stretches are subordinate activity, so they use a quiet gray section
 label instead of competing with the people speaking. Ordinary operator and
@@ -666,6 +686,25 @@ failures, warnings, and indeterminate effects keep their complete history.
 Conversation text is preserved verbatim. `/thinking` and
 `/tools` expose the same choices by name. `--reasoning` and `--tool-view` can
 override the initial modes.
+
+A turn this TUI did not open -- one running when the TUI started, or one
+another surface opened -- is drawn from its journal while it runs. The
+runtime event feed carries a frame per event of a running chat operation
+opened from the dashboard, a TUI or the API; a frame for the open pane's
+keeper is read as "that operation's journal grew", and the pane reads the
+journal from where its record ends, one round trip behind the token. The
+frame itself is not folded: the journal alone carries every line in order,
+and two feeds into one log would have to agree on order after a dropped
+frame. Each history load (a row appended to the transcript, `r`) reads the
+same journals too, so a frame lost while the feed was down costs nothing,
+and a turn a connector (Discord, Slack, another keeper) opened -- which
+sends no frames -- is followed at that pace. The pane draws the turn as an
+open block, the same shape as a turn it streams itself. A turn the loaded
+transcript says is over, or whose journal the server can no longer serve,
+is drawn from its committed rows instead. The footer's turn line still says
+how long the turn has run and which tool it last touched; the `Latest
+output:` tail it used to carry is left out while the pane draws that text.
+A turn whose stream the TUI opened and lost is followed the same way.
 
 Memory journal rows open in summary mode, using producer-owned compact text
 instead of reconstructing a summary from rendered prose. The summary itself

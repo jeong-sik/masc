@@ -21,7 +21,8 @@
     The Librarian's atom position moves with the checkpoint (RFC
     librarian-lifecycle §10-2, {!Masc.Keeper_checkpoint_purge.librarian_rebase}):
     the rewrite is refused while the Librarian has atoms left to read, and
-    otherwise the position is written after the checkpoint. *)
+    otherwise the position is written after the checkpoint and the
+    continuity snapshot, whose numbering the rewrite made stale, is removed. *)
 
 let usage =
   {|Usage: masc_checkpoint_purge --trace TRACE_ID [OPTIONS]
@@ -314,5 +315,23 @@ let () =
                     ("checkpoint installed but the Librarian position was not moved with \
                       it; the Librarian stops on the mismatch until the keeper's Librarian \
                       files are purged: "
-                     ^ Progress.write_error_to_string write_error)))))
+                     ^ Progress.write_error_to_string write_error)));
+            (* The continuity snapshot follows the position: its numbers and
+               digests are the old history's, and the Librarian's next pass
+               writes one for the new. *)
+            (match
+               Masc.Keeper_librarian_continuity.remove
+                 ~keepers_dir:runtime_keepers_dir ~keeper_name:checkpoint.agent_name
+             with
+             | Ok Masc.Keeper_librarian_continuity.Snapshot_removed ->
+               print_endline
+                 "applied: stale continuity snapshot removed; the Librarian's next pass \
+                  writes one for the rewritten history"
+             | Ok Masc.Keeper_librarian_continuity.Snapshot_absent -> ()
+             | Error detail ->
+               error
+                 ("checkpoint installed but the stale continuity snapshot was not removed; \
+                   the next turn starts at the Librarian position until a pass replaces \
+                   it: "
+                  ^ detail))))
      )

@@ -413,6 +413,11 @@ export function KeeperCheckpointPanel({
               ${purgePreview.warnings.length > 0
                 ? html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--rose-light)]" role="alert">${purgePreview.warnings.join(' · ')}</div>`
                 : null}
+              ${purgePreview.continuity_snapshot.kind === 'removed'
+                ? html`<div class="mt-3 text-3xs text-[var(--color-fg-muted)]" data-testid="keeper-checkpoint-purge-continuity">continuity snapshot 을 지웠어요. 다음 Librarian 회차가 새 이력의 것을 써요.</div>`
+                : purgePreview.continuity_snapshot.kind === 'not_removed'
+                  ? html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--rose-light)]" role="alert" data-testid="keeper-checkpoint-purge-continuity">continuity snapshot 을 못 지웠어요: ${purgePreview.continuity_snapshot.detail}</div>`
+                  : null}
             `
           : null}
       </div>

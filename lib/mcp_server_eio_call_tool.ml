@@ -244,6 +244,7 @@ let runtime_mcp_keeper_error_preview message =
 
 let runtime_mcp_keeper_tool_call_sse_payload
     ~(keeper_name : string)
+    ~(keeper_turn_id : int option)
     ~(tool_name : string)
     ~(duration_ms : int)
     ~(disposition : ('completed, 'deferred, 'failed) Tool_result.disposition)
@@ -253,6 +254,7 @@ let runtime_mcp_keeper_tool_call_sse_payload
     [
       ("type", `String "keeper_tool_call");
       ("name", `String keeper_name);
+      ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
       ("tool_name", `String tool_name);
       ("duration_ms", `Int duration_ms);
       ("disposition", `String (Tool_result.string_of_disposition disposition));
@@ -461,6 +463,7 @@ let record_runtime_mcp_keeper_tool_trace
   Sse.broadcast
     (runtime_mcp_keeper_tool_call_sse_payload
        ~keeper_name:ctx.keeper_name
+       ~keeper_turn_id:ctx.keeper_turn_id
        ~tool_name
        ~duration_ms
        ~disposition

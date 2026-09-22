@@ -22,6 +22,7 @@ let entry style body : Layout.entry =
   ; timestamp = "01:41:00"
   ; timeline_bucket = None
   ; span_clock = None
+  ; speaker = "LABEL"
   ; role_label = "LABEL"
   (* No speaker mark on this fixture: the shade layers are what it is about,
      and a mark would only widen the label. #30744 added the field while this

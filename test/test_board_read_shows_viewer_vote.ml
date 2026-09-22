@@ -35,6 +35,7 @@ let post ~id ~author : Board.post =
   ; meta_json = None
   ; visibility = Board.Public
   ; created_at = 0.
+  ; content_updated_at = 0.
   ; updated_at = 0.
   ; expires_at = 0.
   ; votes_up = 2

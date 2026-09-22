@@ -11,9 +11,27 @@ type match_result =
   ; matched_targets : string list
   }
 
+type board_observation_kind =
+  | Observed_post_created
+  | Observed_post_updated of { content_updated_at : float }
+  | Observed_comment_added of Board_dispatch.board_comment_identity
+  | Observed_reaction_changed of Board_dispatch.board_reaction_change
+  | Observed_vote_cast of Board_dispatch.board_vote_change
+
+type board_observation =
+  { kind : board_observation_kind
+  ; post_id : string
+  ; author : string
+  ; title : string
+  ; content : string
+  ; hearth : string option
+  ; updated_at : float option
+  }
+
 type board_read_operation =
   | Get_post
   | Get_comments
+  | Parse_queued_comment_identity
 
 type board_unavailable =
   { operation : board_read_operation
@@ -99,6 +117,7 @@ let disposition_of_unavailable (unavailable : board_unavailable) =
 let board_read_operation_to_string = function
   | Get_post -> "get_post"
   | Get_comments -> "get_comments"
+  | Parse_queued_comment_identity -> "parse_queued_comment_identity"
 ;;
 
 let unavailable_to_string unavailable =
@@ -189,7 +208,13 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   { Keeper_event_queue.kind =
       (match signal.kind with
        | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
-       | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added
+       | Board_dispatch.Board_post_updated { content_updated_at } ->
+         Keeper_event_queue.Post_updated { content_updated_at }
+       | Board_dispatch.Board_comment_added comment ->
+         Keeper_event_queue.Comment_added
+           { comment_id = Board.Comment_id.to_string comment.comment_id
+           ; parent_id = Option.map Board.Comment_id.to_string comment.parent_id
+           }
        | Board_dispatch.Board_reaction_changed reaction ->
          Keeper_event_queue.Reaction_changed
            (queue_reaction_change_of_board reaction)
@@ -203,31 +228,48 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   }
 ;;
 
-(* RFC-0020: board signals are carried as a typed [Keeper_event_queue.board_stimulus]
-   end-to-end. This total conversion rebuilds the [Board_dispatch.board_signal]
-   the downstream matchers expect from the typed payload, taking the board post
-   id from the enclosing stimulus. Replaces the prior JSON re-parse of a string
-   payload (which could fail and silently drop signals). *)
-let board_signal_of_board_stimulus
+(* The queue keeps the comment identity as its wire string (the queue is a
+   leaf and cannot depend on Board). This is the boundary where it becomes
+   the typed identity the Board store issued, parsed once; an identity that
+   does not parse is a Board read that failed, reported like the others. *)
+let board_observation_of_board_stimulus
       ~(post_id : string)
       (bs : Keeper_event_queue.board_stimulus)
-  : Board_dispatch.board_signal
+  : (board_observation, board_unavailable) result
   =
-  { Board_dispatch.kind =
-      (match bs.kind with
-       | Keeper_event_queue.Post_created -> Board_dispatch.Board_post_created
-       | Keeper_event_queue.Comment_added -> Board_dispatch.Board_comment_added
-       | Keeper_event_queue.Reaction_changed reaction ->
-         Board_dispatch.Board_reaction_changed (board_reaction_change_of_queue reaction)
-       | Keeper_event_queue.Vote_cast vote ->
-         Board_dispatch.Board_vote_cast (board_vote_change_of_queue vote))
-  ; post_id
-  ; author = bs.author
-  ; title = bs.title
-  ; content = bs.content
-  ; hearth = bs.hearth
-  ; updated_at = bs.updated_at
-  }
+  let ( let* ) = Result.bind in
+  let parse_comment_id raw =
+    Board.Comment_id.of_string raw
+    |> Result.map_error (fun error ->
+      { operation = Parse_queued_comment_identity; post_id; error })
+  in
+  let* kind =
+    match bs.kind with
+    | Keeper_event_queue.Post_created -> Ok Observed_post_created
+    | Keeper_event_queue.Post_updated { content_updated_at } ->
+      Ok (Observed_post_updated { content_updated_at })
+    | Keeper_event_queue.Comment_added { comment_id; parent_id } ->
+      let* comment_id = parse_comment_id comment_id in
+      let* parent_id =
+        match parent_id with
+        | None -> Ok None
+        | Some raw -> Result.map Option.some (parse_comment_id raw)
+      in
+      Ok (Observed_comment_added { Board_dispatch.comment_id; parent_id })
+    | Keeper_event_queue.Reaction_changed reaction ->
+      Ok (Observed_reaction_changed (board_reaction_change_of_queue reaction))
+    | Keeper_event_queue.Vote_cast vote ->
+      Ok (Observed_vote_cast (board_vote_change_of_queue vote))
+  in
+  Ok
+    { kind
+    ; post_id
+    ; author = bs.author
+    ; title = bs.title
+    ; content = bs.content
+    ; hearth = bs.hearth
+    ; updated_at = bs.updated_at
+    }
 ;;
 
 let post_id_string (post : Board.post) = Board.Post_id.to_string post.id
@@ -265,36 +307,47 @@ let text (signal : Board_dispatch.board_signal) =
 
 let address_text (signal : Board_dispatch.board_signal) =
   match signal.kind with
-  | Board_dispatch.Board_post_created ->
+  | Board_dispatch.Board_post_created
+  | Board_dispatch.Board_post_updated _ ->
     String.concat
       "\n"
       (List.filter
          (fun part -> not (String.equal (String.trim part) ""))
          [ signal.title; signal.content ])
-  | Board_dispatch.Board_comment_added -> signal.content
+  | Board_dispatch.Board_comment_added _ -> signal.content
   | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ -> ""
 ;;
 
-let mention_ids_of_signal signal =
-  Board.direct_targets_of_text (address_text signal)
+let mention_ids_of_text text =
+  Board.direct_targets_of_text text
   |> List.filter_map (fun target ->
     Board.Agent_id.to_string target |> Keeper_identity.Keeper_id.of_string)
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 ;;
 
-let match_signal
-      ~(meta : keeper_meta)
-      ~(signal : Board_dispatch.board_signal)
-  : match_result
-  =
+let mention_ids_of_signal signal = mention_ids_of_text (address_text signal)
+
+let address_text_of_observation observation =
+  match observation.kind with
+  | Observed_post_created | Observed_post_updated _ ->
+    String.concat
+      "\n"
+      (List.filter
+         (fun part -> not (String.equal (String.trim part) ""))
+         [ observation.title; observation.content ])
+  | Observed_comment_added _ -> observation.content
+  | Observed_reaction_changed _ | Observed_vote_cast _ -> ""
+;;
+
+let match_authored_text ~(meta : keeper_meta) ~author ~address_text =
   let self_ids = Message_scope.self_ids meta in
-  if Message_scope.is_self_author ~self_ids signal.author
+  if Message_scope.is_self_author ~self_ids author
   then { explicit_mention = false; matched_targets = [] }
   else (
     let targets =
       if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
     in
-    let mentions = mention_ids_of_signal signal in
+    let mentions = mention_ids_of_text address_text in
     let matched_targets =
       targets
       |> List.filter (fun target ->
@@ -308,6 +361,21 @@ let match_signal
     if matched_targets <> []
     then { explicit_mention = true; matched_targets }
     else { explicit_mention = false; matched_targets = [] })
+;;
+
+let match_signal
+      ~(meta : keeper_meta)
+      ~(signal : Board_dispatch.board_signal)
+  : match_result
+  =
+  match_authored_text ~meta ~author:signal.author ~address_text:(address_text signal)
+;;
+
+let match_observation ~(meta : keeper_meta) ~(observation : board_observation) =
+  match_authored_text
+    ~meta
+    ~author:observation.author
+    ~address_text:(address_text_of_observation observation)
 ;;
 
 (** Check whether this keeper has commented on a post, and which comments
@@ -379,8 +447,8 @@ type wake_reason =
           reaction path already woke the author of the post it landed on; the
           comment path checked only whether the keeper had itself commented, so
           an answer to a keeper's own question did not reach it. *)
-  | Thread_reply_after_self_comment
-      (** A new external comment arrived on a post the keeper had commented on. *)
+  | Reply_to_self_comment
+      (** An external comment directly replies to a comment the keeper authored. *)
   | Reaction_after_self_activity
       (** An external reaction landed on a post the keeper authored or a thread
           the keeper had commented on. *)
@@ -393,10 +461,38 @@ let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
   | Broadcast -> "broadcast"
   | Comment_on_self_post -> "comment_on_self_post"
-  | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
+  | Reply_to_self_comment -> "reply_to_self_comment"
   | Reaction_after_self_activity -> "reaction_after_self_activity"
   | Vote_on_self_post -> "vote_on_self_post"
   | Vote_on_self_comment -> "vote_on_self_comment"
+;;
+
+let board_signal_stimulus
+      ~arrived_at
+      ~(reason : wake_reason)
+      (signal : Board_dispatch.board_signal)
+  =
+  let payload : Keeper_event_queue.stimulus_payload =
+    Keeper_event_queue.Board_signal
+      (board_stimulus_of_board_signal signal)
+  in
+  { Keeper_event_queue.post_id = signal.post_id
+  ; urgency =
+      (match reason with
+       | Explicit_mention | Broadcast ->
+         Keeper_event_queue.Immediate
+       (* A comment on the keeper's own post is a thread event, so it keeps
+          the thread priority. This change's subject is that it wakes at all;
+          raising it to Immediate would be a separate queue decision. *)
+       | Comment_on_self_post
+       | Reply_to_self_comment
+       | Reaction_after_self_activity
+       | Vote_on_self_post
+       | Vote_on_self_comment ->
+         Keeper_event_queue.Normal)
+  ; arrived_at
+  ; payload
+  }
 ;;
 
 let self_authored_post ~self_ids ~(post_id : string) =
@@ -424,7 +520,8 @@ let reaction_touches_self_activity ~self_ids ~(signal : Board_dispatch.board_sig
          | Available `Never -> Available false
          | Available (`No_new_external | `New_external _) -> Available true))
   | Board_dispatch.Board_post_created
-  | Board_dispatch.Board_comment_added
+  | Board_dispatch.Board_post_updated _
+  | Board_dispatch.Board_comment_added _
   | Board_dispatch.Board_vote_cast _ -> Available false
 ;;
 
@@ -461,22 +558,28 @@ let wake_reason
        | Available false -> Available None)
     | Board_dispatch.Board_vote_cast vote ->
       Available (vote_targets_self_writing ~self_ids vote)
-    | Board_dispatch.Board_comment_added ->
-      (* Authorship first, the same order [reaction_touches_self_activity] uses
-         above. Without it [check_self_comment_status] answers [`Never] for the
-         author of the post — it only looks for the keeper's own comments — so
-         an answer to a keeper's question never reached the keeper that asked.
-         Measured on the live Board: 72 of 98 external comments on Keeper posts
-         did not wake the poster, including a post whose title addressed the
-         replier by name. *)
+    | Board_dispatch.Board_comment_added identity ->
       (match self_authored_post ~self_ids ~post_id:signal.post_id with
        | Unavailable _ as unavailable -> unavailable
        | Available true -> Available (Some Comment_on_self_post)
        | Available false ->
-         (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-          | Unavailable _ as unavailable -> unavailable
-          | Available (`New_external _) ->
-            Available (Some Thread_reply_after_self_comment)
-          | Available (`Never | `No_new_external) -> Available None))
-    | Board_dispatch.Board_post_created -> Available None)
+         match identity.parent_id with
+         | None -> Available None
+         | Some parent_id ->
+           match Board_dispatch.get_comments ~post_id:signal.post_id with
+           | Error error -> Unavailable { operation = Get_comments; post_id = signal.post_id; error }
+           | Ok comments ->
+             match List.find_opt
+               (fun (comment : Board.comment) ->
+                 String.equal (Board.Comment_id.to_string comment.id)
+                   (Board.Comment_id.to_string parent_id)) comments with
+             | None ->
+               Unavailable { operation = Get_comments; post_id = signal.post_id;
+                 error = Board.Comment_not_found (Board.Comment_id.to_string parent_id) }
+             | Some parent ->
+               Available
+                 (if Message_scope.is_self_author ~self_ids
+                       (Board.Agent_id.to_string parent.author)
+                  then Some Reply_to_self_comment else None))
+    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ -> Available None)
 ;;

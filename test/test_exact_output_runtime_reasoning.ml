@@ -11,12 +11,24 @@ let requirement = EO.make_output_requirement
 
 let require_ok label = function Ok x -> x | Error _ -> fail label
 
+let openrouter_binding ?reasoning_effort () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~provider_id:"openrouter"
+    ~model_id:"z-ai/glm-5.3-flash"
+    ~base_url:"https://openrouter.ai/api/v1"
+    ~request_path:"/chat/completions"
+    ~enable_thinking:true
+    ?reasoning_effort
+    ~connect_timeout_s:180.
+    ()
+
 let test_missing_effort_has_typed_request_rejection () =
   let target : Resolver.declared_target =
-    { target_ref = "openrouter.probe"; provider_ref = "openrouter"
-    ; model_id = "z-ai/glm-5.3-flash"; enable_thinking = Some true
-    ; reasoning_effort = None
-    ; connect_timeout_s = Some 180.; body_timeout_s = None; api_key_env = None } in
+    { target_ref = "openrouter.probe"
+    ; binding = openrouter_binding ()
+    ; credential = Resolver.Credential_not_declared
+    ; body_timeout_s = None } in
   let snapshot = Resolver.load_resolver_snapshot
       ~io:{ getenv = (fun _ -> Ok None) }
       ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
@@ -137,10 +149,11 @@ let test_explicit_effort_reaches_serialized_request () =
     let runtime_receipt = EO.start_attempt runtime_plan
       |> require_ok "runtime attempt" |> EO.attempt_receipt in
     let target : Resolver.declared_target =
-      { target_ref = "openrouter.probe"; provider_ref = "openrouter"
-      ; model_id = "z-ai/glm-5.3-flash"; enable_thinking = Some true
-      ; reasoning_effort = Some effort
-      ; connect_timeout_s = Some 180.; body_timeout_s = None; api_key_env = None } in
+      { target_ref = "openrouter.probe"
+      ; binding = openrouter_binding ~reasoning_effort:effort ()
+      ; credential =
+          Resolver.Credential_resolved (Llm_provider.Secret.of_string "synthetic-no-network")
+      ; body_timeout_s = None } in
     let snapshot = Resolver.load_resolver_snapshot
         ~io:{ getenv = (fun _ -> Ok (Some "synthetic-no-network")) }
         ~catalog:(Resolver.Embedded_with_targets [ target ]) ()

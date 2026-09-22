@@ -152,9 +152,14 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_jev_destination = {
+  sljd_destination_uri : string;
+  sljd_model : string;
+}
+
 type standalone_lane_jev =
   | Jev_off
-  | Jev_configured of { model : string }
+  | Jev_configured of { destinations : standalone_lane_jev_destination list }
   | Jev_cli_only
   | Jev_lane_unavailable
 
@@ -2505,9 +2510,14 @@ type memory_context_frontier = {
   mcf_end_atom : int;
   mcf_boundary_line : int;
 }
+type memory_context_position = {
+  mcpo_trace_id : string;
+  mcpo_end_atom : int;
+}
 type memory_context_input =
   | Context_summarized of memory_context_frontier
-  | Context_uncompressed
+  | Context_absorbed of memory_context_position
+  | Context_without_snapshot
   | Context_not_applied
 
 type memory_context_prepared = {
@@ -4840,11 +4850,18 @@ let decode_memory_context_cycle keeper_json =
     let* () = require_exact_object_fields "context input" ["kind"; "frontier"] input in
     let* kind = required_string_field input "kind" in
     let* value = required_member input "frontier" in
-    let* value = nullable frontier value in
+    let position json =
+      let* () = require_exact_object_fields "context position" ["trace_id"; "end_atom"] json in
+      let* mcpo_trace_id = required_string_field json "trace_id" in
+      let* mcpo_end_atom = required_int_field json "end_atom" in
+      if String.trim mcpo_trace_id = "" || mcpo_end_atom < 1
+      then Error "invalid context position"
+      else Ok {mcpo_trace_id; mcpo_end_atom} in
     let* mcp_input = match kind, value with
-      | "summarized", Some value -> Ok (Context_summarized value)
-      | "uncompressed", None -> Ok Context_uncompressed
-      | "not_applied", None -> Ok Context_not_applied
+      | "summarized", (`Assoc _ as value) -> Result.map (fun value -> Context_summarized value) (frontier value)
+      | "absorbed", (`Assoc _ as value) -> Result.map (fun value -> Context_absorbed value) (position value)
+      | "without_snapshot", `Null -> Ok Context_without_snapshot
+      | "not_applied", `Null -> Ok Context_not_applied
       | _ -> Error "context input kind disagrees with frontier" in
     Ok {mcp_prepared_at; mcp_runtime_id; mcp_request_bytes; mcp_input} in
   let* saved = required_member json "saved" in
@@ -6097,6 +6114,17 @@ let decode_standalone_lane_slot_count json =
   let* slsc_count = required_int_field json "count" in
   Ok { slsc_slot_id; slsc_count }
 
+let decode_standalone_lane_jev_destination json =
+  let non_blank key =
+    let* value = required_string_field json key in
+    match String.trim value with
+    | "" -> Error (Printf.sprintf "field '%s' must be a non-blank string" key)
+    | trimmed -> Ok trimmed
+  in
+  let* sljd_destination_uri = non_blank "destination_uri" in
+  let* sljd_model = non_blank "model" in
+  Ok { sljd_destination_uri; sljd_model }
+
 let decode_standalone_lane_jev json =
   let* state = required_string_field json "state" in
   match state with
@@ -6104,11 +6132,14 @@ let decode_standalone_lane_jev json =
   | "cli_only" -> Ok Jev_cli_only
   | "lane_unavailable" -> Ok Jev_lane_unavailable
   | "configured" ->
-    let* model = required_string_field json "model" in
-    let model = String.trim model in
-    if String.equal model ""
-    then Error "standalone lane JEV model must be a non-empty string"
-    else Ok (Jev_configured { model })
+    let* destinations = required_list_field json "destinations" in
+    let* destinations =
+      decode_list "destinations" decode_standalone_lane_jev_destination destinations
+    in
+    (* The server reports [configured] only with an armed destination. *)
+    (match destinations with
+     | [] -> Error "standalone lane JEV destinations must name at least one server"
+     | _ :: _ -> Ok (Jev_configured { destinations }))
   | other -> Error ("standalone lane JEV state: unknown value " ^ other)
 
 let decode_standalone_lane json =

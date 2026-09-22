@@ -19,6 +19,7 @@ let make_keeper_tool_handler_with_authority
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
+      ~(keeper_turn_id : unit -> int option)
       ?turn_sandbox_factory
       ?clock
       ?continuation_channel
@@ -122,6 +123,7 @@ let make_keeper_tool_handler_with_authority
   in
   fun ?agent_core_invocation ?result_projection raw_input ->
     let invocation_fields = agent_core_invocation_fields agent_core_invocation in
+    let call_keeper_turn_id = keeper_turn_id () in
     let handle_validation_error ~input validation_result =
       let validation_result =
         match validation_result with
@@ -166,6 +168,7 @@ let make_keeper_tool_handler_with_authority
         (Some validation_result);
       broadcast_keeper_tool_call_event
         ~keeper_name:meta.name
+        ~keeper_turn_id:call_keeper_turn_id
         ~tool_name:name
         ~duration_ms
         ~disposition:validation_result
@@ -232,6 +235,7 @@ let make_keeper_tool_handler_with_authority
                 ~meta
                 ~publication_recovery
                 ~ctx_snapshot
+                ~keeper_turn_id:call_keeper_turn_id
                 ?turn_sandbox_factory
                 ?sw
                 ?clock

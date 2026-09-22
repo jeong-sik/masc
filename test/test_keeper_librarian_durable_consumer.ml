@@ -204,56 +204,6 @@ let establish_progress config ~trace_id first =
   | Consumer.Memory_not_committed -> fail "initial range did not advance"
 ;;
 
-let test_agent_core_handoff_retains_pending_official_evidence () =
-  with_workspace @@ fun config ->
-  let trace_id = "trace-official-to-agent-core" in
-  let attempts = ref 0 in
-  Queue_refresh.remember_turn
-    ~base_path:config.Workspace.base_path
-    ~keeper_name
-    ~trace_id
-    (fun ~meta:_ _trigger ->
-      incr attempts;
-      if !attempts = 1 then raise Exit;
-      Queue_refresh.Entered);
-  Queue_refresh.forget_turn
-    ~base_path:config.Workspace.base_path
-    ~keeper_name;
-  (match
-     Queue_refresh.For_testing.attempt_remembered
-       ~base_path:config.Workspace.base_path
-       ~keeper_name
-       ~trace_id
-       ~meta:(meta trace_id)
-       ~sources_changed:false
-       ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed
-   with
-   | _ -> fail "cancelled official evidence attempt did not escape"
-   | exception Exit -> ());
-  check int "cancelled attempt retains its evidence" 1 !attempts;
-  let handled =
-    Queue_refresh.For_testing.attempt_remembered
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-      ~trace_id
-      ~meta:(meta trace_id)
-      ~sources_changed:false
-      ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed
-  in
-  check bool "pending official evidence survives Agent-Core handoff" true handled;
-  check int "pending official evidence succeeds on retry" 2 !attempts;
-  check bool
-    "handoff evidence retires immediately after its attempt"
-    false
-    (Queue_refresh.For_testing.attempt_remembered
-       ~base_path:config.Workspace.base_path
-       ~keeper_name
-       ~trace_id
-       ~meta:(meta trace_id)
-       ~sources_changed:false
-       ~trigger:Masc.Keeper_librarian_runtime.Conversation_completed)
-;;
-
 let test_n_tick_reads_every_intermediate_turn () =
   with_workspace @@ fun config ->
   let trace_id = "trace-n-tick" in
@@ -1666,28 +1616,6 @@ let test_same_name_clusters_keep_independent_commit_receipts () =
   check int "receipt recovery performs no replay commits" 2 !commits
 ;;
 
-let test_selected_range_bypasses_recent_window () =
-  let messages = List.init 80 (fun index -> message (string_of_int index)) in
-  let input : Masc.Keeper_librarian.input =
-    { turn_ref = Ids.Turn_ref.make ~trace_id:"projection" ~absolute_turn:1
-    ; goal_context = Masc.Keeper_librarian.No_task
-    ; keeper_instructions = ""
-    ; current = None
-    ; working_context = Masc.Keeper_librarian_context.empty
-    ; messages
-    ; tool_observations = []
-    ; counterpart_observations = []
-    }
-  in
-  let projected =
-    Masc.Keeper_librarian_runtime.For_testing.input_for_projection
-      Masc.Keeper_librarian_runtime.Already_selected_range
-      input
-  in
-  check int "durable range keeps every selected message" 80
-    (List.length projected.messages)
-;;
-
 let test_counterpart_range_reads_beyond_recent_windows () =
   with_workspace @@ fun config ->
   let base_dir = config.Workspace.base_path in
@@ -2305,8 +2233,6 @@ let () =
     [ ( "range lifecycle"
       , [ test_case "N ticks retain intermediate turns" `Quick
             test_n_tick_reads_every_intermediate_turn
-        ; test_case "Agent-Core handoff retains pending official evidence" `Quick
-            test_agent_core_handoff_retains_pending_official_evidence
         ; test_case "unread turns counts what a pass has left" `Quick
             test_unread_turns_counts_what_a_pass_has_left
         ; test_case "failed commit and restart retry exact range" `Quick
@@ -2349,8 +2275,6 @@ let () =
             test_same_name_clusters_keep_independent_ranges
         ; test_case "same-name clusters isolate commit receipts" `Quick
             test_same_name_clusters_keep_independent_commit_receipts
-        ; test_case "selected range bypasses recent window" `Quick
-            test_selected_range_bypasses_recent_window
         ; test_case "counterpart range exceeds recent windows" `Quick
             test_counterpart_range_reads_beyond_recent_windows
         ; test_case "counterpart range includes upper boundary once" `Quick

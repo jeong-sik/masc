@@ -61,6 +61,7 @@ type envelope = Event_envelope.t = {
   parent_event_id: string option;
   caused_by: string option;
   source_clock: source_clock;
+  caller_scope: Caller_scope.t option;  (* from the bus handle, never read here *)
 }
 ```
 
@@ -74,6 +75,10 @@ at the prior `run_id` (or `correlation_id`) that causally triggered this event
 — enabling A→B→C cascade reconstruction within a session. Root events set
 `caused_by = None`. Envelopes are filled by producers, never reconstructed or
 rewritten by subscribers.
+`caller_scope` is the scope of the bus handle the event was published on
+(`Event_bus.with_caller_scope`). The code that made the handle decides what
+it means; Agent Core only carries it. A handle keeps a scope the event
+already names.
 
 ### 2.2 Native payload variants
 

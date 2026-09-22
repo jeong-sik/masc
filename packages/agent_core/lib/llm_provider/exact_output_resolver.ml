@@ -22,15 +22,21 @@ type catalog_document =
   ; contents : string
   }
 
+(* The credential a binding sends, as the binding resolved it. The keeper's
+   request carries the key itself, resolved through the deployment's own
+   credential selection; an exact request on the same binding sends that key,
+   not a second read of an environment name. An environment name that
+   resolved to nothing is kept by name, so the refusal can say which one. *)
+type binding_credential =
+  | Credential_not_declared
+  | Credential_resolved of Secret.t
+  | Credential_unresolved of { environment_variable : string }
+
 type declared_target =
   { target_ref : string
-  ; provider_ref : string
-  ; model_id : string
-  ; enable_thinking : bool option
-  ; reasoning_effort : Reasoning_effort.t option
-  ; connect_timeout_s : float option
+  ; binding : PC.t
+  ; credential : binding_credential
   ; body_timeout_s : float option
-  ; api_key_env : string option
   }
 
 type resolver_catalog_input =
@@ -99,6 +105,22 @@ type resolver_snapshot_error =
       }
   | Environment_read_failed of { environment_variable : string }
 
+(* Which wire this target's requests run on. A [[targets]] row in a catalog
+   document names no binding, so the provider row it points at is the only
+   thing that can answer; a deployment's binding answers for itself, because
+   one provider row can serve more than one wire ([[providers]]
+   identity_kinds) and only the binding says which of them this deployment
+   reaches. Reading the row instead sent the Librarian's ollama_cloud slot to
+   the native /api/chat surface while its Keeper requests ran on the
+   OpenAI-compatible one (#37674); the Keeper path answered the same question
+   from the binding after the mirror-image failure in #33652. *)
+type target_wire =
+  | Catalog_provider_wire
+  | Binding_wire of
+      { config : PC.t
+      ; credential : binding_credential
+      }
+
 type target_declaration =
   { target_ref : target_ref
   ; provider_ref : string
@@ -107,11 +129,10 @@ type target_declaration =
   ; reasoning_effort : Reasoning_effort.t option
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
-  ; api_key_env : string option
-      (* Which environment name holds this slot's credential. A catalog row
-         names the provider's usual one; a deployment that reads a different
-         one says so in its binding, and that is the authority. [None] keeps
-         the catalog's name. *)
+  ; wire : target_wire
+      (* For [Binding_wire], the fields above are that binding's own values,
+         read off its config once in [admit_declared]. They are a projection of
+         it, not a second place to write them. *)
   }
 
 type credential_outcome =
@@ -302,7 +323,7 @@ let parse_target_declaration ~source toml =
     ; body_timeout_s
     ; (* A document declares its slots next to the provider rows they name, so
          the catalog's credential name is the only one in play. *)
-      api_key_env = None
+      wire = Catalog_provider_wire
     }
 ;;
 
@@ -520,9 +541,20 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ; option_string (Option.map Reasoning_effort.to_string target.reasoning_effort)
       ; option_float target.connect_timeout_s
       ; option_float target.body_timeout_s
-      ])
+      ]
+      @
+      (* The wire a slot runs on is part of what its evidence covers: the same
+         provider row serves more than one, and a binding names which. *)
+      (match target.wire with
+       | Catalog_provider_wire -> [ "wire=catalog_provider" ]
+       | Binding_wire { config = binding; credential = _ } ->
+         [ "wire=binding"
+         ; PC.string_of_provider_kind binding.PC.kind
+         ; binding.PC.base_url
+         ; binding.PC.request_path
+         ]))
   in
-  ("agent_core-exact-output-catalog-evidence-v4" :: providers) @ models @ targets
+  ("agent_core-exact-output-catalog-evidence-v5" :: providers) @ models @ targets
 ;;
 
 let frozen_environment ~io names =
@@ -561,9 +593,11 @@ let load_resolver_snapshot
     ; contents = Model_catalog_embedded.contents
     }
   in
-  (* A caller's slots arrive as values. [target_ref] is still validated here:
-     it is the only field whose shape the type does not already carry. *)
+  (* A caller's slots arrive as a binding, so every request fact is read off
+     that one value here. [target_ref] is still validated: it is the slot id
+     the lane names, which the binding does not carry. *)
   let admit_declared (declared : declared_target) =
+    let binding = declared.binding in
     match target_ref declared.target_ref with
     | Error _ ->
       Error
@@ -573,36 +607,47 @@ let load_resolver_snapshot
                Printf.sprintf "declared target %S is not a target ref" declared.target_ref
            })
     | Ok target_ref ->
+      let invalid detail =
+        Target_catalog_invalid { source = Embedded_catalog; detail }
+      in
       let timeout field value =
         Binding.validate_timeout ~target_label:declared.target_ref ~field value
-        |> Result.map_error (fun detail ->
-          Target_catalog_invalid { source = Embedded_catalog; detail })
+        |> Result.map_error invalid
       in
-      let* () = timeout "connect_timeout_s" declared.connect_timeout_s in
+      let* () = timeout "connect_timeout_s" binding.PC.connect_timeout_s in
       let* () = timeout "body_timeout_s" declared.body_timeout_s in
+      (* The provider id qualifies the capability row this binding resolves
+         against, so a binding without one names no catalog scope to admit. *)
+      let* provider_ref =
+        match binding.PC.provider_id with
+        | Some provider_ref -> Ok provider_ref
+        | None ->
+          Error
+            (invalid
+               (Printf.sprintf
+                  "declared target %S has a binding that names no provider"
+                  declared.target_ref))
+      in
       let* model_id =
-        match Model_identifiers.Model_id.of_string declared.model_id with
+        match Model_identifiers.Model_id.of_string binding.PC.model_id with
         | Ok model_id -> Ok (Model_identifiers.Model_id.to_string model_id)
         | Error message ->
           Error
-            (Target_catalog_invalid
-               { source = Embedded_catalog
-               ; detail =
-                 Printf.sprintf
-                   "declared target %S has invalid model_id: %s"
-                   declared.target_ref
-                   message
-               })
+            (invalid
+               (Printf.sprintf
+                  "declared target %S has invalid model_id: %s"
+                  declared.target_ref
+                  message))
       in
       Ok
         { target_ref
-        ; provider_ref = declared.provider_ref
+        ; provider_ref
         ; model_id
-        ; enable_thinking = declared.enable_thinking
-        ; reasoning_effort = declared.reasoning_effort
-        ; connect_timeout_s = declared.connect_timeout_s
+        ; enable_thinking = binding.PC.enable_thinking
+        ; reasoning_effort = binding.PC.reasoning_effort
+        ; connect_timeout_s = binding.PC.connect_timeout_s
         ; body_timeout_s = declared.body_timeout_s
-        ; api_key_env = declared.api_key_env
+        ; wire = Binding_wire { config = binding; credential = declared.credential }
         }
   in
   let* base_source, base_document, declared_targets =
@@ -675,13 +720,7 @@ let load_resolver_snapshot
          with
          | Error Binding.Provider_missing -> reject Target_provider
          | Error Binding.Model_missing -> reject Target_model
-         | Ok (provider, model) ->
-           let provider =
-             match target.api_key_env with
-             | None -> provider
-             | Some api_key_env -> { provider with Model_catalog.api_key_env }
-           in
-           Ok ((target, provider, model) :: bindings, rejected))
+         | Ok (provider, model) -> Ok ((target, provider, model) :: bindings, rejected))
       (Ok ([], []))
       target_declarations
   in
@@ -689,15 +728,22 @@ let load_resolver_snapshot
   let environment_names =
     List.fold_left
       (fun names
-        (_, (provider : Model_catalog.provider_entry), (_ : Model_catalog.model_entry)) ->
-         let names =
-           match provider.base_url_env with
-           | Some name when name <> "" -> String_set.add name names
-           | Some _ | None -> names
-         in
-         if provider.api_key_env = ""
-         then names
-         else String_set.add provider.api_key_env names)
+        ( (target : target_declaration)
+        , (provider : Model_catalog.provider_entry)
+        , (_ : Model_catalog.model_entry) ) ->
+         (* A binding carries its own endpoint and its own credential, so the
+            row's environment names answer nothing this target reads. *)
+         match target.wire with
+         | Binding_wire _ -> names
+         | Catalog_provider_wire ->
+           let names =
+             match provider.base_url_env with
+             | Some name when name <> "" -> String_set.add name names
+             | Some _ | None -> names
+           in
+           if provider.api_key_env = ""
+           then names
+           else String_set.add provider.api_key_env names)
       String_set.empty
       structural
   in
@@ -719,44 +765,71 @@ let load_resolver_snapshot
         , (provider : Model_catalog.provider_entry)
         , (model : Model_catalog.model_entry) ) ->
          let* targets = result in
-         let capabilities = Binding.capabilities_of_catalog_binding provider model in
          let anthropic_thinking_control =
            Binding.anthropic_thinking_control_of_model model
          in
          let* () =
-           match provider.base_url_env with
-           | Some name when name <> "" ->
+           match target.wire, provider.base_url_env with
+           | Catalog_provider_wire, Some name when name <> "" ->
              (match observed_environment name with
               | Ok _ -> Ok ()
               | Error () ->
                 Error (Environment_read_failed { environment_variable = name }))
-           | Some _ | None -> Ok ()
+           | (Catalog_provider_wire | Binding_wire _), (Some _ | None) -> Ok ()
          in
-         let base_url = Model_provider_catalog.resolved_base_url ~getenv provider in
+         (* The wire, and with it the capabilities a request on that wire can
+            express and the reasoning stance it has to state. A binding answers
+            with the config its ordinary requests already run on: its own
+            capability override first, else the frozen row laid over the base
+            that wire selects. *)
+         let kind, base_url, request_path, reasoning_uncontrolled, capabilities =
+           match target.wire with
+           | Catalog_provider_wire ->
+             ( provider.kind
+             , Model_provider_catalog.resolved_base_url ~getenv provider
+             , provider.request_path
+             , false
+             , Binding.capabilities_of_catalog_binding provider model )
+           | Binding_wire { config = binding; credential = _ } ->
+             ( binding.PC.kind
+             , binding.PC.base_url
+             , binding.PC.request_path
+             , (* A wire that turns reasoning on by itself accepts one of two
+                  answers: a named effort, or this row saying it rides the
+                  provider's default. Dropping it here left the second kind of
+                  row unable to say either, which is the same field-at-the-
+                  boundary failure this change is about. *)
+               binding.PC.reasoning_uncontrolled
+             , (match binding.PC.model_capabilities_override with
+                | Some capabilities -> capabilities
+                | None ->
+                  Binding.capabilities_of_catalog_binding
+                    ~wire:binding.PC.kind
+                    provider
+                    model) )
+         in
          let* () = validate_base_url ~target_ref:target.target_ref base_url in
          let* () =
-           validate_request_path
-             ~target_ref:target.target_ref
-             ~kind:provider.kind
-             provider.request_path
+           validate_request_path ~target_ref:target.target_ref ~kind request_path
          in
          let* () =
-           validate_model_path ~target_ref:target.target_ref provider.kind target.model_id
+           validate_model_path ~target_ref:target.target_ref kind target.model_id
          in
          let projection_config =
            PC.make
-             ~kind:provider.kind
+             ~kind
              ~provider_id:provider.id
              ~model_id:target.model_id
              ~base_url
              ~headers:[]
-             ~request_path:provider.request_path
+             ~request_path
              ?max_tokens:capabilities.max_output_tokens
              ?max_context:capabilities.max_context_tokens
              ?enable_thinking:target.enable_thinking
              ?reasoning_effort:target.reasoning_effort
              ~supports_structured_output_override:capabilities.supports_structured_output
              ~model_capabilities_override:capabilities
+             ~reasoning_uncontrolled
              ?connect_timeout_s:target.connect_timeout_s
              ()
          in
@@ -766,14 +839,22 @@ let load_resolver_snapshot
          in
          let identity_fingerprint =
            hash_parts
-             ([ "agent_core-exact-output-target-v4"
+             ([ "agent_core-exact-output-target-v5"
               ; target_ref_id target.target_ref
               ; provider.id
-              ; PC.string_of_provider_kind provider.kind
+              ; PC.string_of_provider_kind kind
               ; target.model_id
               ; base_url
-              ; provider.request_path
-              ; provider.api_key_env
+              ; request_path
+              ; (match target.wire with
+                 | Catalog_provider_wire -> provider.api_key_env
+                 | Binding_wire { credential = Credential_not_declared; _ } ->
+                   "credential=none"
+                 | Binding_wire { credential = Credential_resolved _; _ } ->
+                   "credential=binding"
+                 | Binding_wire
+                     { credential = Credential_unresolved { environment_variable }; _ } ->
+                   "credential=unresolved:" ^ environment_variable)
               ; option_bool target.enable_thinking
               ; option_string (Option.map Reasoning_effort.to_string target.reasoning_effort)
               ; option_float target.connect_timeout_s
@@ -789,18 +870,29 @@ let load_resolver_snapshot
            { target_ref = target.target_ref; fingerprint = identity_fingerprint }
          in
          let credential =
-           if provider.api_key_env = ""
-           then Credential_not_required
-           else (
-             match observed_environment provider.api_key_env with
-             | Error () -> Credential_read_failed provider.api_key_env
-             | Ok (Some value) when Binding.has_control value ->
-               Credential_invalid provider.api_key_env
-             | Ok (Some value) ->
-               (match Cli_common_env.trim_non_empty value with
-                | Some credential -> Credential_available (Secret.of_string credential)
-                | None -> Credential_missing provider.api_key_env)
-             | Ok None -> Credential_missing provider.api_key_env)
+           match target.wire with
+           (* The key the binding's own requests carry -- not a second read of
+              an environment name, which the deployment's credential selection
+              may resolve to a different key than the name alone does. *)
+           | Binding_wire { credential = Credential_resolved key; _ } ->
+             Credential_available key
+           | Binding_wire { credential = Credential_not_declared; _ } ->
+             Credential_not_required
+           | Binding_wire { credential = Credential_unresolved { environment_variable }; _ }
+             -> Credential_missing environment_variable
+           | Catalog_provider_wire ->
+             if provider.api_key_env = ""
+             then Credential_not_required
+             else (
+               match observed_environment provider.api_key_env with
+               | Error () -> Credential_read_failed provider.api_key_env
+               | Ok (Some value) when Binding.has_control value ->
+                 Credential_invalid provider.api_key_env
+               | Ok (Some value) ->
+                 (match Cli_common_env.trim_non_empty value with
+                  | Some credential -> Credential_available (Secret.of_string credential)
+                  | None -> Credential_missing provider.api_key_env)
+               | Ok None -> Credential_missing provider.api_key_env)
          in
          let target_id = target_ref_id target.target_ref in
          Ok

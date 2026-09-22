@@ -692,7 +692,7 @@ let test_enum_literal_is_refused_before_any_node () =
        check
          (list string)
          "the refusal names the declared members"
-         [ "memory"; "absorbed"; "history"; "all" ]
+         [ "current"; "absorbed"; "history"; "all" ]
          (List.map Yojson.Safe.Util.to_string allowed)
      | _ -> fail "the source literal was not refused by its enum")
 ;;

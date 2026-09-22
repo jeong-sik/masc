@@ -305,16 +305,18 @@ let test_choice_set_rejects_no_options_and_shared_labels () =
 ;;
 
 let test_config_defaults () =
+  let first, rest = Runtime_schema.default_typesafeai.Runtime_schema.destinations in
   Alcotest.(check string) "default endpoint"
-    "https://api.typesafe.ai/v1/systemone" C.default_endpoint;
-  Alcotest.(check string) "default model" "jev-latest" C.default_model
+    "https://api.typesafe.ai/v1/systemone" first.Runtime_schema.endpoint;
+  Alcotest.(check string) "default model" "jev-latest" first.Runtime_schema.model;
+  Alcotest.(check string) "default key variable" "TYPESAFEAI_API_KEY" first.Runtime_schema.api_key_env;
+  Alcotest.(check int) "the vendor's own server alone" 0 (List.length rest)
 ;;
 
 
 let policy
       ?(enabled = true)
-      ?(endpoint = C.default_endpoint)
-      ?(model = C.default_model)
+      ?(destinations = Runtime_schema.default_typesafeai.Runtime_schema.destinations)
       ?(board_attention = true)
       ?(absorb_gate = false)
       ?(context_review = false)
@@ -324,8 +326,7 @@ let policy
   : Runtime_schema.typesafeai
   =
   { Runtime_schema.lane_enabled = enabled
-  ; lane_endpoint = endpoint
-  ; lane_model = model
+  ; destinations
   ; board_attention
   ; absorb_gate
   ; context_review
@@ -337,15 +338,77 @@ let policy
 let with_policy p f = Masc_test_deps.with_typesafeai_policy p f
 let with_key key f = Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" key f
 
+let destination
+      ?(endpoint = "https://fixture.invalid/systemone")
+      ?(model = "jev-next")
+      ?(api_key_env = "TYPESAFEAI_API_KEY")
+      ()
+  : Runtime_schema.typesafeai_destination
+  =
+  { Runtime_schema.endpoint; model; api_key_env }
+;;
+
 (* The lane reads the published [typesafeai] table; before any load that is
    the default, and the key alone comes from the environment. *)
 let test_config_reads_the_published_policy () =
   with_policy (policy ()) (fun () ->
-    Alcotest.(check string) "the default endpoint" C.default_endpoint (C.endpoint ());
-    Alcotest.(check string) "the default model" C.default_model (C.model ()));
-  with_policy (policy ~endpoint:"https://fixture.invalid/systemone" ~model:"jev-next" ()) (fun () ->
-    Alcotest.(check string) "the table's endpoint" "https://fixture.invalid/systemone" (C.endpoint ());
-    Alcotest.(check string) "the table's model" "jev-next" (C.model ()))
+    Alcotest.(check bool) "the default table names the vendor's own server alone" true
+      (C.configured_destinations ()
+       = Runtime_schema.default_typesafeai.Runtime_schema.destinations));
+  let named = destination (), [] in
+  with_policy (policy ~destinations:named ()) (fun () ->
+    Alcotest.(check bool) "the table's destinations" true (C.configured_destinations () = named))
+;;
+
+(* A destination is asked only when the variable it names holds a key. The
+   armed ones keep the table's order, so a first destination without a key
+   leaves the second to be asked first. *)
+let test_only_destinations_with_a_key_are_armed () =
+  let second_key = "MASC_TEST_TYPESAFEAI_SECOND_KEY" in
+  let typesafe = destination ~endpoint:"https://fixture.invalid/typesafe" ~model:"jev-latest" () in
+  let openrouter =
+    destination
+      ~endpoint:"https://fixture.invalid/openrouter"
+      ~model:"~typesafe/jev-latest"
+      ~api_key_env:second_key
+      ()
+  in
+  let armed () =
+    match C.lane_destinations () with
+    | Error reason -> [ C.unavailable_reason_to_string reason ]
+    | Ok (first, rest) ->
+      List.map
+        (fun (armed : Masc.Typesafeai_client.destination) ->
+           String.concat "|" [ armed.endpoint; armed.model; armed.api_key ])
+        (first :: rest)
+  in
+  let with_second key f = Masc_test_deps.with_process_env second_key key f in
+  with_policy (policy ~destinations:(typesafe, [ openrouter ]) ()) (fun () ->
+    with_key (Some "k-typesafe") (fun () ->
+      with_second (Some "k-openrouter") (fun () ->
+        Alcotest.(check (list string)) "both armed, in the table's order"
+          [ "https://fixture.invalid/typesafe|jev-latest|k-typesafe"
+          ; "https://fixture.invalid/openrouter|~typesafe/jev-latest|k-openrouter"
+          ]
+          (armed ()));
+      with_second None (fun () ->
+        Alcotest.(check (list string)) "only the destination whose variable holds a key"
+          [ "https://fixture.invalid/typesafe|jev-latest|k-typesafe" ]
+          (armed ());
+        Alcotest.(check (list string)) "the one left out is named for the boot report"
+          [ second_key ]
+          (List.map
+             (fun (left_out : Runtime_schema.typesafeai_destination) -> left_out.api_key_env)
+             (C.unarmed_destinations ()))));
+    with_key None (fun () ->
+      with_second (Some "k-openrouter") (fun () ->
+        Alcotest.(check (list string)) "the second alone is armed"
+          [ "https://fixture.invalid/openrouter|~typesafe/jev-latest|k-openrouter" ]
+          (armed ()));
+      with_second None (fun () ->
+        Alcotest.(check (list string)) "no key anywhere" [ "no_armed_destination" ] (armed ());
+        Alcotest.(check int) "a lane that is simply off singles nothing out" 0
+          (List.length (C.unarmed_destinations ())))))
 ;;
 
 let test_config_readiness_is_typed_and_credential_free () =
@@ -359,11 +422,24 @@ let test_config_readiness_is_typed_and_credential_free () =
       match C.readiness () with
       | C.Off -> ()
       | C.Configured _ -> Alcotest.fail "a lane turned off reported JEV configured");
-    with_policy (policy ~model:"jev-next" ()) (fun () ->
+    (* The projection names a destination by its observation URL: whatever the
+       configured endpoint carries in userinfo or query stays out of it. *)
+    let configured =
+      destination
+        ~endpoint:"https://user:url-secret@fixture.invalid/systemone?token=url-secret"
+        ~model:"jev-next"
+        ()
+    in
+    with_policy (policy ~destinations:(configured, []) ()) (fun () ->
       match C.readiness () with
       | C.Off -> Alcotest.fail "an enabled configuration reported JEV off"
-      | C.Configured { model } ->
-        Alcotest.(check string) "readiness carries the model, never the key" "jev-next" model))
+      | C.Configured { destinations } ->
+        Alcotest.(check (list (pair string string)))
+          "readiness carries the armed destinations, never a key"
+          [ "https://fixture.invalid/systemone", "jev-next" ]
+          (List.map
+             (fun (d : Masc.Typesafeai_client.destination_id) -> d.destination_uri, d.model)
+             destinations)))
 ;;
 
 (* Each gate has its own switch on top of the lane's: a key turns the lane
@@ -395,34 +471,46 @@ let test_each_gate_has_its_own_switch () =
 
 (* A keeper named in [excluded_keepers] is never asked about, whichever gate
    asks; every other keeper gets the key. The reason a gate is off is the
-   first of the lane switch, the key, the gate's switch and the exclusion. *)
+   first of the gate's switch, the exclusion, the lane switch and the key:
+   what the operator declared comes before what the lane can do, so a gate
+   that is on and unaskable is told apart from one that was told not to ask. *)
 let test_an_excluded_keeper_keeps_its_content_home () =
   let state = function
     | Error reason -> C.unavailable_reason_to_string reason
-    | Ok api_key -> "on:" ^ api_key
+    | Ok ((first : Masc.Typesafeai_client.destination), _) -> "on:" ^ first.api_key
   in
   let excluded = "kidsnote-slack-context-collector" in
   with_key (Some "synthetic-jev-key") (fun () ->
     with_policy (policy ~absorb_gate:true ~excluded_keepers:[ excluded ] ()) (fun () ->
       Alcotest.(check string) "the absorb gate excludes the named keeper" "keeper_excluded"
-        (state (C.absorb_gate_api_key ~keeper_id:excluded));
+        (state (C.absorb_gate_destinations ~keeper_id:excluded));
       Alcotest.(check string) "the Board gate excludes the same keeper" "keeper_excluded"
-        (state (C.board_attention_api_key ~keeper_id:excluded));
+        (state (C.board_attention_destinations ~keeper_id:excluded));
       Alcotest.(check string) "another keeper gets the key at the absorb gate" "on:synthetic-jev-key"
-        (state (C.absorb_gate_api_key ~keeper_id:"polisher"));
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher"));
       Alcotest.(check string) "and at the Board gate" "on:synthetic-jev-key"
-        (state (C.board_attention_api_key ~keeper_id:"polisher"));
+        (state (C.board_attention_destinations ~keeper_id:"polisher"));
       Alcotest.(check bool) "the exclusion is one question" true (C.is_excluded ~keeper_id:excluded));
     with_policy (policy ~excluded_keepers:[ "polisher" ] ()) (fun () ->
       Alcotest.(check string) "an exclusion does not turn a gate on" "absorb_gate_disabled"
-        (state (C.absorb_gate_api_key ~keeper_id:"polisher")));
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
     with_policy (policy ~enabled:false ~absorb_gate:true ~excluded_keepers:[ "polisher" ] ()) (fun () ->
-      Alcotest.(check string) "the lane switch is named before the exclusion" "lane_disabled"
-        (state (C.absorb_gate_api_key ~keeper_id:"polisher"))));
+      Alcotest.(check string) "the exclusion is named before the lane switch" "keeper_excluded"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~enabled:false ~absorb_gate:true ()) (fun () ->
+      Alcotest.(check string) "a gate that is on names the lane switch" "lane_disabled"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~enabled:false ~absorb_gate:false ()) (fun () ->
+      Alcotest.(check string) "a gate that is off names its own switch, not the lane's"
+        "absorb_gate_disabled"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher"))));
   with_key None (fun () ->
     with_policy (policy ~absorb_gate:true ~excluded_keepers:[ "polisher" ] ()) (fun () ->
-      Alcotest.(check string) "no key is named before the exclusion" "missing_api_key"
-        (state (C.absorb_gate_api_key ~keeper_id:"polisher"))))
+      Alcotest.(check string) "the exclusion is named before the missing key" "keeper_excluded"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~absorb_gate:true ()) (fun () ->
+      Alcotest.(check string) "a gate that is on names the missing key" "no_armed_destination"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher"))))
 ;;
 
 let test_context_and_skill_reviews_require_their_own_opt_in () =
@@ -432,8 +520,8 @@ let test_context_and_skill_reviews_require_their_own_opt_in () =
   in
   let check_reviews label expected =
     Alcotest.(check (pair string string)) label expected
-      (state (C.context_review_api_key ~keeper_id:"polisher"),
-       state (C.skill_applicability_api_key ~keeper_id:"polisher"))
+      (state (C.context_review_destinations ~keeper_id:"polisher"),
+       state (C.skill_applicability_destinations ~keeper_id:"polisher"))
   in
   with_key (Some "synthetic-jev-key") (fun () ->
     with_policy (policy ()) (fun () ->
@@ -453,7 +541,7 @@ let test_context_and_skill_reviews_require_their_own_opt_in () =
       check_reviews "lane disabled" ("lane_disabled", "lane_disabled")));
   with_key None (fun () ->
     with_policy (policy ~context_review:true ~skill_applicability:true ()) (fun () ->
-      check_reviews "both reviews require a key" ("missing_api_key", "missing_api_key")))
+      check_reviews "both reviews require a key" ("no_armed_destination", "no_armed_destination")))
 ;;
 
 (* Names are checked against the declared Keeper roster at boot. *)
@@ -504,6 +592,8 @@ let () =
             test_config_readiness_is_typed_and_credential_free
         ; Alcotest.test_case "reads the published policy" `Quick
             test_config_reads_the_published_policy
+        ; Alcotest.test_case "only destinations with a key are armed" `Quick
+            test_only_destinations_with_a_key_are_armed
         ; Alcotest.test_case "an excluded keeper keeps its content home, at both gates" `Quick
             test_an_excluded_keeper_keeps_its_content_home
         ; Alcotest.test_case "Context and Skill reviews require separate opt-in" `Quick

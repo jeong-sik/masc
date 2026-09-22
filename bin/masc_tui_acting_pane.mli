@@ -82,8 +82,8 @@ type feed =
 (** One keeper as the fleet block draws it. [mark] is the one-cell health
     glyph the roster draws ({!Masc_tui_keeper_mark}); [mark_tone] is the
     colour the caller reads out of the same health. [health] is that same
-    reading. A gone process marks an unsettled feed record with [!]; every
-    other unsettled record wears [~], without asserting a current turn. *)
+    reading. A gone process marks an open feed record with [!]; every
+    other open record wears [~], without asserting a current turn. *)
 type keeper = {
   name : string;
   mark : string;
@@ -225,6 +225,14 @@ type rendering = {
           fits, so a wheel over a short pane moves nothing *)
 }
 
+val next_target_row : targets:row_target array -> row:int -> step:int -> int option
+(** The row a keyboard cursor rests on next: from [row], stepping [step]
+    (1 down, -1 up) through the frame's [targets], the first row a press
+    would act on -- any target but {!Target_none}. [None] when no such row
+    lies that way, or when [step] is zero. [row = -1] with [step = 1] finds
+    the first; the caller then scrolls the pane, since the rows are the
+    frame's and the next call may be below it. *)
+
 val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
 (** Exactly [rows] lines, each exactly [cols] display cells once its spans
     are joined: a line that would overflow is cut at the right edge, a short
@@ -263,8 +271,15 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
 
     Recent tab under [Selected_only]: the fleet rows of keepers waiting on
     an approval, then the selected keeper's focus block, windowed like the
-    Changes tab. The focus header names a settled turn by its number alone;
-    an unsettled record spells its state. Under [Whole_fleet], two layouts.
+    Changes tab. The focus header says what the keeper is doing now when the
+    record carries it -- [running <tool> 4s] while a wire call is out,
+    [waiting on model 12s] while a provider call is in flight, [idle 3m] on
+    a finished record -- each with its own clock and, on a finished record,
+    the turn number after it. A record that says none of the three (between
+    a tool's return and the next provider call, or a CLI lane, which sends
+    no turn markers) keeps the older reading: a finished turn by its number
+    alone, every other record spelling its state ([open], [no end, process
+    gone]), and the age of the newest event. Under [Whole_fleet], two layouts.
     At [scroll = 0] the overview: the fleet takes at
     most half the rows below the header when the focus block has something to
     show, a fold line counts the keepers left out, and the focus block takes
@@ -283,12 +298,15 @@ val keeper_state_text :
   approval:string option ->
   Masc_tui_acting.chunk option ->
   span list
-(** The fleet row's recent observation: approval first, then the record's
-    glyph ([~] unsettled, [!] unsettled with the process gone, the settled
-    mark otherwise) and its words: the newest tool and the observed count
-    ([4+ calls], [no calls yet]) before a settle, the settle's count
-    ([12 calls]) and the tokens after. Unknown settled counts stay unknown.
-    No clock: the age of the newest event is on the focus header. *)
+(** The fleet row's recent observation in four fixed columns: the state
+    word ([approval] with the tool, [no events], [open] with the newest
+    tool, [done]), then the call figure ([-] or [2+] observed so far on an
+    open record, [3] or [?] from the end event on a done one) and the token
+    sum on a done one. [no end] would be the word for a gone process, but
+    {!lines} draws no fleet row for an offline keeper, so only a direct
+    caller sees it. No glyph: the row's one-cell mark is the keeper's
+    health, not the record. No clock: the age of the newest event is on the
+    focus header. *)
 
 val tokens_text : int option * int option -> string
 (** Input and output tokens as two parts when both are known

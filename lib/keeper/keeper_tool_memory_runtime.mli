@@ -4,7 +4,9 @@
     [Tool_shard.memory_search_source_enum_strings] (cycle avoidance,
     sync regression test catches drift). *)
 type memory_search_source =
-  | Memory
+  | Current
+      (** Ordinary and source-bound facts that are current now. This is the
+          default and excludes absorbed history. *)
   | Absorbed
       (** Facts a librarian pass merged into a newer claim (RFC-0456 §4.2),
           read from [<keeper>.memory-absorbed.jsonl]. *)

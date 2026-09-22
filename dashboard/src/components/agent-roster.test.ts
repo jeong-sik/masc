@@ -136,7 +136,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     partial: Partial<NonNullable<KeeperCompositeSnapshot['runtime_attention']>> = {},
   ): NonNullable<KeeperCompositeSnapshot['runtime_attention']> {
     return {
-      state: 'active',
+      state: 'ok',
       needs_attention: false,
       blocked: false,
       reason: null,

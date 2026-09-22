@@ -3,8 +3,8 @@ description = """
 Search durable Memory OS facts or raw conversation history, case-insensitively. \
 Complete-query substrings rank first. Fallback requires every ASCII-whitespace \
 fragment to appear as a substring, in any order. Both tiers run across \
-stores; each tier keeps store order. The default reads current facts and \
-absorbed originals; source='all' adds history. History requires a non-empty \
+stores; each tier keeps store order. The default reads only current facts; \
+source='all' adds absorbed originals and history. History requires a non-empty \
 query. Fact results name their store and original basis; current facts \
 include exact memory_id and category. Use a memory_id as a derived \
 conclusion's premise_id only for store='current_memory_snapshot'. \
@@ -28,7 +28,8 @@ value is rejected."""
 [[params]]
 name = "source"
 type = "string"
-enum = ["memory", "absorbed", "history", "all"]
+enum = ["current", "absorbed", "history", "all"]
 description = """
-Search scope: memory (default, current and absorbed facts), absorbed (facts \
+Search scope: current (default, ordinary and source-bound current facts), \
+absorbed (facts \
 merged into a newer claim), history (raw messages), or all"""

@@ -59,8 +59,8 @@ Opting in sends an HTTP POST to the configured TypeSafe AI endpoint (default:
 
 The JSON body has exactly three top-level fields:
 
-- `model`: the configured `[typesafeai] model` value (`jev-latest` by
-  default);
+- `model`: the `model` of the `[typesafeai] destinations` entry being asked
+  (`jev-latest` for the default destination);
 - `state`: one `singleton_judgment_request`;
 - `questions`: one `relevance` choice question.
 

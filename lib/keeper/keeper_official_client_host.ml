@@ -376,9 +376,10 @@ type carried_start_front =
   | Lane_cut
       (** The lane's own cut sits at or past the seed's position, so it named
           the front. *)
-  | Whole_history
-      (** No seed held and the lane cut nothing: the range starts at the
-          oldest atom and the provider judges it. *)
+  | Turn_start
+      (** No seed held and the lane cut nothing later: the range starts
+          where the last completed turn on this history ended, this turn's
+          own atoms (RFC keeper-context-window-in-tokens §13.4). *)
   | Librarian_snapshot of { absorbed_through : int }
       (** The Librarian absorbed the history through [end_atom] and wrote
           what the keeper was in the middle of; the range starts there and
@@ -409,7 +410,7 @@ let carried_start_front_to_string = function
   | Carried_seed source ->
     Printf.sprintf "carried:%s" (Keeper_carried_front.source_to_string source)
   | Lane_cut -> "lane_cut"
-  | Whole_history -> "whole_history"
+  | Turn_start -> "turn_start"
   (* The same word the Agent Core lane logs for this front
      ([Keeper_carried_front.origin_to_string]), so one search finds both. *)
   | Librarian_snapshot _ -> "librarian_snapshot"
@@ -427,15 +428,15 @@ let carried_start_front_to_string = function
    These lanes hold no ledger: the ledger is written from the usage of a
    request this process composed ([Keeper_turn_driver_try_provider]), and an
    official client composes its own. The seed the caller reads is therefore
-   the whole answer, and with no seed the range is the whole history, which
-   the provider then judges — the same two outcomes the Agent Core path has
-   without a ledger.
+   the whole answer, and with no seed the range starts at [turn_start]: the
+   end of the last completed turn on this history, where the Agent Core path
+   starts without a ledger too (RFC keeper-context-window-in-tokens §13.4).
 
    [own_first_atom] is the front the calling lane already chose for its own
    reason — Claude Code cuts its start seed to the runtime's declared
-   max-prompt-bytes — and the range starts at whichever of the two is later,
-   so neither cut is undone by the other. A lane with no cut of its own
-   passes 0.
+   max-prompt-bytes — and the range starts at whichever of the positions is
+   latest, so no cut is undone by another. A lane with no cut of its own
+   passes 0; a history with no completed turn has [turn_start] 0.
 
    Runs on the calling fiber: reading the seed opens the keeper's turn-record
    store, which takes an [Eio.Mutex], so it cannot run on a CPU-pool domain.
@@ -458,6 +459,7 @@ let carried_start_range
       ~carried_front_seed
       ~librarian_front
       ~own_first_atom
+      ~turn_start
       messages
   =
   let seed_read =
@@ -508,19 +510,25 @@ let carried_start_range
            ~keeper_name
            "model input carried range dropped its front runtime=%s seed=%s reason=%s \
             history_atoms=%d: the history does not open that atom with the same \
-            message, and the start seed carries the whole history"
+            message, and the start seed starts at the turn's own boundary"
            runtime_id
            (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json seed))
            (Keeper_carried_front.dropped_front_to_string dropped)
            history_atom_count;
          None)
   in
-  let lane_only = own_first_atom, (if own_first_atom > 0 then Lane_cut else Whole_history) in
+  let seedless =
+    let turn_start =
+      Keeper_carried_front.clamp ~atom_count:history_atom_count turn_start
+    in
+    if own_first_atom > turn_start then own_first_atom, Lane_cut
+    else turn_start, Turn_start
+  in
   let seed_or_lane =
     match seeded_first_atom with
     | Some (first_atom, source) when first_atom >= own_first_atom ->
       first_atom, Carried_seed source
-    | Some _ | None -> lane_only
+    | Some _ | None -> seedless
   in
   (* Read after the seed, so a position the seed would outrank costs nothing
      to establish. *)

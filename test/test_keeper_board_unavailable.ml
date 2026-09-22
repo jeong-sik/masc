@@ -21,9 +21,8 @@
    3. a transient read failure is not collapsed into the permanent-consume
       path: the exact queue selection remains pending and provider dispatch
       is blocked until a later intake can render it.
-   4. a readable comment event names the replies after the keeper's latest
-      comment by where they start in the thread and the ids at either end.
-   5. the Board replay path names the same replies. *)
+   4. a queued comment keeps its own author and body after later replies.
+   5. Board replay routes exact replies instead of historical participation. *)
 
 open Alcotest
 open Masc
@@ -624,14 +623,14 @@ let add_comment ~post_id ~author content =
   | Error error -> failf "comment: %s" (Board.show_board_error error)
 ;;
 
-let comment_event ~meta ~post_id ~author content =
+let comment_event ~meta ~post_id ~comment_id ~author content =
   let stimulus : Keeper_event_queue.stimulus =
     { Keeper_event_queue.post_id
     ; urgency = Keeper_event_queue.Normal
     ; arrived_at = Time_compat.now ()
     ; payload =
         Keeper_event_queue.Board_signal
-          { kind = Keeper_event_queue.Comment_added
+          { kind = Keeper_event_queue.Comment_added { comment_id; parent_id = None }
           ; author
           ; title = "thread"
           ; content
@@ -649,114 +648,204 @@ let comment_event ~meta ~post_id ~author content =
   | Ok (Some event) -> event
 ;;
 
-(* The replies as (offset, oldest id, newer ids). *)
-let replies = option (triple int string (list string))
-
-let replies_of (event : Keeper_world_observation.pending_board_event) =
-  Option.map
-    (fun { Keeper_world_observation_board_signal.comment_offset; oldest; newer } ->
-       ( comment_offset
-       , Board.Comment_id.to_string oldest
-       , List.map Board.Comment_id.to_string newer ))
-    event.Keeper_world_observation.replies_after_own_comment
-;;
-
-(* (4) The thread: a peer, the keeper, a peer, the keeper again, then three
-   peers. Before the keeper speaks the event names no replies. Right after its
-   second comment it names none either, although a peer answered its first.
-   After the three replies it names them from offset 4, and a thread read at
-   that offset starts at the first of them. *)
-let test_comment_event_names_the_replies_after_the_latest_own_comment () =
-  let keeper_name = "reply-ids" in
-  let meta = test_meta keeper_name in
+let test_queued_comment_keeps_its_author_and_body () =
+  let meta = test_meta "queued-reader" in
   let post_id = create_thread ~title:"thread" "thread topic" in
-  let (_ : string) = add_comment ~post_id ~author:"peer-early" "before the keeper spoke" in
-  check
-    replies
-    "no own comment yet"
-    None
-    (replies_of
-       (comment_event ~meta ~post_id ~author:"peer-early" "before the keeper spoke"));
-  let (_ : string) = add_comment ~post_id ~author:keeper_name "keeper was here" in
-  let answer_to_first = add_comment ~post_id ~author:"peer-a" "answer to the first" in
-  let (_ : string) = add_comment ~post_id ~author:keeper_name "keeper again" in
-  check
-    replies
-    "nothing after the latest own comment"
-    None
-    (replies_of (comment_event ~meta ~post_id ~author:keeper_name "keeper again"));
-  let first_reply = add_comment ~post_id ~author:"peer-b" "first reply" in
-  let second_reply = add_comment ~post_id ~author:"peer-c" "second reply" in
-  let third_reply = add_comment ~post_id ~author:"peer-d" "third reply" in
-  let event = comment_event ~meta ~post_id ~author:"peer-d" "third reply" in
-  check
-    replies
-    "the replies after the latest own comment"
-    (Some (4, first_reply, [ second_reply; third_reply ]))
-    (replies_of event);
-  let fields = Keeper_unified_prompt.For_testing.board_event_fields event in
-  let field name = List.assoc_opt name fields in
-  check (option string) "the count" (Some "3") (field "new_replies_since_own");
-  check (option string) "the offset" (Some "4") (field "new_replies_comment_offset");
-  check (option string) "the oldest id" (Some first_reply) (field "oldest_new_reply_id");
-  check (option string) "the newest id" (Some third_reply) (field "newest_new_reply_id");
-  let read =
-    Board_tool.handle_tool
-      ~result_boundary:Tool_output.Sent_to_client
-      "masc_board_post_get"
-      (`Assoc [ "post_id", `String post_id; "comment_offset", `Int 4 ])
-  in
-  let position =
-    match Board.Comment_page.Position.of_metadata (Tool_result.metadata read) with
-    | Some position -> position
-    | None -> failf "the thread read carries no page position"
-  in
-  check
-    (list int)
-    "the thread read at offset 4 is the last three of seven comments"
-    [ 4; 3; 7 ]
-    Board.Comment_page.Position.[ position.offset; position.returned; position.total ];
-  let thread = Tool_result.message read in
-  let on_page id = String_util.contains_substring thread id in
-  check
-    (list bool)
-    "the page shows the three replies and not the earlier answer"
-    [ true; true; true; false ]
-    (List.map on_page [ first_reply; second_reply; third_reply; answer_to_first ])
+  ignore (add_comment ~post_id ~author:meta.name "earlier participation" : string);
+  let first = add_comment ~post_id ~author:"first-author" "first reply" in
+  ignore (add_comment ~post_id ~author:"later-author" "later reply" : string);
+  let event = comment_event ~meta ~post_id ~comment_id:first ~author:"first-author" "first reply" in
+  check (option string) "queued author" (Some "first-author") event.latest_external_author;
+  check (option string) "queued body" (Some "first reply") event.latest_external_preview;
+  check bool "unrelated later replies are not attached" true
+    (Option.is_none event.replies_after_own_comment)
 ;;
 
-(* (5) The Board replay path. The keeper's cursor is set at the head, then a
-   thread gets a keeper comment and two replies, which moves the thread past
-   the cursor. The replay row for it names the two replies the same way. *)
-let test_board_replay_row_names_the_replies_after_the_own_comment () =
+let test_board_replay_routes_exact_replies () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
-  let keeper_name = "replay-replies" in
-  let meta = test_meta keeper_name in
+  let poster = test_meta "reply-poster" in
+  let parent_author = test_meta "reply-parent" in
+  let bystander = test_meta "reply-bystander" in
   Keeper_registry.For_testing.clear ();
   Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.clear ())
   @@ fun () ->
-  ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
-  let (_ : string) = create_thread ~title:"earlier" "a post before the cursor" in
-  let events, _, _ = Keeper_world_observation.collect_board_events ~base_path ~meta in
-  check int "the first collection only places the cursor" 0 (List.length events);
-  let post_id = create_thread ~title:"thread" "thread topic" in
-  let (_ : string) = add_comment ~post_id ~author:keeper_name "keeper was here" in
-  let first_reply = add_comment ~post_id ~author:"peer-a" "first reply" in
-  let second_reply = add_comment ~post_id ~author:"peer-b" "second reply" in
-  let events, _, _ = Keeper_world_observation.collect_board_events ~base_path ~meta in
-  match
-    List.filter
-      (fun (event : Keeper_world_observation.pending_board_event) ->
-         String.equal event.post_id post_id)
-      events
-  with
-  | [ event ] ->
-    check
-      replies
-      "the replay row names the replies after the keeper's comment"
-      (Some (1, first_reply, [ second_reply ]))
-      (replies_of event)
-  | rows -> failf "expected one replay row for the thread, got %d" (List.length rows)
+  let post_id =
+    match Board_dispatch.create_post ~author:poster.name ~content:"thread topic"
+            ~title:"thread" ~post_kind:Board.Human_post () with
+    | Ok post -> Board.Post_id.to_string post.id
+    | Error error -> fail (Board.show_board_error error)
+  in
+  let parent_id = add_comment ~post_id ~author:parent_author.name "parent comment" in
+  ignore (add_comment ~post_id ~author:bystander.name "past participation" : string);
+  let metas = [poster; parent_author; bystander] in
+  List.iter (fun (meta : Keeper_meta_contract.keeper_meta) ->
+    ignore (Keeper_registry.For_testing.register ~base_path meta.name meta);
+    ignore (Keeper_world_observation.collect_board_events ~base_path ~meta)) metas;
+  let collect (meta : Keeper_meta_contract.keeper_meta) =
+    let snapshot () =
+      match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:meta.name with
+      | Ok queue -> Keeper_event_queue.to_list queue | Error detail -> fail detail in
+    let before = snapshot () in
+    let events, _, _ = Keeper_world_observation.collect_board_events ~base_path ~meta in
+    check int "live replay uses durable queue, not ephemeral events" 0 (List.length events);
+    snapshot ()
+    |> List.filter (fun source ->
+         not (List.exists (Keeper_event_queue.stimulus_identity_equal source) before))
+    |> List.filter_map (fun source ->
+         match Keeper_world_observation.pending_board_event_of_stimulus ~meta source with
+         | Ok event -> event
+         | Error unavailable -> fail (Keeper_world_observation_board_signal.unavailable_to_string unavailable))
+  in
+  ignore (add_comment ~post_id ~author:"external" "top-level comment" : string);
+  check int "post author receives top-level reply on own post" 1 (List.length (collect poster));
+  check int "past parent author does not receive unrelated reply" 0 (List.length (collect parent_author));
+  check int "past participant does not receive unrelated reply" 0 (List.length (collect bystander));
+  Unix.sleepf write_spacing_seconds;
+  (match Board_dispatch.add_comment ~post_id ~parent_id ~author:"external"
+           ~content:"direct answer" () with
+   | Ok _ -> () | Error error -> fail (Board.show_board_error error));
+  List.iter (fun meta ->
+    match collect meta with
+    | [event] ->
+      check (option string) "actual nested reply body" (Some "direct answer")
+        event.Keeper_world_observation.latest_external_preview;
+      check bool "comment event" true (match event.event_kind with Board_comment_added _ -> true | _ -> false)
+    | events -> failf "expected one direct reply, got %d" (List.length events))
+    [poster; parent_author];
+  check int "unrelated participant still excluded" 0 (List.length (collect bystander));
+  List.iter (fun meta -> check int "next tick has no repeated reply" 0
+    (List.length (collect meta))) metas;
+  ignore (add_comment ~post_id ~author:"external" "@reply-bystander explicit answer" : string);
+  check int "explicit comment mention replays without prior-parent match" 1
+    (List.length (collect bystander));
+  check int "explicit audience does not turn into post-author delivery" 0
+    (List.length (collect poster));
+  Unix.sleepf write_spacing_seconds;
+  (match Board_dispatch.update_post ~post_id ~editor:poster.name
+           ~content:"@reply-bystander mention added by editing" () with
+   | Ok _ -> () | Error error -> fail (Board.show_board_error error));
+  check int "mention added by editing an old post replays" 1
+    (List.length (collect bystander));
+  ignore (add_comment ~post_id ~author:"external" "unrelated later comment" : string);
+  check int "later comment does not repeat inherited post mention" 0
+    (List.length (collect bystander))
+;;
+
+let test_catchup_storage_failure_retains_cursor () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let meta = test_meta "catchup-storage" in
+  ignore (Keeper_registry.For_testing.register ~base_path meta.name meta);
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path meta.name)
+  @@ fun () ->
+  ignore (create_thread ~title:"baseline" "before cursor" : string);
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta);
+  let before = Keeper_registry.get_board_cursor ~base_path meta.name in
+  ignore (create_thread ~title:"addressed" "@catchup-storage preserve this" : string);
+  let path = Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) meta.name)
+      Keeper_event_queue_schema.snapshot_filename in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Unix.mkdir path 0o700;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path && Sys.is_directory path then Unix.rmdir path)
+    (fun () ->
+      ignore (Keeper_world_observation.collect_board_events ~base_path ~meta);
+      check bool "failed admission did not advance cursor" true
+        (before = Keeper_registry.get_board_cursor ~base_path meta.name));
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta);
+  let queue = match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:meta.name with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check int "retry durably admits the missed event" 1 (Keeper_event_queue.length queue);
+  check bool "successful admission advances cursor" true
+    (before <> Keeper_registry.get_board_cursor ~base_path meta.name)
+;;
+
+(* [`Reply] queues a comment with a parent, [`Top_level] one without: the
+   parent survives the queue as [Some id] and its absence as [None], so both
+   sides of the optional field make the same round trip. *)
+let accepted_comment_identity_survives_queue_projection ~shape () =
+  let module Signal = Keeper_world_observation_board_signal in
+  let post_id = create_thread ~title:"queued identity" "thread topic" in
+  let parent_id =
+    match shape with
+    | `Reply -> Some (add_comment ~post_id ~author:"parent-author" "parent")
+    | `Top_level -> None
+  in
+  let captured = ref None in
+  Board_dispatch.set_board_signal_hook (fun addressed -> captured := Some addressed);
+  Fun.protect ~finally:(fun () -> Board_dispatch.set_board_signal_hook (fun _ -> ()))
+  @@ fun () ->
+  let accepted =
+    match Board_dispatch.add_comment ~post_id ?parent_id ~author:"reply-author"
+            ~content:"the queued reply" () with
+    | Ok comment -> comment
+    | Error error -> fail (Board.show_board_error error)
+  in
+  let signal =
+    match !captured with
+    | Some addressed -> addressed.Board_dispatch.signal
+    | None -> fail "accepted comment did not emit a signal"
+  in
+  let stimulus : Keeper_event_queue.stimulus =
+    { post_id; urgency = Normal; arrived_at = Time_compat.now ()
+    ; payload = Board_signal (Signal.board_stimulus_of_board_signal signal)
+    }
+  in
+  let restored =
+    match Keeper_event_queue.stimulus_of_yojson
+            (Keeper_event_queue.stimulus_to_yojson stimulus) with
+    | Ok restored -> restored
+    | Error detail -> fail detail
+  in
+  ignore (add_comment ~post_id ~author:"later-author" "a later reply" : string);
+  let observation =
+    match restored.payload with
+    | Keeper_event_queue.Board_signal board ->
+      (match Signal.board_observation_of_board_stimulus ~post_id board with
+       | Ok observation -> observation
+       | Error unavailable -> fail (Signal.unavailable_to_string unavailable))
+    | _ -> fail "restored queue payload is not a Board signal"
+  in
+  (match observation.kind with
+   | Signal.Observed_comment_added identity ->
+     check string "accepted comment ID" (Board.Comment_id.to_string accepted.id)
+       (Board.Comment_id.to_string identity.comment_id);
+     check (option string) "accepted parent ID" parent_id
+       (Option.map Board.Comment_id.to_string identity.parent_id)
+   | _ -> fail "restored signal is not a comment");
+  check string "queued author does not become the later author"
+    "reply-author" observation.author;
+  check string "queued body does not become the later body"
+    "the queued reply" observation.content
+;;
+
+(* The queue only checks that a comment identity is non-empty. One that is
+   not a Board comment id is refused where the queue meets the keeper, as a
+   failed Board read, instead of reaching a consumer as a trusted id. *)
+let test_malformed_queued_comment_identity_is_a_failed_read () =
+  let module Signal = Keeper_world_observation_board_signal in
+  let queued ~comment_id ~parent_id : Keeper_event_queue.board_stimulus =
+    { kind = Keeper_event_queue.Comment_added { comment_id; parent_id }
+    ; author = "reply-author"
+    ; title = "thread"
+    ; content = "a reply"
+    ; hearth = None
+    ; updated_at = None
+    }
+  in
+  let refused what stimulus =
+    match Signal.board_observation_of_board_stimulus ~post_id:"p-queued" stimulus with
+    | Ok _ -> failf "%s: a malformed identity became an observation" what
+    | Error unavailable ->
+      check bool (what ^ " is reported as the identity parse")
+        true (unavailable.Signal.operation = Signal.Parse_queued_comment_identity);
+      check string (what ^ " names the post") "p-queued" unavailable.Signal.post_id
+  in
+  refused "comment id" (queued ~comment_id:"not-a-comment-id" ~parent_id:None);
+  (* The shape Board.Comment_id.generate mints, written out so the test needs
+     no random source. *)
+  let valid = "c-" ^ String.make 32 'a' in
+  refused "parent id" (queued ~comment_id:valid ~parent_id:(Some "not-a-comment-id"))
 ;;
 
 let () =
@@ -806,13 +895,29 @@ let () =
         ] )
     ; ( "replies after own comment"
       , [ test_case
-            "a comment event names the replies after the latest own comment"
+            "catchup storage failure retains cursor"
             `Quick
-            (with_eio test_comment_event_names_the_replies_after_the_latest_own_comment)
+            (with_eio test_catchup_storage_failure_retains_cursor)
         ; test_case
-            "a Board replay row names the replies after the own comment"
+            "accepted comment identity survives queue projection"
             `Quick
-            (with_eio test_board_replay_row_names_the_replies_after_the_own_comment)
+            (with_eio (accepted_comment_identity_survives_queue_projection ~shape:`Reply))
+        ; test_case
+            "a top-level comment keeps no parent through queue projection"
+            `Quick
+            (with_eio (accepted_comment_identity_survives_queue_projection ~shape:`Top_level))
+        ; test_case
+            "a malformed queued comment identity is a failed read"
+            `Quick
+            test_malformed_queued_comment_identity_is_a_failed_read
+        ; test_case
+            "queued comment keeps its author and body"
+            `Quick
+            (with_eio test_queued_comment_keeps_its_author_and_body)
+        ; test_case
+            "Board replay routes exact replies"
+            `Quick
+            (with_eio test_board_replay_routes_exact_replies)
         ] )
     ]
 ;;

@@ -102,6 +102,10 @@ type entry = {
           consumes body budget like any other word and no row exceeds the
           block's wrap width. [None] on every other row; nothing shifts when
           a turn has no span to say. *)
+  speaker : string;
+      (** The label {!role_label} was aligned from, whole. The gutter cuts a
+          long name to its column; the origin heading under {!Origin_row}
+          has the pane's width and draws this instead. *)
   role_label : string;
   role_label_mark_cells : int;
   request_label : string;
@@ -117,11 +121,12 @@ type entry = {
 type metadata =
   | Timeline_break of timeline_bucket
   | Origin of {
-      timestamp : string;
+      clock : string option;
+      speaker : string;
       role_label : string;
       request_label : string;
     }
-  | Continued_at of { timestamp : string }
+  | Continued_at of { clock : string }
 
 type row_kind =
   | Metadata of metadata
@@ -752,13 +757,20 @@ let input_cursor_column ~terminal_cols ~input =
    The badge used to be 16 cells whatever the terminal was, so a
    [codex-mcp-client] read as [codex-mcp-clien…] on a 200-column screen with
    the room to spell it. The width is a fixed pane-derived budget, never below
-   10 so the built-in activity labels remain legible, and
-   never past 14: the built-in activity labels still read whole beside their
+   10 so the built-in activity labels remain legible, and never past the
+   budget below: the built-in activity labels still read whole beside their
    marks, while an opaque long speaker name yields its middle instead of
-   reserving empty cells on every body row. *)
+   reserving empty cells on every body row.
+
+   A sixth of the pane, capped. At a tenth capped at 14 a 130-cell pane --
+   the roster split on a wide terminal -- gave the badge 13 cells, and every
+   keeper of this workspace longer than eleven characters was cut to its
+   ends ("e-m…-leader", "tui…veloper") on every row it spoke. A sixth gives
+   that pane the cap, which spells an eighteen-character name whole beside
+   its mark; an 80-cell pane pays three more cells than before. *)
 let chat_role_label_column = 10
 
-let chat_role_label_share = 10
+let chat_role_label_share = 6
 
 (* A budget, not a measurement of what happens to be loaded.
    Measuring the widest label on the pane tied body width to the message
@@ -771,7 +783,7 @@ let chat_role_label_share = 10
    ("keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent · agent"), so the
    badge took a quarter of the pane and gave it back one message later.
    Fixed, the body keeps its width and only a resize re-wraps. *)
-let chat_role_label_budget = 14
+let chat_role_label_budget = 20
 
 let chat_role_label_width ~pane_cells =
   max chat_role_label_column
@@ -971,36 +983,6 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
     fit_middle column label
   else mark ^ " " ^ fit_middle inner label
 
-(* The inverse of {!align_role_label}: the mark, the name, and the trailing
-   column padding. Written here because this is where the three are joined, and a
-   renderer taking them apart by measuring again is how the two drift.
-
-   The renderer draws the name in reverse video. Reversing the aligned label
-   whole painted the alignment as though it were the badge, so "AUTO" -- four
-   letters -- arrived as an eighteen-cell inverted block with a dozen cells of
-   highlighted nothing between the glyph and the name.
-
-   Tolerant of a label that carries no mark: {!align_role_label} drops it on a
-   column too narrow to hold both, and that label is all name. *)
-let split_aligned_role_label ~style label =
-  let mark = speaker_mark style in
-  let prefix = mark ^ " " in
-  let after_mark =
-    if String.starts_with ~prefix label then
-      String.sub label (String.length prefix)
-        (String.length label - String.length prefix)
-    else label
-  in
-  let mark = if String.equal after_mark label then "" else prefix in
-  let rec walk index =
-    if index > 0 && Char.equal after_mark.[index - 1] ' ' then walk (index - 1)
-    else index
-  in
-  let boundary = walk (String.length after_mark) in
-  ( mark
-  , String.sub after_mark 0 boundary
-  , String.sub after_mark boundary (String.length after_mark - boundary) )
-
 (* #32984: the width gate below is derived from a chat row's fixed chrome,
    not chosen. Before its body, a row pays the frame's border and padding
    (4 cells -- [Masc_tui_frame.inner_width] is [cols - 4], pinned in the
@@ -1109,6 +1091,18 @@ let wrap_words ~max_cells text =
   in
   loop [] (String.split_on_char ' ' text)
 
+(* [HH:MM:SS] cut to the minute for the inline margin. Seconds earn their
+   width on a row of their own; in a margin they are paid for once per message.
+   Text that is not a clock of that shape is left as it is rather than cut
+   blind. *)
+let short_clock timestamp =
+  if
+    String.length timestamp = 8
+    && Char.equal timestamp.[2] ':'
+    && Char.equal timestamp.[5] ':'
+  then String.sub timestamp 0 5
+  else timestamp
+
 (* Consecutive messages from one speaker share a heading. Repeating
    "[time] speaker request" on each of them spent a row per message saying who
    was talking, and a keeper answering in four parts said it four times.
@@ -1131,31 +1125,80 @@ let continues_previous ~(previous : entry option) (entry : entry) =
           else true)
 
 
+(* The heading's clock is the entry's timestamp where the entry has a
+   trustworthy time, and absent where it does not: [timeline_bucket] is
+   [None] exactly on those rows, and the placeholder they carry as
+   [timestamp] is display text, not a time. A heading without a clock draws
+   nothing in the clock's place; a continuation that cannot say when it
+   moved has no row to draw. *)
+(* Who a row speaks for inside one request. A keeper's reply and the work it
+   did to get there -- reasoning, tool calls, skills -- are one voice, the
+   turn's. Everyone else in the request speaks for themselves: the operator
+   who asked, a keeper writing in, the server's status, the pane's own
+   notes. *)
+let speaks_for_turn = function
+  | Keeper | Tool | Skill _ | Thinking -> true
+  | User | Inbound | Status | Local | Journal | Error -> false
+
+(* Under [Origin_row] a heading opens a turn, not a block. A turn that thought,
+   called a tool and answered, eight rounds over, drew a heading above each of
+   its twenty-three blocks -- the same request, the same clock, the same name
+   -- and the blocks it separated were already told apart by how they draw:
+   reasoning dim, tool calls on their rail, the reply in plain text. *)
+let continues_turn ~(previous : entry) (entry : entry) =
+  (not (String.equal entry.request_label ""))
+  && String.equal previous.request_label entry.request_label
+  && speaks_for_turn previous.style
+  && speaks_for_turn entry.style
+
 let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
+  let clock =
+    match entry.timeline_bucket with
+    | Some _ -> Some entry.timestamp
+    | None -> None
+  in
+  let within_turn =
+    match previous with
+    | Some previous -> continues_turn ~previous entry
+    | None -> false
+  in
   let metadata =
-    if not (continues_previous ~previous entry) then
+    if not (within_turn || continues_previous ~previous entry) then
       Some
         ( Origin
-            { timestamp = entry.timestamp;
+            { clock;
+              speaker = entry.speaker;
               role_label = entry.role_label;
               request_label = entry.request_label;
             }
         , Printf.sprintf "[%s] From [%s] %s" entry.timestamp entry.role_label
             entry.request_label )
     else
-      match previous with
-      | Some previous when String.equal previous.timestamp entry.timestamp -> None
-      | Some _ | None ->
-          Some
-            ( Continued_at { timestamp = entry.timestamp }
-            , Printf.sprintf "[%s]" entry.timestamp )
+      match clock, previous with
+      | None, _ -> None
+      (* Inside a turn the clock is the minute, the unit the inline margin
+         already counts in: seconds between a call and the reasoning after it
+         are the turn working, not a pause worth a row. *)
+      | Some _, Some previous
+        when within_turn
+             && String.equal (short_clock previous.timestamp)
+                  (short_clock entry.timestamp) ->
+          None
+      | Some _, Some previous
+        when String.equal previous.timestamp entry.timestamp ->
+          None
+      | Some clock, (Some _ | None) ->
+          Some (Continued_at { clock }, Printf.sprintf "[%s]" clock)
   in
   match metadata with
   | None -> None
   | Some (metadata, text) ->
     let fitted, _, _ = cell_prefix text inner_width in
     Some
-      { style = entry.style
+      { style =
+          (* The heading stands for the whole turn, so it draws as the keeper
+             speaking whichever block the turn happened to open with. *)
+          (if speaks_for_turn entry.style then Keeper else entry.style)
       ; kind = Metadata metadata
       ; shade = Shade_none
       ; text = fitted
@@ -1189,12 +1232,16 @@ let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
           bucket.tb_month bucket.tb_day bucket.tb_hour
         ^ (if bucket.tb_is_dst then " DST" else "")
       in
-      let lead = "\xe2\x94\x80\xe2\x94\x80 " ^ label ^ " " in
+      (* Triple-dash (U+2504), not the solid line: the origin heading under
+         [Origin_row] now ends in a solid rule to its clock, and two solid
+         rules a row apart read as one kind of break. This pane already
+         tells kinds apart by texture -- the journal siding is dashed, an
+         arrival's is solid -- so the hour keeps the dashed one: the time
+         moved, not the speaker. *)
+      let dash = "\xe2\x94\x84" in
+      let lead = dash ^ dash ^ " " ^ label ^ " " in
       let rule_cells = max 0 (inner_width - display_width lead) in
-      let rule =
-        String.concat ""
-          (List.init rule_cells (fun _ -> "\xe2\x94\x80"))
-      in
+      let rule = String.concat "" (List.init rule_cells (fun _ -> dash)) in
       let text, _, _ = cell_prefix (lead ^ rule) inner_width in
       Some
         { style = entry.style
@@ -1236,10 +1283,6 @@ let wrap_body ?markdown ~max_cells ~sanitize text =
    [rows_of_entry] has always floored it at. *)
 let min_body_cells = 4
 
-(* [HH:MM:SS] cut to the minute for the inline margin. Seconds earn their
-   width on a row of their own; in a margin they are paid for once per message.
-   Text that is not a clock of that shape is left as it is rather than cut
-   blind. *)
 (* Every row's clock takes the same cells. A settled row says "23:38" and the
    streaming turn says "live", and the gutter's width is what the body's width
    is taken from, so one cell of difference wrapped the live body differently
@@ -1250,14 +1293,6 @@ let pad_clock text =
   let cells = display_width text in
   if cells >= chat_clock_column then text
   else String.make (chat_clock_column - cells) ' ' ^ text
-
-let short_clock timestamp =
-  if
-    String.length timestamp = 8
-    && Char.equal timestamp.[2] ':'
-    && Char.equal timestamp.[5] ':'
-  then String.sub timestamp 0 5
-  else timestamp
 
 (* [Origin_row] leaves the origin on a row of its own. The other two fold it
    into the body's left margin, which buys back a row per message -- eight

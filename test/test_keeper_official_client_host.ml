@@ -2282,13 +2282,19 @@ let absorbed_snapshot () =
   | Error error -> fail (Snapshot.error_to_string error)
 ;;
 
-let start_range ?(librarian_front = fun _ -> Host.No_position) ?(own_first_atom = 0) messages =
+let start_range
+      ?(librarian_front = fun _ -> Host.No_position)
+      ?(own_first_atom = 0)
+      ?(turn_start = 0)
+      messages
+  =
   Host.carried_start_range
     ~keeper_name:"alpha"
     ~runtime_id:"claude_code.claude-sonnet-5"
     ~carried_front_seed:None
     ~librarian_front
     ~own_first_atom
+    ~turn_start
     messages
 ;;
 
@@ -2312,7 +2318,7 @@ let test_a_start_seed_begins_at_the_librarian_position () =
     (match carried.Host.front with
      | Host.Librarian_snapshot { absorbed_through } ->
        absorbed_through = snapshot.Snapshot.end_atom
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Whole_history -> false);
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start -> false);
   check string "and the log names it the same word the Agent Core lane logs"
     "librarian_snapshot"
     (Host.carried_start_front_to_string carried.Host.front);
@@ -2334,10 +2340,10 @@ let test_a_start_seed_begins_at_the_librarian_position () =
 let test_a_seed_without_a_librarian_position_is_unchanged () =
   let carried = start_range start_seed_messages in
   check int "starts at the oldest atom" 0 carried.Host.first_atom;
-  check bool "whole history" true
+  check bool "the turn start, which is 0 with no completed turn" true
     (match carried.Host.front with
-     | Host.Whole_history -> true
-     | _ -> false)
+     | Host.Turn_start -> true
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Librarian_snapshot _ -> false)
 ;;
 
 (* The Librarian read through the last completed turn, so the position names

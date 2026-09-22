@@ -809,10 +809,21 @@ let test_purge_moves_the_librarian_position_with_the_checkpoint () =
   let count = atoms messages in
   write_position ~end_atom:(count - 1);
   let original = Fs_compat.load_file canonical in
+  (* A continuity snapshot in the old numbering: a preview and a refused
+     apply leave it, an applied purge removes it. Its contents do not
+     matter to the purge, only its numbering, so a placeholder stands in. *)
+  let snapshot_path =
+    Keeper_librarian_continuity.path_for_keepers_dir ~keepers_dir ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname snapshot_path);
+  (match Fs_compat.save_file_atomic_strict snapshot_path "{\"stale\":true}" with
+   | Ok () -> ()
+   | Error _ -> fail "the fixture snapshot was not written");
   (match Checkpoints.purge_current config ~keeper_name ~apply:false with
    | Ok preview ->
      check bool "preview: apply is not allowed" false preview.apply_allowed;
-     check int "preview: the refusal is the one warning" 1 (List.length preview.warnings)
+     check int "preview: the refusal is the one warning" 1 (List.length preview.warnings);
+     check bool "preview: the snapshot is untouched" true
+       (preview.continuity_snapshot = Checkpoints.Snapshot_untouched)
    | Error error -> fail (Checkpoints.purge_error_to_string error));
   (match Checkpoints.purge_current config ~keeper_name ~apply:true with
    | Error
@@ -823,9 +834,20 @@ let test_purge_moves_the_librarian_position_with_the_checkpoint () =
    | Error error -> fail (Checkpoints.purge_error_to_string error)
    | Ok _ -> fail "an apply over an unread atom was allowed");
   check string "a refused apply leaves the checkpoint" original (Fs_compat.load_file canonical);
+  check bool "a refused apply leaves the snapshot" true (Sys.file_exists snapshot_path);
   write_position ~end_atom:count;
   (match Checkpoints.purge_current config ~keeper_name ~apply:true with
-   | Ok result -> check bool "applied" true result.applied
+   | Ok result ->
+     check bool "applied" true result.applied;
+     check bool "the stale snapshot is reported removed" true
+       (result.continuity_snapshot = Checkpoints.Snapshot_removed)
+   | Error error -> fail (Checkpoints.purge_error_to_string error));
+  check bool "the stale snapshot is gone" false (Sys.file_exists snapshot_path);
+  (match Checkpoints.purge_current config ~keeper_name ~apply:true with
+   | Ok again ->
+     check bool "a second apply changes nothing" false again.applied;
+     check bool "and reports the snapshot untouched" true
+       (again.continuity_snapshot = Checkpoints.Snapshot_untouched)
    | Error error -> fail (Checkpoints.purge_error_to_string error));
   let purged =
     match Store.load_agent_core ~session_dir ~session_id:trace_id with

@@ -19,26 +19,32 @@ type catalog_document =
   ; contents : string
   }
 
-(** One exact-output slot: which binding it names, and the request controls and deadlines that
-    binding runs under. The caller already holds these as typed values -- a
-    deployment's runtime bindings -- so they arrive as values rather than as a
-    TOML document to re-parse. [target_ref] is the slot id the lane
-    configuration names, conventionally "<provider>.<model>". *)
+(** The credential a binding sends, as the binding resolved it. An exact
+    request on a binding sends the key that binding's ordinary requests carry
+    -- not a second read of an environment name, which the deployment's
+    credential selection may resolve differently. An environment name that
+    resolved to nothing stays named, so the refusal can say which one. *)
+type binding_credential =
+  | Credential_not_declared  (** The binding names no credential. *)
+  | Credential_resolved of Secret.t
+  | Credential_unresolved of { environment_variable : string }
+
+(** One exact-output slot: the binding it names. The caller already holds that
+    binding as the typed config its ordinary requests run on, so it arrives
+    whole rather than as a field list this module copies -- the wire, the
+    model, the capability override, the thinking and effort controls and the
+    connect deadline are all read from it. Three defects came from copying a
+    subset instead: the connect deadline (#37004), the declared effort
+    (#37326) and the wire itself (#37674). [target_ref] is the slot id the
+    lane configuration names, conventionally "<provider>.<model>". *)
 type declared_target =
   { target_ref : string
-  ; provider_ref : string
-  ; model_id : string
-  ; enable_thinking : bool option
-  ; reasoning_effort : Reasoning_effort.t option
-      (** The binding's explicit effort. [None] leaves the request unspecified.
-          Runtime bindings supply this typed value. Target documents have no
-          effort field and leave it [None]. *)
-  ; connect_timeout_s : float option
+  ; binding : Provider_config.t
+  ; credential : binding_credential
   ; body_timeout_s : float option
-  ; api_key_env : string option
-      (** Which environment name holds this slot's credential. [None] keeps the
-          catalog row's name; a deployment that reads a different one says so
-          in its binding, and that is the authority. *)
+      (** The exact request's body deadline. It is the one request fact a
+          binding does not carry: ordinary requests stream, and this one does
+          not. *)
   }
 
 type resolver_catalog_input =

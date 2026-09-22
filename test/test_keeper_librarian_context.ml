@@ -306,8 +306,130 @@ let test_new_basis_cannot_launder_untouched_advice () = with_store @@ fun keeper
     (member "next_steps" fresh = `List [`String "Answer campaign question"]);
   check int "both source obligations remain recorded" 2 (List.length second.sources)
 
+let test_exact_source_retraction_preserves_and_reconsiders () =
+  with_store @@ fun keepers_dir ->
+  let keeper_id = "source-retraction" in
+  let a = source "event:a" "first signal" in
+  let b = source "event:b" "second signal" in
+  let c = source "chat:c" "settled question" in
+  let d = source "event:d" "unaffected signal" in
+  let mixed = pocket [a.reference; b.reference] "Mixed situation" ["Act once"] in
+  let removed = pocket [c.reference] "Settled question" ["Answer"] in
+  let unaffected = pocket [d.reference] "Unrelated situation" ["Continue"] in
+  let first =
+    ok
+      (Context.commit
+         ~keepers_dir
+         ~keeper_id
+         ~expected_version:None
+         ~execution_basis:"same-progress"
+         ~sources:[a; b; c; d]
+         [mixed; removed; unaffected])
+  in
+  let persisted_mixed =
+    List.find
+      (fun (value : Context.pocket) ->
+         List.mem a.reference value.sources && List.mem b.reference value.sources)
+      first.pockets
+  in
+  let persisted_unaffected =
+    List.find
+      (fun (value : Context.pocket) -> value.sources = [d.reference])
+      first.pockets
+  in
+  let first_snapshot_sha256 =
+    match Context.read_with_snapshot_sha256 ~keepers_dir ~keeper_id with
+    | Ok (Some (snapshot, snapshot_sha256)) ->
+      check bool "hash observation matches first snapshot" true
+        (snapshot = first);
+      snapshot_sha256
+    | Ok None | Error _ -> fail "first working-context hash is unavailable"
+  in
+  let second =
+    match
+      Context.retract_sources
+        ~keepers_dir
+        ~keeper_id
+        ~expected_version:(Context.version first)
+        ~expected_snapshot_sha256:first_snapshot_sha256
+        ~source_references:[b.reference; c.reference]
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "exact source retraction was rejected"
+  in
+  check string "generation is preserved" first.generation second.generation;
+  check int "one atomic retraction advances one revision" 2 second.revision;
+  check (list string) "only exact source references are removed"
+    [a.reference; d.reference]
+    (List.map (fun (value : Context.source) -> value.reference) second.sources);
+  check int "fully removed pocket disappears" 2 (List.length second.pockets);
+  let shrunk =
+    List.find
+      (fun (value : Context.pocket) -> value.id = persisted_mixed.id)
+      second.pockets
+  in
+  check (list string) "partially affected pocket retains unaffected source"
+    [a.reference] shrunk.sources;
+  check bool "partially affected pocket requires reconsideration" true
+    (shrunk.completeness = Context.Needs_reconsideration);
+  check (list string) "stale advice is cleared" [] shrunk.next_steps;
+  check bool "unaffected pocket is byte-for-byte preserved" true
+    (List.exists
+       (fun (value : Context.pocket) -> value = persisted_unaffected)
+       second.pockets);
+  check bool "persisted snapshot equals the receipt" true
+    (ok (Context.read ~keepers_dir ~keeper_id) = Some second);
+  let second_snapshot_sha256 =
+    match Context.read_with_snapshot_sha256 ~keepers_dir ~keeper_id with
+    | Ok (Some (snapshot, snapshot_sha256)) ->
+      check bool "hash observation matches second snapshot" true
+        (snapshot = second);
+      snapshot_sha256
+    | Ok None | Error _ -> fail "second working-context hash is unavailable"
+  in
+  check string "context receipt hash matches exact stored bytes"
+    second_snapshot_sha256
+    (Context.snapshot_sha256 second);
+  (match
+     Context.retract_sources
+       ~keepers_dir
+       ~keeper_id
+       ~expected_version:(Context.version first)
+       ~expected_snapshot_sha256:first_snapshot_sha256
+       ~source_references:[a.reference]
+   with
+   | Error (Context.Retract_snapshot_conflict _) -> ()
+   | Error _ | Ok _ -> fail "stale version did not fail closed");
+  (match
+     Context.retract_sources
+       ~keepers_dir
+       ~keeper_id
+       ~expected_version:(Context.version second)
+       ~expected_snapshot_sha256:(String.make 64 '0')
+       ~source_references:[a.reference]
+   with
+   | Error
+       (Context.Retract_snapshot_conflict
+          { observed_snapshot_sha256 = Some observed; _ }) ->
+     check string "context conflict reports the locked snapshot hash"
+       second_snapshot_sha256 observed
+   | Error _ | Ok _ -> fail "wrong context hash did not fail closed");
+  (match
+     Context.retract_sources
+       ~keepers_dir
+       ~keeper_id
+       ~expected_version:(Context.version second)
+       ~expected_snapshot_sha256:second_snapshot_sha256
+       ~source_references:["event:not-present"]
+   with
+   | Error (Context.Retract_source_not_found _) -> ()
+   | Error _ | Ok _ -> fail "unknown source did not fail closed");
+  check bool "failed source plans leave the snapshot intact" true
+    (ok (Context.read ~keepers_dir ~keeper_id) = Some second)
+
 let () = run "Librarian working contexts"
   ["scenarios", [
+    test_case "exact source retraction is atomic and preserves unaffected pockets" `Quick test_exact_source_retraction_preserves_and_reconsiders;
     test_case "one new source preserves two unrelated prior contexts" `Quick test_unrelated_prior_contexts_need_no_empty_source_output;
     test_case "new execution basis cannot launder untouched advice" `Quick test_new_basis_cannot_launder_untouched_advice;
     test_case "incremental campaign retains one context" `Quick test_incremental_campaign_merges_existing_context;

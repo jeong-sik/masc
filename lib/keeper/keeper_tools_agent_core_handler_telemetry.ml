@@ -5,6 +5,7 @@
 
 let keeper_tool_call_event_json
       ~keeper_name
+      ~keeper_turn_id
       ~tool_name
       ~duration_ms
       ~disposition
@@ -16,6 +17,7 @@ let keeper_tool_call_event_json
   let fields =
     [ "type", `String "keeper_tool_call"
     ; "name", `String keeper_name
+    ; "keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id
     ; "tool_name", `String tool_name
     ; "duration_ms", `Int duration_ms
     ; "disposition", `String (Tool_result.string_of_disposition disposition)
@@ -75,6 +77,7 @@ let agent_core_invocation_fields = function
 
 let broadcast_keeper_tool_call_event
       ~keeper_name
+      ~keeper_turn_id
       ~tool_name
       ~duration_ms
       ~disposition
@@ -88,6 +91,7 @@ let broadcast_keeper_tool_call_event
     Sse.broadcast
       (keeper_tool_call_event_json
          ~keeper_name
+         ~keeper_turn_id
          ~tool_name
          ~duration_ms
          ~disposition

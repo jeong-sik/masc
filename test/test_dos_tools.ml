@@ -79,6 +79,21 @@ let hello_com =
    whole budget instead of settling on the first chunk. *)
 let spinner_com = "\xeb\xfe"
 
+(* Poll INT 33h until the left button goes down, print D, then poll until it
+   comes back up, print U, and exit. The guest therefore proves both state
+   transitions; a ledger entry alone only proves that the host accepted the
+   call.
+
+   org 0x100: down: mov ax,3 / int 33h / test bx,1 / jz down
+              print 'D'
+              up:   mov ax,3 / int 33h / test bx,1 / jnz up
+              print 'U' / int 20h *)
+let mouse_click_com =
+  "\xb8\x03\x00\xcd\x33\xf7\xc3\x01\x00\x74\xf5\xb2\x44\xb4\x02\xcd\x21\
+   \xb8\x03\x00\xcd\x33\xf7\xc3\x01\x00\x75\xf5\xb2\x55\xb4\x02\xcd\x21\
+   \xcd\x20"
+;;
+
 let rec mkdir_p dir =
   if not (Sys.file_exists dir) then begin
     mkdir_p (Filename.dirname dir);
@@ -166,6 +181,37 @@ let test_press_reaches_the_guest_and_the_ledger () =
     | [ entry ] ->
       check string "the ledger names the caller" "vincent" entry.Dos_lane.who;
       check string "and the key" "enter" entry.Dos_lane.key_name
+    | entries ->
+      fail (Printf.sprintf "expected one ledger entry, got %d" (List.length entries)))
+;;
+
+(* A click is button down, run, button up, run, in one call, sharing one step
+   ceiling. The guest prints D only after INT 33h reports the button down, and
+   prints U and exits only after the host clears it, so the screen and the exit
+   are what prove both halves reached the guest. The step total is not asked to
+   prove that -- how many steps the poll loop burns belongs to ocaml-dos -- it
+   only has to stay inside the one ceiling. *)
+let test_click_reaches_the_guest_and_the_ledger () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "mouse.com" mouse_click_com;
+    boot ~base_path "mouse.com";
+    let result =
+      dispatch ~base_path ~agent:"vincent" "masc_dos_click"
+        [ ("x", `Int 1); ("y", `Int 1); ("steps", `Int 1_000) ]
+    in
+    check bool "click succeeds" true (is_completed result);
+    check bool "the guest observed release and exited" true (bool_field "exited" result);
+    check bool "the guest observed down and up" true
+      (contains "DU" (string_field "screen_text" result));
+    check bool "down and up share one ceiling, not two" true
+      (int_field "steps_run" result <= 1_000);
+    match Dos_lane.ledger () with
+    | [ entry ] ->
+      check string "the ledger names the caller" "vincent" entry.Dos_lane.who;
+      (* The default buttons is 1 (left); the entry names the button that
+         went down, not the 0 the up half releases it to. *)
+      check string "and the click as mouse(x,y,buttons)" "mouse(1,1,1)"
+        entry.Dos_lane.key_name
     | entries ->
       fail (Printf.sprintf "expected one ledger entry, got %d" (List.length entries)))
 ;;
@@ -349,6 +395,8 @@ let () =
         ; test_case "inventory" `Quick test_inventory_when_unnamed
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
         ; test_case "press" `Quick test_press_reaches_the_guest_and_the_ledger
+        ; test_case "click reaches the guest" `Quick
+            test_click_reaches_the_guest_and_the_ledger
         ; test_case "inventory only" `Quick test_only_inventory_names_resolve
         ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key

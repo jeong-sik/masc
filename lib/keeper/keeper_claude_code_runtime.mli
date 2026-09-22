@@ -39,6 +39,7 @@ module For_testing : sig
     -> ?librarian_front:
          (Agent_core.Types.message list
           -> Keeper_official_client_host.librarian_position)
+    -> turn_start:int
     -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> keeper_name:string
@@ -86,6 +87,7 @@ val run :
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?librarian_front:
     (Agent_core.Types.message list -> Keeper_official_client_host.librarian_position) ->
+  turn_start:int ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -109,9 +111,11 @@ val run :
     measured it ({!Keeper_official_client_host.carried_start_range}). The
     declared max-prompt-bytes ceiling still cuts, and the range starts at
     whichever of the two positions is later, so a turn seeded from a narrow
-    range does not widen it and the ceiling does not undo the seed. A caller
-    that passes none starts a start seed at the oldest atom, inside the
-    ceiling.
+    range does not widen it and the ceiling does not undo the seed.
+    [turn_start] is where the range starts when no seed names a front: the
+    end of the last completed turn on this history, 0 when it has none (RFC
+    keeper-context-window-in-tokens §13.4). A caller that passes no seed
+    starts there, inside the ceiling.
 
     [librarian_front] names the Librarian's own position for the messages it
     is handed: the atoms before it are in the keeper's memory, and its saved

@@ -1284,6 +1284,26 @@ let test_ocaml_sources_exclude_declared_concrete_keeper_identities () =
       (concrete_keeper_inventory_path repo)
 ;;
 
+(* The scanner's contract, pinned directly. discovery 17 exercises it over
+   the whole tree, but only where the tree happens to hold such a pattern;
+   this says it for the scanner itself. The token is deliberately not a
+   concrete Keeper identity: this file is part of the tree discovery 17
+   reads, so a real name here would be the very collision it forbids. *)
+let test_string_literals_of_ocaml_skips_comments () =
+  check string "a comment is skipped" ""
+    (string_literals_of_ocaml "(* \"example\" *)");
+  check string "a nested comment is skipped" ""
+    (string_literals_of_ocaml "(* outer (* \"example\" *) still *)");
+  check string "a string in a comment does not end it early" ""
+    (string_literals_of_ocaml "(* \"*)\" \"example\" *)");
+  check string "a literal outside a comment is read" "example\n"
+    (string_literals_of_ocaml "let x = \"example\"");
+  check string "a braced literal is read" "example\n"
+    (string_literals_of_ocaml "let x = {|example|}");
+  check string "a comment between literals is skipped" "a\nb\n"
+    (string_literals_of_ocaml "let a = \"a\" (* \"example\" *) let b = \"b\"")
+;;
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
@@ -2264,5 +2284,7 @@ let () =
             test_default_roster_does_not_autoboot;
           test_case "OCaml sources exclude concrete Keeper identities" `Quick
             test_ocaml_sources_exclude_declared_concrete_keeper_identities;
+          test_case "string literal scanner skips comments" `Quick
+            test_string_literals_of_ocaml_skips_comments;
         ] );
     ]

@@ -355,14 +355,14 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   let input : K.input =
     {turn_ref=P.turn_ref half; goal_context=K.No_task; keeper_instructions=instructions;
      current=Some {K.facts=current.facts};
-     working_context=Masc.Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name;
+     working_context=Masc.Keeper_librarian_context.empty;
      messages=P.messages half; tool_observations=[];counterpart_observations=[]} in
   let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json half)) ::
     List.remove_assoc "continuity" (K.prompt_variables input) in
   let _, prompt = Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian variables |> get in
   let requirement = Agent_core.Exact_output.make_output_requirement
-    ~schema:Masc.Keeper_structured_output_schema.librarian_current_output_schema
+    ~schema:Masc.Keeper_structured_output_schema.librarian_continuity_output_schema
     ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
   let chars prompt = Codex.prompt_char_count prompt |> get in
   let max_chars = Masc.Keeper_lane_cli_oneshot.prompt_with_schema ~requirement ~prompt |> chars in
@@ -391,7 +391,77 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   check int "known final-slot bound prevents repeated oversized probes" 1 !oversized;
   check int "one refusal and two fitted chunks reach final slot" 3 !final_calls;
   check bool "no-fit source still reaches recovered alternative" true
-    (match !alternative_bytes with Some size -> size > max_chars | None -> false)
+    (match !alternative_bytes with Some size -> size > max_chars | None -> false);
+  let module O = Masc.Keeper_continuity_observation in
+  let observation () = O.latest_synthesis ~config ~keeper_name |> some in
+  check bool "no further source is not labelled drained" true
+    ((observation ()).state = O.No_source);
+  let next_turn = List.init 4 (fun index ->
+    message (String.make 1000 (Char.chr (Char.code 'e' + index)))) in
+  let extended = source @ next_turn in
+  save extended; boundary ~fresh:false 2 extended;
+  let rejected_calls = ref 0 in
+  let rejected ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    incr rejected_calls;
+    check bool "actual runtime dispatch is visibly running" true
+      ((observation ()).state = O.Running);
+    check bool "new drain fits the learned character ceiling before dispatch" true
+      (chars prompt <= max_chars);
+    Ok {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":null}|} in
+  Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+    ~cli_runner:rejected ~base_path ~keeper_name ();
+  check int "domain refusal advances through both declared slots" 2 !rejected_calls;
+  check bool "failed generation replaces running state" true
+    ((observation ()).state = O.Not_committed);
+  check int "refused range keeps committed frontier" 4
+    (P.read ~config ~keeper_name |> get |> some).end_atom;
+  let resumed_calls = ref 0 in
+  let resumed ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    incr resumed_calls;
+    check bool "domain refusal did not erase the next drain's measured ceiling" true
+      (chars prompt <= max_chars);
+    Ok answer in
+  Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+    ~cli_runner:resumed ~base_path ~keeper_name ();
+  check bool "resumed drain really dispatched" true (!resumed_calls > 0);
+  check int "resumed drain commits the remaining completed atoms" 8
+    (P.read ~config ~keeper_name |> get |> some).end_atom;
+  let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+  let canonical = match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
+    | Ok snapshot -> C.exact_snapshot_messages snapshot
+    | Error _ -> fail "source checkpoint disappeared" in
+  check bool "prefitting and failed generation preserve the original source" true
+    (List.equal Agent_core.Types.Message_value.equal extended canonical);
+  let after_forget = extended @ next_turn in
+  save after_forget; boundary ~fresh:false 3 after_forget;
+  Masc.Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name;
+  let forgotten_calls = ref 0 in
+  let forgotten ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    incr forgotten_calls;
+    check bool "forget removes the learned ceiling instead of retaining stale knowledge" true
+      (chars prompt > max_chars);
+    Ok {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":null}|} in
+  Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+    ~cli_runner:forgotten ~base_path ~keeper_name ();
+  check int "after forget the unfit source still reaches declared alternatives" 2 !forgotten_calls;
+  check int "failed request after forget does not advance coverage" 8
+    (P.read ~config ~keeper_name |> get |> some).end_atom;
+  (try Eio.Cancel.sub (fun cancellation ->
+     let cancelled ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+       check bool "cancelling runtime was running" true ((observation ()).state = O.Running);
+       Eio.Cancel.cancel cancellation Exit;
+       Eio.Fiber.check ();
+       Ok answer in
+     Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity
+       ~cli_runner:cancelled ~base_path ~keeper_name ())
+   with Eio.Cancel.Cancelled _ -> ());
+  check bool "cancellation replaces running state" true ((observation ()).state = O.Cancelled);
+  O.record ~config ~keeper_name
+    {prepared_at=1000.;runtime_id="fixture";input=O.Uncompressed;request_bytes=1};
+  O.forget ~config ~keeper_name;
+  check bool "forget clears both observations" true
+    (Option.is_none (O.latest_synthesis ~config ~keeper_name)
+     && Option.is_none (O.latest ~config ~keeper_name))
 
 let () = run "production continuity pair"
   ["cycle",[test_case "completed turns are work units" `Quick test_completed_turn_work_units;

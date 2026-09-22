@@ -3424,7 +3424,7 @@
 (test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
- (libraries masc_tui_image_preview
+ (libraries masc_tui_link_preview masc_tui_image_preview
   alcotest
   ast_grep
   astring
@@ -6629,6 +6629,10 @@
 
 (include stanzas/test_keeper_librarian_continuity.inc)
 
+(include stanzas/test_keeper_continuity_cancel_recovery.inc)
+
 (include stanzas/test_keeper_continuity_dispatch.inc)
 
 (include stanzas/test_keeper_librarian_capacity_callback.inc)
+
+(include stanzas/test_deployment_store_directories.inc)

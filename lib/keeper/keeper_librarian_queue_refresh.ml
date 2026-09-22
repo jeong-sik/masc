@@ -86,6 +86,9 @@ type measurement =
   }
 
 let measurements : ((string * string), measurement) Hashtbl.t = Hashtbl.create 16
+let input_capacities :
+    ((string * string), Keeper_lane_cli_oneshot.input_capacity) Hashtbl.t =
+  Hashtbl.create 16
 let measurements_mu = Stdlib.Mutex.create ()
 
 let measurement_key ~config ~keeper_name =
@@ -99,7 +102,19 @@ let last_measurement ~config ~keeper_name =
 
 let forget_measurement ~config ~keeper_name =
   let key = measurement_key ~config ~keeper_name in
-  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove measurements key)
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    Hashtbl.remove measurements key;
+    Hashtbl.remove input_capacities key)
+;;
+
+let last_input_capacity ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt input_capacities key)
+;;
+
+let remember_input_capacity ~config ~keeper_name capacity =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace input_capacities key capacity)
 ;;
 
 let publish_measurement ~config ~keeper_name ~last_pass ~unread =
@@ -182,25 +197,43 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
   let module Runtime = Keeper_librarian_runtime in
   let config = Workspace.default_config base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let report detail = Log.Keeper.warn ~keeper_name "continuity pass stopped: %s" detail in
-  (* A provider observation belongs to this drain, not a durable atom budget.
-     Re-render every chunk: previous state, Memory and queued context can grow. *)
-  let capacity = ref None in
+  let module O = Keeper_continuity_observation in
+  let trace_id = ref None and selected_range = ref None in
+  let observe state = O.record_synthesis ~config ~keeper_name
+      {O.observed_at=Time_compat.now (); trace_id= !trace_id;
+       state; range= !selected_range} in
+  let select prepared =
+    trace_id := Some (Ids.Turn_ref.trace_id (P.turn_ref prepared));
+    selected_range := Some {O.start_atom=P.start_atom prepared;
+      end_atom=P.end_atom prepared; completed_end_atom=P.completed_end_atom prepared} in
+  let report state detail =
+    observe state;
+    Log.Keeper.warn ~keeper_name "continuity pass stopped: %s" detail in
+  (* Keep the server's measured character limit across wakes in this process.
+     A domain-output failure must not make the next drain rediscover it with
+     another oversized request. Fitting still checks the runtime is selected
+     and re-renders every chunk; neither an atom count nor a prompt is cached. *)
+  let capacity = ref (last_input_capacity ~config ~keeper_name) in
   let rec next () =
+    observe O.Checking;
     match Env_config.KeeperMemoryOs.librarian_config_state () with
-    | Disabled | Invalid -> ()
+    | Disabled | Invalid -> observe O.Disabled
     | Enabled ->
       match Keeper_meta_store.read_effective_meta_presence config keeper_name with
-      | Error detail | Ok (Keeper_meta_store.Meta_not_current detail) -> report detail
-      | Ok Keeper_meta_store.Meta_absent -> ()
+      | Error detail | Ok (Keeper_meta_store.Meta_not_current detail) -> report O.Source_unavailable detail
+      | Ok Keeper_meta_store.Meta_absent -> observe O.Source_unavailable
       | Ok (Keeper_meta_store.Meta_present meta) ->
+        let current_trace = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+        if !trace_id <> Some current_trace then selected_range := None;
+        trace_id := Some current_trace;
         match Domain_pool_ref.submit_io_or_inline (fun () ->
           P.prepare ~config ~keeper_name
             ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ()) with
-        | Error detail -> report detail
-        | Ok None -> ()
+        | Error detail -> report O.Source_unavailable detail
+        | Ok None -> observe O.No_source
         | Ok (Some prepared) -> attempt meta prepared
   and attempt meta prepared =
+    select prepared;
     let inputs = Domain_pool_ref.submit_io_or_inline (fun () ->
       let ( let* ) = Result.bind in
       let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
@@ -209,7 +242,7 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
           keeper_instructions = meta.Keeper_meta_contract.instructions;
           current = Option.map (fun (value : Keeper_memory_os_current.t) ->
             {Keeper_librarian.facts = value.facts}) current;
-          working_context = Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name;
+          working_context = Keeper_librarian_context.empty;
           messages = P.messages prepared;
           tool_observations = []; counterpart_observations = [] } in
       let* selected = match !capacity with
@@ -227,12 +260,14 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
       Ok (current, memory_committed, range_id, selected,
         {input with messages = P.messages selected})) in
     match inputs with
-    | Error detail -> report detail
+    | Error detail -> report O.Input_unavailable detail
     | Ok (current, memory_committed, range_id, selected, input) ->
       if P.end_atom selected <> P.end_atom prepared then
         Log.Keeper.info ~keeper_name
           "continuity input fitted before dispatch; end_atom=%d -> %d"
           (P.end_atom prepared) (P.end_atom selected);
+      select selected;
+      observe O.Running;
       let saved = ref false and capacity_refused = ref None in
       Runtime.run_best_effort ?cli_runner
         ~trigger:Runtime.Durable_range
@@ -244,21 +279,23 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
           capacity_refused := Some refusal;
           match refusal with
           | Runtime.Input_limit_unknown -> ()
-          | Runtime.Cli_input_limit observed -> capacity := Some observed)
-        ~on_continuity_committed:(fun _ -> saved := true)
+          | Runtime.Cli_input_limit observed ->
+            remember_input_capacity ~config ~keeper_name observed;
+            capacity := Some observed)
+        ~on_continuity_committed:(fun _ -> saved := true; observe O.Committed)
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
         input;
       if !saved then next ()
       else match !capacity_refused with
-      | None -> ()
+      | None -> observe O.Not_committed
       | Some (Runtime.Cli_input_limit observed) ->
         let fitted = Domain_pool_ref.submit_io_or_inline (fun () ->
           Runtime.fit_continuity ~capacity:observed ~base_path
             ~keeper_id:keeper_name ~input selected) in
         (match fitted with
-         | Error detail -> report detail
-         | Ok None -> report "source cannot fit the reported CLI input capacity"
+         | Error detail -> report O.Input_unavailable detail
+         | Ok None -> report O.Capacity_refused "source cannot fit the reported CLI input capacity"
          | Ok (Some smaller) when P.end_atom smaller < P.end_atom selected ->
            Log.Keeper.info ~keeper_name
              "continuity input fitted to reported capacity; runtime=%s max_chars=%d end_atom=%d -> %d"
@@ -266,7 +303,7 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
              (P.end_atom selected) (P.end_atom smaller);
            attempt meta smaller
          | Ok (Some _) ->
-           report "provider capacity refusal disagrees with local prompt measurement")
+           report O.Capacity_refused "provider capacity refusal disagrees with local prompt measurement")
       | Some Runtime.Input_limit_unknown ->
         match P.narrow selected with
         | Some smaller ->
@@ -274,9 +311,11 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
             "continuity input capacity refused; narrowing end_atom=%d -> %d"
             (P.end_atom selected) (P.end_atom smaller);
           attempt meta smaller
-        | None -> report "source cannot be narrowed safely after runtime capacity refusal"
+        | None -> report O.Capacity_refused "source cannot be narrowed safely after runtime capacity refusal"
   in
-  next ()
+  try next () with
+  | Eio.Cancel.Cancelled _ as exn -> observe O.Cancelled; raise exn
+  | exn -> observe O.Not_committed; raise exn
 ;;
 
 let run ~trigger ~base_path ~keeper_name =

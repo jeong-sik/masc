@@ -776,7 +776,8 @@ let test_user_message_background_has_one_render_snapshot () =
   check int "layout receives the captured Chat theme" 1
     (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
        ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
-       ~callee:"cached_chat_markdown" ~arguments:[ "theme", "chat_theme" ]);
+       ~callee:"cached_chat_markdown"
+       ~arguments:[ "theme", "chat_theme"; "link_previews_mode", "link_previews_mode" ]);
   check int "visible drawing receives the captured Chat theme" 1
     (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
        ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"

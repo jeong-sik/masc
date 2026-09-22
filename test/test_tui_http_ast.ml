@@ -1556,28 +1556,34 @@ let test_scoped_surface_refresh_does_not_own_connection_status () =
        ~callees:[] ~fields:[ "connection_status" ])
 ;;
 
-let test_gate_stance_listing_rides_the_flow_generation () =
+let test_gate_stance_listing_checks_a_press_is_not_still_open () =
   let main_path = "bin/masc_tui.ml" in
   (* The stance listing replaces the whole yolo set. Two daemon fibers reach
      it -- a periodic GET and the operator's own POST -- and the network
      decides which lands first, so a GET that started before the press can
      put the pre-press answer back and the armed gate reads as auto again.
      The next press then computes yolo a second time instead of toggling
-     back, which is what makes it visible rather than a flicker. The held
-     call listing already rides [Approval.Flow]; these four pin the stance
-     listing onto the same guard. *)
-  check int "the stance fetch takes a generation" 1
+     back, which is what makes it visible rather than a flicker.
+
+     This used to ride [Approval.Flow]'s shared refresh generation, the same
+     guard the held-call listing rides. That counter also advances on every
+     unrelated background poll tick, so a fetch racing any poll (not only a
+     press) was dropped even with no press ever armed (#37461). It now asks
+     the one question this guard needs directly -- is a press still open --
+     at launch and again when the answer lands, instead of reserving and
+     matching a generation. *)
+  check int "the stance fetch checks a press is not still open" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"launch_keeper_tool_modes_load"
-       ~callee:"Approval.Flow.reserve_refresh");
+       ~callee:"Approval.Flow.action_inflight");
   check int "arming a gate opens an action" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"launch_keeper_tool_mode_set"
        ~callee:"Approval.Flow.begin_action");
-  check int "a stale stance listing is dropped" 1
+  check int "a stance listing that lands during an open press is dropped" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_async_message"
-       ~callee:"Approval.Flow.is_current");
+       ~callee:"Approval.Flow.action_inflight");
   (* Every path that resolves an approval closes the action it opened, and
      closes it with the generation it was handed. There are four such paths
      now and there was one when this line was written; the number is a count
@@ -2925,9 +2931,9 @@ let () =
           `Quick
           test_the_scroll_counts_back_from_a_pinned_row;
         test_case
-          "gate stance listing rides the flow generation"
+          "gate stance listing checks a press is not still open"
           `Quick
-          test_gate_stance_listing_rides_the_flow_generation;
+          test_gate_stance_listing_checks_a_press_is_not_still_open;
         test_case
           "the screen does not read the server's bind address"
           `Quick

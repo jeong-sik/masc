@@ -4885,9 +4885,15 @@ let empty_fusion_tool_trace_json =
 let fusion_recorded_detail_json ?(source = "fusion")
     ?(origin_run_id = "fusion-recorded-501")
     ?(tool_trace = empty_fusion_tool_trace_json)
+    ?seat_routes
     ?(judges = []) () =
   let run_id = "fusion-recorded-501" in
   let tool_trace_fields = [ "tool_trace", tool_trace ] in
+  (* A post written without seat routes carries no key at all, which is the
+     shape older runs have. *)
+  let seat_route_fields =
+    match seat_routes with None -> [] | Some routes -> [ "seat_routes", `List routes ]
+  in
   (* The sink writes the RFC-0284 array on every post, so the fixture always
      carries the key; a post without it is the shape the decoder rejects. *)
   let judges_fields = [ ("judges", `List judges) ] in
@@ -4933,7 +4939,7 @@ let fusion_recorded_detail_json ?(source = "fusion")
                             ; "synthesis", `String "judge-reason-501"
                             ] )
                       ]
-                       @ judges_fields @ tool_trace_fields) )
+                       @ judges_fields @ tool_trace_fields @ seat_route_fields) )
                 ] )
           ] )
     ]
@@ -5531,6 +5537,91 @@ let test_decode_fusion_tool_judge_actor () =
   | Error detail ->
       Alcotest.(check bool) "the closed role set names what it rejected" true
         (String_util.contains_substring detail "unknown fusion judge role \"jury\"")
+
+(* Seat routes, as [Fusion_sink.seat_route_meta] writes them: who the seat
+   was routed to, who answered, and every candidate that failed before it. *)
+let test_decode_fusion_seat_routes () =
+  let panel_route =
+    `Assoc
+      [ "phase", `String "panel"
+      ; "seat", `String "first"
+      ; "route", `String "panel-lane"
+      ; "answered_by", `String "glm-4.6"
+      ; ( "failed_attempts"
+        , `List
+            [ `Assoc
+                [ "runtime", `String "deepseek"
+                ; "code", `String "rate_limited"
+                ; "detail", `String "429 from the provider"
+                ]
+            ] )
+      ]
+  in
+  let judge_route =
+    `Assoc
+      [ "phase", `String "judge"
+      ; "judge_role", `String "meta"
+      ; "seat", `String "meta"
+      ; "route", `String "judge-lane"
+      ; "answered_by", `Null
+      ; "failed_attempts", `List []
+      ]
+  in
+  (match
+     Tui_decode.decode_fusion_detail
+       (fusion_recorded_detail_json ~seat_routes:[ panel_route; judge_route ] ())
+   with
+   | Error detail -> Alcotest.fail detail
+   | Ok { Tui_decode.fud_evidence = Some evidence; _ } -> (
+       match evidence.fe_seat_routes with
+       | Some
+           [ { fsr_seat = Tui_decode.Fusion_panel_seat "first"
+             ; fsr_route = "panel-lane"
+             ; fsr_answered_by = Some "glm-4.6"
+             ; fsr_failed_attempts = [ attempt ]
+             }
+           ; { fsr_seat =
+                 Tui_decode.Fusion_judge_seat
+                   { fs_role = Tui_decode.Judge_meta; fs_identity = "meta" }
+             ; fsr_route = "judge-lane"
+             ; fsr_answered_by = None
+             ; fsr_failed_attempts = []
+             }
+           ] ->
+           Alcotest.(check string) "the runtime that failed" "deepseek" attempt.fsa_runtime;
+           Alcotest.(check string) "its failure code" "rate_limited" attempt.fsa_code;
+           Alcotest.(check string) "and what it said" "429 from the provider"
+             attempt.fsa_detail
+       | Some _ | None -> Alcotest.fail "the seat routes came back in another shape")
+   | Ok _ -> Alcotest.fail "recorded Fusion evidence disappeared");
+  (* A post written before seats were recorded carries no key; the reading
+     stands, and the detail draws no block. *)
+  (match Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ()) with
+   | Ok { Tui_decode.fud_evidence = Some { fe_seat_routes = None; _ }; _ } -> ()
+   | Ok _ -> Alcotest.fail "an absent seat_routes key became something else"
+   | Error detail -> Alcotest.fail detail);
+  (* An empty array is a sink that recorded routes and found none, which is
+     not the same as never having written the key. *)
+  (match Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ~seat_routes:[] ()) with
+   | Ok { Tui_decode.fud_evidence = Some { fe_seat_routes = Some []; _ }; _ } -> ()
+   | Ok _ -> Alcotest.fail "an empty seat_routes array became something else"
+   | Error detail -> Alcotest.fail detail);
+  let malformed =
+    `Assoc
+      [ "phase", `String "judge"
+      ; "seat", `String "meta"
+      ; "route", `String "judge-lane"
+      ; "answered_by", `Null
+      ; "failed_attempts", `List []
+      ]
+  in
+  match
+    Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ~seat_routes:[ malformed ] ())
+  with
+  | Ok _ -> Alcotest.fail "a judge seat without its role decoded"
+  | Error detail ->
+      Alcotest.(check bool) "the reading names the missing role" true
+        (String_util.contains_substring detail "fusion judge seat requires judge_role")
 
 (* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
 let harness_verdict_json ?(fallback = `Null) () =
@@ -9902,6 +9993,8 @@ let () =
           test_decode_fusion_actual_tool_trace;
         Alcotest.test_case "a judge actor carries the closed role sum" `Quick
           test_decode_fusion_tool_judge_actor;
+        Alcotest.test_case "keeps each seat's route and failed attempts" `Quick
+          test_decode_fusion_seat_routes;
       ] );
     ( "decode_harness",
       [

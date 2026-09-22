@@ -1922,6 +1922,11 @@ type async_msg =
   | Fusion_historical_detail_loaded of
       int * Masc.Tui_decode.fusion_historical_evidence
       * (Masc.Tui_decode.fusion_historical_detail, string) result
+  (* Both carry the launch generation: the answer to a read or a submit the
+     operator already left must not open or close a form they are not in. *)
+  | Fusion_launch_options_loaded of
+      int * (Masc.Tui_decode.fusion_launch_options, string) result
+  | Fusion_launched of int * (string, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
@@ -5888,6 +5893,54 @@ let launch_fusion_historical_detail_load state ~mailbox ~reference =
           (Fusion_historical_detail_loaded
              (generation, reference, Error "Eio switch is unavailable"))
   end
+
+(* The two requests behind the launch form. Neither is inflight-guarded by
+   a field of its own: the form's state says which request it waits on, and
+   the generation in the answer says whether it is still that one. *)
+let launch_fusion_launch_options_load state ~mailbox =
+  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+  let generation = state.fusion_launch_generation in
+  state.fusion_launch <- Some (Fusion_launch_reading_presets generation);
+  state.fusion_scroll <- 0;
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_fusion_launch_options ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Fusion_launch_options_loaded (generation, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Fusion_launch_options_loaded (generation, Error "Eio switch is unavailable"))
+
+let launch_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) =
+  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+  let generation = state.fusion_launch_generation in
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.launch_fusion_run ~host ~port ~request with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Fusion_launched (generation, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox (Fusion_launched (generation, Error "Eio switch is unavailable"))
 
 let launch_keeper_lanes_load state ~mailbox =
   if state.keeper_lanes_inflight then ()
@@ -10378,7 +10431,22 @@ let apply_fusion_runs_load state = function
           List.find_index (fun run -> String.equal run.Tui_decode.fur_run_id id) keeper_runs)
         |> Option.value ~default:(max 0 (min state.keeper_run_cursor (List.length keeper_runs - 1)));
       state.fusion_error <- None;
-      state.fusion_cursor <- next_cursor;
+      (* A run the form just started is selected the first time the list
+         carries it, and the wait ends there. *)
+      let started_cursor =
+        match state.fusion_launch with
+        | Some (Fusion_launch_started run_id) ->
+            fusion_snapshot_entries snapshot
+            |> List.find_index (function
+                 | Tui_decode.Fusion_retained_run run -> String.equal run.fur_run_id run_id
+                 | Tui_decode.Fusion_historical_evidence _ -> false)
+        | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) | None -> None
+      in
+      (match started_cursor with
+       | Some cursor ->
+           state.fusion_cursor <- cursor;
+           state.fusion_launch <- None
+       | None -> state.fusion_cursor <- next_cursor);
       (match state.fusion_mode, current_selected_id with
        | Fusion_detail run_id, Some selected
          when String.equal ("run:" ^ run_id) selected
@@ -15397,6 +15465,51 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.fusion_historical_inflight <- None
        | Some _ | None -> ());
       apply_fusion_historical_detail_load state generation reference result
+  | Fusion_launch_options_loaded (generation, result) ->
+      (match state.fusion_launch with
+       | Some (Fusion_launch_reading_presets pending) when pending = generation ->
+           (match result with
+            | Error detail ->
+                state.fusion_launch <- None;
+                state.fusion_error <- Some detail
+            | Ok options ->
+                let keepers = List.map (fun (k : keeper) -> k.k_name) state.keepers in
+                (* The run under the cursor names the Keeper the operator is
+                   looking at; without one, the roster's own cursor does. *)
+                let keeper =
+                  match selected_fusion_entry state with
+                  | Some (Tui_decode.Fusion_retained_run run) -> Some run.fur_keeper
+                  | Some (Tui_decode.Fusion_historical_evidence _) | None ->
+                      Option.map (fun (k : keeper) -> k.k_name) (selected_keeper state)
+                in
+                (match Masc_tui_fusion_launch.open_form ~keepers ~keeper ~options with
+                 | Ok launch ->
+                     state.fusion_launch <- Some (Fusion_launch_open launch);
+                     state.fusion_error <- None
+                 | Error detail ->
+                     state.fusion_launch <- None;
+                     state.fusion_error <- Some detail))
+       | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
+       | None -> ())
+  | Fusion_launched (generation, result) ->
+      (match state.fusion_launch with
+       | Some (Fusion_launch_open launch)
+         when generation = state.fusion_launch_generation
+              && Masc_tui_fusion_launch.submitting launch ->
+           (match result with
+            | Error detail ->
+                state.fusion_launch <-
+                  Some (Fusion_launch_open (Masc_tui_fusion_launch.refused ~detail launch));
+                state.fusion_scroll <- 0
+            | Ok run_id ->
+                (* The list selects the run once it carries it; a list read
+                   already in flight may answer without it. *)
+                state.fusion_launch <- Some (Fusion_launch_started run_id);
+                state.fusion_scroll <- 0;
+                add_event state "system" ("Fusion run " ^ run_id ^ " started");
+                launch_fusion_runs_load state ~mailbox)
+       | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
+       | None -> ())
   | Verification_loaded result ->
       state.verification_inflight <- false;
       (match result with
@@ -17759,7 +17872,22 @@ and is loaded on demand through keeper_skill.
             | Some Text_board_draft ->
                 Buffer.add_string state.board_draft
                   (Keeper_chat.terminal_safe_text ~preserve_newlines:true
-                     paste.Masc_tui_paste.text))
+                     paste.Masc_tui_paste.text)
+            (* A prompt holds many lines, like a board post; the form puts
+               the text into whichever field its cursor is on. *)
+            | Some Text_fusion_launch ->
+                (match state.fusion_launch with
+                 | Some (Fusion_launch_open launch) ->
+                     state.fusion_launch <-
+                       Some
+                         (Fusion_launch_open
+                            (Masc_tui_fusion_launch.paste
+                               ~text:
+                                 (Keeper_chat.terminal_safe_text ~preserve_newlines:true
+                                    paste.Masc_tui_paste.text)
+                               launch));
+                     state.fusion_scroll <- 0
+                 | Some (Fusion_launch_reading_presets _ | Fusion_launch_started _) | None -> ()))
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
        | Some (Pasted _) when state.view = Approvals && Option.is_some state.ask_text_entry ->
@@ -17871,7 +17999,7 @@ and is loaded on demand through keeper_skill.
         match key with
         | Some k ->
             (match text_input_target state ~compact_viewport with
-             | Some Text_browser_url | Some Text_ask_answer -> false
+             | Some Text_browser_url | Some Text_ask_answer | Some Text_fusion_launch -> false
              | _ -> Render_schedule.Input_shortcut.is_quit ~message_mode k)
         | None -> false
       in
@@ -18404,6 +18532,46 @@ and is loaded on demand through keeper_skill.
                        || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                   set (Masc_tui_types.voice_wizard_append session s)
                 | _ -> ()))
+       (* The launch form owns every key while it is up, above the quit key
+          the way the Lane Add-ons form is: a prompt with a q in it is a
+          prompt. Its paste arrives through [Text_fusion_launch], which is
+          claimed under the same viewport condition -- a frame too small to
+          draw the form must not feed it keys either. *)
+       | Some key
+         when state.view = Fusion && not compact_viewport
+              && (match state.fusion_launch with
+                  | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) -> true
+                  | Some (Fusion_launch_started _) | None -> false) ->
+           (match state.fusion_launch with
+            | Some (Fusion_launch_reading_presets _) ->
+                (* Leaving bumps the generation, so the read's answer finds
+                   no form to open. *)
+                if String.equal key "esc" then begin
+                  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+                  state.fusion_launch <- None
+                end
+            | Some (Fusion_launch_open launch) ->
+                (match key with
+                 | "pageup" ->
+                     state.fusion_scroll
+                       <- max 0 (state.fusion_scroll - surface_page_rows state)
+                 | "pagedown" ->
+                     state.fusion_scroll
+                       <- Masc_tui_types.scroll_down_from state.fusion_scroll
+                            ~by:(surface_page_rows state)
+                 | _ ->
+                     (match Masc_tui_fusion_launch.edit ~key launch with
+                      | Masc_tui_fusion_launch.Closed ->
+                          state.fusion_launch <- None;
+                          state.fusion_scroll <- 0
+                      | Masc_tui_fusion_launch.Editing next ->
+                          state.fusion_launch <- Some (Fusion_launch_open next);
+                          state.fusion_scroll <- 0
+                      | Masc_tui_fusion_launch.Submitted (next, request) ->
+                          state.fusion_launch <- Some (Fusion_launch_open next);
+                          state.fusion_scroll <- 0;
+                          launch_fusion_run state ~mailbox:async_messages ~request))
+            | Some (Fusion_launch_started _) | None -> ())
        | Some _
          when quit_key
               && (compact_viewport
@@ -20076,6 +20244,8 @@ and is loaded on demand through keeper_skill.
                 state.fusion_detail <- None;
                 state.fusion_detail_error <- None;
                 launch_fusion_detail_load state ~mailbox:async_messages ~run_id:run.fur_run_id)
+       | Some "a" when state.view = Fusion && state.fusion_mode = Fusion_list ->
+           launch_fusion_launch_options_load state ~mailbox:async_messages
        | Some "K" when state.view = Fusion
            && (match state.fusion_mode, selected_fusion_entry state with
                | Fusion_historical_detail _, _

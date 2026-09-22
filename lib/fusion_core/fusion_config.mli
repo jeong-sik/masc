@@ -44,6 +44,9 @@ type config_error =
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)
 [@@deriving show, eq]
 
+val config_error_message : config_error -> string
+(** 운영자가 읽는 한 줄. 어느 preset 의 어느 값인지 이름을 담는다. *)
+
 (** [fusion] 섹션 부재 시 비활성 기본 정책. *)
 val disabled : Fusion_policy.t
 

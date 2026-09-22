@@ -23,10 +23,10 @@
     [refuse_boot]: without them a keeper starts as another keeper or with
     empty memory, and overwrites what it lost. The deploy preflight scans
     these two with the same decoders. The goal store ([goals.json]) is
-    [degrade_typed]: every reader shows an unreadable store as a typed value
-    and every writer refuses it, so keepers run on tasks, board and schedules
-    and nothing overwrites the file. [examine] reads it once and logs one
-    INFO line when it is unreadable. {!undecodable} holds only a
+    [degrade_typed]: every goal writer refuses an unreadable store and no
+    reader turns it into an empty goal list, so keepers run on tasks, board
+    and schedules and nothing overwrites the file. [examine] reads it and
+    logs one INFO line when it is unreadable. {!undecodable} holds only a
     [refuse_boot store], so the goal store is never refused, never moved
     aside, and [--accept-store-quarantine] does not reach it. A new store
     constructor makes the compiler ask which policy it gets. *)
@@ -54,13 +54,16 @@ type examination =
   }
 
 val examine : Workspace.config -> examination
-(** Decode every store file with this build. Reads only: no file is renamed,
-    so calling it twice gives the same answer. A snapshot the process cannot
-    read at all counts as undecodable; its [rejection] says so. The goal
-    store is read once through [Goal_store.load_source]; when it is
-    [Unavailable], one INFO line [Goal_store.unavailable_to_string] is
-    logged, otherwise nothing. [readable] and [undecodable] count the
-    per-keeper files only. *)
+(** Decode every store file with this build. No file is created, renamed or
+    written, so calling it twice gives the same answer. A snapshot the
+    process cannot read at all counts as undecodable; its [rejection] says
+    so. [readable] and [undecodable] count the per-keeper files only.
+
+    The goal store is read through [Goal_store.load_source]. When it is
+    [Unavailable], [examine] logs one INFO line
+    ([Goal_store.unavailable_to_string]); otherwise it logs nothing about
+    it. Every call logs that line again, so boot calls [examine] once and
+    the line count equals the boot count (RFC-0444 criterion 3). *)
 
 val admit
   :  accept_quarantine:bool

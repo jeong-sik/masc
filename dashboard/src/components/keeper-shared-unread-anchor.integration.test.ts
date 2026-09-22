@@ -36,7 +36,10 @@ vi.mock('../api/dashboard', () => ({
   fetchKeeperWaitingInventory,
 }))
 vi.mock('../api/mcp', () => ({ callMcpTool: vi.fn() }))
-vi.mock('../api/core', () => ({ runOperatorAction: vi.fn() }))
+vi.mock('../api/core', async importOriginal => ({
+  ...await importOriginal<typeof import('../api/core')>(),
+  runOperatorAction: vi.fn(),
+}))
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
   return {

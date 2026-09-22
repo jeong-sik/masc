@@ -20,7 +20,8 @@ val last_measurement : config:Workspace.config -> keeper_name:string -> measurem
 
 val forget_measurement : config:Workspace.config -> keeper_name:string -> unit
 (** Clear after the purge has quiesced the lane and while submissions remain
-    excluded, so a deleted keeper's observation cannot outlive its identity. *)
+    excluded, so a deleted keeper's observations, including measured CLI input
+    capacity, cannot outlive its identity. *)
 
 
 type runtime_entry = Not_entered | Entered

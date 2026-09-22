@@ -197,7 +197,14 @@
  (modules masc_checkpoint_purge)
  (public_name masc-checkpoint-purge)
  (package masc)
- (libraries masc masc_core masc.config_dir_resolver masc.agent_core unix))
+ (libraries
+  masc
+  masc.server
+  masc.host_config
+  masc_core
+  masc.config_dir_resolver
+  masc.agent_core
+  unix))
 
 ;; Phase 1 SSH remote execution lane (spec §4.2): remote shim installed on
 ;; SSH endpoints as the fixed remote command.  Decodes one framed request

@@ -86,6 +86,34 @@ module Flow = struct
   let is_current state generation = state.latest = generation
 end
 
+module Listing_order = struct
+  type t = {
+    next_seq : int;
+    applied_seq : int;
+  }
+
+  type ticket = {
+    press : Flow.generation;
+    seq : int;
+  }
+
+  let initial = { next_seq = 0; applied_seq = 0 }
+
+  let dispatch order flow =
+    let seq = order.next_seq + 1 in
+    { order with next_seq = seq }, { press = Flow.observe flow; seq }
+
+  (* Both clocks, each asked its own question. The press clock is shared by
+     every listing and says "an operator changed this since you left"; the
+     sequence is this listing's own and says "a later fetch of the same thing
+     already landed". A rejected answer leaves [applied_seq] where it was, so
+     it cannot hold back the fetch after it. *)
+  let admit order flow ticket =
+    if Flow.is_current flow ticket.press && ticket.seq > order.applied_seq then
+      { order with applied_seq = ticket.seq }, true
+    else order, false
+end
+
 let ( let* ) = Result.bind
 
 let member key json =

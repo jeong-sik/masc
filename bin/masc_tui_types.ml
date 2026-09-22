@@ -5204,6 +5204,12 @@ type state = {
   mutable runtime_params_notice: (bool * string) option;
   mutable keeper_gate_judges: (string * string) list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
+  (* One per background listing that replaces a whole set: the held-call
+     queue and the tool-mode (YOLO) stances. [approval_flow] says whether a
+     press superseded an answer; these say whether a later fetch of the same
+     listing already landed. *)
+  mutable approvals_order: Masc_tui_operator_projection.Listing_order.t;
+  mutable tool_modes_order: Masc_tui_operator_projection.Listing_order.t;
   (* The list draws each ask on one row; this opens the selected one whole.
      Keyed on the cursor rather than a token so an ask that resolves while it
      is open closes with the row instead of stranding a detail for something
@@ -6970,6 +6976,8 @@ let create_state
   keeper_gate_modes = [];
   keeper_gate_judges = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
+  approvals_order = Masc_tui_operator_projection.Listing_order.initial;
+  tool_modes_order = Masc_tui_operator_projection.Listing_order.initial;
   approval_detail_open = false;
   approval_detail_scroll = 0;
   approval_cursor = 0;

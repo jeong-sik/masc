@@ -881,11 +881,15 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui.ml"
        ~callee:"load_approvals"
      >= 2);
-  check bool "refreshes observe an approval generation" true
+  check bool "refreshes take a numbered approval listing ticket" true
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
-       ~callee:"Approval.Flow.observe"
+       ~callee:"Approval.Listing_order.dispatch"
      >= 1);
+  check int "the held-call listing is admitted in one place" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"apply_approval_observation"
+       ~callee:"Approval.Listing_order.admit");
   check bool "actions invalidate older approval generations" true
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
@@ -1576,23 +1580,26 @@ let test_gate_stance_listing_observes_without_reserving () =
      (#37609 review). The fix keeps [action_inflight] at launch (skip
      dispatching while a press is already open) but observes -- never
      reserves -- the generation there, and checks [is_current] against it
-     on arrival, so a press that opened in between still supersedes it. *)
+     on arrival, so a press that opened in between still supersedes it.
+     The ticket that carries that generation also numbers the fetch, since a
+     full and a scoped refresh can each have one out and the older answer may
+     land last; [Listing_order.admit] asks both questions (task-1672). *)
   check int "the stance fetch checks a press is not still open before dispatch" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"launch_keeper_tool_modes_load"
        ~callee:"Approval.Flow.action_inflight");
-  check int "the stance fetch observes a generation without reserving one" 1
+  check int "the stance fetch takes a numbered ticket without reserving a press" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"launch_keeper_tool_modes_load"
-       ~callee:"Approval.Flow.observe");
+       ~callee:"Approval.Listing_order.dispatch");
   check int "arming a gate opens an action" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"launch_keeper_tool_mode_set"
        ~callee:"Approval.Flow.begin_action");
-  check int "a stance listing whose generation a press has superseded is dropped" 1
+  check int "a stance listing superseded by a press or a later fetch is dropped" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_async_message"
-       ~callee:"Approval.Flow.is_current");
+       ~callee:"Approval.Listing_order.admit");
   (* Every path that resolves an approval closes the action it opened, and
      closes it with the generation it was handed. There are four such paths
      now and there was one when this line was written; the number is a count

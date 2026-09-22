@@ -856,11 +856,12 @@ let auth_error_cors_headers request =
 ;;
 
 (* A 401/403 is about the credential the client presented, and the client is
-   not where it is decided: the TUI's refresh path, the MCP transport and the
-   h2 gateway all reach this responder, and a refusal that came and went in a
-   refresh used to leave no line naming the endpoint that produced it. Log the
-   path and status here, once, for both protocols. The raw bearer is never
-   logged — only the endpoint and the status. *)
+   not where it is decided: the TUI's refresh path reaches this responder (h1)
+   and the h2 gateway reaches its twin, and a refusal that came and went in a
+   refresh left no line naming the endpoint that produced it. /mcp already
+   names its endpoint through [record_mcp_auth_reject]. Log the path and status
+   here, once, for both protocols. The raw bearer is never logged — only the
+   endpoint and the status. *)
 let auth_refusal_details ~protocol ~path ~status =
   `Assoc [ "protocol", `String protocol; "path", `String path; "status", `Int status ]
 ;;
@@ -886,7 +887,9 @@ let respond_auth_error request reqd err =
        :: auth_error_headers ~status ~cors:(auth_error_cors_headers request))
   in
   let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
-  log_auth_refusal ~protocol:"h1" ~path:(Http_server_eio.Request.path request) ~status;
+  log_auth_refusal ~protocol:"h1"
+    ~path:(Http_server_eio.Request.path request)
+    ~status:(Httpun.Status.to_code (status :> Httpun.Status.t));
   Httpun.Reqd.respond_with_string reqd response body
 
 (** Respond with 429 Too Many Requests when the per-agent rate limit is

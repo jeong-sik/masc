@@ -1167,6 +1167,7 @@ let metrics_common_fields ~kind ~channel =
 
 type usage_fixture =
   | Usage_trusted
+  | Usage_unpriced
   | Usage_untrusted
   | Usage_missing
   | Usage_mixed
@@ -1215,6 +1216,20 @@ let usage_fields = function
           ]
       , `Null
       , "missing"
+      , [] )
+  | Usage_unpriced ->
+      ( `Assoc
+          [ "input_tokens", `Int 10
+          ; "output_tokens", `Int 12
+          ; "cache_creation_tokens", `Int 3
+          ; "cache_read_tokens", `Int 4
+          ; "total_tokens", `Int 22
+          ; "usage_trust", `String "trusted"
+          ; "usage_anomaly", `Bool false
+          ; "usage_anomaly_reasons", `List []
+          ]
+      , `Null
+      , "trusted"
       , [] )
   | Usage_mixed ->
       ( `Assoc
@@ -1316,6 +1331,39 @@ let test_decode_current_turn_metrics () =
         entry.le_work_kind
   | Error err -> Alcotest.fail err
 
+(* Every turn row a live keeper wrote on 2026-09-23 carries the five counters
+   and no cost: the providers behind them price nothing, and the producer
+   writes the cost only where the provider's sample carried one
+   ([Keeper_unified_metrics_snapshot]'s [cost_json]). Read as a half-written
+   observation, those rows are dropped, and the Keeper pane's day reads as no
+   turns at all. *)
+let test_a_turn_priced_by_no_provider_is_still_a_turn () =
+  match
+    Tui_decode.decode_log_entry (current_turn_metrics ~usage:Usage_unpriced ())
+  with
+  | Error err -> Alcotest.failf "the live row shape was refused: %s" err
+  | Ok entry ->
+      Alcotest.(check bool) "turn kind" true
+        (entry.le_kind = Tui_decode.Log_turn);
+      Alcotest.(check (option int)) "input tokens" (Some 10)
+        entry.le_input_tokens;
+      Alcotest.(check (option int)) "output tokens" (Some 12)
+        entry.le_output_tokens;
+      Alcotest.(check (option (float 0.001))) "no cost was reported" None
+        entry.le_cost_usd
+
+(* The other way round is a row no producer writes: the cost comes off the
+   same sample as the counters. *)
+let test_a_cost_without_counters_is_refused () =
+  let priced_without_counters =
+    set_field "cost_usd" (`Float 0.25) (current_turn_metrics ~usage:Usage_missing ())
+  in
+  match Tui_decode.decode_log_entry priced_without_counters with
+  | Ok _ -> Alcotest.fail "a cost with no counters to price has to be refused"
+  | Error detail ->
+      Alcotest.(check string) "the refusal says what is missing"
+        "usage cost_usd without the counters it would price" detail
+
 let test_decode_current_turn_variants () =
   List.iter
     (fun (channel, expected_channel) ->
@@ -1363,10 +1411,9 @@ let test_decode_current_turn_variants () =
         (Some 12) entry.le_output_tokens
   | Error err -> Alcotest.fail err
 
-(* The six values are required fields carrying nullable values, so a row can
-   arrive with some of them null and the rest filled -- which is the branch 75
-   of 200 rows in a live keeper's log landed on, 37% of the window. The refusal
-   now says which side of the line each value fell on. *)
+(* The five counters are required fields carrying nullable values, so a row
+   can arrive with some of them null and the rest filled. The refusal says
+   which side of the line each value fell on. *)
 let test_a_row_with_some_values_null_names_them () =
   let null_in_usage key json =
     match json with
@@ -1387,8 +1434,8 @@ let test_a_row_with_some_values_null_names_them () =
    | Error detail ->
        Alcotest.(check string) "the refusal names the one that is null first"
          "usage unset=[total_tokens] set=[input_tokens, output_tokens, \
-          cache_creation_tokens, cache_read_tokens, cost_usd] is not one \
-          current atomic observation"
+          cache_creation_tokens, cache_read_tokens] is not one current atomic \
+          observation"
          detail);
   match
     Tui_decode.decode_log_entry
@@ -10519,6 +10566,10 @@ let () =
           test_decode_current_turn_variants;
         Alcotest.test_case "current heartbeat contract" `Quick
           test_decode_current_heartbeat_metrics;
+        Alcotest.test_case "a turn priced by no provider is still a turn" `Quick
+          test_a_turn_priced_by_no_provider_is_still_a_turn;
+        Alcotest.test_case "a cost without counters is refused" `Quick
+          test_a_cost_without_counters_is_refused;
         Alcotest.test_case "a row with some values null names them" `Quick
           test_a_row_with_some_values_null_names_them;
         Alcotest.test_case "retired and unknown rows fail closed" `Quick

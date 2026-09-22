@@ -368,6 +368,14 @@ let scan_line state line =
 
 (* [find_structural_index pred lines] is {!find_index} restricted to lines that
    carry structure, so a match inside a multi-line value is not one. *)
+let structural_lines lines =
+  let rec loop state acc = function
+    | [] -> List.rev acc
+    | line :: rest -> loop (scan_line state line) (is_structural state :: acc) rest
+  in
+  loop outside [] lines
+;;
+
 let find_structural_index pred lines =
   let rec loop index state = function
     | [] -> None

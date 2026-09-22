@@ -311,7 +311,7 @@ status: reference
 **Fusion Seat (자리)**
 : Fusion 실행에서 답을 내는 한 자리. panel 한 명과 judge 하나가 각각 한 자리다
   (`Panel_seat`·`Judge_seat`). 자리마다 경로 이름 하나를 받고, 그 이름을 후보 목록으로
-  풀어 적힌 순서로 시도한다. 실행마다 명단을 바꿀 수 있다.
+  풀어 적힌 순서로 시도한다. 실행마다 명단(Fusion Roster)을 바꿀 수 있다.
   → [Fusion_types.seat](../../lib/fusion_core/fusion_types.ml)
 
 **Fusion Route (경로 이름)**
@@ -323,6 +323,14 @@ status: reference
   같은 단독 모델 작업의 목적별 실행 경로)와 다른 층이다 — 이쪽은 Fusion 자리의 failover
   후보 순서를 지목한다.
   → [Fusion_seat](../../lib/fusion/fusion_seat.mli)
+
+**Fusion Roster (명단)**
+: 한 Fusion 실행만 preset 의 자리 대신 쓰는 경로 이름 목록. `judge_route` 는 심판 자리
+  하나를, `panel_routes` 는 패널 명단을 바꾼다. `None` 인 칸은 preset 값을 그대로 쓴다.
+  명단을 preset 에 얹는 규칙과 검사는 `Fusion_policy.with_roster` 한 곳에 있고, 검사를
+  통과하지 못하면 `Roster_invalid` 로 거절한다. 바꾸지 않으면 `preset_roster`(두 칸 모두
+  `None`)다. 명단에 적힌 이름은 `route_name` 으로 앞뒤 공백을 떼어 읽는다.
+  → [Fusion_types.roster](../../lib/fusion_core/fusion_types.mli)
 
 **Gate**
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는

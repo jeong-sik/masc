@@ -3166,6 +3166,20 @@ let test_runtime_toml_rejects_non_positive_max_concurrent () =
            (String_util.contains_substring rendered "max-concurrent"))
     [ 0; -1 ]
 
+(* No official client anywhere, so a configured command stays as configured
+   ({!Runtime_official_cli_install.locate}); a case about the configuration
+   should not read this machine's ~/.local/bin. A blank CODEX_INSTALL_DIR
+   reads as unset, which is what the lookup asks. *)
+let without_an_installed_client f =
+  let home = Filename.temp_dir "masc-no-client-" "" in
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir home)
+    (fun () ->
+       Masc_test_deps.with_process_env "PATH" (Some "") (fun () ->
+         Masc_test_deps.with_process_env "HOME" (Some home) (fun () ->
+           Masc_test_deps.with_process_env "CODEX_INSTALL_DIR" (Some "") f)))
+;;
+
 let with_temp_runtime_toml content f =
   let path = Filename.temp_file "runtime" ".toml" in
   let oc = open_out path in
@@ -4989,6 +5003,7 @@ let codex_app_server_runtime_toml ?credential ?(options = "") () =
 
 let test_codex_app_server_materializes_as_turn_runtime () =
   with_temp_runtime_toml (codex_app_server_runtime_toml ()) (fun path ->
+    without_an_installed_client @@ fun () ->
     match load_list_text ~config_path:path with
     | Error error -> failf "codex-app-server runtime should load: %s" error
     | Ok (runtimes, default, _, _, _) ->
@@ -4999,7 +5014,8 @@ let test_codex_app_server_materializes_as_turn_runtime () =
        | Runtime_execution.Claude_code _ ->
          fail "codex-app-server was incorrectly materialized as agent_core"
        | Runtime_execution.Codex_app_server config ->
-         check string "cli path" "codex" config.cli_path;
+         check string "cli path, as configured when no client is installed" "codex"
+           config.cli_path;
          check (option string) "model" (Some "gpt-5.6-sol") config.model
        | Runtime_execution.Antigravity_cli _ ->
          fail "codex-app-server was incorrectly materialized as antigravity-cli"))
@@ -5079,6 +5095,7 @@ let test_antigravity_cli_materializes_typed_process_options () =
        ~options
        ())
     (fun path ->
+       without_an_installed_client @@ fun () ->
        match load_list_text ~config_path:path with
        | Error error -> failf "antigravity-cli runtime should load: %s" error
        | Ok (runtimes, default, _, _, _) ->
@@ -5086,7 +5103,8 @@ let test_antigravity_cli_materializes_typed_process_options () =
          check string "default id" "antigravity.gemini" default.id;
          (match default.execution with
           | Runtime_execution.Antigravity_cli config ->
-            check string "cli path" "agy" config.cli_path;
+            check string "cli path, as configured when no client is installed" "agy"
+              config.cli_path;
             check string "model" "gemini-3.6-flash-high" config.model;
             check (option string) "agent" (Some "fixture-agent") config.agent;
             check bool

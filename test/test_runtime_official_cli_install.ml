@@ -4,7 +4,7 @@
    ~/.local/bin/claude as a link into a versioned directory -- and sets PATH
    for the process, so what is checked is the file system, not a mock. *)
 open Alcotest
-module Install = Masc.Runtime_official_cli_install
+module Install = Runtime_official_cli_install
 
 let executable path =
   Out_channel.with_open_text path (fun oc -> output_string oc "#!/bin/sh\necho fixture\n");

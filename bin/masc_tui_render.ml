@@ -874,8 +874,10 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
      lines keep the text column, so long handoff summaries stay readable. *)
   let labeled_lines label text =
     let width = max 10 (cols - 16) in
-    Message_layout.wrap_words ~max_cells:width
-      (Terminal_text.single_line text)
+    (* The block has rows, so a line break in the text takes one instead of
+       being spelled into the sentence. Of the 718 tasks on this workspace
+       406 are written with line breaks. *)
+    Masc_tui_text_block.rows ~max_cells:width text
     |> List.mapi
          (fun index line ->
             if index = 0 then Printf.sprintf "  %-8s %s" label line

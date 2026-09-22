@@ -23,6 +23,12 @@
 
 ### Fixed
 
+- Task 상세의 `what`·`handoff`·`done-when` 같은 본문 블록이 줄바꿈을 줄로 그려요.
+  지금까지는 여러 줄 글을 한 줄용 읽기로 먼저 통과시켜서, 줄바꿈이 `\x0A` 네 글자로
+  문장 한가운데 섞여 들어갔어요. 이 작업공간의 태스크 718개 중 406개가 줄바꿈이 있는
+  글이라 전부 그렇게 보였습니다. 이제 줄마다 따로 접고, 가운데 빈 줄은 그대로 두고,
+  앞뒤 빈 줄만 버려요. 남이 쓴 글의 escape 를 막는 읽기는 줄마다 그대로 거칩니다.
+
 - The Identity tab no longer repeats the keys its footer draws. The sentence above the service list spelled them because the title row carried the hint and cut it (#35539); the keys have since moved to the footer, which draws all six at 120 columns and gives up `/:filter` and `R:refresh` at 80 with `?` naming what it dropped (#38011).
 - The Approvals title counts what its tab badge counts. The badge is the sum of the approval rows and the questions Keepers have open, and the Overview row reads the same helper, but the title counted the approval rows alone: with one open question the tab read `Approvals·1` and the screen it opened read `MASC Approvals (0)`. The title now reads `(1 question)`, naming the kind beside the three approval kinds (#38006).
 - A repository whose clone or fetch failed says what went wrong. The failure is stamped on the repository with the git message and the route writes it to the wire, but nothing read it: the Workspace surface drew `error` in a nine-cell column and the cause was on no screen. The status is now read as the closed type the store keeps, with the cause inside it, and the selected row's context draws it (#38002).

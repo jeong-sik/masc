@@ -6984,6 +6984,7 @@ let open_context_inspector state ~mailbox ~keeper_name =
      would be a more dangerous lie than a loading row. Refreshing the same
      target keeps its reading; opening a target does not. *)
   state.context_inspector_reading <- None;
+  state.context_inspector_read_at <- None;
   state.context_inspector_tab <- Masc_tui_context_inspector.Composition;
   state.context_inspector_cursor <- 0;
   state.context_inspector_scroll <- 0;
@@ -7393,18 +7394,26 @@ let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
       Some (launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token)
 ;;
 
-let launch_keeper_run_next ?observed_turn state ~mailbox request =
+(* Ask the server to run this queued message next. Run-next only reorders
+   the queue: it carries no interrupt token, so the turn the Keeper is on --
+   its own autonomous turn or another operator's message -- finishes its
+   tool work and yields at the next boundary. Until 2026-09-22 a promoted
+   line (a queued line sent again, /run-next, or Enter while the Keeper's
+   chat control token had not arrived) derived the observed autonomous turn
+   as the token, so the server cancelled that turn; the plain Enter path had
+   stopped doing so on 2026-09-14 and the footer promised the same for all
+   of them. Stopping a turn is an explicit act: Esc, or /steer, which
+   interrupts before it queues. *)
+let launch_keeper_run_next state ~mailbox request =
   if Option.is_some state.keeper_run_next_inflight then ()
   else begin
     let keeper_name = request.Keeper_chat.keeper_name in
     let request_id = request.Keeper_chat.request_id in
-    let interrupt_token = Option.value
-      ~default:(Option.map snd (keeper_observed_turn state keeper_name)) observed_turn in
     state.keeper_run_next_inflight <- Some request_id;
     append_chat_history state request Message_status "Requesting first place for this message; waiting for server confirmation";
     let run () =
       let result = try Masc_tui_http.post_keeper_run_next ~host:server_peer_host
-        ~port:state.port ~keeper_name ~request_id ~interrupt_token
+        ~port:state.port ~keeper_name ~request_id
         with Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn) in
       enqueue_async mailbox (Keeper_run_next_done (request, result)) in
@@ -7657,7 +7666,7 @@ let inflight_for state keeper_name =
 
 let drop_inflight state request =
   (match state.keeper_run_next_pending with
-   | Some (pending, _) when Keeper_chat.same_request_identity pending request ->
+   | Some pending when Keeper_chat.same_request_identity pending request ->
      state.keeper_run_next_pending <- None
    | Some _ | None -> ());
   state.msg_inflight <-
@@ -7910,7 +7919,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                  | None -> add_event state "error" "Steer queue changed before submission"
                  | Some (item, rest) ->
                    state.msg_queued <- rest;
-                   state.keeper_run_next_pending <- Some (request, Option.map snd (keeper_observed_turn state keeper_name));
+                   state.keeper_run_next_pending <- Some request;
                    launch_keeper_request ~promoted:item state ~mailbox request))
 ;;
 (* Send one line to one keeper.
@@ -8006,7 +8015,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                             || Option.is_some (working_chat_for_keeper state target))
                         && Option.is_none state.keeper_run_next_pending
                         && Option.is_none state.keeper_run_next_inflight then
-                       state.keeper_run_next_pending <- Some (item.request, Option.map snd (keeper_observed_turn state target));
+                       state.keeper_run_next_pending <- Some item.request;
                      launch_keeper_request ~promoted:item state ~mailbox
                        item.request)
       | Some _ ->
@@ -8064,7 +8073,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                            || Option.is_some (working_chat_for_keeper state target))
                        && Option.is_none state.keeper_run_next_pending
                        && Option.is_none state.keeper_run_next_inflight then
-                      state.keeper_run_next_pending <- Some (item.request, Option.map snd (keeper_observed_turn state target));
+                      state.keeper_run_next_pending <- Some item.request;
                     launch_keeper_request ~promoted:item state ~mailbox item.request);
                  add_event state "info" "Message submitted without interruption; refreshing chat controls";
                  launch_keeper_turns_load state ~mailbox))))
@@ -9136,6 +9145,7 @@ let toggle_acting_pane (state : state) =
   | Some layout ->
       state.acting_pane_layout <- layout;
       state.acting_pane_scroll <- 0;
+      state.acting_pane_cursor <- None;
       Ok layout
 
 (* Show one of the pane's tabs. Where the pane cannot show, the tab is not
@@ -9290,6 +9300,69 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
           launch_keeper_history_load state ~mailbox ~keeper_name;
           state.view <- Keepers Keeper_message
       | Some index -> state.keeper_cursor <- index)
+
+(* Keyboard focus on the Activity pane (#37672): Ctrl-W puts a cursor on the
+   first row a press acts on, [j]/[k] walk those rows and past the frame's
+   last one scroll the pane a row, Enter does what a press on the row does
+   -- opens or closes a call, turns the order, switches the tab -- and Esc
+   or Ctrl-W hands the keys back to the surface. On Board and Resources the
+   pane is the last stop of the Ctrl-W cycle after their two panes. The
+   cursor is a row of the last frame, the way a press is: what it opens is
+   what was on screen. *)
+let acting_pane_drawn (state : state) =
+  Masc_tui_render.acting_pane_drawn_cols () > 0
+  && not (Masc_tui_render.acting_pane_suppressed state)
+
+let acting_pane_frame_targets () =
+  Array.init (Masc_tui_render.acting_pane_row_count ()) (fun line ->
+    Masc_tui_render.acting_pane_target_at ~line)
+
+(* [true] when the cursor went up; [false] when the frame drew no row a
+   press acts on, so there is nothing to focus. *)
+let focus_acting_pane (state : state) =
+  match
+    Masc_tui_acting_pane.next_target_row
+      ~targets:(acting_pane_frame_targets ()) ~row:(-1) ~step:1
+  with
+  | Some row ->
+      state.acting_pane_cursor <- Some row;
+      true
+  | None -> false
+
+let leave_acting_pane (state : state) =
+  state.acting_pane_cursor <- None;
+  (* The cycle closes where it opened: the left pane. *)
+  (match state.view with
+   | Board -> state.board_focus <- Left_pane
+   | Resources -> state.resource_focus <- Left_pane
+   | _ -> ())
+
+let move_acting_pane_cursor (state : state) ~row ~step =
+  match
+    Masc_tui_acting_pane.next_target_row
+      ~targets:(acting_pane_frame_targets ()) ~row ~step
+  with
+  | Some next -> state.acting_pane_cursor <- Some next
+  | None ->
+      (* No further row in this frame: bring the next one in. The cursor
+         keeps its row; the pane moves under it. *)
+      scroll_acting_pane state ~delta:step
+
+let acting_pane_focus_keys =
+  [ "j"; "down"; "k"; "up"; "enter"; "\r"; "\n"; "esc"; "\023" ]
+
+let handle_acting_pane_focus_key (state : state) ~base_path ~mailbox ~row key =
+  match key with
+  | "j" | "down" -> move_acting_pane_cursor state ~row ~step:1
+  | "k" | "up" -> move_acting_pane_cursor state ~row ~step:(-1)
+  | "esc" | "\023" -> leave_acting_pane state
+  | _ -> handle_acting_pane_click state ~base_path ~mailbox ~line:row
+
+(* Ctrl-W where no pane cycle owns it: the surface and the Activity pane
+   take turns. *)
+let focus_acting_pane_or_say_why (state : state) =
+  if not (focus_acting_pane state) then
+    add_event state "system" "Activity pane has no row to open"
 
 let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   let target =
@@ -9641,7 +9714,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             | None -> notice ~role:Message_error "Local queue changed; inspect /queue again"
             | Some (_, rest) ->
               state.msg_queued <- rest;
-              state.keeper_run_next_pending <- Some (item.request, Option.map snd (keeper_observed_turn state name));
+              state.keeper_run_next_pending <- Some item.request;
               launch_keeper_request ~promoted:item state ~mailbox item.request;
               notice ~role:Message_local "Submitting queued input; it will be prioritized once the server accepts it")
          | None ->
@@ -12694,6 +12767,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         state.voice_wizard
   | Voice_config_loaded (result, setup, device) ->
       state.voice_input_device <- device;
+      (* The Config surface re-reads voice on entry and after every save, so
+         a transcriber set up there is named on the next empty draft. *)
+      state.voice_stt_set_up <- Masc.Voice_bridge.stt_set_up ();
       (match result with
        | Ok json ->
            state.voice_config <- Some json;
@@ -12854,6 +12930,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          shows the whole history anyway, and the loader is generation-
          guarded, so the flag only remembers that a reload is due. *)
       let open_chat_gained_turn = ref false in
+      (* The chat operations the open pane's keeper streamed a frame for in
+         this batch, with the highest journal seq named and the earliest
+         frame clock: one follow-up read per operation per batch, decided
+         after the loop ([journal_follow_for_frame]), however many tokens
+         arrived. *)
+      let open_chat_stream_frames : (string * (int option * float)) list ref = ref [] in
       (* Same shape as [open_chat_gained_turn]: remember that a fusion run
          pushed a status, decide once per batch after the loop. The run id
          rides along so an open detail only refetches when it is the run
@@ -12900,6 +12982,34 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                       && state.msg_target_keeper_name = Some appended_keeper ->
                    open_chat_gained_turn := true
                | Some _ | None -> ());
+              (match event with
+               | Masc_tui_observer.Keeper_chat_stream_frame
+                   { keeper; operation_id; seq; at; _ }
+                 when state.view = Keepers Keeper_message
+                      && state.msg_target_keeper_name = Some keeper ->
+                   let highest =
+                     match List.assoc_opt operation_id !open_chat_stream_frames, seq with
+                     | Some (Some held, first_at), Some seq ->
+                         (Some (max held seq), first_at)
+                     | Some (Some held, first_at), None -> (Some held, first_at)
+                     | Some (None, first_at), seq -> (seq, first_at)
+                     | None, seq -> (seq, at)
+                   in
+                   open_chat_stream_frames :=
+                     (operation_id, highest)
+                     :: List.remove_assoc operation_id !open_chat_stream_frames
+               | Masc_tui_observer.Keeper_chat_stream_frame _
+               | Masc_tui_observer.Agent_core _
+               | Masc_tui_observer.Keeper_heartbeat _
+               | Masc_tui_observer.Keeper_tool_call _
+               | Masc_tui_observer.Keeper_turn_complete _
+               | Masc_tui_observer.Keeper_turn_observation _
+               | Masc_tui_observer.Keeper_composite_changed _
+               | Masc_tui_observer.Keeper_chat_appended _
+               | Masc_tui_observer.Keeper_waiting_inventory_changed _
+               | Masc_tui_observer.Fusion_run_status _
+               | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
+                   ());
               (match event with
                | Masc_tui_observer.Fusion_run_status { run_id; _ } ->
                    fusion_status_seen := Some run_id
@@ -12971,6 +13081,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              launch_keeper_history_load ~load_file_changes:false state ~mailbox
                ~keeper_name
          | None -> ());
+      (* A frame of a turn this pane did not open: its journal grew, so read
+         it from where the pane's record ends. The frame itself is not
+         folded -- see [journal_follow_for_frame]. *)
+      (match state.msg_target_keeper_name with
+       | Some keeper_name ->
+           List.iter
+             (fun (operation_id, (seq, at)) ->
+               match
+                 journal_follow_for_frame state ~keeper_name ~operation_id ~seq ~at
+               with
+               | Follow_nothing -> ()
+               | Follow_read_after_inflight ->
+                   journal_read_wanted state operation_id seq
+               | Follow_read { started_at; since_seq } ->
+                   launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
+                     [ (operation_id, started_at, since_seq) ])
+             (List.rev !open_chat_stream_frames)
+       | None -> ());
       (* A fusion push reloads only the surface that shows it. The event
          says a run moved; HTTP says what it is now -- the same
          trigger/SSOT split the dashboard applies (sse-store). Both loaders
@@ -14022,14 +14150,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                Option.iter (append_chat_history state request Message_status) notice
              | _ -> ()) deltas;
            (match state.keeper_run_next_pending with
-            | Some (pending, observed_turn) when Keeper_chat.same_request_identity pending request ->
+            | Some pending when Keeper_chat.same_request_identity pending request ->
               let admission = List.find_map (fun (_, delta) -> match delta with
                 | Keeper_chat_live.Accepted {admission;_} -> Some admission
                 | _ -> None) deltas in
               (match admission with
                | Some Keeper_chat_live.Queued ->
                  state.keeper_run_next_pending <- None;
-                 launch_keeper_run_next ~observed_turn state ~mailbox request
+                 launch_keeper_run_next state ~mailbox request
                | Some (Running | Settled) ->
                  state.keeper_run_next_pending <- None;
                  append_chat_history state request Message_status "Submitted message already started or settled; no other turn was interrupted"
@@ -14470,7 +14598,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              state.context_inspector_keeper
       then begin
         state.context_inspector_loading <- false;
-        state.context_inspector_reading <- Some (keeper_name, reading)
+        state.context_inspector_reading <- Some (keeper_name, reading);
+        state.context_inspector_read_at <- Some (Unix.gettimeofday ())
       end
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->
@@ -14565,7 +14694,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (* Not generation-guarded: a journal is the turn's record whichever
          keeper the pane shows now, and the log is kept per keeper. *)
       journal_read_finished state operation_id;
-      match journal with
+      (* A stream frame arrived while this read was in flight: the read may
+         have stopped short of the line it announced. Decided after the
+         result below is folded, so the next read starts past it and a turn
+         that just ended asks for nothing. *)
+      let read_again () =
+        match take_journal_wanted state operation_id with
+        | Not_wanted -> ()
+        | Wanted { highest_seq } -> (
+            (* Against the highest seq the frames named: a read that reached
+               it has answered them, and the chain ends here rather than with
+               one more empty read. *)
+            match
+              journal_follow_for_frame state ~keeper_name ~operation_id
+                ~seq:highest_seq ~at:started_at
+            with
+            | Follow_nothing | Follow_read_after_inflight -> ()
+            | Follow_read { started_at; since_seq } ->
+                launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
+                  [ (operation_id, started_at, since_seq) ])
+      in
+      (match journal with
       | Ok lines ->
           (* The lines join the session's record of the turn when it has one
              -- a cut live stream's partial log, an earlier read of a turn
@@ -14575,7 +14724,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             match settled_log_for_request state ~keeper_name operation_id with
             | Some held when not (turn_log_holds_the_turn held) -> held
             | Some _ | None ->
-                turn_log_create ~keeper_name ~request_id:operation_id ~started_at
+                turn_log_create ~keeper_name ~request_id:operation_id
+                  ~started_at:(journal_log_started_at ~fallback:started_at lines)
           in
           turn_log_add_journaled log lines;
           Keeper_chat_log.commit log.tl_log;
@@ -14642,7 +14792,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "error"
             (Printf.sprintf "journal for %s not loaded: %s"
                (Keeper_chat.compact_request_id operation_id)
-               (Keeper_chat.terminal_safe_text detail)))
+               (Keeper_chat.terminal_safe_text detail)));
+      read_again ())
   | Tools_loaded (generation, keeper_name, result) ->
       settle_tools_read state ~generation Tools_inventory_read;
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
@@ -15576,6 +15727,7 @@ let main
     Option.value
       (tui_settings.send_on_stop)
       ~default:false;
+  state.voice_stt_set_up <- Masc.Voice_bridge.stt_set_up ();
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
@@ -17732,6 +17884,11 @@ and is loaded on demand through keeper_skill.
          send. Everything it does not claim reaches the surface with its
          meaning unchanged, so no existing binding moved when the row
          appeared. The chat surface is excluded — it draws its own composer. *)
+      (* A cursor left over a pane this frame did not draw would come back
+         on a stale row when the pane returns; it goes down here, before
+         any key reads it. *)
+      if Option.is_some state.acting_pane_cursor && not (acting_pane_drawn state)
+      then state.acting_pane_cursor <- None;
       let composer_claimed =
         Option.is_none state.lane_addons &&
         (not compact_viewport)
@@ -18230,6 +18387,31 @@ and is loaded on demand through keeper_skill.
           modal and surface branch: those states are hidden, and a question,
           search cursor, or draft must not move behind the fallback. *)
        | Some _ when compact_viewport -> ()
+       (* The Activity pane holds these keys while its cursor is up. Above
+          the surfaces on purpose: a [j] here must not also move the list
+          beside the pane. Any other key reaches the surface unchanged. *)
+       | Some k
+         when Option.is_some state.acting_pane_cursor
+              && acting_pane_drawn state
+              && Option.is_none (text_input_target state ~compact_viewport)
+              && List.mem k acting_pane_focus_keys ->
+           let row = Option.value state.acting_pane_cursor ~default:0 in
+           handle_acting_pane_focus_key state ~base_path ~mailbox:async_messages
+             ~row k;
+           Render_schedule.request render_schedule Render_schedule.Force
+       (* Ctrl-W on a surface without a pane cycle of its own goes straight
+          to the Activity pane. Board and Resources keep their cycles below,
+          with the pane as the last stop; the chat keeps Ctrl-W for the word
+          in its draft and gives it up only when the draft is empty. *)
+       | Some "\023"
+         when Option.is_none state.acting_pane_cursor
+              && acting_pane_drawn state
+              && Option.is_none (text_input_target state ~compact_viewport)
+              && state.view <> Board && state.view <> Resources
+              && (state.view <> Keepers Keeper_message
+                  || Buffer.length state.msg_input = 0) ->
+           focus_acting_pane_or_say_why state;
+           Render_schedule.request render_schedule Render_schedule.Force
        | Some k
          when String.equal k toggle_browser_lane_key
               && not state.palette_open && (not state.help_open && not state.keeper_deletions_open)
@@ -20683,17 +20865,26 @@ and is loaded on demand through keeper_skill.
               && terminal_columns >= keeper_split_threshold_cols
               && not state.board_detail_wide ->
            (match state.board_mode with
-            | Board_read _ ->
-                state.board_focus <-
-                  (match state.board_focus with
-                   | Left_pane -> Right_pane
-                   | Right_pane -> Left_pane)
-            | Board_list | Board_compose -> ())
-       | Some "\023" when state.view = Resources ->
-           state.resource_focus <-
-             (match state.resource_focus with
-              | Left_pane -> Right_pane
-              | Right_pane -> Left_pane)
+            | Board_read _ -> (
+                match state.board_focus with
+                | Left_pane -> state.board_focus <- Right_pane
+                | Right_pane ->
+                    (* The Activity pane is the cycle's last stop when the
+                       frame draws it; otherwise the cycle closes. *)
+                    if not (acting_pane_drawn state && focus_acting_pane state)
+                    then state.board_focus <- Left_pane)
+            | Board_list ->
+                if acting_pane_drawn state then focus_acting_pane_or_say_why state
+            | Board_compose -> ())
+       | Some "\023" when state.view = Board && state.board_mode <> Board_compose ->
+           (* One pane on screen: the surface and the Activity pane take turns. *)
+           if acting_pane_drawn state then focus_acting_pane_or_say_why state
+       | Some "\023" when state.view = Resources -> (
+           match state.resource_focus with
+           | Left_pane -> state.resource_focus <- Right_pane
+           | Right_pane ->
+               if not (acting_pane_drawn state && focus_acting_pane state)
+               then state.resource_focus <- Left_pane)
        | Some "shift-left"
          when state.view = Code && state.code_focus_file = Right_pane
               && not state.code_history_open ->

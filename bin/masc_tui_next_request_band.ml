@@ -20,7 +20,8 @@ let origin_sentence = function
       Printf.sprintf "front halved after a refusal (retry %d)" retry
   | Inspector.Carried_evicted_after_refusal { retry } ->
       Printf.sprintf "front evicted after a refusal (retry %d)" retry
-  | Inspector.Carried_whole_history -> "no front to start from: the whole history"
+  | Inspector.Carried_turn_start { end_atom } ->
+      Printf.sprintf "no front to start from: this turn's own atoms, from atom %d" end_atom
 ;;
 
 (* A Unix epoch as a UTC clock reading, the day dropped: the band compares
@@ -172,9 +173,9 @@ let lines ~prose ~fact ~safe ~scale
       let checkpoint =
         prose
           (Printf.sprintf
-             "%d messages in the checkpoint; the wake line adds %d bytes as the \
+             "%d messages in the checkpoint; the wake line adds %s tok as the \
               newest atom."
-             forecast.Inspector.checkpoint_messages forecast.Inspector.wake_line_bytes)
+             forecast.Inspector.checkpoint_messages (Masc_tui_token_scale.format_estimate scale forecast.Inspector.wake_line_bytes))
       in
       (match forecast.Inspector.walk with
        | Error refusal ->

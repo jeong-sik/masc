@@ -1415,6 +1415,19 @@ let legend ~cols =
   ^ pad_left calls_cells "calls"
   ^ pad_left tokens_cells "tok/turn"
 
+let next_target_row ~(targets : row_target array) ~row ~step =
+  let count = Array.length targets in
+  let rec walk index =
+    if index < 0 || index >= count then None
+    else
+      match targets.(index) with
+      | Target_none -> walk (index + step)
+      | Target_next_tab | Target_keeper _ | Target_more | Target_file _
+      | Target_calls _ | Target_call _ | Target_call_order ->
+          Some index
+  in
+  if step = 0 then None else walk (row + step)
+
 let lines ~rows ~cols ~scroll input =
   let rows = max 0 rows in
   if rows = 0 then { rows = []; targets = []; scroll_max = 0 }

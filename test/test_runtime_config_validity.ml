@@ -780,7 +780,7 @@ let test_unset_thinking_does_not_disable_reasoning_model () =
    instead of keeping a second copy beside it: the copy is how a slot came to
    run on a different wire than the Keeper requests of the same binding
    (#37674). *)
-let declared_targets_of_config_path ~label path =
+let declared_targets_of_config_path ?(environment = []) ~label path =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let startup_state = Runtime_startup_state.get () in
   Fun.protect
@@ -788,6 +788,17 @@ let declared_targets_of_config_path ~label path =
       Runtime.For_testing.restore runtime_snapshot;
       Runtime_startup_state.set startup_state)
   @@ fun () ->
+  (* A binding's key is read here, once, when the runtime loads it, and the
+     exact slot carries that key rather than reading the name again. So the
+     credentials a scenario has are the process environment around this load,
+     not answers the resolver's [io] gives: [io] no longer decides a binding's
+     key. [None] unsets a name the suite's shell may have exported. *)
+  let rec with_environment = function
+    | [] -> fun f -> f ()
+    | (name, value) :: rest ->
+      fun f -> Masc_test_deps.with_process_env name value (fun () -> with_environment rest f)
+  in
+  with_environment environment @@ fun () ->
   match Runtime.init_default ~config_path:path with
   | Error detail -> failf "%s: runtime bindings should initialize: %s" label detail
   (* Loading the bindings is what makes them targets, so a binding this config
@@ -795,13 +806,14 @@ let declared_targets_of_config_path ~label path =
   | Ok () -> Server_runtime_bootstrap.For_testing.exact_output_targets_of_runtimes ()
 ;;
 
-let snapshot_of_config ~io ~label path =
+let snapshot_of_config ?environment ~io ~label path =
   match
     Exact_output.load_resolver_snapshot
       ~io
       ~target_binding_policy:Exact_output.Exclude_unbound_targets
       ~catalog:
-        (Exact_output.Embedded_with_targets (declared_targets_of_config_path ~label path))
+        (Exact_output.Embedded_with_targets
+           (declared_targets_of_config_path ?environment ~label path))
       ()
   with
   | Ok snapshot -> snapshot
@@ -2070,19 +2082,24 @@ let test_release_evidence_fixture_lanes_resolve_without_environment_credentials 
 let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let root = repo_root () in
   let runtime_path = Filename.concat root "config/runtime.toml" in
-  let io : Exact_output.resolver_io =
-    { getenv =
-        (function
-          | "ZAI_CODING_API_KEY" | "ZAI_API_KEY" | "KIMI_API_KEY"
-          | "OLLAMA_CLOUD_API_KEY" ->
-            Ok (Some "exact-output-seed-test")
-          | _ -> Ok None)
-    }
+  (* The names the seed's providers declare. They are process environment
+     around the runtime load, where a binding's key is read; the resolver's
+     [io] answers nothing about a binding's key any more. *)
+  let io : Exact_output.resolver_io = { getenv = (fun _ -> Ok None) } in
+  let every_seed_key =
+    [ "ZAI_API_KEY", Some "exact-output-seed-test"
+    ; "KIMI_API_KEY", Some "exact-output-seed-test"
+    ; "OLLAMA_CLOUD_API_KEY", Some "exact-output-seed-test"
+    ]
   in
-  let single_key_io : Exact_output.resolver_io =
-    { getenv = (function
-        | "ZAI_API_KEY" -> Ok (Some "first-install-glm-key")
-        | _ -> Ok None) }
+  (* [OLLAMA_API_KEY] is the fallback name the runtime also reads for the
+     Ollama Cloud binding; a first install has neither. *)
+  let public_key_only =
+    [ "ZAI_API_KEY", Some "first-install-glm-key"
+    ; "KIMI_API_KEY", None
+    ; "OLLAMA_CLOUD_API_KEY", None
+    ; "OLLAMA_API_KEY", None
+    ]
   in
   let output_requirement =
     Exact_output.make_output_requirement
@@ -2103,11 +2120,13 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
   match Runtime_toml.parse_file runtime_path with
   | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
   | Ok config ->
-    let snapshot = snapshot_of_config ~io ~label:"deployment seed" runtime_path in
+    let snapshot =
+      snapshot_of_config ~environment:every_seed_key ~io ~label:"deployment seed" runtime_path
+    in
     (* Every GLM binding the seed declares has to come up on the public key
        alone; a first install has no coding-plan key. *)
     let single_key_snapshot =
-      snapshot_of_config ~io:single_key_io ~label:"single-key GLM" runtime_path
+      snapshot_of_config ~environment:public_key_only ~io ~label:"single-key GLM" runtime_path
     in
     List.iter
       (fun (binding : Runtime_schema.binding) ->

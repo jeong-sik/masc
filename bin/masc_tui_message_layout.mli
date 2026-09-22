@@ -134,6 +134,10 @@ type entry = {
           consumes body budget like any other word and no row exceeds the
           block's wrap width. [None] on every other row; nothing shifts when
           a turn has no span to say. *)
+  speaker : string;
+      (** The label {!role_label} was aligned from, whole. The gutter cuts a
+          long name to its column; the origin heading under {!Origin_row}
+          has the pane's width and draws this instead. *)
   role_label : string;
   role_label_mark_cells : int;
       (** Cells the speaker mark occupies at the head of {!role_label}, from
@@ -159,14 +163,20 @@ type metadata =
       (** The first entry in a different civil hour. It is structural metadata
           so scrolling and search measure the same row the renderer paints. *)
   | Origin of {
-      timestamp : string;
+      clock : string option;
+          (** The entry's timestamp where the entry has a trustworthy time
+              ([timeline_bucket] is [Some]); [None] where it does not, so the
+              heading draws no clock rather than the placeholder text. *)
+      speaker : string;
       role_label : string;
       request_label : string;
     }
-  | Continued_at of { timestamp : string }
-(** A new origin carries every field the renderer needs for its badge. A later
-    row from the same origin carries only its new timestamp, so callers never
-    have to parse display text to decide what should be highlighted. *)
+  | Continued_at of { clock : string }
+      (** Only emitted where the entry has a trustworthy time: a continuation
+          that cannot say when it moved has nothing to draw. *)
+(** A new origin carries every field the renderer needs for its heading. A
+    later row from the same origin carries only its new clock, so callers
+    never have to parse display text to decide what should be highlighted. *)
 
 type shade =
   | Shade_none
@@ -458,14 +468,6 @@ val continued_mark : style -> string
     speaker. While the turn opens with {!speaker_mark}, continuing rows draw
     a quiet vertical connection line ("│") rather than repeating the mark
     over a wide empty gutter. Reasoning keeps its own dot. *)
-
-val split_aligned_role_label :
-  style:style -> string -> string * string * string
-(** An {!align_role_label} result taken back apart into its mark, the
-    name, and its trailing column padding. The padding is layout and the name
-    is content: a renderer that reverses the whole label paints empty cells as
-    though they were the badge. The mark is empty for a label
-    narrow enough that {!align_role_label} dropped it. *)
 
 val fit_speaker :
   ?column:int -> speaker:string -> surface:string option -> unit -> string

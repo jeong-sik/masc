@@ -40,8 +40,24 @@ type checkpoint_progress =
 type continuity
 (** A snapshot verified against the dispatch's original checkpoint. *)
 
-val uncompressed_history : continuity
-(** A fresh history cannot use an older snapshot or an older eviction front. *)
+val without_snapshot : continuity
+(** No snapshot to summarize with: none is saved, or the saved one belongs to
+    another history. The request starts at the turn's own boundary
+    ({!Keeper_carried_front.Turn_start}); an older eviction front is not used. *)
+
+val absorbed_history :
+  trace_id:string ->
+  messages:Agent_core.Types.message list ->
+  Keeper_librarian_progress.t ->
+  (int * continuity) option
+(** The Librarian's durable position as the front of the request, with the
+    exclusive end atom it stands at: the atoms before it are read into memory
+    and are not sent again, and no summary stands in for them. [Some] only
+    when the position names [trace_id] and the atom before it opens with the
+    message the position recorded, so a position from another trace or
+    another history generation is [None]. Taken when a saved continuity
+    snapshot no longer fits the history (RFC keeper-context-window-in-tokens
+    section 13.6). *)
 
 val completed_history_end :
   trace_id:string ->
@@ -49,6 +65,16 @@ val completed_history_end :
   messages:Agent_core.Types.message list -> (int, Librarian_continuity_snapshot.error) result
 (** The last verified completed atom endpoint. An attempt seed is not proof that
     resumed work completed; callers retain original bodies when no proof exists. *)
+
+val turn_start :
+  config:Workspace.config -> keeper_name:string -> trace_id:string ->
+  messages:Agent_core.Types.message list -> int
+(** Where a request with no absorbed point starts (RFC
+    keeper-context-window-in-tokens §13.4): {!completed_history_end} read from
+    the keeper's turn-boundary store, 0 when the history has no completed
+    turn. A store this process cannot read, or a boundary the history in hand
+    does not match, is logged and answered 0: the request goes out from the
+    oldest atom rather than not at all. *)
 
 val prepare_continuity :
   trace_id:string ->
@@ -417,8 +443,9 @@ type composed =
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
     atoms older than [demote_before], or over every atom when the last
-    resort is armed, then the carried range from [front]; the whole history
-    without one. Nothing here measures the request against a limit. *)
+    resort is armed, then the carried range from [front], or from
+    [completed_end_atom] without one (§13.4). Nothing here measures the
+    request against a limit. *)
 
 type request_view =
   { composed : composed
@@ -509,6 +536,7 @@ module For_testing : sig
     last_resort:bool ->
     base_path:string ->
     demote_before:int ->
+    completed_end_atom:int ->
     Agent_core.Types.message list ->
     composed
 
@@ -522,6 +550,7 @@ module For_testing : sig
     last_resort:bool ->
     base_path:string ->
     demote_before:int ->
+    completed_end_atom:int ->
     materialize:
       (pending:Keeper_model_input_demotion.pending list ->
        Agent_core.Types.message list ->

@@ -205,7 +205,8 @@ let test_turns_do_not_readmit_what_the_scope_hides () =
     ; Observer.Keeper_composite_changed { keeper = "analyst"; at = 100. }
     ; heartbeat "analyst"
     ; Observer.Keeper_chat_stream_frame
-        { keeper = "analyst"; frame = Some "text_delta"; at = 100. }
+        { keeper = "analyst"; operation_id = "op"; seq = None
+        ; frame = Some "text_delta"; at = 100. }
     ; Observer.Keeper_waiting_inventory_changed
         { keeper = "analyst"; queue_kind = Some "event_queue"; at = 100. }
     ; Observer.Snapshot "keepers"
@@ -288,7 +289,8 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
     ; Observer.Other "internal_agent_runs_changed"
     ; Observer.Keeper_chat_stream_frame
-        { keeper = "test-keeper"; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
+        { keeper = "test-keeper"; operation_id = "op"; seq = None
+        ; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
     ; Observer.Keeper_waiting_inventory_changed
         { keeper = "lane-smith"; queue_kind = Some "board"; at = 100. }
     ; Observer.Fusion_run_status
@@ -314,6 +316,8 @@ let test_one_reply_does_not_bury_the_actions_it_sits_between () =
     List.init 400 (fun index ->
         Observer.Keeper_chat_stream_frame
           { keeper = "test-keeper"
+          ; operation_id = "op"
+          ; seq = Some index
           ; frame = Some "TEXT_MESSAGE_CONTENT"
           ; at = 100. +. float_of_int index
           })
@@ -333,7 +337,8 @@ let test_a_stream_frame_draws_its_keeper_and_what_it_was () =
   let row =
     Acting.row_of_event ~at:100. ~duration_ms:None
       (Observer.Keeper_chat_stream_frame
-         { keeper = "test-keeper"; frame = Some "CUSTOM KEEPER_TOOL_RESULT_READY"; at = 1787507570.5 })
+         { keeper = "test-keeper"; operation_id = "op"; seq = None
+         ; frame = Some "CUSTOM KEEPER_TOOL_RESULT_READY"; at = 1787507570.5 })
   in
   check string "keeper" "test-keeper" row.Acting.keeper;
   check bool "the row wears the feed's clock, not the frame's" true
@@ -390,6 +395,8 @@ let test_a_long_reply_does_not_evict_the_log_it_streams_into () =
   let stream index =
     Observer.Keeper_chat_stream_frame
       { keeper = "test-keeper"
+      ; operation_id = "op"
+      ; seq = Some index
       ; frame = Some "TEXT_MESSAGE_CONTENT"
       ; at = 200. +. float_of_int index
       }
@@ -411,7 +418,8 @@ let test_a_long_reply_does_not_evict_the_log_it_streams_into () =
 let test_the_old_arrival_trim_would_have_lost_them () =
   let stream index =
     Observer.Keeper_chat_stream_frame
-      { keeper = "test-keeper"; frame = Some "TEXT_MESSAGE_CONTENT"; at = float_of_int index }
+      { keeper = "test-keeper"; operation_id = "op"; seq = Some index
+      ; frame = Some "TEXT_MESSAGE_CONTENT"; at = float_of_int index }
   in
   let ring = List.init 1_200 stream @ [ settled "largo" ] in
   let by_arrival = List.filteri (fun index _ -> index < 1_000) ring in
@@ -428,7 +436,8 @@ let test_the_old_arrival_trim_would_have_lost_them () =
 let test_a_reply_does_not_trim_the_observation_a_call_needs () =
   let stream index =
     Observer.Keeper_chat_stream_frame
-      { keeper = "alpha"; frame = Some "TEXT_MESSAGE_CONTENT"; at = 200. +. float_of_int index }
+      { keeper = "alpha"; operation_id = "op"; seq = Some index
+      ; frame = Some "TEXT_MESSAGE_CONTENT"; at = 200. +. float_of_int index }
   in
   (* Newest first, the order the ring holds: the reply streamed after the
      call and the observation that numbers it. *)

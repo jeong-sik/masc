@@ -3451,7 +3451,9 @@
   masc_tui_render_schedule
   masc_tui_frame_presenter
   masc_tui_ansi
+  masc_tui_theme
   masc_tui_types
+  unix
   yojson)
  (deps
   (source_tree ../bin)))
@@ -5104,7 +5106,7 @@
 (test
  (name test_tui_chat_activity)
  (modules test_tui_chat_activity)
- (libraries alcotest masc_tui_types masc_tui_keeper_chat_live
+ (libraries alcotest astring masc_tui_answering masc_tui_types masc_tui_keeper_chat_live
   masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue))
 
 (test
@@ -6611,6 +6613,7 @@
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)
 
+(include stanzas/test_exact_output_admission_refusal_reason.inc)
 (include stanzas/test_exact_output_binding_wire.inc)
 
 (rule

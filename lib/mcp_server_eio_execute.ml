@@ -422,7 +422,7 @@ let execute_tool_eio
                      ~args:coerced_args
                  | Mod_library ->
                    Tool_library.dispatch
-                     { Tool_library.agent_name }
+                     { Tool_library.base_path = config.base_path; agent_name }
                      ~name
                      ~args:coerced_args
                  | Mod_external ->

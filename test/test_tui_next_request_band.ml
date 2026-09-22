@@ -119,8 +119,10 @@ let test_the_band_names_the_marks_and_the_range () =
      && says "front from this runtime's ledger" rows);
   Alcotest.(check bool) "the last count is read against the marks" true
     (says "last counted 91.0k tok against marks 120.0k / 80.0k" rows);
-  Alcotest.(check bool) "the footer counts the checkpoint and the wake line" true
-    (says "6012 messages in the checkpoint; the wake line adds 131 bytes as the newest atom" rows)
+  (* 131 / 3.39 = 38.6: the wake line is named in the same estimated tokens as
+     every other figure of the band, never in bytes beside them. *)
+  Alcotest.(check bool) "the footer counts the checkpoint and the wake line in tokens" true
+    (says ("6012 messages in the checkpoint; the wake line adds " ^ approx ^ "39 tok as the newest atom") rows)
 
 let test_a_pinned_figure_from_another_lane_names_it () =
   let forecast =
@@ -238,7 +240,7 @@ let test_a_cold_front_names_its_record_and_nothing_counted () =
     (says "front from turn #3581's record; nothing counted since the server started" rows);
   Alcotest.(check bool) "no count line" false (says "last counted" rows)
 
-let test_the_whole_history_and_refusal_fronts_say_why () =
+let test_the_turn_start_and_refusal_fronts_say_why () =
   let with_origin origin =
     lines
       (Ok
@@ -252,8 +254,9 @@ let test_the_whole_history_and_refusal_fronts_say_why () =
               })
             measured))
   in
-  Alcotest.(check bool) "the whole history" true
-    (says "no front to start from: the whole history" (with_origin Inspector.Carried_whole_history));
+  Alcotest.(check bool) "the turn start" true
+    (says "no front to start from: this turn's own atoms, from atom 3577"
+       (with_origin (Inspector.Carried_turn_start { end_atom = 3577 })));
   Alcotest.(check bool) "a halved front" true
     (says "front halved after a refusal (retry 2)"
        (with_origin (Inspector.Carried_halved_after_refusal { retry = 2 })));
@@ -283,6 +286,41 @@ let test_an_evicted_refusal_origin_decodes () =
       } -> ()
   | Ok _ -> Alcotest.fail "the eviction origin lost its retry"
   | Error detail -> Alcotest.fail ("the eviction origin decodes: " ^ detail)
+
+let test_a_turn_start_origin_decodes () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"schema":"masc.keeper.next-request-forecast.v5","checkpoint_messages":1,"wake_line_bytes":1,
+         "walk":{"lane_id":"r","declared":["r"]},
+         "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
+           "parts":{"error":"not measured"},"history_atoms":4,
+           "carried":{"first_atom":2,"kept_atoms":2,"transmitted_bytes":300,"preamble_bytes":null,
+                      "origin":{"kind":"turn_start","end_atom":2},"counted_tokens":null},
+           "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
+  in
+  (match Inspector.decode_forecast json with
+   | Ok
+       { candidates =
+           [ { carried = Some { origin = Inspector.Carried_turn_start { end_atom = 2 }; _ }
+             ; _
+             }
+           ]
+       ; _
+       } -> ()
+   | Ok _ -> Alcotest.fail "the turn start origin lost its atom"
+   | Error detail -> Alcotest.fail ("the turn start origin decodes: " ^ detail));
+  let without_atom =
+    Yojson.Safe.from_string
+      {|{"schema":"masc.keeper.next-request-forecast.v5","checkpoint_messages":1,"wake_line_bytes":1,
+         "walk":{"lane_id":"r","declared":["r"]},
+         "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
+           "parts":{"error":"not measured"},"history_atoms":4,
+           "carried":{"first_atom":2,"kept_atoms":2,"transmitted_bytes":300,"preamble_bytes":null,
+                      "origin":{"kind":"whole_history"},"counted_tokens":null},
+           "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
+  in
+  Alcotest.(check bool) "the removed kind is not a known origin" true
+    (Result.is_error (Inspector.decode_forecast without_atom))
 
 let test_no_range_without_the_fixed_parts_is_said () =
   let reason = "no completed turn on this runtime carried a composition in the newest 200 records" in
@@ -595,8 +633,10 @@ let () =
             test_no_marks_says_only_a_refusal_moves_the_front
         ; Alcotest.test_case "a cold front names its record and nothing counted" `Quick
             test_a_cold_front_names_its_record_and_nothing_counted
-        ; Alcotest.test_case "the whole history and refusal fronts say why" `Quick
-            test_the_whole_history_and_refusal_fronts_say_why
+        ; Alcotest.test_case "the turn start and refusal fronts say why" `Quick
+            test_the_turn_start_and_refusal_fronts_say_why
+        ; Alcotest.test_case "a turn start origin decodes with its atom" `Quick
+            test_a_turn_start_origin_decodes
         ; Alcotest.test_case "no range without the fixed parts is said" `Quick
             test_no_range_without_the_fixed_parts_is_said
         ; Alcotest.test_case "an official-client runtime carries no range and says why" `Quick

@@ -98,7 +98,7 @@ let test_frontmatter_crlf_delimiter_is_seen () =
      the third read it fine. *)
   let content = "---\r\ntitle: Example\r\n---\r\nbody" in
   let parsed = Frontmatter.parse content in
-  check string "title is read" "Example" (Frontmatter.field parsed "title")
+  check string "title is read" "Example" (Option.value ~default:"" (List.assoc_opt "title" parsed.Frontmatter.fields))
 
 let test_frontmatter_absent_returns_whole_content () =
   let content = "no frontmatter here" in
@@ -119,10 +119,19 @@ let test_frontmatter_body_excludes_the_block () =
   check string "body" "line one\nline two" parsed.Frontmatter.body
 
 let test_frontmatter_tags_accept_both_shapes () =
-  let bracketed = Frontmatter.parse "---\ntags: [a, b]\n---\n" in
-  let bare = Frontmatter.parse "---\ntags: a, b\n---\n" in
-  check (list string) "bracketed" [ "a"; "b" ] (Frontmatter.list_field bracketed "tags");
-  check (list string) "bare" [ "a"; "b" ] (Frontmatter.list_field bare "tags")
+  let tags content =
+    let parsed = Frontmatter.parse content in
+    match List.assoc_opt "tags" parsed.Frontmatter.fields with
+    | Some value -> Frontmatter.list_value value
+    | None -> fail "tags field is present in every fixture here"
+  in
+  check (list string) "bracketed" [ "a"; "b" ] (tags "---\ntags: [a, b]\n---\n");
+  check (list string) "bare" [ "a"; "b" ] (tags "---\ntags: a, b\n---\n");
+  (* [tags: []] and [tags:] are both a document with no tags; whether a
+     document with no [tags] line at all is an error is the caller's call,
+     which is why [list_value] takes the value and not the field name. *)
+  check (list string) "empty brackets" [] (tags "---\ntags: []\n---\n");
+  check (list string) "empty value" [] (tags "---\ntags:\n---\n")
 
 (* A block that never closes used to consume the document: every line became
    a field candidate and the body came back empty, so a prompt whose closing
@@ -138,9 +147,23 @@ let test_frontmatter_unterminated_block_keeps_the_document () =
     []
     parsed.Frontmatter.fields
 
+(* [parse] answers the same empty fields for no block and for a block that
+   never closes; a reader that reports why a document does not read needs the
+   two apart, and [read] names them. *)
+let test_frontmatter_read_tells_absent_unclosed_and_closed_apart () =
+  let block content =
+    match Frontmatter.read content with
+    | Frontmatter.Absent -> "absent"
+    | Frontmatter.Unclosed -> "unclosed"
+    | Frontmatter.Closed parsed -> "closed:" ^ Option.value ~default:"" (List.assoc_opt "title" parsed.Frontmatter.fields)
+  in
+  check string "no opening delimiter" "absent" (block "title: T\nbody");
+  check string "no closing delimiter" "unclosed" (block "---\ntitle: T\nbody");
+  check string "closed block" "closed:T" (block "---\ntitle: T\n---\nbody")
+
 let test_frontmatter_line_without_colon_is_skipped () =
   let parsed = Frontmatter.parse "---\njust text\ntitle: T\n---\n" in
-  check string "title still read" "T" (Frontmatter.field parsed "title");
+  check string "title still read" "T" (Option.value ~default:"" (List.assoc_opt "title" parsed.Frontmatter.fields));
   check int "only one field" 1 (List.length parsed.Frontmatter.fields)
 
 (* The predicate both config-root seeds ask ([masc init] and the server's own
@@ -250,5 +273,7 @@ let () =
         test_frontmatter_line_without_colon_is_skipped;
       test_case "unterminated block keeps the document" `Quick
         test_frontmatter_unterminated_block_keeps_the_document;
+      test_case "read tells absent, unclosed and closed apart" `Quick
+        test_frontmatter_read_tells_absent_unclosed_and_closed_apart;
     ];
   ]

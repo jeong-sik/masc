@@ -22,11 +22,21 @@ type catalog_document =
   ; contents : string
   }
 
+(* The credential a binding sends, as the binding resolved it. The keeper's
+   request carries the key itself, resolved through the deployment's own
+   credential selection; an exact request on the same binding sends that key,
+   not a second read of an environment name. An environment name that
+   resolved to nothing is kept by name, so the refusal can say which one. *)
+type binding_credential =
+  | Credential_not_declared
+  | Credential_resolved of Secret.t
+  | Credential_unresolved of { environment_variable : string }
+
 type declared_target =
   { target_ref : string
   ; binding : PC.t
+  ; credential : binding_credential
   ; body_timeout_s : float option
-  ; api_key_env : string option
   }
 
 type resolver_catalog_input =
@@ -106,7 +116,10 @@ type resolver_snapshot_error =
    from the binding after the mirror-image failure in #33652. *)
 type target_wire =
   | Catalog_provider_wire
-  | Binding_wire of PC.t
+  | Binding_wire of
+      { config : PC.t
+      ; credential : binding_credential
+      }
 
 type target_declaration =
   { target_ref : target_ref
@@ -116,11 +129,6 @@ type target_declaration =
   ; reasoning_effort : Reasoning_effort.t option
   ; connect_timeout_s : float option
   ; body_timeout_s : float option
-  ; api_key_env : string option
-      (* Which environment name holds this slot's credential. A catalog row
-         names the provider's usual one; a deployment that reads a different
-         one says so in its binding, and that is the authority. [None] keeps
-         the catalog's name. *)
   ; wire : target_wire
       (* For [Binding_wire], the fields above are that binding's own values,
          read off its config once in [admit_declared]. They are a projection of
@@ -315,8 +323,7 @@ let parse_target_declaration ~source toml =
     ; body_timeout_s
     ; (* A document declares its slots next to the provider rows they name, so
          the catalog's credential name is the only one in play. *)
-      api_key_env = None
-    ; wire = Catalog_provider_wire
+      wire = Catalog_provider_wire
     }
 ;;
 
@@ -540,7 +547,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
          provider row serves more than one, and a binding names which. *)
       (match target.wire with
        | Catalog_provider_wire -> [ "wire=catalog_provider" ]
-       | Binding_wire binding ->
+       | Binding_wire { config = binding; credential = _ } ->
          [ "wire=binding"
          ; PC.string_of_provider_kind binding.PC.kind
          ; binding.PC.base_url
@@ -640,8 +647,7 @@ let load_resolver_snapshot
         ; reasoning_effort = binding.PC.reasoning_effort
         ; connect_timeout_s = binding.PC.connect_timeout_s
         ; body_timeout_s = declared.body_timeout_s
-        ; api_key_env = declared.api_key_env
-        ; wire = Binding_wire binding
+        ; wire = Binding_wire { config = binding; credential = declared.credential }
         }
   in
   let* base_source, base_document, declared_targets =
@@ -714,13 +720,7 @@ let load_resolver_snapshot
          with
          | Error Binding.Provider_missing -> reject Target_provider
          | Error Binding.Model_missing -> reject Target_model
-         | Ok (provider, model) ->
-           let provider =
-             match target.api_key_env with
-             | None -> provider
-             | Some api_key_env -> { provider with Model_catalog.api_key_env }
-           in
-           Ok ((target, provider, model) :: bindings, rejected))
+         | Ok (provider, model) -> Ok ((target, provider, model) :: bindings, rejected))
       (Ok ([], []))
       target_declarations
   in
@@ -731,18 +731,19 @@ let load_resolver_snapshot
         ( (target : target_declaration)
         , (provider : Model_catalog.provider_entry)
         , (_ : Model_catalog.model_entry) ) ->
-         let names =
-           (* A binding carries its own endpoint, so the row's environment name
-              for one answers nothing this target reads. *)
-           match target.wire, provider.base_url_env with
-           | Binding_wire _, (Some _ | None) -> names
-           | Catalog_provider_wire, Some name when name <> "" ->
-             String_set.add name names
-           | Catalog_provider_wire, (Some _ | None) -> names
-         in
-         if provider.api_key_env = ""
-         then names
-         else String_set.add provider.api_key_env names)
+         (* A binding carries its own endpoint and its own credential, so the
+            row's environment names answer nothing this target reads. *)
+         match target.wire with
+         | Binding_wire _ -> names
+         | Catalog_provider_wire ->
+           let names =
+             match provider.base_url_env with
+             | Some name when name <> "" -> String_set.add name names
+             | Some _ | None -> names
+           in
+           if provider.api_key_env = ""
+           then names
+           else String_set.add provider.api_key_env names)
       String_set.empty
       structural
   in
@@ -789,7 +790,7 @@ let load_resolver_snapshot
              , provider.request_path
              , false
              , Binding.capabilities_of_catalog_binding provider model )
-           | Binding_wire binding ->
+           | Binding_wire { config = binding; credential = _ } ->
              ( binding.PC.kind
              , binding.PC.base_url
              , binding.PC.request_path
@@ -845,7 +846,15 @@ let load_resolver_snapshot
               ; target.model_id
               ; base_url
               ; request_path
-              ; provider.api_key_env
+              ; (match target.wire with
+                 | Catalog_provider_wire -> provider.api_key_env
+                 | Binding_wire { credential = Credential_not_declared; _ } ->
+                   "credential=none"
+                 | Binding_wire { credential = Credential_resolved _; _ } ->
+                   "credential=binding"
+                 | Binding_wire
+                     { credential = Credential_unresolved { environment_variable }; _ } ->
+                   "credential=unresolved:" ^ environment_variable)
               ; option_bool target.enable_thinking
               ; option_string (Option.map Reasoning_effort.to_string target.reasoning_effort)
               ; option_float target.connect_timeout_s
@@ -861,18 +870,29 @@ let load_resolver_snapshot
            { target_ref = target.target_ref; fingerprint = identity_fingerprint }
          in
          let credential =
-           if provider.api_key_env = ""
-           then Credential_not_required
-           else (
-             match observed_environment provider.api_key_env with
-             | Error () -> Credential_read_failed provider.api_key_env
-             | Ok (Some value) when Binding.has_control value ->
-               Credential_invalid provider.api_key_env
-             | Ok (Some value) ->
-               (match Cli_common_env.trim_non_empty value with
-                | Some credential -> Credential_available (Secret.of_string credential)
-                | None -> Credential_missing provider.api_key_env)
-             | Ok None -> Credential_missing provider.api_key_env)
+           match target.wire with
+           (* The key the binding's own requests carry -- not a second read of
+              an environment name, which the deployment's credential selection
+              may resolve to a different key than the name alone does. *)
+           | Binding_wire { credential = Credential_resolved key; _ } ->
+             Credential_available key
+           | Binding_wire { credential = Credential_not_declared; _ } ->
+             Credential_not_required
+           | Binding_wire { credential = Credential_unresolved { environment_variable }; _ }
+             -> Credential_missing environment_variable
+           | Catalog_provider_wire ->
+             if provider.api_key_env = ""
+             then Credential_not_required
+             else (
+               match observed_environment provider.api_key_env with
+               | Error () -> Credential_read_failed provider.api_key_env
+               | Ok (Some value) when Binding.has_control value ->
+                 Credential_invalid provider.api_key_env
+               | Ok (Some value) ->
+                 (match Cli_common_env.trim_non_empty value with
+                  | Some credential -> Credential_available (Secret.of_string credential)
+                  | None -> Credential_missing provider.api_key_env)
+               | Ok None -> Credential_missing provider.api_key_env)
          in
          let target_id = target_ref_id target.target_ref in
          Ok

@@ -1570,6 +1570,37 @@ let test_a_working_state_that_leaves_no_turn_stays_out () =
     snapshot
 ;;
 
+(* A window that holds the working state and the whole range it leads sends
+   both: the summary in front, then every atom from where the Librarian read. *)
+let test_a_working_state_the_window_holds_goes () =
+  let messages = carried_front_history () in
+  let snapshot = snapshot_of ~messages ~end_atom:53 ~working_state:"Fifty asks answered so far." in
+  let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+  let before = working_state_not_carried ~reason:"displaces_atoms" in
+  let seen_front = ref None in
+  let projected =
+    project_with_capacity
+      ~librarian_front:(fun _ ->
+        Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+      ~on_carried_front:(fun front ~transmitted_bytes:_ -> seen_front := Some front)
+      ~capacity:1_000_000
+      messages
+  in
+  (match projected with
+   | ({ role = System; content = [ Text text ]; _ } : Agent_core.Types.message) :: rest ->
+     check string "the working state leads the list" working_state text;
+     check (list string) "and every atom from the Librarian's position follows"
+       (encoded_history (List.filteri (fun index _ -> index >= 53) messages))
+       (encoded_history rest)
+   | _ -> fail "the working state did not lead the list");
+  (match !seen_front with
+   | Some (Keeper_official_client_host.Librarian_snapshot _) -> ()
+   | Some _ -> fail "the reported front is not the working state"
+   | None -> fail "the composition reported no front");
+  check (float 0.) "and nothing is counted as left out" before
+    (working_state_not_carried ~reason:"displaces_atoms")
+;;
+
 let test_a_front_from_another_history_is_dropped () =
   let messages = carried_front_history () in
   let other =
@@ -1670,6 +1701,10 @@ let () =
             "a working state that leaves no turn stays out"
             `Quick
             test_a_working_state_that_leaves_no_turn_stays_out
+        ; test_case
+            "a working state the window holds goes"
+            `Quick
+            test_a_working_state_the_window_holds_goes
           ; test_case
               "a front from another history is dropped"
               `Quick

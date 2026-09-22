@@ -6,6 +6,17 @@ module Librarian = Keeper_librarian
 module Memory = Keeper_memory_os_types
 module Runtime = Keeper_librarian_runtime
 
+let contains ~needle haystack =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec scan index =
+    if index + n > h
+    then false
+    else String.equal (String.sub haystack index n) needle || scan (index + 1)
+  in
+  n = 0 || scan 0
+;;
+
 let ordinary_requirement =
   Agent_core.Exact_output.make_output_requirement
     ~schema:Keeper_structured_output_schema.librarian_current_output_schema
@@ -357,10 +368,27 @@ let test_excluded_last_slot_preserves_domain_failure () =
        (List.map
           (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
           preflight.Runtime.selected_slots);
-     check (list (pair string string))
+     (* The slot id the run is without, and what that slot refused. The reason
+        is the operator's only account of why a lane is one slot short, so it
+        carries the provider config's own sentence, not just the kind. *)
+     check (list string)
        "the refused slot is reported, not fatal"
-       [ ("librarian-bad", "wire_admission_rejected:target_request_rejected") ]
-       preflight.Runtime.unusable
+       [ "librarian-bad" ]
+       (List.map fst preflight.Runtime.unusable);
+     (match preflight.Runtime.unusable with
+      | [ (_, reason) ] ->
+        check bool
+          "the refusal names its kind"
+          true
+          (String.starts_with
+             ~prefix:"wire_admission_rejected:target_request_rejected("
+             reason);
+        check bool
+          "and carries what the config refused"
+          true
+          (contains ~needle:"masc-exact-fixture-model" reason)
+      | unusable ->
+        failf "expected one refused slot, got %d" (List.length unusable))
    | Error error ->
      fail (Runtime.extraction_error_to_string error));
   with_temp_base "librarian-preflight-execution" @@ fun base_path ->

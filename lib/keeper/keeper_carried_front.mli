@@ -14,12 +14,14 @@
     record counts the same history as an Agent Core one — read as
     [total_atoms - transmitted_atoms]; a lane walking to its next candidate
     starts from the range the last answered request carried rather than from
-    the whole history.
-    With neither, the caller has no atom to start from and carries the whole
-    history; the provider judges it, and the turn driver owns the one move a
-    refusal forces, which {!Halved_after_refusal} and
-    {!Evicted_after_refusal} name. These positions belong to the turn and
-    take precedence over an older front in a later candidate's ledger.
+    the oldest atom.
+    With neither, the range starts where the last completed turn on this
+    history ended ({!Turn_start}, RFC keeper-context-window-in-tokens §13.4):
+    this turn's own atoms go out and the atoms before them wait for the
+    Librarian. The turn driver owns the one move a refusal forces, which
+    {!Halved_after_refusal} and {!Evicted_after_refusal} name. These
+    positions belong to the turn and take precedence over an older front in
+    a later candidate's ledger.
 
     A front is a position: the atom index and the digest of the message that
     opens that atom
@@ -53,9 +55,12 @@ type seed =
 type origin =
   | Carried of source  (** The front came from a seed. *)
   | Librarian_snapshot of { end_atom : int; boundary_line : int }
-  | Whole_history
-      (** No front to start from: everything, until the first usage on the
-          pair is counted or a refusal halves the range. *)
+  | Turn_start of { end_atom : int }
+      (** No absorbed point and no seed: the range begins where the last
+          completed turn on this history ended, so only this turn's own
+          atoms go out and the atoms before them wait for the Librarian.
+          [end_atom] is 0 on a history with no completed turn, where that
+          is the short history a fresh keeper has. *)
 
 val of_ledger : Keeper_model_input_ledger.t -> seed option
 (** The ledger's front with the digest the ledger recorded for it; [None]
@@ -188,5 +193,6 @@ val origin_to_string : origin -> string
 
 val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind]: [ledger], [turn_record] with [turn],
-    [halved_after_refusal] or
-    [evicted_after_refusal] with [retry], or [whole_history]. *)
+    [halved_after_refusal] or [evicted_after_refusal] with [retry],
+    [librarian_snapshot] with [end_atom] and [boundary_line], or
+    [turn_start] with [end_atom]. *)

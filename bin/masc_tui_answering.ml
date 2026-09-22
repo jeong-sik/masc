@@ -77,16 +77,36 @@ let duration_text = Masc_tui_message_layout.span_text
 
 let elapsed_text ~now started_at = duration_text (now -. started_at)
 
+(* One row of the chat pane's status band. [lead] is what the eye lands on
+   -- the mark, the lane, the age -- and the renderer paints it in the
+   status colour; [rest] is the detail after it, receded. The band used to
+   be drawn in the status colour whole, five rows of it, and a screen where
+   every word is the colour of a warning has no warning on it. *)
+type chat_activity_row =
+  { lead : string
+  ; rest : string
+  }
+
+let chat_activity_row_text row = row.lead ^ row.rest
+
 (* The same running turn must remain visible while a submitted chat waits
-   behind it. No ETA can be inferred from the turn's elapsed age. *)
-let chat_activity ~now ~keeper_name ~error rows =
-  let stale = match error with None -> [] | Some detail -> ["Activity unavailable: " ^ detail] in
+   behind it. No ETA can be inferred from the turn's elapsed age.
+
+   [frame] steps the running mark the way the live progress row's does
+   ([running_glyph]); a surface with no ticker passes none and gets the
+   still mark. [text_tail_drawn]: the pane is drawing the turn's reply text
+   itself (an observed turn read from its journal on every stream frame),
+   so the preview's tail of the same text is left out rather than said
+   twice on one screen. *)
+let chat_activity ?(frame = -1) ~now ~keeper_name ~error ~text_tail_drawn rows =
+  let plain text = { lead = text; rest = "" } in
+  let stale = match error with None -> [] | Some detail -> [plain ("Activity unavailable: " ^ detail)] in
   match List.find_opt (fun (row : Tui_decode.keeper_turn_row) ->
     String.equal row.ktr_keeper_name keeper_name) rows with
   | None -> stale
   | Some { ktr_state = Tui_decode.Keeper_turn_idle; _ } -> stale
   | Some { ktr_state = Tui_decode.Keeper_turn_unavailable detail; _ } ->
-    stale @ ["Current turn unavailable: " ^ detail]
+    stale @ [plain ("Current turn unavailable: " ^ detail)]
   | Some { ktr_state = Tui_decode.Keeper_turn_running { lane; started_at_unix; preview }; _ } ->
     let status = match preview with
       | None -> "progress has not been reported"
@@ -96,14 +116,26 @@ let chat_activity ~now ~keeper_name ~error rows =
           (elapsed_text ~now preview.ktp_updated_at_unix)
     in
     let text = match preview with
+      | Some _ when text_tail_drawn -> []
       | Some preview when String.trim preview.Tui_decode.ktp_text_tail <> "" ->
-        ["Latest output: " ^ Tui_decode.sanitize_terminal_text preview.ktp_text_tail]
+        [{ lead = ""; rest = "Latest output: " ^ Tui_decode.sanitize_terminal_text preview.ktp_text_tail }]
       | Some _ | None -> []
     in
-    let observed = match error with None -> "Current" | Some _ -> "Last observed" in
-    stale @ [Printf.sprintf "%s %s turn · %s · %s"
-      observed (lane_word lane) (elapsed_text ~now started_at_unix)
-      (Tui_decode.sanitize_terminal_text status ^ " · /queue")] @ text
+    (* "Current chat_operation turn · 14m43s · …" went: the mark says a turn
+       is running, and the lane and the age are the facts; "current" and
+       "turn" were the sentence around them. A stale reading keeps its word,
+       because a number from a poll that is failing is a different fact. *)
+    let mark, observed =
+      match error with
+      | None -> running_glyph ~frame, ""
+      | Some _ -> running_still, "last observed "
+    in
+    stale
+    @ [ { lead = Printf.sprintf "%s %s%s · %s" mark observed (lane_word lane)
+                   (elapsed_text ~now started_at_unix)
+        ; rest = " · " ^ Tui_decode.sanitize_terminal_text status
+        } ]
+    @ text
 ;;
 
 let is_running (row : Tui_decode.keeper_turn_row) =

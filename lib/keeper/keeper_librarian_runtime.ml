@@ -984,8 +984,10 @@ let run_best_effort
                 never mentions is one it never saw. *)
              (* An absorption the merged claim does not convey is not applied:
                 that memory stays current (RFC-librarian-absorb-gate). The
-                gate only narrows the list. A skipped check leaves the answer
-                unchanged; a failed judgment retains unconfirmed originals. *)
+                gate only narrows the list. A gate switched off, or an
+                excluded Keeper, leaves the answer unchanged; a gate that is
+                on but cannot be asked absorbs nothing; a failed judgment
+                retains unconfirmed originals. *)
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)

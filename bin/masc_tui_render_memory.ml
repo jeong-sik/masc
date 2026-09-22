@@ -140,7 +140,7 @@ let memory_context_lines (k : memory_keeper_health) =
       | Some value ->
         let input = match value.mcp_input with
           | Context_summarized value -> "summary " ^ frontier value
-          | Context_uncompressed -> "full history"
+          | Context_without_snapshot -> "no snapshot: this turn only"
           | Context_not_applied -> "saved context not applied" in
         Printf.sprintf "%s · %d request bytes · %s"
           (memory_updated_text (Some value.mcp_prepared_at))

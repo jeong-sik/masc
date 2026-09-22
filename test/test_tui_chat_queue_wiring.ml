@@ -14,6 +14,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Live = Masc_tui_keeper_chat_live
 module Log = Masc_tui_keeper_chat_log
 module Tui_types = Masc_tui_types
+module Tui_decode = Masc.Tui_decode
 module Keeper_selection = Masc_tui_keeper_selection
 
 let position =
@@ -1694,7 +1695,395 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
       (String.starts_with ~prefix:Masc_tui_theme.Box.h continuation
        && not (Astring.String.is_infix ~affix:keeper continuation));
     check int "a continuation also fills the row" inner
-      (Masc_tui_message_layout.display_width continuation))
+      (Masc_tui_message_layout.display_width continuation);
+    (* A lead one cell short of the room has no cell for a rule and still
+       fills the row: the clock stays in the column every other heading
+       puts it in. The lead is mark, space, name, " · " and the request id
+       (17 cells here), so the name is sized to land at room - 1. *)
+    let clock_cells = String.length (clock_of at) + 1 in
+    let room = inner - clock_cells in
+    let request = "tui-01a0c788-43a7" in
+    let exact = String.make (room - 1 - (2 + 3 + String.length request)) 'k' in
+    (* The pane shows its target keeper's rows, and a keeper row is labelled
+       with its keeper's name: the name under test is the target. *)
+    state.msg_target_keeper_name <- Some exact;
+    state.msg_history <-
+      [ { (chat_entry ~request_id:request ~role:Tui_types.Message_keeper
+             ~text:"EXACT_BODY" ~at ())
+          with Tui_types.me_keeper_name = exact } ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    (match
+       List.find_opt
+         (fun line ->
+           Astring.String.is_infix ~affix:exact line
+           && Astring.String.is_suffix ~affix:(clock_of at) (String.trim line))
+         plain
+     with
+     | Some line ->
+         check int "a lead one short of the room still fills the row" inner
+           (Masc_tui_message_layout.display_width (String.trim line))
+     | None -> fail "no heading spells the exact-width name");
+    (* A lane with no name -- a tool block -- draws its request after the
+       mark, not a dot with nothing on its left. *)
+    state.msg_target_keeper_name <- Some keeper;
+    state.msg_history <-
+      [ { (chat_entry ~request_id:request ~role:Tui_types.Message_tool
+             ~text:"read_file a.ml" ~at ())
+          with Tui_types.me_keeper_name = keeper } ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    (match
+       List.find_opt
+         (fun line -> Astring.String.is_suffix ~affix:(clock_of at) (String.trim line))
+         plain
+     with
+     | Some line ->
+         check bool "no dot with an empty name on its left" false
+           (Astring.String.is_infix ~affix:"  \xc2\xb7 " line);
+         check bool "the request follows the mark" true
+           (Astring.String.is_infix ~affix:(" " ^ request) line)
+     | None -> fail "no heading for the tool row"))
+;;
+
+(* A turn this pane did not open -- a TUI restarted mid-turn, a turn another
+   surface opened -- is drawn from its journal while it runs. The journal
+   reads fed a log that was held and drawn nowhere until the turn ended, so
+   the operator read the reply one line at a time off the footer's turn
+   preview (#36244). Now the log is an open block in the pane, the preview's
+   tail is left out of the footer while the pane draws the same text, and
+   the moment the journal says the turn ended the block is a settled one. *)
+let test_an_observed_running_turn_is_drawn_from_its_journal () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 100);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_loaded_keeper <- Some "alpha";
+    state.msg_loaded <-
+      [ chat_entry ~request_id:"op-1"
+          ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
+          ~text:"asked" ~at:100. () ];
+    let running = journal_log ~request_id:"op-1" ~started_at:100. ~finished:false () in
+    Tui_types.hold_settled_log state running;
+    let preview : Tui_decode.keeper_turn_preview =
+      { ktp_status_text = "glm · receiving response"; ktp_updated_at_unix = 130.
+      ; ktp_text_tail = "said"; ktp_last_tool = None }
+    in
+    state.keeper_turns <-
+      [ { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
+        ; ktr_state = Tui_decode.Keeper_turn_running
+            { lane = Tui_decode.Turn_lane_chat_operation; started_at_unix = 100.
+            ; interrupt_token = "t"; preview = Some preview } } ];
+    check (list string) "the running turn's log is observed, not settled"
+      [ "op-1" ]
+      (List.map Tui_types.turn_log_request_id
+         (Tui_types.observed_logs_for_keeper state "alpha"));
+    let count needle text =
+      Astring.String.cuts ~sep:needle text |> List.length |> fun n -> n - 1
+    in
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n"
+        (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines)
+    in
+    let running_screen = screen () in
+    check int "the question stays" 1 (count "asked" running_screen);
+    check bool "the pane draws the turn's text" true
+      (Tui_types.observed_turn_text_drawn state "alpha");
+    check int "the journal's reply text is in the pane once" 1
+      (count "said" running_screen);
+    check int "the footer does not repeat the tail as Latest output" 0
+      (count "Latest output" running_screen);
+    check bool "the footer still says a turn is running, by lane and age" true
+      (Astring.String.is_infix ~affix:"chat_operation \xc2\xb7 " running_screen);
+    check int "the turn's rail has not closed" 0
+      (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_closes)
+         running_screen);
+    (* The next journal read brings the end of the turn: the log now stands
+       for it, leaves the observed set, and is drawn as a settled block. *)
+    Tui_types.turn_log_add_journaled running
+      [ line 3 100.15 (journal_reply "said"); line 4 100.2 (E.Run_finished { run_id = "r" }) ];
+    Tui_types.hold_settled_log state running;
+    check (list string) "a finished turn is no longer observed" []
+      (List.map Tui_types.turn_log_request_id
+         (Tui_types.observed_logs_for_keeper state "alpha"));
+    state.keeper_turns <-
+      [ { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
+        ; ktr_state = Tui_decode.Keeper_turn_idle } ];
+    let settled_screen = screen () in
+    check int "the reply is still drawn once" 1 (count "said" settled_screen);
+    check bool "and the turn's rail closes" true
+      (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_closes)
+         settled_screen > 0
+       || count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_stands)
+            settled_screen > 0))
+;;
+
+(* The pane's own turn is the live block while its request is in flight, and
+   is not observed beside it. A stream the pane opened and lost settles
+   without hearing the end, [msg_live] lets go of it, and from then on it is
+   observed: the journal reads feed that log in place until the turn ends. *)
+let test_the_panes_own_turn_is_live_in_flight_and_observed_once_cut () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  let entry =
+    inflight_with_log ~keeper_name:"alpha" ~started_at:10.
+      [ Live.Run_started; Live.Text "partial" ]
+  in
+  state.msg_live <- Some entry.log;
+  state.msg_inflight <- [ entry ];
+  check (list string) "in flight: the live block, not observed" []
+    (List.map Tui_types.turn_log_request_id
+       (Tui_types.observed_logs_for_keeper state "alpha"));
+  Tui_types.settle_turn_log state entry;
+  state.msg_inflight <- [];
+  check bool "the cut log is held" true (List.memq entry.log state.msg_settled_logs);
+  check bool "the pane let go of it" true (Option.is_none state.msg_live);
+  check (list string) "cut and settled: observed, for the journal reads to feed"
+    [ entry.sent_request.request_id ]
+    (List.map Tui_types.turn_log_request_id
+       (Tui_types.observed_logs_for_keeper state "alpha"))
+;;
+
+(* A Working log that can no longer end is not an open block. The journal
+   with nothing more to say -- the settle-time failure the server never
+   journals (#33108), a restart's interruption, a pruned journal -- and the
+   loaded transcript saying the turn is over each take the log out of the
+   observed set, and the committed rows stand for the turn as they did
+   before observed blocks were drawn. Otherwise the block stayed open, its
+   rail never closing, beside the same turn's committed tool rows. *)
+let test_a_working_log_that_cannot_end_is_not_observed () =
+  let observed state =
+    List.map Tui_types.turn_log_request_id
+      (Tui_types.observed_logs_for_keeper state "alpha")
+  in
+  let fresh () =
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_loaded_keeper <- Some "alpha";
+    Tui_types.hold_settled_log state
+      (journal_log ~request_id:"op-1" ~started_at:100. ~finished:false ());
+    state
+  in
+  let state = fresh () in
+  check (list string) "running: observed" [ "op-1" ] (observed state);
+  Tui_types.remember_journal_unavailable state "op-1";
+  check (list string) "the journal has nothing more to say: not observed" []
+    (observed state);
+  let state = fresh () in
+  state.msg_loaded <-
+    [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_error
+        ~text:"provider failed at settle" ~at:130. () ];
+  check (list string) "a failure on record: not observed" [] (observed state);
+  let state = fresh () in
+  state.msg_loaded <-
+    [ chat_entry ~request_id:"op-1" ~role:Tui_types.Message_keeper
+        ~text:"the recorded reply" ~at:130. () ];
+  check (list string) "a reply on record: not observed" [] (observed state)
+;;
+
+(* A journal log bound to the execution the pane's live turn is bound to is
+   that turn, drawn already as the live block. The settled blocks apply the
+   same test. *)
+let test_a_journal_log_of_the_live_execution_is_not_observed () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  let live =
+    inflight_with_log ~keeper_name:"alpha" ~started_at:10.
+      [ Live.Run_started; Live.Text "shared answer" ]
+  in
+  let execution_id = live.sent_request.request_id in
+  Tui_types.turn_log_add ~now:11. live.log ~seq:None
+    (Live.Batch_bound { operation_id = execution_id; execution_id });
+  state.msg_live <- Some live.log;
+  state.msg_inflight <- [ live ];
+  let follower =
+    Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"batch-follower"
+      ~started_at:10.
+  in
+  List.iteri
+    (fun seq delta -> Tui_types.turn_log_add ~now:10. follower ~seq:(Some seq) delta)
+    [ Live.Run_started
+    ; Live.Batch_bound { operation_id = "batch-follower"; execution_id }
+    ; Live.Text "shared answer" ];
+  Log.commit follower.Tui_types.tl_log;
+  Tui_types.hold_settled_log state follower;
+  check string "the follower is bound to the live execution" execution_id
+    (Tui_types.turn_log_execution_id follower);
+  check (list string) "and is not observed beside the live block" []
+    (List.map Tui_types.turn_log_request_id
+       (Tui_types.observed_logs_for_keeper state "alpha"))
+;;
+
+let fresh_state_with_running_log () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  Tui_types.hold_settled_log state
+    (journal_log ~request_id:"op-1" ~started_at:100. ~finished:false ());
+  state
+;;
+
+(* A stream frame of a turn this pane did not open is the fact that the
+   turn's journal grew; the answer is a read from where the pane's record
+   ends, not a fold of the frame. What the frame asks depends on what the
+   pane already knows about the operation. *)
+let test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends () =
+  let follow ?(seq = Some 7) ?(at = 300.) state =
+    Tui_types.journal_follow_for_frame state ~keeper_name:"alpha"
+      ~operation_id:"op-1" ~seq ~at
+  in
+  let fresh () =
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.msg_target_keeper_name <- Some "alpha";
+    state
+  in
+  (match follow (fresh ()) with
+   | Tui_types.Follow_read { started_at; since_seq } ->
+       (* The frame's clock is the fallback the read carries; the log the
+          read creates takes the journal head's own time
+          ([journal_log_started_at]). *)
+       check (float 0.) "an operation the pane knows nothing of: the whole journal" 300. started_at;
+       check bool "from the start" true (since_seq = Masc.Keeper_chat_event_log.Whole_turn)
+   | Follow_nothing | Follow_read_after_inflight -> fail "a fresh operation is read");
+  let held_state = fresh_state_with_running_log in
+  (match follow ~seq:(Some 2) (held_state ()) with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "a seq the log already holds asks for nothing");
+  (match follow ~seq:(Some 3) (held_state ()) with
+   | Tui_types.Follow_read { started_at; since_seq } ->
+       check (float 0.) "a held log keeps its own start" 100. started_at;
+       check bool "and the read resumes after what it holds" true
+         (since_seq = Masc.Keeper_chat_event_log.After_seq 2)
+   | Follow_nothing | Follow_read_after_inflight ->
+       fail "a seq past the record is read");
+  (match follow ~seq:None (held_state ()) with
+   | Tui_types.Follow_read _ -> ()
+   | Follow_nothing | Follow_read_after_inflight ->
+       fail "a frame with no seq (the settle-time terminal) is read");
+  let inflight_state = held_state () in
+  Tui_types.journal_read_started inflight_state "op-1";
+  (match follow inflight_state with
+   | Tui_types.Follow_read_after_inflight -> ()
+   | Follow_nothing | Follow_read _ -> fail "a read in flight is not doubled");
+  let finished_state = fresh () in
+  Tui_types.hold_settled_log finished_state
+    (journal_log ~request_id:"op-1" ~started_at:100. ());
+  (match follow finished_state with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight -> fail "a turn that ended is over");
+  let unavailable_state = fresh () in
+  Tui_types.remember_journal_unavailable unavailable_state "op-1";
+  (match follow unavailable_state with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "a journal the server cannot serve is not asked for");
+  let refused_state = fresh () in
+  refused_state.msg_journal_reads_refused <- true;
+  (match follow refused_state with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "a refused credential asks for nothing");
+  let own_state = fresh () in
+  let entry = inflight_with_log ~keeper_name:"alpha" ~started_at:10. [ Live.Run_started ] in
+  own_state.msg_inflight <- [ entry ];
+  (match
+     Tui_types.journal_follow_for_frame own_state ~keeper_name:"alpha"
+       ~operation_id:entry.sent_request.request_id ~seq:(Some 7) ~at:300.
+   with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "the pane's own stream feeds its own request")
+;;
+
+(* One wanted mark per operation carrying the highest seq the frames named,
+   taken once. A read that lands having reached that seq ends the chain; the
+   seq-less settle terminal never lowers it. *)
+let test_a_wanted_journal_read_is_remembered_once_and_taken_once () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+  in
+  Tui_types.journal_read_wanted state "op-1" (Some 4);
+  Tui_types.journal_read_wanted state "op-1" (Some 9);
+  Tui_types.journal_read_wanted state "op-1" None;
+  Tui_types.journal_read_wanted state "op-2" None;
+  check (list string) "one entry per operation" [ "op-2"; "op-1" ]
+    (List.map fst state.msg_journal_wanted);
+  (match Tui_types.take_journal_wanted state "op-1" with
+   | Tui_types.Wanted { highest_seq } ->
+       check (option int) "the highest seq named" (Some 9) highest_seq
+   | Not_wanted -> fail "op-1 was wanted");
+  check bool "taken once" true
+    (Tui_types.take_journal_wanted state "op-1" = Tui_types.Not_wanted);
+  check (list string) "the other stays" [ "op-2" ] (List.map fst state.msg_journal_wanted);
+  (* The landed read reached the line the frames named: the pane holds
+     seq 2 of op-1 and the frames named 2, so nothing more is read. *)
+  let held = fresh_state_with_running_log () in
+  (match
+     Tui_types.journal_follow_for_frame held ~keeper_name:"alpha"
+       ~operation_id:"op-1" ~seq:(Some 2) ~at:300.
+   with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "a read that reached the named seq ends the chain")
+;;
+
+(* A log built from a journal read stands at the journal head's own time,
+   not at the moment the read was asked for. *)
+let test_a_journal_built_log_starts_at_the_journal_head () =
+  let head = line 0 100. (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" }) in
+  let later = line 3 100.3 (E.Text_delta "said") in
+  check (float 0.) "a read from the head takes the head's time" 100.
+    (Tui_types.journal_log_started_at ~fallback:300. [ head; later ]);
+  check (float 0.) "a read that resumes past the head keeps the fallback" 300.
+    (Tui_types.journal_log_started_at ~fallback:300. [ later ]);
+  check (float 0.) "an empty read keeps the fallback" 300.
+    (Tui_types.journal_log_started_at ~fallback:300. [])
+;;
+
+(* The frame reaches the read: the observer batch decides per operation
+   through [journal_follow_for_frame] and launches the read; a landed read
+   takes the wanted mark and reads again. *)
+let test_stream_frames_are_wired_to_journal_reads () =
+  let in_binding ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+      ~binding_name ~callee
+  in
+  let decides = in_binding ~binding_name:"apply_async_message" ~callee:"journal_follow_for_frame" in
+  let wants = in_binding ~binding_name:"apply_async_message" ~callee:"journal_read_wanted" in
+  let takes = in_binding ~binding_name:"apply_async_message" ~callee:"take_journal_wanted" in
+  let heads = in_binding ~binding_name:"apply_async_message" ~callee:"journal_log_started_at" in
+  (* Two launch sites: the frame's own, and the read-again after a landing. *)
+  let launches =
+    in_binding ~binding_name:"apply_async_message"
+      ~callee:"launch_keeper_chat_journal_loads"
+  in
+  if decides < 2 || wants < 1 || takes < 1 || launches < 3 || heads < 1
+  then
+    failf
+      "stream frames must reach the journal reads: decides=%d wants=%d takes=%d launches=%d heads=%d"
+      decides wants takes launches heads
 ;;
 
 (* The renderer knows the wrapped transcript's real maximum only after it has
@@ -2931,6 +3320,22 @@ let () =
             test_promoted_live_output_survives_settlement_and_replay
         ; test_case "the origin heading spells the name and ends on the clock" `Quick
             test_origin_row_heading_spells_the_name_and_ends_on_the_clock
+        ; test_case "an observed running turn is drawn from its journal" `Quick
+            test_an_observed_running_turn_is_drawn_from_its_journal
+        ; test_case "the pane's own turn is live in flight and observed once cut" `Quick
+            test_the_panes_own_turn_is_live_in_flight_and_observed_once_cut
+        ; test_case "a Working log that cannot end is not observed" `Quick
+            test_a_working_log_that_cannot_end_is_not_observed
+        ; test_case "a journal log of the live execution is not observed" `Quick
+            test_a_journal_log_of_the_live_execution_is_not_observed
+        ; test_case "a stream frame asks for a journal read from where the record ends" `Quick
+            test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends
+        ; test_case "a wanted journal read is remembered once and taken once" `Quick
+            test_a_wanted_journal_read_is_remembered_once_and_taken_once
+        ; test_case "a journal-built log starts at the journal head" `Quick
+            test_a_journal_built_log_starts_at_the_journal_head
+        ; test_case "stream frames are wired to journal reads" `Quick
+            test_stream_frames_are_wired_to_journal_reads
         ; test_case "promoted queue request owns a typed slot" `Quick
             test_promoted_queue_request_keeps_its_user_in_transcript
         ; test_case "message scroll accepts the rendered clamp" `Quick

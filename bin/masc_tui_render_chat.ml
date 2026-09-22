@@ -420,6 +420,9 @@ let origin_heading buf cols ~plain ~styled ~clock =
     if lead_cells <= room then styled, lead_cells else fit_width plain room, room
   in
   let rule_cells = room - lead_cells - 1 in
+  (* A lead one cell short of the room leaves no cell for a rule but still
+     owes the space: without it the row summed to one less than the frame
+     and the clock sat a cell left of every other heading's. *)
   let rule =
     if rule_cells >= 1 then
       Printf.sprintf "%s%s%s%s"
@@ -427,6 +430,7 @@ let origin_heading buf cols ~plain ~styled ~clock =
         recede
         (draw_hline (if String.equal lead "" then rule_cells + 1 else rule_cells))
         Ansi.reset
+    else if rule_cells = 0 && not (String.equal lead "") then " "
     else ""
   in
   let tail =
@@ -581,8 +585,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
          column for the inline modes, and this row has the pane. A name the
          gutter cut to "e-m…-leader" is spelled whole here. *)
       let mark = Message_layout.speaker_mark row.style in
+      (* The dot separates a name from a request; a lane with no name (the
+         tool and reasoning blocks carry an empty label) draws the request
+         alone after its mark rather than a dot with nothing on its left. *)
       let request =
-        if String.equal request_label "" then ""
+        if String.equal request_label "" || String.equal speaker "" then
+          request_label
         else " \xc2\xb7 " ^ request_label
       in
       let plain = mark ^ " " ^ speaker ^ request in
@@ -596,10 +604,13 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
             (* The mark keeps its colour and stays out of the badge, the way
                the inline gutter already draws it, so the two origin modes
                agree about what a speaker mark looks like. The reverse span
-               covers only the name. *)
-            Printf.sprintf "%s%s%s %s%s%s%s%s%s" (Chat_theme.origin row.style)
-              Ansi.bold mark Ansi.reverse speaker Ansi.reset Ansi.dim request
-              Ansi.reset
+               covers only the name, and an empty name gets no span. *)
+            let badge =
+              if String.equal speaker "" then ""
+              else Printf.sprintf "%s%s%s" Ansi.reverse speaker Ansi.reset
+            in
+            Printf.sprintf "%s%s%s %s%s%s%s" (Chat_theme.origin row.style)
+              Ansi.bold mark badge Ansi.dim request Ansi.reset
       in
       origin_heading buf cols ~plain ~styled ~clock
 
@@ -1879,6 +1890,9 @@ type tagged_row =
    authority. Never evicted within a session, like the logs themselves. *)
 type settled_block_memo = {
   sbm_log : Masc_tui_types.turn_log;
+  sbm_committed : bool;
+      (** Which placement the block was projected with: a settled turn's,
+          or the open placement an observed turn takes. *)
   sbm_revision : int;
   sbm_timeline : (Masc_tui_types.msg_entry * float option) list;
   sbm_messages : Masc_tui_types.msg_entry list;
@@ -2300,7 +2314,12 @@ let render_keeper_message (state : state) =
       { lb_log = turn_log; lb_request_id = request_id; lb_insertion = insertion;
         lb_entries = entries }
     in
-    let settled_projection (turn_log : Masc_tui_types.turn_log) =
+    (* One projection per held log per change of its inputs, settled or
+       observed. The transcript's revision moves on every fold, so a journal
+       read that grew an observed log reprojects it once, and the frames
+       between reads -- every key, tick and async message -- reuse the
+       block. *)
+    let held_projection ~committed (turn_log : Masc_tui_types.turn_log) =
       let key =
         ( Masc_tui_types.turn_log_keeper_name turn_log
         , Masc_tui_types.turn_log_request_id turn_log )
@@ -2309,6 +2328,7 @@ let render_keeper_message (state : state) =
       match Hashtbl.find_opt settled_block_memo key with
       | Some memo
         when memo.sbm_log == turn_log
+             && memo.sbm_committed = committed
              && memo.sbm_revision = revision
              && memo.sbm_timeline == committed_visible_timeline
              && memo.sbm_messages == committed_timeline_messages
@@ -2317,9 +2337,10 @@ let render_keeper_message (state : state) =
              && memo.sbm_chat_cols = chat_cols ->
           memo.sbm_block
       | Some _ | None ->
-          let block = log_projection ~committed:true turn_log in
+          let block = log_projection ~committed turn_log in
           Hashtbl.replace settled_block_memo key
             { sbm_log = turn_log;
+              sbm_committed = committed;
               sbm_revision = revision;
               sbm_timeline = committed_visible_timeline;
               sbm_messages = committed_timeline_messages;
@@ -2340,7 +2361,7 @@ let render_keeper_message (state : state) =
           Masc_tui_types.turn_log_execution_id live <> Masc_tui_types.turn_log_execution_id settled
         | Some _ | None -> true)
       |> List.filter Masc_tui_types.turn_log_holds_the_turn
-      |> List.map settled_projection
+      |> List.map (held_projection ~committed:true)
       |> List.filter (fun block -> block.lb_entries <> [])
     in
     let live_block =
@@ -2352,7 +2373,19 @@ let render_keeper_message (state : state) =
           | block -> Some block)
       | Some _ | None -> None
     in
-    let blocks = settled_blocks @ Option.to_list live_block in
+    (* Turns running that this pane did not open, drawn from the journal
+       reads that feed their logs ([observed_logs_for_keeper]). Projected
+       the way the live block is placed -- uncommitted, so the block sits
+       where a running turn's rows go and its rail stays open -- and
+       memoised the way a settled block is: the log changes only when a
+       journal read lands, not on every frame. *)
+    let observed_blocks =
+      Masc_tui_types.observed_logs_for_keeper state keeper_name
+      |> List.map (held_projection ~committed:false)
+      |> List.filter (fun block -> block.lb_entries <> [])
+    in
+    let open_blocks = observed_blocks @ Option.to_list live_block in
+    let blocks = settled_blocks @ open_blocks in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Tagged_row message, entry)
@@ -2388,8 +2421,10 @@ let render_keeper_message (state : state) =
       let block_requests =
         List.map (fun block -> block.lb_request_id) blocks
       in
-      let live_request_id =
-        Option.map (fun block -> block.lb_request_id) live_block
+      (* Requests whose turn has not closed: the live block's and every
+         observed block's. Their last row continues until the stream ends. *)
+      let open_request_ids =
+        List.map (fun block -> block.lb_request_id) open_blocks
       in
       let request_of = function
         | Tagged_row (message : Masc_tui_types.msg_entry) ->
@@ -2414,7 +2449,7 @@ let render_keeper_message (state : state) =
               let opens = opens_at = index in
               let closes =
                 closes_at = index
-                && not (Option.equal String.equal live_request_id (Some request_id))
+                && not (List.exists (String.equal request_id) open_request_ids)
               in
               let edge : Masc_tui_types.turn_edge =
                 match opens, closes with
@@ -2438,10 +2473,10 @@ let render_keeper_message (state : state) =
         merged
     in
     let tagged_layout_entries =
-      match blocks, live_block with
+      match blocks, open_blocks with
       | [], _ -> committed_tagged
-      | _ :: _, Some _ -> merge_blocks ()
-      | _ :: _, None -> (
+      | _ :: _, _ :: _ -> merge_blocks ()
+      | _ :: _, [] -> (
           match !merged_blocks_memo with
           | Some memo
             when memo.mbm_committed == committed_layout_entries
@@ -2503,7 +2538,16 @@ let render_keeper_message (state : state) =
              many wrapped rows when the operator first leaves the bottom.
              Treating that existing height as newly arrived double-counts it
              on the first key press. Structural compensation resumes when the
-             trail settles into a block the pin can account for. *)
+             trail settles into a block the pin can account for.
+
+             An observed block is not this case: its log is among the settled
+             logs the pin remembered, so the branch below counts it the way it
+             counts any held log -- not at all while it was on screen when the
+             pin was taken, whole when it was held later. Rows it grows by
+             between the pin and its settle go uncounted, as a live trail's
+             do; the rows that arrive around it are counted as they land, so
+             the reader is not moved by them while the turn runs and not
+             jumped by them when it ends. *)
           0
       | Some pin, None ->
           let arrived_since_pin = function
@@ -2664,9 +2708,14 @@ let render_keeper_message (state : state) =
                   (Keeper_chat.terminal_safe_text
                      entry.sent_request.keeper_name)))
            others);
+    (* The lead -- the mark, the lane, the age -- in the status colour; the
+       detail after it receded. Drawn whole in the status colour, five rows of
+       band read as five warnings and none stood out. *)
     List.iter
-      (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-        ("  " ^ text))
+      (fun (row : Masc_tui_answering.chat_activity_row) ->
+        box_line chat_buf chat_cols
+          (Printf.sprintf "  %s%s%s%s%s%s" (Theme.warn ()) row.lead Ansi.reset
+             (Theme.recede ()) row.rest Ansi.reset))
       (Masc_tui_types.keeper_message_activity_rows state);
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       (Masc_tui_types.keeper_observed_interrupt_rows state);
@@ -2965,9 +3014,14 @@ let render_keeper_message (state : state) =
        [Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail]
        and the draft row was a bare prompt. The hint sits after the caret, so
        the caret column does not move, and it goes while a capture or
-       continuous mode runs, because the footer's meter says it louder. *)
+       continuous mode runs, because the footer's meter says it louder.
+
+       Only where speech-to-text is set up. Without a transcriber the keys it
+       names refuse, and the sentence sat beside every empty draft of every
+       operator who never set voice up. *)
     let voice_hint =
       if String.equal input ""
+         && state.voice_stt_set_up
          && state.keeper_message_focus = Right_pane
          && Option.is_none state.voice_capture
          && Option.is_none state.voice_continuous

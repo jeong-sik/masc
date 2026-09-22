@@ -318,10 +318,12 @@ status: reference
 : Fusion 자리에 적히는 값. Keeper 배정과 같은 규칙(`Runtime.resolve_assignment`)으로
   푼다 — `[runtime.lanes.<이름>]`이 있으면 그 lane 의 후보 목록, 없고 런타임 id 이면 그
   런타임 하나짜리 후보 목록. 한 자리는 후보를 적힌 순서로 시도하고 처음 쓸 수 있는
-  답에서 멈춘다(panel 은 비어 있지 않은 글, judge 는 파싱을 통과한 종합). 못 푼 이름은
-  `Unknown_route`·`Route_unavailable` typed 실패다. 용어집 `Exact-output route`(Librarian
-  같은 단독 모델 작업의 목적별 실행 경로)와 다른 층이다 — 이쪽은 Fusion 자리의 failover
-  후보 순서를 지목한다.
+  답에서 멈춘다(panel 은 비어 있지 않은 글, judge 는 파싱을 통과한 종합). 적힌 이름이
+  로드된 lane 도 런타임도 아니면 `Unknown_route`, 런타임의 카탈로그 행이 없으면
+  `Route_unavailable` typed 실패다. 배포 preset 의 자리 이름은 같은 파일이 선언한 lane
+  이나 `[provider.model]` 바인딩이어야 하며, 아니면 첫 실행이 아니라 빌드에서 잡힌다.
+  용어집 `Exact-output route`(Librarian 같은 단독 모델 작업의 목적별 실행 경로)와 다른
+  층이다 — 이쪽은 Fusion 자리의 failover 후보 순서를 지목한다.
   → [Fusion_seat](../../lib/fusion/fusion_seat.mli)
 
 **Fusion Roster (명단)**

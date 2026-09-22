@@ -1,4 +1,5 @@
 # Approved lib/keeper module basenames that intentionally omit the keeper_
 # prefix. Format: <module-basename> | <reason>.
+antigravity_input_frame | Shared Antigravity input-frame vocabulary used by both the keeper turn and the Fusion one-shot turn; referenced from lib/fusion/.
 hitl_summary_worker | Approval-queue HITL context summarizer kept under its plan name while the keeper namespace transition is staged.
 surface_ref | Shared typed surface vocabulary used by keeper lanes, external attention, and gate recording.

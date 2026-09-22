@@ -123,6 +123,11 @@ let summary = function
       Printf.sprintf "waiting(%s,%s)" keeper (Option.value ~default:"-" queue_kind)
   | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
+  | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
+  | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
+    ->
+      Printf.sprintf "lane_resource(%s,%s,%s)" lr_package lr_instance
+        (Option.value ~default:"-" lr_detail)
   | Observer.Event (Observer.Snapshot name) -> "snapshot:" ^ name
   | Observer.Event (Observer.Other name) -> "other:" ^ name
   | Observer.Undecodable detail -> "undecodable:" ^ detail
@@ -406,6 +411,64 @@ let untaught_agent_core_frame =
   "data: {\"type\":\"agent_core:relay_dropped\",\"event_type\":\"relay_dropped\",\
    \"agent_name\":\"lane-smith\",\"ts_unix\":1.0}\n\n"
 
+(* The run registries' change push is read by the name the server broadcasts
+   it under, so the two cannot drift apart. *)
+let test_the_internal_runs_push_is_read_by_the_servers_name () =
+  check (list string) "the frame the server broadcasts decodes to the push"
+    [ "internal_runs" ]
+    (List.map summary
+       (decode_all
+          [ "data: "
+            ^ Yojson.Safe.to_string (Masc.Internal_agent_runs_event.to_json ())
+            ^ "\n\n"
+          ]))
+
+(* The frame the bridge makes of the event the lane runtime publishes, so the
+   test reads what the wire carries rather than a hand-built copy of it. *)
+module Lane_events = Masc.Lane_addon_resource_events
+
+let lane_resource_frame ?detail lifecycle =
+  let resource =
+    { Lane_events.instance_id = "inst-7"
+    ; run_id = "run-7"
+    ; package_id = "masc-dos"
+    ; package_revision = "rev-1"
+    ; container_id = None
+    ; detail
+    }
+  in
+  match
+    Masc.Keeper_event_bridge.native_event_to_json
+      (Lane_events.event lifecycle resource)
+  with
+  | Some json -> "data: " ^ Yojson.Safe.to_string json ^ "\n\n"
+  | None -> fail "the bridge relays no frame for a lane resource event"
+
+(* Every lifecycle the lane runtime publishes is read as what it is, with the
+   package, the instance and the failure reason the payload carries. *)
+let test_every_lane_resource_lifecycle_is_read_with_its_payload () =
+  List.iter
+    (fun lifecycle ->
+      let name = Lane_events.wire_name lifecycle in
+      match decode_all [ lane_resource_frame ~detail:"image not found" lifecycle ] with
+      | [ Observer.Event (Observer.Lane_resource resource) ] ->
+          check bool (name ^ " keeps its lifecycle") true
+            (resource.Observer.lr_lifecycle = lifecycle);
+          check string (name ^ " names its package") "masc-dos"
+            resource.Observer.lr_package;
+          check string (name ^ " names its instance") "inst-7"
+            resource.Observer.lr_instance;
+          check (option string) (name ^ " keeps the reason") (Some "image not found")
+            resource.Observer.lr_detail
+      | decoded ->
+          failf "%s decoded as %s" name
+            (String.concat "; " (List.map summary decoded)))
+    Lane_events.all
+
+let test_a_lane_resource_without_a_reason_says_so () =
+  check (list string) "an acquisition carries no reason"
+    [ "lane_resource(masc-dos,inst-7,-)" ]
+    (List.map summary (decode_all [ lane_resource_frame Lane_events.Acquired ]))
 (* A run that ended says how long it ran, and a failed one why, read from
    the payload the bridge writes. *)
 let test_an_ended_run_carries_its_elapsed_and_error () =
@@ -447,13 +510,13 @@ let test_a_failed_run_without_its_error_is_undecodable () =
 let test_what_this_build_was_not_taught_keeps_its_name () =
   check (list string) "snapshots are named, not retained; unknown types are named"
     [ "snapshot:execution_snapshot"
-    ; "other:internal_agent_runs_changed"
+    ; "other:brand_new_push"
     ; "agent_core(lane-smith,other:relay_dropped,-,turn=-,batch=-)"
     ]
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"execution_snapshot\",\"payload\":{\"keepers\":[]}}\n\n"
-          ; "data: {\"type\":\"internal_agent_runs_changed\"}\n\n"
+          ; "data: {\"type\":\"brand_new_push\"}\n\n"
           ; untaught_agent_core_frame
           ]));
   match decode_all [ untaught_agent_core_frame ] with
@@ -646,6 +709,12 @@ let () =
             test_multiline_frame_preserves_payload_and_cursor
         ; test_case "a line cut by the chunk boundary is held" `Quick
             test_a_line_cut_by_the_chunk_boundary_is_held
+        ; test_case "the internal runs push is read by the server's name" `Quick
+            test_the_internal_runs_push_is_read_by_the_servers_name
+        ; test_case "every lane resource lifecycle is read with its payload"
+            `Quick test_every_lane_resource_lifecycle_is_read_with_its_payload
+        ; test_case "a lane resource without a reason says so" `Quick
+            test_a_lane_resource_without_a_reason_says_so
         ; test_case "an ended run carries its elapsed and error" `Quick
             test_an_ended_run_carries_its_elapsed_and_error
         ; test_case "a failed run without its error is undecodable" `Quick

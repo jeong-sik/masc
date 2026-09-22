@@ -999,7 +999,7 @@ let initialize_owner_state_blocking
        (Owner_initialization_failed
           (Run_registry_already_installed `Exact_lane)));
   let broadcast_internal_agent_runs_changed () =
-    Sse.broadcast (`Assoc [ "type", `String "internal_agent_runs_changed" ])
+    Sse.broadcast (Internal_agent_runs_event.to_json ())
   in
   Atomic.set
     Verification_run_registry.change_observer_fn

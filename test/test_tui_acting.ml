@@ -287,7 +287,8 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; Observer.Snapshot "execution_snapshot"
     ; settled "largo"
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
-    ; Observer.Other "internal_agent_runs_changed"
+    ; Observer.Other "brand_new_push"
+    ; Observer.Internal_agent_runs_changed
     ; Observer.Keeper_chat_stream_frame
         { keeper = "test-keeper"; operation_id = "op"; seq = None
         ; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
@@ -302,9 +303,94 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   in
   check int "actions keeps the call, the settlement, the chat, and the unknown" 4
     (under Acting.Actions);
-  check int "everything keeps all eleven" 11 (under Acting.Everything);
+  check int "everything keeps all twelve" 12 (under Acting.Everything);
   check bool "an event this build was not taught always draws" true
     (Acting.visible Acting.Actions (Observer.Other "brand_new"))
+
+(* The run registries broadcast a change on every run they add or settle, and
+   it arrived as a type this build did not know -- which every scope draws,
+   with the mark that asks the reader to look. On the live fleet it was two of
+   the five rows under "turns", beside a scope line promising one row per
+   Keeper turn. It is a server push: the everything scope shows it, the two
+   that show what a keeper did do not. *)
+let test_the_internal_runs_push_is_not_a_keepers_act () =
+  let push = Observer.Internal_agent_runs_changed in
+  check bool "turns does not draw it" false (Acting.visible Acting.Turns push);
+  check bool "actions does not draw it" false (Acting.visible Acting.Actions push);
+  check bool "everything does" true (Acting.visible Acting.Everything push);
+  let row = Acting.row_of_event ~at:100. ~duration_ms:None push in
+  check bool "it is drawn quiet, not with the look-here mark" true
+    (row.Acting.glyph = Acting.Quiet);
+  check string "and it says what changed" "a run registry changed"
+    row.Acting.detail
+
+module Lane_events = Masc.Lane_addon_resource_events
+
+let lane_resource ?detail lifecycle =
+  Observer.Lane_resource
+    { Observer.lr_lifecycle = lifecycle
+    ; lr_package = "masc-dos"
+    ; lr_instance = "inst-7"
+    ; lr_detail = detail
+    ; lr_at = 100.
+    }
+
+(* A container that would not start, or whose removal nobody can show, is a
+   failure the operator acts on, so the scopes that show what happened draw
+   it -- with the failure mark, the package, and the reason in the server's
+   own words. A container that started or was removed is the lane runtime
+   doing its job: state, shown under everything. *)
+let test_a_lane_container_failure_is_drawn_with_its_reason () =
+  let failed = lane_resource ~detail:"image not found" Lane_events.Acquire_failed in
+  check bool "turns draws a failed start" true (Acting.visible Acting.Turns failed);
+  let row = Acting.row_of_event ~at:100. ~duration_ms:None failed in
+  check bool "with the failure mark" true (row.Acting.glyph = Acting.Failure);
+  check string "naming the package and the reason"
+    "masc-dos \xc2\xb7 image not found" row.Acting.detail;
+  List.iter
+    (fun (name, lifecycle, shown) ->
+      check bool (name ^ " under turns") shown
+        (Acting.visible Acting.Turns (lane_resource lifecycle));
+      check bool (name ^ " under everything") true
+        (Acting.visible Acting.Everything (lane_resource lifecycle)))
+    [ ("a started container", Lane_events.Acquired, false)
+    ; ("a failed start", Lane_events.Acquire_failed, true)
+    ; ("a removed container", Lane_events.Release_confirmed, false)
+    ; ("an unproven removal", Lane_events.Release_incomplete, true)
+    ]
+
+(* A lane container that keeps failing the same way fails once every few
+   seconds: on the live fleet two packages missing their image failed 7,196
+   times in one day. Under turns, the scope that folds a keeper's lifecycle
+   rows into one row per turn, each package failing for one reason is one row
+   carrying how many times the screen holds it, at its newest occurrence --
+   and a different reason is a different row. *)
+let test_a_repeating_container_failure_is_one_row_under_turns () =
+  let no_image = "No such image" in
+  let events_oldest_first =
+    [ lane_resource ~detail:no_image Lane_events.Acquire_failed
+    ; Observer.Lane_resource
+        { Observer.lr_lifecycle = Lane_events.Acquire_failed
+        ; lr_package = "output-statistics"
+        ; lr_instance = "inst-8"
+        ; lr_detail = Some no_image
+        ; lr_at = 100.
+        }
+    ; lane_resource ~detail:no_image Lane_events.Acquire_failed
+    ; lane_resource ~detail:no_image Lane_events.Acquire_failed
+    ; lane_resource ~detail:"daemon not running" Lane_events.Acquire_failed
+    ]
+  in
+  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
+  let details = List.map (fun row -> row.Acting.detail) rows in
+  check (list string) "one row per package and reason, newest first"
+    [ "masc-dos \xc2\xb7 daemon not running"
+    ; "\xc3\x973 masc-dos \xc2\xb7 No such image"
+    ; "output-statistics \xc2\xb7 No such image"
+    ]
+    details;
+  check int "actions still lists every failure" 5
+    (List.length (List.filter (Acting.visible Acting.Actions) events_oldest_first))
 
 (* A reply sends one stream frame per token, so a single keeper answering fills
    the retained ring on its own. Before these frames were decoded they arrived
@@ -577,7 +663,8 @@ let test_every_row_wears_the_clock_the_feed_ordered_it_by () =
     (fun (name, event) ->
        check bool (name ^ " wears the arrival clock") true
          (Float.equal (at_of event) received))
-    [ ("an unknown type", Observer.Other "internal_agent_runs_changed")
+    [ ("an unknown type", Observer.Other "brand_new_push")
+    ; ("the internal runs push", Observer.Internal_agent_runs_changed)
     ; ("a snapshot", Observer.Snapshot "execution_snapshot")
       (* These two carried a clock of their own before, and it is no longer
          what the row shows -- the row shows the order it sits in. *)
@@ -1207,7 +1294,13 @@ let test_call_key_prefers_the_provider_id () =
 let () =
   run "tui acting"
     [ ( "rows"
-      , [ test_case "actions hide what says nothing a row can act on" `Quick
+      , [ test_case "a repeating container failure is one row under turns" `Quick
+            test_a_repeating_container_failure_is_one_row_under_turns
+        ; test_case "a lane container failure is drawn with its reason" `Quick
+            test_a_lane_container_failure_is_drawn_with_its_reason
+        ; test_case "the internal runs push is not a keeper's act" `Quick
+            test_the_internal_runs_push_is_not_a_keepers_act
+        ; test_case "actions hide what says nothing a row can act on" `Quick
             test_actions_hide_what_says_nothing_a_row_can_act_on
         ; test_case "filter explanations name scope and quiet rows" `Quick
             test_filter_explanations_name_scope_and_quiet_rows

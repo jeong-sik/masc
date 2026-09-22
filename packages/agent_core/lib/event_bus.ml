@@ -326,7 +326,7 @@ let subscribe ~(config : subscription_config) ?(filter = accept_all) ?purpose bu
     in
     bus.hub.subscribers <- sub :: bus.hub.subscribers;
     bus.hub.next_id <- id + 1;
-    ignore (Atomic.fetch_and_add bus.hub.subscriber_count 1);
+    Atomic.incr bus.hub.subscriber_count;
     sub)
 ;;
 
@@ -335,7 +335,7 @@ let remove_subscription bus sub =
     let before = List.length bus.hub.subscribers in
     bus.hub.subscribers <- List.filter (fun s -> s.id <> sub.id) bus.hub.subscribers;
     let after = List.length bus.hub.subscribers in
-    if after < before then ignore (Atomic.fetch_and_add bus.hub.subscriber_count (-1)) else ())
+    if after < before then Atomic.decr bus.hub.subscriber_count)
 ;;
 
 let drain_locked sub =

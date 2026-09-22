@@ -1802,6 +1802,60 @@ let test_a_nameless_heading_does_not_paint_its_request () =
         | _ -> fail ("the heading does not open on the mark: " ^ String.escaped line)))
 ;;
 
+(* A line someone else wrote reads in its own column on a wide pane, apart
+   from the operator and the keeper talking (RFC chat-turn-rail-and-side-lanes
+   §4.6); on a pane narrower than a 100-column terminal it stays in the one
+   column. *)
+let test_an_arrival_reads_in_its_own_column () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_history <-
+      [ { (chat_entry ~request_id:"tui-01a0c788-0001"
+             ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
+             ~text:"OPERATOR_ASKS" ~at:1_790_053_724. ())
+          with Tui_types.me_keeper_name = "alpha" }
+      ; { (chat_entry ~request_id:"tui-01a0c788-0002"
+             ~role:
+               (Tui_types.Message_user
+                  (Tui_types.Sent_by_other { speaker = "pangyo"; surface = None }))
+             ~text:"ARRIVAL_SAYS" ~at:1_790_053_784. ())
+          with Tui_types.me_keeper_name = "alpha" } ];
+    let column_of cols needle =
+      set_size (40, cols);
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+      match
+        List.find_map
+          (fun line ->
+            Option.map
+              (fun index -> Masc_tui_message_layout.display_width (String.sub line 0 index))
+              (Astring.String.find_sub ~sub:needle line))
+          plain
+      with
+      | Some column -> column
+      | None -> fail (needle ^ " was not drawn: " ^ String.concat "\n" plain)
+    in
+    let inner = Masc_tui_ansi.framed_inner_width 140 in
+    check bool "on a wide pane the arrival starts past a third of it" true
+      (column_of 140 "ARRIVAL_SAYS" >= inner / 3);
+    check bool "the operator stays at the left" true
+      (column_of 140 "OPERATOR_ASKS" < inner / 3);
+    check bool "on a narrow pane the arrival stays in the one column" true
+      (column_of 90 "ARRIVAL_SAYS" = column_of 90 "OPERATOR_ASKS"))
+;;
+
 (* The origin heading under Ctrl-F's metadata:full. The clock led the row
    ("[14:08:44]  ● e-m…-leader"), so the first cells of every heading were
    time-chrome and the name beside them was cut to the gutter's column on a
@@ -1819,7 +1873,10 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
     | Changed _ | Unchanged _ -> ()
   in
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
-    let rows, cols = 40, 100 in
+    (* Narrower than the pane at which a line someone else wrote takes a
+       column of its own (RFC chat-turn-rail-and-side-lanes §4.6), so the
+       heading's geometry here is the whole pane's. *)
+    let rows, cols = 40, 96 in
     set_size (rows, cols);
     let keeper = "goo-yang-bong" in
     let other = "e-masc-the-leader-of-this-workspace" in
@@ -3552,6 +3609,8 @@ let () =
             test_a_journal_revision_draws_its_facts_in_columns
         ; test_case "a folded reasoning block is the count and the key" `Quick
             test_a_folded_reasoning_block_is_the_count_and_the_key
+        ; test_case "an arrival reads in its own column" `Quick
+            test_an_arrival_reads_in_its_own_column
         ; test_case "an execute call leads with its exit and output" `Quick
             test_an_execute_call_leads_with_its_exit_and_output
         ; test_case "a nameless heading does not paint its request" `Quick

@@ -618,7 +618,8 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
   | Message_layout.Metadata (Message_layout.Continued_at { clock }) ->
       (* The same speaker, later. Nothing changed at the left, so the row is
          the heading's tail alone: the rule to the clock. *)
-      origin_heading buf cols ~plain:"" ~styled:"" ~clock:(Some clock)
+      origin_heading buf cols ~plain:row.gutter ~styled:row.gutter
+        ~clock:(Some clock)
   | Message_layout.Metadata
       (Message_layout.Origin { clock; speaker; role_label = _; request_label })
     ->
@@ -639,7 +640,9 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
       let gap =
         if String.equal speaker "" && String.equal request "" then "" else " "
       in
-      let plain = mark ^ gap ^ speaker ^ request in
+      (* A heading in an arrival's column starts after the blank run the
+         layout put in its gutter; everywhere else the gutter is empty. *)
+      let plain = row.gutter ^ mark ^ gap ^ speaker ^ request in
       let styled =
         match row.style with
         | Message_layout.Tool | Message_layout.Thinking ->
@@ -660,7 +663,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
                pane's own keeper, a turn opened by a tool -- carried the
                speaker's bold colour into the request id that should
                recede. *)
-            Printf.sprintf "%s%s%s%s%s%s%s%s%s" (Chat_theme.origin row.style)
+            Printf.sprintf "%s%s%s%s%s%s%s%s%s%s" row.gutter (Chat_theme.origin row.style)
               Ansi.bold mark Ansi.reset gap badge Ansi.dim request Ansi.reset
       in
       origin_heading buf cols ~plain ~styled ~clock

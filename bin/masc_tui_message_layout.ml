@@ -1241,7 +1241,7 @@ let continues_turn ~(previous : entry) (entry : entry) =
   && speaks_for_turn previous.style
   && speaks_for_turn entry.style
 
-let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
+let metadata_row ~(previous : entry option) ~inner_width ~indent (entry : entry) =
   let clock =
     match entry.timeline_bucket with
     | Some _ -> Some entry.timestamp
@@ -1292,10 +1292,12 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
       ; kind = Metadata metadata
       ; shade = Shade_none
       ; text = fitted
-      ; gutter_rail_cells = 0
+      (* A heading in the arrival's column starts after the same blank run
+         its body does; [inner_width] is already that column's. *)
+      ; gutter_rail_cells = indent
       ; gutter_clock_cells = 0
-      ; gutter_label_at = 0
-      ; gutter = ""
+      ; gutter_label_at = indent
+      ; gutter = String.make indent ' '
       ; action = Action_none
       }
 
@@ -1529,7 +1531,33 @@ let origin_gutter ~origin ~previous ~inner_width entry =
           (fit_width continued (display_width filled), rail_cells, rail_cells, 0)
       else Some (filled, rail_cells, label_at, clock_cells)
 
+(* A line someone else wrote reads in a column of its own beside the
+   conversation (RFC chat-turn-rail-and-side-lanes §4.6), on a pane wide
+   enough to hold two. Ninety-six is a 100-column terminal's inner width: the
+   frame's border and padding take four. Narrower, the right column's body
+   would hold a few words a row, and the split would cost more reading than it
+   saves. *)
+let inbound_split_min_inner_cells = 96
+
+(* The column starts a third of the way in: the conversation keeps the left
+   two thirds' worth of rhythm and the arrival still has most of the width. *)
+let inbound_indent_share = 3
+
+let inbound_indent ~inner_width (entry : entry) =
+  match entry.style with
+  | Inbound when inner_width >= inbound_split_min_inner_cells ->
+      inner_width / inbound_indent_share
+  | Inbound | User | Keeper | Status | Local | Journal | Error | Tool | Skill _
+  | Thinking ->
+      0
+
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
+  (* Everything after the indent is laid out in the column that is left, so
+     the origin, the heading and the body fit the column rather than the
+     pane. *)
+  let indent = inbound_indent ~inner_width entry in
+  let pane_width = inner_width in
+  let inner_width = pane_width - indent in
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in
   let gutter_width =
     match gutter with
@@ -1617,12 +1645,17 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       ; kind = Body
       ; shade = shade_of_style entry.style
       ; text = "  " ^ chunk
-      ; gutter_rail_cells = rail_cells
+      (* The indent sits after the rail: the rail's join belongs on the
+         conversation's line, and the blank run after it is what moves the
+         rest into the arrival's column. *)
+      ; gutter_rail_cells = rail_cells + indent
       (* A wrapped row's gutter is blanks held at the first row's width: no
          clock column of its own, so no boundary to hand the renderer. *)
       ; gutter_clock_cells = (if index = 0 then clock_cells else 0)
-      ; gutter_label_at = (if index = 0 then label_at else rail_cells)
-      ; gutter = rail_at index ^ (if index = 0 then margin else blank)
+      ; gutter_label_at = (if index = 0 then label_at else rail_cells) + indent
+      ; gutter =
+          rail_at index ^ String.make indent ' '
+          ^ (if index = 0 then margin else blank)
       (* The fold marker sits at the end of the first row, so that is the
          row a press lands on. A continuation carries the same text and none
          of the affordance. *)
@@ -1633,11 +1666,11 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     match origin with
     | Origin_inline | Origin_bare -> body_rows
     | Origin_row -> (
-        match metadata_row ~previous ~inner_width entry with
+        match metadata_row ~previous ~inner_width ~indent entry with
         | None -> body_rows
         | Some metadata -> metadata :: body_rows)
   in
-  match timeline_break_row ~previous ~inner_width entry with
+  match timeline_break_row ~previous ~inner_width:pane_width entry with
   | None -> message_rows
   | Some timeline_break -> timeline_break :: message_rows
 

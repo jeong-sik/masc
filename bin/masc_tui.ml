@@ -71,6 +71,40 @@ let scrolled_surface state surface =
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
+(* Why this session ended, written once at exit. The per-PID stderr log held
+   only the boot lines, so a session that ended left no reason behind: the
+   operator saw roughly a hundred files a day and none said why. Set at each
+   way out and written by the [at_exit] below, which runs after the terminal
+   is restored. *)
+let exit_reason : Masc_tui_exit_reason.t option ref = ref None
+
+let note_exit_reason reason =
+  match !exit_reason with
+  | Some _ -> ()
+  | None -> exit_reason := Some reason
+;;
+
+let write_exit_reason () =
+  let reason =
+    match !exit_reason with
+    | Some reason -> reason
+    | None -> Masc_tui_exit_reason.Exception "left the loop without a recorded cause"
+  in
+  (* stderr is the per-PID log file by now ([redirect_stderr_off_terminal]),
+     and a direct write is not queued behind the console mirror's thread, so
+     the line is on disk before the process returns. *)
+  try Printf.eprintf "[masc-tui] %s\n%!" (Masc_tui_exit_reason.line reason) with
+  | _ -> ()
+;;
+
+(* The name of the signal that asked the session to end, for the exit line. *)
+let signal_name signal =
+  if signal = Sys.sigterm then "SIGTERM"
+  else if signal = Sys.sighup then "SIGHUP"
+  else if signal = Sys.sigquit then "SIGQUIT"
+  else Printf.sprintf "signal %d" signal
+;;
+
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
@@ -15813,7 +15847,10 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
   (* [at_exit] runs its callbacks in the reverse of this order. Restore first
      so an error writing the frame summary cannot prevent the first restore
      attempt. An exception interrupts that cleanup pass; OCaml may retry
-     remaining callbacks while reporting an uncaught exception. *)
+     remaining callbacks while reporting an uncaught exception. The exit
+     reason is registered first so it is written last, after the terminal is
+     back. *)
+  at_exit write_exit_reason;
   at_exit Masc_tui_frame_timing.report;
   at_exit cleanup;
   (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
@@ -16030,7 +16067,10 @@ let main
      it runs at the next poll point, inside whatever the loop was doing, an
      Eio wait included. *)
   let exit_signals = Masc_tui_exit_signals.create () in
-  let terminate _ = Masc_tui_exit_signals.request_terminate exit_signals in
+  let terminate signal =
+    Masc_tui_exit_signals.request_terminate exit_signals
+      ~signal:(signal_name signal)
+  in
   (* Ctrl-C used to reach [terminate] and the session ended mid-sentence, with
      whatever was in the composer gone. It is one key away from Ctrl-V and
      Ctrl-X on the same hand, and the footer never listed it, so the first
@@ -17460,7 +17500,12 @@ and is loaded on demand through keeper_skill.
          switch release that stops a server this TUI started runs for every
          way out. *)
       (match Masc_tui_exit_signals.poll exit_signals with
-       | Masc_tui_exit_signals.Quit -> raise Break
+       | Masc_tui_exit_signals.Quit ->
+           note_exit_reason
+             (match Masc_tui_exit_signals.terminate_signal exit_signals with
+              | Some signal -> Masc_tui_exit_reason.Terminate signal
+              | None -> Masc_tui_exit_reason.Interrupt);
+           raise Break
        | Masc_tui_exit_signals.Interrupt_armed ->
            state.quit_armed <- false;
            add_event state "system"
@@ -18605,7 +18650,10 @@ and is loaded on demand through keeper_skill.
                     && not
                          (state.view = Board
                          && state.board_mode = Board_compose))) ->
-           if state.quit_armed then raise Break
+           if state.quit_armed then begin
+             note_exit_reason Masc_tui_exit_reason.Quit_key;
+             raise Break
+           end
            else begin
              state.quit_armed <- true;
              add_event state "system"
@@ -24863,7 +24911,13 @@ let run_with_eio_context f =
             Eio_context.set_clock (Eio.Stdenv.clock env);
             Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
             f ()))
-  with Break -> ()
+  with
+  | Break -> ()
+  | exn ->
+      (* An uncaught exception is the abnormal end the exit line exists to
+         name; the [at_exit] writer still runs while the exception unwinds. *)
+      note_exit_reason (Masc_tui_exit_reason.Exception (Printexc.to_string exn));
+      raise exn
 
 let () =
   (* Informational flags terminate during parsing, before base-path

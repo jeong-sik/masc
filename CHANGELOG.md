@@ -55,6 +55,7 @@
 - The TUI Fusion screen can start a run: `a` opens a form for the Keeper, preset, topology, prompt and web tools, posts it, and selects the new run once the list carries it. A preset the topology cannot run comes back as the server's own sentence (#37823).
 - A Fusion run's detail lists its seat routes: the route each panel and judge seat was given, the runtime that answered it, and every candidate that failed before that one. Runs recorded without routes draw no block (#37823).
 - The Memory screen shows how far each keeper's continuity snapshot trails the Librarian's read position, beside the durable drain's unread count: the TUI keeper line says `continuity behind N`, the Memory header and the dashboard totals strip sum it over the fleet. A lag that could not be taken, because there is no snapshot, the file does not read, the snapshot names another trace or it sits ahead of the position, reads as `?` and is counted as unmeasured rather than as zero, and the fleet sum covers only the keepers it was taken for (#37856).
+- The TUI writes why a session ended to its own log, one line per session in `.masc/logs/masc-tui-<pid>.log`: `exit: normal (quit key)`, `exit: normal (signal SIGTERM)` or `exit: abnormal (exception ...)`. A normal end is the operator or the session's owner asking for it — the `q` key, a second `Ctrl-C`, or a terminate signal — and an abnormal one is an uncaught exception. The per-PID log held only the boot lines, so a session that ended left no reason behind: roughly a hundred files a day and none said why (task-754).
 
 ### Changed
 

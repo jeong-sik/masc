@@ -14827,6 +14827,93 @@ def run_ctrl_y_regression(executable: str) -> None:
     )
 
 
+def exit_reason_log(base_path: str) -> str:
+    """Everything the TUI wrote to its own per-PID stderr log, or "".
+
+    The TUI redirects stderr to ``.masc/logs/masc-tui-<pid>.log`` at boot, so
+    the exit line lands there. The pid is the TUI's, not the launcher shell's,
+    so the file is found by glob rather than by name.
+    """
+    logs = sorted(Path(base_path, ".masc", "logs").glob("masc-tui-*.log"))
+    if not logs:
+        return ""
+    return logs[-1].read_text(encoding="utf-8", errors="replace")
+
+
+def wait_for_exit_reason(base_path: str, needle: str, timeout: float = 10.0) -> str:
+    """The log text once it carries [needle], or an assertion naming what it held.
+
+    The line is written as the process exits, so the read races the write; the
+    poll is what makes the scenario wait for the fact rather than for a sleep.
+    """
+    deadline = time.monotonic() + timeout
+    text = ""
+    while time.monotonic() < deadline:
+        text = exit_reason_log(base_path)
+        if needle in text:
+            return text
+        time.sleep(0.05)
+    raise AssertionError(
+        f"no exit reason {needle!r} in {base_path}/.masc/logs/masc-tui-*.log; "
+        f"the log held:\n{text}"
+    )
+
+
+def quit_writes_its_reason_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    base_path: str,
+) -> None:
+    """Leave with q and read the reason back from the log the TUI wrote.
+
+    The per-PID log held only the boot lines, so a session that ended left no
+    reason behind. The first q arms, the second leaves; the exit line is
+    written as the process returns.
+    """
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+    os.write(master_fd, b"q")
+    text = wait_for_exit_reason(base_path, "exit: normal (quit key)")
+    if "exit: abnormal" in text:
+        raise AssertionError(f"a q quit read as abnormal:\n{text}")
+
+
+def sigterm_writes_its_reason_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    slave_fd: int,
+    output: bytearray,
+    base_path: str,
+) -> None:
+    """A terminate signal leaves the same record, naming the signal.
+
+    A service manager's SIGTERM is not the operator's q, and the log has to
+    tell them apart, so the reason carries the signal's name.
+    """
+    terminate_with_sigterm(process, master_fd, slave_fd, output, base_path)
+    wait_for_exit_reason(base_path, "exit: normal (signal SIGTERM)")
+
+
+def run_exit_reason_regression(executable: str) -> None:
+    # #37813's sibling: the per-PID log held only the boot lines, so a session
+    # that ended left no reason behind. These read the reason back from the log
+    # the process wrote, one per way out.
+    run_terminal_scenario(
+        executable,
+        description="a q quit writes its reason to the session log",
+        interact=quit_writes_its_reason_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="a SIGTERM writes its reason to the session log",
+        interact=sigterm_writes_its_reason_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        confirm_exit=b"",
+    )
+
+
 def run_first_install_credential_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -17607,6 +17694,11 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
         "first-install-credential",
         "first install credential regression",
         (run_first_install_credential_regression,),
+    ),
+    ScenarioFamily(
+        "exit-reason",
+        "exit reason regression",
+        (run_exit_reason_regression,),
     ),
     ScenarioFamily("planning-review", "Planning Task Review regression", (run_planning_review_regression,)),
     ScenarioFamily("repositories", "Repositories regression", (run_repositories_regression,)),

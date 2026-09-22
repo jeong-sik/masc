@@ -25,16 +25,31 @@ let test_quiet_session_keeps_running () =
 
 let test_terminate_quits_on_the_next_pass () =
   let t = Signals.create () in
-  Signals.request_terminate t;
+  Signals.request_terminate t ~signal:"SIGTERM";
   check verdict "a terminate signal ends the session" Signals.Quit
     (Signals.poll t);
-  check verdict "and is never withdrawn" Signals.Quit (Signals.poll t)
+  check verdict "and is never withdrawn" Signals.Quit (Signals.poll t);
+  check (option string) "the cause is the signal that asked" (Some "SIGTERM")
+    (Signals.terminate_signal t)
 
 let test_terminate_outranks_a_first_ctrl_c () =
   let t = Signals.create () in
   Signals.request_interrupt t;
-  Signals.request_terminate t;
-  check verdict "terminate wins over arming" Signals.Quit (Signals.poll t)
+  Signals.request_terminate t ~signal:"SIGHUP";
+  check verdict "terminate wins over arming" Signals.Quit (Signals.poll t);
+  check (option string) "and the cause is the terminate, not the Ctrl-C"
+    (Some "SIGHUP") (Signals.terminate_signal t)
+
+(* A second Ctrl-C quits too, but no signal asked for it: the exit line must
+   read that as an interrupt, not as a terminate. *)
+let test_a_second_ctrl_c_leaves_no_terminate_signal () =
+  let t = Signals.create () in
+  Signals.request_interrupt t;
+  ignore (Signals.poll t);
+  Signals.request_interrupt t;
+  check verdict "second Ctrl-C quits" Signals.Quit (Signals.poll t);
+  check (option string) "no signal asked for this end" None
+    (Signals.terminate_signal t)
 
 let test_first_ctrl_c_arms_and_second_quits () =
   let t = Signals.create () in
@@ -61,7 +76,7 @@ let test_a_delivered_sigterm_reaches_quit () =
   let t = Signals.create () in
   let previous =
     Sys.signal Sys.sigterm
-      (Sys.Signal_handle (fun _ -> Signals.request_terminate t))
+      (Sys.Signal_handle (fun _ -> Signals.request_terminate t ~signal:"SIGTERM"))
   in
   Fun.protect
     ~finally:(fun () -> Sys.set_signal Sys.sigterm previous)
@@ -104,6 +119,8 @@ let () =
             test_terminate_quits_on_the_next_pass;
           test_case "a terminate request outranks a first Ctrl-C" `Quick
             test_terminate_outranks_a_first_ctrl_c;
+          test_case "a second Ctrl-C leaves no terminate signal" `Quick
+            test_a_second_ctrl_c_leaves_no_terminate_signal;
           test_case "a first Ctrl-C arms and a second quits" `Quick
             test_first_ctrl_c_arms_and_second_quits;
           test_case "input withdraws a standing Ctrl-C" `Quick

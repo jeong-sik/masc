@@ -2016,15 +2016,18 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
       ~module_path:main_path ~binding_name:"enter_terminal_session" ~signal
       ~handler
   in
-  (* Two [at_exit] calls, and which is which matters: they run in reverse of
+  (* Three [at_exit] calls, and which is which matters: they run in reverse of
      this order and stop at the first that raises, so the frame summary --
      which appends to a file and can fail on the write -- registers first and
-     the terminal restore registers last, where it runs first. *)
+     the terminal restore registers last, where it runs first. The exit-reason
+     writer registers before both, so it runs last, after the terminal is
+     back. *)
   check bool "startup registers cleanup and handlers before raw mode" true
     (Ast_grep.direct_call_sequence_matches_in_value_binding
        ~module_path:main_path ~binding_name:"enter_terminal_session"
        ~callees:
          [ "at_exit"
+         ; "at_exit"
          ; "at_exit"
          ; "Sys.set_signal"
          ; "Sys.set_signal"
@@ -2179,11 +2182,16 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   (* Signal-driven quit and the armed q shortcut are separate exits. Pin
      the condition of each rather than letting an arbitrary second raise
      satisfy the count; both must still unwind through the root switch. *)
-  let raises_break (expression : Parsetree.expression) =
+  (* The exit now writes its reason down before it leaves, so the arm that
+     raises [Break] is a sequence whose last expression is the raise. What the
+     guard pins is unchanged: the signal poll's [Quit] arm and the armed q key
+     are the only two ways out, and each ends in [raise Break]. *)
+  let rec ends_with_break (expression : Parsetree.expression) =
     match expression.pexp_desc with
     | Pexp_apply (callee, [Asttypes.Nolabel, argument]) ->
         Ast_grep.expression_is_identifier "raise" callee
         && Ast_grep.expression_is_constructor "Break" argument
+    | Pexp_sequence (_, rest) -> ends_with_break rest
     | _ -> false
   in
   let count_exit matches =
@@ -2198,7 +2206,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
           match case.pc_lhs.ppat_desc, case.pc_guard with
           | Ppat_construct ({txt; _}, None), None ->
               String.equal (Ast_grep.longident_to_string txt) "Masc_tui_exit_signals.Quit"
-              && raises_break case.pc_rhs
+              && ends_with_break case.pc_rhs
           | _ -> false) cases
     | _ -> false) in
   let armed_key_exit = count_exit (fun expression ->
@@ -2207,7 +2215,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
         ({pexp_desc = Pexp_field (receiver, {txt; _}); _}, yes, Some _)
       when Ast_grep.expression_is_identifier "state" receiver
            && String.equal (Ast_grep.longident_to_string txt) "quit_armed" ->
-        raises_break yes
+        ends_with_break yes
     | _ -> false) in
   check int "signal poll Quit propagates Break" 1 signal_exit;
   check int "q propagates Break only once armed" 1 armed_key_exit;

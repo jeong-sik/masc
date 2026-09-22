@@ -159,6 +159,30 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   }
 ;;
 
+(* Antigravity has no system-prompt channel. The keeper path
+   (keeper_antigravity_runtime.ml) puts the instructions at the head of the
+   input under the SYSTEM INSTRUCTIONS / CURRENT GOAL labels; a one-shot turn
+   uses the same labels. Without this the panel or judge system prompt — for a
+   judge-of-judges first judge, its whole lens — never reaches the model. *)
+let antigravity_prompt ~runtime_id ~system_prompt ~prompt =
+  let label key =
+    match String.trim (Prompt_registry.get_prompt key) with
+    | "" ->
+      Error (provider_error ~runtime_id (Printf.sprintf "missing prompt asset %s" key))
+    | text -> Ok (text ^ "\n")
+  in
+  match system_prompt with
+  | None -> Ok prompt
+  | Some instructions ->
+    Result.bind (label Prompt_names.keeper_antigravity_system_instructions_label)
+      (fun system_label ->
+         Result.map
+           (fun goal_label ->
+              String.concat "\n\n"
+                [ system_label ^ instructions; goal_label ^ prompt ])
+           (label Prompt_names.keeper_antigravity_current_goal_label))
+;;
+
 type image_input = { media_type : string; base64_data : string }
 type response = { text : string; model : string }
 type failure =
@@ -285,6 +309,10 @@ let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?tim
     (* [home_dir] is left unset so the client uses the inherited HOME, which is
        where its OAuth token already lives. The keeper path overrides it for
        per-keeper isolation; a panelist has no durable state to isolate. *)
+    let* prompt =
+      antigravity_prompt ~runtime_id ~system_prompt ~prompt
+      |> Result.map_error (fun failure -> Setup_failure failure)
+    in
     (match Runtime_antigravity.run_turn ~mgr ~clock ~cwd config ~prompt with
      | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model }
      | Error error ->

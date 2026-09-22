@@ -638,7 +638,7 @@ atom digest 는 전부 겹치는 것으로 둔다. 2a 와 5 에는 그것이 최
    - 각 턴 끝 줄이 가리키는 atom 을 여는 메시지. 실패한 턴은 마지막 끝 줄 뒤에 메시지를 남길 수 있어서, 끝만 지키면 마지막 끝 줄이 빠진다. 맞는 작업 상태도, 맞는 읽은 위치도 없는 Keeper 는 요청을 마지막으로 끝난 턴부터 싣는데, 끝 줄이 하나도 맞지 않으면 가장 오래된 atom 부터 싣는다.
    - 지금 이력에 맞는 연속성 스냅숏이 덮은 앞부분. 아래 문단이 이유다.
 
-   그래서 읽은 위치, 턴 끝 줄, 요청 앞머리가 purge 뒤에도 그대로 맞는다. 읽은 위치의 증인 줄(`turn_boundary_for_position`)도 그대로 있어 `Progress_boundary_missing` 이 생기지 않는다. `purge_messages` 는 atom 수, 지킨 여는 메시지의 digest, 스냅숏이 여전히 맞는지(`Librarian_continuity_snapshot.restore`)를 확인하고, 하나라도 다르면 설치하지 않는다. 앞머리 씨앗은 앞머리가 옮겨 간 아무 atom 이나 가리키므로 지키지 않는다. 그 atom 을 여는 메시지가 바뀌면 씨앗이 맞지 않고, 요청은 마지막 끝난 턴에서 시작한다.
+   그래서 읽은 위치, 턴 끝 줄, 요청 앞머리가 purge 뒤에도 그대로 맞는다. 읽은 위치의 증인 줄(`Keeper_turn_boundaries.witness_line`)도 그대로 있어 `Progress_boundary_missing` 이 생기지 않는다. `purge_messages` 는 atom 수, 지킨 여는 메시지의 digest, 스냅숏이 여전히 맞는지(`Librarian_continuity_snapshot.restore`)를 확인하고, 하나라도 다르면 설치하지 않는다. 앞머리 씨앗은 앞머리가 옮겨 간 아무 atom 이나 가리키므로 지키지 않는다. 그 atom 을 여는 메시지가 바뀌면 씨앗이 맞지 않고, 요청은 마지막 끝난 턴에서 시작한다.
 
    위치가 끝에 있을 때만 purge 한다는 위 조건은 그대로 둔다. 이제 이유는 번호가 아니라 내용이다. purge 는 도구 결과와 추론을 비우는데, Librarian 이 아직 읽지 않은 atom 에서 그러면 그 내용은 흡수되지 못한다.
 

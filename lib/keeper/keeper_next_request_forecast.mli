@@ -169,7 +169,7 @@ val declared_at : declared:string list -> string -> int option
 val carry
   :  measure:(Agent_core.Types.message -> int)
   -> front:Keeper_carried_front.seed option
-  -> turn_start:int
+  -> turn_start:Keeper_carried_front.turn_start
   -> counted_tokens:int option
   -> Agent_core.Types.message list
   -> carried
@@ -178,7 +178,7 @@ val carry
     against this history (the index opens with the seed's message); without
     one, or with one it drops, from [turn_start]: the end of the last
     completed turn on this history (RFC keeper-context-window-in-tokens
-    §13.4). *)
+    §13.4), or the newest atom alone when that boundary is unknown. *)
 
 
 type composition =

@@ -2275,7 +2275,7 @@ reasoning-effort = "high"
 
 [openrouter.openrouter-qwen3-8-max]
 
-# Ten more ids probed live on 2026-09-22 in the same shape as the twelve
+# More ids probed live on 2026-09-22 in the same shape as the twelve
 # above (evidence/task-openrouter-new-models/SUMMARY.md). Every one answered a
 # plain completion and took reasoning_effort "high"; the catalog rows carry
 # the rest, including which refuse "none" or tool_choice required.
@@ -2342,15 +2342,6 @@ streaming = true
 reasoning-effort = "high"
 
 [openrouter.openrouter-grok-4-7]
-
-[models.openrouter-minimax-m3]
-api-name = "minimax/minimax-m3"
-tools-support = true
-thinking-support = true
-streaming = true
-reasoning-effort = "high"
-
-[openrouter.openrouter-minimax-m3]
 
 [models.openrouter-qwen3-8-flash]
 api-name = "qwen/qwen3.8-flash"

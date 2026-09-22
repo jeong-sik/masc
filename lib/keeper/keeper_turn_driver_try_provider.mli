@@ -69,13 +69,14 @@ val completed_history_end :
 
 val turn_start :
   config:Workspace.config -> keeper_name:string -> trace_id:string ->
-  messages:Agent_core.Types.message list -> int
+  messages:Agent_core.Types.message list -> Keeper_carried_front.turn_start
 (** Where a request with no absorbed point starts (RFC
     keeper-context-window-in-tokens §13.4): {!completed_history_end} read from
-    the keeper's turn-boundary store, 0 when the history has no completed
-    turn. A store this process cannot read, or a boundary the history in hand
-    does not match, is logged and answered 0: the request goes out from the
-    oldest atom rather than not at all. *)
+    the keeper's turn-boundary store, [Turn_boundary 0] when the history has
+    no completed turn. A store this process cannot read, or a boundary the
+    history in hand does not match, is logged and answered
+    [Turn_boundary_unknown]: the request then opens on the newest atom alone
+    and its origin says so, rather than on the whole history. *)
 
 val prepare_continuity :
   trace_id:string ->
@@ -131,7 +132,7 @@ type try_provider_ctx =
             refusal in this turn supplies the front. *)
   ; continuity : continuity option
   ; input_policy : Keeper_input_policy.t
-  ; completed_end_atom : int
+  ; turn_boundary : Keeper_carried_front.turn_start
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
         (** The latest refusal's front, shared by every Agent Core candidate
             of this turn. A valid later front takes precedence over the
@@ -474,7 +475,7 @@ type composed =
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
     atoms older than [demote_before], or over every atom when the last
     resort is armed, then the carried range from [front], or from
-    [completed_end_atom] without one (§13.4). Nothing here measures the
+    [turn_boundary] without one (§13.4). Nothing here measures the
     request against a limit. *)
 
 type request_view =
@@ -566,7 +567,7 @@ module For_testing : sig
     last_resort:bool ->
     base_path:string ->
     demote_before:int ->
-    completed_end_atom:int ->
+    turn_boundary:Keeper_carried_front.turn_start ->
     Agent_core.Types.message list ->
     composed
 
@@ -580,7 +581,7 @@ module For_testing : sig
     last_resort:bool ->
     base_path:string ->
     demote_before:int ->
-    completed_end_atom:int ->
+    turn_boundary:Keeper_carried_front.turn_start ->
     materialize:
       (pending:Keeper_model_input_demotion.pending list ->
        Agent_core.Types.message list ->

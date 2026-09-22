@@ -202,6 +202,11 @@ type msg_role =
           once before for the same reason, out of the journal lane where they
           interleaved with memory commits. *)
   | Message_error
+      (** A failure the server reported for a request: a message it refused,
+          a delivery that failed, a held call it could not answer. The
+          operator's own steps that fail -- a command missing its argument,
+          an image that would not open -- are not rows; they read on the
+          footer. *)
   | Message_tool
       (** The tool calls of one finished turn, as the row block the live pane
           drew while it ran. The strict stream decode carries no tool
@@ -4711,12 +4716,6 @@ type state = {
      in the draft either way, and that draft is also where a spoken
      half-sentence waits for typing. *)
   mutable voice_send_on_stop: bool;
-  (* Whether speech-to-text is set up where this TUI runs
-     ([Masc.Voice_bridge.stt_set_up]): read at boot and again whenever the
-     voice config is re-read. An empty draft names the capture keys only
-     then -- to an operator without a transcriber they named a key that
-     refuses. *)
-  mutable voice_stt_set_up: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* The Memory facts list's [Enter] detail: the whole fact text in its own
@@ -6979,7 +6978,6 @@ let create_state
   keeper_queue_inflight = [];
   keeper_run_next_pending = None;
   voice_send_on_stop = false;
-  voice_stt_set_up = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;

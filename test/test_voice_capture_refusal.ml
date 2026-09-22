@@ -112,40 +112,10 @@ let test_the_floor_is_not_measured_under_an_invalid_config () =
       (Bridge.measure_noise_floor ~agent_id:"tester" ()))
 ;;
 
-(* Whether a surface names the capture keys: set up only where a capture
-   would reach a transcriber, or where a config the operator wrote is what
-   the capture will report on. *)
-let test_stt_is_set_up_only_where_a_capture_reaches_a_transcriber () =
-  let endpoint ~enabled =
-    Printf.sprintf
-      {|{ "stt": { "default_model": "whisper-1", "endpoints": [ { "id": "local", "kind": "whisper_cli", "command": "/bin/true", "enabled": %b } ] } }|}
-      enabled
-  in
-  with_temp_dir "voice-stt-unset-" (fun root ->
-    without_env "MASC_CONFIG_DIR" @@ fun () ->
-    with_env "MASC_BASE_PATH" root @@ fun () ->
-    check bool "no voice config: not set up" false (Bridge.stt_set_up ()));
-  with_explicit_voice_config {|{ "capture": {} }|} (fun () ->
-    check bool "a config without [stt]: not set up" false (Bridge.stt_set_up ()));
-  with_explicit_voice_config (endpoint ~enabled:false) (fun () ->
-    check bool "every endpoint disabled: not set up" false (Bridge.stt_set_up ()));
-  with_explicit_voice_config (endpoint ~enabled:true) (fun () ->
-    check bool "an enabled endpoint: set up" true (Bridge.stt_set_up ()));
-  with_explicit_voice_config wrong_typed_capture_config (fun () ->
-    check bool "a config that does not parse: set up, the capture says why" true
-      (Bridge.stt_set_up ()))
-;;
-
 let () =
   run
     "Voice capture refusal"
-    [ ( "stt set up"
-      , [ test_case
-            "stt is set up only where a capture reaches a transcriber"
-            `Quick
-            test_stt_is_set_up_only_where_a_capture_reaches_a_transcriber
-        ] )
-    ; ( "invalid config"
+    [ ( "invalid config"
       , [ test_case
             "a capture under an invalid config is refused by name"
             `Quick

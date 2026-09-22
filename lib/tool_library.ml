@@ -46,7 +46,9 @@ type context = {
 let library_root ~base_path =
   Filename.concat base_path "docs/library"
 
-(* YAML frontmatter parsing *)
+(* YAML frontmatter parsing. Every field [handle_add] writes and a reader
+   projects is required: a document missing one does not read, rather than
+   reading as an empty string. [updated] is written but nothing reads it. *)
 type frontmatter = {
   title: string;
   source: library_source;
@@ -55,51 +57,83 @@ type frontmatter = {
   tags: string list;
 }
 
+type frontmatter_field =
+  | Title
+  | Source
+  | Author
+  | Created
+  | Tags
+
+let frontmatter_field_key = function
+  | Title -> "title"
+  | Source -> "source"
+  | Author -> "author"
+  | Created -> "created"
+  | Tags -> "tags"
+
 (* Why a document's header does not read as a library document. The raw value
    of an unknown source is kept only to name it back to the reader. *)
 type frontmatter_error =
   | No_frontmatter
-  | Missing_source
+  | Unclosed_frontmatter
+  | Missing_field of frontmatter_field
   | Unknown_source of string
 
 let parse_frontmatter content =
-  if not (Frontmatter.has_frontmatter content)
-  then Error No_frontmatter
-  else (
-    let parsed = Frontmatter.parse content in
-    match List.assoc_opt "source" parsed.Frontmatter.fields with
-    | None -> Error Missing_source
-    | Some raw ->
-      (match source_of_string_opt raw with
-       | None -> Error (Unknown_source raw)
-       | Some source ->
-         Ok
-           { title = Frontmatter.field parsed "title"
-           ; source
-           ; author = Frontmatter.field parsed "author"
-           ; created = Frontmatter.field parsed "created"
-           ; tags = Frontmatter.list_field parsed "tags"
-           }))
+  match Frontmatter.read content with
+  | Frontmatter.Absent -> Error No_frontmatter
+  | Frontmatter.Unclosed -> Error Unclosed_frontmatter
+  | Frontmatter.Closed parsed ->
+    let ( let* ) = Result.bind in
+    let lookup field =
+      List.assoc_opt (frontmatter_field_key field) parsed.Frontmatter.fields
+    in
+    (* A scalar that is present but empty says nothing, so it reads as absent.
+       [tags] is a list, and [tags: []] is a document with no tags. *)
+    let scalar field =
+      match lookup field with
+      | Some value when not (String.equal value "") -> Ok value
+      | Some _ | None -> Error (Missing_field field)
+    in
+    let* title = scalar Title in
+    let* raw_source = scalar Source in
+    let* source =
+      Option.to_result ~none:(Unknown_source raw_source) (source_of_string_opt raw_source)
+    in
+    let* author = scalar Author in
+    let* created = scalar Created in
+    let* tags =
+      match lookup Tags with
+      | Some _ -> Ok (Frontmatter.list_field parsed (frontmatter_field_key Tags))
+      | None -> Error (Missing_field Tags)
+    in
+    Ok { title; source; author; created; tags }
 ;;
 
+(* The raw source is quoted as written: [%S] would escape a non-ASCII value
+   into decimal byte codes the reader cannot recognise. *)
 let frontmatter_error_to_string = function
   | No_frontmatter -> "no frontmatter"
-  | Missing_source -> "no source in frontmatter"
+  | Unclosed_frontmatter -> "frontmatter has no closing ---"
+  | Missing_field field -> sprintf "no %s in frontmatter" (frontmatter_field_key field)
   | Unknown_source raw ->
-    sprintf "source %S is not one of: %s" raw (String.concat ", " valid_source_strings)
+    sprintf "source \"%s\" is not one of: %s" raw (String.concat ", " valid_source_strings)
 
 (* The one line list, read and search print for a document whose header does
    not read: its filename and the reason. *)
 let describe_unreadable path error =
   sprintf "%s (%s)" (Filename.basename path) (frontmatter_error_to_string error)
 
-(* List documents *)
+(* Every Markdown file in the library, in name order. Nothing is skipped by
+   name: a file that is not a library document shows up as one whose header
+   does not read. *)
 let list_documents ~base_path =
   let dir = library_root ~base_path in
   if Sys.file_exists dir && Sys.is_directory dir then
     Sys.readdir dir
     |> Array.to_list
-    |> List.filter (fun f -> Filename.check_suffix f ".md" && not (String.equal f "SCHEMA.md"))
+    |> List.filter (fun f -> Filename.check_suffix f ".md")
+    |> List.sort String.compare
     |> List.map (fun f -> Filename.concat dir f)
   else []
 

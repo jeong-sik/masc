@@ -124,7 +124,7 @@ callers that only gain an argument; a batch that grows past that is split before
 | 4 | channel gate state paths (`channel_gate_{slack,discord,imessage,sidecar}_state`, stored as `unit -> string` in `channel_gate_binding_store`), `server_imessage_in_process_gateway` cursor path | `Env_config_core.resolve_against_base_path` | no |
 | 5 | browser lane token path; `Tool_misc_web_fetch.offload_full_text` and the `handle` callers (`tool_misc`, `tool_misc_web_enrichment`, `verification_authority_tools`, `fusion_agent_core`, `keeper_tool_in_process_runtime`); delete `resolve_against_base_path` | `Env_config_core.resolve_against_base_path`, `Env_config_core.base_path` | no |
 | 6 | `Tool_assignment_telemetry.get_or_create_runtime` (`mcp_server_eio_call_tool`, `mcp_server_eio_protocol`, `keeper_run_tools_setup`, `workspace_metric_hooks`); rewrite `test_store_follows_the_base_path` to pass `~base_path` | `Env_config.base_path` per call | caller |
-| 7 | `Tool_library.workspace_root` (`mcp_server_eio_execute`, `keeper_tool_in_process_runtime`, `keeper_tag_dispatch`); `Shutdown_hooks.run_all` tmp cleanup | `Sys.getenv_opt "MASC_BASE_PATH"` | caller / no |
+| 7 | `Shutdown_hooks.run_all` tmp cleanup | `Sys.getenv_opt "MASC_BASE_PATH"` | no |
 | 8 | `Voice_config` path lookups, `Voice_bridge_core.masc_base_dir`, `Keeper_voice_local` singleton, `keeper_tool_voice_runtime` | `Host_config`, `base_path_or_cwd` | no |
 | 9 | diagnostics: `server_dashboard_http_runtime_info` resolution JSON, `server_routes_http_runtime_health_helpers.health_path_diagnostics`, `server_dashboard_http_core_shell_bootstrap.dashboard_shell_paths_json`, `server_runtime_bootstrap` path diagnostics (`base_path_raw`), `server_base_path_diagnostics` resolution source | `base_path_source_opt`, `Host_config`, `MASC_BASE_PATH_RESOLUTION_SOURCE` | yes |
 | 10 | `Config_dir_resolver.resolve ~base_path` and keeper callers: `keeper_types_profile`, `keeper_run_context`, `keeper_runtime_config`, `keeper_vision_tool` | `inputs_from_env` | caller |
@@ -133,7 +133,7 @@ callers that only gain an argument; a batch that grows past that is split before
 | 13 | bin readers: `masc_checkpoint_purge`, `masc_cost`, `masc_tui_theme_catalog`, `masc_tui_config`, `fusion_run`, `masc_lane_cli_probe`, `keeper_capability_probe_cli`, the `base_path_source_opt` reads in `main_eio` sandbox and setup commands; `Browser_host.resolve_config` takes the root from its CLI flag instead of `Env_config_core.base_path` | `base_path_or_cwd`, `current_env_base_path_opt`, `base_path_source_opt` | entry point |
 | 14 | entry points and retirement (§4) | — | — |
 
-`Host_config.sandbox_workspace_root` carries the same value, so `tool_library`,
+`Host_config.sandbox_workspace_root` carries the same value, so
 `keeper_sandbox_containment` and `exec_policy_paths` move with the batch that owns
 their caller. Batch 9 needs `Server_startup_state.input_base_path` (#36457).
 

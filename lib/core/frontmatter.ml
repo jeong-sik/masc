@@ -11,20 +11,21 @@ type t =
   ; body : string
   }
 
+type block =
+  | Absent
+  | Unclosed
+  | Closed of t
+
 let empty content = { fields = []; body = content }
 
-let parse content =
+let read content =
   let lines = String.split_on_char '\n' content in
   match lines with
   | first :: rest when String.equal (String.trim first) "---" ->
-    (* A block that never closes is not frontmatter. Reading it as one threw
-       the whole document away: every line became a field candidate and the
-       body came back empty, so a prompt with a typo in its closing delimiter
-       loaded as blank (#26599). Hand the content back unread instead. *)
     let rec collect acc = function
-      | [] -> empty content
+      | [] -> Unclosed
       | line :: remaining when String.equal (String.trim line) "---" ->
-        { fields = List.rev acc; body = String.concat "\n" remaining }
+        Closed { fields = List.rev acc; body = String.concat "\n" remaining }
       | line :: remaining ->
         let acc =
           match String.index_opt line ':' with
@@ -39,13 +40,18 @@ let parse content =
         collect acc remaining
     in
     collect [] rest
-  | _ -> empty content
+  | _ -> Absent
 ;;
 
-let has_frontmatter content =
-  match String.split_on_char '\n' content with
-  | first :: _ -> String.equal (String.trim first) "---"
-  | [] -> false
+(* A block that never closes is not frontmatter. Reading it as one threw the
+   whole document away: every line became a field candidate and the body came
+   back empty, so a prompt with a typo in its closing delimiter loaded as blank
+   (#26599). Hand the content back unread instead; a reader that must tell the
+   two apart asks [read]. *)
+let parse content =
+  match read content with
+  | Closed parsed -> parsed
+  | Absent | Unclosed -> empty content
 ;;
 
 let field t name =

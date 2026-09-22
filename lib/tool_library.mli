@@ -20,15 +20,14 @@
     [config/tools/masc_library_add.toml]; the "library source enum" case in
     [test_enum_mirror_sync] compares that enum with {!valid_source_strings}.
 
-    A document whose frontmatter is absent, has no [source], or names a
-    [source] outside the vocabulary does not read as a library document. List,
-    read and search print it by filename with that reason instead of passing
-    the raw value through.
+    A document reads only when its frontmatter is closed and carries [title],
+    [source], [author], [created] and [tags], with [source] inside the
+    vocabulary. Any other document is printed by filename with the reason —
+    by the tools here and by the [masc://library] resources, which read
+    through {!parse_frontmatter} and {!list_documents} — instead of passing a
+    raw or empty value through.
 
-    Internal: [source_to_string], the [frontmatter] and [frontmatter_error]
-    types + [parse_frontmatter] + [list_documents], and [handle_list] /
-    [handle_add] (reachable via {!dispatch}).  All consumed only
-    inside the dispatch handlers or {!schemas}. *)
+    Internal: [handle_list] / [handle_add] (reachable via {!dispatch}). *)
 
 (** {1 Library source} *)
 
@@ -39,9 +38,41 @@ type library_source =
   | Experiment
   | Observation
 
+val source_to_string : library_source -> string
+(** The spelling written to, and read back from, a document's [source]. *)
+
 val valid_source_strings : string list
 (** Every spelling [masc_library_add] accepts for [source], derived from
     {!library_source}. Handler error messages list it. *)
+
+(** {1 Documents} *)
+
+type frontmatter = {
+  title : string;
+  source : library_source;
+  author : string;
+  created : string;
+  tags : string list;
+}
+
+type frontmatter_error
+(** Why a document does not read: no frontmatter, a block with no closing
+    delimiter, a required field absent or empty, or a [source] outside
+    {!library_source}. *)
+
+val parse_frontmatter : string -> (frontmatter, frontmatter_error) result
+
+val frontmatter_error_to_string : frontmatter_error -> string
+(** The reason as a reader sees it. An unknown [source] is quoted as written. *)
+
+val describe_unreadable : string -> frontmatter_error -> string
+(** [describe_unreadable path error] is ["<basename> (<reason>)"], the line
+    every library surface prints for a document that does not read. *)
+
+val list_documents : base_path:string -> string list
+(** Every [.md] file directly under {!library_root}, as full paths in name
+    order; [[]] when the directory does not exist. No file is skipped by
+    name. *)
 
 (** {1 Context} *)
 

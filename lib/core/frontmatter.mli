@@ -12,14 +12,18 @@ type t =
   ; body : string  (** Everything after the closing delimiter. *)
   }
 
-val parse : string -> t
-(** No opening delimiter means no frontmatter: [fields] is empty and [body] is
-    the whole input. A missing closing delimiter consumes the rest as fields
-    and leaves [body] empty. Delimiter lines are compared after trimming, so
-    CRLF and trailing spaces read the same as a bare [---]. *)
+type block =
+  | Absent  (** The first line is not a delimiter. *)
+  | Unclosed  (** An opening delimiter with no closing one after it. *)
+  | Closed of t
 
-val has_frontmatter : string -> bool
-(** Whether the first line is a delimiter, without parsing the rest. *)
+val read : string -> block
+(** Delimiter lines are compared after trimming, so CRLF and trailing spaces
+    read the same as a bare [---]. *)
+
+val parse : string -> t
+(** {!read} for a caller that does not need to tell the cases apart: [Absent]
+    and [Unclosed] both answer empty [fields] with the whole input as [body]. *)
 
 val field : t -> string -> string
 (** The value for [name], or [""] when absent. *)

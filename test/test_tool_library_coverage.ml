@@ -437,7 +437,7 @@ let test_added_frontmatter_carries_only_observable_fields () =
   )
 
 (* ============================================================
-   Documents whose source does not read
+   Documents whose frontmatter does not read
    ============================================================
 
    A document written by hand can carry any [source]. List, read and search
@@ -490,6 +490,33 @@ let test_unknown_source_is_named_not_passed_through () =
     Alcotest.(check bool) "read returns the document" true
       (msg_contains ~needle:"shared marker" body)
   )
+
+(* A header missing a field the writer always writes, a block that never
+   closes, and a source outside ASCII. Each is named with its own reason: the
+   missing title is not printed as an empty bold title, the unclosed block is
+   not reported as a missing source although its source line is there, and the
+   non-ASCII source is quoted as written rather than as escaped bytes. *)
+let test_header_that_does_not_read_names_its_reason () =
+  with_temp_base_path (fun ctx ->
+    write_library_document ctx ~filename:"no-title.md"
+      "---\nsource: research\nauthor: codex\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
+    write_library_document ctx ~filename:"empty-author.md"
+      "---\ntitle: Empty Author\nsource: research\nauthor:\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
+    write_library_document ctx ~filename:"unclosed.md"
+      "---\ntitle: Unclosed\nsource: research\nauthor: codex\n\nbody\n";
+    write_library_document ctx ~filename:"korean-source.md"
+      "---\ntitle: Korean Source\nsource: 연구\nauthor: codex\ncreated: 2026-09-22\ntags: []\n---\n\nbody\n";
+    let (ok, listing) = dispatch_exn ctx ~name:"masc_library_list" ~args:(`Assoc []) in
+    Alcotest.(check bool) "list ok" true ok;
+    Alcotest.(check bool) "missing title named" true
+      (msg_contains ~needle:"- no-title.md (no title in frontmatter)" listing);
+    Alcotest.(check bool) "no empty bold title" false (msg_contains ~needle:"****" listing);
+    Alcotest.(check bool) "empty author reads as missing" true
+      (msg_contains ~needle:"- empty-author.md (no author in frontmatter)" listing);
+    Alcotest.(check bool) "unclosed block named as unclosed" true
+      (msg_contains ~needle:"- unclosed.md (frontmatter has no closing ---)" listing);
+    Alcotest.(check bool) "non-ASCII source quoted as written" true
+      (msg_contains ~needle:"- korean-source.md (source \"연구\" is not one of:" listing))
 
 (* ============================================================
    Workflow: add → list → read → search
@@ -555,6 +582,8 @@ let () =
     ("unreadable_source", [
       Alcotest.test_case "unknown source is named, not passed through" `Quick
         test_unknown_source_is_named_not_passed_through;
+      Alcotest.test_case "header that does not read names its reason" `Quick
+        test_header_that_does_not_read_names_its_reason;
     ]);
     ("library_search", [
       Alcotest.test_case "empty query" `Quick test_search_empty_query;

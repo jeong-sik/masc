@@ -138,6 +138,20 @@ let test_frontmatter_unterminated_block_keeps_the_document () =
     []
     parsed.Frontmatter.fields
 
+(* [parse] answers the same empty fields for no block and for a block that
+   never closes; a reader that reports why a document does not read needs the
+   two apart, and [read] names them. *)
+let test_frontmatter_read_tells_absent_unclosed_and_closed_apart () =
+  let block content =
+    match Frontmatter.read content with
+    | Frontmatter.Absent -> "absent"
+    | Frontmatter.Unclosed -> "unclosed"
+    | Frontmatter.Closed parsed -> "closed:" ^ Frontmatter.field parsed "title"
+  in
+  check string "no opening delimiter" "absent" (block "title: T\nbody");
+  check string "no closing delimiter" "unclosed" (block "---\ntitle: T\nbody");
+  check string "closed block" "closed:T" (block "---\ntitle: T\n---\nbody")
+
 let test_frontmatter_line_without_colon_is_skipped () =
   let parsed = Frontmatter.parse "---\njust text\ntitle: T\n---\n" in
   check string "title still read" "T" (Frontmatter.field parsed "title");
@@ -250,5 +264,7 @@ let () =
         test_frontmatter_line_without_colon_is_skipped;
       test_case "unterminated block keeps the document" `Quick
         test_frontmatter_unterminated_block_keeps_the_document;
+      test_case "read tells absent, unclosed and closed apart" `Quick
+        test_frontmatter_read_tells_absent_unclosed_and_closed_apart;
     ];
   ]

@@ -16646,6 +16646,82 @@ def run_resources_regression(executable: str) -> None:
     )
 
 
+def open_turn_roster_http_fixtures(started_at_unix: float) -> HttpFixtures:
+    """alpha healthy and beta failing, each with a turn open.
+
+    A failing keeper's keepalive runs the next attempt, so its turn is open
+    while the roster header counts it failing; alpha is the working keeper
+    its row must not look like.
+    """
+    fixtures = keeper_runtime_http_fixtures()
+    status, roster = fixtures["/api/v1/gate/keepers?detailed=true"]
+    alpha, beta = roster["keepers"]
+    beta = {
+        **beta,
+        "status": "active",
+        "health": "failing",
+        "paused": False,
+        "phase": "failing",
+        "activation_mode": "autonomous",
+    }
+    fixtures["/api/v1/gate/keepers?detailed=true"] = (
+        status,
+        {**roster, "keepers": [alpha, beta]},
+    )
+    fixtures["/api/v1/keepers/turns"] = (
+        200,
+        {
+            "schema": "masc.keeper_turns.v1",
+            "keepers": [
+                {
+                    "keeper_name": name,
+                    "status": "ok",
+                    "chat_control_token": f"control-{name}",
+                    "turn": {
+                        "lane": "autonomous",
+                        "started_at_unix": started_at_unix,
+                        "interrupt_token": token,
+                        "preview": None,
+                    },
+                }
+                for name, token in (
+                    ("alpha", "4f3c2a10-5b6d-4e7f-8a9b-0c1d2e3f4a5b"),
+                    ("beta", "7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d"),
+                )
+            ],
+        },
+    )
+    return fixtures
+
+
+def a_failing_keepers_open_turn_reads_failing(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    working = re.compile(rb"\d+s +alpha\b")
+    failing = re.compile(rb"\bfailing +beta\b")
+    deadline = time.monotonic() + 10.0
+    screen = b""
+    while time.monotonic() < deadline:
+        read_available(master_fd, output)
+        screen = screen_text(bytes(output))
+        if working.search(screen) and failing.search(screen):
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError(
+            "the roster did not draw alpha's turn with its elapsed time and "
+            f"beta's with its failing word: {screen!r}"
+        )
+    if not re.search(rb"\b1 failing\b", screen):
+        raise AssertionError(f"the header did not count beta failing: {screen!r}")
+    os.write(master_fd, b"q")
+
+
 def run_keeper_lanes_regression(executable: str) -> None:
     fixtures = keeper_runtime_http_fixtures()
     gate = GatedHttpResponse(
@@ -16683,6 +16759,12 @@ def run_keeper_lanes_regression(executable: str) -> None:
         "/api/v1/dashboard/exact-lane-runs/hitl-fixture"
     ] = hitl_lane_run_detail_response()
     fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
+    run_terminal_scenario(
+        executable,
+        description="a failing keeper's open turn reads failing",
+        interact=a_failing_keepers_open_turn_reads_failing,
+        http_fixtures=open_turn_roster_http_fixtures(time.time() - 42),
+    )
     run_terminal_scenario(
         executable,
         description="Keepers operations and Standalone-only Lanes",

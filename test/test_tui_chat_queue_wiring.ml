@@ -1746,6 +1746,38 @@ let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
      | None -> fail "no heading for the tool row"))
 ;;
 
+(* A folded reasoning block is one short row: the count and the key. It was
+   a 61-cell sentence drawn once a round, the widest row of a turn that
+   reasons between every call. *)
+let test_a_folded_reasoning_block_is_the_count_and_the_key () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 100);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_reasoning_visibility <- Tui_types.Reasoning_folded;
+    state.msg_history <-
+      [ chat_entry ~request_id:"tui-01a0c788-43a7" ~role:Tui_types.Message_thinking
+          ~text:"read the caller\n\nthen the test\ncheck main" ~at:1_790_053_724. () ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    let has affix = List.exists (Astring.String.is_infix ~affix) plain in
+    check bool "the count of lines with text and the key" true
+      (has "Reasoning \xc2\xb7 3 lines folded \xc2\xb7 Ctrl-R");
+    check bool "no sentence about how to expand it" false (has "/thinking");
+    check bool "the reasoning itself stays folded" false (has "then the test"))
+;;
+
 (* A turn this pane did not open -- a TUI restarted mid-turn, a turn another
    surface opened -- is drawn from its journal while it runs. The journal
    reads fed a log that was held and drawn nowhere until the turn ended, so
@@ -3318,6 +3350,8 @@ let () =
             test_the_reload_rebuilds_loaded_turns_from_their_journals
         ; test_case "promoted live output survives settlement and replay" `Quick
             test_promoted_live_output_survives_settlement_and_replay
+        ; test_case "a folded reasoning block is the count and the key" `Quick
+            test_a_folded_reasoning_block_is_the_count_and_the_key
         ; test_case "the origin heading spells the name and ends on the clock" `Quick
             test_origin_row_heading_spells_the_name_and_ends_on_the_clock
         ; test_case "an observed running turn is drawn from its journal" `Quick

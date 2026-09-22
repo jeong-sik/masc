@@ -10,7 +10,7 @@ type window = {
   aw_heartbeats : int;
   aw_input_tokens : int;
   aw_output_tokens : int;
-  aw_cost_usd : float;
+  aw_cost_usd : float option;
   aw_tool_calls : int;
   aw_top_tools : tool_use list;
   aw_covered : bool;
@@ -23,7 +23,7 @@ let empty =
     aw_heartbeats = 0;
     aw_input_tokens = 0;
     aw_output_tokens = 0;
-    aw_cost_usd = 0.;
+    aw_cost_usd = None;
     aw_tool_calls = 0;
     aw_top_tools = [];
     aw_covered = false;
@@ -79,8 +79,14 @@ let summarize ~since entries =
               acc.aw_input_tokens + Option.value entry.Decode.le_input_tokens ~default:0;
             aw_output_tokens =
               acc.aw_output_tokens + Option.value entry.Decode.le_output_tokens ~default:0;
+            (* A row whose provider priced nothing carries no cost, and no
+               row in the window carrying one is not a window that cost
+               nothing. The sum stays absent until a row states a price. *)
             aw_cost_usd =
-              acc.aw_cost_usd +. Option.value entry.Decode.le_cost_usd ~default:0.;
+              (match (acc.aw_cost_usd, entry.Decode.le_cost_usd) with
+               | total, None -> total
+               | None, Some cost -> Some cost
+               | Some total, Some cost -> Some (total +. cost));
             aw_tool_calls =
               acc.aw_tool_calls + List.length entry.Decode.le_tools_used;
           }

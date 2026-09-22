@@ -542,6 +542,29 @@ let count_applications_with_exact_positional_identifier_in_value_binding
     ~arguments_match
 ;;
 
+(* Whether [callee] is called in [binding_name] with [label] given at all,
+   whatever value it carries. The identifier and constructor matchers below
+   cannot stand in: a labelled [true]/[false] is a constructor, and an
+   optional argument that a caller simply omits is exactly what this is for --
+   the call still compiles, so only a check like this one sees the omission. *)
+let count_applications_with_labelled_argument_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~label
+  =
+  let arguments_match args =
+    List.exists
+      (fun (argument_label, _) ->
+        match argument_label with
+        | Asttypes.Labelled name -> String.equal name label
+        | Asttypes.Nolabel | Asttypes.Optional _ -> false)
+      args
+  in
+  count_exact_applications_in_value_binding ~module_path ~binding_name ~callee
+    ~arguments_match
+;;
+
 let count_applications_with_exact_identifier_and_constructor_in_value_binding
       ~module_path
       ~binding_name
@@ -710,6 +733,36 @@ let direct_call_sequence_matches_in_value_binding
       in
       List.equal (Option.equal String.equal) actual (List.map Option.some callees)
   | [] | _ :: _ :: _ -> false
+;;
+
+(* The identifiers a binding hands to [callee] at [position], in the order its
+   direct sequence makes the calls. Counting the calls says how many there
+   are; only the order says which one runs last -- and for [at_exit], whose
+   callbacks run in reverse of registration, that order is the whole
+   guarantee. An argument that is not a plain identifier reads as [None]
+   rather than being dropped, so a call never silently leaves the sequence. *)
+let positional_identifier_sequence_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~position
+  =
+  match expressions_of_value_binding ~module_path ~binding_name with
+  | [ expression ] ->
+      expression
+      |> strip_function_parameters
+      |> flatten_direct_sequence
+      |> List.filter_map (fun (statement : Parsetree.expression) ->
+           match statement.pexp_desc with
+           | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
+             when String.equal (longident_to_string txt) callee ->
+               Some
+                 (match positional_argument args position with
+                  | Some { pexp_desc = Pexp_ident { txt = argument; _ }; _ } ->
+                      Some (longident_to_string argument)
+                  | Some _ | None -> None)
+           | _ -> None)
+  | [] | _ :: _ :: _ -> []
 ;;
 
 let unit_lambda_body (expression : Parsetree.expression) =

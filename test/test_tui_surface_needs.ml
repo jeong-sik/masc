@@ -10,7 +10,11 @@ open Alcotest
 
 module Types = Masc_tui_types
 
-let needs surface = Types.surface_needs surface
+(* The Keeper pane is the one reading a surface cannot answer for: these
+   cases ask what the surface itself fetches, so they ask with the pane
+   down. [test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn]
+   asks the other way. *)
+let needs surface = Types.surface_needs ~keeper_pane_drawn:false surface
 
 let test_only_the_chat_pane_asks_for_chat_history () =
   check bool "the chat pane asks for it" true
@@ -43,6 +47,37 @@ let test_every_keeper_sub_mode_still_asks_for_the_roster () =
     ; "the chat pane", Types.Keeper_message
     ]
 ;;
+
+(* The pane on the right of the screen draws a health mark per Keeper, and
+   it is up on every surface but Activity. Read from the surface alone, the
+   marks were the unread dash everywhere but Keepers and Metrics: the roster
+   the pane draws from was never fetched there. *)
+let test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn () =
+  List.iter
+    (fun (label, surface) ->
+      check bool
+        (label ^ " does not fetch the roster for itself")
+        false
+        (Types.surface_needs ~keeper_pane_drawn:false surface)
+          .Types.needs_keeper_roster;
+      check bool
+        (label ^ " fetches it while the pane draws it")
+        true
+        (Types.surface_needs ~keeper_pane_drawn:true surface)
+          .Types.needs_keeper_roster)
+    [ ("approvals", Types.Approvals)
+    ; ("board", Types.Board)
+    ; ("planning", Types.Planning)
+    ; ("config", Types.Config)
+    ; ("memory", Types.Memory)
+    ];
+  (* And the pane changes nothing else: a surface asks for what it draws. *)
+  let board_without = Types.surface_needs ~keeper_pane_drawn:false Types.Board in
+  let board_with = Types.surface_needs ~keeper_pane_drawn:true Types.Board in
+  check bool "the board still asks for the board" true
+    board_with.Types.needs_board;
+  check bool "and for nothing else the pane does not draw" true
+    ({ board_with with Types.needs_keeper_roster = false } = board_without)
 
 let test_forward_navigation_fetches_only_new_surface_datasets () =
   (* Walk the whole ring forward from Overview. A named stop marker rotted
@@ -88,10 +123,12 @@ let test_equal_needs_have_no_delta () =
 
 let test_full_refresh_omits_scoped_datasets_while_their_owner_is_running () =
   let concurrent =
-    Types.full_refresh_needs ~scoped_refresh_inflight:true Types.Board
+    Types.full_refresh_needs ~scoped_refresh_inflight:true
+      ~keeper_pane_drawn:true Types.Board
   in
   let alone =
-    Types.full_refresh_needs ~scoped_refresh_inflight:false Types.Board
+    Types.full_refresh_needs ~scoped_refresh_inflight:false
+      ~keeper_pane_drawn:true Types.Board
   in
   check bool "concurrent full refresh is global-only" false
     (Types.surface_needs_any concurrent);
@@ -135,6 +172,8 @@ let () =
             test_only_the_chat_pane_asks_for_chat_history
         ; test_case "every keeper sub-mode asks for the roster" `Quick
             test_every_keeper_sub_mode_still_asks_for_the_roster
+        ; test_case "the keeper pane asks for the roster wherever it is drawn"
+            `Quick test_the_keeper_pane_asks_for_the_roster_wherever_it_is_drawn
         ; test_case "forward navigation fetches only new datasets" `Quick
             test_forward_navigation_fetches_only_new_surface_datasets
         ; test_case "equal needs have no delta" `Quick

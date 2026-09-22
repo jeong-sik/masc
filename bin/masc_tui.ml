@@ -84,17 +84,43 @@ let note_exit_reason reason =
   | None -> exit_reason := Some reason
 ;;
 
+(* Written once. [at_exit] stops at the first callback that raises and OCaml
+   may retry the remaining ones while it reports the exception, so a writer
+   with no guard can leave two [exit:] rows for one session -- and a reader
+   counting rows by cause would count that session twice. *)
+let exit_reason_written = ref false
+
 let write_exit_reason () =
-  let reason =
-    match !exit_reason with
-    | Some reason -> reason
-    | None -> Masc_tui_exit_reason.Exception "left the loop without a recorded cause"
-  in
-  (* stderr is the per-PID log file by now ([redirect_stderr_off_terminal]),
-     and a direct write is not queued behind the console mirror's thread, so
-     the line is on disk before the process returns. *)
-  try Printf.eprintf "[masc-tui] %s\n%!" (Masc_tui_exit_reason.line reason) with
-  | _ -> ()
+  if not !exit_reason_written then begin
+    exit_reason_written := true;
+    let reason =
+      match !exit_reason with
+      | Some reason -> reason
+      | None -> Masc_tui_exit_reason.Unrecorded
+    in
+    let row = "[masc-tui] " ^ Masc_tui_exit_reason.line reason ^ "\n" in
+    (* Two attempts through different layers, because this row is the whole
+       point of the change: a session that ends without it is unexplained
+       again. [output_string] goes through the buffered channel, which can
+       raise on a channel an earlier [at_exit] callback already closed; the
+       raw write on the descriptor skips that layer, so it fails for
+       different reasons rather than the same one. stderr is the per-PID log
+       file by now ([redirect_stderr_off_terminal]), and neither attempt is
+       queued behind the console mirror's thread, so the row is on disk
+       before the process returns.
+
+       If both fail the failure is dropped on purpose, not by oversight: the
+       descriptor this function would report on is the one that just refused,
+       and raising here would take the remaining [at_exit] callbacks down
+       with it. *)
+    try
+      output_string stderr row;
+      flush stderr
+    with _ -> (
+      (* fire-and-forget: the note above says why this failure is dropped. *)
+      try ignore (Unix.write_substring Unix.stderr row 0 (String.length row))
+      with _ -> ())
+  end
 ;;
 
 (* The name of the signal that asked the session to end, for the exit line. *)
@@ -377,6 +403,8 @@ let move_identity_cursor (state : state) ~delta =
               Masc_tui_scroll.ensure_visible
                 ~cursor:
                   (Masc_tui_types.identity_provider_line
+                     ~summary:
+                       (Masc_tui_types.identity_summary ~providers ~query)
                      ~notice:
                        (Masc_tui_types.identity_notice
                           ~cols:(identity_pane_columns state)
@@ -10962,7 +10990,10 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
     let needs =
       Masc_tui_types.full_refresh_needs
-        ~scoped_refresh_inflight:!scoped_refresh_inflight state.view
+        ~scoped_refresh_inflight:!scoped_refresh_inflight
+        ~keeper_pane_drawn:
+          (not (Masc_tui_render.acting_pane_suppressed state))
+        state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
        in the surface bundle, so the tick asks for it here. Without this the
@@ -16337,7 +16368,12 @@ let main
      surfaces that read the same things -- a keeper list and a keeper's detail --
      costs no request. Watching from the loop catches every way the surface can
      change, rather than asking each of the places that change it to remember. *)
-  let drawn_needs = ref (Masc_tui_types.surface_needs state.view) in
+  let drawn_needs =
+    ref
+      (Masc_tui_types.surface_needs
+         ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
+         state.view)
+  in
   let input_reader = create_input_reader () in
   (* Palette and graphics share one bounded startup probe because both replies
      arrive on the key stream. The probe removes only replies to these exact
@@ -24617,7 +24653,12 @@ and is loaded on demand through keeper_skill.
          it for every Tab made an Overview -> Tools walk spend those requests
          once per distinct [surface_needs] record. A scoped refresh neither
          repeats them nor changes connection status. *)
-      let needed = Masc_tui_types.surface_needs state.view in
+      let needed =
+        Masc_tui_types.surface_needs
+          ~keeper_pane_drawn:
+            (not (Masc_tui_render.acting_pane_suppressed state))
+          state.view
+      in
       if
         needed <> !drawn_needs
         && not !http_refresh_inflight

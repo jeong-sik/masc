@@ -10,9 +10,11 @@
   (`masc_tui_keys.ml`), the picker's status line on the chat pane and in the
   route editor (`masc_tui_render.ml`), and the in-row status of a keeper whose
   turn moved to its next runtime candidate
-  (`masc_tui_keeper_chat_transcript.ml`). The `(no runtime lanes configured)`
+  (`masc_tui_keeper_chat_transcript.ml`). The runtime detail panel's
+  `Failover Chain:` label now reads `Candidate Chain:`, matching the
+  `Head Candidate:` label beside it (`masc_tui_render.ml`). The `(no runtime lanes configured)`
   empty state and the `pick a runtime lane` help now say "runtime candidate
-  order", matching the glossary's Lane definition; the shipped
+  order", matching the glossary's Runtime Candidate Order entry; the shipped
   `config/runtime.toml` section comment says "Runtime candidate orders" (#37918).
   The `[runtime].media_failover` key, which orders the vision fleet and is a
   different mechanism, is unchanged — its screen strings keep the key name,
@@ -24,6 +26,7 @@
 - Transcript tail recovery reads a missing checkpoint ref as `Already_dispatchable`, as its interface promised, instead of failing the recovery as `Checkpoint_unavailable` on a keeper whose session directory holds no checkpoint yet. A ref that cannot be read, names another identity or session, or cannot be locked still fails it (#37904).
 - A `cd` operand in a keeper's Execute call is checked to exist only under the Host and Docker sandboxes, where the host filesystem is what the command sees. Microvm, SSH and delegated sandboxes keep their checkouts in the guest, so the host check refused every `cd <checkout>` on those keepers with a path error. The containment check still applies under every sandbox (#37908).
 - A Librarian working state carried into a keeper's next request no longer wears the extra-system-context tag. The prompt-context check counted that tag and found two carriers, so it reported `prompt_context_presence_mismatch` or `prompt_context_carrier_repeated` on every request and left the turn record's `input_components` empty. The working state now carries its own `masc.librarian_working_state.v1` tag, and the tail window pins it the same way (#37894).
+- The verification queue (`GET /api/v1/verification/requests?view=awaiting`) says which verdict each row waits on: `intent` is `complete` or `cancel`, read from the task the row names, and `null` in the history view, which has no backlog join. A cancellation waits on the same queue as a completion and only an operator's verdict clears it, so a reader could not tell the seven cancel requests waiting since 2026-09-19 from completion requests (#37965).
 
 
 ## [0.36.0] - 2026-09-22
@@ -57,7 +60,7 @@
 - The TUI Fusion screen can start a run: `a` opens a form for the Keeper, preset, topology, prompt and web tools, posts it, and selects the new run once the list carries it. A preset the topology cannot run comes back as the server's own sentence (#37823).
 - A Fusion run's detail lists its seat routes: the route each panel and judge seat was given, the runtime that answered it, and every candidate that failed before that one. Runs recorded without routes draw no block (#37823).
 - The Memory screen shows how far each keeper's continuity snapshot trails the Librarian's read position, beside the durable drain's unread count: the TUI keeper line says `continuity behind N`, the Memory header and the dashboard totals strip sum it over the fleet. A lag that could not be taken, because there is no snapshot, the file does not read, the snapshot names another trace or it sits ahead of the position, reads as `?` and is counted as unmeasured rather than as zero, and the fleet sum covers only the keepers it was taken for (#37856).
-- The TUI writes why a session ended to its own log, one line per session in `.masc/logs/masc-tui-<pid>.log`: `exit: normal (quit key)`, `exit: normal (signal SIGTERM)` or `exit: abnormal (exception ...)`. A normal end is the operator or the session's owner asking for it — the `q` key, a second `Ctrl-C`, or a terminate signal — and an abnormal one is an uncaught exception. The per-PID log held only the boot lines, so a session that ended left no reason behind: roughly a hundred files a day and none said why (task-754).
+- The TUI writes why a session ended to its own log, one line per session in `.masc/logs/masc-tui-<pid>.log`: `[masc-tui] exit: normal (quit key)`, `[masc-tui] exit: normal (signal SIGTERM)` or `[masc-tui] exit: abnormal (exception ...)` — grep the `[masc-tui] exit:` prefix to collect them and nothing else. A normal end is the operator or the session's owner asking for it — the `q` key, a second `Ctrl-C`, or a terminate signal — and an abnormal one is an uncaught exception, or `no cause was recorded` if a session somehow leaves without naming one. A cause longer than 200 bytes is cut on a character boundary and the row ends in `[+N bytes]`, so one runaway backtrace cannot make the line unreadable. The per-PID log held only the boot lines, so a session that ended left no reason behind: roughly a hundred files a day and none said why (task-754).
 
 ### Changed
 

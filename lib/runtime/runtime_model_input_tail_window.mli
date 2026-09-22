@@ -60,12 +60,30 @@ val is_extra_context : Agent_core.Types.message -> bool
 (** Whether the per-turn context assembler authored the message: any
     extra-system-context provenance, including an [Invalid] or [Duplicate]
     tag. Such a message is {!Pinned}, and a request carrying it is not a
-    sample of the carried history's size. *)
+    sample of the carried history's size. The Librarian working state is
+    not this context; see {!is_working_state}. *)
+
+val working_state_marker_key : string
+(** Metadata key tagging the Librarian working state that opens a
+    summarized range. Distinct from the per-turn context carrier's tag: the
+    provenance check over a request expects exactly one carrier, appended by
+    AGENT_CORE, while the working state is composed by the range. The
+    message exists only in the transmitted copy; nothing writes it to
+    durable state. *)
+
+val working_state_metadata : Agent_core.Types.metadata
+(** The metadata a working-state message carries: {!working_state_marker_key}
+    alone. *)
+
+val is_working_state : Agent_core.Types.message -> bool
+(** Whether the message carries {!working_state_marker_key} under any value.
+    Such a message is {!Pinned}. *)
 
 type label =
   | Pinned
-      (** Survives every cut: [System] entries and messages carrying
-          extra-system-context provenance, both re-assembled fresh each turn. *)
+      (** Survives every cut: [System] entries, messages carrying
+          extra-system-context provenance, and the Librarian working state,
+          all re-assembled fresh each request. *)
   | Atom of int  (** Zero-based index of the atom this message belongs to. *)
 
 val annotate

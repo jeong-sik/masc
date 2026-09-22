@@ -705,9 +705,10 @@ status: reference
   끝난 turn이 끝난 자리에서 시작한다), `Turn_start_unknown`(그 경계마저 못 읽음:
   가장 새 Atom 하나에서 시작한다). Agent Core는 맞는 저장본 → Librarian이 읽은
   위치 → 마지막으로 끝난 turn의 경계 순으로 고르고, 원장·씨앗은 turn이 연속성을
-  고르지 않았을 때(trace 없음·복구 뷰)만 읽는다. 공식 클라이언트 레인은 씨앗이나
-  레인 자체의 자르기가 고른 지점이 더 뒤면 그쪽에서 시작한다
-  (`RFC-keeper-context-window-in-tokens` §13.4·§13.6).
+  고르지 않았을 때(trace 없음·복구 뷰)만 읽는다. 공식 클라이언트 레인은 씨앗이
+  레인 자체의 자르기와 같거나 그 뒤에 있으면 씨앗에서 시작한다(마지막으로 끝난 turn의
+  경계보다 오래돼도 그렇다). 씨앗이 없으면 레인의 자르기와 turn 경계 중 뒤쪽에서
+  시작한다 (`RFC-keeper-context-window-in-tokens` §13.4·§13.6).
   `Librarian_progress`는 그 위치가 이 trace를 지목하고 그 앞 Atom이 위치가 기록한
   Message로 열릴 때만 채택하며, 그때 요청은 읽지 않은 Atom부터 실리고 그 앞을
   요약하지 않는다. `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞 Atom은
@@ -837,9 +838,8 @@ status: reference
   `Summarized of frontier`(하던 일 저장본이 대신하는 경계까지 요약; frontier는 trace·
   끝 Atom·경계 줄), `Absorbed of { trace_id; end_atom }`(Librarian의 durable Read
   Position에서 시작하고 그 앞을 요약하지 않음 — Agent Core 와 공식 클라이언트 레인
-  모두에서 성립), `Without_snapshot`(맞는 저장본도,
-  이 History의 자리인 읽은 위치도 없어 마지막으로 끝난 turn의 경계부터 실음 — 그
-  경계마저 못 읽으면 가장 새 Atom 하나만 실음),
+  모두에서 성립), `Without_snapshot`(turn이 Librarian 지점을 고르지 않아, 요청이
+  씨앗·레인 자체의 자르기·turn 경계 중 한 곳에서 시작함),
   `Not_applied`(저장된 맥락을 적용하지 않음: turn 이 아무 선택도 안 했거나(추적 없음·
   복구 뷰), 공식 클라이언트 레인에서 씨앗이나 레인 자체의 자르기가 turn 이 고른 지점보다
   뒤에 있었음). `Absorbed`는 경계 줄이 없어 모양이

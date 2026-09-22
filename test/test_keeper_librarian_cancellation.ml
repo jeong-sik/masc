@@ -94,8 +94,12 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-cancel-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy
     { Runtime_schema.default_typesafeai with
-      lane_endpoint = jev.base_url
-    ; lane_model = "requested-cancel-model"
+      destinations =
+        ( { Runtime_schema.endpoint = jev.base_url
+          ; model = "requested-cancel-model"
+          ; api_key_env = "TYPESAFEAI_API_KEY"
+          }
+        , [] )
     ; absorb_gate = true
     } @@ fun () ->
   let cancel_context, set_cancel_context = Eio.Promise.create () in
@@ -210,10 +214,14 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
        (`Assoc [ "s0_0", `Float 0.875 ]) (member "answers" evaluation);
      let sent = Fixture.request_bodies jev |> List.hd |> Yojson.Safe.from_string in
      let request = member "request" evaluation in
+     let asked = match member "destinations" request |> Yojson.Safe.Util.to_list with
+       | [ destination ] -> destination
+       | destinations -> Alcotest.failf "one destination, %d listed" (List.length destinations) in
+     check_json "actual completed request model" (member "model" sent) (member "model" asked);
      List.iter (fun key -> check_json ("actual completed request " ^ key)
-       (member key sent) (member key request)) [ "model"; "state"; "questions" ];
+       (member key sent) (member key request)) [ "state"; "questions" ];
      Alcotest.(check string) "the attempted endpoint survives replay" jev.base_url
-       (member "endpoint" request |> string);
+       (member "destination_uri" asked |> string);
      List.iter (fun key -> check_json ("partial report has no " ^ key) `Null
        (member key gate)) [ "applied_absorptions"; "left"; "conveyed" ]);
   let module Projection = Server_standalone_lane_projection in

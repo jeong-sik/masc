@@ -164,15 +164,33 @@ let generate ~sw ~net ~runtime_id ~provider_cfg (prompt : R.prompt) =
            ; incomplete_response = Some response
            } : R.failed_generation)
 
-let judge ~clock ~endpoint (request : R.judge_request) =
-  let* api_key =
-    match Masc.Typesafeai_config.api_key () with
-    | None -> Error "TypeSafe API key is not configured"
-    | Some api_key ->
-        if Masc.Typesafeai_config.is_enabled () then Ok api_key
-        else Error "TypeSafe evaluation is disabled by configuration"
+(* A measurement names one judge: the first destination the table lists.
+   Walking on to a second server would score some cases with a different
+   judge under one label, so only that destination is asked, and only when
+   the variable it names holds a key. *)
+let judge_destination () = fst (Masc.Typesafeai_config.configured_destinations ())
+
+let judge ~clock (request : R.judge_request) =
+  let named = judge_destination () in
+  let* destination =
+    match Masc.Typesafeai_config.lane_destinations () with
+    | Error reason ->
+        Error
+          ("TypeSafe evaluation is unavailable: "
+           ^ Masc.Typesafeai_config.unavailable_reason_to_string reason)
+    | Ok (first, rest) ->
+        (match
+           List.find_opt
+             (fun (armed : Masc.Typesafeai_client.destination) ->
+                String.equal armed.endpoint named.endpoint
+                && String.equal armed.model named.model)
+             (first :: rest)
+         with
+         | Some armed -> Ok armed
+         | None ->
+             Error
+               (Printf.sprintf "the measurement judge has no key in %s" named.api_key_env))
   in
-  let destination = { Masc.Typesafeai_client.endpoint; model = request.model; api_key } in
   let* evaluated =
     Masc.Typesafeai_client.evaluate ~clock ~destinations:(destination, [])
       ~state:(R.judge_state request) ~questions:(R.judge_questions request) ()
@@ -221,14 +239,14 @@ let measure_case ~generate ~clock ~save (case : R.case) =
        | Error failed -> save (R.Answer_failed (question, failed))
        | Ok answer ->
            let* _ = save (R.Answer_ready { question; answer }) in
-           let endpoint = Masc.Typesafeai_config.endpoint () in
+           let named = judge_destination () in
            let request =
              R.judge_request
-               ~endpoint:(Masc.Typesafeai_client.endpoint_for_observation endpoint)
-               ~model:(Masc.Typesafeai_config.model ()) case
+               ~endpoint:(Masc.Typesafeai_client.endpoint_for_observation named.endpoint)
+               ~model:named.model case
                ~question:question_text ~answer:answer.response.text
            in
-           match judge ~clock ~endpoint request with
+           match judge ~clock request with
            | Ok judgment -> save (R.Scored { question; answer; judgment })
            | Error error ->
                save (R.Judge_failed { question; answer; failure = { request; error } }))
@@ -369,7 +387,7 @@ let run_comparison options =
           ~output_path:options.output_path (encode samples) in
         let generate = generate ~sw ~net:(Eio.Stdenv.net env)
           ~runtime_id:options.runtime_id ~provider_cfg in
-        let endpoint = Masc.Typesafeai_config.endpoint () in
+        let named = judge_destination () in
         let rec loop completed = function
           | [] -> Ok (List.rev completed)
           | (case, _) :: rest ->
@@ -379,9 +397,9 @@ let run_comparison options =
               |> Result.map_error Masc.Keeper_fs.durable_write_error_to_string
             in
             let* progress = M.evaluate_case ~generate
-              ~judge:(judge ~clock:(Eio.Stdenv.clock env) ~endpoint)
-              ~judge_endpoint:(Masc.Typesafeai_client.endpoint_for_observation endpoint)
-              ~judge_model:(Masc.Typesafeai_config.model ())
+              ~judge:(judge ~clock:(Eio.Stdenv.clock env))
+              ~judge_endpoint:(Masc.Typesafeai_client.endpoint_for_observation named.endpoint)
+              ~judge_model:named.model
               ~snapshot_path:(snapshot_path case) ~save case in
             loop ((case, progress) :: completed) rest
         in

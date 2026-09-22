@@ -65,6 +65,10 @@ val report_unknown_typesafeai_exclusions : base_path:string -> unit
     directory-read warning without accusing any configured name. Called once
     the runtime table is loaded. *)
 
+val report_unarmed_typesafeai_destinations : unit -> unit
+(** One warning per destination {!Typesafeai_config.unarmed_destinations}
+    finds. Called once the runtime table is loaded. *)
+
 val start_microvm_guest_maintenance :
   sw:Eio.Switch.t -> sweep:(unit -> unit) -> unit
 (** Fork a switch-owned startup sweep outside the Keeper readiness barrier.

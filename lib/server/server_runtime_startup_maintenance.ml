@@ -348,6 +348,18 @@ let report_unknown_typesafeai_exclusions ~base_path =
       names
 ;;
 
+let report_unarmed_typesafeai_destinations () =
+  List.iter
+    (fun (destination : Runtime_schema.typesafeai_destination) ->
+       Log.Server.warn
+         "[typesafeai].destinations names %s (%s), but its api_key_env %S holds no key: it is \
+          left out of the walk"
+         (Typesafeai_client.endpoint_for_observation destination.endpoint)
+         destination.model
+         destination.api_key_env)
+    (Typesafeai_config.unarmed_destinations ())
+;;
+
 let start_microvm_guest_maintenance ~sw ~sweep =
   Eio.Fiber.fork ~sw (fun () ->
     let started_at = Unix.gettimeofday () in

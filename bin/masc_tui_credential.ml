@@ -123,3 +123,13 @@ let outcome_notice = function
 let outcome_needs_retry = function
   | Workspace_pending -> true
   | Held | Minted | Not_required | Mint_failed _ -> false
+
+(* How loudly the notice is said. A mint and a failure are not the same news:
+   both were reported as errors, which reads a working first start as a broken
+   one -- and on a first install, where the client mints for itself, that is
+   the ordinary path. Waiting for the workspace is that same ordinary path one
+   step earlier, so it reads as system too; only a workspace that refused a
+   credential is a fault the operator has to act on. *)
+let outcome_level = function
+  | Mint_failed _ -> "error"
+  | Held | Minted | Not_required | Workspace_pending -> "system"

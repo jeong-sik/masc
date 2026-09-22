@@ -7,7 +7,7 @@
 # says.
 #
 # A row is scoped to a provider with provider_name when the same model differs
-# by endpoint: 41 model ids here appear under more than one provider, because
+# by endpoint: many model ids here appear under more than one provider, because
 # the same weights reached through a different wire have a different window or
 # a different way of being told to think.
 #
@@ -3099,6 +3099,120 @@ supports_reasoning = true
 reasoning_streaming_format = "delta:reasoning_content"
 supports_native_streaming = true
 
+# The rest of the Z.AI coding plan's text models. A glm-coding binding never
+# reads a bare row (the glm-4.6v twin below has the full account), so without
+# these every one resolved to the glm capabilities_base: a 200000 window for
+# all of them, glm-4.5 and glm-4.5-air included, whose bare rows say 128000.
+# All eight are listed by GET /coding/paas/v4/models and answered a plain and
+# a tool-call completion on 2026-09-22, reasoning on message.reasoning_content.
+# The output ceiling is the range each endpoint named when it refused an
+# oversized max_tokens the same day: code 1210 "[1,131072]" on all eight.
+# glm-5.2's 1M window is docs.z.ai/guides/llm/glm-5.2; the other windows are
+# their bare rows' values, since docs.z.ai no longer has a page for them.
+[[models]]
+id_prefix = "glm-5.2"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5.1"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5-turbo"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4.7"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4.6"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4.5"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4.5-air"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
 [[models]]
 id_prefix = "glm-4.6v"
 provider_name = "glm-coding"
@@ -3593,13 +3707,38 @@ supports_image_input = true
 supports_multimodal_inputs = true
 supports_native_streaming = true
 
-# Z.AI coding plan's kimi-for-coding. Window and output ceiling from the
-# endpoint; no tool_choice on this wire.
+# The 256K variant of k3. GET /coding/v1/models on 2026-09-22 lists it with
+# context_length 262144 and otherwise the same metadata as k3 (reasoning,
+# image and video input, dynamic tools, efforts low/high/max). Provider-scoped
+# lookup is an exact id match, so k3's row does not answer for it. Not called
+# that day: the plan's weekly quota was spent. The controls copy k3's row,
+# which claims only the none/not-none difference it has verified, not the
+# listed ladder.
+[[models]]
+id_prefix = "k3-256k"
+provider_name = "kimi_coding"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+reasoning_streaming_format = "delta:reasoning_content"
+accepted_reasoning_efforts = ["none"]
+supports_image_input = true
+supports_multimodal_inputs = true
+supports_native_streaming = true
+
+# api.kimi.com/coding's kimi-for-coding. The alias follows whatever model the
+# plan currently serves: GET /coding/v1/models on 2026-09-22 names it
+# "K2.8 Preview" with context_length 1048576, up from the 262144 this row
+# carried for K2.7 Code. Output ceiling from the endpoint; no tool_choice on
+# this wire.
 [[models]]
 id_prefix = "kimi-for-coding"
 provider_name = "kimi_coding"
 base = "openai_chat"
-max_context_tokens = 262144
+max_context_tokens = 1048576
 max_output_tokens = 131072
 supports_tools = true
 supports_tool_choice = false

@@ -169,11 +169,11 @@ let test_typed_execute_response_cwd_uses_container_path () =
         (Astring.String.is_infix ~affix:visible_root prompt);
       check bool "Docker prompt recommends relative argv operands" true
         (Astring.String.is_infix
-           ~affix:"Prefer relative argv path operands"
+           ~affix:"argv 의 경로 인자는 상대 경로로 쓴다"
            prompt);
       check bool "Docker prompt rejects host absolute paths" true
         (Astring.String.is_infix
-           ~affix:"host absolute paths are unavailable"
+           ~affix:"호스트의 절대 경로를 쓸 수 없다"
            prompt);
       let response_fields =
         Keeper_tool_execute_runtime.For_testing.model_execute_location_fields

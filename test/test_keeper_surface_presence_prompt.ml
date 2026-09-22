@@ -666,10 +666,10 @@ let test_docker_root_is_not_promised_as_execution_operand () =
     check bool "docker prompt forbids the absolute root as a typed cwd" true
       (contains
          ~needle:
-           "Pass a relative typed `cwd` (usually `.`), not this absolute root."
+           "도구의 `cwd` 에는 이 절대 경로 대신 상대 경로(보통 `.`)를 넘긴다."
          rendered);
     check bool "docker prompt keeps argv path operands relative" true
-      (contains ~needle:"Prefer relative argv path operands." rendered);
+      (contains ~needle:"argv 의 경로 인자는 상대 경로로 쓴다." rendered);
     let config = Masc.Workspace.default_config "/tmp/unused" in
     let docker_meta =
       { meta with

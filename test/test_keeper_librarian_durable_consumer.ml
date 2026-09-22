@@ -1071,6 +1071,67 @@ let test_corrupt_intervening_checkpoint_stops_the_pass () =
   | None -> fail "the stopped pass removed progress"
 ;;
 
+(* The wall clock went backwards between the retired trace and the one that
+   follows it, and a counterpart row arrived in between. The hand-off range
+   reads nothing -- its own end is older than the bound carried from the trace
+   before it -- and the round after it, whose bound is that range's end, reads
+   the row. Nothing is stranded. *)
+let test_backwards_clock_at_hand_off_reads_the_row_next_round () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-backwards-a" in
+  let trace_b = "trace-backwards-b" in
+  let trace_c = "trace-backwards-c" in
+  let now = Time_compat.now () in
+  let a_ended = now +. 100.0 in
+  let b_ended = now -. 100.0 in
+  write_meta config trace_a;
+  save_checkpoint config ~trace_id:trace_a [ message "a" ] 1;
+  append_boundary config ~trace_id:trace_a ~turn:1 ~recorded_at:a_ended [ message "a" ];
+  let carried = ref [] in
+  let commit ~expected_revision:_ ~range_id:_ ~official_range_id:_ input =
+    carried := !carried @ [ text_markers input, counterpart_contents input ];
+    true
+  in
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "trace A was not read");
+  (* The row arrives after A's range was read, and the clock has gone back. *)
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name
+    ~content:"between the traces"
+    ~speaker
+    ();
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:b_ended [ message "b" ];
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary
+    config ~trace_id:trace_c ~turn:1 ~recorded_at:(now +. 300.0) [ message "c" ];
+  write_meta config trace_c;
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "the trace in between is read" trace_b progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the trace in between was not read");
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "the current trace follows" trace_c progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the current trace did not follow");
+  check
+    (list (pair (list string) (list string)))
+    "the row between the two traces is read once, by the round after the hand-off"
+    [ [ "a" ], []; [ "b" ], []; [ "c" ], [ "between the traces" ] ]
+    !carried
+;;
+
 let test_failed_long_range_retries_only_oldest_cut_point () =
   with_workspace @@ fun config ->
   let trace_id = "trace-bounded-retry" in
@@ -2417,6 +2478,72 @@ let test_a_refused_boundary_line_is_not_lifted_for_official_turns () =
   | Ok _ -> fail "the restart lifted the official stop"
 ;;
 
+(* The same backwards clock, but an official-client line of the retired era
+   is still the official cursor. This commit does not replace that cursor, so
+   the round after the hand-off would carry the same stamp and the row between
+   the traces would be read by nobody. The pass refuses instead of advancing
+   past it. *)
+let test_official_cursor_above_the_range_end_refuses_the_hand_off () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-official-backwards-a" in
+  let trace_b = "trace-official-backwards-b" in
+  let trace_c = "trace-official-backwards-c" in
+  let now = Time_compat.now () in
+  let a_ended = now +. 100.0 in
+  write_meta config trace_a;
+  save_checkpoint config ~trace_id:trace_a [ message "a" ] 1;
+  append_boundary config ~trace_id:trace_a ~turn:1 ~recorded_at:a_ended [ message "a" ];
+  append_official_boundary config ~trace_id:trace_a ~turn:2 ~recorded_at:a_ended;
+  (match
+     Official.write
+       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+       ~keeper_id:keeper_name
+       { Official.boundary_line = 2 }
+   with
+   | Ok () -> ()
+   | Error error -> fail (Official.write_error_to_string error));
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> true)
+   with
+   | Ok (Consumer.Progress_advanced _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "trace A was not read");
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name
+    ~content:"between the traces"
+    ~speaker
+    ();
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary
+    config ~trace_id:trace_b ~turn:1 ~recorded_at:(now -. 100.0) [ message "b" ];
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary
+    config ~trace_id:trace_c ~turn:1 ~recorded_at:(now +. 300.0) [ message "c" ];
+  write_meta config trace_c;
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+         fail "the hand-off committed a range that strands the row")
+   with
+   | Error (Consumer.Counterpart_interval_non_monotone { after; before }) ->
+     check (float 0.001) "the refusal names the carried bound" a_ended after;
+     check (float 0.001) "and this range's end" (now -. 100.0) before
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the hand-off advanced past a row no later range would read");
+  match read_progress config with
+  | Some progress ->
+    check string "the position stays on the retired trace" trace_a progress.position.trace_id
+  | None -> fail "the refused pass removed progress"
+;;
+
 let () =
   run
     "Keeper Librarian durable consumer"
@@ -2453,6 +2580,8 @@ let () =
             test_superseded_intervening_checkpoint_is_passed
         ; test_case "damaged checkpoint in between stops the pass" `Quick
             test_corrupt_intervening_checkpoint_stops_the_pass
+        ; test_case "backwards clock at hand-off reads the row next round" `Quick
+            test_backwards_clock_at_hand_off_reads_the_row_next_round
         ; test_case "failed growing range retries oldest cut" `Quick
             test_failed_long_range_retries_only_oldest_cut_point
         ; test_case "last boundary wins when wall clock goes backward" `Quick
@@ -2525,6 +2654,8 @@ let () =
             test_an_official_line_older_than_the_baseline_is_read
         ; test_case "a refused boundary line is not lifted for official turns" `Quick
             test_a_refused_boundary_line_is_not_lifted_for_official_turns
+        ; test_case "official cursor above the range end refuses the hand-off" `Quick
+            test_official_cursor_above_the_range_end_refuses_the_hand_off
         ] )
     ; ( "production wake"
       , [ test_case "failure stops and a later wake drains successful cuts" `Quick

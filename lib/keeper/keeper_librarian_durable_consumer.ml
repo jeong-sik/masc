@@ -973,13 +973,15 @@ let consume_one_with_extent
        atom baseline set while an older official line waited -- covers no
        counterpart the older turn should see, and must not turn the interval
        backwards. *)
+    let cursor_bound cursor =
+      match cursor with
+      | Some (line, recorded_at) when line < step_line first_step -> Some recorded_at
+      | Some _ | None -> None
+    in
+    let atom_bound = cursor_bound after_atom in
+    let official_bound = cursor_bound after_official in
     let after =
-      List.filter_map
-        (fun cursor ->
-           match cursor with
-           | Some (line, recorded_at) when line < step_line first_step -> Some recorded_at
-           | Some _ | None -> None)
-        [ after_atom; after_official ]
+      List.filter_map Fun.id [ atom_bound; official_bound ]
       |> List.fold_left (fun after recorded_at ->
         match after with
         | None -> Some recorded_at
@@ -1058,18 +1060,32 @@ let consume_one_with_extent
       in
       (* A bound carried from the trace before this one can sit after this
          range's end when the wall clock went backwards between the two
-         traces. The window is then empty by reading, not by repair: a row
-         inside it is read by the next range, whose lower bound is this
-         range's end. Within one trace the same shape says the position and
-         the boundary disagree, and still stops the pass. *)
+         traces. This commit replaces the atom cursor with this range's end,
+         so the rows above that end are read by the next range: the window
+         here is empty by reading, not by repair.
+
+         That holds only while the atom cursor is the one that inverted the
+         interval. The official cursor is not replaced by this commit, so if
+         it also sits after this range's end, the next range's bound is that
+         same stamp and the rows between would be read by nobody. Then the
+         refusal stands: the pass stops without advancing, and an official
+         line or a clock that comes forward moves it again. Within one trace
+         the inversion says the position and its boundary disagree, and stops
+         the pass as before. *)
       let carried_from_another_trace =
         match counterpart_progress with
         | None -> false
         | Some { P.position; _ } -> not (String.equal position.P.trace_id trace_id)
       in
+      let inverted_by_the_carried_bound_alone =
+        carried_from_another_trace
+        && (match official_bound with
+            | None -> true
+            | Some official_bound -> official_bound <= ended_at)
+      in
       let* () =
         match after with
-        | Some after when after > ended_at && not carried_from_another_trace ->
+        | Some after when after > ended_at && not inverted_by_the_carried_bound_alone ->
           Error (Counterpart_interval_non_monotone { after; before = ended_at })
         | None | Some _ -> Ok ()
       in

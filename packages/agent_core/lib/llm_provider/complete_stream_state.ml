@@ -1007,7 +1007,8 @@ let detail_of_run run =
               | Type_field | Format_field | Index_field | Other_field -> field)
            run.fragment.fields)
     in
-    (* The same rule the stream parser applies to one fragment's text. *)
+    (* A whole run of spacing is no readable text. One streamed fragment of
+       spacing is kept by the parser: it belongs to the run around it. *)
     { Types.raw; text = (if String.trim text = "" then None else Some text) }
 ;;
 

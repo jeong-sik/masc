@@ -2022,6 +2022,25 @@ let test_trail_keeps_arrival_order () =
         (List.length items)
         (String.concat "; " (List.map trail_item_to_string items))
 
+(* A GLM stretch as it streams: paragraphs split by runs of blank lines, a
+   padded blank, a leading and a trailing break. The pane keeps one empty line
+   per break and none at either end. *)
+let test_trail_keeps_one_empty_line_per_paragraph_break () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Thinking "\n\nMain is red."
+    ; Live.Thinking "\nTwo causes:\n\n\n\n1. the board test"
+    ; Live.Thinking "\n  \n2. the stale cmi\n\n"
+    ];
+  match Transcript.trail t with
+  | [ Transcript.Trail_thinking lines ] ->
+      check (list string) "one empty line per break"
+        [ "Main is red."; "Two causes:"; ""; "1. the board test"; "";
+          "2. the stale cmi" ]
+        lines
+  | items -> failf "expected one reasoning stretch, got %d items" (List.length items)
+
 let test_trail_groups_consecutive_calls_into_one_block () =
   let t = fresh () in
   feed t
@@ -2498,6 +2517,8 @@ let () =
     ; ( "trail"
       , [ test_case "arrival order is kept" `Quick
             test_trail_keeps_arrival_order
+        ; test_case "one empty line per paragraph break" `Quick
+            test_trail_keeps_one_empty_line_per_paragraph_break
         ; test_case "consecutive calls are one block" `Quick
             test_trail_groups_consecutive_calls_into_one_block
         ; test_case "a call updates after later stretches open" `Quick

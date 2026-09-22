@@ -2556,6 +2556,17 @@ type memory_context_prepared = {
 type memory_context_cycle = {
   mcc_saved : memory_context_frontier option;
   mcc_saved_unreadable : bool;
+  (* Where the Librarian has read to, beside where its snapshot cuts. A
+     snapshot that stopped moving while the position kept going is what a
+     request pays for: it starts at the cut and carries every atom since
+     (#37793). The distance is [mcc_read_position - mcc_saved.mcf_end_atom]
+     and is not carried as a field of its own. *)
+  mcc_read_position : int option;
+  mcc_read_position_unreadable : bool;
+  (* Where a snapshot being rewritten from atom 0 has to reach before a
+     request starts from it. [None] on a snapshot that is not being
+     rewritten. *)
+  mcc_rewriting_through : int option;
   mcc_prepared : memory_context_prepared option;
   mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }
@@ -4852,7 +4863,8 @@ let decode_memory_alert json =
 let decode_memory_context_cycle keeper_json =
   let* json = required_member keeper_json "context_cycle" in
   let* () = require_exact_object_fields "context cycle"
-    ["saved"; "saved_read_error"; "prepared"; "synthesis"] json in
+    ["saved"; "saved_read_error"; "read_position"; "read_position_read_error";
+     "rewriting_through"; "prepared"; "synthesis"] json in
   let nullable decode = function `Null -> Ok None | value -> Result.map Option.some (decode value) in
   let frontier json =
     let* () = require_exact_object_fields "context frontier" ["trace_id"; "end_atom"; "boundary_line"] json in
@@ -4898,11 +4910,29 @@ let decode_memory_context_cycle keeper_json =
     | None, _ -> Ok false
     | Some "snapshot_unreadable", None -> Ok true
     | _ -> Error "context saved frontier disagrees with read error" in
+  let* mcc_read_position = required_nullable_int_field json "read_position" in
+  let* () = match mcc_read_position with
+    | Some end_atom when end_atom < 1 -> Error "invalid context read position"
+    | Some _ | None -> Ok () in
+  let* position_read_error = required_nullable_string_field json "read_position_read_error" in
+  let* mcc_read_position_unreadable = match position_read_error, mcc_read_position with
+    | None, _ -> Ok false
+    | Some "progress_unreadable", None -> Ok true
+    | Some _, _ -> Error "context read position disagrees with read error" in
+  let* mcc_rewriting_through = required_nullable_int_field json "rewriting_through" in
+  (* The writer sets this only past the cut it belongs to, on a snapshot that
+     was read. A value without that snapshot, or at or behind its cut, is not
+     a rewrite this reader can describe. *)
+  let* () = match mcc_rewriting_through, mcc_saved with
+    | None, _ -> Ok ()
+    | Some through, Some saved when through > saved.mcf_end_atom -> Ok ()
+    | Some _, (Some _ | None) -> Error "context rewrite target disagrees with the saved cut" in
   let* value = required_member json "prepared" in
   let* mcc_prepared = nullable prepared value in
   let* value = required_member json "synthesis" in
   let* mcc_synthesis = nullable Keeper_continuity_observation.synthesis_of_json value in
-  Ok {mcc_saved; mcc_saved_unreadable; mcc_prepared; mcc_synthesis}
+  Ok {mcc_saved; mcc_saved_unreadable; mcc_read_position; mcc_read_position_unreadable;
+      mcc_rewriting_through; mcc_prepared; mcc_synthesis}
 
 let decode_memory_keeper_health json =
   let* () =

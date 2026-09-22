@@ -3433,7 +3433,9 @@ let test_decode_repository_requires_resolved_local_path () =
    the decoder must keep both axes instead of collapsing that row to
    memoryless. *)
 let empty_memory_context_cycle =
-  `Assoc ["saved", `Null; "saved_read_error", `Null; "prepared", `Null; "synthesis", `Null]
+  `Assoc ["saved", `Null; "saved_read_error", `Null; "read_position", `Null;
+    "read_position_read_error", `Null; "rewriting_through", `Null;
+    "prepared", `Null; "synthesis", `Null]
 
 let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let keeper id present failures source_present =
@@ -3564,7 +3566,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let input = `Assoc ["kind", `String "summarized"; "frontier", frontier] in
   let prepared = `Assoc ["prepared_at", `Float 1700000000.; "runtime_id", `String "fixture-runtime";
     "input", input; "request_bytes", `Int 2048] in
-  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null; "prepared", prepared; "synthesis", `Null] in
+  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null;
+    "read_position", `Int 4; "read_position_read_error", `Null;
+    "rewriting_through", `Null; "prepared", prepared; "synthesis", `Null] in
   let context_payload cycle = map_keeper 0 (replace_field "context_cycle" cycle) json in
   let synthesis = `Assoc ["observed_at", `Float 1700000000.; "trace_id", `String "context-trace";
     "state", `String "not_committed"; "range", `Assoc ["start_atom", `Int 3;
@@ -3930,6 +3934,149 @@ let test_decode_memory_alert_keeps_the_code_contract () =
     (memory_alert_snapshot_with_extra [ ("value", `Float 4.0) ]
        ~code:"librarian_starvation" ~severity:"error"
        ~target:"librarian_starvation")
+
+(* A snapshot that stopped moving while the Librarian kept reading is what a
+   request pays for: it starts at the cut and carries every atom up to the
+   position. The two numbers have to arrive together, or a reader cannot tell
+   an ordinary one-turn lag from rounds that have been failing for a day
+   (#37793). *)
+let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
+  let snapshot_with context_cycle =
+    `Assoc
+      [ ("schema", `String "keeper.memory_os.current_health.v7")
+      ; ("generated_at", `Float 1_775_000_000.0)
+      ; ( "keepers"
+        , `List
+            [ `Assoc
+                [ ("keeper_id", `String "alpha")
+                ; ("revision", `Int 1)
+                ; ("facts", `Int 0)
+                ; ("observed_facts", `Int 0)
+                ; ("derived_facts", `Int 0)
+                ; ("support_invalidations", `Int 0)
+                ; ("snapshot_bytes", `Int 0)
+                ; ("added", `Int 0)
+                ; ("removed", `Int 0)
+                ; ("snapshot_present", `Bool true)
+                ; ("updated_at", `Float 1700000000.)
+                ; ("context_cycle", context_cycle)
+                ; ( "librarian"
+                  , `Assoc
+                      [ ("state", `String "drained")
+                      ; ("detail", `Null)
+                      ; ("measured_at", `Float 1_775_000_000.0)
+                      ; ("unread_atom_turns", `Int 0)
+                      ; ("unread_official_turns", `Int 0)
+                      ; ("last_success_at", `Null)
+                      ; ("last_failure_kind", `Null)
+                      ] )
+                ; ("librarian_failures", `Int 0)
+                ; ("vision_ingest_errors", `Int 0)
+                ; ("vision_ingest_error_reasons", `List [])
+                ; ("read_error", `Null)
+                ; ("source_revision", `Int 0)
+                ; ("source_facts", `Int 0)
+                ; ("source_invalidations", `Int 0)
+                ; ("source_snapshot_bytes", `Int 0)
+                ; ("source_snapshot_present", `Bool false)
+                ; ("source_read_error", `Null)
+                ; ("alerts", `List [])
+                ] ] )
+      ; ( "totals"
+        , `Assoc
+            [ ("facts", `Int 0); ("observed_facts", `Int 0); ("derived_facts", `Int 0)
+            ; ("support_invalidations", `Int 0); ("snapshot_bytes", `Int 0)
+            ; ("added", `Int 0); ("removed", `Int 0); ("source_facts", `Int 0)
+            ; ("source_invalidations", `Int 0); ("source_snapshot_bytes", `Int 0)
+            ; ("librarian_unread_turns", `Int 0); ("librarian_failures", `Int 0)
+            ; ("vision_ingest_errors", `Int 0); ("read_errors", `Int 0)
+            ; ("source_read_errors", `Int 0)
+            ] )
+      ; ( "alert_summary"
+        , `Assoc
+            [ ("total_alerts", `Int 0); ("warn_alerts", `Int 0); ("error_alerts", `Int 0)
+            ; ("keepers_with_alerts", `Int 0); ("snapshot_read_error_keepers", `Int 0)
+            ; ("source_snapshot_read_error_keepers", `Int 0)
+            ; ("librarian_stopped_keepers", `Int 0); ("librarian_starving_keepers", `Int 0)
+            ] )
+      ]
+  in
+  let cycle ?(saved = true) ~read_position ~read_error ~rewriting_through () =
+    `Assoc
+      [ ( "saved"
+        , if saved
+          then
+            `Assoc
+              [ ("trace_id", `String "trace-1"); ("end_atom", `Int 7694)
+              ; ("boundary_line", `Int 385) ]
+          else `Null )
+      ; ("saved_read_error", `Null)
+      ; ("read_position", match read_position with None -> `Null | Some value -> `Int value)
+      ; ( "read_position_read_error"
+        , match read_error with None -> `Null | Some value -> `String value )
+      ; ( "rewriting_through"
+        , match rewriting_through with None -> `Null | Some value -> `Int value )
+      ; ("prepared", `Null)
+      ; ("synthesis", `Null)
+      ]
+  in
+  let cycle_of snapshot =
+    match snapshot.Tui_decode.mhs_keepers with
+    | [ keeper ] -> keeper.Tui_decode.mkh_context_cycle
+    | _ -> Alcotest.fail "the fixture holds one keeper"
+  in
+  (match
+     Tui_decode.decode_memory_health_snapshot
+       (snapshot_with
+          (cycle ~read_position:(Some 12887) ~read_error:None
+             ~rewriting_through:(Some 12888) ()))
+   with
+   | Error detail -> Alcotest.failf "decode failed: %s" detail
+   | Ok snapshot ->
+     let cycle = cycle_of snapshot in
+     Alcotest.(check (option int)) "the read position is carried" (Some 12887)
+       cycle.Tui_decode.mcc_read_position;
+     Alcotest.(check (option int)) "the rewrite target is carried" (Some 12888)
+       cycle.Tui_decode.mcc_rewriting_through;
+     Alcotest.(check bool) "the position was readable" false
+       cycle.Tui_decode.mcc_read_position_unreadable;
+     match cycle.Tui_decode.mcc_saved with
+     | None -> Alcotest.fail "the fixture saves a cut"
+     | Some saved ->
+       Alcotest.(check int) "the cut the position is read against" 7694
+         saved.Tui_decode.mcf_end_atom);
+  (* An unreadable position is why there is no number, not a keeper that has
+     read nothing. *)
+  (match
+     Tui_decode.decode_memory_health_snapshot
+       (snapshot_with
+          (cycle ~read_position:None ~read_error:(Some "progress_unreadable")
+             ~rewriting_through:None ()))
+   with
+   | Error detail -> Alcotest.failf "decode failed: %s" detail
+   | Ok snapshot ->
+     Alcotest.(check bool) "an unreadable position says so" true
+       (cycle_of snapshot).Tui_decode.mcc_read_position_unreadable);
+  (* Both halves of the disagreement: a marker with a number, and a rewrite
+     target the cut already reached. *)
+  Alcotest.(check bool) "a read error beside a position is refused" true
+    (Result.is_error
+       (Tui_decode.decode_memory_health_snapshot
+          (snapshot_with
+             (cycle ~read_position:(Some 12887) ~read_error:(Some "progress_unreadable")
+                ~rewriting_through:None ()))));
+  Alcotest.(check bool) "a rewrite target at the cut is refused" true
+    (Result.is_error
+       (Tui_decode.decode_memory_health_snapshot
+          (snapshot_with
+             (cycle ~read_position:(Some 12887) ~read_error:None
+                ~rewriting_through:(Some 7694) ()))));
+  Alcotest.(check bool) "a rewrite target without a cut is refused" true
+    (Result.is_error
+       (Tui_decode.decode_memory_health_snapshot
+          (snapshot_with
+             (cycle ~saved:false ~read_position:(Some 12887) ~read_error:None
+                ~rewriting_through:(Some 12888) ()))))
 
 let test_decode_memory_health_rejects_stale_schema () =
   let json =
@@ -9886,6 +10033,8 @@ let () =
           test_decode_repository_changes_keeps_git_axes;
         Alcotest.test_case "memory health keeps ordinary and source axes" `Quick
           test_decode_memory_health_keeps_ordinary_and_source_axes;
+        Alcotest.test_case "memory health reads the Librarian position beside the cut"
+          `Quick test_decode_memory_health_reads_the_librarian_position_beside_the_cut;
         Alcotest.test_case "memory health rejects stale schema" `Quick
           test_decode_memory_health_rejects_stale_schema;
         Alcotest.test_case "memory alert keeps the code contract" `Quick

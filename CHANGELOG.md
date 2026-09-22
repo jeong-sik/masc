@@ -14,6 +14,7 @@
 - Tool-call log rows no longer carry the top-level `success` boolean. Every new row records `wire_outcome` (`unknown` when nothing was observed); tooling that reads `success` should read the typed disposition or `wire_outcome` instead (#37487).
 
 ### Added
+- Keeper memory health now reports where the Librarian has read to, and where a snapshot it is rewriting from atom 0 has to reach, beside the cut a request starts at. A snapshot that stopped moving while the position kept going is what the turn carries, and the cut alone could not say so: the numbers were in the logs only. The TUI Memory screen prints the position and how far past the cut it sits (#37793).
 - Catalog: dedicated rows for Z.AI GLM coding models (glm-5.2 through glm-4.5-air) and Kimi coding plans, with measured context windows and output limits, so coding-plan bindings resolve real values instead of falling back to bare GLM defaults (#37767).
 - Catalog: measured OpenRouter rows for claude-fable-5.1, claude-haiku-4.5, gpt-6-astra, gpt-5.6-terra, gpt-5.6-luna, gemini-3.1-pro-preview, grok-4.7, qwen3.8-flash and glm-5.3-flashx, with per-model tool-choice and reasoning-effort support as measured; review follow-ups unbind OpenRouter minimax-m3 (empty answers at high effort; still available via ollama_cloud) and turn off glm-5.3-flashx structured output (#37782, #37789).
 

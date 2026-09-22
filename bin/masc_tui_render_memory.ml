@@ -132,9 +132,28 @@ let memory_context_lines (k : memory_keeper_health) =
     let cycle = k.mkh_context_cycle in
     let frontier value = Printf.sprintf "atom %d / boundary %d · trace %s"
       value.mcf_end_atom value.mcf_boundary_line (Terminal_text.single_line value.mcf_trace_id) in
-    let saved = match cycle.mcc_saved with
-      | Some value -> frontier value
-      | None -> if cycle.mcc_saved_unreadable then "unreadable" else "absent" in
+    let saved =
+      let cut = match cycle.mcc_saved with
+        | Some value -> frontier value
+        | None -> if cycle.mcc_saved_unreadable then "unreadable" else "absent" in
+      (* Where the Librarian has read to belongs beside the cut, not on a line
+         of its own: a request starts at the cut and carries the atoms up to
+         the position, so the two apart is what the turn pays (#37793). *)
+      let read = match cycle.mcc_read_position, cycle.mcc_saved with
+        | None, _ ->
+          if cycle.mcc_read_position_unreadable
+          then " · read position unreadable"
+          else " · nothing read yet"
+        | Some position, Some value when position > value.mcf_end_atom ->
+          Printf.sprintf " · read to atom %d, %d atoms past the cut"
+            position (position - value.mcf_end_atom)
+        | Some position, Some _ | Some position, None ->
+          Printf.sprintf " · read to atom %d" position in
+      let rewriting = match cycle.mcc_rewriting_through with
+        | None -> ""
+        | Some through ->
+          Printf.sprintf " · rewriting from atom 0, unused until atom %d" through in
+      cut ^ read ^ rewriting in
     let prepared, input = match cycle.mcc_prepared with
       | None -> "not observed since server start", "not observed"
       | Some value ->

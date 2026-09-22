@@ -68,9 +68,13 @@ val counted_field : Yojson.Safe.t -> count:string -> unread:string -> (counted, 
 ```
 
 - 디코더는 두 필드를 **같이** 읽는다. 한쪽만 읽는 경로가 타입에 없다.
-- 그리는 쪽은 `Masc_tui_counted.text` 하나를 쓴다. `unread = 0` 이면 지금과
-  같은 문자열, 아니면 `3 (2 sources unread)` 처럼 뒤에 붙인다. 말은 한 곳에서만
-  정해진다.
+- 그리는 쪽은 `Masc_tui_counted.text` 하나를 쓴다. `unread = 0` 이면 수만,
+  아니면 `3+ (2 sources unread)` 처럼 **수 뒤에 `+`** 를 붙이고 못 읽은 것을
+  뒤에 쓴다. 말은 한 곳에서만 정해진다.
+- `+` 는 못 읽은 게 있을 때 그 수가 합계가 아니라 **하한**이기 때문이다.
+  `0 (2 sources unread)` 은 "없다" 가 먼저 읽히는데, 못 읽은 곳에 몇이 있었는지는
+  아무도 모른다. `counted = 0` 도 예외가 아니다 — `0+` 로 쓴다. Changes 판이
+  아직 안 끝난 기록의 호출 수를 `2+` 로 쓰는 것과 같은 이유이고, 같은 표기다.
 - 이미 그렇게 하는 Approvals·Overview 는 같은 함수로 모은다. 지금은 `held_note`
   와 `queue_note` 가 각자 문장을 갖고 있다.
 
@@ -110,3 +114,8 @@ val counted_field : Yojson.Safe.t -> count:string -> unread:string -> (counted, 
   요청" 이다. 같은 타입으로 볼지, 다른 사실로 둘지 정해야 한다.
 - Approvals 의 `held calls stale` 은 수가 아니라 **목록 전체가 낡았다**는 뜻이다.
   `unread` 와 같은 칸에 둘지, 별도 상태로 둘지.
+
+`counted = 0` 을 어떻게 쓰는지는 §3 에서 정했다. 처음에 열어 뒀는데, 그 사이
+#38012 가 첫 자리를 구현하면서 `0 (2 sources unread)` 로 정해 버렸다. 이 RFC 가
+막으려는 게 그렇게 자리마다 따로 정해지는 것이라, #38012 를 `0+` 로 고치고 규칙을
+§3 에 적었다.

@@ -210,6 +210,14 @@ status: reference
   process-local 관측). Board Attention Candidate와 다른 뜻이다.
   → [Runtime.t](../../lib/runtime/runtime.mli)
 
+**media_failover**
+: vision 도구가 이미지를 읽을 때 호출하는 runtime의 순서(`[runtime].media_failover`,
+  "vision read fleet"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
+  Keeper turn은 여기로 파견하지 않고, turn의 이미지 재라우팅은 자기 lane 안에 머문다.
+  이름의 "failover"는 런타임 후보 순서를 가리키던 옛 단어의 잔재이고, 이 키는 그와
+  다른 메커니즘이다 — 키 이름에 옛 단어가 남는 유일한 곳이다.
+  → [Runtime.media_failover](../../lib/runtime/runtime.mli)
+
 **Lane**
 : Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)

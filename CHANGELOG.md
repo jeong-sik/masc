@@ -4,8 +4,6 @@
 
 > Before you upgrade: read the two items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), and the removed `--dup-threshold` purge option (#37751).
 
-*Tag date is provisional and must be updated to the tag commit's UTC date before publishing.*
-
 ### Upgrade notes
 
 - The shared keeper prompt (`keeper`) no longer carries a value system, and the `keeper.instructions.custom` slot is gone: a keeper's `instructions` now sit in `<role>` tags as written, with no heading in front. What a world values goes in the new `keeper.worldview` slot, whose default says no value system is set and each keeper's role decides. An operator override of `keeper` still replaces the whole shared body, so to take the new body, move any worldview text from that override into `keeper.worldview` and clear the `keeper` override. Restart the server right after installing the binary: until it restarts, an old server reads the new prompt files and cannot find `keeper.instructions.custom`, which fails the turns of every keeper that has instructions (#37753).
@@ -14,9 +12,11 @@
 ### Added
 
 - A Fusion judge seat (single, refine, JOJ first pass, meta and stage meta) can name an official-client runtime (Claude Code, Codex or Antigravity); the judge then runs as a one-turn CLI call, the same path a panel seat takes, instead of failing every run with `Build_error`. Its token usage is recorded as unmeasured and its tool record as `Official_client_uninstrumented` (#37768).
-- The TUI's `tools:full` view opens an Execute call with its exit status and elapsed time, then its output, then the execution context, instead of the whole JSON result envelope (#37766).
+- The TUI's `tools:full` view opens an Execute call with its exit status and elapsed time, then its output and stderr, instead of the whole JSON result envelope. An output stored as an artifact shows its digest and size, and a timed-out call shows its limit on the status line (#37766, #37792).
 - The TUI's `journal:full` view draws each Memory journal revision's facts in two columns — sign and category on the left, the claim wrapped at word boundaries on the right (#37764).
 - In a chat pane at least 96 columns wide, lines that arrive from another keeper, another person or a connector start a third of the way across the pane, so they sit apart from the operator's messages and the keeper's replies; narrower panes keep one column (#37773).
+- The catalog and the shipped `config/runtime.toml` carry ten more OpenRouter models, each probed before its row was written: `claude-fable-5.1`, `claude-haiku-4.5`, `gpt-6-astra`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gemini-3.1-pro-preview`, `grok-4.7`, `minimax-m3`, `qwen3.8-flash` and `glm-5.3-flashx`. The rows record what the probes found, such as a model that refuses a required or named `tool_choice` or rejects reasoning effort `none` (#37782).
+- Z.AI coding-plan (`glm-coding`) models `glm-5.2`, `glm-5.1`, `glm-5-turbo`, `glm-5`, `glm-4.7`, `glm-4.6`, `glm-4.5` and `glm-4.5-air` have their own catalog rows, so they no longer fall back to the glm defaults of a 200000-token window and 40960 output tokens. The catalog gives `kimi-for-coding` a 1048576-token window and adds a `k3-256k` row. The shipped `config/runtime.toml` binds every subscription and coding-plan model (Claude Code, Codex, Antigravity, `glm-coding`, `kimi_coding`, Ollama Cloud) and marks the binding the install wizard picks with `wizard-default` (#37767).
 
 ### Changed
 
@@ -28,6 +28,9 @@
 
 - A Fusion run records an official-client timeout as a timeout instead of a provider error, and runs its HTTP and CLI panel seats at the same time instead of starting the CLI seats after the HTTP ones finish (#37768).
 - A keeper request that starts at the last completed turn records that turn's boundary as its `turn_start` `end_atom`, instead of the atom where the clamped range opens; the next-request forecast does the same (#37757).
+- The TUI's `metadata:full` title line no longer shows the request id, and the mark's color and weight end at the mark instead of running into the rule (#37780).
+- A keeper whose turn-boundary store cannot be read, or matches no boundary of its history, no longer sends its whole history as if the last completed turn ended at atom 0. The request opens on the newest atom alone and its origin says `turn_start_unknown` with the reader's reason, in the TUI band and the request forecast as well (#37746).
+- A Librarian working state that cannot be read, cannot be checked against the turn-boundary log, or covers conversation bytes that changed no longer refuses every Agent-Core turn. The request starts at the Librarian's read position, or at the turn's own boundary, as it does when the working state no longer fits, and the reason is logged as a warning. A refused turn also ran no Librarian round, so a working state whose covered bytes changed was never written again; a working-state file or boundary log that cannot be read now leaves turns running and names the file to fix (#37762).
 
 ## [0.35.22] - 2026-09-22
 
@@ -73,8 +76,6 @@
 
 ### Fixed
 
-- A keeper whose turn-boundary store cannot be read, or matches no boundary of its history, no longer sends its whole history as if the last completed turn ended at atom 0. The request opens on the newest atom alone and its origin says `turn_start_unknown` with the reader's reason, in the TUI band and the request forecast as well (#37746).
-- A Librarian working state that cannot be read, cannot be checked against the turn-boundary log, or covers conversation bytes that changed no longer refuses every Agent-Core turn. The request starts at the Librarian's read position, or at the turn's own boundary, as it does when the working state no longer fits, and the reason is logged as a warning. A refused turn also ran no Librarian round, so a working state whose covered bytes changed was never written again; a working-state file or boundary log that cannot be read now leaves turns running and names the file to fix (#37762).
 - Setup fixture substitutions now fail at the exact changed fixture location instead of silently passing and blaming the wrong field (#37434).
 - The cancel guard now follows complete handler arm lists and recognizes both exception-arm forms, eliminating false positives from comments and distant cancellation arms (#37495).
 - The strict runtime-config check now excludes vendored warning policy from MASC's warning gate without weakening MASC source checks (#37315).

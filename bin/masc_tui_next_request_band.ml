@@ -172,9 +172,9 @@ let lines ~prose ~fact ~safe ~scale
       let checkpoint =
         prose
           (Printf.sprintf
-             "%d messages in the checkpoint; the wake line adds %d bytes as the \
+             "%d messages in the checkpoint; the wake line adds %s tok as the \
               newest atom."
-             forecast.Inspector.checkpoint_messages forecast.Inspector.wake_line_bytes)
+             forecast.Inspector.checkpoint_messages (Masc_tui_token_scale.format_estimate scale forecast.Inspector.wake_line_bytes))
       in
       (match forecast.Inspector.walk with
        | Error refusal ->

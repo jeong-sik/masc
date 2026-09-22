@@ -144,8 +144,8 @@ let exact_view (keeper : PC.t) =
   let declared : Resolver.declared_target =
     { target_ref = "ollama_cloud.deepseek-flash"
     ; binding = { keeper with PC.enable_thinking = Some true }
+    ; credential = Resolver.Credential_resolved keeper.PC.api_key
     ; body_timeout_s = None
-    ; api_key_env = Some "OLLAMA_CLOUD_API_KEY"
     }
   in
   let snapshot =

@@ -39,7 +39,7 @@
     not serialize on I/O.
 
     Internal helpers stay private at this boundary
-    ([parse_frontmatter], [parse_list_value],
+    ([parse_frontmatter],
     [extract_variables], [store],
     [version_index], [meta_tbl], [prompts_dir],
     [markdown_dir], [is_valid_prompt_key],

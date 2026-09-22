@@ -675,6 +675,25 @@ Conversation text is preserved verbatim. `/thinking` and
 `/tools` expose the same choices by name. `--reasoning` and `--tool-view` can
 override the initial modes.
 
+A turn this TUI did not open -- one running when the TUI started, or one
+another surface opened -- is drawn from its journal while it runs. The
+runtime event feed carries a frame per event of a running chat operation
+opened from the dashboard, a TUI or the API; a frame for the open pane's
+keeper is read as "that operation's journal grew", and the pane reads the
+journal from where its record ends, one round trip behind the token. The
+frame itself is not folded: the journal alone carries every line in order,
+and two feeds into one log would have to agree on order after a dropped
+frame. Each history load (a row appended to the transcript, `r`) reads the
+same journals too, so a frame lost while the feed was down costs nothing,
+and a turn a connector (Discord, Slack, another keeper) opened -- which
+sends no frames -- is followed at that pace. The pane draws the turn as an
+open block, the same shape as a turn it streams itself. A turn the loaded
+transcript says is over, or whose journal the server can no longer serve,
+is drawn from its committed rows instead. The footer's turn line still says
+how long the turn has run and which tool it last touched; the `Latest
+output:` tail it used to carry is left out while the pane draws that text.
+A turn whose stream the TUI opened and lost is followed the same way.
+
 Memory journal rows open in summary mode, using producer-owned compact text
 instead of reconstructing a summary from rendered prose. The summary itself
 ends in `Ctrl-N: journal detail`; `Ctrl-N` or `/memory`

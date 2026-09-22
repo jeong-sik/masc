@@ -180,9 +180,9 @@ val handle_browser_act_with_outcome :
   args:Yojson.Safe.t -> Keeper_tool_execution.t
 
 val handle_library_search_with_outcome
-  : meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
+  : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 val handle_library_read_with_outcome
-  : meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
+  : config:Workspace.config -> meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
 
 val handle_surface_read
   :  config:Workspace.config

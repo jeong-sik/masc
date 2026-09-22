@@ -27,6 +27,11 @@
 
 ### Changed
 
+- The TUI chat header labels a model the stream named without a runtime id as `model:`, and only an announced runtime id as `turn:`; a model name is no longer shown as the runtime.
+- The next-request band names the wake line in the same estimated tokens as its other figures instead of bytes.
+- The Context pane's title says how long ago its reading was received; the pane refreshes only by hand, so a reading from before the current turn is no longer indistinguishable from a current one.
+- The Librarian absorb gate no longer applies absorptions unjudged when it is switched on but cannot ask the judgment model (`[typesafeai] enabled = false`, or no armed destination): the sources stay current and the new claims still apply. A gate switched off, or an excluded Keeper, applies the answer as before. Typesafeai gate unavailability now names the declared switch or exclusion before the lane's own state.
+- In the TUI, a queued line sent again, `/run-next`, and Enter before the Keeper's chat control token arrives now only ask for first place in the queue; they no longer cancel the Keeper's running autonomous turn. Stopping a turn stays an explicit act (Esc, `/steer`).
 - A provider response with no text, thinking, or tool call is now settled as an observed response instead of being retried as an unseen server failure (#37206).
 - Gateway readers now document and consistently treat cancellation as an intentional shutdown rather than a connection failure (#37481).
 - The owner-child cancellation marker is retained only after both cancellation paths were verified, making the lifecycle evidence match the runtime tree (#37488).

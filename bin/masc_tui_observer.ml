@@ -114,7 +114,12 @@ type event =
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
   | Keeper_chat_stream_frame of
-      { keeper : string; frame : string option; at : float }
+      { keeper : string
+      ; operation_id : string
+      ; seq : int option
+      ; frame : string option
+      ; at : float
+      }
   | Keeper_waiting_inventory_changed of
       { keeper : string; queue_kind : string option; at : float }
   (* Server push, not a keeper act: a fusion deliberation changed stage or
@@ -194,6 +199,15 @@ let optional_string_field fields name ~event =
   | None | Some `Null -> Ok None
   | Some (`String value) -> Ok (Some value)
   | Some _ -> Error (Printf.sprintf "%s carries a non-string %s" event name)
+
+(* Absent is a fact the frame states ([None]); a value of the wrong shape is
+   a frame this build cannot read, and is said so rather than read as
+   absent. *)
+let optional_int_field fields name ~event =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) -> Ok (Some value)
+  | Some _ -> Error (Printf.sprintf "%s carries a non-integer %s" event name)
 
 let agent_core_kind_of_event_type = function
   | "tool_called" -> Tool_called
@@ -340,9 +354,14 @@ let stream_frame_label inner =
 let decode_keeper_chat_operation_event fields =
   let event = "keeper_chat_operation_event" in
   let* keeper = required string_field fields "name" ~event in
+  let* operation_id = required string_field fields "operation_id" ~event in
   let* at = required float_field fields "ts_unix" ~event in
   let frame = Option.bind (assoc_field fields "ag_ui_event") stream_frame_label in
-  Ok (Keeper_chat_stream_frame { keeper; frame; at })
+  (* The journal seq of the event this frame projects
+     ([Keeper_chat_broadcast.operation_event]); the wire terminal a settle
+     synthesises carries none. *)
+  let* seq = optional_int_field fields "seq" ~event in
+  Ok (Keeper_chat_stream_frame { keeper; operation_id; seq; frame; at })
 
 (* Names the keeper in [keeper_name] rather than [name] -- the one broadcast
    in this family that does. Reading the field it actually sends is why this

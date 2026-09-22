@@ -11,8 +11,9 @@
     [Tool_schemas_library] carries it beside the schema so the descriptor
     never types its own.
 
-    The source vocabulary is a literal in [Tool_schemas_library] rather than a
-    variant, so nothing derives it from an owner and the whole list moved.
+    [masc_library_add]'s [source] enum is a literal in its TOML file.
+    [Tool_library.library_source] owns that vocabulary, and the "library source
+    enum" case in [test_enum_mirror_sync] compares the two.
     [test_library_tool_toml_parity] keeps the publication order and which
     tools declare a keeper_projection; the descriptions and schemas it also
     pinned were copies of these values. *)

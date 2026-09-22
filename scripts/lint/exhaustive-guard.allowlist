@@ -73,5 +73,4 @@ lib/server/server_mcp_transport_http_headers.ml:11
 lib/server/server_mcp_transport_http_headers.ml:19
 lib/server/server_routes_http_routes_attribution.ml:19
 lib/tool_call_quality_benchmark/tool_call_quality_benchmark_scoring.ml:54
-lib/tool_library.ml:69
 lib/transport.ml:57

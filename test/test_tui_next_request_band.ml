@@ -119,8 +119,10 @@ let test_the_band_names_the_marks_and_the_range () =
      && says "front from this runtime's ledger" rows);
   Alcotest.(check bool) "the last count is read against the marks" true
     (says "last counted 91.0k tok against marks 120.0k / 80.0k" rows);
-  Alcotest.(check bool) "the footer counts the checkpoint and the wake line" true
-    (says "6012 messages in the checkpoint; the wake line adds 131 bytes as the newest atom" rows)
+  (* 131 / 3.39 = 38.6: the wake line is named in the same estimated tokens as
+     every other figure of the band, never in bytes beside them. *)
+  Alcotest.(check bool) "the footer counts the checkpoint and the wake line in tokens" true
+    (says ("6012 messages in the checkpoint; the wake line adds " ^ approx ^ "39 tok as the newest atom") rows)
 
 let test_a_pinned_figure_from_another_lane_names_it () =
   let forecast =

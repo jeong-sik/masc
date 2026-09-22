@@ -15033,9 +15033,17 @@ let render_context_inspector state =
     Option.value ~default:"no Keeper" state.context_inspector_keeper
     |> Keeper_chat.terminal_safe_text
   in
+  (* What the numbers describe: a reading in flight, or one received some
+     time ago. The pane does not poll, so without the age a reading from
+     before the current turn read as the current turn. *)
   let refreshing =
     if state.context_inspector_loading then Ansi.dim ^ "  refreshing" ^ Ansi.reset
-    else ""
+    else
+      match state.context_inspector_reading, state.context_inspector_read_at with
+      | Some _, Some read_at ->
+          let age = Float.max 0. (Unix.gettimeofday () -. read_at) in
+          Ansi.dim ^ "  read " ^ Masc_tui_message_layout.span_text age ^ " ago" ^ Ansi.reset
+      | Some _, None | None, (Some _ | None) -> ""
   in
   (* The search query, drawn where the typing lands: the Keepers strip's
      own indicator sits on a surface this pane replaced. *)

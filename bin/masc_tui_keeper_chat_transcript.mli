@@ -340,7 +340,10 @@ val current_runtime_id : t -> string option
 val runtime_identity_text :
   keeper_name:string -> configured_runtime:string -> t option -> string
 (** Labels the configured runtime separately from the matching turn's observed
-    runtime. Another keeper's transcript cannot supply the turn identity. *)
+    runtime ([turn: <runtime id>]). A stream that named its model before any
+    runtime id was announced is labelled [model: <model>]: a model name is not
+    a runtime id and is never shown as one. Another keeper's transcript cannot
+    supply the turn identity. *)
 
 (** The recorded reply (KEEPER_REPLY_DETAILS): the visible text, the typed
     outcome, and the turn it was recorded under. *)

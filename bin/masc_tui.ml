@@ -9112,36 +9112,46 @@ let seek_in_chat state ~target ~restart =
                  "/find %s \xe2\x80\x94 no older match; /find %s starts again"
                  state.msg_find state.msg_find))
 
-(* The Activity pane's toggle, shared by Ctrl-L and [/activity]. Measured
+(* The Activity pane's cycle, narrow to wide to hidden, shared by Ctrl-L
+   and [/activity]. Measured
    against the terminal's own width, not the width the surfaces lay out
    against: with the pane showing, that width is already short by the pane,
    and a threshold read from it could refuse to hide the very pane that
    narrowed it. *)
 let toggle_acting_pane (state : state) =
   let _rows, cols = Masc_tui_ansi.get_terminal_size () in
+  if Masc_tui_render.acting_pane_suppressed state then
+    (* The same rule as the width check below, for a surface the pane never
+       draws beside: a press here would move narrow to wide unseen, and the
+       reader would meet the change on the next surface. *)
+    Error "Activity pane is not drawn over this surface; preference unchanged"
+  else
   match
-    Masc_tui_acting_pane.toggle_hidden ~hidden:state.acting_pane_hidden ~cols
+    Masc_tui_acting_pane.next_layout ~layout:state.acting_pane_layout ~cols
   with
   | None ->
       Error
         (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
            Masc_tui_acting_pane.threshold_cols)
-  | Some hidden ->
-      state.acting_pane_hidden <- hidden;
+  | Some layout ->
+      state.acting_pane_layout <- layout;
       state.acting_pane_scroll <- 0;
-      Ok hidden
+      Ok layout
 
 (* Show one of the pane's tabs. Where the pane cannot show, the tab is not
    set either: a preference with no visible effect would surprise the
    reader after a later resize, the same rule the toggle follows. *)
 let show_acting_pane_tab (state : state) tab =
   let _rows, cols = Masc_tui_ansi.get_terminal_size () in
-  if not (Masc_tui_acting_pane.shown ~hidden:false ~cols) then
+  if Masc_tui_acting_pane.drawn_cols ~layout:Masc_tui_acting_pane.Narrow ~cols = 0 then
     Error
       (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
          Masc_tui_acting_pane.threshold_cols)
   else begin
-    state.acting_pane_hidden <- false;
+    (match state.acting_pane_layout with
+     | Masc_tui_acting_pane.Hidden ->
+         state.acting_pane_layout <- Masc_tui_acting_pane.Narrow
+     | Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide -> ());
     state.acting_pane_tab <- tab;
     state.acting_pane_scroll <- 0;
     Ok ()
@@ -9469,9 +9479,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Toggle_acting_pane ->
       Buffer.clear state.msg_input;
       (match toggle_acting_pane state with
-       | Ok hidden ->
+       | Ok layout ->
            notice ~role:Message_local
-             (if hidden then "Activity pane hidden" else "Activity pane shown")
+             ("Activity pane " ^ Masc_tui_acting_pane.layout_label layout)
        | Error reason -> notice ~role:Message_error reason)
   | Masc_tui_command.Show_acting_pane_tab tab ->
       Buffer.clear state.msg_input;
@@ -9489,7 +9499,32 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Acting_pane_tab_unknown word ->
       Buffer.clear state.msg_input;
       notice ~role:Message_error
-        (Printf.sprintf "/activity takes fleet or changes, not %s" word)
+        (Printf.sprintf "/activity takes fleet, changes or order, not %s" word)
+  | Masc_tui_command.Set_acting_pane_call_order which ->
+      Buffer.clear state.msg_input;
+      (* The calls are drawn on the fleet tab, so the order is set with that
+         tab up: turning an order the reader cannot see would surprise them
+         after the next switch, the rule [show_acting_pane_tab] keeps for
+         the tab itself. *)
+      (match show_acting_pane_tab state Masc_tui_acting_pane.Tab_fleet with
+       | Ok () ->
+           let order =
+             match which with
+             | `Next -> Masc_tui_acting_pane.next_call_order state.acting_pane_call_order
+             | `Newest -> Masc_tui_acting_pane.Newest_first
+             | `Oldest -> Masc_tui_acting_pane.Oldest_first
+             | `Longest -> Masc_tui_acting_pane.Longest_first
+             | `By_tool -> Masc_tui_acting_pane.By_tool
+           in
+           state.acting_pane_call_order <- order;
+           notice ~role:Message_local
+             ("Activity calls " ^ Masc_tui_acting_pane.call_order_label order)
+       | Error reason -> notice ~role:Message_error reason)
+  | Masc_tui_command.Acting_pane_call_order_unknown word ->
+      Buffer.clear state.msg_input;
+      notice ~role:Message_error
+        (Printf.sprintf
+           "/activity order takes newest, oldest, longest or tool, not %s" word)
   | Masc_tui_command.Lane_addons input ->
       Buffer.clear state.msg_input;
       (match Masc_tui_lane_addons.parse_request input with
@@ -12224,6 +12259,8 @@ let handle_composer_key state ~base_path ~mailbox key =
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
          | Masc_tui_command.Acting_pane_tab_unknown _
+         | Masc_tui_command.Set_acting_pane_call_order _
+         | Masc_tui_command.Acting_pane_call_order_unknown _
          | Masc_tui_command.Lane_addons _
          | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
          | Masc_tui_command.Open_link_preview _
@@ -15255,9 +15292,10 @@ let toggle_roster_pane_key = "\002"
 
 (* Ctrl-L, beside Ctrl-B: the Activity pane is the side bar on the other
    edge. It costs the surface [Masc_tui_acting_pane.pane_cols] columns for
-   the fleet's live feed, and a reader who wants the width back, or the feed
-   beside a chat, toggles it. A letter would not do -- in the composer every
-   letter is text. *)
+   the fleet's live feed, or [wide_pane_cols] for whole names and each
+   call's age, and a reader who wants the width back, or the feed beside a
+   chat, walks it narrow, wide, hidden. One key for the three: every other
+   Ctrl letter is taken, and in the composer every plain letter is text. *)
 let toggle_acting_pane_key = "\012"
 
 (* Ctrl-^ keeps a reader one key away without consuming a typed letter. *)

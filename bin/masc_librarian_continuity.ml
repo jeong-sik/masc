@@ -172,9 +172,9 @@ let judge ~clock ~endpoint (request : R.judge_request) =
         if Masc.Typesafeai_config.is_enabled () then Ok api_key
         else Error "TypeSafe evaluation is disabled by configuration"
   in
+  let destination = { Masc.Typesafeai_client.endpoint; model = request.model; api_key } in
   let* evaluated =
-    Masc.Typesafeai_client.evaluate ~clock ~api_key
-      ~endpoint ~model:request.model
+    Masc.Typesafeai_client.evaluate ~clock ~destinations:(destination, [])
       ~state:(R.judge_state request) ~questions:(R.judge_questions request) ()
     |> Result.map_error Masc.Typesafeai_client.failure_to_string
   in

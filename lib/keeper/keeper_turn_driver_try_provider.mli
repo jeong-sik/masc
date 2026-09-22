@@ -108,11 +108,18 @@ type librarian_position =
 val librarian_position :
   messages:Agent_core.Types.message list ->
   continuity ->
-  (librarian_position, string) result
+  (librarian_position, Agent_core.Error.t) result
 (** The continuity the turn chose ({!continuity_for_request}) as a position
     in [messages], the list a lane is about to cut. [Error] when that list no
-    longer holds what the choice covered ({!validate_continuity}); the lane
-    then drops only the Librarian front. *)
+    longer holds what the choice covered ({!validate_continuity}), the same
+    error that refuses an Agent Core request; the lane refuses its request
+    with it. *)
+
+val working_state_text : Librarian_continuity_snapshot.t -> string
+(** The text a request carries in place of the atoms a fitting snapshot
+    covers: its working state under a label saying it is a summary to use as
+    context, not new instructions. Every lane that carries a working state
+    sends this text. *)
 
 val continuity_for_request :
   keeper_name:string ->

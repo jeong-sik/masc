@@ -36,9 +36,7 @@ module For_testing : sig
   val start_seed_projection
     :  capacity_bytes:int
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
-    -> ?librarian_front:
-         (Agent_core.Types.message list
-          -> Keeper_official_client_host.librarian_position)
+    -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
     -> turn_start:Keeper_carried_front.turn_start
     -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
@@ -85,8 +83,7 @@ val run :
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
-  ?librarian_front:
-    (Agent_core.Types.message list -> Keeper_official_client_host.librarian_position) ->
+  ?librarian_front:Keeper_official_client_host.librarian_front_reader ->
   turn_start:Keeper_carried_front.turn_start ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
@@ -128,7 +125,8 @@ val run :
     since it is where a range with no absorbed point begins. The request can
     still grow
     by the working state, which the declared ceiling has already cut around
-    before this lane composes.
+    before this lane composes. A reader error refuses the request, as the
+    same check refuses an Agent Core request.
 
     [on_transmitted_model_input] fires once per attempt, after the capacity
     window has cut the history and before the prompt is built. Required rather

@@ -509,7 +509,7 @@ let test_an_unusable_snapshot_starts_without_it () =
    snapshot that no longer fits, a read position that does -- gives those
    lanes the read position, as it gives the Agent Core lane; a fitting
    snapshot gives its working state; a list that no longer holds what the
-   choice covered is refused, so the lane drops only the Librarian front. *)
+   choice covered is an error, and the lane refuses its request with it. *)
 let test_official_lanes_take_the_same_choice () =
   let snapshot, lines = capture_source source in
   let moved = [pinned; text T.User "Start over on the docs"; text T.Assistant "Docs drafted.";
@@ -524,7 +524,7 @@ let test_official_lanes_take_the_same_choice () =
   (match Driver.librarian_position ~messages:moved chosen with
    | Ok (Driver.Librarian_progress {end_atom = 2}) -> ()
    | Ok _ -> fail "the purge shape did not hand the official lane the read position"
-   | Error detail -> fail detail);
+   | Error error -> fail (Agent_core.Error.to_string error));
   let current = source @ [text T.User "Continue the review"] in
   let fitting =
     Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:current
@@ -534,7 +534,7 @@ let test_official_lanes_take_the_same_choice () =
    | Ok (Driver.Librarian_snapshot chosen_snapshot) ->
      check int "the snapshot's end" snapshot.Snapshot.end_atom chosen_snapshot.Snapshot.end_atom
    | Ok _ -> fail "a fitting snapshot did not reach the official lane"
-   | Error detail -> fail detail);
+   | Error error -> fail (Agent_core.Error.to_string error));
   let rewritten = List.map (fun (m : T.message) ->
     if m = text T.Assistant "The build passed." then text T.Assistant "Rewritten reply" else m) current in
   (match Driver.librarian_position ~messages:rewritten fitting with

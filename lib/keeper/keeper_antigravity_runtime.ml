@@ -187,7 +187,8 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
       on_model_input_window_observation;
     Ok projection.messages
   in
-  match attempt ~librarian_front:(Host.librarian_front_or_absent librarian_front) with
+  let* librarian_front = Host.read_librarian_front librarian_front history_messages in
+  match attempt ~librarian_front with
   | Ok result -> observed result
   | Error (`Source error) -> Error error
   | Error (`Window (front, error)) ->
@@ -199,7 +200,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
           fit the declared window: %s"
          runtime_id
          (Runtime_model_input_tail_window.budget_error_to_string error);
-       (match attempt ~librarian_front:(fun _ -> Keeper_turn_driver_try_provider.No_position) with
+       (match attempt ~librarian_front:Keeper_turn_driver_try_provider.No_position with
         | Ok result -> observed result
         | Error (`Source error) -> Error error
         | Error (`Window (_, error)) ->

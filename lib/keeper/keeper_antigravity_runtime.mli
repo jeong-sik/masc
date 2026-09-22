@@ -34,8 +34,7 @@ val run :
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
-  ?librarian_front:
-    (Agent_core.Types.message list -> Keeper_official_client_host.librarian_position) ->
+  ?librarian_front:Keeper_official_client_host.librarian_front_reader ->
   turn_start:Keeper_carried_front.turn_start ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
@@ -59,7 +58,12 @@ val run :
     admission window and its observation likewise apply only to that fresh
     input. A resumed conversation reports [Held_by_client_session]: the CLI
     re-sends just the new turn, so what the model reads is not this process's
-    to measure. *)
+    to measure.
+
+    [librarian_front] reads the turn's continuity choice as a position in the
+    history a fresh conversation starts from
+    ({!Keeper_official_client_host.read_librarian_front}); a reader error
+    refuses the request, as the same check refuses an Agent Core request. *)
 
 module For_testing : sig
   val capacity_bounded_model_input_projection
@@ -69,9 +73,7 @@ module For_testing : sig
     -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
-    -> ?librarian_front:
-         (Agent_core.Types.message list
-          -> Keeper_official_client_host.librarian_position)
+    -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
     -> turn_start:Keeper_carried_front.turn_start
     -> keeper_name:string
     -> runtime_id:string

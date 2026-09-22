@@ -253,12 +253,20 @@ type carried_start =
     not fit says nothing about it. *)
 type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
-val librarian_front_or_absent
-  :  (Agent_core.Types.message list -> librarian_position) option
+type librarian_front_reader =
+  Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
+(** Reads the turn's choice as a position in exactly the messages a lane is
+    about to cut ({!Keeper_turn_driver_try_provider.librarian_position}).
+    [Error] when those messages no longer hold what the choice covered; the
+    lane refuses the request with it, as the Agent Core lane refuses its
+    own. *)
+
+val read_librarian_front
+  :  librarian_front_reader option
   -> Agent_core.Types.message list
-  -> librarian_position
-(** A lane's optional reading as the total function {!carried_start_range}
-    takes: [None] becomes
+  -> (librarian_position, Agent_core.Error.t) result
+(** A lane's optional reader applied to its messages, before the range is
+    cut. A lane handed no reader has
     {!Keeper_turn_driver_try_provider.No_position}. *)
 
 val carried_start_front_to_string : carried_start_front -> string
@@ -267,7 +275,7 @@ val carried_start_range
   :  keeper_name:string
   -> runtime_id:string
   -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
-  -> librarian_front:(Agent_core.Types.message list -> librarian_position)
+  -> librarian_front:librarian_position
   -> own_first_atom:int
   -> turn_start:Keeper_carried_front.turn_start
   -> Agent_core.Types.message list
@@ -288,9 +296,9 @@ val carried_start_range
     keeper-context-window-in-tokens §13.4); a history with no completed turn
     has [turn_start] 0.
 
-    [librarian_front] answers with the turn's continuity choice as a
-    position in exactly the messages it is handed: a fitting working state
-    ([Librarian_snapshot]), the Librarian's read position alone
+    [librarian_front] is the turn's continuity choice as a position in these
+    messages, read by the lane ({!read_librarian_front}): a fitting working
+    state ([Librarian_snapshot]), the Librarian's read position alone
     ([Librarian_progress]), or none. That position wins when it is at or past the seed that
     holds, or the lane's own cut when no seed holds, so a Librarian that read
     less than the last request carried never moves the range back.

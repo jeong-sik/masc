@@ -1066,7 +1066,7 @@ let plain_user_message text : Agent_core.Types.message =
   }
 ;;
 
-let capacity_projection ?on_model_input_window_observation ?carried_front_seed
+let capacity_projection ?on_model_input_window_observation ?carried_front_seed ?librarian_front
     ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~declared_max_prompt_bytes ~system_prompt ~goal source =
   Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
     ~declared_max_prompt_bytes
@@ -1074,6 +1074,7 @@ let capacity_projection ?on_model_input_window_observation ?carried_front_seed
     ~goal
     ?on_model_input_window_observation
     ?carried_front_seed
+    ?librarian_front
     ~turn_start
     ~keeper_name:"alpha"
     ~runtime_id:"antigravity_subscription.gemini"
@@ -1331,12 +1332,13 @@ let agent_core_range ?(turn_start = Keeper_carried_front.Turn_boundary { end_ato
     .Runtime_model_input_tail_window.messages
 ;;
 
-let project_with_capacity ?on_model_input_window_observation ?carried_front_seed
+let project_with_capacity ?on_model_input_window_observation ?carried_front_seed ?librarian_front
     ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~capacity messages =
   match
     capacity_projection
       ?on_model_input_window_observation
       ?carried_front_seed
+      ?librarian_front
       ~turn_start
       ~declared_max_prompt_bytes:(Some capacity)
       ~system_prompt:"system"
@@ -1390,6 +1392,39 @@ let test_cold_start_begins_at_the_turn_start () =
     (encoded_history (agent_core_range ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 53 }) ~front:None messages))
     (encoded_history projected);
   check int "seven atoms of sixty went" 7 (List.length projected)
+;;
+
+(* The Librarian front reaches the list this lane renders -- a read position
+   as the start -- and a list the turn's choice no longer describes refuses
+   the request, as it refuses an Agent Core request. *)
+let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
+  let messages = carried_front_history () in
+  let projected =
+    project_with_capacity
+      ~librarian_front:(fun _ ->
+        Ok (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 53 }))
+      ~capacity:1_000_000
+      messages
+  in
+  check (list string) "the range starts at the read position"
+    (encoded_history (List.filteri (fun index _ -> index >= 53) messages))
+    (encoded_history projected);
+  let refused _ =
+    Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
+            { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
+  in
+  match
+    capacity_projection ~librarian_front:refused ~declared_max_prompt_bytes:(Some 1_000_000)
+      ~system_prompt:"system" ~goal:"goal" None
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project messages with
+     | Error _ -> ()
+     | Ok _ -> fail "a list the turn's choice no longer describes went out")
 ;;
 
 let test_a_front_from_another_history_is_dropped () =
@@ -1480,6 +1515,10 @@ let () =
               "a cold start begins at the turn start"
               `Quick
               test_cold_start_begins_at_the_turn_start
+          ; test_case
+              "the Librarian front reaches the list and its error refuses"
+              `Quick
+              test_the_librarian_front_reaches_the_list_and_its_error_refuses
           ; test_case
               "a front from another history is dropped"
               `Quick

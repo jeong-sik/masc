@@ -126,7 +126,7 @@ let model_input_projection_for_capacity
             (Runtime_model_input_tail_window.budget_error_to_core_error error))
   in
   let* capacity_cut = capacity_cut in
-  let windowed =
+  let* windowed =
     match capacity_cut with
     | Some projection
       when projection.Runtime_model_input_tail_window.dropped_atoms
@@ -136,19 +136,20 @@ let model_input_projection_for_capacity
          newest atom, so seeding this one would put an atom back into the view
          the provider just refused. The floor stands. *)
       observe_window projection;
-      projection.Runtime_model_input_tail_window.messages
+      Ok projection.Runtime_model_input_tail_window.messages
     | Some _ | None ->
       let own_first_atom =
         match capacity_cut with
         | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
         | None -> 0
       in
+      let* librarian_front = Host.read_librarian_front librarian_front messages in
       let carried =
         Host.carried_start_range
           ~keeper_name
           ~runtime_id
           ~carried_front_seed
-          ~librarian_front:(Host.librarian_front_or_absent librarian_front)
+          ~librarian_front
           ~own_first_atom
           ~turn_start
           messages
@@ -159,7 +160,7 @@ let model_input_projection_for_capacity
          seed named no front. A list with no atom has no front to report, and
          [Runtime_model_input_tail_window.observe] reports nothing for it. *)
       observe_window carried.Host.projection;
-      carried.Host.messages
+      Ok carried.Host.messages
   in
   let () =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->

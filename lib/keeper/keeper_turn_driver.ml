@@ -1607,24 +1607,15 @@ let run_named
 	     exact list each composition cuts, and checked against that list on
 	     every call, because a lane composes more than once in a turn and the
 	     list grows between compositions. A list that no longer holds what the
-	     choice covered drops only the Librarian front: the seed carries its
-	     own digest of the atom it names and is checked against this history
-	     separately. *)
+	     choice covered refuses the request, as the same check refuses an
+	     Agent Core request ([validate_continuity]): one rule on both lanes
+	     for a history that moved under the turn. *)
 	  let official_client_librarian_front messages =
 	    match Eio.Lazy.force continuity with
-	    | None -> Keeper_turn_driver_try_provider.No_position
+	    | None -> Ok Keeper_turn_driver_try_provider.No_position
 	    | Some chosen ->
-	      (match
-	         Domain_pool_ref.submit_cpu_or_inline (fun () ->
-	           Keeper_turn_driver_try_provider.librarian_position ~messages chosen)
-	       with
-	       | Ok position -> position
-	       | Error detail ->
-	         Log.Keeper.warn
-	           ~keeper_name
-	           "official client start seed drops the librarian position: %s"
-	           detail;
-	         Keeper_turn_driver_try_provider.No_position)
+	      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+	        Keeper_turn_driver_try_provider.librarian_position ~messages chosen)
 	  in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)

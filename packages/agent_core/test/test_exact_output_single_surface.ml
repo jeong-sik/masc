@@ -498,8 +498,8 @@ let test_deepseek_catalog_is_json_only_before_dispatch () =
             ~request_path:"/chat/completions"
             ~connect_timeout_s:30.0
             ()
+      ; credential = EO.Credential_resolved (Secret.of_string "deepseek-fixture-key")
       ; body_timeout_s = None
-      ; api_key_env = None
       }
     ]
   in

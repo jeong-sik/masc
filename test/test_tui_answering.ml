@@ -431,7 +431,7 @@ let test_chat_shows_background_work_and_uncertainty () =
     [ running ~preview ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "echo"
     ; running ~lane:Tui_decode.Turn_lane_maintenance ~started:950. "other" ] in
   let lines = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo"
-    ~error:None rows in
+    ~error:None ~text_tail_drawn:false rows in
   Alcotest.(check int) "running status and latest output" 2 (List.length lines);
   let joined = String.concat "\n" lines in
   List.iter (fun expected -> Alcotest.(check bool) expected true
@@ -440,18 +440,26 @@ let test_chat_shows_background_work_and_uncertainty () =
   Alcotest.(check bool) "other Keeper never appears" false
     (Astring.String.is_infix ~affix:"other" joined);
   let waiting = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"other"
-    ~error:None rows |> String.concat "\n" in
+    ~error:None ~text_tail_drawn:false rows |> String.concat "\n" in
   Alcotest.(check bool) "missing events are not invented work" true
     (Astring.String.is_infix ~affix:"progress has not been reported" waiting);
   let stale = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo"
-    ~error:(Some "timeout") rows in
+    ~error:(Some "timeout") ~text_tail_drawn:false rows in
   Alcotest.(check bool) "failed observation is labelled" true
     (Astring.String.is_infix ~affix:"Activity unavailable" (List.hd stale));
   Alcotest.(check bool) "cached progress is marked last observed" true
     (Astring.String.is_infix ~affix:"Last observed autonomous" (String.concat "\n" stale));
   Alcotest.(check (list string)) "idle has no stale running preview" []
     (Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo" ~error:None
-      [row "echo" Tui_decode.Keeper_turn_idle])
+      ~text_tail_drawn:false [row "echo" Tui_decode.Keeper_turn_idle]);
+  (* The pane drawing the same text keeps the status line and drops the
+     tail: the sentence is on screen once, above. *)
+  let drawn = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo"
+    ~error:None ~text_tail_drawn:true rows in
+  Alcotest.(check int) "status line alone when the pane draws the text" 1
+    (List.length drawn);
+  Alcotest.(check bool) "the tail is not said twice" false
+    (Astring.String.is_infix ~affix:"editing the report" (String.concat "\n" drawn))
 ;;
 
 let () =

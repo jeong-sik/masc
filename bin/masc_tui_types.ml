@@ -5846,6 +5846,12 @@ type state = {
   (* Operations whose journal a fiber is reading right now, so a load that
      arrives before the read returns does not start a second one. *)
   mutable msg_journal_inflight: string list;
+  (* Operations a stream frame named while their journal was being read,
+     with the highest journal seq the frames named: the read in flight may
+     have stopped short of that line, so when it lands another read starts
+     from where it stopped -- unless it reached the line, which ends the
+     chain. One entry per operation, however many frames arrived. *)
+  mutable msg_journal_wanted: (string * int option) list;
   (* The server refused this client's credential for the journal endpoint.
      Said once; no journal is asked for again this session. *)
   mutable msg_journal_reads_refused: bool;
@@ -6162,6 +6168,52 @@ let journal_read_finished state operation_id =
       state.msg_journal_inflight
 ;;
 
+(* The highest seq named wins; a frame with no seq (the settle terminal)
+   never lowers what an earlier frame named. *)
+let journal_read_wanted state operation_id seq =
+  let highest =
+    match List.assoc_opt operation_id state.msg_journal_wanted, seq with
+    | Some (Some held), Some seq -> Some (max held seq)
+    | Some (Some held), None -> Some held
+    | Some None, seq | None, seq -> seq
+  in
+  state.msg_journal_wanted <-
+    (operation_id, highest)
+    :: List.remove_assoc operation_id state.msg_journal_wanted
+;;
+
+type journal_wanted =
+  | Not_wanted
+  | Wanted of { highest_seq : int option }
+
+(* Whether a read was wanted for this operation while one was in flight, and
+   the fact taken: the caller decides the read it stands for, against the
+   seq the frames named. *)
+let take_journal_wanted state operation_id =
+  match List.assoc_opt operation_id state.msg_journal_wanted with
+  | Some highest_seq ->
+      state.msg_journal_wanted <-
+        List.remove_assoc operation_id state.msg_journal_wanted;
+      Wanted { highest_seq }
+  | None -> Not_wanted
+;;
+
+(* The moment a log built from a journal read stands at. The journal's first
+   line (seq 0, the operation's acceptance) is the turn's start; a read that
+   begins there says so itself, and a log created for it takes that rather
+   than the moment the read was asked for -- a stream frame's clock, on the
+   read a frame launched before the history named the turn's first row,
+   which would have aged the turn from the first frame seen and left the
+   span short by everything before it. [fallback] stands where the read did
+   not start at the head. *)
+let journal_log_started_at ~fallback
+    (lines : Masc.Keeper_chat_event_log.journaled_event list) =
+  match lines with
+  | { Masc.Keeper_chat_event_log.seq = 0; ts; _ } :: _ -> ts
+  | _ :: _ | [] -> fallback
+;;
+
+
 (* Where a journal read starts for this operation: after what a held log of
    it already has (a cut live stream's partial log, or an earlier read of a
    turn still running), or the whole journal. *)
@@ -6170,6 +6222,69 @@ let journal_resume_position state ~keeper_name operation_id =
   | Some held when not (turn_log_holds_the_turn held) ->
       Masc_tui_keeper_chat_log.resume_position held.tl_log
   | Some _ | None -> Masc.Keeper_chat_event_log.Whole_turn
+;;
+
+(* What a stream frame for an operation asks of the pane.
+
+   The observer feed carries one frame per AG-UI event of every running chat
+   operation, with the journal seq of the event it projects. The pane does
+   not fold the frame: a frame is a projection of a journal line, and the
+   journal is what the pane draws a turn it did not open from (RFC-0412
+   §3.2). Two feeds into one log would have to agree on order -- a frame
+   lost while the observer stream was down, then read from the journal
+   after later frames had landed, would put the turn's words out of order --
+   and the journal alone already carries every line in order. So a frame is
+   the fact that the operation's journal has grown, and the answer is a read
+   from where the log's record of it ends: one round trip behind the token
+   instead of a history load behind it.
+
+   The server sends these frames for operations whose continuation channel
+   is the dashboard -- opened from the dashboard, this TUI or the API. A
+   turn a connector (Discord, Slack, another keeper's queue) opened sends
+   none and stays on the history loads. *)
+type journal_follow =
+  | Follow_nothing
+      (** Not this pane's to read: a request of its own is streaming the
+          operation, the journal was declared unavailable or this credential
+          refused, the turn is over, or the log already holds the seq the
+          frame named. *)
+  | Follow_read of { started_at : float; since_seq : Masc.Keeper_chat_event_log.replay_position }
+  | Follow_read_after_inflight
+      (** A read is in flight; it may stop short of the line the frame
+          announced, so another starts when it lands. *)
+
+let journal_follow_for_frame state ~keeper_name ~operation_id ~seq ~at =
+  let own_request =
+    List.exists
+      (fun entry -> String.equal entry.sent_request.request_id operation_id)
+      state.msg_inflight
+  in
+  let held = settled_log_for_request state ~keeper_name operation_id in
+  if own_request
+     || state.msg_journal_reads_refused
+     || List.exists (String.equal operation_id) state.msg_journal_unavailable
+  then Follow_nothing
+  else
+    match held with
+    | Some held when turn_log_holds_the_turn held -> Follow_nothing
+    | held ->
+        let since_seq = journal_resume_position state ~keeper_name operation_id in
+        let already_held =
+          match seq with
+          | Some seq -> not (Masc.Keeper_chat_event_log.seq_is_after since_seq seq)
+          | None -> false
+        in
+        if already_held then Follow_nothing
+        else if List.exists (String.equal operation_id) state.msg_journal_inflight
+        then Follow_read_after_inflight
+        else
+          Follow_read
+            { started_at =
+                (match held with
+                 | Some held -> turn_log_started_at held
+                 | None -> at)
+            ; since_seq
+            }
 ;;
 
 (* Whether the loaded transcript says this turn is over: the keeper's reply,
@@ -6188,6 +6303,92 @@ let loaded_turn_has_ended state ~keeper_name request_id =
          | Message_skill _ | Message_thinking | Message_memory ->
              false)
        state.msg_loaded
+;;
+
+(* The turns of this keeper the pane can see running but did not open. A TUI
+   started while a turn was running, or a turn another surface opened, has no
+   request of its own to stream from. What it has is the turn's journal
+   (RFC-0412 §3.2): read on every history load from where the last read
+   stopped, folded into a log held beside the settled ones. That log was
+   drawn nowhere -- the pane draws the logs that stand for a finished turn,
+   and a turn still running stands for nothing yet -- so the operator read
+   the turn's text one line at a time off the footer's turn preview while
+   the pane held the whole of it (#36244).
+
+   Observed is: Working, and still able to end. A log a request of this pane
+   is feeding is the live block, not this ([in_flight]); so is a journal log
+   bound to the same execution as the live one -- a batch member's journal
+   carries [Batch_bound], so the two can share an execution while the pane
+   holds only its own request in flight ([is_live], the test the settled
+   blocks apply). A log whose turn the loaded transcript says is over -- a
+   reply or a failure on record ([loaded_turn_has_ended]) -- or whose
+   journal has nothing more to say ([msg_journal_unavailable]: the
+   settle-time failure that is never journaled (#33108), a restart's
+   interruption, a pruned journal) would be drawn as an open block for the
+   rest of the session, beside the committed rows of the same turn; the
+   committed rows stand for such a turn, as they did before observed blocks
+   were drawn. A stream this pane opened and lost -- settled without hearing
+   the end, [msg_live] let go of it ([settle_turn_log]) -- is observed from
+   then on: the journal reads feed that same log in place
+   ([hold_settled_log]), which is how a cut stream's turn is followed to its
+   end. Answered per frame from the same list the settled blocks come from,
+   so a log that comes to hold its turn leaves here the frame it does. *)
+let observed_logs_for_keeper state keeper_name =
+  let in_flight log =
+    List.exists
+      (fun entry ->
+        String.equal entry.sent_request.request_id (turn_log_request_id log))
+      state.msg_inflight
+  in
+  let is_live log =
+    match state.msg_live with
+    | Some live ->
+        String.equal (turn_log_keeper_name live) keeper_name
+        && String.equal (turn_log_execution_id live) (turn_log_execution_id log)
+    | None -> false
+  in
+  let can_still_end log =
+    let request_id = turn_log_request_id log in
+    (not (List.exists (String.equal request_id) state.msg_journal_unavailable))
+    && not (loaded_turn_has_ended state ~keeper_name request_id)
+  in
+  settled_logs_for_keeper state keeper_name
+  |> List.filter (fun log ->
+         (match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
+          | Masc_tui_keeper_chat_transcript.Working -> true
+          | Masc_tui_keeper_chat_transcript.Waiting
+          | Masc_tui_keeper_chat_transcript.Stream_ended
+          | Masc_tui_keeper_chat_transcript.Stream_failed _ ->
+              false)
+         && (not (in_flight log))
+         && (not (is_live log))
+         && can_still_end log)
+;;
+
+(* Whether the pane draws an observed turn's reply text itself. The footer's
+   turn preview carries the same text's tail from the turns poll; drawn
+   twice, the newest sentence sat in the pane and again under it. Text only:
+   a turn that has so far only reasoned or called tools has nothing in the
+   pane the preview would repeat. The two are equally fresh because every
+   stream frame of the turn reads its journal ([journal_follow_for_frame]);
+   without that the pane's copy was only as new as the last row appended,
+   and the tail was the fresher of the two. *)
+let observed_turn_text_drawn state keeper_name =
+  List.exists
+    (fun log ->
+      List.exists
+        (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+          match item.drawn with
+          | Masc_tui_keeper_chat_transcript.Drawn_text _
+          | Masc_tui_keeper_chat_transcript.Drawn_reply _ ->
+              true
+          | Masc_tui_keeper_chat_transcript.Drawn_thinking _
+          | Masc_tui_keeper_chat_transcript.Drawn_skill _
+          | Masc_tui_keeper_chat_transcript.Drawn_tools _
+          | Masc_tui_keeper_chat_transcript.Drawn_status _ ->
+              false)
+        (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript))
+    (observed_logs_for_keeper state keeper_name)
 ;;
 
 (* Whether a reasoning row is drawn at all under this visibility. The
@@ -7303,6 +7504,7 @@ let create_state
   msg_settled_logs = [];
   msg_journal_unavailable = [];
   msg_journal_inflight = [];
+  msg_journal_wanted = [];
   msg_journal_reads_refused = false;
   msg_scroll_pin_settled = [];
   detail_scroll = 0;
@@ -9749,6 +9951,7 @@ let keeper_message_activity_rows (state : state) =
          ^ " · in progress"]
       | None -> Masc_tui_answering.chat_activity
           ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+          ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
           state.keeper_turns in
     let submitted = match state.msg_live with
       | Some live when String.equal (turn_log_keeper_name live) keeper_name ->

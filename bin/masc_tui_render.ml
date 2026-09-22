@@ -4182,44 +4182,46 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
 let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ~now ~frame ~yolo ~paused ~health ~turn ~next_action ~keeper ~runtime =
   let status_color = keeper_action_color next_action in
-  (* A running turn takes the cell whole -- both the mark and the word.
-     Split, the mark and the word can answer from different readings and
-     the row argues with itself.
+  (* A keeper with an open turn draws the turn's mark in the HEALTH cell. The
+     mark moves while the turn is being worked: it is the one thing on the
+     screen that is changing as the reader looks at it.
 
-     The word is the elapsed time rather than "answering". The mark already
-     says it is answering, and it says so by moving; spending eight columns
-     to repeat that leaves no room for the fact the mark cannot carry, which
-     is how long. Eight seconds and forty minutes are different situations
-     and they used to be the same row. It also ends the truncation: this
-     column is cut for "healthy", and "answering" never fit in it.
+     The word beside it is how long the turn has run. The moving mark already
+     says the keeper is answering, and eight seconds and forty minutes are
+     different situations. It also fits: this column is cut for "healthy",
+     and "answering" does not.
+
+     A failing keeper keeps its health word. Its keepalive is running the
+     next attempt, so the mark still moves, but the roster header counts it
+     as failing and its row is where the reader looks for it. Beside the
+     elapsed time it would draw exactly what a working keeper draws. The
+     colour stays the one its next action gives it, as on its idle row.
+
+     A turn whose keeper the health reading calls offline was never closed
+     and nothing works it: the mark stops, the elapsed stays -- how long it
+     has been open is the fact -- and the cell takes the failure colour.
 
      Idle and unavailable rows keep the health word -- unavailable is the
      owner lookup failing, which the health column describes better than a
      blank would. *)
-  (* A turn record that outlives the process it belongs to. The summary above
-     this table read "2 offline / not running" while
-     one listed keeper's own row drew a turning mark and a climbing clock: its turn
-     had started and never been closed, and the process behind it had gone.
-     The row that most needed reading looked like the healthiest kind.
-
-     The elapsed stays -- a turn open two minutes is the fact -- but the mark
-     stops. Motion here means work is progressing, and for a keeper the health
-     reading calls offline, nothing is. A failing keeper's keepalive still runs
-     its turns, so its open turn is being worked; whether it fails is known
-     only when it ends. *)
-  let turn_is_being_worked =
-    match Option.map Tui_decode.keeper_health_reading health with
-    | Some Tui_decode.Health_offline -> false
-    | Some (Tui_decode.Health_running | Tui_decode.Health_idle | Tui_decode.Health_failing)
-    | None -> true
-  in
   let glyph, status_word, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
-    | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) ->
-      ( Masc_tui_answering.running_glyph
-          ~frame:(if turn_is_being_worked then frame else -1)
-      , Masc_tui_answering.elapsed_text ~now started_at_unix
-      , if turn_is_being_worked then (Theme.info ()) else (Theme.bad ()) )
+    | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) -> (
+        let elapsed = Masc_tui_answering.elapsed_text ~now started_at_unix in
+        match
+          Masc_tui_keeper_mark.open_turn
+            (Option.map Tui_decode.keeper_health_reading health)
+        with
+        | Masc_tui_keeper_mark.Worked ->
+            (Masc_tui_answering.running_glyph ~frame, elapsed, Theme.info ())
+        | Masc_tui_keeper_mark.Worked_while_failing ->
+            ( Masc_tui_answering.running_glyph ~frame
+            , keeper_health_deviation_word health
+            , status_color )
+        | Masc_tui_keeper_mark.Left_open ->
+            ( Masc_tui_answering.running_glyph ~frame:(-1)
+            , elapsed
+            , Theme.bad () ))
     | Some Tui_decode.Keeper_turn_idle
     | Some (Tui_decode.Keeper_turn_unavailable _)
     | None ->

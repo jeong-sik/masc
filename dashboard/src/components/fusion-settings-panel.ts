@@ -181,8 +181,8 @@ export function FusionSettingsPanel() {
   }
   if (state.phase === 'failed') {
     // Its own testid: this is "the panel never opened", not "a write was
-    // refused". The two used to be one selector, and a reader could not tell
-    // which had happened.
+    // refused". A refusal leaves the editor on screen with the values the
+    // operator typed; this replaces the editor entirely.
     return html`<div class="set-err" data-testid="fusion-settings-load-error">${state.error}</div>`
   }
 

@@ -1064,13 +1064,13 @@ let test_one_speaker_keeps_one_heading () =
     |> List.map (fun (row : Layout.row) -> row.text)
   in
   check (list string) "the same second is the same message"
-    [ "[12:34:56] From [keeper.one] tui-..dddddddd"; "  first"; "  second" ]
+    [ "[12:34:56] From [keeper.one]"; "  first"; "  second" ]
     (rows
        [ entry Layout.Keeper "keeper.one" "tui-..dddddddd" "first"
        ; entry Layout.Keeper "keeper.one" "tui-..dddddddd" "second"
        ]);
   check (list string) "a later second keeps its own row, without the name"
-    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
+    [ "[12:34:56] From [keeper.one]"
     ; "  first"
     ; "[12:35:01]"
     ; "  second"
@@ -1084,15 +1084,15 @@ let test_one_speaker_keeps_one_heading () =
   (* The placeholder a row without a time carries as its timestamp is
      display text, not a moment; a later placeholder says nothing moved. *)
   check (list string) "a later row without a time draws no clock row"
-    [ "[--:--:--] From [JOURNAL] "; "  first"; "  second" ]
+    [ "[--:--:--] From [JOURNAL]"; "  first"; "  second" ]
     (rows
        [ entry ~timestamp:"--:--:--" Layout.Journal "JOURNAL" "" "first"
        ; entry ~timestamp:"--:--:--" Layout.Journal "JOURNAL" "" "second"
        ]);
   check (list string) "a different speaker starts again"
-    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
+    [ "[12:34:56] From [keeper.one]"
     ; "  first"
-    ; "[12:34:56] From [you] tui-..dddddddd"
+    ; "[12:34:56] From [you]"
     ; "  second"
     ]
     (rows
@@ -1100,9 +1100,9 @@ let test_one_speaker_keeps_one_heading () =
        ; entry Layout.User "you" "tui-..dddddddd" "second"
        ]);
   check (list string) "a new turn starts again even from the same speaker"
-    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
+    [ "[12:34:56] From [keeper.one]"
     ; "  first"
-    ; "[12:34:56] From [keeper.one] tui-..eeeeeeee"
+    ; "[12:34:56] From [keeper.one]"
     ; "  second"
     ]
     (rows
@@ -1134,9 +1134,9 @@ let test_a_turn_keeps_one_heading_across_its_blocks () =
   in
   let drawn = rows turn in
   check (list string) "the operator's heading, the turn's, and one clock row"
-    [ "[12:34:56] From [you] tui-..dddddddd"
+    [ "[12:34:56] From [you]"
     ; "  look"
-    ; "[12:34:56] From [] tui-..dddddddd"
+    ; "[12:34:56] From []"
     ; "  find it"
     ; "  read_file a.ml"
     ; "  found"
@@ -1158,9 +1158,9 @@ let test_a_turn_keeps_one_heading_across_its_blocks () =
    | [ Layout.User; Layout.Keeper ] -> ()
    | _ -> fail "the turn opened on reasoning should draw its heading as the keeper");
   check (list string) "a new request opens a new turn"
-    [ "[12:34:56] From [] tui-..dddddddd"
+    [ "[12:34:56] From []"
     ; "  first"
-    ; "[12:34:56] From [] tui-..eeeeeeee"
+    ; "[12:34:56] From []"
     ; "  second"
     ]
     (text
@@ -1183,7 +1183,7 @@ let test_metadata_keeps_a_typed_origin () =
   match rows with
   | { Layout.kind =
         Layout.Metadata
-          (Layout.Origin { clock; speaker; role_label; request_label });
+          (Layout.Origin { clock; speaker; role_label });
       _
     }
     :: { Layout.kind = Layout.Body; _ }
@@ -1196,7 +1196,6 @@ let test_metadata_keeps_a_typed_origin () =
       check (option string) "origin clock" (Some "12:34:56") clock;
       check string "origin speaker" "you" speaker;
       check string "origin label" "you" role_label;
-      check string "origin request" "tui-..aaaaaaaa" request_label;
       check string "continuation clock" "12:35:01" continued_at
   | _ -> fail "message rows lost their typed origin/body structure"
 ;;
@@ -1448,6 +1447,43 @@ let test_journal_rows_hang_the_claim_under_itself () =
     :: _ ->
       ()
   | _ -> fail "the first row should open on its sign and its category's tone"
+;;
+
+(* A line someone else wrote steps in from the conversation by two cells
+   (RFC chat-turn-rail-and-side-lanes §4.6), after the rail, in every origin
+   mode and at every width; the renderer draws its bar in those rows. Anyone
+   in the conversation itself does not move. *)
+let test_an_arrival_steps_in_from_the_conversation () =
+  let arrival = entry Layout.Inbound "pangyo" "tui-..dddddddd" "claimed #37740" in
+  let reply = entry Layout.Keeper "alpha" "tui-..eeeeeeee" "noted" in
+  check int "an arrival steps in" 2 (Layout.inbound_indent arrival);
+  check int "the conversation's own rows do not" 0 (Layout.inbound_indent reply);
+  let body_rows origin width entry =
+    Layout.visible_rows ~origin ~inner_width:width ~height:20 [ entry ]
+    |> List.filter (fun (row : Layout.row) ->
+           match row.kind with
+           | Layout.Body -> true
+           | Layout.Metadata _ | Layout.Viewport_gap _ -> false)
+  in
+  List.iter
+    (fun width ->
+      match body_rows Layout.Origin_inline width arrival with
+      | row :: _ ->
+          check int "the rail's cells carry the step" (Layout.turn_rail_cells + 2)
+            row.gutter_rail_cells;
+          check string "the blank run follows the rail" "  "
+            (String.sub row.gutter Layout.turn_rail_cells 2)
+      | [] -> fail "the arrival drew no body row")
+    [ 120; 80 ];
+  match
+    Layout.visible_rows ~origin:Layout.Origin_row ~inner_width:120 ~height:20
+      [ arrival ]
+    |> without_hour_rail
+  with
+  | heading :: body :: _ ->
+      check string "the heading steps in" "  " heading.gutter;
+      check string "so does its body" "  " body.gutter
+  | _ -> fail "the arrival drew no heading and body"
 ;;
 
 (* Scrollback. Ten one-line entries render to twenty-one rows -- the hour
@@ -1903,7 +1939,9 @@ let test_normal_inline_margin_bytes_stay_stable () =
 let test_a_repeated_minute_leaves_its_column_blank () =
   let entries =
     [ entry ~timestamp:"10:52:03" Layout.User "you" "tui-..aaaaaaaa" "first"
-    ; entry ~timestamp:"10:52:41" Layout.Inbound "client" "tui-..cccccccc"
+    (* A second speaker, not an arrival: an arrival steps in by
+       [inbound_indent_cells], and this is about the clock's column. *)
+    ; entry ~timestamp:"10:52:41" Layout.Keeper "client" "tui-..cccccccc"
         "second"
     ; entry ~timestamp:"10:53:01" Layout.Keeper "keeper" "tui-..dddddddd"
         "third"
@@ -2620,7 +2658,9 @@ let () =
             test_a_trailing_newline_opens_a_line
         ] )
     ; ( "scrollback"
-      , [ test_case "journal rows hang the claim under itself" `Quick
+      , [ test_case "an arrival steps in from the conversation" `Quick
+            test_an_arrival_steps_in_from_the_conversation
+        ; test_case "journal rows hang the claim under itself" `Quick
             test_journal_rows_hang_the_claim_under_itself
         ; test_case "one speaker keeps one heading" `Quick
             test_one_speaker_keeps_one_heading

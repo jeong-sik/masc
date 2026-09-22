@@ -141,7 +141,7 @@ let tool_name entry = tool_name_prefix ^ entry.name
    here in a way it would not be for a shipped asset: this tool exists only
    because a SKILL.md at that path was read into the catalog. A name without
    the prefix is some other tool and answers [None]. *)
-let skill_source_of_tool_name name =
+let skill_name_of_tool_name name =
   if String.starts_with ~prefix:tool_name_prefix name
   then (
     let skill =
@@ -150,8 +150,14 @@ let skill_source_of_tool_name name =
         (String.length tool_name_prefix)
         (String.length name - String.length tool_name_prefix)
     in
-    if String.equal skill "" then None else Some ("skills/" ^ skill ^ "/SKILL.md"))
+    if String.equal skill "" then None else Some skill)
   else None
+;;
+
+let skill_source_of_tool_name name =
+  Option.map
+    (fun skill -> "skills/" ^ skill ^ "/SKILL.md")
+    (skill_name_of_tool_name name)
 ;;
 let status_tool_name = "keeper_composition_status"
 let cancel_tool_name = "keeper_composition_cancel"

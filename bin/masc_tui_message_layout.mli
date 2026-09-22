@@ -145,6 +145,18 @@ type journal_line =
       { sign : journal_sign; category : string; tone : journal_tone; claim : string }
   | Journal_drop of { memory_id : string; reason : string }
 
+(** What a row says about the Librarian's pass over the journal. A run of
+    failed passes is one state the chat header names while it lasts, not a
+    row between every pair of turns. *)
+type memory_pass =
+  | Pass_committed  (** The pass committed a revision. *)
+  | Pass_failed of { kind : string }
+      (** The pass failed; [kind] is the server's word for how. *)
+  | No_pass
+      (** Every row that reports no pass: a journal entry that could not be
+          read, a neutral system row sharing the Memory lane, and every row
+          outside it. *)
+
 type entry = {
   style : style;
   timestamp : string;
@@ -170,6 +182,8 @@ type entry = {
           column, and read back by the renderer to style the mark and the
           label differently: colour says status, the label only says kind. *)
   request_label : string;
+      (** The turn this entry belongs to, for grouping: rows of one request
+          share a heading. Never drawn -- the grouping is what a reader sees. *)
   body : string;
   journal : journal_line list;
       (** A Memory journal revision's lines, drawn under {!body} in columns
@@ -219,7 +233,6 @@ type metadata =
               heading draws no clock rather than the placeholder text. *)
       speaker : string;
       role_label : string;
-      request_label : string;
     }
   | Continued_at of { clock : string }
       (** Only emitted where the entry has a trustworthy time: a continuation
@@ -265,7 +278,7 @@ type origin_display =
 (** Where a message's origin is drawn. [Origin_inline] is the chat default
     (see [Masc_tui_types.create_state]); its clock is drawn only on the rows
     where the minute moved. [Origin_bare] drops that clock, and [Origin_row]
-    adds a full timestamp and request-id heading. Folding headings into the
+    gives each turn a heading row with the speaker and the full timestamp. Folding headings into the
     gutter hands their rows back to the conversation: eight speakers taking
     turns otherwise spend eight rows of a forty-row pane on headings.
 
@@ -280,10 +293,11 @@ type row = {
   text : string;
   gutter_rail_cells : int;
       (** Cells at the head of {!gutter} holding the turn rail and the space
-          after it. Zero where no rail is drawn at all, so a pane that never
-          shows one pays nothing for it. The renderer draws these cells in the
-          quiet tone: the rail is structure, and colour on this row is already
-          spent saying status. *)
+          after it, and the blank run a line someone else wrote steps in by
+          ({!inbound_indent}). Zero where neither is drawn, so a
+          pane that never shows one pays nothing for it. The renderer draws
+          these cells in the quiet tone: the rail is structure, and colour on
+          this row is already spent saying status. *)
   gutter_clock_cells : int;
       (** Cells of {!gutter} between the rail's end and the mark's start that
           the renderer paints as the receded clock column, trailing space
@@ -311,7 +325,9 @@ type row = {
       (** What to draw left of the body's rule. Empty under {!Origin_row};
           under the other two it holds the origin on a message's first row and
           the same width in blanks on the rest, so a wrapped body lines up
-          under where it started. *)
+          under where it started. A line someone else wrote carries its
+          {!inbound_indent} here in every mode; on a heading row that blank run
+          is all the gutter holds, and the heading starts after it. *)
   action : row_action;
       (** What a press on this row opens, {!Action_none} on every row but the
           first of an entry that carries one. The fold marker sits at the end
@@ -567,6 +583,15 @@ val wrap_body :
     terminal vocabulary of its own, and so is [markdown]: given one, it renders
     the escaped text and owns the wrapping, because fenced code keeps breaks a
     word wrap would ruin. *)
+
+val inbound_indent_cells : int
+(** How far a line someone else wrote steps in: two cells. *)
+
+val inbound_indent : entry -> int
+(** Cells a line someone else wrote ({!Inbound}) steps in from the
+    conversation (RFC chat-turn-rail-and-side-lanes §4.6); the renderer draws
+    a bar in the sender's colour down that block's left edge. Zero for every
+    other style. *)
 
 val visible_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->

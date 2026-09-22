@@ -38,8 +38,25 @@ let with_runtime_toml content f =
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
 ;;
 
+(* No official client anywhere, so a configured command stays as configured
+   ({!Runtime_official_cli_install.locate}); these cases are about the
+   configuration, not about where a client is installed. A blank
+   CODEX_INSTALL_DIR reads as unset, which is what the lookup asks. *)
+let without_an_installed_client f =
+  let home = Filename.temp_dir "masc-no-client-" "" in
+  let restore = List.map (fun name -> name, Sys.getenv_opt name) [ "PATH"; "HOME"; "CODEX_INSTALL_DIR" ] in
+  List.iter (fun (name, value) -> Unix.putenv name value)
+    [ "PATH", ""; "HOME", home; "CODEX_INSTALL_DIR", "" ];
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter (fun (name, value) -> Unix.putenv name (Option.value value ~default:"")) restore;
+      Unix.rmdir home)
+    f
+;;
+
 let load content =
-  with_runtime_toml content (fun path -> load_list_text ~config_path:path)
+  without_an_installed_client (fun () ->
+    with_runtime_toml content (fun path -> load_list_text ~config_path:path))
 ;;
 
 let test_materializes_official_client_owner () =
@@ -50,7 +67,7 @@ let test_materializes_official_client_owner () =
     check string "default" "claude_code.claude-code-sonnet" default.id;
     (match default.execution with
      | Runtime_execution.Claude_code config ->
-       check string "CLI" "claude" config.cli_path;
+       check string "CLI, as configured when no client is installed" "claude" config.cli_path;
        check (option string)
          "model"
          (Some "claude-sonnet-4-5")

@@ -737,6 +737,46 @@ let test_only_an_accepted_finalize_save_owes_the_line () =
     (owed ~notice_pending:false ~saved_checkpoint_present:false)
 ;;
 
+(* The one lookup a read position is read by. The latest line stating the
+   position wins; a line past [through], a line of another trace, a restart
+   line, a turn with no atom position and a line no decoder reads state none. *)
+let test_the_line_that_states_a_position () =
+  let at = Boundaries.Atom_history { end_atom = 2; last_atom_digest = "digest" } in
+  let lines =
+    [ 1, Ok (record ~turn:1 at)
+    ; 2, Ok (record ~turn:2 ~trace_id:"other" at)
+    ; 3, Ok (history_restarted ())
+    ; 4, Ok (record ~turn:4 Boundaries.Empty_atom_history)
+    ; 5, Error (Boundaries.Not_json "torn")
+    ; 6, Ok (record ~turn:6 at)
+    ; 7, Ok (record ~turn:7 (Boundaries.Atom_history { end_atom = 3; last_atom_digest = "digest" }))
+    ]
+  in
+  let found ?through ?(trace_id = "trace") ?(digest = "digest") () =
+    Option.map
+      (fun (line, _recorded_at, _turn_ref) -> line)
+      (Boundaries.witness_line ?through ~trace_id ~end_atom:2 ~last_atom_digest:digest lines)
+  in
+  check (option int) "the latest line that states it" (Some 6) (found ());
+  check (option int) "only among the lines counted" (Some 1) (found ~through:5 ());
+  check (option int) "none counted, none found" None (found ~through:0 ());
+  check (option int) "another digest is another position" None (found ~digest:"other" ());
+  check (option int) "another trace has its own lines" (Some 2) (found ~trace_id:"other" ());
+  let stated record =
+    Option.map
+      (fun (_turn_ref, end_atom, digest) -> end_atom, digest)
+      (Boundaries.atom_position_stated ~trace_id:"trace" record)
+  in
+  check (option (pair int string)) "a turn end states its position" (Some (2, "digest"))
+    (stated (record at));
+  check (option (pair int string)) "a restart states none" None
+    (stated (history_restarted ()));
+  check (option (pair int string)) "an empty history states none" None
+    (stated (record Boundaries.Empty_atom_history));
+  check (option (pair int string)) "another trace's turn states none here" None
+    (stated (record ~trace_id:"other" at))
+;;
+
 let () =
   run
     "keeper_turn_boundaries"
@@ -757,6 +797,8 @@ let () =
             test_a_history_with_no_atom_is_a_fresh_start
         ; test_case "a turn without a saved checkpoint" `Quick
             test_a_turn_without_a_saved_checkpoint
+        ; test_case "the line that states a position" `Quick
+            test_the_line_that_states_a_position
         ] )
     ; ( "store"
       , [ test_case "appended lines read back in order" `Quick

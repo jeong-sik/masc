@@ -91,9 +91,9 @@ let kind_to_string : History.kind -> string = function
   | History.Delivery_failed _ -> "delivery_failed"
   | History.Tool_calls block ->
       Printf.sprintf "tools[%s]" (String.concat " | " (full_tool_rows block))
-  | History.Skill_activity skill ->
+  | History.Skill_activity skills ->
       Printf.sprintf "skill[%s]"
-        (String.concat " | " (Transcript.skill_rows ~full:true skill))
+        (String.concat " | " (Transcript.skill_rows ~full:true skills))
   | History.Reasoning lines ->
       Printf.sprintf "thinking[%s]" (String.concat " | " lines)
   | History.Gate_activity { approval_id; phase; tool; _ } ->
@@ -149,9 +149,11 @@ let tool ?execution_id ?tool_call_id ?status ?dur name =
      @ (match dur with None -> [] | Some d -> [ "dur", `String d ]))
 
 let skill_activation ?(delivery = `Assoc []) ?(actions = [])
-    ?(name = "ci-red-attribution") () =
+    ?(name = "ci-red-attribution")
+    ?(invocation = `Assoc [ "kind", `String "instruction" ]) () =
   `Assoc
     [ "identity", `Assoc [ "name", `String name ]
+    ; "invocation", invocation
     ; "content_revision", `String "sha256:content-1"
     ; "turn_ref", `String "trace-1#54"
     ; "runtime_id", `String "codex-app-server"
@@ -316,8 +318,13 @@ let test_roles_map_to_what_the_pane_draws () =
     (List.map (fun r -> r.History.text) decoded.History.rows);
   (match (List.nth decoded.History.rows 3).History.kind with
    | History.Gate_activity _ -> failf "unexpected gate row"
-   | History.Memory_activity { summary; journal = _ } ->
-       check (option string) "a neutral system row stays whole" None summary
+   | History.Memory_activity { summary; journal = _; pass } ->
+       check (option string) "a neutral system row stays whole" None summary;
+       check bool "a neutral system row reports no pass" true
+         (match pass with
+          | Masc_tui_message_layout.No_pass -> true
+          | Masc_tui_message_layout.Pass_failed _
+          | Masc_tui_message_layout.Pass_committed -> false)
    | History.Addressed_to_keeper _ | History.Said_by_keeper
    | History.Autonomous_reply | History.Delivery_failed _
    | History.Tool_calls _ | History.Skill_activity _ | History.Reasoning _
@@ -1183,21 +1190,26 @@ let test_exact_skill_evidence_replaces_the_raw_call_and_names_actions () =
   match decoded.History.rows with
   | [ skill_row; tools_row ] ->
       (match skill_row.kind with
-       | History.Skill_activity skill ->
+       | History.Skill_activity [ skill ] ->
            check string "the exact ledger names the Skill" "ci-red-attribution"
              skill.skill_name;
+           check bool "an instruction skill was read" true
+             (skill.invocation = Some Transcript.Instruction_read);
            check bool "delivery plus observed actions means used" true
              (skill.state = Transcript.Skill_used);
            check (list string) "the exact action sequence is kept"
              [ "Execute"; "Read" ] skill.actions;
-           let rows = Transcript.skill_rows ~full:true skill in
+           let rows = Transcript.skill_rows ~full:true [ skill ] in
            check string "the strongest evidence state is bold"
              "**전달됨, 도구 씀** \xc2\xb7 **ci-red-attribution** \xc2\xb7 2 actions"
              (List.hd rows);
            check bool "the exact turn proof is visible" true
              (List.exists
                 (String.starts_with ~prefix:"  proof \xc2\xb7 turn=trace-1#54")
-                rows)
+                rows);
+           check (list string) "the compact row is the name alone"
+             [ "**ci-red-attribution**" ]
+             (Transcript.skill_rows ~full:false [ skill ])
        | other ->
            failf "expected a Skill row, got %s" (kind_to_string other));
       (match tools_row.kind with
@@ -1231,12 +1243,15 @@ let test_served_skill_without_delivery_does_not_claim_use () =
          ])
   in
   match decoded.History.rows with
-  | [ { History.kind = History.Skill_activity skill; _ } ] ->
+  | [ { History.kind = History.Skill_activity [ skill ]; _ } ] ->
       check bool "served is weaker than delivered" true
         (skill.state = Transcript.Skill_served_only);
-      check (list string) "the UI says delivery was not recorded"
-        [ "**읽음, 전달 기록 없음** \xc2\xb7 **ci-red-attribution**" ]
-        (Transcript.skill_rows ~full:false skill)
+      check string "the full row says delivery was not recorded"
+        "**읽음, 전달 기록 없음** \xc2\xb7 **ci-red-attribution**"
+        (List.hd (Transcript.skill_rows ~full:true [ skill ]));
+      check (list string) "the compact row says only that it was triggered"
+        [ "**ci-red-attribution**" ]
+        (Transcript.skill_rows ~full:false [ skill ])
   | rows ->
       failf "expected one served-only Skill row, got %d: %s" (List.length rows)
         (String.concat "; "
@@ -1256,11 +1271,13 @@ let test_missing_skill_evidence_stays_visible_beside_the_raw_call () =
          ])
   in
   match decoded.History.rows with
-  | [ { History.kind = History.Skill_activity warning; _ }
+  | [ { History.kind = History.Skill_activity [ warning ]; _ }
     ; { History.kind = History.Tool_calls raw; _ }
     ] ->
       check bool "the evidence gap is a typed warning" true
         (warning.state = Transcript.Skill_evidence_missing);
+      check bool "the pane's own warning row carries no invocation" true
+        (warning.invocation = None);
       check string "the producer's raw call is retained" "keeper_skill"
         (List.hd raw.activities).tool_name;
       check (option string) "the exact failure reason is visible"
@@ -1283,8 +1300,7 @@ let test_skill_evidence_count_mismatch_retains_every_raw_call () =
          ])
   in
   match decoded.History.rows with
-  | [ { History.kind = History.Skill_activity exact; _ }
-    ; { History.kind = History.Skill_activity warning; _ }
+  | [ { History.kind = History.Skill_activity [ exact; warning ]; _ }
     ; { History.kind = History.Tool_calls raw; _ }
     ] ->
       check string "the exact activation is still shown" "ci-red-attribution"
@@ -1294,8 +1310,74 @@ let test_skill_evidence_count_mismatch_retains_every_raw_call () =
       check int "neither unmatched raw call is hidden" 2
         (List.length raw.activities)
   | rows ->
-      failf "expected exact evidence, warning, and raw calls; got %d row(s)"
+      failf "expected one skill block of exact evidence and warning, then raw calls; got %d row(s)"
         (List.length rows)
+
+(* A turn that ran one composition seven times is one skill block, and the
+   compact row counts the triggers instead of saying the same row seven
+   times (msx-retro-mania, 2026-09-22: seven "읽음, 전달 기록 없음 ·
+   msx-observe" rows between one JOURNAL row and the tool block). The
+   composition ran; it was not read. *)
+let test_a_turn_that_triggers_one_skill_seven_times_is_one_counted_row () =
+  let composition =
+    `Assoc [ "kind", `String "composition"; "tool_name", `String "keeper_compose_msx-observe" ]
+  in
+  let projection =
+    skill_projection ~status:"available"
+      (List.init 7 (fun _ ->
+           skill_activation ~name:"msx-observe" ~invocation:composition ~delivery:`Null ())
+       @ [ skill_activation ~name:"sangokushi-2" ~actions:[ "masc_msx_press" ] () ])
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54" ~skill_activations:projection
+             (List.init 7 (fun _ -> tool ~status:"ok" "keeper_compose_msx-observe")
+              @ [ tool ~status:"ok" "keeper_skill"; tool ~status:"ok" "masc_msx_press" ])
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Skill_activity skills; _ }; { History.kind = History.Tool_calls _; _ } ] ->
+      check int "eight invocations in one block" 8 (List.length skills);
+      check bool "the composition's invocation names its tool" true
+        ((List.hd skills).invocation
+         = Some (Transcript.Composition_run { tool_name = "keeper_compose_msx-observe" }));
+      check (list string) "compact: one counted row per skill, in first-trigger order"
+        [ "**msx-observe** \xc3\x977"; "**sangokushi-2**" ]
+        (Transcript.skill_rows ~full:false skills);
+      check string "full: a composition ran, it was not read"
+        "**실행됨, 전달 기록 없음** \xc2\xb7 **msx-observe**"
+        (List.hd (Transcript.skill_rows ~full:true skills))
+  | rows ->
+      failf "expected one skill block and one tool block, got %d row(s): %s"
+        (List.length rows)
+        (String.concat "; " (List.map (fun (r : History.row) -> kind_to_string r.kind) rows))
+
+(* An invocation kind the ledger does not write is a row this build cannot
+   read: dropped and counted, never drawn as read or run. *)
+let test_an_unknown_invocation_kind_does_not_decode () =
+  let projection =
+    skill_projection ~status:"available"
+      [ skill_activation ~invocation:(`Assoc [ "kind", `String "ritual" ]) () ]
+  in
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54" ~skill_activations:projection
+             [ tool ~status:"ok" "keeper_skill" ]
+         ])
+  in
+  match decoded.History.rows with
+  | [ { History.kind = History.Skill_activity [ warning ]; _ }; _ ] ->
+      check bool "the projection could not be read" true
+        (warning.state = Transcript.Skill_evidence_unavailable);
+      check bool "the reason names the kind" true
+        (match warning.detail with
+         | Some detail -> String.ends_with ~suffix:"unknown: ritual" detail
+         | None -> false)
+  | rows ->
+      failf "expected an evidence warning, got %d row(s): %s" (List.length rows)
+        (String.concat "; " (List.map (fun (r : History.row) -> kind_to_string r.kind) rows))
 
 let test_a_turn_that_also_spoke_keeps_the_order_it_ran_in () =
   let decoded =
@@ -1571,7 +1653,12 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
         (Option.is_some row.structural_id);
       (match row.kind with
        | History.Gate_activity _ -> failf "unexpected gate row"
-   | History.Memory_activity { summary; journal } ->
+   | History.Memory_activity { summary; journal; pass } ->
+           check bool "a committed revision is a committed pass" true
+             (match pass with
+              | Masc_tui_message_layout.Pass_committed -> true
+              | Masc_tui_message_layout.Pass_failed _
+              | Masc_tui_message_layout.No_pass -> false);
            check (option string) "typed summary is producer-built"
              (Some
                 "Librarian \xc2\xb7 revision 7 \xc2\xb7 +1 \xe2\x88\x921 \xc2\xb7 3 retained")
@@ -1688,9 +1775,16 @@ let test_memory_failure_keeps_kind_and_detail () =
         (Option.is_some row.structural_id);
       (match row.kind with
        | History.Gate_activity _ -> failf "unexpected gate row"
-   | History.Memory_activity { summary; journal = _ } ->
+   | History.Memory_activity { summary; journal = _; pass } ->
            check (option string) "failure summary omits the detail body"
-             (Some "Librarian failed \xc2\xb7 exact_execution_failure") summary
+             (Some "Librarian failed \xc2\xb7 exact_execution_failure") summary;
+           check bool "the pass is typed as failed, with the server's kind" true
+             (match pass with
+              | Masc_tui_message_layout.Pass_failed { kind = "exact_execution_failure" } ->
+                  true
+              | Masc_tui_message_layout.Pass_failed _
+              | Masc_tui_message_layout.Pass_committed
+              | Masc_tui_message_layout.No_pass -> false)
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply | History.Delivery_failed _
        | History.Tool_calls _ | History.Skill_activity _
@@ -2174,6 +2268,10 @@ let () =
             test_missing_skill_evidence_stays_visible_beside_the_raw_call
         ; test_case "Skill evidence count mismatch keeps raw calls" `Quick
             test_skill_evidence_count_mismatch_retains_every_raw_call
+        ; test_case "a turn that triggers one skill seven times is one counted row" `Quick
+            test_a_turn_that_triggers_one_skill_seven_times_is_one_counted_row
+        ; test_case "an unknown invocation kind does not decode" `Quick
+            test_an_unknown_invocation_kind_does_not_decode
         ; test_case "projection keeps stable row and absolute turn identity"
             `Quick
             test_persisted_identity_and_absolute_turn_survive_projection

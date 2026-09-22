@@ -7,7 +7,7 @@
 # says.
 #
 # A row is scoped to a provider with provider_name when the same model differs
-# by endpoint: 41 model ids here appear under more than one provider, because
+# by endpoint: many model ids here appear under more than one provider, because
 # the same weights reached through a different wire have a different window or
 # a different way of being told to think.
 #
@@ -265,12 +265,17 @@ cache_read_multiplier = 0.1
 # 가격은 developers.openai.com 2026-09-07: sol $4/$20, terra $2/$12, luna 는
 # #34066 의 openai-responses 행에 이미 있다(구독 레인은 이 행과 api-name 을
 # 공유한다).
+# 두 행 모두 max 까지 받는다. codex CLI 목록(~/.codex/models_cache.json,
+# 2026-09-22)이 low~max 이고, 아래 openai-responses 행의 2026-09-07
+# /v1/responses 실측도 max 에 200 이었다. codex 레인은 이 bare 행 목록으로
+# effort 를 깎으므로(keeper_official_client_host.ml
+# clamp_reasoning_effort_to_catalog) max 가 없으면 max 바인딩이 xhigh 로 나간다.
 [[models]]
 id_prefix = "gpt-5.6-sol"
 base = "openai_chat_extended"
 max_context_tokens = 1050000
 max_output_tokens = 128000
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 input_per_million = 4.0
 output_per_million = 20.0
 cache_write_multiplier = 1.25
@@ -281,10 +286,25 @@ id_prefix = "gpt-5.6-terra"
 base = "openai_chat_extended"
 max_context_tokens = 1050000
 max_output_tokens = 128000
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 input_per_million = 2.0
 output_per_million = 12.0
 cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+# gpt-5.5 had no row and fell to "gpt-5", whose ladder stops at high, so a
+# codex binding at xhigh went out as high. The codex CLI lists low..xhigh for
+# it (~/.codex/models_cache.json, 2026-09-22); window, ceiling and price as the
+# openrouter openai/gpt-5.5 row.
+[[models]]
+id_prefix = "gpt-5.5"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh"]
+input_per_million = 5.0
+output_per_million = 30.0
+cache_write_multiplier = 1.0
 cache_read_multiplier = 0.1
 
 [[models]]
@@ -3099,6 +3119,154 @@ supports_reasoning = true
 reasoning_streaming_format = "delta:reasoning_content"
 supports_native_streaming = true
 
+# The rest of the Z.AI coding plan's text models. A glm-coding binding's
+# capability lookup never reads a bare row (the glm-4.6v twin below has the
+# full account), so without these every one resolved to the glm
+# capabilities_base: a 200000 window and a 40960 output ceiling for all of
+# them, glm-4.5 and glm-4.5-air included, whose bare rows say 128000.
+# All eight are listed by GET /coding/paas/v4/models and answered a plain and
+# a tool-call completion on 2026-09-22, reasoning on message.reasoning_content.
+# Windows: glm-5.2's 1M is docs.z.ai/guides/llm/glm-5.2; the others are their
+# bare rows' values, since docs.z.ai no longer has a page for them.
+# Output: each endpoint named "[1,131072]" when it refused an oversized
+# max_tokens the same day (code 1210). That is the parameter's range, not room
+# in the window, so glm-4.5 and glm-4.5-air keep their bare rows' 96000 inside
+# a 128000 window; an exact-output call sends this value as max_tokens.
+# Prices: pricing, unlike the capability lookup, falls back to a bare row when
+# no scoped row exists, so these rows restate the bare rows' prices and a turn
+# on them is estimated exactly as before. glm-5.2's bare row has no price.
+[[models]]
+id_prefix = "glm-5.2"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5.1"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+input_per_million = 1.4
+output_per_million = 4.4
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18571428571428572
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5-turbo"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+input_per_million = 1.2
+output_per_million = 4.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+input_per_million = 1.0
+output_per_million = 3.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.2
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4.7"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4.6"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 131072
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4.5"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+input_per_million = 0.6
+output_per_million = 2.2
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.18333333333333332
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4.5-air"
+provider_name = "glm-coding"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+input_per_million = 0.2
+output_per_million = 1.1
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.15
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+reasoning_streaming_format = "delta:reasoning_content"
+supports_native_streaming = true
+
 [[models]]
 id_prefix = "glm-4.6v"
 provider_name = "glm-coding"
@@ -3466,6 +3634,214 @@ supports_parallel_tool_calls = false
 supports_required_tool_choice = false
 supports_named_tool_choice = false
 
+# More OpenRouter ids, probed 2026-09-22 in the same shape as the rows
+# above: basic, stream, tool_choice required, reasoning shape,
+# reasoning_split, the seven-rung ladder, and the listed output ceiling sent
+# as max_tokens (evidence/task-openrouter-new-models/SUMMARY.md). Window,
+# ceiling, price and parameter support are the gateway's GET /api/v1/models
+# the same day; every id reads image input there, so none lowers a modality.
+# Each answered a plain completion, took reasoning_split, and streamed its
+# usage on the last chunk.
+
+# Anthropic refused tool_choice required and named, with no reasoning field
+# on the request: "tool_choice: type \"tool\" and \"any\" are not supported
+# for this model". Its thinking is always on, which is also why "none" is
+# refused below.
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+# max_output_tokens is the gateway's listed ceiling. Sending it as max_tokens
+# answered 402 "requires more credits, or fewer max_tokens": the gateway
+# reserves max_tokens x price against the key's balance ($1.9 that day), so
+# the ceiling itself was not exercised.
+[[models]]
+id_prefix = "anthropic/claude-fable-5.1"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+
+# At max_tokens 200 and 400 every rung billed 0 reasoning tokens. At 4000,
+# "high" billed 3628 with reasoning.text and "none" billed 0
+# (probe-claude-haiku45-reasoning-budget-*.json), so the disable rung is real;
+# a small max_tokens leaves this model no room to reason. tool_choice required
+# at "high" and max_tokens 4000 answered get_weather with 0 reasoning tokens
+# (probe-claude-haiku45-toolcall-thinking.json): the gateway serves a forced
+# call without thinking, as it did for opus-5 and sonnet-5 the same day.
+[[models]]
+id_prefix = "anthropic/claude-haiku-4.5"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 200000
+max_output_tokens = 64000
+input_per_million = 1.0
+output_per_million = 5.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+# max_output_tokens is the gateway's listed ceiling. Sending it as max_tokens
+# answered 402 "requires more credits, or fewer max_tokens": the gateway
+# reserves max_tokens x price against the key's balance ($1.9 that day), so
+# the ceiling itself was not exercised.
+[[models]]
+id_prefix = "openai/gpt-6-astra"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# All seven rungs answered 200. Every rung billed 0 reasoning tokens on the
+# ladder prompt, as gpt-5.6-sol did on 2026-09-10; the "think it through"
+# prompt at "high" billed 17 with reasoning.encrypted and reasoning.summary.
+[[models]]
+id_prefix = "openai/gpt-5.6-terra"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 2.0
+output_per_million = 12.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# All seven rungs answered 200 and "none" billed 0 reasoning tokens.
+[[models]]
+id_prefix = "openai/gpt-5.6-luna"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 0.2
+output_per_million = 1.2
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# The stream carried its reasoning only as a delta.reasoning_details item,
+# never as delta.reasoning text, which is what delta_details:reasoning reads.
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+[[models]]
+id_prefix = "google/gemini-3.1-pro-preview"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+input_per_million = 2.0
+output_per_million = 12.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+[[models]]
+id_prefix = "x-ai/grok-4.7"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 500000
+max_output_tokens = 450000
+input_per_million = 1.6
+output_per_million = 4.8
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# Same Alibaba refusal as qwen3.8-max: HTTP 400 invalid_parameter_error "The
+# tool_choice parameter does not support being set to required or object in
+# thinking mode". Unlike qwen3.8-max, "none" answered 200 with 0 reasoning
+# tokens, so this ladder keeps the disable rung.
+[[models]]
+id_prefix = "qwen/qwen3.8-flash"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+input_per_million = 0.15
+output_per_million = 0.47
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_min_p = false
+supports_parallel_tool_calls = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+
+# The Z.AI coding plan refuses this id (code 1311,
+# zai-coding-plan-glm53-flashx.json); the gateway serves it. The gateway lists
+# response_format for it but not structured_outputs, so the row lowers the
+# base claim.
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+[[models]]
+id_prefix = "z-ai/glm-5.3-flashx"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 131072
+input_per_million = 0.37
+output_per_million = 1.25
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_min_p = false
+supports_parallel_tool_calls = false
+supports_structured_output = false
+
 # Z.AI coding plan. Window 1M (docs.z.ai). The 131072 output ceiling is the
 # value the endpoint named when it refused an out-of-range max_tokens with
 # code 1210. Reads images (probe PNG confirmed).
@@ -3593,13 +3969,38 @@ supports_image_input = true
 supports_multimodal_inputs = true
 supports_native_streaming = true
 
-# Z.AI coding plan's kimi-for-coding. Window and output ceiling from the
-# endpoint; no tool_choice on this wire.
+# The 256K variant of k3. GET /coding/v1/models on 2026-09-22 lists it with
+# context_length 262144 and otherwise the same metadata as k3 (reasoning,
+# image and video input, dynamic tools, efforts low/high/max). Provider-scoped
+# lookup is an exact id match, so k3's row does not answer for it. Not called
+# that day: the plan's weekly quota was spent. The controls copy k3's row,
+# which claims only the none/not-none difference it has verified, not the
+# listed ladder.
+[[models]]
+id_prefix = "k3-256k"
+provider_name = "kimi_coding"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+reasoning_streaming_format = "delta:reasoning_content"
+accepted_reasoning_efforts = ["none"]
+supports_image_input = true
+supports_multimodal_inputs = true
+supports_native_streaming = true
+
+# api.kimi.com/coding's kimi-for-coding. The alias follows whatever model the
+# plan currently serves: GET /coding/v1/models on 2026-09-22 names it
+# "K2.8 Preview" with context_length 1048576, up from the 262144 this row
+# carried for K2.7 Code. Output ceiling from the endpoint; no tool_choice on
+# this wire.
 [[models]]
 id_prefix = "kimi-for-coding"
 provider_name = "kimi_coding"
 base = "openai_chat"
-max_context_tokens = 262144
+max_context_tokens = 1048576
 max_output_tokens = 131072
 supports_tools = true
 supports_tool_choice = false

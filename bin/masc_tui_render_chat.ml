@@ -429,16 +429,12 @@ let dress_tool_summary (line : string) : string =
 
 ;;
 
-(* The origin heading under [Origin_row]: who and which request at the
-   left, when at the right edge, a rule between.
-
-   The clock led the row before -- "[14:08:44]  ● e-m…-leader" -- so the
-   first thing the eye met on every heading was time-chrome, and the name
-   beside it was cut to the gutter's column on a row that had the whole
-   pane. The clock is still drawn: metadata:full is the mode that shows
-   seconds. It recedes to the right edge, where a chat client's timestamps
-   sit, and the rule between the name and it says where a turn's rows begin
-   without spending a colour on the heading.
+(* The origin heading under [Origin_row]: who at the left, when at the
+   right edge, a rule between. The name is spelt whole on a row that has the
+   whole pane; the clock (metadata:full is the mode that shows seconds) sits
+   at the right edge, where a chat client's timestamps sit, and the rule
+   between them says where a turn's rows begin without spending a colour on
+   the heading.
 
    [plain] is the lead measured, [styled] the same cells dressed; the two
    are kept together by the one caller so the rule is measured against what
@@ -447,6 +443,23 @@ let dress_tool_summary (line : string) : string =
    inner width exactly: the lead, one space and the rule fill the room the
    clock leaves, and the clock takes its cell count plus the space before
    it. *)
+(* The bar down the left edge of a line someone else wrote, in the sender's
+   colour: solid, where the journal's siding is dotted, so the texture says
+   which kind of outside it came from (RFC chat-turn-rail-and-side-lanes
+   §4.6). Plain and styled. The space goes before the bar, not after: in the
+   inline gutter a name that fills its column would otherwise run into it,
+   and the glyph fills only the left quarter of its cell, so the rest of the
+   cell already keeps it off the text. *)
+let arrival_bar (style : Message_layout.style) =
+  match style with
+  | Message_layout.Inbound ->
+      ( " \xe2\x96\x8e",
+        Printf.sprintf " %s\xe2\x96\x8e%s" (Chat_theme.origin style) Ansi.reset )
+  | Message_layout.User | Message_layout.Keeper | Message_layout.Status
+  | Message_layout.Local | Message_layout.Journal | Message_layout.Error
+  | Message_layout.Tool | Message_layout.Skill _ | Message_layout.Thinking ->
+      ("", "")
+
 let origin_heading buf cols ~plain ~styled ~clock =
   let inner = framed_inner_width cols in
   let recede = Theme.recede () in
@@ -596,6 +609,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           match row.style, row.shade with
           | Message_layout.Journal, _ ->
               Printf.sprintf "%s┊%s " (Chat_theme.origin row.style) Ansi.reset
+          | Message_layout.Inbound, _ -> snd (arrival_bar row.style)
           | _, Message_layout.Shade_none -> "  "
           | _, Message_layout.Shade_quoted ->
               Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
@@ -618,28 +632,24 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
   | Message_layout.Metadata (Message_layout.Continued_at { clock }) ->
       (* The same speaker, later. Nothing changed at the left, so the row is
          the heading's tail alone: the rule to the clock. *)
-      origin_heading buf cols ~plain:"" ~styled:"" ~clock:(Some clock)
+      let bar, styled_bar = arrival_bar row.style in
+      origin_heading buf cols ~plain:(row.gutter ^ bar)
+        ~styled:(row.gutter ^ styled_bar) ~clock:(Some clock)
   | Message_layout.Metadata
-      (Message_layout.Origin { clock; speaker; role_label = _; request_label })
+      (Message_layout.Origin { clock; speaker; role_label = _ })
     ->
       (* [speaker], not [role_label]: the label was aligned to the gutter's
          column for the inline modes, and this row has the pane. A name the
-         gutter cut to "e-m…-leader" is spelled whole here. *)
+         gutter cut to "e-m…-leader" is spelled whole here.
+
+         No request id. It groups the rows of a turn, and the rows already
+         show that grouping; as text it was an identifier no reader acts on. *)
       let mark = Message_layout.speaker_mark row.style in
-      (* The dot separates a name from a request; a lane with no name (the
-         tool and reasoning blocks carry an empty label) draws the request
-         alone after its mark rather than a dot with nothing on its left. *)
-      let request =
-        if String.equal request_label "" || String.equal speaker "" then
-          request_label
-        else " \xc2\xb7 " ^ request_label
-      in
-      (* A keeper's own row without a request id has neither, and the mark
-         then stands alone before the rule instead of two spaces. *)
-      let gap =
-        if String.equal speaker "" && String.equal request "" then "" else " "
-      in
-      let plain = mark ^ gap ^ speaker ^ request in
+      let gap = if String.equal speaker "" then "" else " " in
+      (* A heading in an arrival's column starts after the blank run the
+         layout put in its gutter; everywhere else the gutter is empty. *)
+      let bar, styled_bar = arrival_bar row.style in
+      let plain = row.gutter ^ bar ^ mark ^ gap ^ speaker in
       let styled =
         match row.style with
         | Message_layout.Tool | Message_layout.Thinking ->
@@ -655,8 +665,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
               if String.equal speaker "" then ""
               else Printf.sprintf "%s%s%s" Ansi.reverse speaker Ansi.reset
             in
-            Printf.sprintf "%s%s%s%s%s%s%s%s" (Chat_theme.origin row.style)
-              Ansi.bold mark gap badge Ansi.dim request Ansi.reset
+            (* The mark's colour and weight end at the mark, not at whatever
+               follows it: a heading without a name has no badge to end
+               them, and the rule after it would draw bold in the speaker's
+               colour. *)
+            Printf.sprintf "%s%s%s%s%s%s%s%s" row.gutter styled_bar
+              (Chat_theme.origin row.style) Ansi.bold mark Ansi.reset gap badge
       in
       origin_heading buf cols ~plain ~styled ~clock
 
@@ -870,6 +884,12 @@ let keeper_call_association state ~keeper_name
    rather than held: the palette behind [Theme.*] is resolved against the
    terminal's answers and can change, and a cached record would keep drawing
    the colours the last answer produced. *)
+(* How much of a served input or output the full calls draw before folding
+   the rest. Enough to say what the payload is -- a member list, the head of
+   a table -- on a pane that draws about twenty rows; a whole result runs to
+   hundreds, and the Keeper Calls view is where it is read whole. *)
+let tool_document_rows_shown = 8
+
 let tool_detail_palette () : Tool_detail.palette =
   { Tool_detail.branch = Theme.recede ()
     (* A field's name and a document member's name are the same kind of
@@ -882,6 +902,7 @@ let tool_detail_palette () : Tool_detail.palette =
   ; number = Masc_tui_theme.Syntax.json_number
   ; literal = Masc_tui_theme.Syntax.json_literal
   ; punctuation = Masc_tui_theme.Syntax.json_punctuation
+  ; note = Theme.recede ()
     (* The pane opens these rows dim; a bare reset after the first painted
        span would drop every following byte back to full weight. Close the
        way the markdown palette closes: reset, then reopen the rung the tree
@@ -1057,24 +1078,29 @@ let keeper_message_tool_activity_details state ~keeper_name
                (said "status"
                   (Masc_tui_execute_result.status_text result)
                   (if result.ok then Theme.ok () else Theme.bad ()))
-           (* Absent is not empty: a large output rides an artifact, which
-              the context line names. *)
            ; Option.map
-               (fun output ->
-                 if String.equal output "" then said "output" "(empty)" ""
-                 else served "output" output)
+               (function
+                 | Masc_tui_execute_result.Printed "" -> said "output" "(empty)" ""
+                 | Masc_tui_execute_result.Printed output -> served "output" output
+                 | Masc_tui_execute_result.Stored reference ->
+                     said "output" (Masc_tui_execute_result.stored_text reference) "")
                result.output
            ; Option.map (served "stderr") result.stderr
-           ; Option.map
-               (fun text -> said "context" text "")
-               (Masc_tui_execute_result.rest_text result)
            ])
     @ [ Option.map (fun (label, value) -> said label value "") result_field
       ; Some (said "identity" identity "")
       ]
     |> List.filter_map Fun.id
   in
-  Tool_detail.tree ~palette:(tool_detail_palette ()) fields
+  Tool_detail.tree ~palette:(tool_detail_palette ())
+    ~fold:
+      { Tool_detail.fold_rows = tool_document_rows_shown
+      ; fold_note =
+          (fun hidden ->
+            Printf.sprintf "\xe2\x80\xa6 +%d lines \xc2\xb7 Keeper Calls (%s)" hidden
+              Masc_tui_keys.keeper_calls_key)
+      }
+    fields
 
 
 (* How one finished turn's tool block becomes rows: the operator's
@@ -1228,7 +1254,7 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
         |> List.filter (fun (message, _) ->
           message.me_role <> Message_thinking
           || Masc_tui_types.reasoning_drawn state.msg_reasoning_visibility)
-        |> Masc_tui_types.fold_memory_summary_runs
+        |> Masc_tui_types.project_memory_history
              ~visibility:state.msg_memory_visibility
         |> Masc_tui_types.project_gate_history ~visibility:state.msg_tool_visibility
       in
@@ -1454,16 +1480,16 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
             when state.msg_reasoning_visibility = Reasoning_folded ->
               folded_thinking_summary message.me_text
           | Message_skill _ -> (
-              match message.me_skill_activity with
-              | None -> message.me_text
-              (* The summary line carries the fact this row exists for —
-                 "delivered and used, N actions" — so it never folds. The
-                 action list, proof line and detail ride the tool toggle:
-                 Ctrl-D opens them, the resting pane stays one line. *)
-              | Some activity ->
+              match message.me_skill_block with
+              | [] -> message.me_text
+              (* One row per skill the turn triggered, counted, is the fact
+                 this row exists for. Each invocation's state, actions,
+                 proof line and detail ride the tool toggle: Ctrl-D opens
+                 them, the resting pane stays one line per skill. *)
+              | activities ->
                   Keeper_chat_transcript.skill_rows
                     ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
-                    activity
+                    activities
                   |> String.concat "\n")
           (* The Memory journal's change arrives inside a ["```diff"]
              fence, so a leading [+] is fence content rather than a list
@@ -1489,13 +1515,10 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                   | _ :: _, Some summary -> summary
                   | [], _ | _ :: _, None -> message.me_text)
               | Memory_summary -> (
-                  (* A summarised row is a cut row, so it says which key
-                     uncuts it. What that key does is the footer's line,
-                     which is on screen whenever this row is: spelling
-                     "journal detail" here again cost twenty-five cells on
-                     every journal row of the pane. *)
+                  (* The key that uncuts a summarised row is the footer's
+                     Ctrl-N:journal, on screen whenever this row is. *)
                   match message.me_memory_summary with
-                  | Some summary -> summary ^ " · Ctrl-N"
+                  | Some summary -> summary
                   | None -> message.me_text))
           (* Only a gated row: a Gate step's text ends in the argument the
              call asked for, while a status row without one is a sentence the
@@ -2169,15 +2192,44 @@ let render_keeper_message (state : state) =
           Message_layout.display_width context_separator
           + Message_layout.display_width item
     in
+    (* A Librarian that keeps failing is a state of this keeper's memory. It
+       is said here, once, for as long as the run lasts, instead of as a row
+       between every pair of turns ([project_memory_history]). It takes at
+       most half of what the context item leaves; the runtime id in the
+       identity yields first, as it does to the context item. *)
+    let librarian_item =
+      Option.map
+        (fun (failing : Masc_tui_types.librarian_failing) ->
+          fit_width
+            (Masc_tui_types.librarian_failing_text
+               ~since:(keeper_message_clock failing.lf_since) failing)
+            (max 0 ((inner_cells - context_cells) / 2)))
+        (Masc_tui_types.librarian_failing (chat_rows_for state keeper_name))
+    in
+    let librarian_cells =
+      match librarian_item with
+      | None -> 0
+      | Some item ->
+          Message_layout.display_width context_separator
+          + Message_layout.display_width item
+    in
     let identity =
       keeper_message_identity
-        ~max_cells:(max 0 (inner_cells - context_cells)) state keeper_name
+        ~max_cells:(max 0 (inner_cells - context_cells - librarian_cells))
+        state keeper_name
     in
     let identity_row =
-      match context_item with
-      | None -> identity
-      | Some item ->
-          identity ^ context_separator ^ Ansi.dim ^ item ^ Ansi.reset
+      String.concat ""
+        (identity
+         :: List.filter_map Fun.id
+              [ Option.map
+                  (fun item ->
+                    context_separator ^ Theme.warn () ^ item ^ Ansi.reset)
+                  librarian_item
+              ; Option.map
+                  (fun item -> context_separator ^ Ansi.dim ^ item ^ Ansi.reset)
+                  context_item
+              ])
     in
     if
       not
@@ -2417,17 +2469,19 @@ let render_keeper_message (state : state) =
                     in
                     let body = String.concat "\n" (projected_tool_rows projection) in
                     entry (tool_block_style projection) (label "") (annotate_body body)
-                | Keeper_chat_transcript.Drawn_skill skill ->
+                | Keeper_chat_transcript.Drawn_skill skills ->
                     entry
-                      (Message_layout.Skill (skill_tone_of_state skill.state))
+                      (Message_layout.Skill
+                         (skill_tone_of_state
+                            (Keeper_chat_transcript.skill_block_state skills)))
                       (label "")
                       (String.concat "\n"
-                         (* Same fold as the committed rows: the summary line
-                            stays, the action list, proof line and detail ride
-                            the tool toggle. *)
+                         (* Same fold as the committed rows: one counted row
+                            per skill; each invocation's state, actions,
+                            proof line and detail ride the tool toggle. *)
                          (Keeper_chat_transcript.skill_rows
                             ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
-                            skill))
+                            skills))
                 | Keeper_chat_transcript.Drawn_text text
                 | Keeper_chat_transcript.Drawn_reply text ->
                     (* No name on the heading, as on the committed rows:
@@ -3145,27 +3199,6 @@ let render_keeper_message (state : state) =
        caret did not. Reading the rows already in the frame, with the same
        [frame_lines] that builds it, cannot disagree with it. *)
     let rows_above_composer = count_frame_lines chat_buf in
-    (* An empty draft names the voice keys, as the composer row does under
-       every other surface. This pane binds them too and is the one an operator
-       speaks from, yet nothing on it said so: the key list in the footer has
-       no room for them. Measured 2026-09-13 at 120 columns, the footer read
-       [Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail]
-       and the draft row was a bare prompt. The hint sits after the caret, so
-       the caret column does not move, and it goes while a capture or
-       continuous mode runs, because the footer's meter says it louder.
-
-       Only where speech-to-text is set up. Without a transcriber the keys it
-       names refuse, and the sentence sat beside every empty draft of every
-       operator who never set voice up. *)
-    let voice_hint =
-      if String.equal input ""
-         && state.voice_stt_set_up
-         && state.keeper_message_focus = Right_pane
-         && Option.is_none state.voice_capture
-         && Option.is_none state.voice_continuous
-      then Ansi.dim ^ "  " ^ Masc_tui_keys.voice_keys_hint ^ Ansi.reset
-      else ""
-    in
     List.iteri
       (fun index line ->
         (* Only the first line carries the prompt; the rest line up under it so
@@ -3175,9 +3208,8 @@ let render_keeper_message (state : state) =
         let prefix =
           if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
         in
-        let hint = if index = 0 then voice_hint else "" in
         box_line chat_buf chat_cols
-          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.reset ^ line ^ hint))
+          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.reset ^ line))
       composer;
 
     let input_row =

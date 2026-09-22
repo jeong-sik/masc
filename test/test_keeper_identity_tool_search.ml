@@ -1126,6 +1126,7 @@ let test_load_survives_purge_checkpoint_and_resume () =
           ~trace_id:checkpoint.Agent_core.Checkpoint.session_id
           ~boundary_lines:[]
           ~continuity:None
+          ~progress:None
           checkpoint
       with
       | Ok (checkpoint, report) ->

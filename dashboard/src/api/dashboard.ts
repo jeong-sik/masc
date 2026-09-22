@@ -40,9 +40,13 @@ export type {
   FusionRunRecord,
   DashboardFusionRunsResponse,
   FusionConfigView,
+  FusionConfigSnapshot,
   FusionPresetConfigView,
   FusionPanelGroupView,
   FusionJudgeSpecView,
+  FusionPresetWire,
+  FusionConfigEditOperation,
+  FusionConfigEditFailure,
 } from './dashboard-fusion'
 export {
   parseFusionRunsResponse,
@@ -50,6 +54,10 @@ export {
   parseFusionConfigResponse,
   fetchFusionConfig,
   runnableTopologies,
+  presetToWire,
+  FusionConfigEditError,
+  parseFusionConfigEditError,
+  applyFusionConfigEdit,
 } from './dashboard-fusion'
 export type {
   VerificationRunStatusLabel,

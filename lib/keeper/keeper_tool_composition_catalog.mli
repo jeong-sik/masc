@@ -168,6 +168,11 @@ val entries : t -> entry list
 val find : t -> string -> entry option
 val tool_name : entry -> string
 
+val skill_name_of_tool_name : string -> string option
+(** The skill a composition tool is named after, or [None] for a name that is
+    not a composition tool. The tool is named from the skill, so a reader
+    that has only the name can say which skill ran. *)
+
 val skill_source_of_tool_name : string -> string option
 (** The SKILL.md a composition tool name came from, relative to the masc
     directory (["skills/<name>/SKILL.md"]), or [None] for a name that is not a

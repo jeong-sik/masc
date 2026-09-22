@@ -8,22 +8,66 @@ let script = function
   | Codex -> "https://chatgpt.com/codex/install.sh", "sh"
   | Claude -> "https://claude.ai/install.sh", "bash"
   | Antigravity -> "https://antigravity.google/cli/install.sh", "bash"
-let executable client =
-  let command = name client in
-  let directories = match client, Env_config_core.raw_value_opt "CODEX_INSTALL_DIR" with
-    | Codex, Some path when String.trim path <> "" -> [path]
-    | _ -> (match Env_config_core.raw_value_opt "HOME" with Some home -> [Filename.concat home ".local/bin"] | None -> []) in
-  let path = match Env_config_core.raw_value_opt "PATH" with
-    | Some path -> String.split_on_char ':' path
-    | None -> [] in
-  (directories @ path) |> List.find_map (fun directory ->
-    if directory = "" then None else
-    let candidate = Filename.concat directory command in
-    try
-      let candidate = Unix.realpath candidate in
-      Unix.access candidate [Unix.X_OK];
-      if (Unix.stat candidate).st_kind = Unix.S_REG then Some candidate else None
-    with Unix.Unix_error _ -> None)
+(* An executable regular file at [path], as the path was given. [stat] follows
+   a link, so a link to such a file passes; the path returned is the link,
+   not its target. The Claude Code installer keeps ~/.local/bin/claude as a
+   link into a versioned directory that an update replaces, so the link is
+   the name that stays valid. *)
+let runnable path =
+  match
+    (Unix.access path [ Unix.X_OK ];
+     (Unix.stat path).st_kind)
+  with
+  | Unix.S_REG -> Some path
+  | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> None
+  | exception Unix.Unix_error _ -> None
+;;
+
+(* A PATH entry the spawn can use. A shell reads an empty or relative entry
+   against the directory it is in; what is found here is spawned later from a
+   keeper's own working directory, where the same relative entry names
+   somewhere else, so only absolute entries are searched. *)
+let path_directories () =
+  match Env_config_core.raw_value_opt "PATH" with
+  | Some path ->
+    List.filter
+      (fun directory -> directory <> "" && not (Filename.is_relative directory))
+      (String.split_on_char ':' path)
+  | None -> []
+;;
+
+(* Where the vendor installer writes the client: CODEX_INSTALL_DIR for Codex
+   when set, else ~/.local/bin for each of the three. *)
+let vendor_directories client =
+  match client, Env_config_core.raw_value_opt "CODEX_INSTALL_DIR" with
+  | Codex, Some path when String.trim path <> "" -> [ path ]
+  | (Codex | Claude | Antigravity), _ ->
+    (match Env_config_core.raw_value_opt "HOME" with
+     | Some home -> [ Filename.concat home ".local/bin" ]
+     | None -> [])
+;;
+
+let locate client ~command =
+  if String.contains command '/'
+  then runnable command
+  else (
+    let first_in directories =
+      List.find_map (fun directory -> runnable (Filename.concat directory command)) directories
+    in
+    match first_in (path_directories ()) with
+    | Some path -> Some path
+    | None ->
+      if String.equal command (name client) then first_in (vendor_directories client) else None)
+;;
+
+let executable client = locate client ~command:(name client)
+
+let spawn_path client ~command =
+  match locate client ~command with
+  | Some path -> path
+  | None -> command
+;;
+
 let install ~run client =
   let ( let* ) = Result.bind in
   try

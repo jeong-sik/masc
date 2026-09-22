@@ -192,7 +192,8 @@ class ModelSelection(unittest.TestCase):
             id='openrouter', display_name='OpenRouter', protocol='openai-compatible-http',
             endpoint='https://openrouter.ai/api/v1', api_key_env='OPENROUTER_API_KEY',
             origin='agent_core_catalog', setup_support='new_connection', provider_kind='openai_compat')])
-        rows = SETUP.connection_sources(inventory)
+        with patch.object(SETUP, 'official_client_path', return_value=None):
+            rows = SETUP.connection_sources('/fixture', inventory)
         source = next(row for row in rows if row['provider_id'] == 'openrouter')
         self.assertEqual(source['choice'], 'openai_compatible')
         self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
@@ -205,7 +206,8 @@ class ModelSelection(unittest.TestCase):
                                setup_support='new_connection', credential_kind=kind)
             if kind == 'file':
                 integration['credential_file'] = '/private/owned-api-key'
-            source = SETUP.connection_sources(dict(runtimes=[], integrations=[integration]))[0]
+            with patch.object(SETUP, 'official_client_path', return_value=None):
+                source = SETUP.connection_sources('/fixture', dict(runtimes=[], integrations=[integration]))[0]
             self.assertEqual(source['credential_kind'], kind)
             if kind == 'file':
                 with patch.object(SETUP, 'native_discover_models', return_value=([], 'server')) as discover:
@@ -667,7 +669,9 @@ class NamedCatalogSources(unittest.TestCase):
     ]}
 
     def catalog_sources(self, inventory):
-        return [source for source in SETUP.connection_sources(inventory) if source.get('catalog_provider')]
+        with patch.object(SETUP, 'official_client_path', return_value=None):
+            sources = SETUP.connection_sources('/fixture', inventory)
+        return [source for source in sources if source.get('catalog_provider')]
 
     def test_unconfigured_catalog_integrations_become_named_sources(self):
         sources = self.catalog_sources(self.INVENTORY)
@@ -921,12 +925,11 @@ class MultipleSelection(unittest.TestCase):
             self.assertEqual(SETUP.pick('Connections', ['Codex', 'Claude'], multiple=True), [0])
 
     def test_fast_setup_still_exposes_every_provider_through_browse(self):
-        sources = [dict(choice='claude_code', command='claude', credential_file=None, api_key_env='',
-                        endpoint='', label='Claude Code'),
-                   dict(choice='openai_compatible', command='', credential_file=None, api_key_env='FIXTURE_NO_API_KEY',
-                        endpoint='https://example.org', label='Another provider')]
-        with patch.object(SETUP.shutil, 'which', return_value='/owned/claude'), \
-                patch.dict(os.environ, {'FIXTURE_NO_API_KEY': ''}), \
+        sources = [dict(choice='claude_code', command='claude', command_path='/owned/claude', credential_file=None,
+                        api_key_env='', endpoint='', label='Claude Code'),
+                   dict(choice='openai_compatible', command='', command_path=None, credential_file=None,
+                        api_key_env='FIXTURE_NO_API_KEY', endpoint='https://example.org', label='Another provider')]
+        with patch.dict(os.environ, {'FIXTURE_NO_API_KEY': ''}), \
                 patch.object(SETUP, 'pick', side_effect=[[3], [1]]) as picker:
             shown, selected = SETUP.pick_connection_sources(sources)
         self.assertEqual(len(picker.call_args_list[0].args[1]), 4)

@@ -7,6 +7,10 @@
 val escape_string : string -> string
 (** Escape a TOML basic string payload. *)
 
+val render_key : string -> string
+(** A key or one table-path segment as TOML spells it: bare when it is only
+    letters, digits, underscore and dash, quoted otherwise. *)
+
 val scalar_line : key:string -> value:string -> string
 (** Render [key = "value"]. *)
 
@@ -33,6 +37,11 @@ val header_of_line : string -> header option
 val is_table_header : string -> bool
 (** Return [true] when [header_of_line line] is a header of either kind. *)
 
+val header_trailing_comment : string -> string option
+(** The comment after a header line, with the spaces before it:
+    [Some "  # note"] for [\[a.b\]  # note]. [None] when the line is not a
+    header or carries no comment. A [#] inside a quoted key is not one. *)
+
 val is_table : path:string -> string -> bool
 (** Return [true] when [line] opens the standard table [[path]], compared by
     the key path the grammar reads from each. *)
@@ -42,6 +51,11 @@ val split_at : int -> 'a list -> 'a list * 'a list
 
 val find_index : ('a -> bool) -> 'a list -> int option
 (** Return the zero-based index of the first matching element. *)
+
+val structural_lines : string list -> bool list
+(** For each line, whether it begins outside every value opened on an earlier
+    line. A header, key or comment is structure only on such a line: inside a
+    triple-quoted string or a multi-line array the same text is data. *)
 
 val key_of_line : string -> string option
 (** Return the assignment key in a [key = value] line, if present. *)

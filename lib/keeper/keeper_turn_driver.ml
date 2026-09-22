@@ -1553,78 +1553,30 @@ let run_named
          completed turns' tool bodies demote. Read once per turn for every
          input policy and lane. A turn resuming an operation composes from
          its recovery view and names no boundary here, as before. *)
-      let completed_end_atom = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+      let turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id, recovery_view with
         | Some trace_id, None ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
             Keeper_turn_driver_try_provider.turn_start
               ~config:(Workspace.default_config base_path) ~keeper_name ~trace_id
               ~messages:initial_messages)
-        | None, _ | Some _, Some _ -> 0) in
+        | None, _ | Some _, Some _ -> Keeper_carried_front.Turn_boundary { end_atom = 0 }) in
       let continuity = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id, recovery_view with
-        | None, _ | _, Some _ -> Ok None
+        | None, _ | _, Some _ -> None
         | Some trace_id, None ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
             let config = Workspace.default_config base_path in
-            let ( let* ) = Result.bind in
-            let* saved = Keeper_librarian_continuity.read ~config ~keeper_name in
-            (* Where a request without a fitting snapshot starts: the
-               Librarian's durable position when it is a place in this history
-               (RFC keeper-context-window-in-tokens §13.6), else this turn's
-               own boundary (§13.4). *)
-            let absorbed_or_turn_start ~why =
-              let absorbed =
-                match
-                  Keeper_librarian_progress.read
-                    ~keepers_dir:(Workspace.keepers_runtime_dir config)
-                    ~keeper_id:keeper_name
-                with
-                | Ok (Some progress) ->
-                  Keeper_turn_driver_try_provider.absorbed_history
-                    ~trace_id ~messages:initial_messages progress
-                | Ok None -> None
-                | Error error ->
-                  Log.Keeper.warn ~keeper_name
-                    "Librarian progress unreadable while no continuity snapshot fits (%s): %s"
-                    why (Keeper_librarian_progress.read_error_to_string error);
-                  None
-              in
-              match absorbed with
-              | Some (end_atom, continuity) ->
-                Log.Keeper.info ~keeper_name
-                  "no Librarian continuity snapshot fits the current history (%s); starting at the Librarian's position, atom %d"
-                  why end_atom;
-                Ok (Some continuity)
-              | None ->
-                Log.Keeper.info ~keeper_name
-                  "no Librarian continuity snapshot fits the current history (%s); the request starts at this turn's own boundary"
-                  why;
-                Ok (Some Keeper_turn_driver_try_provider.without_snapshot)
-            in
-            match saved with
-            | None -> absorbed_or_turn_start ~why:"no continuity snapshot is saved"
-            | Some snapshot ->
-              let* lines = Keeper_turn_boundaries.read
-                ~keepers_dir:(Workspace.keepers_runtime_dir config)
-                ~keeper_id:keeper_name in
-              match Keeper_turn_driver_try_provider.prepare_continuity ~trace_id ~lines
-                ~messages:initial_messages snapshot with
-              | Ok restored -> Ok (Some restored)
-              | Error
-                  ((Librarian_continuity_snapshot.Trace_mismatch
-                   | Librarian_continuity_snapshot.History_changed
-                   | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
-                (* The snapshot no longer fits this history. The Librarian's
-                   durable position may still: goo-yang-bong's did on
-                   2026-09-22 while its snapshot did not, and the keeper sent
-                   its 12,720 atoms, 16.4 MB, 44 cycles in a row until the
-                   position was used. From the position the request carries
-                   what the Librarian has not read (RFC
-                   keeper-context-window-in-tokens §13.6); with no position it
-                   starts at this turn's own boundary (§13.4). *)
-                absorbed_or_turn_start ~why:(Librarian_continuity_snapshot.error_to_string mismatch)
-              | Error error -> Error (Librarian_continuity_snapshot.error_to_string error)))
+            let keepers_dir = Workspace.keepers_runtime_dir config in
+            Some
+              (Keeper_turn_driver_try_provider.continuity_for_request
+                 ~keeper_name ~trace_id ~messages:initial_messages
+                 ~snapshot:(Keeper_librarian_continuity.read ~config ~keeper_name)
+                 ~lines:(fun () ->
+                   Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:keeper_name)
+                 ~progress:(fun () ->
+                   Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name
+                   |> Result.map_error Keeper_librarian_progress.read_error_to_string))))
       in
 	  let refused_carried_front = ref None in
 	  (* The same front the Agent Core branch reads, for the official-client
@@ -1646,6 +1598,56 @@ let run_named
 	      (match carried_front_seed with
 	       | Some read -> read ()
 	       | None -> Keeper_carried_front.no_seed_read)
+	  in
+	  (* The official-client branches take the continuity the Agent Core branch
+	     takes ([continuity] above): one choice per turn for every lane, so the
+	     order -- a fitting working state, else the Librarian's read position,
+	     else the turn start -- is the same on both. These lanes cut their start
+	     seed themselves, so the choice is handed over as a position in the
+	     exact list each composition cuts, and checked against that list on
+	     every call, because a lane composes more than once in a turn and the
+	     list grows between compositions. A list that no longer holds what the
+	     choice covered refuses the request, as the same check refuses an
+	     Agent Core request ([validate_continuity]): one rule on both lanes
+	     for a history that moved under the turn.
+
+	     [attempt_messages] is the list this candidate starts from, which is
+	     the turn's history as this candidate sees it: a runtime that cannot
+	     see an image is handed a reading of it in the image's place
+	     ([project_input_for_attempt]). The check is held to that rendering
+	     ([continuity_for_attempt]), so it answers whether the list moved in
+	     flight rather than whether this candidate renders the history the
+	     way the checkpoint stores it (#37812). *)
+	  let official_client_librarian_front ~attempt_messages messages =
+	    match Eio.Lazy.force continuity with
+	    | None -> Ok Keeper_turn_driver_try_provider.No_position
+	    | Some chosen ->
+	      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+	        Keeper_turn_driver_try_provider.librarian_position
+	          ~messages
+	          (Keeper_turn_driver_try_provider.continuity_for_attempt
+	             ~messages:attempt_messages
+	             chosen))
+	  in
+	  (* The same record the Agent Core branch writes before each request
+	     ([pre_dispatch_serialization_observer] in
+	     [Keeper_turn_driver_try_provider]), so the Memory screen shows what an
+	     official-client request started from too. The bytes are the carried
+	     range in the canonical encoding, which is what these lanes measure;
+	     the Agent Core record holds its serialized body. *)
+	  let record_official_client_continuity ~runtime_id front ~transmitted_bytes =
+	    match session_id with
+	    | None -> ()
+	    | Some trace_id ->
+	      Keeper_continuity_observation.record
+	        ~config:(Workspace.default_config base_path) ~keeper_name
+	        { Keeper_continuity_observation.prepared_at = Time_compat.now ()
+	        ; runtime_id
+	        ; input =
+	            Keeper_official_client_host.continuity_observation_input
+	              ~trace_id ~continuity:(Eio.Lazy.force continuity) front
+	        ; request_bytes = transmitted_bytes
+	        }
 	  in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)
@@ -2277,7 +2279,10 @@ let run_named
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
-            ~turn_start:(Eio.Lazy.force completed_end_atom)
+            ~librarian_front:
+              (official_client_librarian_front ~attempt_messages:initial_messages)
+            ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
+            ~turn_start:(Eio.Lazy.force turn_boundary)
             (* Antigravity's CLI assembles the wire, so the shape masc can
                report is the list it handed over. *)
             ?on_model_input_window_observation:
@@ -2396,7 +2401,10 @@ let run_named
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
-            ~turn_start:(Eio.Lazy.force completed_end_atom)
+            ~librarian_front:
+              (official_client_librarian_front ~attempt_messages:initial_messages)
+            ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
+            ~turn_start:(Eio.Lazy.force turn_boundary)
             ~pre_tool_rejects
             ~base_path
             ~goal
@@ -2498,13 +2506,15 @@ let run_named
         , claude_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Agent_core runtime_provider_config ->
-       let continuity = Eio.Lazy.force continuity in
+       (* Held to this candidate's own rendering of the history, for the
+          reason [official_client_librarian_front] states. *)
+       let continuity =
+         Option.map
+           (Keeper_turn_driver_try_provider.continuity_for_attempt
+              ~messages:initial_messages)
+           (Eio.Lazy.force continuity)
+       in
        (match
-          match continuity, recovery_view with
-          | Error detail, None ->
-            Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
-              { field = "librarian.continuity"; detail }))
-          | (Ok _ | Error _), _ ->
           match provider_config_transform with
           | None -> Ok runtime_provider_config
           | Some transform -> transform runtime_provider_config
@@ -2559,10 +2569,8 @@ let run_named
             ; error_runtime_id
             ; context_marks
             ; input_policy
-            ; completed_end_atom = Eio.Lazy.force completed_end_atom
-            ; continuity = (match recovery_view, continuity with
-                | None, Ok snapshot -> snapshot
-                | Some _, _ | None, Error _ -> None)
+            ; turn_boundary = Eio.Lazy.force turn_boundary
+            ; continuity
             ; (* Read only when the process holds no ledger for this pair:
                  the range the newest completed Agent Core turn record on
                  this history measured, whichever runtime ran it, so a

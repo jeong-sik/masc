@@ -111,9 +111,10 @@ type kind =
       (** One typed block of calls. Either consecutive [role: "tool"] rows,
           or the tool steps of one autonomous turn's trace block. Rendering is
           deferred to the shared [Compact | Full] projector. *)
-  | Skill_activity of Masc_tui_keeper_chat_transcript.skill_activity
-      (** Exact per-turn Skill activation evidence derived by the server from
-          the durable activation ledger. It distinguishes served content from
+  | Skill_activity of Masc_tui_keeper_chat_transcript.skill_activity list
+      (** One turn's Skill activations, as the server derived them from the
+          durable activation ledger; one row for the turn, the way its tool
+          steps are one block. Each distinguishes served content from
           provider delivery and observed post-delivery actions. *)
   | Reasoning of string list
       (** What the keeper reasoned during one autonomous turn, as the trace
@@ -137,13 +138,16 @@ type kind =
   | Memory_activity of
       { summary : string option
       ; journal : Masc_tui_message_layout.journal_line list
+      ; pass : Masc_tui_message_layout.memory_pass
       }
       (** A committed or failed Memory OS journal pass. [journal] is a
           committed revision's added, removed and dropped lines, typed, for
           the pane to draw in columns; [row.text] says the same in plain text
           for readers of text, or carries the typed failure detail. [summary]
           is the producer-built one-line projection. Neutral system rows reuse
-          this lane with [None] and therefore remain whole in summary mode. *)
+          this lane with [None] and therefore remain whole in summary mode.
+          [pass] says whether the row is a committed pass, a failed one, or
+          no pass at all, so the pane never reads it back out of [summary]. *)
   | Fusion_conclusion of fusion_conclusion
       (** A [Fusion] block the assistant row carried: the deliberation
           conclusion is the row's own [content], and this names the run and

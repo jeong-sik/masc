@@ -3178,7 +3178,11 @@ let runtime_model_list_cmd =
 
 let runtime_codex_models_cmd =
   let cli = Arg.(value & opt string "codex" & info ["cli-path"] ~docv:"EXECUTABLE") in
-  let run cli_path = Masc_cli_codex_models.run ~cli_path ~timeout_s:runtime_probe_subscription_timeout_s in
+  let run cli_path =
+    Masc_cli_codex_models.run
+      ~cli_path:(Runtime_official_cli_install.spawn_path Codex ~command:cli_path)
+      ~timeout_s:runtime_probe_subscription_timeout_s
+  in
   Cmd.v (Cmd.info "runtime-codex-models" ~doc:"Refresh selected Codex model metadata in an isolated connection home without a model turn.")
     Term.(const run $ cli)
 
@@ -3387,7 +3391,9 @@ let antigravity_account_cmd =
       | false, None -> Some Import_current in
     match action with
     | None -> prerr_endline "Choose sign-in or an existing account reference."; 1
-    | Some action -> Masc_cli_antigravity.account ~base_path ~cli_path
+    | Some action ->
+      Masc_cli_antigravity.account ~base_path
+        ~cli_path:(Runtime_official_cli_install.spawn_path Antigravity ~command:cli_path)
         ~timeout_s:runtime_probe_subscription_timeout_s ~action in
   Cmd.v (Cmd.info "runtime-antigravity-account" ~doc:"Select an Antigravity account and list its actual models without a model turn.")
     Term.(const run $ base_path $ cli_path $ sign_in $ credential)
@@ -3395,8 +3401,11 @@ let antigravity_account_cmd =
 let antigravity_models_cmd =
   let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
   let credential = Arg.(required & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
-  let run cli_path oauth_source = Masc_cli_antigravity.models ~cli_path ~oauth_source
-    ~timeout_s:runtime_probe_subscription_timeout_s in
+  let run cli_path oauth_source =
+    Masc_cli_antigravity.models
+      ~cli_path:(Runtime_official_cli_install.spawn_path Antigravity ~command:cli_path)
+      ~oauth_source ~timeout_s:runtime_probe_subscription_timeout_s
+  in
   Cmd.v (Cmd.info "runtime-antigravity-models" ~doc:"Refresh the selected Antigravity account's models without a model turn.")
     Term.(const run $ cli_path $ credential)
 
@@ -3407,7 +3416,10 @@ let antigravity_context_cmd =
   let run cli_path oauth_source model_id =
     match Masc_cli_onboarding.python (Unix.realpath Sys.executable_name) with
     | None -> prerr_endline "The installed Python helper is missing. Reinstall the complete MASC release."; 1
-    | Some python_path -> Masc_cli_antigravity.context ~python_path ~cli_path ~oauth_source ~model_id
+    | Some python_path ->
+      Masc_cli_antigravity.context ~python_path
+        ~cli_path:(Runtime_official_cli_install.spawn_path Antigravity ~command:cli_path)
+        ~oauth_source ~model_id
         ~timeout_s:runtime_probe_subscription_timeout_s in
   Cmd.v (Cmd.info "runtime-antigravity-context" ~doc:"Read the selected account model's actual CLI context without a model prompt.")
     Term.(const run $ cli_path $ credential $ model)
@@ -3423,6 +3435,15 @@ let setup_stop_owner_cmd =
     ~login:(fun () -> ensure_local_operator_login ~base_path ~port ~agent) in
   Cmd.v (Cmd.info "setup-stop-previous-owner" ~doc:"Gracefully stop the authenticated owner selected for workspace upgrade.")
     Term.(const stop $ base_path $ port $ login_agent $ expected_version)
+
+let runtime_client_path_cmd =
+  let client = Arg.(required & opt (some Masc_cli_client_path.client_arg) None & info ["client"]
+    ~docv:"CLIENT" ~doc:"claude-code, codex or antigravity.") in
+  let command = Arg.(value & opt (some string) None & info ["command"]
+    ~docv:"COMMAND" ~doc:"The configured command; defaults to the client's own name.") in
+  Cmd.v (Cmd.info "runtime-client-path"
+    ~doc:"Print where an official client runs from, as the runtime will spawn it.")
+    Term.(const (fun client command -> Masc_cli_client_path.run ~client ~command) $ client $ command)
 
 let sandbox_catalog_cmd =
   let inspect requested =
@@ -3697,6 +3718,7 @@ let cmd =
     ; setup_stop_owner_cmd
     ; doctor_cmd
     ; sandbox_catalog_cmd
+    ; runtime_client_path_cmd
     ; token_cmd
     ; build_commit_cmd
     ]

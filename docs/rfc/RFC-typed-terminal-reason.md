@@ -15,6 +15,8 @@ related: ["0454", "0371", "0004"]
   종료 사유를 닫힌 합타입 `Keeper_turn_end.t` 로 만들어 영수증(receipt)과 decision log 에 그대로 싣는다.
   문자열은 화면과 metric label 로 내보낼 때만 만든다.
 - 기준: main `7755743ea7`. 라이브 데이터는 `<base-path>/.masc/keepers` 를 읽기만 했다.
+  실측 조건: `<base-path>` = 이 워크스페이스의 라이브 루트, 2026-09-22 13:35 KST. keeper 디렉터리는 그 뒤에도 바뀌므로
+  (같은 날 14:25 재측정에서 keeper 16개, receipt 파일 214개, 49,217줄, 132MB) 아래 숫자는 그 시각의 것이고, 비율만 재현된다.
 
 ## 1. 결정 (초안, 운영자 확인 필요)
 
@@ -40,8 +42,7 @@ related: ["0454", "0371", "0004"]
   그래서 첫 PR 은 그 catch-all 을 명시 갈래로 바꾸는 일이다.
 - **D8 클라이언트는 wire 문자열로 판정하지 않는다.** 서버가 typed 값으로 내린 판정(막힘, severity, 다음 행동)을 그린다.
   막힘은 실패 종류일 때만이고, 서버는 그것을 `Keeper_turn_end.t` 의 exhaustive match 로 정한다(§3.8).
-- **D9 RFC-0159 파일을 이 커밋에서 지운다.** 그 문서는 지금 없는 `Disp_pause_human` 과 문자열 갈래를 전제로 쓰였다.
-  그 문서가 원한 것, 곧 내부 실패의 출처를 구별하는 일은 D1 의 typed 값이 싣는다(§3.2).
+- **D9 내부 실패의 출처는 D1 의 typed 값이 싣는다(§3.2).** 출처를 가르려고 reason 라벨을 쪼개는 설계는 두지 않는다.
 - **D10 배포할 때 옛 receipt 디렉터리를 지운다** (2026-09-22 결정, Q3 닫힘). PR-3c 를 배포할 때
   `<base>/.masc/keepers/*/execution-receipts/` 를 지운다. 2026-09-22 기준 keeper 27개, 파일 335개,
   77,625줄, 207MB 다. 지우지 않아도 부팅은 막히지 않지만(§3.6), 남겨 두면 키퍼가 턴을 한 번 돌기 전까지
@@ -116,7 +117,7 @@ Agent_core.Error.t                      원인을 아는 곳은 여기뿐이다
 | G12 | `keeper_turn_disposition.ml:54-61` `to_wire` | `success`, `input_required`, `external_cancel`, `runtime_attempts_exhausted` | `Keeper_turn_disposition.t` |
 | G13 | `keeper_unified_metrics_decision.ml:113-117` | `unknown_error` 기본값 | 없음. 호출자 2곳이 모두 값을 넘겨 이 갈래는 도달하지 않는다 |
 
-- 문자열을 만드는 함수: 13곳, 파일 8개.
+- 문자열을 만드는 함수: 13곳, 파일 10개(G1–G13 표).
 - receipt 레코드를 만드는 곳은 2곳이다. `keeper_agent_run_receipt.ml:151-200` 과 `keeper_turn_helpers.ml:189-231`.
   여기에 값을 넘기는 호출자는 6곳이다(agent run 1곳 + pre-dispatch 5곳: G8 셋, G9, G10).
 - `Keeper_terminal_reason` 의 `Pre_dispatch_success` 버킷은 `"pre_dispatch_success"` 를 기다린다.
@@ -170,7 +171,7 @@ Agent_core.Error.t                      원인을 아는 곳은 여기뿐이다
   생산자가 없는 `pre_dispatch_success` 도 마찬가지다. 30일 receipt 중 `yielded_*` 가 7,758줄(10.0%)이다.
   C4 도 같은 모양이다. disposition 이 `Success` 가 아니면 attention 이다(`dashboard_execution.ml:378-392`).
 
-**브리프와 다른 점.** `is_transient_provider_runtime_failure` 는 `Disp_retry_later` 를 가르지 않는다.
+**확인된 사실.** `is_transient_provider_runtime_failure` 는 `Disp_retry_later` 를 가르지 않는다.
 transient 갈래(226-236)도, 아닌 갈래(237-241)도 `Disp_retry_later` 다. reason 라벨만
 `transient_runtime_retry` 와 `provider_runtime_error` 로 다르다. 그리고 `Disp_retry_later` 는 아무것도 예약하지 않는다.
 broadcast 도 없다. 이 판정은 라벨이다.
@@ -188,9 +189,10 @@ broadcast 도 없다. 이 판정은 라벨이다.
 | `scripts/keeper-runtime-truth-gate.sh:139` | fixture |
 | `scripts/check-boundary-guard.sh:282-287` (V7r) | 지울 파일 목록 |
 
-- TS 는 테스트가 아닌 파일 14개가 이 값을 받고, 2개 파일이 값으로 분기한다.
+- TS 는 테스트가 아닌 파일 14개가 이 값을 받고, 기준 main 에서는 3개 파일(`fsm-hub.ts`, `fsm-hub-types.ts`, `fleet-fsm-matrix.ts`)이
+  값으로 분기하며 `keeper-detail-alert-strip.ts:150, 217, 342` 가 `isTurnTerminalFailureCode` 로 간접 분기한다.
   클라이언트가 서버의 wire 를 다시 분류하는 것이 문제의 모양이다. 서버와 클라이언트가 같은 어휘를 따로 베끼고, 한쪽이 바뀌면 다른 쪽은 조용히 틀린다.
-- 막힘 판정의 소비자는 서버의 C3 `composite_execution_blocked` 하나다. `fleet-fsm-matrix.ts` 는 서버의 `runtime_attention` 만 그린다(b58ddba17b).
+- 막힘 판정의 소비자는 서버의 C3 `composite_execution_blocked` 하나다. `fleet-fsm-matrix.ts` 는 #37684(main `7c7a5626dc`) 뒤로 서버의 `runtime_attention` 만 그린다.
 - TUI 는 이 값을 읽지 않는다.
 - 테스트: masc `test/` 19개 파일, agent_core 테스트 4개 파일이 닿는다.
 
@@ -244,13 +246,13 @@ broadcast 도 없다. 이 판정은 라벨이다.
   `agent_error_hook_execution_failed` 4, 기타 2. 전부 2026-09-02 이전이다. 첫 줄은 지금 코드가 쓰지 않는 옛 철자다.
   철자가 바뀔 때마다 분류기가 따라가야 했다는 뜻이다.
 - 성공 receipt 는 `"success"` 를 쓴다(G6, G7). `"completed"` 는 `stop_reason` 필드에만 있다.
-  대시보드가 `'completed'` 와 비교해 막힘을 다시 정하던 코드는 성공한 keeper 를 "정체" 로 그렸다. b58ddba17b 가 그 재분류를 지웠다.
+  대시보드가 `'completed'` 와 비교해 막힘을 다시 정하던 코드는 성공한 keeper 를 "정체" 로 그렸다. #37684 가 그 재분류를 지웠다.
   `fsm-hub.ts` 의 receipt 색은 아직 같은 비교를 쓴다.
 
 ### 2.7 같은 뿌리의 다른 자리
 
-- `server_dashboard_http_composite_claims.ml:370` 은 서버가 자기가 쓴 JSON 을 다시 읽으며 `"pause_human"` 과 비교한다.
-  지금 `operator_disposition_kind` 에 그 값은 없다. 다른 PR 이 처리 중이라 이 RFC 는 건드리지 않는다.
+- 서버가 자기가 쓴 JSON 을 다시 읽으며 `"pause_human"` 과 비교하던 자리(`server_dashboard_http_composite_claims.ml`)는
+  `operator_disposition_kind` 에 없는 값을 기다리고 있었다. #37684 가 지웠다. 같은 뿌리의 사례로만 적는다.
 - `Keeper_internal_error.classify_masc_internal_error_of_string` 과 `[masc_agent_core_error]` 접두어 메시지는 RFC-0454 가 목록으로 다룬다.
 
 ## 3. 설계
@@ -285,12 +287,15 @@ and failure =
 val of_core_error : Agent_core.Error.t -> failure
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, decode_error) result
-val label : t -> string   (* 표시와 metric label 용. 읽어서 판정하지 않는다 *)
+val label : t -> stop_reason:Keeper_execution_receipt_types.stop_reason -> string
+  (* 표시와 metric label 용. 읽어서 판정하지 않는다. Turn_ok 의 글자는 stop_reason 이 정한다 *)
 val summary : t -> string
 ```
 
 - `Turn_ok` 에 stop_reason 을 싣지 않는다. receipt 에 이미 typed `stop_reason` 필드가 있다.
-  지금 문자열은 그 필드를 한 번 더 굽는다(G6). 같은 사실을 두 번 저장하지 않는다.
+  지금 문자열은 그 필드를 한 번 더 굽는다(G6: `success`, `input_required`, `yielded_*` 넷). 같은 사실을 두 번 저장하지 않는다.
+  그래서 `label` 은 `Turn_ok` 만으로 그 여섯 글자를 만들 수 없다. `label` 은 receipt 의 typed `stop_reason` 을 함께 받는다
+  (`val label : t -> stop_reason:Keeper_execution_receipt_types.stop_reason -> string`). §5 의 바이트 비교는 이 시그니처 기준이다.
 - 생성자마다 원래 typed 값이 가진 매개변수를 그대로 든다. 상태 코드, timeout phase, repeating shape, config field 가 그렇다.
   지금은 이것들이 `:` 뒤 문자열로 붙는다.
 - `of_core_error` 는 carrier 에 masc 값이 있으면 `Masc`, 없으면 `Core` 를 만든다. 결정하는 곳은 여기 한 곳이다.
@@ -334,7 +339,7 @@ val summary : t -> string
 
 - `Internal_error` 버킷에는 출처가 넷이다. carrier 없는 internal, `Internal_unhandled_exception { site; ... }`,
   `Internal_bridge_exception { caller; ... }`, `Internal_contract_rejected` 다. 이 출처는 receipt 의 typed 값에 그대로 남는다.
-  출처를 가르려고 reason 라벨을 쪼갤 필요가 없다. 지운 RFC-0159 가 원한 구별은 이것으로 된다.
+  출처를 가르려고 reason 라벨을 쪼갤 필요가 없다.
 - `is_transient_provider_runtime_failure` 는 typed 판정이 된다.
   `Api Timeout`, `Api NetworkError`, `Provider Timeout`, `Provider NetworkError { kind = Timeout }` 이 `true` 다.
   지금 접두어가 고르는 집합과 같다. `Provider NetworkError` 의 다른 kind 는 phase 가 있어도 지금처럼 `false` 다.
@@ -403,7 +408,7 @@ type official_client_failure =
 **컴파일러가 못 잡는 자리.** 새 생성자를 더해도 아래 자리들은 컴파일 오류가 나지 않는다. masc 분류 결과를 catch-all 로 받기 때문이다.
 
 - `keeper_runtime_attempt.ml:142-143` 의 `| Some _ | None ->`. 새 생성자는 이 갈래로 떨어진다.
-  안쪽 match 는 `Internal_carried` 에 `None` 을 준다(201-208). 그러면 `lane_should_retry` 가 `false` 가 되고 레인이 거기서 멈춘다.
+  안쪽 match 는 `Internal_carried` 에 `None` 을 준다(198-204). 그러면 `lane_should_retry` 가 `false` 가 되고 레인이 거기서 멈춘다.
   지금은 `ProviderReportedError` → `ProviderFailure` → `should_try_next = true` 로 다음 후보에 간다.
   영향을 받는 것은 codex(`rpc_error`, `turn_failed`), claude_code(`turn_failed`), antigravity(`turn_failed`) 의 실패 중
   effect 가 관측되지 않은 것이다. effect 가 관측된 실패는 driver 가 먼저 fence 로 감싼다.
@@ -426,10 +431,10 @@ PR-0 뒤에는 새 생성자가 이 자리들에서 컴파일 오류가 된다. 
 `summary_of_masc_internal_error` 는 새 생성자에 한 줄을 만든다.
 
 위 표는 `ProviderReportedError` 를 이름으로 받는 자리만 센 것이다. 값이 `Provider _` 에서 `Internal_carried _` 로 옮겨 가므로
-두 갈래를 통째로 받는 자리도 답이 같아야 한다. `lib/` 에 `Agent_core.Error.Provider _` 를 통째로 받는 자리가 18곳,
-`Internal_carried` 를 받는 자리가 28곳 있다.
+두 갈래를 통째로 받는 자리도 답이 같아야 한다. `lib/` 에 `Provider _` 를 통째로 받는 자리가 19곳(한정 이름 `Agent_core.Error.Provider _` 18곳과
+or-pattern 안의 비한정 `| Provider _` 인 `keeper_task_skill_turn.ml:156` 1곳), `Internal_carried` 를 받는 자리가 28곳(패턴 줄 기준, 생성자 정의와 주석 제외) 있다.
 
-- `Provider _` 18곳은 전부 열어 봤다. 16곳은 `Internal_carried _` 와 답이 같다(`false` 또는 `None`).
+- `Provider _` 19곳은 전부 열어 봤다. 17곳은 `Internal_carried _` 와 답이 같다(`false` 또는 `None`; `keeper_task_skill_turn.ml:156` 은 `None`).
   `keeper_turn_driver.ml:652-664, 840-844`, `keeper_turn_driver_try_runtime.ml:52, 97, 122`, `keeper_turn_driver_try_provider.ml:1986`,
   `keeper_error_classify.ml:84, 140, 179, 196, 595`, `keeper_turn_runtime_budget.ml:108`, `runtime_agent_core_runner.ml:54`,
   `keeper_runtime_failure_route.ml:81`, `keeper_agent_error.ml:36`, `keeper_event_bridge_error_json.ml:126` 이다.
@@ -462,7 +467,9 @@ provider 마다 어휘가 다르고 masc 가 정하지 않는다. 데이터로 �
 - 그 밖의 `Api _`, `Provider _` 생성자 각각
 - `Agent _`, `Mcp _`, `Serialization _`, `Io _`, `Orchestration _`, carrier 없는 internal
 
-RFC-0454 의 "생성자별" 이 이것을 모두 덮는다.
+RFC-0454 의 지금 표(§2.2, `:175`)는 `Api NetworkError` 와 `Provider NetworkError` 를 한 생성자 `Network { runtime; kind }` 로 합친다.
+그 모양으로는 위 셋째 줄을 가를 수 없다(`Api NetworkError` 는 항상 transient, `Provider NetworkError` 는 `kind = Timeout` 일 때만).
+PR-2b 는 둘을 따로 둔다. RFC-0454 P2 가 먼저 열리면 그 표를 이 조건에 맞춰야 하고, 그것이 Q2 의 조건이다.
 
 ### 3.5 문자열이 남는 곳
 
@@ -476,8 +483,8 @@ RFC-0454 의 "생성자별" 이 이것을 모두 덮는다.
 **receipt (S1, PR-3c).** `Dated_jsonl` 은 JSON 으로 파싱되지 않는 줄만 건너뛴다(`dated_jsonl.ml:1005-1041`).
 옛 줄은 JSON 으로는 멀쩡하니 `Yojson.Safe.t` 로 올라온다. 그 뒤 `Keeper_turn_end.of_yojson` 이 `terminal_reason` 이 없다고 거절한다.
 
-- 부팅은 막히지 않는다. receipt 를 읽는 곳은 trust snapshot, composite claims, dashboard trust·goals, telemetry,
-  `masc_keeper_status` 도구(`keeper_status_detail.ml:567`)뿐이다. 부팅 경로에서 읽는 곳은 없다.
+- 부팅은 막히지 않는다. receipt 를 읽는 곳은 trust snapshot(C2; `masc_keeper_status` 도구는 이것을 거친다), composite claims(C3),
+  dashboard trust·goals, telemetry, `bin/masc_trace.ml` 의 `dump_receipts`(C8)뿐이다. 부팅 경로에서 읽는 곳은 없다.
 - `latest_json` 은 최신 줄 하나를 준다. keeper 가 배포 뒤 턴을 한 번 돌면 최신 줄이 새 모양이 된다.
   그 전까지 그 keeper 는 "receipt 를 읽을 수 없음" 으로 보인다. 이 상태는 typed 로 표현한다. "receipt 없음" 과 구별한다.
 - 목록을 보여주는 곳(telemetry)은 줄마다 decode 한다. 한 줄의 실패가 목록 전체를 비우지 않게 한다.
@@ -488,7 +495,9 @@ RFC-0454 의 "생성자별" 이 이것을 모두 덮는다.
 
 **decision log (S2).** 옛 줄의 `terminal_reason` 은 `{code, disposition, ...}` 모양이다. 새 decoder 는 거절한다.
 
-- 이 필드를 읽는 곳은 trust snapshot(C2)과 dashboard feeds(C5) 둘이다. model inference metrics, memory, telemetry 는 다른 필드를 읽어서 영향이 없다.
+- 이 필드를 읽는 곳은 trust snapshot(C2)과 dashboard feeds(C5) 둘이다. 같은 줄의 telemetry `error_category` 는
+  `keeper_unified_metrics_decision.ml:392` 가 `terminal_reason_code` 를 한 번 더 복사한 것이고, `dashboard_http_keeper_feeds.ml:292` →
+  `dashboard-keeper-cost.ts:200` 이 읽는다. PR-5 가 이 사본도 `Keeper_turn_end.label` 로 바꾼다. model inference metrics 와 memory 는 다른 필드를 읽는다.
 - trust snapshot 은 decision 이 안 읽힌다고 receipt 로 조용히 넘어가지 않는다. 읽을 수 없다는 상태를 보여준다.
 - decision log 는 다른 데이터도 들고 있어서 지우지 않는다.
 
@@ -500,7 +509,7 @@ RFC-0454 의 "생성자별" 이 이것을 모두 덮는다.
 ### 3.7 decision log, registry, trust snapshot
 
 - decision log 는 `terminal_reason` 에 `Keeper_turn_end.to_yojson` 을 쓴다.
-  `terminal_reason_code`, `terminal_reason_severity`, `terminal_reason_source` 문자열은 지운다. severity 와 summary 는 읽을 때 계산한다.
+  `terminal_reason_code`, `terminal_reason_severity`, `terminal_reason_source` 문자열과 telemetry `error_category` 의 사본은 지운다. severity 와 summary 는 읽을 때 계산한다.
 - `append_decision_record` 의 `?terminal_reason` 을 필수 인자로 바꾼다. `"unknown_error"` 기본값(G13)은 호출자 2곳이 이미 값을 넘겨서 쓰이지 않는다.
 - checkpoint 에서 `Yielded_*` 로 멈춘 턴을 지금은 `Input_required` 로 적는다(`keeper_unified_turn_success.ml:444-460`).
   `Turn_ok` 와 typed `stop_reason` 이 되면서 이 라벨이 고쳐진다.
@@ -538,14 +547,14 @@ RFC-0454 의 "생성자별" 이 이것을 모두 덮는다.
 | PR | base | 내용 | 흐름 | 부수효과 | 라벨 | 크기 |
 |---|---|---|---|---|---|---|
 | PR-0 | main | §3.3 "컴파일러가 못 잡는 자리". `classify_masc_internal_error` 를 부르는 23곳을 표로 적고, 결과를 catch-all 로 받는 자리(`keeper_runtime_attempt.ml:142-143`, `keeper_runtime_failure_route.ml:325-328`, `keeper_error_classify.ml:212-214` 등)를 16개 생성자를 모두 적는 match 로 바꾼다 | 없음. 생성자마다 지금 답을 그대로 적는다 | 없음 | 없음 | 약 10k |
-| PR-1 | PR-0 | §3.3. `Official_client_failed` 추가, 어댑터 3개, PR-0 이 드러낸 자리마다 arm, claude runtime 필드. #37580 흡수. RFC-0159 를 가리키던 코드 주석 8곳 정리 | **흐름을 바꿀 수 있는 유일한 PR.** 의도한 답은 main 과 같다. `keeper_runtime_attempt` arm 을 틀리면 공식 클라이언트 실패에서 레인이 멈춘다(route arm 을 틀리면 route 라벨만 `Internal_opaque` 로 바뀐다). PR-0 이 먼저 들어가야 컴파일러가 빠뜨림을 잡는다 | 없음. disposition 이 같다 | receipt 코드 `provider_error_reported:turn_failed` → `official_client_failed`, `error_kind` provider → internal, 채팅 row 실패 생성자, registry `code`, rotation 문장, attribution `error_type_known` | lib 12개 안팎 + 테스트. 약 15k |
+| PR-1 | PR-0 | §3.3. `Official_client_failed` 추가, 어댑터 3개, PR-0 이 드러낸 자리마다 arm, claude runtime 필드. #37580 흡수 | **흐름을 바꿀 수 있는 유일한 PR.** 의도한 답은 main 과 같다. `keeper_runtime_attempt` arm 을 틀리면 공식 클라이언트 실패에서 레인이 멈춘다(route arm 을 틀리면 route 라벨만 `Internal_opaque` 로 바뀐다). PR-0 이 먼저 들어가야 컴파일러가 빠뜨림을 잡는다 | 없음. disposition 이 같다 | receipt 코드 `provider_error_reported:turn_failed` → `official_client_failed`, `error_kind` provider → internal, 채팅 row 실패 생성자, registry `code`, rotation 문장, attribution `error_type_known` | lib 12개 안팎 + 테스트. 약 15k |
 | PR-2a | main | `Keeper_request_failure_core` 안에 `Retry.api_error` 전체 투영 + codec + summary. 아직 `t` 를 바꾸지 않는다 | 없음 | 없음 | 없음 | 약 10k |
 | PR-2b | PR-2a | `Llm_provider.Error.provider_error` 전체 투영 + codec + summary | 없음 | 없음 | 없음 | 약 12k |
 | PR-2c | PR-2b | 나머지 family 투영, `Keeper_request_failure_core.t` 를 닫힌 합으로 바꿈, `Fenced_core`·`Keeper_request_failure` 소비자 | 없음 | 없음 | 채팅 row 요약 문장, 채팅 row JSON (RFC-0454 D6 hard cut) | 약 15k |
 | PR-3a | PR-2c | `Keeper_turn_end` 타입, 엄격 codec, `label`, `summary`, 테스트 | 없음 | 없음 | 없음 | 약 10k |
-| PR-3b | PR-3a, PR-1 | receipt 레코드 필드를 `Keeper_turn_end.t` 로, 생산자 6곳, `operator_disposition` 재작성. `Keeper_agent_error` 의 문자열 렌더는 `Keeper_turn_end.label` 로 옮긴다. `Keeper_provider_runtime_boundary` 의 timeout 접두어 갈래는 답을 바꾸지 않으므로(§3.7) 여기서 지운다. 그래야 `Keeper_terminal_reason` 을 상수까지 지울 수 있다. `wire_kind_of_string` 도 삭제. `is_transient_provider_runtime_failure` 와 그 틀린 주석(`keeper_terminal_reason.ml:187`, "두 상수와 같음 비교" 라고 적혀 있지만 실제로는 비교 6개와 접두어 2개)도 이때 함께 사라진다. 파일에는 아직 `terminal_reason_code` 를 `label` 로 쓴다. `label` 은 지금 문자열과 바이트가 같다 | 없음 | 없음. golden 표로 broadcast 집합이 같음을 보인다 | 없음. 파일 글자가 같다 | 약 18k |
+| PR-3b | PR-3a, PR-1 | receipt 레코드 필드를 `Keeper_turn_end.t` 로, 생산자 6곳, `operator_disposition` 재작성. `Keeper_agent_error` 의 문자열 렌더는 `Keeper_turn_end.label` 로 옮긴다. `Keeper_provider_runtime_boundary` 의 timeout 접두어 갈래는 답을 바꾸지 않으므로(§3.7) 여기서 지운다. 그래야 `Keeper_terminal_reason` 을 상수까지 지울 수 있다. `wire_kind_of_string` 도 삭제. `is_transient_provider_runtime_failure` 와 그 틀린 주석(`keeper_terminal_reason.ml:187`, "두 상수와 같음 비교" 라고 적혀 있지만 실제로는 같음 비교 4개와 접두어 비교 2개)도 이때 함께 사라진다. 파일에는 아직 `terminal_reason_code` 를 `label` 로 쓴다. `label` 은 지금 문자열과 바이트가 같다 | 없음 | 없음. golden 표로 broadcast 집합이 같음을 보인다 | 없음. 파일 글자가 같다 | 약 18k |
 | PR-3c | PR-3b | receipt 파일 모양 전환(`terminal_reason` 객체, `terminal_reason_code` 제거), OCaml 에서 receipt JSON 을 읽는 곳(C2·C3·C7·C8)을 엄격 decode 로, C3 막힘 판정을 §3.8 규칙으로, 서버 JSON 에 typed 판정 필드, manifest·activity payload. 대시보드로 나가는 JSON 에는 PR-4 까지 `terminal_reason_code` 를 `label` 로 계산해 같은 이름으로 낸다 | 없음 | decode 실패 metric 이 새로 생긴다 | receipt 파일 모양(hard cut), "receipt 를 읽을 수 없음" 상태, yield·input_required 가 막힘에서 빠짐 | 약 15k |
-| PR-4 | PR-3c | 대시보드가 서버 판정만 그린다: `terminal_reason` 객체 decoder(모르는 kind 는 decode 실패), `TURN_TERMINAL_FAILURE_CODES` 와 `fsm-hub.ts` 의 `includes`·`'completed'` 분기와 라벨 표를 지우고 서버의 판정·`label` 을 쓴다, 서버 JSON 의 `terminal_reason_code` 라벨 제거, fixture 를 실제 값으로(`'completed'`·`'api_error'` fixture 는 생산자가 쓰지 않는 값이다), 스크립트 3개. b58ddba17b 위에 쌓는다 | 없음 | 없음 | 대시보드 receipt 색과 라벨, alert strip 의 종료 실패 표시 | 약 15k |
+| PR-4 | PR-3c | 대시보드가 서버 판정만 그린다: `terminal_reason` 객체 decoder(모르는 kind 는 decode 실패), `TURN_TERMINAL_FAILURE_CODES` 와 `fsm-hub.ts` 의 `includes`·`'completed'` 분기와 라벨 표를 지우고 서버의 판정·`label` 을 쓴다, 서버 JSON 의 `terminal_reason_code` 라벨 제거, fixture 를 실제 값으로(`'completed'`·`'api_error'` fixture 는 생산자가 쓰지 않는 값이다), 스크립트 3개. #37684(main `7c7a5626dc`) 가 지운 fleet 매트릭스 재분류는 범위 밖이다 | 없음 | 없음 | 대시보드 receipt 색과 라벨, alert strip 의 종료 실패 표시 | 약 15k |
 | PR-5 | PR-3c | decision log 에 `Keeper_turn_end`, trust snapshot 출처 분리, dashboard feeds, C4 를 §3.8 규칙으로, `append_decision_record` 필수 인자, `registry_failure_reason_of_terminal_reason` 의 입력을 `Keeper_turn_end.t` 로, `Keeper_turn_terminal`·`Keeper_turn_disposition` 삭제 | 없음. registry 가 같은 경우에 같은 생성자를 잡는다 | 없음 | decision log 모양(hard cut), checkpoint yield 라벨, trust severity·next_action 문장, attention 판정 | 약 18k |
 | PR-6 | PR-5 | registry `Provider_runtime_error` 에 `failure`, status bridge 요약, `Keeper_turn_terminal_code` 삭제, 도달하지 않는 raw_error 갈래 삭제 | 없음. registry 가 같은 경우에 같은 생성자를 잡는다 | 없음 | status bridge 요약 문장 | 약 12k |
 
@@ -581,7 +590,8 @@ main ─ PR-2a ─ PR-2b ─ PR-2c ─ PR-3a ─ PR-3b ─ PR-3c ─┬─ PR-4
 
 - `classify_masc_internal_error` 23곳과 `Internal_carried` 를 받는 28곳의 표를 PR 본문에 싣는다.
   자리마다 catch-all 이었는지, 바꾼 뒤 생성자별 답이 무엇인지, `Provider _` 와 답이 같은지 적는다.
-- PR-0 뒤 `classify_masc_internal_error` 결과를 `Some _` 로 받는 갈래가 `lib/` 에 0건이어야 한다.
+- PR-0 뒤 `classify_masc_internal_error` 결과를 안을 보지 않고 받는 갈래(`Some _`, `Some internal ->` 처럼 이름만 묶는 것)가 `lib/` 에 0건이어야 한다.
+  값을 그대로 넘기는 `Some masc -> Masc masc` 꼴은 판정이 아니므로 예외다.
 - 동작은 바뀌지 않으므로 새 테스트보다 기존 스위트(`test_keeper_runtime_attempt`, `test_keeper_runtime_failure_route`, `test_keeper_turn_driver_failover`)가 그대로 초록인지가 증거다.
 
 **PR-1.**
@@ -643,6 +653,5 @@ PR-4 뒤 `terminal_reason_code` 0건. PR-5 뒤 `Keeper_turn_disposition`, `Keepe
   `outcome` 은 `Keeper_turn_end.t` 에서 계산할 수 있다. 없앨지는 후속으로 따로 본다.
 - **제3자 provider 어휘.** agent_core 의 `ProviderReportedError.error_type`, OpenAI·OpenRouter·Ollama 봉투 파서는 그대로다.
 - **runtime blocker.** `Keeper_meta_contract.blocker_class` 와 그 직렬화 문자열은 그대로다. trust snapshot 이 그것을 disposition 에 섞는 부분만 PR-5 에서 나눈다.
-- **`"pause_human"`**(`server_dashboard_http_composite_claims.ml:370`). 다른 브랜치가 처리한다.
 - **RFC-0454 의 채팅 row 작업.** 공유하는 agent-core 투영(PR-2)만 겹친다.
 - **manifest·activity event 의 나머지 필드와 event kind.**

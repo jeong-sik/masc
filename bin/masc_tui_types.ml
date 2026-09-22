@@ -202,6 +202,11 @@ type msg_role =
           once before for the same reason, out of the journal lane where they
           interleaved with memory commits. *)
   | Message_error
+      (** A failure the server reported for a request: a message it refused,
+          a delivery that failed, a held call it could not answer. The
+          operator's own steps that fail -- a command missing its argument,
+          an image that would not open -- are not rows; they read on the
+          footer. *)
   | Message_tool
       (** The tool calls of one finished turn, as the row block the live pane
           drew while it ran. The strict stream decode carries no tool
@@ -461,6 +466,9 @@ type msg_entry = {
       (** A committed Memory journal revision's lines, typed and made
           terminal-safe, for the pane to draw in columns. Empty on every other
           row; [me_text] says the same in plain text. *)
+  me_memory_pass: Masc_tui_message_layout.memory_pass;
+      (** The Librarian pass a Memory row reports. [No_pass] on every row
+          that reports none. *)
   me_gate: gate_step option;
       (** The typed approval step behind a Gate status row. Carried so a run
           of steps can be folded back into the one approval they describe;
@@ -471,7 +479,9 @@ type msg_entry = {
           durable transcript replaces the session copy and used as that input
           phase's source clock; never set on tool or output rows. *)
   me_tool_block: Masc_tui_keeper_chat_transcript.tool_block option;
-  me_skill_activity: Masc_tui_keeper_chat_transcript.skill_activity option;
+  me_skill_block: Masc_tui_keeper_chat_transcript.skill_activity list;
+      (** One turn's Skill invocations, for the pane to count on the row and
+          unfold under the tool toggle. Empty on every other row. *)
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;
@@ -481,17 +491,32 @@ type msg_entry = {
   me_at: float;
 }
 
-(* A run of journal rows says one thing: where the memory ended up. Each row
-   in summary mode still wraps to about two lines, so three commits in a row
-   took six lines of a pane whose whole point is the conversation. The newest
-   row carries the current revision, so it is the one kept; the ones before it
-   are counted, and Ctrl-N still opens all of them.
+(* The Memory lane in summary mode says where the memory ended up.
 
-   Full mode is not folded: it exists to show every commit. *)
-let fold_memory_summary_runs ~visibility entries =
+   A failed Librarian pass is not drawn there: while passes keep failing the
+   chat header names the run once ({!librarian_failing}), and a failure row
+   between every pair of turns said the same thing each time.
+
+   A run of journal rows says one thing. Each row still wraps to about two
+   lines, so three commits in a row took six lines of a pane whose whole
+   point is the conversation. The newest row carries the current revision,
+   so it is the one kept; the ones before it are counted, and Ctrl-N still
+   opens all of them.
+
+   Full mode is neither filtered nor folded: it exists to show every pass. *)
+let project_memory_history ~visibility entries =
   match visibility with
   | Memory_hidden | Memory_full -> entries
   | Memory_summary ->
+    let entries =
+      List.filter
+        (fun (entry, _) ->
+          match entry.me_memory_pass with
+          | Masc_tui_message_layout.Pass_failed _ -> false
+          | Masc_tui_message_layout.Pass_committed
+          | Masc_tui_message_layout.No_pass -> true)
+        entries
+    in
     let annotate folded (entry, extra) =
       if folded = 0 then (entry, extra)
       else
@@ -521,6 +546,42 @@ let fold_memory_summary_runs ~visibility entries =
     in
     go [] [] entries
 ;;
+
+(* Librarian passes failing in a row, up to the newest one: how the newest
+   failed, how many in a row, and when the first of them was recorded. A
+   committed pass ends the run; a row that reports no pass says nothing about
+   it. [None] when the newest pass committed or none is on record. The passes
+   are ordered by observation time, because a producer backfill lands older
+   rows after newer ones in the history. *)
+type librarian_failing = {
+  lf_kind: string;
+  lf_count: int;
+  lf_since: float;
+}
+
+let librarian_failing entries =
+  entries
+  |> List.filter_map (fun entry ->
+       match entry.me_memory_pass with
+       | Masc_tui_message_layout.Pass_failed { kind } -> Some (entry.me_at, Some kind)
+       | Masc_tui_message_layout.Pass_committed -> Some (entry.me_at, None)
+       | Masc_tui_message_layout.No_pass -> None)
+  |> List.stable_sort (fun (left, _) (right, _) -> Float.compare left right)
+  |> List.fold_left
+       (fun failing (at, failed) ->
+         match failed, failing with
+         | Some kind, None -> Some { lf_kind = kind; lf_count = 1; lf_since = at }
+         | Some kind, Some run ->
+             Some { run with lf_kind = kind; lf_count = run.lf_count + 1 }
+         | None, (Some _ | None) -> None)
+       None
+
+(* The header item: the run first, so a narrow row cut from the right still
+   says that the Librarian is failing and since when; the server's word for
+   how comes last. *)
+let librarian_failing_text ~since failing =
+  Printf.sprintf "Librarian failing \xc3\x97%d since %s \xc2\xb7 %s"
+    failing.lf_count since failing.lf_kind
 
 (* Compact folds only a successfully settled approval. Its durable identity
    survives the continuation's new request id, so prose or a tool block between
@@ -1651,6 +1712,28 @@ type fusion_mode =
   | Fusion_list
   | Fusion_detail of string
   | Fusion_historical_detail of Tui_decode.fusion_historical_evidence
+
+(** How many list reads a started run is waited for. The read that was
+    already in flight when the run started cannot carry it, so one more is
+    the smallest number that lets a fresh read arrive. Past that the wait
+    ends whether or not the registry retained the run: an unbounded wait
+    would move the cursor onto that run at some arbitrary later refresh,
+    wherever the operator had navigated to by then. *)
+let fusion_started_list_reads = 2
+
+(** The launch form over the Fusion list. Reading the presets is a request
+    of its own, so the form has a state before it exists; the generation
+    tells a late answer from the read the operator is waiting on. Once the
+    server accepts a run, the list is asked again and the cursor lands on
+    that run when a read carries it, within
+    [fusion_started_list_reads] reads. *)
+type fusion_launch =
+  | Fusion_launch_reading_presets of int
+  | Fusion_launch_open of Masc_tui_fusion_launch.t
+  | Fusion_launch_started of
+      { fls_run_id : string
+      ; fls_reads_left : int
+      }
 
 (** Actor-scoped pending confirmation from the exact operator projection. *)
 type approval_item = Masc_tui_operator_projection.approval_item
@@ -4711,12 +4794,6 @@ type state = {
      in the draft either way, and that draft is also where a spoken
      half-sentence waits for typing. *)
   mutable voice_send_on_stop: bool;
-  (* Whether speech-to-text is set up where this TUI runs
-     ([Masc.Voice_bridge.stt_set_up]): read at boot and again whenever the
-     voice config is re-read. An empty draft names the capture keys only
-     then -- to an operator without a transcriber they named a key that
-     refuses. *)
-  mutable voice_stt_set_up: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* The Memory facts list's [Enter] detail: the whole fact text in its own
@@ -5661,6 +5738,11 @@ type state = {
   mutable fusion_detail_inflight: (int * string) option;
   mutable fusion_historical_detail: Tui_decode.fusion_historical_detail option;
   mutable fusion_historical_inflight: (int * Tui_decode.fusion_historical_evidence) option;
+  mutable fusion_launch: fusion_launch option;
+  (* The read or the submit the form is waiting on. A key that closes the
+     form bumps it, so the answer to a read the operator left cannot open
+     the form behind their back. *)
+  mutable fusion_launch_generation: int;
   (* The feature-proof reading. Kept beside its error rather than collapsed
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
@@ -5992,9 +6074,43 @@ let settle_voice_transcript (state : state) ~keeper =
     Some disposition
   end
 
+(* Drop the launch form, whatever state it is in. The generation is bumped
+   so the answer to a preset read or a submit still in flight cannot open a
+   form the operator has already left -- one that would be invisible, hold no
+   keys, and carry defaults computed from a cursor that has since moved.
+
+   Answers whether a submit was in flight, because dropping the form does not
+   unsend the request: the caller is the one that can tell the operator the
+   run may have started. *)
+let abandon_fusion_launch (state : state) =
+  match state.fusion_launch with
+  | None -> false
+  | Some launch ->
+      state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+      state.fusion_launch <- None;
+      (match launch with
+       | Fusion_launch_open form -> Masc_tui_fusion_launch.submitting form
+       | Fusion_launch_reading_presets _ | Fusion_launch_started _ -> false)
+
+(* The launch form belongs to the Fusion surface and to nothing else, so the
+   loop drops it whenever the surface under it is no longer Fusion. Asked
+   every iteration rather than at the places that change the surface: there
+   are 44 assignments to [view] in the key and message paths and one
+   [goto_surface] among them, and the overlays that have to be torn down on
+   a jump are named by hand in some of them -- [Task_dispatched] closes the
+   help sheet, the palette and the row search by name, and would have left
+   this form open on a Keeper chat. A rule kept in one place cannot be the
+   one an author forgets.
+
+   Answers whether a submit was still out, which the caller turns into the
+   notice: dropping the form does not unsend the request. *)
+let reconcile_fusion_launch (state : state) =
+  state.view <> Fusion && abandon_fusion_launch state
+
 type text_input_target =
   | Text_browser_url
   | Text_ask_answer
+  | Text_fusion_launch
   | Text_preset_name
   | Text_runtime_lane_name
   | Text_runtime_param
@@ -6037,6 +6153,15 @@ let text_input_target (state : state) ~compact_viewport =
      Enter still saved the draft. The other text targets already carry it. *)
   else if Option.is_some state.voice_wizard && not compact_viewport then
     Some Text_voice_wizard
+  (* The launch form takes every key while it is open, above the Fusion
+     list under it; paste follows. Not on a viewport too small to draw it,
+     the rule the voice wizard above keeps. *)
+  else if
+    state.view = Fusion && not compact_viewport
+    && (match state.fusion_launch with
+        | Some (Fusion_launch_open _) -> true
+        | Some (Fusion_launch_reading_presets _ | Fusion_launch_started _) | None -> false)
+  then Some Text_fusion_launch
   else if state.view = Approvals && not compact_viewport
           && not state.context_inspector_open && Option.is_some state.ask_text_entry
   then Some Text_ask_answer
@@ -6979,7 +7104,6 @@ let create_state
   keeper_queue_inflight = [];
   keeper_run_next_pending = None;
   voice_send_on_stop = false;
-  voice_stt_set_up = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;
@@ -7437,6 +7561,8 @@ let create_state
   fusion_detail_inflight = None;
   fusion_historical_detail = None;
   fusion_historical_inflight = None;
+  fusion_launch = None;
+  fusion_launch_generation = 0;
   observer = Observer_off;
   mcp_session = None;
   observer_cursor = None;

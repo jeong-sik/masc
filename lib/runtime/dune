@@ -16,6 +16,7 @@
   cstruct
   otoml
   masc.toml_line_editor
+  masc.fusion_core
   base64
   dune-build-info
   digestif

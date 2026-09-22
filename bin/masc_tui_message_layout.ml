@@ -106,6 +106,11 @@ type journal_line =
       { sign : journal_sign; category : string; tone : journal_tone; claim : string }
   | Journal_drop of { memory_id : string; reason : string }
 
+type memory_pass =
+  | Pass_committed
+  | Pass_failed of { kind : string }
+  | No_pass
+
 type entry = {
   style : style;
   timestamp : string;
@@ -139,7 +144,6 @@ type metadata =
       clock : string option;
       speaker : string;
       role_label : string;
-      request_label : string;
     }
   | Continued_at of { clock : string }
 
@@ -1241,7 +1245,7 @@ let continues_turn ~(previous : entry) (entry : entry) =
   && speaks_for_turn previous.style
   && speaks_for_turn entry.style
 
-let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
+let metadata_row ~(previous : entry option) ~inner_width ~indent (entry : entry) =
   let clock =
     match entry.timeline_bucket with
     | Some _ -> Some entry.timestamp
@@ -1256,13 +1260,8 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
     if not (within_turn || continues_previous ~previous entry) then
       Some
         ( Origin
-            { clock;
-              speaker = entry.speaker;
-              role_label = entry.role_label;
-              request_label = entry.request_label;
-            }
-        , Printf.sprintf "[%s] From [%s] %s" entry.timestamp entry.role_label
-            entry.request_label )
+            { clock; speaker = entry.speaker; role_label = entry.role_label }
+        , Printf.sprintf "[%s] From [%s]" entry.timestamp entry.role_label )
     else
       match clock, previous with
       | None, _ -> None
@@ -1292,10 +1291,12 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
       ; kind = Metadata metadata
       ; shade = Shade_none
       ; text = fitted
-      ; gutter_rail_cells = 0
+      (* A heading in the arrival's column starts after the same blank run
+         its body does; [inner_width] is already that column's. *)
+      ; gutter_rail_cells = indent
       ; gutter_clock_cells = 0
-      ; gutter_label_at = 0
-      ; gutter = ""
+      ; gutter_label_at = indent
+      ; gutter = String.make indent ' '
       ; action = Action_none
       }
 
@@ -1529,7 +1530,24 @@ let origin_gutter ~origin ~previous ~inner_width entry =
           (fit_width continued (display_width filled), rail_cells, rail_cells, 0)
       else Some (filled, rail_cells, label_at, clock_cells)
 
+(* A line someone else wrote steps in from the conversation, and the renderer
+   draws a bar in its sender's colour down its left edge (RFC
+   chat-turn-rail-and-side-lanes §4.6). Two cells set it apart without making
+   a long arrival wrap narrower than the rows around it. *)
+let inbound_indent_cells = 2
+
+let inbound_indent (entry : entry) =
+  match entry.style with
+  | Inbound -> inbound_indent_cells
+  | User | Keeper | Status | Local | Journal | Error | Tool | Skill _ | Thinking -> 0
+
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
+  (* Everything after the indent is laid out in the column that is left, so
+     the origin, the heading and the body fit the column rather than the
+     pane. *)
+  let indent = inbound_indent entry in
+  let pane_width = inner_width in
+  let inner_width = pane_width - indent in
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in
   let gutter_width =
     match gutter with
@@ -1617,12 +1635,17 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       ; kind = Body
       ; shade = shade_of_style entry.style
       ; text = "  " ^ chunk
-      ; gutter_rail_cells = rail_cells
+      (* The indent sits after the rail: the rail's join belongs on the
+         conversation's line, and the blank run after it is what moves the
+         rest into the arrival's column. *)
+      ; gutter_rail_cells = rail_cells + indent
       (* A wrapped row's gutter is blanks held at the first row's width: no
          clock column of its own, so no boundary to hand the renderer. *)
       ; gutter_clock_cells = (if index = 0 then clock_cells else 0)
-      ; gutter_label_at = (if index = 0 then label_at else rail_cells)
-      ; gutter = rail_at index ^ (if index = 0 then margin else blank)
+      ; gutter_label_at = (if index = 0 then label_at else rail_cells) + indent
+      ; gutter =
+          rail_at index ^ String.make indent ' '
+          ^ (if index = 0 then margin else blank)
       (* The fold marker sits at the end of the first row, so that is the
          row a press lands on. A continuation carries the same text and none
          of the affordance. *)
@@ -1633,11 +1656,11 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     match origin with
     | Origin_inline | Origin_bare -> body_rows
     | Origin_row -> (
-        match metadata_row ~previous ~inner_width entry with
+        match metadata_row ~previous ~inner_width ~indent entry with
         | None -> body_rows
         | Some metadata -> metadata :: body_rows)
   in
-  match timeline_break_row ~previous ~inner_width entry with
+  match timeline_break_row ~previous ~inner_width:pane_width entry with
   | None -> message_rows
   | Some timeline_break -> timeline_break :: message_rows
 

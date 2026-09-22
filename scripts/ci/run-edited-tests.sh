@@ -650,6 +650,44 @@ run_selected() {
 ${sources}
 EOF
 
+  # A suite with a custom bound (the keyboard walk, the only entry today)
+  # runs before anything else, alone and at its own bound. Run
+  # 35685267067 killed it at 202s and 221s -- the budget left after the
+  # build and 17 linked suites had run -- because its 600s bound only ever
+  # shrank to the remainder the rest of the selection left. The walk
+  # measures 261s when healthy (#36343), so it needs the budget's fullest
+  # wallet, not that remainder. Direct-edited-first keeps its meaning among
+  # the default-bound suites; this phase is before every class.
+  local custom_source custom_dir custom_name own limit status
+  while IFS= read -r custom_source; do
+    [ -n "${custom_source}" ] || continue
+    case "${custom_source}" in *.py) ;; *) continue ;; esac
+    [ "$(suite_timeout "${custom_source}")" -eq "${per_suite_timeout}" ] && continue
+    if printf '%s\n' "${known_failures}" | grep -Fxq "${custom_source}"; then
+      continue
+    fi
+    custom_dir=$(dirname "${custom_source}")
+    custom_name=$(basename "${custom_source}" .py)
+    own=$(suite_timeout "${custom_source}")
+    if [ "$(budget_left)" -le 0 ]; then
+      failed="${failed}${custom_dir}/${custom_name} (not run: the step budget ran out)\n"
+      continue
+    fi
+    limit=$(bounded_by_budget "${own}")
+    echo "== ${custom_dir}/${custom_name} (dune rule, bound ${own}s, first)"
+    status=0
+    timeout "${limit}" dune build "@${custom_dir}/runtest-${custom_name}" < /dev/null || status=$?
+    if [ "${status}" -eq 0 ]; then
+      ran=$((ran + 1))
+    elif [ "${status}" -eq 124 ] && [ "${limit}" -lt "${own}" ]; then
+      failed="${failed}${custom_dir}/${custom_name} (stopped at the step budget after ${limit}s)\n"
+    else
+      failed="${failed}${custom_dir}/${custom_name} (run)\n"
+    fi
+  done <<EOF
+${sources}
+EOF
+
   local group_sources
   for group_sources in "${direct_group}" "${attributed_group}"; do
     if ! printf '%s\n' "${group_sources}" | grep -q '[^[:space:]]'; then
@@ -679,6 +717,11 @@ EOF
     fi
     case "${source}" in
       *.py)
+        # Custom-bound suites (the walk) already ran in the phase above at
+        # their own bound with the fullest wallet. The batch's limit maths
+        # uses per_suite_timeout, so letting one back in here would both
+        # rerun it and re-hide its bound from the batch's budget.
+        [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] || continue
         python_sources[python_count]="${source}"
         python_count=$((python_count + 1))
         [ "$(suite_timeout "${source}")" -eq "${per_suite_timeout}" ] \
@@ -858,8 +901,7 @@ ENVS
   # edited rules remain their own earlier execution class, and a rule with a
   # custom timeout stays on the one-at-a-time path below. Selection and the
   # fail-closed step budget are unchanged.
-    if [ "${python_count}" -gt 1 ] && [ "${python_batchable}" = true ]; then
-      local python_targets=()
+    if [ "${python_count}" -gt 1 ] && [ "${python_batchable}" = true ]; then      local python_targets=()
       i=0
       while [ "${i}" -lt "${python_count}" ]; do
         source=${python_sources[i]}
@@ -1327,6 +1369,17 @@ FAKE
     runner_check "a parallel wave that spends the budget names every remainder" \
       "test/test_slow_one (stopped at the step budget);test/test_slow_two (stopped at the step budget);test/test_zz_after (not run: the step budget ran out);" \
       0 2 test_slow_one test_slow_two test_zz_after
+
+  # task-1678: the keyboard walk has a custom 600s bound, but a selection
+  # that also carries linked suites used to reach it with the remainder only
+  # (202s/221s in run 35685267067) and its bound shrank to that. It must run
+  # first, at its own bound, with everything else fitted into what is left.
+  # The stand-in walk (slow_py) sleeps past any small budget, so a pass here
+  # means it was handed its own bound, not the remainder.
+  RUNNER_DIRECT_SOURCES="test/test_slow_py.py" \
+    runner_check "a custom-bound walk runs first and whole, before linked suites" \
+      "" \
+      0 4 test_ok test_ok_too test/test_slow_py.py
   # Count the call instead of inferring one call from whether two-second
   # stand-in builds fit inside a three-second wall-clock budget. On a loaded
   # runner the setup could consume that one-second margin before dune began.

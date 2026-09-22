@@ -282,8 +282,8 @@ let add_routes router =
                         ; recovered_from = None
                         } ->
                      Dashboard_verification.Backlog_read
-                       { live_request_ids =
-                           Dashboard_verification.awaiting_request_ids
+                       { live =
+                           Dashboard_verification.awaiting_tasks
                              observed_backlog
                        }
                    | Ok { Workspace_backlog.observed_backlog
@@ -294,8 +294,8 @@ let add_routes router =
                         that looks current and is not: anything submitted
                         after the snapshot is missing from it. *)
                      Dashboard_verification.Backlog_recovered
-                       { live_request_ids =
-                           Dashboard_verification.awaiting_request_ids
+                       { live =
+                           Dashboard_verification.awaiting_tasks
                              observed_backlog
                        ; detail =
                            Printf.sprintf

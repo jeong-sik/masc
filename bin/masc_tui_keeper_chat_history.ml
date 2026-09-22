@@ -62,7 +62,7 @@ type kind =
       ; recovered_at : float option
       }
   | Tool_calls of Transcript.tool_block
-  | Skill_activity of Transcript.skill_activity
+  | Skill_activity of Transcript.skill_activity list
   | Reasoning of string list
   | Gate_activity of
       { approval_id : string
@@ -995,6 +995,21 @@ let decode_skill_activation = function
         | Some (`Assoc _) -> Ok true
         | Some _ | None -> Error "Skill activation delivery is invalid"
       in
+      (* The ledger's own closed kinds ([Keeper_skill_activation_ledger.
+         invocation_to_yojson]): a kind it does not write is a row this
+         build cannot read, not a read. *)
+      let* invocation =
+        match List.assoc_opt "invocation" fields with
+        | Some (`Assoc invocation) -> (
+            match string_field invocation "kind" with
+            | Some "instruction" -> Ok Transcript.Instruction_read
+            | Some "composition" ->
+                let* tool_name = required_string invocation "tool_name" in
+                Ok (Transcript.Composition_run { tool_name })
+            | Some other -> Error ("Skill activation invocation kind is unknown: " ^ other)
+            | None -> Error "Skill activation invocation has no kind")
+        | Some _ | None -> Error "Skill activation invocation is not an object"
+      in
       let state =
         match delivered, actions with
         | false, _ -> Transcript.Skill_served_only
@@ -1002,7 +1017,7 @@ let decode_skill_activation = function
         | true, _ :: _ -> Transcript.Skill_used
       in
       Ok
-        (Transcript.make_skill_activity ~skill_tool_use_id ~turn_ref
+        (Transcript.make_skill_activity ~invocation ~skill_tool_use_id ~turn_ref
            ~content_revision ~runtime_id ~skill_name ~state ~actions ())
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Error "Skill activation is not an object"
@@ -1112,24 +1127,25 @@ let reconcile_skill_projection_with_trace summary projection =
       ; replaces_raw_skill_tools = false
       }
 
+(* One row for the turn's skill work, as the trace's tool steps are one
+   block: the pane counts the invocations on the row and unfolds them under
+   the tool toggle. *)
 let rows_of_skill_projection ~source_id ~turn_sequence ~turn_id ~operation_id at
     projection =
-  List.mapi
-    (fun index activity ->
-      Utterance
-        { at
-        ; structural_id =
-            Option.map
-              (fun id -> Printf.sprintf "%s:skill-%d" id index)
-              source_id
-        ; turn_sequence
-        ; turn_id
-        ; operation_id
-        ; kind = Skill_activity activity
-        ; text = ""
-        ; attachments = []
-        })
-    projection.activities
+  match projection.activities with
+  | [] -> []
+  | activities ->
+      [ Utterance
+          { at
+          ; structural_id = Option.map (fun id -> id ^ ":skills") source_id
+          ; turn_sequence
+          ; turn_id
+          ; operation_id
+          ; kind = Skill_activity activities
+          ; text = ""
+          ; attachments = []
+          }
+      ]
 
 (* The rows an assistant row's blocks become: one reasoning block, one
    tool block, then what the turn said. The trace interleaves think and

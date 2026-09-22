@@ -1743,6 +1743,29 @@ let test_roster_duplicate_route () =
     Alcotest.failf "expected Duplicate_panelist x, got %s"
       (Fusion_policy.Validated_preset.invalid_to_string invalid)
 
+(* A route read from a tool argument or a CLI flag passes through
+   [route_name]. Without it two spellings of one route become two seats, and
+   the duplicate check above never sees them as the same. *)
+let test_route_name_reads_one_name_per_route () =
+  Alcotest.(check (option string)) "padding is not part of the name" (Some "sonnet")
+    (route_name "  sonnet ");
+  Alcotest.(check (option string)) "a tab counts as padding" (Some "a.b") (route_name "\ta.b\n");
+  Alcotest.(check (option string)) "blank is no route" None (route_name "   ");
+  Alcotest.(check (option string)) "empty is no route" None (route_name "");
+  Alcotest.(check (option string)) "inner spaces stay" (Some "a b") (route_name " a b ");
+  match
+    Fusion_policy.with_roster (mk_preset "pad")
+      (roster
+         ~panel:
+           (List.filter_map route_name [ " x"; "x " ])
+         ())
+  with
+  | Error (Fusion_policy.Validated_preset.Duplicate_panelist "x") -> ()
+  | Ok _ -> Alcotest.fail "two spellings of one route must collide as one seat"
+  | Error invalid ->
+    Alcotest.failf "expected Duplicate_panelist x, got %s"
+      (Fusion_policy.Validated_preset.invalid_to_string invalid)
+
 let test_roster_empty_panel () =
   match Fusion_policy.with_roster (mk_preset "empty") (roster ~panel:[] ()) with
   | Error Fusion_policy.Validated_preset.No_panel_models -> ()
@@ -1896,6 +1919,8 @@ let () =
         ; Alcotest.test_case "min_answered above new panel" `Quick
             test_roster_min_answered_above_new_panel
         ; Alcotest.test_case "duplicate route" `Quick test_roster_duplicate_route
+        ; Alcotest.test_case "route_name reads one name per route" `Quick
+            test_route_name_reads_one_name_per_route
         ; Alcotest.test_case "empty panel" `Quick test_roster_empty_panel
         ; Alcotest.test_case "effective preset typed denials" `Quick
             test_effective_preset_typed_denials

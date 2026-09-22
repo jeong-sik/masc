@@ -45,6 +45,21 @@ val without_snapshot : continuity
     fit this history or cannot be used ({!continuity_for_request}). The request starts at the turn's own boundary
     ({!Keeper_carried_front.Turn_start}); an older eviction front is not used. *)
 
+type continuity_choice =
+  | Chose_no_point
+      (** The turn had no Librarian point to start from
+          ({!without_snapshot}). *)
+  | Chose_a_librarian_point
+      (** The turn started at a snapshot's end or at the Librarian's read
+          position. *)
+
+val continuity_choice : continuity -> continuity_choice
+(** Which of the two a continuity is, for a caller that records what a
+    request started from
+    ({!Keeper_official_client_host.continuity_observation_input}). The
+    constructors stay in, so no caller can build a continuity that was never
+    checked against this dispatch's checkpoint. *)
+
 val absorbed_history :
   trace_id:string ->
   messages:Agent_core.Types.message list ->

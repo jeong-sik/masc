@@ -91,10 +91,19 @@ type skill_state =
   | Skill_evidence_missing
   | Skill_evidence_unavailable
 
-val skill_state_label : skill_state -> string
-(** The phrase a skill row leads with, one per state. A skill's life is
-    read, delivered, used, and the phrase says how far it got; the last three
-    states are not steps of that life and say so. *)
+(** How the skill was invoked, off the server's [invocation.kind] for a
+    durable activation and off the tool's name for a live call: an
+    instruction skill is read as text, a composition is run as the tool
+    named after it. The rows say "read" or "run" accordingly. *)
+type skill_invocation =
+  | Instruction_read
+  | Composition_run of { tool_name : string }
+
+val skill_state_label : ?invocation:skill_invocation -> skill_state -> string
+(** The phrase a full skill row leads with, one per state. A skill's life is
+    read (or, for a composition, run), delivered, used, and the phrase says
+    how far it got; the last three states are not steps of that life and say
+    so. *)
 
 val all_skill_states : skill_state list
 (** Every state, in the order of the skill's life. *)
@@ -106,6 +115,10 @@ val legend : (string * string) list
 
 type skill_activity = private
   { skill_name : string
+  ; invocation : skill_invocation option
+      (** [None] only on the rows the pane makes for evidence it could not
+          read ([Skill_evidence_missing], [Skill_evidence_unavailable]);
+          every decoded activation and every live call carries one. *)
   ; skill_tool_use_id : string option
   ; turn_ref : string option
   ; content_revision : string option
@@ -116,6 +129,7 @@ type skill_activity = private
   }
 
 val make_skill_activity :
+  ?invocation:skill_invocation ->
   ?skill_tool_use_id:string ->
   ?turn_ref:string ->
   ?content_revision:string ->
@@ -135,10 +149,16 @@ val skill_activity_of_tool : tool_activity -> skill_activity option
     Skill tool family. A returned call is [Skill_served_pending] until durable
     delivery evidence replaces the live row. *)
 
-val skill_rows : full:bool -> skill_activity -> string list
-(** Markdown rows for one Skill card. The first row emphasizes the exact Skill
-    name and lifecycle; [full] additionally exposes actions and exact proof
-    coordinates. *)
+val skill_rows : full:bool -> skill_activity list -> string list
+(** Markdown rows for one block of Skill invocations. Compact: one row per
+    skill named in the block, in first-trigger order, with how many times
+    it was triggered ([**msx-observe** ×7]) and, only when a trigger failed
+    or its evidence could not be read, that state's words. [full]: each
+    invocation's state and name, its observed actions, its proof
+    coordinates and its detail. *)
+
+val skill_block_state : skill_activity list -> skill_state
+(** The state a block of invocations draws in: the worst of them. *)
 
 (** A contiguous block of tool calls. [omitted_steps] is a durable transcript
     fact, not the number of rows a compact projection hides. *)
@@ -315,9 +335,10 @@ type trail_item =
   | Trail_thinking of string list
       (** Reasoning lines of one contiguous stretch. A paragraph break is one
           empty line; the stretch never opens or closes on one. *)
-  | Trail_skill of skill_activity
-      (** A Skill-as-tool call separated from generic tools so the chat can
-          give its delivery/usage semantics a distinct visual treatment. *)
+  | Trail_skill of skill_activity list
+      (** One contiguous run of Skill-as-tool calls, separated from generic
+          tools so the chat can give their delivery/usage semantics a
+          distinct visual treatment and count them as one row. *)
   | Trail_tools of tool_block
       (** One contiguous run of typed calls. A call keeps updating its facts
           (arguments, outcome) after later stretches open. *)
@@ -379,7 +400,7 @@ val turn_status_text :
 (** One row of a turn as the pane draws it. *)
 type drawn =
   | Drawn_thinking of string list
-  | Drawn_skill of skill_activity
+  | Drawn_skill of skill_activity list
   | Drawn_tools of tool_block
   | Drawn_text of string  (** A reply stretch as it streamed. *)
   | Drawn_reply of string

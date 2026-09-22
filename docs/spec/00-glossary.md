@@ -248,11 +248,11 @@ status: reference
     표면(TUI "pick a runtime lane", dashboard "runtime lane cost matrix")과 코드가
     쓰는 이름이다. 설정은 `[runtime.lanes.<name>]`의 `candidates`이고 Keeper
     assignment가 이 lane을 지목한다. 제품 SSOT는 같은 메커니즘을 "Runtime slot"이라
-    부른다(§2·§3·§4).
+    부른다(§2·§3·§5.1).
     → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
   - **고정 Lane** — Keeper turn 밖에서 고정된 신원으로 도는 실행 경로.
-    `librarian`·`hitl_auto_judge`·`board_attention`·`workspace_curator`·`verifier`가
-    있다(`Runtime.exact_lane`). 설정은
+    `librarian_exact`·`hitl_auto_judge`·`board_attention_exact`·
+    `workspace_curator_exact`·`verifier_exact`가 있다(`Runtime.exact_lane`). 설정은
     `[runtime.exact_output_lanes.<name>]`의 `slots`, durable 기록은
     `Exact_lane_run_registry.lane`(`Librarian`·`Hitl_auto_judge`·`Board_attention`·
     `Workspace_curator`)이다 — verifier exact lane은 이 registry 밖에 있다. 제품
@@ -324,12 +324,13 @@ status: reference
   그래서 집합 밖 선언 노력은 깎여 통과하고, 거절로 남는 것은 깎을 기준이 없는 선언
   없음과, 토글이 사다리 밖으로 만든 값이다.
   → [Provider_config.reasoning_effort_request_rejection](../../packages/agent_core/lib/llm_provider/provider_config.mli)
+
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
   Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
   Lane 행을 제공할 수 있고, 패키지 worker는 관측 계산만 격리한다. attach·detach와
   Add-on 장애는 기존 Keeper의 권한·도구·진행 중 작업을 축소하지 않으며, 추가 근거는
-  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·
+  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·`lane_output`·
   `browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
   검사·표시한다.
   → [설계 계약](../design/lane-addon-v0.md),
@@ -642,8 +643,9 @@ status: reference
   이력을 돌려주지 않고 오류를 낸다. carried-front 씨앗은 남기지 않는다 — purge가 그
   atom의 여는 message를 다시 썼으면 씨앗이 안 맞아 요청은 마지막 완료 turn이 끝난 자리에서
   시작한다. 구조적으로 깨진 입력의 복구는 깨진 꼬리를 버리므로 끝이 옮겨지는 것이
-  설계다. 그때 복구는 Librarian이 센 경계 줄(`witness_line`)이 말하는 마지막 turn
+  설계다. 복구가 Librarian 위치를 옮길 때는 `witness_line`이 확인한 마지막 turn
   끝에서 이력을 끝내고, 그런 줄이 없으면 `Recovery_end_unwitnessed`로 거절한다.
+  위치가 없거나 rebase가 위치를 거절하면 깨진 곳에서 끝낸다.
 
   Librarian의 atom 위치(`librarian_rebase`)는 sound transcript면 그대로 돌려받고, 깨진
   transcript 복구에서만 새 끝으로 옮긴다. 어느 쪽이든 Librarian이 아직 읽을 atom을

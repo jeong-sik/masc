@@ -39,6 +39,20 @@ status: reference
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
   입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
 
+**Exit Reason (세션 종료 사유)**
+: TUI 세션이 왜 끝났는지 자기 stderr 로그(`.masc/logs/masc-tui-<pid>.log`)에 남기는 한 줄.
+  `Masc_tui_exit_reason.t`가 닫힌 어휘를 소유한다 — `Quit_key`(q·Q·Ctrl-Q),
+  `Interrupt`(첫 Ctrl-C가 아직 살아 있는 동안의 두 번째 Ctrl-C), `Terminate of string`
+  (SIGTERM·SIGHUP·SIGQUIT), `Exception of string`(루프를 빠져나온 잡히지 않은 예외).
+  `is_normal`이 정상/비정상을 가른다: 정상은 운영자나 세션 주인이 의도해 끝낸 것
+  (`Quit_key`·`Interrupt`·`Terminate`), 비정상은 요청 없이 표면이 떠난 것(`Exception`)이다.
+  줄은 `exit: normal (quit key)` 꼴이고, detail에 제어 바이트가 있으면 먼저 한 줄로
+  평탄화한다 — 로그를 한 줄씩 읽기 때문이다. 이 줄이 끝의 유일한 기록이다: 로그에는
+  기동 줄만 있어, 끝난 세션은 사유를 남기지 않았다. **Terminal Reason**과 다른 축이다 —
+  Terminal Reason은 끝난 Keeper turn의 영수증 필드이고, Exit Reason은 TUI 프로세스
+  세션이 끝난 까닭이다.
+  → [Masc_tui_exit_reason](../../bin/masc_tui_exit_reason.mli), [TUI 안내](../TUI-GUIDE.md)
+
 **Workspace**
 : 에이전트와 협업 상태가 공유되는 조율 범위.
 

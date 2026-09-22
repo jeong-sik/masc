@@ -2107,6 +2107,67 @@ def navigate_with_arrows_and_quit(
 KEEPER_RUNTIME_COLUMN_COLUMNS = 126
 
 
+# Ctrl-L walks the Activity pane narrow, wide, hidden. The widths are
+# Masc_tui_acting_pane.pane_cols and wide_pane_cols; 160 columns holds the
+# wide pane (wide_threshold_cols is 150). The pane's header row starts with
+# its one-cell border, so "[Recent]" sits one cell inside the pane's left
+# edge: the pane's width is read off where that header begins.
+ACTING_PANE_CYCLE_COLUMNS = 160
+ACTING_PANE_NARROW_COLUMNS = 56
+ACTING_PANE_WIDE_COLUMNS = 74
+
+
+def acting_pane_header_cell(output: bytearray) -> int:
+    """The cell "[Recent]" starts at on the screen now, or -1 when no pane
+    header is drawn. Cells are counted as code points: the surface beside
+    the pane at this size draws no wide glyph."""
+    for _row, text in sorted(screen_rows(bytes(output)).items()):
+        plain = text.decode("utf-8", "replace")
+        cell = plain.find("[Recent]")
+        if cell >= 0:
+            return cell
+    return -1
+
+
+def acting_pane_ctrl_l_cycle_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=ACTING_PANE_CYCLE_COLUMNS,
+        needle=b"MASC Overview",
+    )
+    drain_until_quiet(process, master_fd, output, cap=4.0)
+
+    def header_for(pane_columns: int) -> int:
+        return ACTING_PANE_CYCLE_COLUMNS - pane_columns + 1
+
+    expected = [
+        ("the pane opens narrow", header_for(ACTING_PANE_NARROW_COLUMNS)),
+        ("one press: wide", header_for(ACTING_PANE_WIDE_COLUMNS)),
+        ("two presses: hidden", -1),
+        ("three presses: narrow again", header_for(ACTING_PANE_NARROW_COLUMNS)),
+    ]
+    for index, (label, cell) in enumerate(expected):
+        if index > 0:
+            write_all(master_fd, output, b"\x0c")
+            drain_until_quiet(process, master_fd, output, cap=4.0)
+        drawn = acting_pane_header_cell(output)
+        if drawn != cell:
+            raise AssertionError(
+                f"{label}: pane header at cell {drawn}, expected {cell}: "
+                f"{screen_text(bytes(output))!r}"
+            )
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+
+
 def keeper_runtime_phase_and_identity_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -14413,6 +14474,11 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper phase and runtime identity",
         interact=keeper_runtime_phase_and_identity_interaction,
         http_fixtures=keeper_runtime_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Ctrl-L walks the Activity pane narrow, wide, hidden",
+        interact=acting_pane_ctrl_l_cycle_interaction,
     )
     run_terminal_scenario(
         executable,

@@ -57,12 +57,18 @@ module Flow = struct
   let initial = { latest = 0; action = None }
   let action_inflight state = Option.is_some state.action
 
-  let reserve_refresh state =
-    match state.action with
-    | Some _ -> state, None
-    | None ->
-        let generation = state.latest + 1 in
-        { latest = generation; action = None }, Some generation
+  (* A listing observes the press generation; it never advances it. Two
+     independent listings used to invalidate each other because each reader
+     used to advance [latest] itself via the removed [reserve_refresh]
+     (#37461, #37609 review): a stance fetch (gen=N) racing an unrelated
+     background poll's own [reserve_refresh] call (gen=N+1) made the stance
+     answer's [is_current] check false even though no press had ever
+     opened. Only [begin_action] moves the generation now, which is the one
+     event a listing needs to be superseded by -- including a press that
+     opens and closes between this call and the reader checking
+     [is_current], which a dispatch-time-only [action_inflight] check
+     cannot see. *)
+  let observe state = state.latest
 
   let begin_action state =
     match state.action with
@@ -78,6 +84,34 @@ module Flow = struct
     | Some _ | None -> state, false
 
   let is_current state generation = state.latest = generation
+end
+
+module Listing_order = struct
+  type t = {
+    next_seq : int;
+    applied_seq : int;
+  }
+
+  type ticket = {
+    press : Flow.generation;
+    seq : int;
+  }
+
+  let initial = { next_seq = 0; applied_seq = 0 }
+
+  let dispatch order flow =
+    let seq = order.next_seq + 1 in
+    { order with next_seq = seq }, { press = Flow.observe flow; seq }
+
+  (* Both clocks, each asked its own question. The press clock is shared by
+     every listing and says "an operator changed this since you left"; the
+     sequence is this listing's own and says "a later fetch of the same thing
+     already landed". A rejected answer leaves [applied_seq] where it was, so
+     it cannot hold back the fetch after it. *)
+  let admit order flow ticket =
+    if Flow.is_current flow ticket.press && ticket.seq > order.applied_seq then
+      { order with applied_seq = ticket.seq }, true
+    else order, false
 end
 
 let ( let* ) = Result.bind

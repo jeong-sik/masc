@@ -88,12 +88,57 @@ let test_state_writes_do_survive () =
     (Option.equal Keeper_id.Task_id.equal decoded.current_task_id (Some task_id))
 ;;
 
+(* board_interests is a config field like the others above -- the raw
+   snapshot never carries it -- but [effective_meta_of_profile_defaults] is
+   the overlay that is supposed to restore it from the keeper's own TOML
+   profile. Until #37586 it mirrored [mention_targets]: an empty profile
+   default preserved whatever the caller already had. #37586 added
+   [board_interests] to this same overlay but wrote an unconditional
+   [defaults.board_interests] instead of [mention_targets]'s fallback match,
+   so any keeper without a profile-declared value had it wiped to [] on
+   every overlay call -- including the one inside
+   [wakeup_relevant_keeper_for_board_signal], which is why an explicitly
+   interested Keeper's Board attention candidate stopped being recorded
+   (task-1670, test_board_dispatch / test_keeper_board_discoverable_cursor /
+   test_keeper_keepalive_helpers). *)
+let test_board_interests_survive_an_empty_profile_default () =
+  let open Keeper_meta_contract in
+  let effective defaults meta =
+    match effective_meta_of_profile_defaults defaults meta with
+    | Ok effective -> effective
+    | Error detail -> Alcotest.fail detail
+  in
+  let meta = { (base_meta ()) with board_interests = [ "thread review" ] } in
+  (* [effective_meta_of_profile_defaults] rejects an unresolved sandbox
+     profile before it ever reaches board_interests (Ok sandbox_profile
+     guard), so every defaults value needs one, same as
+     test_config_writes_are_dropped above. *)
+  let defaults_with_profile board_interests =
+    { Keeper_types_profile.empty_keeper_profile_defaults with
+      sandbox_profile = Some Keeper_types_profile.Docker
+    ; board_interests
+    }
+  in
+  let overlaid = effective (defaults_with_profile []) meta in
+  Alcotest.(check (list string))
+    "an empty profile default does not clear an existing board_interests"
+    [ "thread review" ]
+    overlaid.board_interests;
+  let replaced = effective (defaults_with_profile [ "release" ]) meta in
+  Alcotest.(check (list string))
+    "a profile-declared board_interests still overrides"
+    [ "release" ]
+    replaced.board_interests
+;;
+
 let () =
   Alcotest.run
     "keeper-meta-config-not-durable"
     [ ( "round trip"
       , [ Alcotest.test_case "config writes are dropped" `Quick test_config_writes_are_dropped
         ; Alcotest.test_case "state writes survive" `Quick test_state_writes_do_survive
+        ; Alcotest.test_case "board_interests survives an empty profile default"
+            `Quick test_board_interests_survive_an_empty_profile_default
         ] )
     ]
 ;;

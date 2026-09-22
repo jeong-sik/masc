@@ -488,20 +488,27 @@ let run_runtime_evidence ?fixture_dir () =
           Alcotest.(check string) "evaluation failure" "failed" (member "status" evaluation |> string);
           Alcotest.(check string) "same evaluation failure" reason (member "reason" evaluation |> string);
           let failure = member "failure" evaluation in
-          Alcotest.(check int) "actual HTTP failure status" 503 (member "status" failure |> Yojson.Safe.Util.to_int);
-          Alcotest.(check string) "actual HTTP failure body" "fixture unavailable" (member "body" failure |> string);
+          Alcotest.(check string) "the walk records every destination asked" "every_destination_refused"
+            (member "kind" failure |> string);
+          let refusal = match member "attempts" failure |> Yojson.Safe.Util.to_list with
+            | [ attempt ] -> member "refusal" attempt
+            | attempts -> Alcotest.failf "one destination, %d attempts" (List.length attempts) in
+          Alcotest.(check int) "actual HTTP failure status" 503 (member "status" refusal |> Yojson.Safe.Util.to_int);
+          Alcotest.(check string) "actual HTTP failure body" "fixture unavailable" (member "body" refusal |> string);
           List.iter (fun key -> check_json ("failure does not invent " ^ key)
             `Null (member key evaluation)) [ "model"; "answers"; "request_body_sha256" ]
         | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run ->
           Alcotest.(check string) "a rejected HTTP response is a failed evaluation" "failed"
             (member "status" evaluation |> string);
-          let failure = member "failure" evaluation in
+          let refusal = match member "failure" evaluation |> member "attempts" |> Yojson.Safe.Util.to_list with
+            | [ attempt ] -> member "refusal" attempt
+            | attempts -> Alcotest.failf "one destination, %d attempts" (List.length attempts) in
           Alcotest.(check string) "HTTP and transport failures remain distinct" "http_response"
-            (member "kind" failure |> string);
+            (member "kind" refusal |> string);
           Alcotest.(check int) "actual successful HTTP status survives decoding failure" 200
-            (member "status" failure |> Yojson.Safe.Util.to_int);
+            (member "status" refusal |> Yojson.Safe.Util.to_int);
           let original_body = Option.get (invalid_response_body scenario) in
-          let body = member "body" failure in
+          let body = member "body" refusal in
           let restored = match body with
             | `String body -> body
             | body ->
@@ -515,9 +522,9 @@ let run_runtime_evidence ?fixture_dir () =
           Alcotest.(check string) "the exact returned body survives durable replay"
             original_body restored;
           Alcotest.(check string) "failure destination is retained for all consumers"
-            displayed_jev_uri (member "destination_uri" failure |> string);
+            displayed_jev_uri (member "destination_uri" refusal |> string);
           Alcotest.(check bool) "typed failure diagnostic is retained" true
-            (String.length (member "detail" failure |> string) > 0);
+            (String.length (member "detail" refusal |> string) > 0);
           List.iter (fun key -> check_json ("decode failure does not invent " ^ key)
             `Null (member key evaluation)) [ "model"; "answers"; "request_body_sha256" ]
         | Invalid_answer_run ->
@@ -709,11 +716,11 @@ let test_transport_diagnostics_preserve_cause_without_configured_credentials () 
     let detail = Printf.sprintf "%s url=%s normalized=%s key=%s"
         cause endpoint normalized api_key in
     let failure = Client.For_testing.transport_failure ~endpoint ~api_key detail in
-    let rendered = Client.failure_to_string failure in
+    let rendered = Client.refusal_to_string failure in
     Alcotest.(check string) "diagnostic cause and safe destination remain"
       (Printf.sprintf "typesafeai: transport failure: %s url=%s normalized=%s key=[REDACTED]"
          cause displayed displayed) rendered;
-    let json = Client.failure_to_yojson failure in
+    let json = Client.refusal_to_yojson failure in
     let open Yojson.Safe.Util in
     Alcotest.(check string) "transport failure has its own type" "transport"
       (member "kind" json |> to_string);
@@ -750,8 +757,13 @@ let test_failure_bodies_omit_configured_credentials () =
       ~on_error:(fun exn -> Alcotest.fail (Printexc.to_string exn)));
   List.iter (fun (status, suffix) ->
     reply := status, "gateway echo " ^ api_key ^ " url=" ^ endpoint ^ suffix;
-    let failure = match Client.evaluate ~clock ~endpoint ~api_key ~state:`Null ~questions:[] () with
-      | Error failure -> failure
+    let destination = { Client.endpoint; model = "gateway-echo-model"; api_key } in
+    let failure =
+      match Client.evaluate ~clock ~destinations:(destination, []) ~state:`Null ~questions:[] () with
+      | Error failure ->
+        (match Client.attempts failure with
+         | [ attempt ] -> attempt.refusal
+         | asked -> Alcotest.failf "one destination, %d attempts" (List.length asked))
       | Ok _ -> Alcotest.fail "the gateway response must remain a typed failure" in
     let expected = "gateway echo [REDACTED] url=" ^ displayed ^ suffix in
     (match failure with
@@ -759,7 +771,7 @@ let test_failure_bodies_omit_configured_credentials () =
        Alcotest.(check string) "the typed observation already omits known credentials" expected body;
        Alcotest.(check string) "the typed destination is safe" displayed destination_uri
      | Client.Transport_failure detail -> Alcotest.fail detail);
-    let json = Client.failure_to_yojson failure in
+    let json = Client.refusal_to_yojson failure in
     let body = member "body" json in
     let decoded = match body with
       | `String body -> body

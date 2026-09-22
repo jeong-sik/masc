@@ -40,16 +40,6 @@ let replace_descriptor replacement =
     else current)
 ;;
 
-let replace_contract_field name value = function
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (field, current) ->
-            if String.equal field name then field, value else field, current)
-         fields)
-  | _ -> fail "descriptor contract encoder returned a non-object"
-;;
-
 let node ?after ~id ~tool_name input =
   Plan.node ~id:(node_id id) ~tool_name ?after ~input ()
 ;;

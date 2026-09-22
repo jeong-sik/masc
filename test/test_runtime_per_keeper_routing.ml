@@ -1872,8 +1872,8 @@ let test_runtime_config_text_save_rejects_invalid_without_write () =
       (Runtime.get_default_runtime_id ()))
 ;;
 
-(* A write must not put a broken [fusion] on disk: one bad save used to refuse
-   every Fusion run until the file was fixed by hand. The same text with a valid
+(* A save must not put a broken [fusion] on disk: a bad table refuses every
+   Fusion run until the file is fixed by hand. The same text with a valid
    quorum saves, so the rejection is the fusion check and not something else in
    the fixture. *)
 let fusion_section ~min_answered =
@@ -1917,6 +1917,33 @@ let test_runtime_config_text_save_rejects_invalid_fusion_without_write () =
     with
     | Ok _receipt -> ()
     | Error msg -> Alcotest.failf "a valid fusion section must save: %s" msg)
+;;
+
+(* A broken [fusion] can already be on disk: boot tolerates it and a hand edit
+   can write it. A save that leaves [fusion] as the file has it is not judged on
+   it, so an unrelated write such as a keeper purge still goes through. A save
+   that changes the table is judged, even from broken to still broken. *)
+let test_runtime_config_text_save_judges_fusion_only_when_changed () =
+  with_runtime_file (fun path ->
+    let broken = fusion_section ~min_answered:3 in
+    write_file path (runtime_config ^ broken);
+    (match Runtime.init_default ~config_path:path with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "boot must not refuse a broken [fusion]: %s" msg);
+    (match Runtime.save_config_text ~runtime_config_path:path (runtime_config_openai_default ^ broken) with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "a save that keeps [fusion] as it is must pass: %s" msg);
+    Alcotest.(check string) "the unrelated change is on disk" "openai.gpt"
+      (Runtime.get_default_runtime_id ());
+    let still_broken = runtime_config_openai_default ^ fusion_section ~min_answered:4 in
+    (match Runtime.validate_config_text ~runtime_config_path:path still_broken with
+     | Ok () -> Alcotest.fail "preview must judge a [fusion] the save changes"
+     | Error msg ->
+       Alcotest.(check bool) "preview names min_answered" true (string_contains msg "min_answered"));
+    match Runtime.save_config_text ~runtime_config_path:path still_broken with
+    | Ok _receipt -> Alcotest.fail "a save that changes [fusion] must leave it loadable"
+    | Error msg ->
+      Alcotest.(check bool) "save names min_answered" true (string_contains msg "min_answered"))
 ;;
 
 let test_undeclared_keeper_falls_to_default () =
@@ -3449,6 +3476,10 @@ let () =
             "runtime.toml save rejects an invalid [fusion] before write"
             `Quick
             test_runtime_config_text_save_rejects_invalid_fusion_without_write
+        ; Alcotest.test_case
+            "runtime config save judges fusion only when changed"
+            `Quick
+            test_runtime_config_text_save_judges_fusion_only_when_changed
         ; Alcotest.test_case
             "messages-http provider loads and keeper assignment resolves"
             `Quick

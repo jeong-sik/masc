@@ -147,6 +147,16 @@ status: reference
   합계·누적·범위 미상인 값으로 단일 요청의 컨텍스트 점유율이나 비용을 계산하지
   않는다. 클라이언트 턴 합계도 failover를 포함한 Keeper turn 전체 합계는 아니다.
 
+**Caller Scope**
+: 이벤트를 발행하는 코드가 bus handle에 실어 봉투에 붙는 불투명한 값
+  (`Caller_scope.t`, `Event_envelope.caller_scope`). Agent Core는 그대로 나르기만 하고
+  내용을 읽지 않으며, 빈 값은 scope가 아니고 거부된다. 무엇을 뜻하는지는 handle을 만든
+  쪽만 정한다. Keeper는 이 scope에 자기 Keeper turn id를 실어, 한 turn이 낸 여러 provider
+  호출의 event를 그 turn에 귀속시킨다(`Keeper_turn_scope`). 위의 Usage Scope(토큰 집계
+  범위)와 이름이 겹치지만 다른 축이다.
+  → [Caller_scope](../../packages/agent_core/lib/caller_scope.mli),
+  [Keeper_turn_scope](../../lib/keeper/keeper_turn_scope.mli)
+
 **Tool**
 : 이름·입력 schema·handler로 노출되는 호출 단위. MASC가 제공하는 Tool의
   descriptor와 권한 검사는 MASC가 소유한다. → [Tool boundary](13-agent-core.md#tool-boundary)
@@ -623,12 +633,15 @@ status: reference
 : `masc_library_add`로 수동 추가한 Markdown 문서를 읽는 지식 라이브러리.
   자동 수집 경로는 없고 Keeper에게는 검색·읽기 샤드만 있으므로, 설치에 문서가
   하나도 없는 상태도 정상이다. 알려진 문서가 있을 때만 검색한다.
-  문서는 `MASC_BASE_PATH/docs/library`(없으면 호스트 런타임 루트) 아래 저장되고,
+  문서는 호출자가 해석한 workspace(`Workspace.config.base_path`) 아래
+  `<base_path>/docs/library`에 저장되고, 도구는 환경 변수를 읽지 않는다.
   각 문서는 YAML frontmatter
   (`title`·`source`·`author`·`created`·`updated`·`tags`)를 갖는다. 한 층의 평평한
   디렉터리라 문서는 들어 있거나 없거나 둘 중 하나다. `source`는 닫힌 합타입
   (`Direct_experience`·`Research`·`Experiment`·`Observation`)이고, 생성자를 더하면
-  `source_to_string`이 컴파일 오류로 강제된다. 네 도구가 이걸 쓴다 —
+  `source_to_string`이 컴파일 오류로 강제된다. 쓰기에서 `source`가 없으면 `title`
+  없을 때처럼 거부하고, 읽기에서 알 수 없는 `source`는 파일명과 이유로 표시한다.
+  네 도구가 이걸 쓴다 —
   `masc_library_list`·`masc_library_read`·`masc_library_add`·`masc_library_search`.
   Keeper 쪽에는 read-only인 `keeper_library_search`·`keeper_library_read` 샤드
   투영만 있다.

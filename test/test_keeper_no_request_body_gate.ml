@@ -235,8 +235,19 @@ streaming = false
            })
   in
   let historical_payload = String.make 4000 'z' in
+  (* Atom 0 is the turn the Librarian has read; the completed tool exchange
+     that follows is the one it has not. Only a completed turn the Librarian
+     is behind on reaches the wire at all: with no Librarian position the
+     request starts at the completed boundary (RFC keeper-context-window
+     §13.4), and with one it starts there (§13.6). *)
   let initial_messages : Agent_core.Types.message list =
-    [ { role = Agent_core.Types.Assistant
+    [ { role = Agent_core.Types.User
+      ; content = [ Agent_core.Types.Text "earlier ask, already read by the Librarian" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { role = Agent_core.Types.Assistant
       ; content = [ Agent_core.Types.ToolUse
           { id = "call-demote-1"; name = "fixture_tool"; input = `Assoc [] } ]
       ; name = None
@@ -268,11 +279,18 @@ streaming = false
           { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
           ; history_at_start = Keeper_turn_boundaries.Fresh_history
           ; position } } in
-    match Keeper_turn_boundaries.append
-      ~keepers_dir:(Workspace.keepers_runtime_dir (Workspace.default_config base_path))
-      ~keeper_id:"demote-proof" record with
+    let keepers_dir = Workspace.keepers_runtime_dir (Workspace.default_config base_path) in
+    (match Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:"demote-proof" record with
+     | Ok () -> ()
+     | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error));
+    let last_atom_digest =
+      match Runtime_model_input_tail_window.atom_opening_digest initial_messages 0 with
+      | Some digest -> digest
+      | None -> fail "the fixture history opens atom 0" in
+    match Keeper_librarian_progress.write ~keepers_dir ~keeper_id:"demote-proof"
+      { position = { trace_id; end_atom = 1; last_atom_digest }; boundary_lines_seen = 1 } with
     | Ok () -> ()
-    | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error));
+    | Error error -> fail (Keeper_librarian_progress.write_error_to_string error));
   let tools =
     if not reader_available then [active_tool]
     else

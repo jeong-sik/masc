@@ -18588,18 +18588,16 @@ and is loaded on demand through keeper_skill.
                        <- Masc_tui_types.scroll_down_from state.fusion_scroll
                             ~by:(surface_page_rows state)
                  | _ ->
-                     let was_submitting = Masc_tui_fusion_launch.submitting launch in
                      (match Masc_tui_fusion_launch.edit ~key launch with
                       | Masc_tui_fusion_launch.Closed ->
-                          (* Bumped through the same rule a surface jump uses,
-                             so a late answer cannot reopen what was left. *)
-                          ignore
-                            (Masc_tui_types.leave_fusion_launch state ~destination:Overview);
-                          state.fusion_scroll <- 0;
-                          if was_submitting then
+                          (* The operator stays on Fusion, so this is the
+                             drop itself rather than a surface jump. Its
+                             answer is whether a submit was still out. *)
+                          if Masc_tui_types.abandon_fusion_launch state then
                             add_event state "system"
                               "Fusion launch left while its answer was out; the run may have \
-                               started - r refreshes the list"
+                               started - r refreshes the list";
+                          state.fusion_scroll <- 0
                       | Masc_tui_fusion_launch.Editing next ->
                           state.fusion_launch <- Some (Fusion_launch_open next);
                           state.fusion_scroll <- 0

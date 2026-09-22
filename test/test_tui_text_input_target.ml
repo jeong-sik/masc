@@ -397,7 +397,35 @@ let test_leaving_fusion_abandons_the_launch_form () =
     (Tui_types.leave_fusion_launch state ~destination:Tui_types.Overview);
   check bool "and is dropped" true (Option.is_none state.Tui_types.fusion_launch);
   check bool "nothing open means nothing to leave" false
-    (Tui_types.leave_fusion_launch state ~destination:Tui_types.Overview)
+    (Tui_types.leave_fusion_launch state ~destination:Tui_types.Overview);
+  (* The one input that reaches the other answer. Everything above leaves a
+     form that never submitted, so without this the function could return a
+     literal [false] and the suite would still be green -- and that answer is
+     the whole reason the operator is told the run may have started. *)
+  let submitted =
+    let typed =
+      List.fold_left
+        (fun form key ->
+          match Masc_tui_fusion_launch.edit ~key form with
+          | Masc_tui_fusion_launch.Editing form -> form
+          | Masc_tui_fusion_launch.Submitted _ -> fail "typing must not submit"
+          | Masc_tui_fusion_launch.Closed -> fail "typing must not close")
+        (form ())
+        [ "tab"; "tab"; "tab"; "w"; "h"; "y"; "\019" ]
+    in
+    match Masc_tui_fusion_launch.edit ~key:"enter" typed with
+    | Masc_tui_fusion_launch.Submitted (waiting, _) -> waiting
+    | Masc_tui_fusion_launch.Editing form ->
+        fail (String.concat " | " ("review Enter must submit" :: Masc_tui_fusion_launch.lines form))
+    | Masc_tui_fusion_launch.Closed -> fail "review Enter must not close"
+  in
+  check bool "the form is waiting on its answer" true
+    (Masc_tui_fusion_launch.submitting submitted);
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_open submitted);
+  check bool "leaving with a submit still out says the run may have started" true
+    (Tui_types.leave_fusion_launch state ~destination:Tui_types.Changes);
+  check bool "and the form is dropped with it" true
+    (Option.is_none state.Tui_types.fusion_launch)
 
 let () =
   Alcotest.run

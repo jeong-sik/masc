@@ -6074,25 +6074,30 @@ let settle_voice_transcript (state : state) ~keeper =
     Some disposition
   end
 
-(* The launch form belongs to the Fusion surface and to nothing else. Every
-   jump away abandons it, generation bumped so the answer to a preset read or
-   a submit still in flight cannot open a form on a surface the operator has
-   left -- invisible, holding no keys, and built from a cursor that has since
-   moved. The mouse reaches [goto_surface] from the Activity pane before any
-   key handler runs, so the form's own Esc is not the only way out of it.
+(* Drop the launch form, whatever state it is in. The generation is bumped
+   so the answer to a preset read or a submit still in flight cannot open a
+   form the operator has already left -- one that would be invisible, hold no
+   keys, and carry defaults computed from a cursor that has since moved.
 
-   Answers whether a submit was in flight, because leaving does not unsend
-   the request and the operator should hear that the run may have started. *)
-let leave_fusion_launch (state : state) ~(destination : surface) =
+   Answers whether a submit was in flight, because dropping the form does not
+   unsend the request: the caller is the one that can tell the operator the
+   run may have started. *)
+let abandon_fusion_launch (state : state) =
   match state.fusion_launch with
   | None -> false
-  | Some _ when destination = Fusion -> false
   | Some launch ->
       state.fusion_launch_generation <- state.fusion_launch_generation + 1;
       state.fusion_launch <- None;
       (match launch with
        | Fusion_launch_open form -> Masc_tui_fusion_launch.submitting form
        | Fusion_launch_reading_presets _ | Fusion_launch_started _ -> false)
+
+(* The launch form belongs to the Fusion surface and to nothing else, so a
+   jump anywhere else drops it. The mouse reaches [goto_surface] from the
+   Activity pane before any key handler runs, so the form's own Esc is not
+   the only way out of the surface it lives on. *)
+let leave_fusion_launch (state : state) ~(destination : surface) =
+  if destination = Fusion then false else abandon_fusion_launch state
 
 type text_input_target =
   | Text_browser_url

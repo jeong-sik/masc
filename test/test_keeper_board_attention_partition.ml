@@ -1394,6 +1394,64 @@ let test_legacy_settled_give_up_reclassifies_and_reopens () =
     states
 ;;
 
+(* task-1674: the reopen gate is the candidate's own shape, not the root
+   state alone. A [Judged] (or quarantined-toward-judgment) replay must keep
+   its [Abandoned] root closed — reopening it here would race the
+   quarantine-generation bookkeeping [#37668 pinned]. A [Pending] replay is
+   the desync shape task-1660 measured and is the only thing that reopens. *)
+let test_a_judged_candidate_keeps_its_abandoned_root_closed () =
+  with_temp_base "board-attention-partition-judged-gate" @@ fun base_path ->
+  let judged = candidate ~id:"candidate-judged-gate" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ judged ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  let proof = provenance ~slot_id:"gate-slot" ~call_id:"gate-call" () in
+  let bound =
+    P.bind_before_dispatch ~worker_epoch:owner ~base_path ~partition:claimed ~provenance:proof
+    |> ok "bind before gate block"
+    |> fsynced "bind before gate block"
+  in
+  let blocked =
+    P.block
+      ~now:11.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:bound
+      (P.Exact_execution_quarantined (P.Bound proof))
+    |> ok "block the gate candidate"
+    |> fsynced "block the gate candidate"
+  in
+  ignore (ok "abandon for gate" (P.abandon ~now:12.0 ~base_path ~partition:blocked) : P.t);
+  (* The Candidate ledger replay carries a judgment: this is the shape a
+     [Requeued_resumable] candidate has after its dedicated reconciliation
+     path has already recorded one. *)
+  let replayed =
+    { judged with
+      A.status =
+        A.Judged
+          { judgment = judgment proof
+          ; last_delivery_failure = None
+          }
+    }
+  in
+  Alcotest.(check int)
+    "a judged candidate keeps its abandoned root closed"
+    0
+    (ok
+       "ensure_roots over a judged replay"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" [ replayed ]));
+  let reloaded = ok "load after judged replay" (P.load ~base_path ~keeper_name:"alpha") in
+  let latest =
+    List.find_opt
+      (fun (p : P.t) -> String.equal p.P.candidate_id "candidate-judged-gate")
+      reloaded
+  in
+  match latest with
+  | Some { P.state = P.Abandoned { abandoned_at }; _ } ->
+    Alcotest.(check (float 0.0)) "abandonment is untouched" 12.0 abandoned_at
+  | other -> Alcotest.fail "judged replay changed the abandoned root's state"
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_partition"
@@ -1470,6 +1528,10 @@ let () =
             "legacy settled give-up reclassifies and reopens"
             `Quick
             test_legacy_settled_give_up_reclassifies_and_reopens
+        ; Alcotest.test_case
+            "a judged candidate keeps its abandoned root closed"
+            `Quick
+            test_a_judged_candidate_keeps_its_abandoned_root_closed
         ] )
     ]
 ;;

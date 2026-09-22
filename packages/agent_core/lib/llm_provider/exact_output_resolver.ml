@@ -778,8 +778,14 @@ let load_resolver_snapshot
          in
          (* The wire, and with it the capabilities a request on that wire can
             express. A binding answers with the config its ordinary requests
-            already run on, read the way [PC.capabilities_for_config_model]
-            reads it, against this resolver's frozen catalog. *)
+            already run on: its own override first, else the row laid over the
+            base its wire selects -- [Caps.apply_catalog_entry], the same
+            overlay [PC.capabilities_for_config_model] ends at. The lookup in
+            front of that overlay is not shared: that one searches the global
+            catalog and may fall back to a bare row or the provider base,
+            while this target already holds the row its frozen catalog
+            admitted. Only the overlay rule has to agree, and it is one
+            function. *)
          let kind, base_url, request_path, capabilities =
            match target.wire with
            | Catalog_provider_wire ->

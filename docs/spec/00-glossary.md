@@ -527,6 +527,22 @@ status: reference
   이 파일의 Atom 위치는 선택한 cluster의 History만 가리키는
   cluster-scoped 좌표다. 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
 
+**Turn Boundary Position (턴 경계 위치)**
+: `turn-boundaries.jsonl`의 `turn_ended` 줄이 적는, 그 turn이 끝났을 때 History의
+  끝이 어디인가. 닫힌 넷이고 wire `kind`가 이름이다 — `Atom_history { end_atom;
+  last_atom_digest }`(`atom_history`), `Empty_atom_history`(`empty_atom_history`),
+  `No_atom_history`(`no_atom_history`), `Stale_noop`(`stale_noop`). 위치(Atom 수와
+  마지막 Atom의 digest)를 갖는 것은 `Atom_history` 하나다. 저장이 Checkpoint를
+  돌려주면 그 messages에서 위치를 세고, Atom이 하나도 없으면 `Empty_atom_history`다.
+  저장이 `Stale_noop`이라 돌려줄 Checkpoint가 없으면 소유자로 갈린다 — 공식
+  클라이언트 turn은 `No_atom_history`, Agent Core turn은 `Stale_noop`이다
+  (`keeper_agent_run_finalize_response.ml`의 `turn_boundary_position`). 그래서
+  `No_atom_history` 줄은 공식 클라이언트 turn을 가리킨다. `Stale_noop`은
+  `Keeper_checkpoint_store`의 저장 결과 `Stale_noop`(더 새 writer가 앞서 canonical
+  Checkpoint를 그대로 둔 성공적 no-op)과 이름을 공유하지만 다른 값이다 — 하나는
+  저장 결과, 하나는 turn 경계 위치다.
+  → [Keeper_turn_boundaries](../../lib/keeper/keeper_turn_boundaries.ml)
+
 **Read Position**
 : Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
   Turn Boundary와 같은 cluster의 Keeper runtime 디렉터리에 저장한다.

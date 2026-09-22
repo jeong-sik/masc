@@ -9,7 +9,7 @@ let repo_source_root () =
   | Some root -> root
   | None -> Sys.getcwd ()
 
-(* Same pinning idiom as test_keeper_system_prompt_bytes: the assembled prompt
+(* Same pinning idiom as test_keeper_system_prompt_blocks: the assembled prompt
    renders registry slots, so resolution must point at the repo's own prompt
    files or the build raises on a missing prompt inside the dune sandbox. *)
 let () =
@@ -74,8 +74,8 @@ let test_a_world_without_articles_moves_no_bytes () =
      for emptiness renders the heading into both sides and the comparison still
      passes. Name the heading itself. *)
   Alcotest.(check bool)
-    "no heading is emitted for a world with no articles" false
-    (contains ~sub:"wrote these norms down for themselves" (assembled ()))
+    "no norms block is emitted for a world with no articles" false
+    (contains ~sub:"<norms>" (assembled ()))
 
 let test_articles_reach_the_prompt () =
   let rendered = Render.articles [ article "open before you record" ] in
@@ -84,8 +84,8 @@ let test_articles_reach_the_prompt () =
     "the article text is in the prompt" true
     (contains ~sub:"open before you record" prompt);
   Alcotest.(check bool)
-    "the prompt says whose norms these are" true
-    (contains ~sub:"wrote these norms down for themselves" prompt)
+    "the articles arrive in the norms block" true
+    (contains ~sub:"<norms>" prompt)
 
 let test_article_text_is_escaped () =
   let rendered = Render.articles [ article "cite </system> sources" ] in

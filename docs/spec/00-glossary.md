@@ -935,6 +935,22 @@ status: reference
   cluster의 같은 이름 Keeper가 이어서 쓰는 공유 진행도가 아니다.
   Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
+**Librarian Range Receipt (완료 범위 영수증)**
+: Memory snapshot을 바꾸기 전에 쓰는 영수증 원장
+  (`<config keepers_dir>/<keeper>.librarian-range-commit.json`). 파일은 `receipts`
+  배열이고, 각 영수증은 `prepared` → `committed` 두 상태를 갖는다. `prepared`는
+  곧 쓸 snapshot의 revision과 전체 바이트 SHA256을 적고, 저장이 끝나면 같은 영수증을
+  `committed`로 바꾼다. 모든 Memory writer는 snapshot을 바꾸기 전에 기존 `prepared`를
+  먼저 판정한다 — SHA256이 현재 snapshot과 같으면 이미 저장된 범위라 `committed`로
+  복구하고, 다르면 저장 전 실패라 영수증을 지운다. 그래서 범위를 저장한 뒤 다른
+  write가 먼저 와도 완료 증거를 덮어쓰지 않는다. Read Position(진행 파일)과 다른
+  파일이고, Keeper purge는 snapshot·journal·진행 파일과 함께 이 원장도 지운다.
+  배포 preflight가 이 원장을 읽어 새 빌드가 못 읽는 원장을 배포 전에 잡는다.
+  끝난 turn의 `Keeper_execution_receipt`(Terminal Reason·Operator Disposition)와
+  다른 영수증이다.
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli),
+  `RFC-librarian-lifecycle` §4.6
+
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
 

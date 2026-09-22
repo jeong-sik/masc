@@ -23,6 +23,7 @@
 
 ### Fixed
 
+- The Board title counts what the board holds rather than the listing page it drew. The listing is one server page of fifty with no key past it, so a board of 109 posts read `MASC Board (50)` and the 59 posts off the page left no trace; the title now reads `(50 of 109)`, and `(41)` where the page carries everything (#37999).
 - Transcript tail recovery reads a missing checkpoint ref as `Already_dispatchable`, as its interface promised, instead of failing the recovery as `Checkpoint_unavailable` on a keeper whose session directory holds no checkpoint yet. A ref that cannot be read, names another identity or session, or cannot be locked still fails it (#37904).
 - A `cd` operand in a keeper's Execute call is checked to exist only under the Host and Docker sandboxes, where the host filesystem is what the command sees. Microvm, SSH and delegated sandboxes keep their checkouts in the guest, so the host check refused every `cd <checkout>` on those keepers with a path error. The containment check still applies under every sandbox (#37908).
 - A Librarian working state carried into a keeper's next request no longer wears the extra-system-context tag. The prompt-context check counted that tag and found two carriers, so it reported `prompt_context_presence_mismatch` or `prompt_context_carrier_repeated` on every request and left the turn record's `input_components` empty. The working state now carries its own `masc.librarian_working_state.v1` tag, and the tail window pins it the same way (#37894).

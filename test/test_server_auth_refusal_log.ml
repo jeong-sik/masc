@@ -27,29 +27,35 @@ let test_message_names_both () =
 (* A fresh test process starts the ring empty with [total = 0], so the first
    entry pushed here gets seq 0. A [since_seq] cursor of 0 means "strictly
    newer than 0" and would drop that very entry, so only pass a cursor when
-   the ring already held something. *)
-let recent_auth_lines () =
+   the ring already held something. The baseline is read before the emit, or
+   the cursor would name the line the test is looking for. *)
+let baseline_seq () =
   match Log.Ring.recent ~limit:1 () with
-  | (entry : Log.Ring.entry) :: _ ->
-    Log.Ring.recent ~limit:10 ~module_filter:"Auth" ~since_seq:entry.seq ()
-  | [] -> Log.Ring.recent ~limit:10 ~module_filter:"Auth" ()
+  | (entry : Log.Ring.entry) :: _ -> Some entry.seq
+  | [] -> None
+
+let auth_lines_since baseline =
+  match baseline with
+  | Some seq -> Log.Ring.recent ~limit:10 ~module_filter:"Auth" ~since_seq:seq ()
+  | None -> Log.Ring.recent ~limit:10 ~module_filter:"Auth" ()
+
+let refusal_line = "HTTP auth rejected: h1 /api/v1/keeper/chat -> 401"
 
 let has_refusal_line entries =
   List.exists
-    (fun (entry : Log.Ring.entry) ->
-      String.equal entry.message "HTTP auth rejected: h1 /api/v1/keeper/chat -> 401")
+    (fun (entry : Log.Ring.entry) -> String.equal entry.message refusal_line)
     entries
 
 (* The emit itself, not just the pure helpers: a refused request must reach the
    dashboard log ring the operator reads. *)
 let test_log_auth_refusal_emits_line () =
+  let baseline = baseline_seq () in
   Server_auth.log_auth_refusal ~protocol:"h1" ~path:"/api/v1/keeper/chat" ~status:401;
-  let entries = recent_auth_lines () in
+  let entries = auth_lines_since baseline in
   check bool "refusal line reached the log ring" true (has_refusal_line entries);
   match
     List.find_opt
-      (fun (entry : Log.Ring.entry) ->
-        String.equal entry.message "HTTP auth rejected: h1 /api/v1/keeper/chat -> 401")
+      (fun (entry : Log.Ring.entry) -> String.equal entry.message refusal_line)
       entries
   with
   | None -> ()
@@ -62,6 +68,7 @@ let test_log_auth_refusal_emits_line () =
 (* The responder, not just the helper: this drives [respond_auth_error] itself
    over a real [Httpun.Reqd], so deleting its logging call fails the test. *)
 let test_respond_auth_error_emits_line () =
+  let baseline = baseline_seq () in
   let reqd_ref = ref None in
   let conn =
     Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd)
@@ -75,7 +82,7 @@ let test_respond_auth_error_emits_line () =
   Server_auth.respond_auth_error request reqd
     (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken "stale-token-x"));
   check bool "respond_auth_error left a refusal line" true
-    (has_refusal_line (recent_auth_lines ()))
+    (has_refusal_line (auth_lines_since baseline))
 
 let () =
   run "server_auth_refusal_log"

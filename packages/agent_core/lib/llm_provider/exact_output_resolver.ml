@@ -777,30 +777,35 @@ let load_resolver_snapshot
            | (Catalog_provider_wire | Binding_wire _), (Some _ | None) -> Ok ()
          in
          (* The wire, and with it the capabilities a request on that wire can
-            express. A binding answers with the config its ordinary requests
-            already run on: its own override first, else the row laid over the
-            base its wire selects -- [Caps.apply_catalog_entry], the same
-            overlay [PC.capabilities_for_config_model] ends at. The lookup in
-            front of that overlay is not shared: that one searches the global
-            catalog and may fall back to a bare row or the provider base,
-            while this target already holds the row its frozen catalog
-            admitted. Only the overlay rule has to agree, and it is one
-            function. *)
-         let kind, base_url, request_path, capabilities =
+            express and the reasoning stance it has to state. A binding answers
+            with the config its ordinary requests already run on: its own
+            capability override first, else the frozen row laid over the base
+            that wire selects. *)
+         let kind, base_url, request_path, reasoning_uncontrolled, capabilities =
            match target.wire with
            | Catalog_provider_wire ->
              ( provider.kind
              , Model_provider_catalog.resolved_base_url ~getenv provider
              , provider.request_path
+             , false
              , Binding.capabilities_of_catalog_binding provider model )
            | Binding_wire binding ->
              ( binding.PC.kind
              , binding.PC.base_url
              , binding.PC.request_path
+             , (* A wire that turns reasoning on by itself accepts one of two
+                  answers: a named effort, or this row saying it rides the
+                  provider's default. Dropping it here left the second kind of
+                  row unable to say either, which is the same field-at-the-
+                  boundary failure this change is about. *)
+               binding.PC.reasoning_uncontrolled
              , (match binding.PC.model_capabilities_override with
                 | Some capabilities -> capabilities
                 | None ->
-                  Caps.apply_catalog_entry ~catalog ~wire:(Some binding.PC.kind) model) )
+                  Binding.capabilities_of_catalog_binding
+                    ~wire:binding.PC.kind
+                    provider
+                    model) )
          in
          let* () = validate_base_url ~target_ref:target.target_ref base_url in
          let* () =
@@ -823,6 +828,7 @@ let load_resolver_snapshot
              ?reasoning_effort:target.reasoning_effort
              ~supports_structured_output_override:capabilities.supports_structured_output
              ~model_capabilities_override:capabilities
+             ~reasoning_uncontrolled
              ?connect_timeout_s:target.connect_timeout_s
              ()
          in

@@ -301,16 +301,6 @@ val for_provider_model_id
   -> model_id:string
   -> capabilities option
 
-(** Lay [entry] over the base [wire] selects for it, the way
-    {!for_provider_model_id} does once it has found the row. A caller that
-    already holds both the catalog and the row -- the exact-output resolver
-    holds a frozen pair -- reads the same capabilities without going back
-    through the global catalog lookup. *)
-val apply_catalog_entry
-  :  catalog:Model_catalog.t
-  -> wire:Provider_kind.t option
-  -> Model_catalog.model_entry
-  -> capabilities
 
 (** Lookup capabilities for a known model_id.
 

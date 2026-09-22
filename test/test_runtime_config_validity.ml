@@ -782,10 +782,16 @@ let test_unset_thinking_does_not_disable_reasoning_model () =
    (#37674). *)
 let declared_targets_of_config_path ~label path =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
-  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+  let startup_state = Runtime_startup_state.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Runtime_startup_state.set startup_state)
   @@ fun () ->
   match Runtime.init_default ~config_path:path with
   | Error detail -> failf "%s: runtime bindings should initialize: %s" label detail
+  (* Loading the bindings is what makes them targets, so a binding this config
+     disables has no slot here -- the same answer the server gives. *)
   | Ok () -> Server_runtime_bootstrap.For_testing.exact_output_targets_of_runtimes ()
 ;;
 

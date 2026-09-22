@@ -29,7 +29,7 @@ let require_ok label = function
 
 (* The live shape of the binding this defect was found on: the Librarian's
    cheap HTTP slot, whose model row names an effort its wire has to accept. *)
-let runtime_toml ~protocol ~endpoint =
+let runtime_toml ~protocol ~endpoint ~stance =
   Printf.sprintf
     {|[runtime]
 default = "ollama_cloud.deepseek-flash"
@@ -45,7 +45,7 @@ key = "OLLAMA_CLOUD_API_KEY"
 api-name = "deepseek-v4.1-flash"
 tools-support = true
 thinking-support = true
-reasoning-effort = "low"
+%s
 [ollama_cloud.deepseek-flash]
 |}
     (String.concat
@@ -60,7 +60,17 @@ reasoning-effort = "low"
              (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids))))
     protocol
     endpoint
+    stance
 ;;
+
+(* The two stances a reasoning-enabling wire accepts. The deployment's own
+   rows use both: one names a depth, the rest ride the provider's default. *)
+let declared_effort = {|reasoning-effort = "low"
+[models.deepseek-flash.capabilities]
+thinking-control-format = "reasoning-effort"|}
+
+let rides_provider_default = "reasoning-uncontrolled = true"
+
 
 let with_runtime f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
@@ -83,9 +93,9 @@ let with_runtime f =
       Fs_compat.remove_tree root)
     (fun () ->
        Llm_provider.Model_catalog.clear_global ();
-       let load ~protocol ~endpoint =
+       let load ~protocol ~endpoint ~stance =
          let path = Filename.concat root "runtime.toml" in
-         Fs_compat.save_file path (runtime_toml ~protocol ~endpoint);
+         Fs_compat.save_file path (runtime_toml ~protocol ~endpoint ~stance);
          Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
          let keeper_config =
            match Runtime.get_runtimes () with
@@ -128,7 +138,10 @@ let test_openai_compatible_binding_reaches_its_own_wire () =
   with_runtime
   @@ fun load ->
   let keeper, admitted =
-    load ~protocol:"openai-compatible-http" ~endpoint:"https://ollama.com/v1"
+    load
+      ~protocol:"openai-compatible-http"
+      ~endpoint:"https://ollama.com/v1"
+      ~stance:declared_effort
   in
   let projected = Resolver.projection_target admitted in
   check_wire "openai-compatible" ~keeper ~exact:projected.config;
@@ -158,7 +171,9 @@ let test_openai_compatible_binding_reaches_its_own_wire () =
 let test_native_binding_reaches_the_native_wire () =
   with_runtime
   @@ fun load ->
-  let keeper, admitted = load ~protocol:"ollama-http" ~endpoint:"https://ollama.com" in
+  let keeper, admitted =
+    load ~protocol:"ollama-http" ~endpoint:"https://ollama.com" ~stance:declared_effort
+  in
   let projected = Resolver.projection_target admitted in
   check_wire "native" ~keeper ~exact:projected.config;
   check
@@ -170,8 +185,38 @@ let test_native_binding_reaches_the_native_wire () =
   match EO.project_request_body ~target:admitted ~messages requirement with
   | Ok (_ : EO.request_body_projection) ->
     fail "the native wire has no effort ladder, so this request cannot be built"
+  | Error (EO.Wire_admission_rejected EO.Target_request_rejected) ->
+    Printf.eprintf "native wire refusal: %s\n%!"
+      (EO.admission_error_reason (EO.Wire_admission_rejected EO.Target_request_rejected))
   | Error error ->
-    Printf.eprintf "native wire refusal: %s\n%!" (EO.admission_error_reason error)
+    failf
+      "the native wire should refuse the request itself, not: %s"
+      (EO.admission_error_reason error)
+;;
+
+(* The rows that ride the provider's default instead of naming a depth. The
+   OpenAI-compatible wire turns reasoning on when a request carries no
+   control, so it takes this stance as the answer -- but only if the stance
+   survives the trip from the binding to the exact request (#37674). *)
+let test_a_row_that_rides_the_provider_default_still_projects () =
+  with_runtime
+  @@ fun load ->
+  let keeper, admitted =
+    load
+      ~protocol:"openai-compatible-http"
+      ~endpoint:"https://ollama.com/v1"
+      ~stance:rides_provider_default
+  in
+  let projected = Resolver.projection_target admitted in
+  check_wire "rides-provider-default" ~keeper ~exact:projected.config;
+  check
+    bool
+    "the binding's reasoning stance reaches the exact request"
+    true
+    projected.config.reasoning_uncontrolled;
+  match EO.project_request_body ~target:admitted ~messages requirement with
+  | Ok (_ : EO.request_body_projection) -> ()
+  | Error error -> failf "exact projection refused: %s" (EO.admission_error_reason error)
 ;;
 
 let () =
@@ -191,6 +236,10 @@ let () =
             "a native binding of the same model runs on the native wire"
             `Quick
             test_native_binding_reaches_the_native_wire
+        ; test_case
+            "a row that rides the provider's reasoning default still projects"
+            `Quick
+            test_a_row_that_rides_the_provider_default_still_projects
         ] )
     ]
 ;;

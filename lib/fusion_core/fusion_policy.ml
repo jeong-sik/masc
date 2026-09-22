@@ -301,12 +301,47 @@ module Validated_preset = struct
 
   let preset (t : t) : preset = t
 
+  (* "preset <name>" 뒤에 붙는 서술어. 도구·HTTP·설정 편집이 같은 문장을 쓴다. *)
+  let invalid_to_string = function
+    | No_panel_models -> "has no panel seat"
+    | Missing_prompt -> "is missing a panel or judge system prompt"
+    | Missing_judge_model -> "has no judge"
+    | Duplicate_panelist id -> Printf.sprintf "has two panel seats named %s" id
+    | Bad_max_output_tokens tokens ->
+      Printf.sprintf "has an output token budget %d that is not positive" tokens
+    | Bad_timeout_s seconds ->
+      Printf.sprintf "has a timeout %g that is not a finite positive number" seconds
+    | Judge_panel_prompt_missing -> "has a first judge without a system prompt"
+    | Duplicate_judge id -> Printf.sprintf "has two first judges named %s" id
+    | Min_answered_below_min value | Min_answered_above_max value ->
+      Printf.sprintf "min_answered %d is outside 1 to its panel seat count" value
+
   (* private 타입 deriving 의존을 피해 underlying [preset]에 위임 (Fusion_policy.t가
      derive할 때 Validated_preset.pp/equal을 참조한다). *)
   let pp fmt (t : t) = pp_preset fmt t
   let show (t : t) = show_preset t
   let equal (a : t) (b : t) = equal_preset a b
 end
+
+(* 요청의 명단을 preset 에 얹고 처음부터 다시 검사한다. panel 을 바꾸면 라벨 없는 그룹
+   하나가 되는데, 그 그룹의 prompt·web_tools·출력 예산·timeout 은 preset 첫 그룹에서
+   가져온다. 그룹이 없는 preset 에는 가져올 설정이 없어 그룹 목록이 비고, 검사가
+   [No_panel_models] 로 거절한다. min_answered 는 그대로 두므로 새 명단보다 크면
+   [Min_answered_above_max] 가 된다 — 줄여 맞추지 않는다. *)
+let with_roster (p : preset) (roster : Fusion_types.roster) =
+  let judge =
+    match roster.judge_route with
+    | None -> p.judge
+    | Some route -> route
+  in
+  let panels =
+    match roster.panel_routes, p.panels with
+    | None, _ -> p.panels
+    | Some routes, first :: _ -> [ { first with models = routes; label = "" } ]
+    | Some _, [] -> []
+  in
+  Validated_preset.of_preset { p with judge; panels }
+;;
 
 type t =
   { enabled : bool
@@ -329,6 +364,17 @@ let decide_top_level ~(policy : t) ~preset =
     match find_preset policy preset with
     | None -> Error (Fusion_types.Preset_unknown preset)
     | Some _ -> Ok ()
+;;
+
+let effective_preset ~(policy : t) ~preset ~roster =
+  match find_preset policy preset with
+  | None -> Error (Fusion_types.Preset_unknown preset)
+  | Some vp ->
+    with_roster (Validated_preset.preset vp) roster
+    |> Result.map_error (fun invalid ->
+      Fusion_types.Roster_invalid
+        (Printf.sprintf "preset %s with this roster %s" preset
+           (Validated_preset.invalid_to_string invalid)))
 ;;
 
 (* decide는 enabled/preset/depth의 구조적 판정만 담당한다 — "이 턴이 심의할 가치가

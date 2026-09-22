@@ -103,20 +103,7 @@ type error =
   | Fusion_invalid of Fusion_config.config_error list
   | Configuration_rejected of string
 
-let invalid_message : Fusion_policy.Validated_preset.invalid -> string = function
-  | No_panel_models -> "has no panel seat"
-  | Missing_prompt -> "is missing a panel or judge system prompt"
-  | Missing_judge_model -> "has no judge"
-  | Duplicate_panelist id -> Printf.sprintf "has two panel seats named %s" id
-  | Bad_max_output_tokens tokens ->
-    Printf.sprintf "has an output token budget %d that is not positive" tokens
-  | Bad_timeout_s seconds ->
-    Printf.sprintf "has a timeout %g that is not a finite positive number" seconds
-  | Judge_panel_prompt_missing -> "has a first judge without a system prompt"
-  | Duplicate_judge id -> Printf.sprintf "has two first judges named %s" id
-  | Min_answered_below_min value | Min_answered_above_max value ->
-    Printf.sprintf "min_answered %d is outside 1 to its panel seat count" value
-;;
+let invalid_message = Fusion_policy.Validated_preset.invalid_to_string
 
 let invalid_code : Fusion_policy.Validated_preset.invalid -> string = function
   | No_panel_models -> "no_panel_models"

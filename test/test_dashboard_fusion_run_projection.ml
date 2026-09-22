@@ -108,7 +108,7 @@ let test_list_and_unknown_detail_responses () =
     ~run_id:"fusion-list-run"
     ~keeper:"fusion-detail-keeper"
     ~preset:"test"
-    ~topology:Fusion_types.Simple
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
     ~started_at:1.0;
   let list_json =
     Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
@@ -161,7 +161,7 @@ let test_detail_uses_exact_typed_board_origin () =
     ~run_id:pending_run_id
     ~keeper:"fusion-detail-keeper"
     ~preset:"test"
-    ~topology:Fusion_types.Simple
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
     ~started_at:10.0;
   (match
      Board_dispatch.create_post
@@ -230,7 +230,7 @@ let test_detail_uses_exact_typed_board_origin () =
     ~run_id:recorded_run_id
     ~keeper:"fusion-detail-keeper"
     ~preset:"test"
-    ~topology:Fusion_types.Simple
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
     ~started_at:20.0;
   let origin : Board.post_origin =
     { turn_ref = None
@@ -312,7 +312,7 @@ let test_replay_failure_keeps_historical_evidence_readable () =
   let initial = Fusion_run_registry.create ~path:replay_path () in
   let lost_id = "lost-observation" in
   Fusion_run_registry.register_running initial ~run_id:lost_id ~keeper:"caller"
-    ~preset:"test" ~topology:Fusion_types.Simple ~started_at:10.;
+    ~preset:"test" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:10.;
   let channel = open_out_gen [Open_append; Open_binary] 0o600 replay_path in
   output_string channel
     {|{"event":"complete","id":"lost-observation","completion":null}
@@ -371,7 +371,7 @@ let test_replay_failure_keeps_historical_evidence_readable () =
    | Error error -> fail (Board.show_board_error error));
   check string "diagnostic read preserves malformed source" before (Fs_compat.load_file replay_path);
   Fusion_run_registry.register_running registry ~run_id:lost_id ~keeper:"caller"
-    ~preset:"test" ~topology:Fusion_types.Simple ~started_at:20.;
+    ~preset:"test" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:20.;
   let retained = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
       ~registry in
   check int "retained run does not duplicate its Board history" 0

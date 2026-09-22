@@ -104,6 +104,7 @@
 - The librarian now reads official-client turns from those history lines instead of only the turn's final assistant answer (#37527).
 
 ### Fixed
+- A Librarian continuity pass that a provider refused now reads less on the next pass instead of starting over. The pass used to ask whether the refusal was about size, read that verdict from whichever slot the walk happened to end on, and keep the answer only until the pass ended; a keeper whose continuity snapshot no longer fits its history prepares from atom 0, so every pass offered the whole backlog, halved it twice and died, and one keeper read nothing for a day. The width it narrowed to is now carried to the next pass and released only once the backlog is read to its end, the verdict is taken from every failure in the walk rather than the last one, and a refusal no smaller request would avoid (quota, overload, server, network, authentication, authorization, payment, an absent model, or a failure that never reached a provider) leaves the width where it is. A failed pass no longer retries in place: it records the narrower width and waits for the next signal (#37793).
 
 - Setup fixture substitutions now fail at the exact changed fixture location instead of silently passing and blaming the wrong field (#37434).
 - The cancel guard now follows complete handler arm lists and recognizes both exception-arm forms, eliminating false positives from comments and distant cancellation arms (#37495).

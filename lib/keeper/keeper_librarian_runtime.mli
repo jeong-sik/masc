@@ -41,9 +41,25 @@ type write_scope = Context_only | Context_and_memory
 (** The caller names the evidence's purpose. A queue-source organization pass
     writes only working Context; a durable range retains Memory processing. *)
 
-type capacity_refusal =
-  | Input_limit_unknown
-  | Cli_input_limit of Keeper_lane_cli_oneshot.input_capacity
+type not_committed =
+  { detail : string
+        (** The typed cause, for the caller's log. *)
+  ; walk_was_never_about_size : bool
+        (** No failure the walk recorded could be answered by sending less:
+            each was either a provider momentarily unable to serve a request
+            it accepted (quota, overload, server, network), or a refusal only
+            an operator can lift (authentication, authorization, payment, an
+            absent model). Its caller then waits for the next signal at the
+            width it already had, instead of reading less on a refusal a
+            smaller request would meet just as surely.
+
+            The verdict covers every failed visit of the walk, not the last
+            one, so the same set of causes answers the same way whatever order
+            the slots were tried in. A walk that ended in the CLI fallback, or
+            one that recorded no typed cause at all, is false: the pass reads
+            less rather than holding the whole range for a reason it cannot
+            name. *)
+  }
 
 val fit_continuity :
   capacity:Keeper_lane_cli_oneshot.input_capacity -> base_path:string -> keeper_id:string ->
@@ -59,7 +75,10 @@ val run_best_effort
   -> ?on_memory_committed:(unit -> unit)
        (** Synchronous observation at the snapshot commit. Must only update
            caller-owned in-memory state, without I/O, yielding or raising. *)
-  -> ?on_capacity_refused:(capacity_refusal -> unit)
+  -> ?on_cli_input_limit:(Keeper_lane_cli_oneshot.input_capacity -> unit)
+       (** The character limit a CLI slot reported while refusing, for
+           {!fit_continuity}. An API slot's refusal reports none. *)
+  -> ?on_not_committed:(not_committed -> unit)
   -> ?on_continuity_committed:(Librarian_continuity_snapshot.t -> unit)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
   -> ?official_range_id:Keeper_memory_os_current.official_range_id

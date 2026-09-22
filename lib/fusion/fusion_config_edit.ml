@@ -223,66 +223,68 @@ let check_routes (preset : Fusion_policy.preset) =
     (Ok ()) (preset_routes preset)
 ;;
 
-let precheck = function
-  | Upsert_preset preset ->
-    let name = preset.Fusion_policy.name in
-    let* () = if valid_name name then Ok () else Error (Name_invalid name) in
-    let* _validated =
-      Fusion_policy.Validated_preset.of_preset preset
-      |> Result.map_error (fun invalid -> Preset_invalid { preset = name; invalid })
-    in
-    check_routes preset
-  | Rename_preset { target; from = _ } ->
-    if valid_name target then Ok () else Error (Name_invalid target)
-  | Set_settings _ | Delete_preset _ -> Ok ()
-;;
-
-(* ── the locked edit ───────────────────────────────────────────────────── *)
+(* ── the edit ──────────────────────────────────────────────────────────── *)
 
 exception Refused of error
 
-let current_fusion contents =
-  match Otoml.Parser.from_string contents with
-  | exception Otoml.Parse_error (_, detail) -> raise (Refused (Configuration_unavailable detail))
-  | toml ->
-    ( Otoml.find_or ~default:false toml Otoml.get_boolean [ "fusion"; "enabled" ]
-    , Otoml.find_opt toml Otoml.get_string [ "fusion"; "default_preset" ] )
+let refused = function
+  | Ok text -> text
+  | Error error -> raise (Refused (Edit_refused error))
 ;;
 
-let edited_text contents operation =
-  let refused = function
-    | Ok text -> text
-    | Error error -> raise (Refused (Edit_refused error))
-  in
-  match operation with
-  | Set_settings settings -> Fusion_config_writer.set_settings contents settings
-  | Upsert_preset preset -> refused (Fusion_config_writer.upsert_preset contents preset)
-  | Delete_preset name ->
-    (match current_fusion contents with
-     | true, Some default when String.equal default name ->
+(* Deleting the default of an enabled [fusion] would leave a file that does
+   not load. Asked of the file read under the lock. *)
+let delete_checked contents name =
+  match Otoml.Parser.from_string_result contents with
+  | Error detail -> raise (Refused (Configuration_unavailable detail))
+  | Ok toml ->
+    (match
+       ( Otoml.find_result toml Otoml.get_boolean [ "fusion"; "enabled" ]
+       , Otoml.find_result toml Otoml.get_string [ "fusion"; "default_preset" ] )
+     with
+     | Ok true, Ok default when String.equal default name ->
        raise (Refused (Default_preset_deleted name))
-     | (true | false), (Some _ | None) ->
+     | (Ok _ | Error _), (Ok _ | Error _) ->
        refused (Fusion_config_writer.delete_preset contents ~name))
+;;
+
+(* The checks that need no lock, then the edit to run under it. An upsert
+   reaches the writer as the preset its validation returned. *)
+let prepare = function
+  | Upsert_preset preset ->
+    let name = preset.Fusion_policy.name in
+    let* () = if valid_name name then Ok () else Error (Name_invalid name) in
+    let* validated =
+      Fusion_policy.Validated_preset.of_preset preset
+      |> Result.map_error (fun invalid -> Preset_invalid { preset = name; invalid })
+    in
+    let* () = check_routes preset in
+    Ok (fun contents -> refused (Fusion_config_writer.upsert_preset contents validated))
   | Rename_preset { from; target } ->
-    refused (Fusion_config_writer.rename_preset contents ~from ~target)
+    if valid_name target
+    then Ok (fun contents -> refused (Fusion_config_writer.rename_preset contents ~from ~target))
+    else Error (Name_invalid target)
+  | Set_settings settings ->
+    Ok (fun contents -> Fusion_config_writer.set_settings contents settings)
+  | Delete_preset name -> Ok (fun contents -> delete_checked contents name)
 ;;
 
 let check_fusion text =
-  match Otoml.Parser.from_string text with
-  | exception Otoml.Parse_error (_, detail) -> raise (Refused (Configuration_rejected detail))
-  | toml ->
+  match Otoml.Parser.from_string_result text with
+  | Error detail -> raise (Refused (Configuration_rejected detail))
+  | Ok toml ->
     (match Fusion_config.of_toml toml with
      | Ok _ -> ()
      | Error errors -> raise (Refused (Fusion_invalid errors)))
 ;;
 
 let apply ~runtime_config_path ~expected_revision operation =
-  let* () = precheck operation in
+  let* write = prepare operation in
   let edit contents =
     let observation = Runtime.config_observation ~path:runtime_config_path contents in
     let revision = Runtime.config_source_revision_to_string observation.source_revision in
     if not (String.equal revision expected_revision) then raise (Refused Configuration_changed);
-    let text = edited_text contents operation in
+    let text = write contents in
     check_fusion text;
     text
   in

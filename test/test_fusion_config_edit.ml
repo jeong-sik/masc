@@ -134,6 +134,18 @@ let test_upsert_writes_a_lane_judge () =
     check bool "the judge note survives" true (contains "# judge note"))
 ;;
 
+(* The dashboard sends the whole preset on every save, so saving one it did not
+   change must not reformat the operator's file. *)
+let test_unchanged_upsert_leaves_the_file () =
+  with_config (fun path ->
+    let before = read path in
+    (match apply path (Masc.Fusion_config_edit.Upsert_preset (preset_named path "trio")) with
+     | Ok _ -> ()
+     | Error error ->
+       failf "unchanged upsert refused: %s" (Masc.Fusion_config_edit.error_message error));
+    check string "runtime.toml is byte-identical" before (read path))
+;;
+
 let test_stale_revision_is_refused () =
   with_config (fun path ->
     let trio = preset_named path "trio" in
@@ -217,6 +229,8 @@ let () =
     "fusion config edit"
     [ ( "apply"
       , [ test_case "upsert writes a lane judge" `Quick test_upsert_writes_a_lane_judge
+        ; test_case "unchanged upsert leaves the file" `Quick
+            test_unchanged_upsert_leaves_the_file
         ; test_case "stale revision is refused" `Quick test_stale_revision_is_refused
         ; test_case "unknown route is refused" `Quick test_unknown_route_is_refused
         ; test_case "invalid preset is refused" `Quick test_invalid_preset_is_refused

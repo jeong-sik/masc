@@ -2392,19 +2392,15 @@ let identity_filter_rows ~providers filter =
 
 (* Each block above the list brings its own trailing blank, so two of them
    do not stack two blanks and none of them leaves the list flush against
-   the hint.
+   the tally.
 
-   The sentence reads as a duplicate of the tab's own hint row -- [ ]:tab,
-   arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh -- and it was
-   dropped on that ground, until a 150-column frame showed the hint row does
-   not reach the screen at all: the row spends 79 cells on nine tab labels
-   before the hint starts, so the title is cut inside "Automation" and the
-   keys are never drawn. Until that row is fixed this sentence is the only
-   place an operator can read them -- #35539. *)
-let identity_preamble ~keeper ~summary ~notice =
-  ("  Move with arrows, enter to connect " ^ keeper
-   ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
-  :: summary :: "" :: notice
+   No keys here. The tab's own keys ride the footer, which is where every
+   other surface puts them: at 120 columns it draws all six
+   ([ ]:tab, arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh) and
+   at 80 it gives up /:filter and R:refresh in that order, with [?] naming
+   what it dropped. A sentence spelling them again stood here while the
+   title row carried the hint and cut it, which the footer no longer does. *)
+let identity_preamble ~summary ~notice = summary :: "" :: notice
 
 (** Which pane line the provider at [index] is drawn on.
 
@@ -2413,7 +2409,7 @@ let identity_preamble ~keeper ~summary ~notice =
     fifty-odd rows they would have to scroll past. It moves the list down,
     so the row a keypress scrolls to moves with it. *)
 let identity_provider_line ~summary ~notice ~index =
-  List.length (identity_preamble ~keeper:"" ~summary ~notice) + index
+  List.length (identity_preamble ~summary ~notice) + index
 
 (** The cursor held inside the list it names. A cursor left behind by a
     shorter list answers from the last row rather than from one that is no

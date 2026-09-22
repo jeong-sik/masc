@@ -1386,7 +1386,12 @@ let render_approvals (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let count = List.length approvals in
+  (* The same population the tab badge and the Overview row count: the
+     approval rows plus the open questions. This title counted the approval
+     rows alone, so an operator who came here from a badge of 1 was met with
+     "(0)" and had to find the question block further down to learn what the
+     badge had been counting. *)
+  let count = Masc_tui_types.approvals_surface_pending state in
   (* The count is what is on screen. It used to be the pending-confirm queue's
      own visible/total pair, and that queue is one of the three lists this
      screen draws: with seven Gate rows waiting and no confirm entries, the
@@ -1422,6 +1427,14 @@ let render_approvals (state : state) =
      with nothing in them, a bracket inside the parenthesis, and a total the
      one kind that did have rows had already said. With one kind its count is
      the total; with more, the total leads and the kinds follow it. *)
+  (* The questions a Keeper is waiting on are the fourth kind this surface
+     answers, and the only one whose word takes a plural, so it is built
+     beside the three rather than inside their format. *)
+  let question_count =
+    match state.asks_snapshot with
+    | Some snapshot -> List.length (Ask_projection.open_rows snapshot)
+    | None -> 0
+  in
   let count_text =
     let kinds =
       [ (Theme.warn (), List.length state.keeper_tool_approvals, "held")
@@ -1433,6 +1446,15 @@ let render_approvals (state : state) =
              else
                Some
                  (Printf.sprintf "%s%d %s%s" style kind_count word Ansi.reset))
+    in
+    let kinds =
+      if question_count = 0 then kinds
+      else
+        kinds
+        @ [ Printf.sprintf "%s%s%s" (Theme.warn ())
+              (Masc_tui_message_layout.count_noun question_count "question")
+              Ansi.reset
+          ]
     in
     match kinds with
     | [] -> string_of_int count
@@ -6510,7 +6532,6 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   in
   if numbered = [] && rejected = [] && state.identity_filter <> None then
     Masc_tui_types.identity_preamble
-      ~keeper:(Terminal_text.single_line k.k_name)
       ~summary:(Masc_tui_types.identity_summary ~providers ~query)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
@@ -6520,7 +6541,6 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
     Masc_tui_types.identity_preamble
-      ~keeper:(Terminal_text.single_line k.k_name)
       ~summary:(Masc_tui_types.identity_summary ~providers ~query)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
@@ -6910,15 +6930,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             | Connector_stale -> "STALE"
           in
           let connection_label (connector : Tui_decode.connector) =
+            let word =
+              Masc_tui_connector_state.badge_word connector.cn_connection
+            in
             match connector.cn_connection with
             | Tui_decode.Connector_connected ->
-                (Theme.ok ()) ^ "● CONNECTED" ^ Ansi.reset
+                (Theme.ok ()) ^ "● " ^ word ^ Ansi.reset
             | Connector_connected_unavailable ->
-                (Theme.warn ()) ^ "● CONNECTED / UNAVAILABLE" ^ Ansi.reset
-            | Connector_disconnected ->
-                (Theme.bad ()) ^ "● DISCONNECTED" ^ Ansi.reset
-            | Connector_offline -> Ansi.dim ^ "○ UNAVAILABLE" ^ Ansi.reset
-            | Connector_stale -> (Theme.warn ()) ^ "● STALE" ^ Ansi.reset
+                (Theme.warn ()) ^ "● " ^ word ^ Ansi.reset
+            | Connector_disconnected -> (Theme.bad ()) ^ "● " ^ word ^ Ansi.reset
+            | Connector_offline -> Ansi.dim ^ "○ " ^ word ^ Ansi.reset
+            | Connector_stale -> (Theme.warn ()) ^ "● " ^ word ^ Ansi.reset
           in
           let transport_rows =
             List.mapi
@@ -7025,16 +7047,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                     (match selected_binding with
                      | None -> "(no binding selected)"
                      | Some binding -> binding_reference binding)
-                ; Printf.sprintf "  %-18s %s · %s" "Connection"
+                  (* The badge is read from the status the row would print
+                     beside it ([decode_connector_connection] takes status,
+                     available and connected), so the word never differs from
+                     the badge and the row said the same thing twice. *)
+                ; Printf.sprintf "  %-18s %s" "Connection"
                     (connection_label connector)
-                    (Terminal_text.single_line connector.cn_status)
                 ; Printf.sprintf "  %-18s %s" "MASC API"
                     (Printf.sprintf "%s:%d"
                        Masc_network_defaults.masc_http_loopback_peer state.port)
                 ; Printf.sprintf "  %-18s %s" "Channel type"
                     (Terminal_text.single_line_or ~default:"-" connector.cn_channel)
                 ]
-                @ optional_row "Runtime state" runtime_state
+                @ optional_row "Runtime state"
+                    (Masc_tui_connector_state.runtime_state_to_draw
+                       ~connection:connector.cn_connection runtime_state)
                 @ optional_row "Status source" connector.cn_status_source
                 @ optional_row "Remote endpoint" connector.cn_endpoint
                 @ optional_row "Status file" connector.cn_status_path
@@ -9727,9 +9754,19 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
     | [] -> "none assigned"
     | names -> String.concat ", " names
   in
+  (* The status column has room for the word and not for the cause, and a
+     repository whose clone or fetch failed keeps that cause in its status.
+     The row says "error" and this says what it was; every other status has
+     nothing here to add. *)
+  let failure =
+    match Masc.Tui_decode.repository_status_reason repo.rp_status with
+    | None -> []
+    | Some reason -> wrap "Error" reason
+  in
   wrap "Path" repo.rp_resolved_local_path
   @ stored_path
   @ wrap "Keepers" keepers
+  @ failure
 
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
@@ -9869,7 +9906,9 @@ let render_repository_list (state : state) =
                         Terminal_text.single_line r.rp_name
                     ; wrow_branch =
                         Terminal_text.single_line r.rp_default_branch
-                    ; wrow_status = Terminal_text.single_line r.rp_status
+                    ; wrow_status =
+                        Terminal_text.single_line
+                          (Masc.Tui_decode.repository_status_word r.rp_status)
                     ; wrow_sync = (if r.rp_auto_sync then "auto" else "manual")
                     ; wrow_path =
                         Terminal_text.single_line r.rp_resolved_local_path

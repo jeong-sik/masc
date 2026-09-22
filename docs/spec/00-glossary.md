@@ -152,6 +152,20 @@ status: reference
   조치가 필요한 fleet health 저하 사유이며, 다른 차단 사유가 없으면 `degraded`로
   표시한다. 실행 fiber의 생존·실행 가능 여부를 바꾸거나 세션 복구를 승인하지 않는다.
 
+**Turn Configuration Error (턴 구성 오류)**
+: Keeper turn이 typed Agent Core 구성 오류로 끝나 latch된 실패 원인
+  (`Keeper_registry.Turn_configuration_error { code; field; detail }`). 현재 프로세스는
+  운영자가 설정이나 환경을 바꾸지 않고는 이 실패를 고칠 수 없다. `code`는
+  `missing_env_var`·`unsupported_provider`·`credential_unavailable`·
+  `sensitive_value_in_config` 넷이고, `field`는 관련 설정 키다. Fleet는 일시정지되지
+  않은 `Failing` Keeper의 이 원인을 `turn_configuration_error_keeper_count/names`로
+  표시하고, 다른 차단 사유가 없으면 `degraded`로 표시하며 `operator_action_required`를
+  참으로 만든다. autoboot 대상만 세는 `configuration_blocked_*`와 달리 이 값은 autoboot
+  집합 밖의 수동 Keeper도 포함한다. `recovering`·`official_client_recovery_required`와
+  함께 `Failing` 수를 정확히 분할한다.
+  → [Keeper_registry.failure_reason](../../lib/keeper/keeper_registry_types_failure.mli),
+  [blocker](../../lib/keeper/keeper_status_bridge_blocker.ml)
+
 **Usage Scope**
 : Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
   요청별, `turn_total`은 공식 클라이언트 턴 안의 여러 provider 요청 합계,
@@ -220,7 +234,11 @@ status: reference
 
 **Lane**
 : Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다.
-  → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
+  Lane은 또한 `Browser Lane`·`MSX Lane`·`DOS Lane`·`Slack Lane`처럼 Keeper가
+  공유 머신·세션을 관찰·조작하는 관측·조작 대상이며, Runtime Lane과 다른 축이다.
+  → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli),
+  [Browser_lane](../../lib/browser_lane/browser_lane.ml),
+  [Msx_lane](../../lib/msx_lane/msx_lane.mli)
 
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
@@ -279,6 +297,16 @@ status: reference
   그래서 집합 밖 선언 노력은 깎여 통과하고, 거절로 남는 것은 깎을 기준이 없는 선언
   없음과, 토글이 사다리 밖으로 만든 값이다.
   → [Provider_config.reasoning_effort_request_rejection](../../packages/agent_core/lib/llm_provider/provider_config.mli)
+**Lane Add-on**
+: 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
+  Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
+  Lane 행을 제공할 수 있고, 패키지 worker는 관측 계산만 격리한다. attach·detach와
+  Add-on 장애는 기존 Keeper의 권한·도구·진행 중 작업을 축소하지 않으며, 추가 근거는
+  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·
+  `browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
+  검사·표시한다.
+  → [설계 계약](../design/lane-addon-v0.md),
+  [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli)
 
 **Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
@@ -560,6 +588,24 @@ status: reference
   [공식 클라이언트 세션 저장소](../../lib/keeper/keeper_official_client_session_store.mli)에
   기록한다.
   → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
+
+**Checkpoint Purge (체크포인트 청소)**
+: 멈춘 Keeper의 canonical AGENT_CORE checkpoint를 LLM 없이 세 닫힌 규칙으로 줄이는
+  운영자 작업(RFC-0351 S1). R2는 `ToolUse`가 없는 assistant message의 서명 없는
+  `Thinking`·`ReasoningDetails` 블록을 지우고, R3는 닫힌 tool cycle의 `ToolResult`
+  내용을 고정 표시로 바꾸며, R1은 바이트가 같은 text-only message가 `dup_threshold`번
+  이상 반복되면 처음과 마지막만 남긴다. R2·R3를 R1보다 먼저 적용하는 순서가 한 번의
+  통과를 fixpoint로 만든다. tool protocol cycle은 쪼개거나 순서를 바꾸지 않고, 마지막
+  `keep_recent_messages`개와 구조적으로 보호된 꼬리는 바이트 그대로 남긴다. `messages`
+  밖의 필드는 바뀌지 않아 같은 watermark 재저장으로 받아들여진다. Dashboard의
+  "정리 미리보기"는 읽기 전용이고, "백업 후 청소"는 원본을 바이트 그대로 백업한 뒤
+  저장하며 Keeper가 등록돼 있으면 쓸 수 없다. CLI `masc-checkpoint-purge`는 기본이
+  dry-run이고 `--apply`가 백업 후 저장한다. checkpoint를 다시 쓰면 atom 번호가 바뀌므로
+  Librarian의 atom 위치도 함께 옮기며(`librarian_rebase`), Librarian이 아직 읽을 atom을
+  남겼으면 재작성을 거부한다. 서버의 dashboard 청소 동작은 그 전에 Librarian lane을
+  취소하고 기다린다.
+  → [Keeper_checkpoint_purge](../../lib/keeper/keeper_checkpoint_purge.mli),
+  [Runbook](../CHECKPOINT-PURGE-RUNBOOK.md)
 
 **받은 일 정리**
 : 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나

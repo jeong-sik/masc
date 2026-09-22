@@ -37,6 +37,11 @@ val header_of_line : string -> header option
 val is_table_header : string -> bool
 (** Return [true] when [header_of_line line] is a header of either kind. *)
 
+val header_trailing_comment : string -> string option
+(** The comment after a header line, with the spaces before it:
+    [Some "  # note"] for [\[a.b\]  # note]. [None] when the line is not a
+    header or carries no comment. A [#] inside a quoted key is not one. *)
+
 val is_table : path:string -> string -> bool
 (** Return [true] when [line] opens the standard table [[path]], compared by
     the key path the grammar reads from each. *)

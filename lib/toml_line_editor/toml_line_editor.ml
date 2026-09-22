@@ -169,6 +169,32 @@ let is_table_header line =
   | None -> false
 ;;
 
+(* The comment after a header is found by the grammar, not by the first [#]: a
+   quoted key may hold one. The comment starts at the first [#] whose prefix
+   still reads as the same header, and the spaces before it come along. *)
+let header_trailing_comment line =
+  match header_of_line line with
+  | None -> None
+  | Some header ->
+    let length = String.length line in
+    let rec find from =
+      match String.index_from_opt line from '#' with
+      | None -> None
+      | Some at ->
+        (match header_of_line (String.sub line 0 at) with
+         | Some prefix when equal_header prefix header ->
+           let rec header_end index =
+             if index > 0 && (Char.equal line.[index - 1] ' ' || Char.equal line.[index - 1] '\t')
+             then header_end (index - 1)
+             else index
+           in
+           let start = header_end at in
+           Some (String.sub line start (length - start))
+         | Some _ | None -> find (at + 1))
+    in
+    find 0
+;;
+
 (* [is_table ~path line]: [line] opens the standard table [\[path\]]. [path] is
    the text between the brackets as a writer emits it, so the grammar reads it
    the way it reads the line: a quoted segment is one key and a bare dotted
@@ -366,8 +392,6 @@ let scan_line state line =
     walk 0 state)
 ;;
 
-(* [find_structural_index pred lines] is {!find_index} restricted to lines that
-   carry structure, so a match inside a multi-line value is not one. *)
 let structural_lines lines =
   let rec loop state acc = function
     | [] -> List.rev acc
@@ -376,6 +400,8 @@ let structural_lines lines =
   loop outside [] lines
 ;;
 
+(* [find_structural_index pred lines] is {!find_index} restricted to lines that
+   carry structure, so a match inside a multi-line value is not one. *)
 let find_structural_index pred lines =
   let rec loop index state = function
     | [] -> None
@@ -401,6 +427,8 @@ type value =
    every double but renders 0.1 as 0.10000000000000001, so precision climbs
    until the rendering parses back equal. [nan] never compares equal to itself
    and falls through to the 17-digit form, which is spelled [nan] either way. *)
+let exact_integer_bound = Float.pow 2. 53.
+
 let float_text v =
   let rec shortest precision =
     if precision > 17
@@ -411,7 +439,14 @@ let float_text v =
       | Some parsed when Float.equal parsed v -> rendered
       | Some _ | None -> shortest (precision + 1))
   in
-  let rendered = shortest 1 in
+  (* [%g] switches to an exponent once the exponent reaches the precision, so
+     the shortest round-trip form of 120 is [1.2e+02]. A whole number below
+     2^53 is an exact integer, and [%.1f] spells it digit for digit. *)
+  let rendered =
+    if Float.is_integer v && Float.abs v < exact_integer_bound
+    then Printf.sprintf "%.1f" v
+    else shortest 1
+  in
   let has character = String.exists (Char.equal character) rendered in
   (* A float rendered without a point or exponent reads back as an integer, and
      a field declared float is then refused by type. [nan] and [inf] carry no

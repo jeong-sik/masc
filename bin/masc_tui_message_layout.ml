@@ -139,7 +139,6 @@ type metadata =
       clock : string option;
       speaker : string;
       role_label : string;
-      request_label : string;
     }
   | Continued_at of { clock : string }
 
@@ -1256,13 +1255,8 @@ let metadata_row ~(previous : entry option) ~inner_width ~indent (entry : entry)
     if not (within_turn || continues_previous ~previous entry) then
       Some
         ( Origin
-            { clock;
-              speaker = entry.speaker;
-              role_label = entry.role_label;
-              request_label = entry.request_label;
-            }
-        , Printf.sprintf "[%s] From [%s] %s" entry.timestamp entry.role_label
-            entry.request_label )
+            { clock; speaker = entry.speaker; role_label = entry.role_label }
+        , Printf.sprintf "[%s] From [%s]" entry.timestamp entry.role_label )
     else
       match clock, previous with
       | None, _ -> None

@@ -621,28 +621,19 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
       origin_heading buf cols ~plain:row.gutter ~styled:row.gutter
         ~clock:(Some clock)
   | Message_layout.Metadata
-      (Message_layout.Origin { clock; speaker; role_label = _; request_label })
+      (Message_layout.Origin { clock; speaker; role_label = _ })
     ->
       (* [speaker], not [role_label]: the label was aligned to the gutter's
          column for the inline modes, and this row has the pane. A name the
-         gutter cut to "e-m…-leader" is spelled whole here. *)
+         gutter cut to "e-m…-leader" is spelled whole here.
+
+         No request id. It groups the rows of a turn, and the rows already
+         show that grouping; as text it was an identifier no reader acts on. *)
       let mark = Message_layout.speaker_mark row.style in
-      (* The dot separates a name from a request; a lane with no name (the
-         tool and reasoning blocks carry an empty label) draws the request
-         alone after its mark rather than a dot with nothing on its left. *)
-      let request =
-        if String.equal request_label "" || String.equal speaker "" then
-          request_label
-        else " \xc2\xb7 " ^ request_label
-      in
-      (* A keeper's own row without a request id has neither, and the mark
-         then stands alone before the rule instead of two spaces. *)
-      let gap =
-        if String.equal speaker "" && String.equal request "" then "" else " "
-      in
+      let gap = if String.equal speaker "" then "" else " " in
       (* A heading in an arrival's column starts after the blank run the
          layout put in its gutter; everywhere else the gutter is empty. *)
-      let plain = row.gutter ^ mark ^ gap ^ speaker ^ request in
+      let plain = row.gutter ^ mark ^ gap ^ speaker in
       let styled =
         match row.style with
         | Message_layout.Tool | Message_layout.Thinking ->
@@ -658,13 +649,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
               if String.equal speaker "" then ""
               else Printf.sprintf "%s%s%s" Ansi.reverse speaker Ansi.reset
             in
-            (* The mark's colour and weight end at the mark. The badge's own
-               reset used to end them, so a heading without a name -- the
-               pane's own keeper, a turn opened by a tool -- carried the
-               speaker's bold colour into the request id that should
-               recede. *)
-            Printf.sprintf "%s%s%s%s%s%s%s%s%s%s" row.gutter (Chat_theme.origin row.style)
-              Ansi.bold mark Ansi.reset gap badge Ansi.dim request Ansi.reset
+            (* The mark's colour and weight end at the mark, not at whatever
+               follows it: a heading without a name has no badge to end
+               them, and the rule after it would draw bold in the speaker's
+               colour. *)
+            Printf.sprintf "%s%s%s%s%s%s%s" row.gutter (Chat_theme.origin row.style)
+              Ansi.bold mark Ansi.reset gap badge
       in
       origin_heading buf cols ~plain ~styled ~clock
 

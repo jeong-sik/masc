@@ -1064,13 +1064,13 @@ let test_one_speaker_keeps_one_heading () =
     |> List.map (fun (row : Layout.row) -> row.text)
   in
   check (list string) "the same second is the same message"
-    [ "[12:34:56] From [keeper.one] tui-..dddddddd"; "  first"; "  second" ]
+    [ "[12:34:56] From [keeper.one]"; "  first"; "  second" ]
     (rows
        [ entry Layout.Keeper "keeper.one" "tui-..dddddddd" "first"
        ; entry Layout.Keeper "keeper.one" "tui-..dddddddd" "second"
        ]);
   check (list string) "a later second keeps its own row, without the name"
-    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
+    [ "[12:34:56] From [keeper.one]"
     ; "  first"
     ; "[12:35:01]"
     ; "  second"
@@ -1084,15 +1084,15 @@ let test_one_speaker_keeps_one_heading () =
   (* The placeholder a row without a time carries as its timestamp is
      display text, not a moment; a later placeholder says nothing moved. *)
   check (list string) "a later row without a time draws no clock row"
-    [ "[--:--:--] From [JOURNAL] "; "  first"; "  second" ]
+    [ "[--:--:--] From [JOURNAL]"; "  first"; "  second" ]
     (rows
        [ entry ~timestamp:"--:--:--" Layout.Journal "JOURNAL" "" "first"
        ; entry ~timestamp:"--:--:--" Layout.Journal "JOURNAL" "" "second"
        ]);
   check (list string) "a different speaker starts again"
-    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
+    [ "[12:34:56] From [keeper.one]"
     ; "  first"
-    ; "[12:34:56] From [you] tui-..dddddddd"
+    ; "[12:34:56] From [you]"
     ; "  second"
     ]
     (rows
@@ -1100,9 +1100,9 @@ let test_one_speaker_keeps_one_heading () =
        ; entry Layout.User "you" "tui-..dddddddd" "second"
        ]);
   check (list string) "a new turn starts again even from the same speaker"
-    [ "[12:34:56] From [keeper.one] tui-..dddddddd"
+    [ "[12:34:56] From [keeper.one]"
     ; "  first"
-    ; "[12:34:56] From [keeper.one] tui-..eeeeeeee"
+    ; "[12:34:56] From [keeper.one]"
     ; "  second"
     ]
     (rows
@@ -1134,9 +1134,9 @@ let test_a_turn_keeps_one_heading_across_its_blocks () =
   in
   let drawn = rows turn in
   check (list string) "the operator's heading, the turn's, and one clock row"
-    [ "[12:34:56] From [you] tui-..dddddddd"
+    [ "[12:34:56] From [you]"
     ; "  look"
-    ; "[12:34:56] From [] tui-..dddddddd"
+    ; "[12:34:56] From []"
     ; "  find it"
     ; "  read_file a.ml"
     ; "  found"
@@ -1158,9 +1158,9 @@ let test_a_turn_keeps_one_heading_across_its_blocks () =
    | [ Layout.User; Layout.Keeper ] -> ()
    | _ -> fail "the turn opened on reasoning should draw its heading as the keeper");
   check (list string) "a new request opens a new turn"
-    [ "[12:34:56] From [] tui-..dddddddd"
+    [ "[12:34:56] From []"
     ; "  first"
-    ; "[12:34:56] From [] tui-..eeeeeeee"
+    ; "[12:34:56] From []"
     ; "  second"
     ]
     (text
@@ -1183,7 +1183,7 @@ let test_metadata_keeps_a_typed_origin () =
   match rows with
   | { Layout.kind =
         Layout.Metadata
-          (Layout.Origin { clock; speaker; role_label; request_label });
+          (Layout.Origin { clock; speaker; role_label });
       _
     }
     :: { Layout.kind = Layout.Body; _ }
@@ -1196,7 +1196,6 @@ let test_metadata_keeps_a_typed_origin () =
       check (option string) "origin clock" (Some "12:34:56") clock;
       check string "origin speaker" "you" speaker;
       check string "origin label" "you" role_label;
-      check string "origin request" "tui-..aaaaaaaa" request_label;
       check string "continuation clock" "12:35:01" continued_at
   | _ -> fail "message rows lost their typed origin/body structure"
 ;;

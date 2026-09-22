@@ -614,9 +614,9 @@ when chat opened from detail.
 
 ```
  Message to: sangsu  ● active · running anthropic.claude-opus-5  (port 8935)
-   ► YOU · tui-019... ──────────────────────────────────────── 14:35:01
+   ► YOU ───────────────────────────────────────────────────── 14:35:01
      hello, how are you?
-   ● tui-019... ────────────────────────────────────────────── 14:35:03
+   ● ───────────────────────────────────────────────────────── 14:35:03
    │ ✓ Read a.ml
      ...reply text...
    > type here_
@@ -624,7 +624,7 @@ when chat opened from detail.
 ```
 
 That is the `metadata:full` heading (`Ctrl-F`): the speaker whole at the
-left, the request id after it, the clock at the right edge and a rule
+left, the clock at the right edge and a rule
 between. A heading opens a turn, not a block: the keeper's reasoning, tool
 calls and reply in one request share it, and a later minute of that turn
 draws only the rule and its clock. The pane's own keeper is not named on
@@ -670,7 +670,7 @@ the one column.
 Chat opens with a short clock beside the speaker mark and label. The clock is
 drawn only where the minute moved, so a run of rows inside one minute leaves
 the column blank and keeps its width. `Ctrl-F` walks the axis: a full
-timestamp/request-id heading, then the bare clock-free gutter, then back. The
+timestamp heading, then the bare clock-free gutter, then back. The
 header names the two stops away from rest as `metadata:full` or
 `metadata:off`. A streaming
 row uses its actual start clock rather than the word `live`; the active-turn

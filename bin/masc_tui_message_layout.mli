@@ -170,6 +170,8 @@ type entry = {
           column, and read back by the renderer to style the mark and the
           label differently: colour says status, the label only says kind. *)
   request_label : string;
+      (** The turn this entry belongs to, for grouping: rows of one request
+          share a heading. Never drawn -- the grouping is what a reader sees. *)
   body : string;
   journal : journal_line list;
       (** A Memory journal revision's lines, drawn under {!body} in columns
@@ -219,7 +221,6 @@ type metadata =
               heading draws no clock rather than the placeholder text. *)
       speaker : string;
       role_label : string;
-      request_label : string;
     }
   | Continued_at of { clock : string }
       (** Only emitted where the entry has a trustworthy time: a continuation
@@ -265,7 +266,7 @@ type origin_display =
 (** Where a message's origin is drawn. [Origin_inline] is the chat default
     (see [Masc_tui_types.create_state]); its clock is drawn only on the rows
     where the minute moved. [Origin_bare] drops that clock, and [Origin_row]
-    adds a full timestamp and request-id heading. Folding headings into the
+    gives each turn a heading row with the speaker and the full timestamp. Folding headings into the
     gutter hands their rows back to the conversation: eight speakers taking
     turns otherwise spend eight rows of a forty-row pane on headings.
 

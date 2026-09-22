@@ -459,7 +459,7 @@ restart puts every Keeper back on `auto`.
 
 ### Lanes
 
-The [Glossary](spec/00-glossary.md#core) uses Lane for Runtime candidate order. Runtime execution owns the model/tool loop, exact-output routes select candidates for a work purpose, and memory queues serialize submitted work. These are separate axes; this section's existing UI label `Lanes` shows exact-output routes.
+The [Glossary](spec/00-glossary.md#core) uses Lane for the fixed exact-output execution path — the same thing this section's UI label `Lanes` shows — and Runtime Candidate Order for the order in which a Keeper turn tries runtime candidates. Runtime execution owns the model/tool loop, exact-output routes select candidates for a work purpose, and memory queues serialize submitted work. These are separate axes.
 
 For TOML package installations, open `/addons` from the composer or choose
 `go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
@@ -1587,7 +1587,7 @@ the JSON encoding of the same reference is not drawn beside them.
 
 ### Runtime
 
-Runtime lanes and their ordered candidates, joined to the latest provider
+Runtime candidate orders, joined to the latest provider
 metadata reachability reading by exact `runtime_id`.
 
 ```
@@ -1604,7 +1604,7 @@ provider/model labels. The lane fact on each row says why that candidate is
 the one the lane walks: `head`, `fallback #n`, or `single candidate`.
 `GET /api/v1/dashboard/runtime-probe` supplies only a cached provider
 metadata-endpoint reachability reading. It does not send a completion, execute a CLI
-runtime, or report lane failover history.
+runtime, or report runtime candidate order history.
 
 `CLI not probed` is neutral, and a candidate absent from a stale probe is
 `unobserved`, not unhealthy. Green is limited to the `reachable` token; model,

@@ -8,13 +8,36 @@ val read_in : keepers_dir:string -> keeper_name:string ->
     workspace config, as the offline checkpoint purge does. *)
 val read : config:Workspace.config -> keeper_name:string ->
   (Librarian_continuity_snapshot.t option, string) result
-val prepare : ?end_atom:int -> config:Workspace.config -> keeper_name:string -> trace_id:string -> unit ->
-  (prepared option, string) result
+type no_source =
+  | Drained
+      (** Every completed turn the boundary log states has been read. *)
+  | Source_unreadable
+      (** The checkpoint this trace names is absent, or the boundary lines do
+          not cover its prefix. The backlog is unknown, not empty. *)
+  | Empty_range
+      (** The requested end sits at or behind the start. *)
+
+type source =
+  | Ready of prepared
+  | No_source of no_source
+
+val prepare_source : ?end_atom:int -> config:Workspace.config -> keeper_name:string ->
+  trace_id:string -> unit -> (source, string) result
 (** Read boundaries before the locked checkpoint. Supply previous valid state
     plus the suffix through the next real completed turn. Capacity is a ceiling,
     not a reason to include later turns. An explicit [end_atom] selects a prefix;
     an unpublished exact Memory receipt takes precedence over either choice.
-    Pending in-flight atoms are excluded. [None] means no new complete coverage. *)
+    Pending in-flight atoms are excluded.
+
+    The {!no_source} reason is carried because one caller acts on it: a pass
+    that narrowed its reads releases that limit when the backlog is
+    {!Drained}, and an unreadable source is not evidence that it was. *)
+
+val prepare : ?end_atom:int -> config:Workspace.config -> keeper_name:string -> trace_id:string -> unit ->
+  (prepared option, string) result
+(** {!prepare_source} for a caller that only asks whether there is work.
+    [None] means no new complete coverage, whatever the reason. *)
+
 val prompt_json : prepared -> Yojson.Safe.t
 val commit : config:Workspace.config -> keeper_name:string -> prepared:prepared ->
   working_state:string -> (Librarian_continuity_snapshot.t, string) result

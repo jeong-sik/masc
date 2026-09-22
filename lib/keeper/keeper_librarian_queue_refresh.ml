@@ -77,6 +77,20 @@ let release_width ~config ~keeper_name =
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove limited_widths key)
 ;;
 
+(* A pass can report more than once: the walk fails, then recording that
+   failure raises and the handler around it reports the raise. Evidence of
+   size from any report stands; the latest cause is the one logged. *)
+let merge_not_committed earlier (outcome : Keeper_librarian_runtime.not_committed) =
+  match earlier with
+  | None -> outcome
+  | Some (earlier : Keeper_librarian_runtime.not_committed) ->
+    { outcome with
+      Keeper_librarian_runtime.walk_shows_size =
+        earlier.Keeper_librarian_runtime.walk_shows_size
+        || outcome.Keeper_librarian_runtime.walk_shows_size
+    }
+;;
+
 let last_input_capacity ~config ~keeper_name =
   let key = measurement_key ~config ~keeper_name in
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt input_capacities key)
@@ -184,11 +198,6 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
      another oversized request. Fitting still checks the runtime is selected
      and re-renders every chunk; neither an atom count nor a prompt is cached. *)
   let capacity = ref (last_input_capacity ~config ~keeper_name) in
-  (* Whether this call has committed a range. [P.prepare] answers [Ok None]
-     both for a drained backlog and for a checkpoint it could not read, so an
-     empty answer alone does not show the source was read to its end; an empty
-     answer that follows a commit does. *)
-  let committed_in_call = ref false in
   let rec next () =
     observe O.Checking;
     match Env_config.KeeperMemoryOs.librarian_config_state () with
@@ -201,37 +210,49 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
         let current_trace = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
         if !trace_id <> Some current_trace then selected_range := None;
         trace_id := Some current_trace;
+        let settle_no_source = function
+          | P.Drained ->
+            (* §4.3 releases the limit when the backlog is read to its end, and
+               on no other outcome: one narrowed commit does not show that the
+               range which refused now fits. *)
+            release_width ~config ~keeper_name;
+            observe O.No_source
+          | P.Source_unreadable | P.Empty_range ->
+            (* Not evidence that the backlog was read. The checkpoint this
+               trace names is absent, or the prefix asked for sits at the
+               start. Releasing the width here would send the next pass back
+               at the whole backlog, which is the loop this limit exists to
+               stop. *)
+            observe O.No_source
+        in
         match Domain_pool_ref.submit_io_or_inline (fun () ->
-          P.prepare ~config ~keeper_name
-            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ()) with
+          P.prepare_source ~config ~keeper_name ~trace_id:current_trace ()) with
         | Error detail -> report O.Source_unavailable detail
-        | Ok None ->
-          (* §4.3 releases the limit when the backlog is read to its end, and
-             on no other outcome: one narrowed commit does not show that the
-             range which refused now fits. An empty source that follows a
-             commit in this call is that end; an empty source on its own can
-             also be a checkpoint this pass could not read, and dropping the
-             width there would send the next pass back at the full backlog. *)
-          if !committed_in_call then release_width ~config ~keeper_name;
-          observe O.No_source
-        | Ok (Some prepared) ->
+        | Ok (P.No_source no_source) -> settle_no_source no_source
+        | Ok (P.Ready prepared) ->
           (match limited_width ~config ~keeper_name ~trace_id:current_trace with
            | None -> attempt meta prepared
            | Some width when P.end_atom prepared - P.start_atom prepared <= width ->
              attempt meta prepared
            | Some width ->
-             let atoms candidate = P.end_atom candidate - P.start_atom candidate in
+             (* Cut at the width: the unit read is then the width the last
+                refusal left, and the logged number is the number of atoms
+                this pass sends. *)
+             let end_atom = P.start_atom prepared + width in
              (match Domain_pool_ref.submit_io_or_inline (fun () ->
-                P.fit ~fits:(fun candidate -> Ok (atoms candidate <= width)) prepared) with
+                P.prepare_source ~end_atom ~config ~keeper_name
+                  ~trace_id:current_trace ()) with
               | Error detail -> report O.Input_unavailable detail
-              | Ok None ->
-                (* An exact Memory receipt's range cannot be split; it is
-                   reapplied whole or not at all. *)
-                attempt meta prepared
-              | Ok (Some one_unit) ->
+              | Ok (P.No_source no_source) ->
+                (* The checkpoint changed between the two reads. Sending the
+                   first read's range would send more than the width, so this
+                   pass settles on what the second read found, as a first read
+                   that found it would. *)
+                settle_no_source no_source
+              | Ok (P.Ready one_unit) ->
                 (* completed_end_atom names the last completed turn inside the
                    prepared range: when it equals start_atom the range holds no
-                   turn cut, and the unit is an atom split rather than a turn. *)
+                   turn cut, and the unit is an atom cut rather than a turn. *)
                 Log.Keeper.info ~keeper_name
                   "continuity pass reads one unit; width=%d start_atom=%d completed_end_atom=%d \
                    end_atom=%d -> %d"
@@ -283,11 +304,8 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
           cli_limit := Some observed;
           remember_input_capacity ~config ~keeper_name observed;
           capacity := Some observed)
-        ~on_not_committed:(fun outcome -> cause := Some outcome)
-        ~on_continuity_committed:(fun _ ->
-          saved := true;
-          committed_in_call := true;
-          observe O.Committed)
+        ~on_not_committed:(fun outcome -> cause := Some (merge_not_committed !cause outcome))
+        ~on_continuity_committed:(fun _ -> saved := true; observe O.Committed)
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
         input;
@@ -297,12 +315,16 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
         match !cause with
         | Some outcome -> outcome.Runtime.detail
         | None -> "no provider attempt settled the pass" in
-      let walk_was_never_about_size =
+      (* No verdict at all means nothing said the size was the problem, so
+         the width stands. A pass can end without one -- a snapshot commit
+         that failed on disk, a raise before any request was composed -- and
+         reading less would answer a local failure by shrinking the source. *)
+      let shows_size =
         match !cause with
-        | Some outcome -> outcome.Runtime.walk_was_never_about_size
+        | Some outcome -> outcome.Runtime.walk_shows_size
         | None -> false in
       match !cli_limit with
-      | None when walk_was_never_about_size ->
+      | None when not shows_size ->
         (* Nothing the walk met could be answered by sending less. §4.3 waits
            for the next signal: reading less here would answer a quota storm
            or an expired credential by walking the source down toward a single
@@ -446,6 +468,8 @@ let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
 ;;
 
 module For_testing = struct
+  let limited_width = limited_width
+  let merge_not_committed = merge_not_committed
   let run_continuity = run_continuity
   let run_durable_with_commit = run_durable_with_commit
 end

@@ -763,13 +763,26 @@ let test_cli_workspace ?(linked_worktree = false) cluster_name () =
          moved to the rewritten end after the checkpoint is installed. *)
       let atoms = atom_count checkpoint.messages in
       write_progress ~end_atom:(atoms - 1);
+      (* A continuity snapshot in the old numbering: a refused apply leaves
+         it and an applied purge removes it. *)
+      let snapshot_path =
+        Masc.Keeper_librarian_continuity.path_for_keepers_dir
+          ~keepers_dir:runtime_keepers_dir ~keeper_name:checkpoint.agent_name in
+      Fs_compat.mkdir_p (Filename.dirname snapshot_path);
+      (match Fs_compat.save_file_atomic_strict snapshot_path "{\"stale\":true}" with
+       | Ok () -> ()
+       | Error _ -> Alcotest.fail "the fixture snapshot was not written");
       let before_refused = workspace_contents owner_root in
       run_cli ~exit_code:1 [ "--base"; base_path; "--apply" ];
       Alcotest.(check (list (pair string (option string))))
         "a refused apply writes nothing"
         before_refused (workspace_contents owner_root);
+      Alcotest.(check bool) "a refused apply leaves the stale snapshot" true
+        (Sys.file_exists snapshot_path);
       write_progress ~end_atom:atoms;
       run_cli [ "--base"; base_path; "--apply" ];
+      Alcotest.(check bool) "apply removes the stale continuity snapshot" false
+        (Sys.file_exists snapshot_path);
       let backup_dirs =
         Sys.readdir runtime_root |> Array.to_list
         |> List.filter (String.starts_with

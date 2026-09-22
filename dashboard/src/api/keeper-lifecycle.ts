@@ -277,8 +277,15 @@ export interface KeeperCheckpointPurgeResponse {
   backup_path: string | null
   report: KeeperCheckpointPurgeReport
   warnings: string[]
+  /** What an applied purge did to the keeper's continuity snapshot: a
+   *  preview, a refused apply and a no-op leave it untouched. */
+  continuity_snapshot: KeeperCheckpointPurgeContinuitySnapshot
   inventory: KeeperCheckpointInventory
 }
+
+export type KeeperCheckpointPurgeContinuitySnapshot =
+  | { kind: 'untouched' | 'removed' | 'absent'; detail: null }
+  | { kind: 'not_removed'; detail: string }
 
 export async function fetchKeeperCheckpoints(
   name: string,

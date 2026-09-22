@@ -63,7 +63,14 @@ val default_config : config
     it is taken as new; raising it to the log's current length would pass
     over a restart no round has seen yet
     ([specs/bug-models/LibrarianRead-purge-trim-counting-lines-buggy.cfg]).
-    The official-turn position is a line of that log and is not touched. *)
+    The official-turn position is a line of that log and is not touched.
+
+    The continuity snapshot ([librarian-continuity.json]) is not moved: its
+    numbers and digests are the old history's and a mapping to the new
+    numbering does not exist once R1 has dropped atoms. The caller that
+    installs the rewrite removes it ({!Keeper_librarian_continuity.remove});
+    the Librarian's next pass writes one for the new history, and until then
+    a turn starts at the moved position. *)
 type rebase =
   | No_progress  (** No position: nothing to move. *)
   | Rebased of

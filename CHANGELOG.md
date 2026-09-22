@@ -27,6 +27,7 @@
 
 ### Changed
 
+- A checkpoint purge now removes the keeper's continuity snapshot along with moving the Librarian position, since the rewrite leaves the snapshot in the old atom numbering; the purge result and the CLI say whether one was removed (#TBD).
 - A keeper request with no Librarian snapshot that fits the current history starts at the Librarian's read position when that position is a place in the history, and otherwise, with no seed, at the end of the last completed turn, instead of carrying the whole history; official-client lanes without a seed start at that boundary too. The Memory screen and dashboard show the position-only case as `absorbed`. The turn-record and forecast origin `whole_history` is replaced by `turn_start` with its `end_atom`, and the Memory screen's continuity input `uncompressed` by `without_snapshot` (#37734, #37745).
 - The TUI chat header labels a model the stream named without a runtime id as `model:`, and only an announced runtime id as `turn:`; a model name is no longer shown as the runtime.
 - The next-request band names the wake line in the same estimated tokens as its other figures instead of bytes.

@@ -181,6 +181,7 @@ describe("KeeperCheckpointPanel diagnostics", () => {
       apply_allowed: true,
       applied: action === "apply_purge",
       backup_path: action === "apply_purge" ? "/tmp/backups/trace-test.json" : null,
+      continuity_snapshot: { kind: action === "apply_purge" ? "removed" : "untouched", detail: null },
       report: {
         messages_before: 916,
         messages_after: 857,

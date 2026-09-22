@@ -1604,7 +1604,7 @@ provider/model labels. The lane fact on each row says why that candidate is
 the one the lane walks: `head`, `fallback #n`, or `single candidate`.
 `GET /api/v1/dashboard/runtime-probe` supplies only a cached provider
 metadata-endpoint reachability reading. It does not send a completion, execute a CLI
-runtime, or report lane failover history.
+runtime, or report runtime candidate order history.
 
 `CLI not probed` is neutral, and a candidate absent from a stale probe is
 `unobserved`, not unhealthy. Green is limited to the `reachable` token; model,

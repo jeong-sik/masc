@@ -652,6 +652,58 @@ let test_parse_blank_declared_member_does_not_fall_through () =
   | S.Openai_parse_failed _ -> Alcotest.fail "expected Openai_undeclared_reasoning_member"
 ;;
 
+(* The slices around a glued spot in a live GLM-5.3 journal ("red2.",
+   "showed15"): the newline and the space arrive as their own slices, and the
+   reasoning text keeps them. [""] still adds nothing. *)
+let test_spacing_slices_stay_in_reasoning_text () =
+  let slice text =
+    Printf.sprintf
+      {|{"id":"c-glm","model":"glm-5.3","choices":[{"index":0,"delta":{"reasoning_content":%s},"finish_reason":null}]}|}
+      (Yojson.Safe.to_string (`String text))
+  in
+  let state = S.create_openai_stream_state ~provider:"glm" ~model:"glm-5.3" () in
+  let thinking =
+    [ " red"; "\n"; "2."; ""; " "; "showed" ]
+    |> List.concat_map (fun text ->
+      let parsed =
+        S.parse_openai_sse_chunk
+          ~streaming_reasoning:(RD.Delta_field "reasoning_content")
+          (slice text)
+      in
+      let events, _telemetry = S.openai_sse_parse_result_to_events state parsed in
+      List.filter_map
+        (function
+          | ContentBlockDelta { delta = ThinkingDelta text; _ } -> Some text
+          | _ -> None)
+        events)
+    |> String.concat ""
+  in
+  Alcotest.(check string) "reasoning text" " red\n2. showed" thinking
+;;
+
+(* The same slice under the declared member of a split-details row, and as
+   the text of a mirrored detail. *)
+let test_spacing_slice_stays_in_split_reasoning_details () =
+  let data =
+    {|{"id":"c-minimax","model":"minimax-m3","choices":[{"index":0,"delta":{"reasoning_content":"\n","reasoning_details":[{"type":"text","text":" "}]},"finish_reason":null}]}|}
+  in
+  match
+    S.parse_openai_sse_chunk
+      ~streaming_reasoning:(RD.Delta_field_and_details "reasoning_content")
+      data
+  with
+  | S.Openai_chunk { delta_reasoning_details = Some { delta_reasoning_content; delta_details }; _ }
+    ->
+    Alcotest.(check (option string)) "reasoning content" (Some "\n") delta_reasoning_content;
+    (match delta_details with
+     | [ detail ] -> Alcotest.(check (option string)) "detail text" (Some " ") detail.text
+     | _ -> Alcotest.fail "expected one reasoning detail")
+  | S.Openai_chunk { delta_reasoning_details = None; _ } ->
+    Alcotest.fail "the spacing slice was dropped"
+  | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+  | S.Openai_undeclared_reasoning_member _ -> Alcotest.fail "expected OpenAI chunk"
+;;
+
 let test_parse_reasoning_uses_dialect_delta_field () =
   let data =
     {|{"id":"c-dialect","model":"dialect","choices":[{"index":0,"delta":{"reasoning_content":"wrong","reasoning":"selected"},"finish_reason":null}]}|}
@@ -1863,6 +1915,14 @@ let () =
             "blank declared member does not fall through"
             `Quick
             test_parse_blank_declared_member_does_not_fall_through
+        ; test_case
+            "spacing slices stay in reasoning text"
+            `Quick
+            test_spacing_slices_stay_in_reasoning_text
+        ; test_case
+            "spacing slice stays in split reasoning details"
+            `Quick
+            test_spacing_slice_stays_in_split_reasoning_details
         ; test_case
             "reasoning dialect field"
             `Quick

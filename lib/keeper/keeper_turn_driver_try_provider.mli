@@ -45,6 +45,20 @@ val without_snapshot : continuity
     another history. The request starts at the turn's own boundary
     ({!Keeper_carried_front.Turn_start}); an older eviction front is not used. *)
 
+val absorbed_history :
+  trace_id:string ->
+  messages:Agent_core.Types.message list ->
+  Keeper_librarian_progress.t ->
+  (int * continuity) option
+(** The Librarian's durable position as the front of the request, with the
+    exclusive end atom it stands at: the atoms before it are read into memory
+    and are not sent again, and no summary stands in for them. [Some] only
+    when the position names [trace_id] and the atom before it opens with the
+    message the position recorded, so a position from another trace or
+    another history generation is [None]. Taken when a saved continuity
+    snapshot no longer fits the history (RFC keeper-context-window-in-tokens
+    section 13.6). *)
+
 val completed_history_end :
   trace_id:string ->
   lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->

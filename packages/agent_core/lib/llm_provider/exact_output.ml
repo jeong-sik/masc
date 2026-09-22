@@ -679,8 +679,9 @@ let wire_admission_error_disposition = function
     Input_capacity (Token_capacity_rejected reason)
   | Output_reservation_unavailable
   | Token_measurement_failed
-  | Target_request_rejected
-  | Request_serialization_rejected -> Request_preparation_failed
+  | Target_request_rejected _
+  | Request_serialization_rejected _
+  | Measured_request_mismatch -> Request_preparation_failed
 ;;
 
 let admission_error_disposition = function
@@ -834,6 +835,11 @@ let input_capacity_evidence_json = function
       ]
 ;;
 
+(* A refusal the transport or the provider config produced, said once for both
+   the evidence record and the operator-facing line. The typed error keeps its
+   own vocabulary; this renders the sentence inside it. *)
+let refusal_reason refusal = Error.to_string (Error.of_http_error refusal)
+
 let wire_admission_error_evidence_json = function
   | Capability_snapshot_missing ->
     `Assoc [ "kind", `String "capability_snapshot_missing" ]
@@ -880,9 +886,17 @@ let wire_admission_error_evidence_json = function
   | Token_measurement_failed -> `Assoc [ "kind", `String "token_measurement_failed" ]
   | Unsupported_target_model { model_id } ->
     `Assoc [ "kind", `String "unsupported_target_model"; "model_id", `String model_id ]
-  | Target_request_rejected -> `Assoc [ "kind", `String "target_request_rejected" ]
-  | Request_serialization_rejected ->
-    `Assoc [ "kind", `String "request_serialization_rejected" ]
+  | Target_request_rejected refusal ->
+    `Assoc
+      [ "kind", `String "target_request_rejected"
+      ; "detail", `String (refusal_reason refusal)
+      ]
+  | Request_serialization_rejected refusal ->
+    `Assoc
+      [ "kind", `String "request_serialization_rejected"
+      ; "detail", `String (refusal_reason refusal)
+      ]
+  | Measured_request_mismatch -> `Assoc [ "kind", `String "measured_request_mismatch" ]
 ;;
 
 let admission_error_evidence_json = function
@@ -933,8 +947,13 @@ let wire_admission_error_reason = function
   | Token_measurement_failed -> "token_measurement_failed"
   | Unsupported_target_model { model_id } ->
     Printf.sprintf "unsupported_target_model(%s)" (quoted_dynamic model_id)
-  | Target_request_rejected -> "target_request_rejected"
-  | Request_serialization_rejected -> "request_serialization_rejected"
+  | Target_request_rejected refusal ->
+    Printf.sprintf "target_request_rejected(%s)" (quoted_dynamic (refusal_reason refusal))
+  | Request_serialization_rejected refusal ->
+    Printf.sprintf
+      "request_serialization_rejected(%s)"
+      (quoted_dynamic (refusal_reason refusal))
+  | Measured_request_mismatch -> "measured_request_mismatch"
 ;;
 
 let admission_error_reason = function

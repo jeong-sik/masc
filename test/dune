@@ -6610,6 +6610,8 @@
 
 (include stanzas/test_exact_output_runtime_reasoning.inc)
 
+(include stanzas/test_exact_output_admission_refusal_reason.inc)
+
 (rule
  (alias runtest-test_tui_jev_readiness)
  (deps test_tui_jev_readiness.py test_tui_keyboard_input.py ../bin/masc_tui.exe)

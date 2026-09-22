@@ -33,7 +33,16 @@ let threshold_cols = pane_cols + surface_floor_cols
    keeper's name in a fleet row, and a call's age at the end of a call row.
    Eighteen more name cells hold the longest name on the live roster whole
    (kidsnote-slack-context-collector, 32 of 34); the calls' own column is
-   the call row's remaining width, so the tool names gain the rest. *)
+   the call row's remaining width, so the tool names gain the rest.
+
+   What it costs: every reader needs a 150-column terminal for the wide
+   pane, and fourteen of the eighteen are for that one name -- the next
+   longest, kidsnote-spec-mania, is 19, and a longer name still reads,
+   folded in the middle by [Layout.fit_middle]. The floor is seven: the age
+   and its gap take seven cells of any extra, and fewer would leave the
+   tool names narrower than the narrow pane's. The operator chose 74 over
+   a width sized to the second name (2026-09-22). A roster name longer
+   than 34 folds rather than raising this. *)
 let wide_extra_cols = 18
 let wide_pane_cols = pane_cols + wide_extra_cols
 let wide_threshold_cols = wide_pane_cols + surface_floor_cols
@@ -54,6 +63,9 @@ let drawn_cols ~layout ~cols =
   | Wide when cols >= wide_threshold_cols -> wide_pane_cols
   | Wide | Narrow -> if cols >= threshold_cols then pane_cols else 0
 
+(* Narrow, wide, hidden is the operator's order (2026-09-22): hiding from
+   narrow takes two presses. Narrow, hidden, wide would make hiding one
+   press and widening two; the order is this match and nothing else. *)
 let next_layout ~layout ~cols =
   if cols < threshold_cols then None
   else

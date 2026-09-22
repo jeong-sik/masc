@@ -1660,7 +1660,7 @@ let test_a_wide_bracketed_row_and_its_detail_say_one_age () =
   check bool "Grep's facts row says the same age" true
     (contains "47.0s ago" (text (row 2)));
   check bool "Execute alone, its age at the edge" true
-    (rail (row 6) = (alone, Pane.Plain)
+    (rail (row 6) = (alone, Pane.Dim)
      && String.ends_with ~suffix:"5ms  30.0s" (text (row 6)))
 
 (* The longest name on the live roster: the narrow pane cuts it, the wide

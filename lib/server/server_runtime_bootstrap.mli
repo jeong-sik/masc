@@ -94,6 +94,16 @@ val mandatory_exact_output_lane_ids : string list
 
 module For_testing : sig
   val configure_exact_output_registry : ?config_root:string -> unit -> unit
+
+  val exact_output_targets_of_runtimes
+    :  unit
+    -> Agent_core.Exact_output.declared_target list
+  (** The exact-output slots of the runtimes loaded right now. A test that asks
+      what a deployment's bindings admit reads them from here rather than
+      building its own list beside this one: a second copy of this derivation
+      is what left the slots on a different wire than their Keeper requests
+      (#37674). *)
+
   val install_domain_pool_references : Domain_pool.t -> unit
 end
 

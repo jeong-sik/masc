@@ -275,7 +275,11 @@ let exact_config (target : request_target) response_format =
   ; enable_thinking = target.config.enable_thinking
   ; preserve_thinking = None
   ; reasoning_effort = target.config.reasoning_effort
-  ; reasoning_uncontrolled = false
+    (* [reasoning_uncontrolled] stays as the target resolved it. Forcing it
+       false took the second of the two answers a reasoning-enabling wire
+       accepts away from the rows that give it: those rows name no effort
+       because they ride the provider's default, and with the stance erased
+       they could say neither (#37674). *)
   ; clear_thinking = None
   ; tool_stream = false
   ; tool_choice = None

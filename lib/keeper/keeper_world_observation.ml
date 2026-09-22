@@ -21,7 +21,7 @@ type board_reaction_event =
 type pending_board_event_kind =
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added of Board_dispatch.board_comment_identity
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
@@ -58,12 +58,23 @@ type pending_board_event =
   ; latest_external_preview : string option
   }
 
+let same_board_event_identity (left : pending_board_event) (right : pending_board_event) =
+  String.equal left.post_id right.post_id
+  && match left.event_kind, right.event_kind with
+     | Board_comment_added left_comment, Board_comment_added right_comment ->
+       String.equal
+         (Board.Comment_id.to_string left_comment.Board_dispatch.comment_id)
+         (Board.Comment_id.to_string right_comment.Board_dispatch.comment_id)
+     | Board_post_updated, Board_post_updated -> Float.equal left.updated_at right.updated_at
+     | _ -> left.event_kind = right.event_kind
+;;
+
 let is_board_activity_event (event : pending_board_event) =
   match event.event_kind with
   | Schedule_due _ -> false
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added _
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
@@ -92,7 +103,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Schedule_due _ -> true
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added _
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
@@ -110,7 +121,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Completion_authority_rejected _ -> true
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added _
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
@@ -130,7 +141,7 @@ let is_task_outcome_event (event : pending_board_event) =
   | Task_outcome _ -> true
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added _
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
@@ -154,7 +165,7 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Ask_answered_row
   | Board_post_created
   | Board_post_updated
-  | Board_comment_added
+  | Board_comment_added _
   | Board_reaction_changed _
   | Board_vote_cast _
   | Fusion_completed
@@ -360,15 +371,13 @@ let read_backlog_snapshot = Inputs.read_backlog_snapshot
 let claimable_task_count observation = List.length observation.claimable_tasks
 let count_running_keeper_fibers = Inputs.count_running_keeper_fibers
 let compute_idle_seconds = Inputs.compute_idle_seconds
-let board_signal_match = Board_signal.match_signal
-let check_self_comment_status = Board_signal.check_self_comment_status
 let compare_board_cursor_token = Board_signal.compare_cursor_token
 let board_cursor_token_of_post = Board_signal.cursor_token_of_post
 let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
 
 (** The keeper's own latest board posts, newest first. Cursor-independent:
-    the board-event collector above filters out self-authored posts and only
-    looks past the cursor, so without this a keeper never observes its own
+    the board-event collector routes new source events and ignores the Keeper's
+    own authored signals, so without this a keeper never observes its own
     published posts in-prompt (production: one keeper posted 23 near-duplicate
     posts in a single hour). Raw observation only — bounded by
     [Keeper_config.keeper_board_own_recent_max]; no dedup gate. *)
@@ -568,7 +577,7 @@ let pending_board_event_kind_of_observation
   match observation.kind with
   | Board_signal.Observed_post_created -> Board_post_created
   | Board_signal.Observed_post_updated _ -> Board_post_updated
-  | Board_signal.Observed_comment_added _ -> Board_comment_added
+  | Board_signal.Observed_comment_added identity -> Board_comment_added identity
   | Board_signal.Observed_reaction_changed reaction ->
     Board_reaction_changed (board_reaction_event_of_dispatch reaction)
   | Board_signal.Observed_vote_cast vote -> Board_vote_cast vote
@@ -580,7 +589,6 @@ let pending_board_event_of_board_observation
       (observation : Board_signal.board_observation)
   : (pending_board_event, Board_signal.board_unavailable) result
   =
-  let self_ids = self_ids meta in
   let matched = Board_signal.match_observation ~meta ~observation in
   match Board_dispatch.get_post ~post_id:observation.post_id with
   | Error error ->
@@ -610,43 +618,30 @@ let pending_board_event_of_board_observation
       , post.updated_at )
     in
     let event_kind = pending_board_event_kind_of_observation observation in
-    let comment_derived =
+    let latest_external_author, latest_external_preview =
       match observation.kind with
-      | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _ -> Ok (None, None, None)
       | Board_signal.Observed_comment_added _ ->
-        (match check_self_comment_status ~self_ids ~post_id:observation.post_id with
-         | Board_signal.Unavailable unavailable -> Error unavailable
-         | Board_signal.Available (`New_external (replies, author, preview)) ->
-           Ok (Some replies, Some author, Some preview)
-         | Board_signal.Available (`No_new_external | `Never) ->
-           Ok
-             ( None
-             , Some observation.author
-             , Some (short_preview ~max_len:60 observation.content) ))
-      (* A reaction or vote row states who did what to which target; the
-         replies after the keeper's own comment belong to comment rows, so
-         none are derived here. *)
-      | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
-        Ok (None, None, None)
+        Some observation.author, Some (short_preview ~max_len:60 observation.content)
+      | Board_signal.Observed_post_created
+      | Board_signal.Observed_post_updated _
+      | Board_signal.Observed_reaction_changed _
+      | Board_signal.Observed_vote_cast _ -> None, None
     in
-    (match comment_derived with
-     | Error unavailable -> Error unavailable
-     | Ok (replies_after_own_comment, latest_external_author, latest_external_preview) ->
-       Ok
-         { event_kind
-         ; post_id = observation.post_id
-         ; author = observation.author
-         ; title
-         ; preview
-         ; hearth
-         ; post_kind
-         ; updated_at
-         ; explicit_mention = matched.explicit_mention
-         ; matched_targets = matched.matched_targets
-         ; replies_after_own_comment
-         ; latest_external_author
-         ; latest_external_preview
-         })
+    Ok
+      { event_kind
+      ; post_id = observation.post_id
+      ; author = observation.author
+      ; title
+      ; preview
+      ; hearth
+      ; post_kind
+      ; updated_at
+      ; explicit_mention = matched.explicit_mention
+      ; matched_targets = matched.matched_targets
+      ; replies_after_own_comment = None
+      ; latest_external_author
+      ; latest_external_preview
+      }
 ;;
 
 (* RFC-0266: fusion answers are the deliberation result the keeper requested,
@@ -1202,11 +1197,9 @@ let pending_board_event_of_stimulus
     Cursor state lives in Keeper_registry as [(updated_at, post_id)].
     Returns (structured events, new post count, mention count).
 
-    Comment-stream dedup: after the initial cursor + author filter,
-    each candidate post is scanned for self-authored comments.
-    Posts where the keeper has already commented and no new external
-    replies have arrived are excluded. This prevents duplicate reactive
-    comments while allowing legitimate follow-ups. *)
+    Replay each new post/comment through the same audience route as live
+    delivery. Historical participation is not an address. Cursor progress
+    follows complete posts; a transient source failure retains its boundary. *)
 let collect_board_events_with_cursor_policy
       ~advance_cursor
       ~(base_path : string)
@@ -1245,31 +1238,8 @@ let collect_board_events_with_cursor_policy
       | None -> []
       | Some cursor -> list_board_posts_after_cursor cursor
     in
-    let self_ids = self_ids meta in
-    let recent =
-      List.filter
-        (fun (p : Board.post) ->
-           not (is_self_author ~self_ids (Board.Agent_id.to_string p.author)))
-        posts
-    in
-    let new_count = List.length recent in
-    let mention_count =
-      List.length
-        (List.filter
-           (fun (p : Board.post) ->
-              let signal : Board_dispatch.board_signal =
-                { kind = Board_dispatch.Board_post_created
-                ; post_id = Board.Post_id.to_string p.id
-                ; author = Board.Agent_id.to_string p.author
-                ; title = p.title
-                ; content = p.body
-                ; hearth = p.hearth
-                ; updated_at = Some p.updated_at
-                }
-              in
-              (board_signal_match ~meta ~signal).explicit_mention)
-           recent)
-    in
+    let new_count = List.length posts in
+    let mention_count = ref 0 in
     (* Board-unavailable-result: classify + log + count a failed read
        encountered mid-scan, without raising. [Permanent] means this one post
        can never resolve (e.g. swept from the store) — the caller skips it
@@ -1303,163 +1273,118 @@ let collect_board_events_with_cursor_policy
            (Board_signal.unavailable_to_string unavailable));
       disposition
     in
+    let signal_after_cursor (p : Board.post) created_at =
+      match base_cursor with
+      | None -> false
+      | Some (ts, post_id) ->
+        let token = created_at, Board.Post_id.to_string p.id in
+        (* DET-OK: compare persisted source coordinates with the existing cursor;
+           None is the empty Board boundary, not an unknown post identity. *)
+        (match post_id with
+         | None -> created_at >= ts
+         | Some id -> compare_board_cursor_token token (ts, id) > 0)
+        && compare_board_cursor_token token (board_cursor_token_of_post p) <= 0
+    in
+    let route_signal (p : Board.post) (signal : Board_dispatch.board_signal) =
+      match Board_audience.classify ~visibility:p.visibility signal with
+      | Error error ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string ObservationQueryFailures)
+          ~labels:[ "operation", Runtime_observation_query_operation.(to_label Board_events) ] ();
+        Log.Keeper.warn
+          "board replay audience rejected: keeper=%s post=%s error=%s"
+          meta.name signal.post_id (Board_audience.classification_error_to_string error);
+        Ok None
+      | Ok audience ->
+        (match Board_audience.route_for_keeper ~audience ~meta ~signal with
+         | Board_signal.Unavailable unavailable -> Error unavailable
+         | Board_signal.Available Board_audience.Ignore -> Ok None
+         | Board_signal.Available Board_audience.Judge_discoverable ->
+           (* Prompt previews never persist candidates or wake a lane. *)
+           if advance_cursor then (
+             let candidate = Keeper_board_attention_candidate.of_board_signal
+                 ~meta ~recorded_at:(Time_compat.now ()) signal in
+             match Keeper_board_attention_candidate.record_and_wake ~base_path candidate with
+             | Ok acceptance ->
+               let persistence =
+                 match acceptance.persistence with
+                 | Keeper_board_attention_candidate.Candidate_recorded -> "recorded"
+                 | Keeper_board_attention_candidate.Candidate_already_present -> "duplicate"
+               in
+               let kind =
+                 match signal.kind with
+                 | Board_dispatch.Board_post_created -> "post_created"
+                 | Board_dispatch.Board_post_updated _ -> "post_updated"
+                 | Board_dispatch.Board_comment_added _ -> "comment_added"
+                 | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
+                 | Board_dispatch.Board_vote_cast _ -> "vote_cast"
+               in
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+                 ~labels:[ "keeper", meta.name; "kind", kind
+                         ; "audience", Board_audience.label audience
+                         ; "persistence", persistence ] ()
+             | Error detail ->
+               raise (Keeper_board_attention_candidate.Candidate_unavailable detail));
+           Ok None
+         | Board_signal.Available (Board_audience.Deliver _) ->
+           Result.bind
+             (Board_signal.board_observation_of_board_stimulus
+                ~post_id:signal.post_id
+                (Board_signal.board_stimulus_of_board_signal signal))
+             (pending_board_event_of_board_observation ~meta
+                ~arrived_at:(Time_compat.now ()))
+           |> Result.map Option.some)
+    in
+    let events_of_post (p : Board.post) =
+      let post_id = Board.Post_id.to_string p.id in
+      match Board_dispatch.get_comments ~post_id with
+      | Error error -> Error { Board_signal.operation = Board_signal.Get_comments; post_id; error }
+      | Ok comments ->
+        let post_signal : Board_dispatch.board_signal =
+          { kind =
+              (if Float.equal p.content_updated_at p.created_at
+               then Board_dispatch.Board_post_created
+               else Board_dispatch.Board_post_updated { content_updated_at = p.content_updated_at })
+          ; post_id
+          ; author = Board.Agent_id.to_string p.author; title = p.title; content = p.body
+          ; hearth = p.hearth; updated_at = Some p.content_updated_at }
+        in
+        let signals =
+          (if signal_after_cursor p p.content_updated_at then [post_signal] else [])
+          @ List.filter_map (fun (comment : Board.comment) ->
+              if not (signal_after_cursor p comment.created_at) then None
+              else Some { post_signal with
+                kind = Board_dispatch.Board_comment_added
+                  { comment_id = comment.id; parent_id = comment.parent_id }
+              ; author = Board.Agent_id.to_string comment.author
+              ; content = comment.content; updated_at = Some comment.created_at }) comments
+        in
+        let rec collect acc = function
+          | [] -> Ok (List.rev acc)
+          | signal :: rest ->
+            (match route_signal p signal with
+             | Error _ as error -> error
+             | Ok None -> collect acc rest
+             | Ok (Some event) -> collect (event :: acc) rest)
+        in
+        collect [] signals
+    in
     let rec consume_posts last_cursor acc = function
       | [] -> List.rev acc, last_cursor
       | (p : Board.post) :: rest ->
-        let post_id = Board.Post_id.to_string p.id in
         let next_cursor = board_cursor_token_of_post p in
-        let comment_status = check_self_comment_status ~self_ids ~post_id in
-        (match comment_status with
-         | Board_signal.Unavailable unavailable ->
-           (match log_and_count_unavailable ~context:"comment status" unavailable with
-            | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
-            | Board_signal.Transient -> List.rev acc, last_cursor)
-         | Board_signal.Available `No_new_external ->
-           Log.Keeper.debug
-             "board dedup: skipping post_id=%s (no new external since my comment)"
-             post_id;
-           consume_posts (Some next_cursor) acc rest
-         | Board_signal.Available `Never ->
-           let signal : Board_dispatch.board_signal =
-             { kind = Board_dispatch.Board_post_created
-             ; post_id
-             ; author = Board.Agent_id.to_string p.author
-             ; title = p.title
-             ; content = p.body
-             ; hearth = p.hearth
-             ; updated_at = Some p.updated_at
-             }
-           in
-           let matched = board_signal_match ~meta ~signal in
-           (match Board_audience.classify ~visibility:p.visibility signal with
-            | Error error ->
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string ObservationQueryFailures)
-                ~labels:
-                  [ ( "operation"
-                    , Runtime_observation_query_operation.(to_label Board_events) )
-                  ]
-                ();
-              Log.Keeper.warn
-                "board replay audience rejected: keeper=%s post=%s error=%s"
-                meta.name
-                post_id
-                (Board_audience.classification_error_to_string error);
-              consume_posts (Some next_cursor) acc rest
-            | Ok audience ->
-              (match Board_audience.route_for_keeper ~audience ~meta ~signal with
-               | Board_signal.Unavailable unavailable ->
-                 (match
-                    log_and_count_unavailable ~context:"audience" unavailable
-                  with
-                  | Board_signal.Permanent ->
-                    consume_posts (Some next_cursor) acc rest
-                  | Board_signal.Transient -> List.rev acc, last_cursor)
-               | Board_signal.Available Board_audience.Ignore ->
-                 consume_posts (Some next_cursor) acc rest
-               | Board_signal.Available Board_audience.Judge_discoverable ->
-                 (* Only the live Keeper collector owns durable candidate
-                    production. Dashboard prompt preview uses
-                    [advance_cursor:false] and must remain a read-only projection:
-                    observing the page cannot schedule a model judgment or wake a
-                    Keeper lane. *)
-                 if not advance_cursor
-                 then consume_posts (Some next_cursor) acc rest
-                 else (
-                   let candidate =
-                     Keeper_board_attention_candidate.of_board_signal
-                       ~meta
-                       ~recorded_at:(Time_compat.now ())
-                       signal
-                   in
-                   (match
-                      Keeper_board_attention_candidate.record_and_wake
-                        ~base_path
-                        candidate
-                    with
-                    | Ok acceptance ->
-                      let persistence =
-                        match acceptance.persistence with
-                        | Keeper_board_attention_candidate.Candidate_recorded ->
-                          "recorded"
-                        | Keeper_board_attention_candidate.Candidate_already_present ->
-                          "duplicate"
-                      in
-                      Otel_metric_store.inc_counter
-                        Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
-                        ~labels:
-                          [ "keeper", meta.name
-                          ; "kind", "post_created"
-                          ; "audience", Board_audience.label audience
-                          ; "persistence", persistence
-                          ]
-                        ()
-                    | Error detail ->
-                      raise
-                        (Keeper_board_attention_candidate.Candidate_unavailable
-                           detail));
-                   consume_posts (Some next_cursor) acc rest)
-               | Board_signal.Available (Board_audience.Deliver _) ->
-                 (* [explicit_mention] mirrors mention parsing only:
-                    Broadcast-routed deliveries (e.g. [@@all]) record
-                    [false] because a broadcast has no per-keeper mention
-                    target. The event's presence in this Deliver branch
-                    already marks it as addressed; downstream
-                    (the unified-prompt board event renderer)
-                    uses the field solely to render a "[mentions ...]"
-                    note. *)
-                 consume_posts
-                   (Some next_cursor)
-                   ({ event_kind = Board_post_created
-                    ; post_id
-                    ; author = Board.Agent_id.to_string p.author
-                    ; title = p.title
-                    ; preview = short_preview ~max_len:80 p.body
-                    ; hearth = p.hearth
-                    ; post_kind = p.post_kind
-                    ; updated_at = p.updated_at
-                    ; explicit_mention = matched.explicit_mention
-                    ; matched_targets = matched.matched_targets
-                    ; replies_after_own_comment = None
-                    ; latest_external_author = None
-                    ; latest_external_preview = None
-                    }
-                    :: acc)
-                   rest))
-         | Board_signal.Available (`New_external (replies, ext_author, ext_preview)) ->
-           (
-             let signal : Board_dispatch.board_signal =
-               { kind = Board_dispatch.Board_post_created
-               ; post_id
-               ; author = Board.Agent_id.to_string p.author
-               ; title = p.title
-               ; content = p.body
-               ; hearth = p.hearth
-               ; updated_at = Some p.updated_at
-               }
-             in
-             let matched = board_signal_match ~meta ~signal in
-             consume_posts
-               
-               (Some next_cursor)
-               ({ event_kind = Board_post_created
-                ; post_id
-                ; author = Board.Agent_id.to_string p.author
-                ; title = p.title
-                ; preview = short_preview ~max_len:80 p.body
-                ; hearth = p.hearth
-                ; post_kind = p.post_kind
-                ; updated_at = p.updated_at
-                ; explicit_mention = matched.explicit_mention
-                ; matched_targets = matched.matched_targets
-                ; replies_after_own_comment = Some replies
-                ; latest_external_author = Some ext_author
-                ; latest_external_preview = Some ext_preview
-                }
-                :: acc)
-               rest))
+        match events_of_post p with
+        | Ok events ->
+          mention_count := !mention_count + List.length
+              (List.filter (fun (event : pending_board_event) -> event.explicit_mention) events);
+          consume_posts (Some next_cursor) (List.rev_append events acc) rest
+        | Error unavailable ->
+          (match log_and_count_unavailable ~context:"signal replay" unavailable with
+           | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
+           | Board_signal.Transient -> List.rev acc, last_cursor)
     in
-    let final_events, last_cursor = consume_posts None [] recent in
+    let final_events, last_cursor = consume_posts None [] posts in
     if advance_cursor
     then (
       match base_cursor, last_cursor with
@@ -1490,7 +1415,7 @@ let collect_board_events_with_cursor_policy
             meta.name
             (List.length final_events))
     );
-    final_events, new_count, mention_count
+    final_events, new_count, !mention_count
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Keeper_board_attention_candidate.Candidate_unavailable detail as exn ->

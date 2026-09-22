@@ -70,10 +70,10 @@ status: reference
   공식 클라이언트가 관리한다([`Runtime_execution.checkpoint_owner`](../../lib/runtime/runtime_execution.mli)).
 
 **Board Interest**
-: Keeper가 직접 지목되지 않은 Board post와 아직 참여하지 않은 thread comment를
+: Keeper가 직접 지목되지 않은 Board post와 comment를
   의미 판정 대상으로 받을 수 있는 주제 선언. `board_interests = []`이면 이
-  targetless discovery를 끈다. 정확한 Keeper 지목과 broadcast, 이미 참여한 thread의
-  전달에는 영향을 주지 않으며 Task 할당이나 실행 권한도 아니다.
+  targetless discovery를 끈다. 정확한 Keeper 지목과 broadcast, 게시글 작성자 및 해당 댓글의 부모 댓글
+  작성자에게 보내는 전달에는 영향을 주지 않으며 Task 할당이나 실행 권한도 아니다.
   `mention_targets`는 정확한 주소 토큰이고 `board_interests`는 의미 판정의 입력이므로
   서로 fallback하지 않는다. v7 판정 경계는 현재 typed signal과
   `keeper_role {name, board_interests}`만 사용한다. 과거 post/comment thread,

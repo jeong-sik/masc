@@ -753,7 +753,7 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
       carried.Keeper_event_queue.schedule_id
   | WO.Board_post_created
    | WO.Board_post_updated
-  | WO.Board_comment_added
+  | WO.Board_comment_added _
   | WO.Board_reaction_changed _
   | WO.Board_vote_cast _
   | WO.Fusion_completed
@@ -1221,6 +1221,14 @@ let test_board_activity_renders_every_admitted_row () =
   check bool "an old non-mention is visible too" true
     (contains_sub "board-post-01" world_state)
 
+let own_post_comment =
+  { Masc.Board_dispatch.comment_id =
+      Masc.Board.Comment_id.of_string "c-00000000000000000000000000000001"
+      |> Result.get_ok
+  ; parent_id = None
+  }
+;;
+
 (* The post author is the one participant who never commented on their own
    thread, so [check_self_comment_status] answers [`Never] and the row carries
    no replies after an own comment. The observation still resolves the
@@ -1229,7 +1237,7 @@ let test_board_activity_renders_every_admitted_row () =
 let test_a_comment_on_your_own_post_says_who_and_what () =
   let commented_on_by_someone_else =
     { sample_board_event with
-      event_kind = WO.Board_comment_added
+      event_kind = WO.Board_comment_added own_post_comment
     ; replies_after_own_comment = None
     ; latest_external_author = Some "bob"
     ; latest_external_preview = Some "I hit this too, here is the trace"
@@ -1269,7 +1277,7 @@ let test_a_reply_after_your_own_comment_still_counts () =
   in
   let replied_after_me =
     { sample_board_event with
-      event_kind = WO.Board_comment_added
+      event_kind = WO.Board_comment_added own_post_comment
     ; replies_after_own_comment =
         Some
           { Masc.Keeper_world_observation_board_signal.comment_offset =

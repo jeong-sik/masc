@@ -128,7 +128,7 @@ type wake_reason =
   | Explicit_mention
   | Broadcast
   | Comment_on_self_post
-  | Thread_reply_after_self_comment
+  | Reply_to_self_comment
   | Reaction_after_self_activity
   | Vote_on_self_post
   | Vote_on_self_comment

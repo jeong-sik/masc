@@ -1074,10 +1074,7 @@ let heartbeat_event_intake
       (fun acc (event : Keeper_world_observation.pending_board_event) ->
          if
            List.exists
-             (fun existing ->
-                String.equal
-                  existing.Keeper_world_observation.post_id
-                  event.Keeper_world_observation.post_id)
+             (Keeper_world_observation.same_board_event_identity event)
              acc
          then acc
          else (
@@ -1091,7 +1088,7 @@ let heartbeat_event_intake
                 meta_after_triage.name
             | Keeper_world_observation.Board_post_created
   | Keeper_world_observation.Board_post_updated
-            | Keeper_world_observation.Board_comment_added
+            | Keeper_world_observation.Board_comment_added _
             | Keeper_world_observation.Board_reaction_changed _
             | Keeper_world_observation.Board_vote_cast _
             | Keeper_world_observation.Fusion_completed

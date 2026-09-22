@@ -399,7 +399,7 @@ let board_signal_stimulus
           the thread priority. This change's subject is that it wakes at all;
           raising it to Immediate would be a separate queue decision. *)
        | Board_wake.Comment_on_self_post
-       | Board_wake.Thread_reply_after_self_comment
+       | Board_wake.Reply_to_self_comment
        | Board_wake.Reaction_after_self_activity
        | Board_wake.Vote_on_self_post
        | Board_wake.Vote_on_self_comment ->
@@ -819,7 +819,7 @@ let wakeup_relevant_keeper_for_board_signal
                       | Board_wake.Broadcast -> Keeper_registry.Broadcast_signal
                       | Board_wake.Explicit_mention
                       | Board_wake.Comment_on_self_post
-                      | Board_wake.Thread_reply_after_self_comment
+                      | Board_wake.Reply_to_self_comment
                       | Board_wake.Reaction_after_self_activity
                       | Board_wake.Vote_on_self_post
                       | Board_wake.Vote_on_self_comment ->

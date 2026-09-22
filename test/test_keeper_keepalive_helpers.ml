@@ -859,11 +859,8 @@ let test_lane_meta_failure_does_not_block_next_durable_delivery () =
          (board_queue_length config healthy.name))
 ;;
 
-(* #25600 fixture: a [Thread_participants]-audience comment signal is the
-   only route that re-reads the board store at signal time
-   ([check_self_comment_status]).  The keeper authored an earlier comment on
-   the post, so a newer external comment addresses it as
-   [Thread_reply_after_self_comment] — but only if the store read succeeds. *)
+(* The nested reply targets the keeper's exact parent comment. Its author
+   must be read successfully from the Board store before direct delivery. *)
 let create_thread_fixture config ~keeper_name =
   let meta = make_board_resume_meta keeper_name in
   persist_and_register_board_lane config meta;
@@ -881,13 +878,14 @@ let create_thread_fixture config ~keeper_name =
     | Ok post -> post
   in
   let post_id = Board.Post_id.to_string post.id in
-  let add_comment ~author ~content =
-    match Board_dispatch.add_comment ~post_id ~author ~content () with
+  let add_comment ?parent_id ~author ~content () =
+    match Board_dispatch.add_comment ~post_id ~author ~content ?parent_id () with
     | Error error -> fail (Board.show_board_error error)
     | Ok comment -> comment
   in
-  ignore (add_comment ~author:meta.Keeper_meta_contract.name ~content:"keeper was here");
-  let comment = add_comment ~author:"external-author" ~content:"follow up" in
+  let parent = add_comment ~author:meta.Keeper_meta_contract.name ~content:"keeper was here" () in
+  let comment = add_comment ~parent_id:(Board.Comment_id.to_string parent.id)
+      ~author:"external-author" ~content:"follow up" () in
   let signal : Board_dispatch.addressed_board_signal =
     { signal =
         { kind =
@@ -1213,7 +1211,7 @@ let test_comment_routes_bystander_lane_to_attention_judgment () =
        in
        check bool "participant lane keeps direct delivery" true
          (match route ~audience ~meta addressed.Board_dispatch.signal with
-          | KBA.Deliver KWOBS.Thread_reply_after_self_comment -> true
+          | KBA.Deliver KWOBS.Reply_to_self_comment -> true
           | KBA.Deliver _ | KBA.Judge_discoverable | KBA.Ignore -> false);
        check bool "bystander lane escalates to judgment" true
          (match route ~audience ~meta:bystander addressed.Board_dispatch.signal with
@@ -1328,6 +1326,51 @@ let test_owner_inventory_stopping_refreshes_work_heartbeat () =
     refreshes
 ;;
 
+let test_comments_address_post_and_direct_parent_only () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:(fun () -> Board_dispatch.set_board_signal_hook (fun _ -> ()); Keeper_registry.For_testing.clear ())
+    (fun () ->
+      let poster = make_board_resume_meta "poster" in
+      let parent_author = make_board_resume_meta "parent-author" in
+      let participant = { (make_board_resume_meta "past-participant") with board_interests = [ "research" ] } in
+      List.iter (persist_and_register_board_lane config) [poster; parent_author; participant];
+      let post = match Board_dispatch.create_post ~author:poster.name ~content:"research question"
+          ~title:"thread" ~post_kind:Board.Human_post ~visibility:Board.Internal () with
+        | Ok post -> post | Error error -> fail (Board.show_board_error error) in
+      let post_id = Board.Post_id.to_string post.id in
+      let add ?parent_id author =
+        match Board_dispatch.add_comment ~post_id ~author ~content:"same text" ?parent_id () with
+        | Ok comment -> comment | Error error -> fail (Board.show_board_error error) in
+      let parent = add parent_author.name in
+      ignore (add participant.name);
+      let last_signal = ref None in
+      Board_dispatch.set_board_signal_hook (fun addressed ->
+        last_signal := Some addressed;
+        KKS.wakeup_relevant_keeper_for_board_signal ~config addressed);
+      ignore (add "external-author");
+      check int "top-level comment reaches poster" 1 (board_queue_length config poster.name);
+      check int "past comment does not address its author" 0 (board_queue_length config parent_author.name);
+      check int "other participant is not directly addressed" 0 (board_queue_length config participant.name);
+      check int "interested non-target receives judgment candidate" 1 (board_attention_count config participant.name);
+      ignore (add ~parent_id:(Board.Comment_id.to_string parent.id) "external-author");
+      check int "nested comment still reaches poster" 2 (board_queue_length config poster.name);
+      check int "nested comment reaches exact parent author" 1 (board_queue_length config parent_author.name);
+      check int "unrelated participant remains undelivered" 0 (board_queue_length config participant.name);
+      check int "interested non-target judges each distinct comment" 2 (board_attention_count config participant.name);
+      let signal = (Option.get !last_signal).Board_dispatch.signal in
+      let missing = Board.Comment_id.of_string "c-00000000000000000000000000000001" |> Result.get_ok in
+      let signal = match signal.kind with
+        | Board_dispatch.Board_comment_added identity ->
+          { signal with kind = Board_dispatch.Board_comment_added { identity with parent_id = Some missing } }
+        | _ -> assert false in
+      check bool "missing direct parent is unavailable, not a guessed recipient" true
+        (match KWOBS.wake_reason ~meta:parent_author ~signal with
+         | KWOBS.Unavailable { error = Board.Comment_not_found _; _ } -> true
+         | _ -> false))
+;;
+
 let () =
   run
     "keeper keepalive helpers"
@@ -1356,7 +1399,9 @@ let () =
             test_not_in_registry_warn_state_is_bounded
         ] )
     ; ( "board_signal_delivery"
-      , [ test_case "goal keyword overlap is not a wake reason" `Quick
+      , [ test_case "comments address post and exact parent only" `Quick
+            test_comments_address_post_and_direct_parent_only
+        ; test_case "goal keyword overlap is not a wake reason" `Quick
             test_board_goal_keyword_overlap_is_not_wake_reason
         ; test_case "mentions use exact typed Keeper ids" `Quick
             test_board_mentions_use_exact_typed_keeper_ids

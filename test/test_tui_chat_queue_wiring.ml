@@ -1805,8 +1805,8 @@ let test_an_observed_running_turn_is_drawn_from_its_journal () =
       (count "said" running_screen);
     check int "the footer does not repeat the tail as Latest output" 0
       (count "Latest output" running_screen);
-    check bool "the footer still says a turn is running" true
-      (Astring.String.is_infix ~affix:"chat_operation turn" running_screen);
+    check bool "the footer still says a turn is running, by lane and age" true
+      (Astring.String.is_infix ~affix:"chat_operation \xc2\xb7 " running_screen);
     check int "the turn's rail has not closed" 0
       (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_closes)
          running_screen);

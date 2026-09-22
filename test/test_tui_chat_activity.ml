@@ -27,61 +27,73 @@ let live ?(keeper_name = "alpha") ?(request_id = "request-1") state admission =
     submitted_at = 2.; sent_at = 2.; control_generation = 0; origin = Tui.Direct_submission; phase = Tui.Turn_streaming; log = live }];
   live
 
-let last rows = match List.rev rows with
-  | line :: _ -> line
-  | [] -> fail "expected an activity row"
+let texts rows = List.map Masc_tui_answering.chat_activity_row_text rows
 
-let test_admission_is_not_inferred_from_waiting_phase () =
-  List.iter (fun (admission, expected) ->
+(* The admission is the live progress row's to say
+   ([Masc_tui_keeper_chat_transcript.phase_text], pinned in
+   test_tui_keeper_chat_transcript): "sent; not accepted yet", "queued · 3
+   messages in the keeper's queue", "accepted; the run is starting". The
+   band said each again in a sentence of its own under it. For every
+   admission, the band now names only what the progress row does not: a
+   turn this pane did not open, which the pane is waiting behind. *)
+let test_the_band_does_not_repeat_the_admission () =
+  List.iter (fun admission ->
     let state = state () in
-    state.keeper_turns <- [running Turn_lane_autonomous];
     ignore (live state admission);
-    check string "same Waiting phase, distinct admission facts" expected
-      (last (Tui.keeper_message_activity_rows state)))
-    [ None, "Your request is awaiting server acceptance; queue position unknown"
-    ; Some Live.Running, "Your request was accepted; waiting for its first event"
-    ; Some Live.Settled, "Your request already settled; replaying its result"
-    ; Some Live.Queued, "Your message is queued behind this Keeper's current turn; start time unknown"
-    ]
+    check (list string) "no turn observed: nothing under the progress row" []
+      (texts (Tui.keeper_message_activity_rows state));
+    state.keeper_turns <- [running Turn_lane_autonomous];
+    match Tui.keeper_message_activity_rows state with
+    | [ row ] ->
+      check bool "the one row is the turn the pane waits behind" true
+        (String.length row.Masc_tui_answering.lead > 0
+         && Astring.String.is_infix ~affix:"autonomous" row.lead);
+      check bool "and it does not restate the admission" false
+        (List.exists (fun needle ->
+           Astring.String.is_infix ~affix:needle (Masc_tui_answering.chat_activity_row_text row))
+           [ "Your message"; "Your request"; "queued at the server" ])
+    | rows -> fail (String.concat " | " (texts rows)))
+    [ None; Some Live.Running; Some Live.Settled; Some Live.Queued ]
 
+(* The band never names a blocker it did not observe: another keeper's turn,
+   this pane's own chat operation (the live row draws it), a failing poll, an
+   idle or unreadable keeper -- none puts an observed-turn row under a queued
+   request of this pane. *)
 let test_queue_does_not_invent_a_blocking_turn () =
   List.iter (fun (rows, error) ->
     let state = state () in
     state.keeper_turns <- rows;
     state.keeper_turns_error <- error;
     ignore (live state (Some Live.Queued));
-    check string "unknown or unrelated turn cannot be the blocker"
-      "Your message is queued at the server; start time unknown"
-      (last (Tui.keeper_message_activity_rows state)))
+    check bool "no observed-turn row names a blocker" false
+      (List.exists (fun text -> Astring.String.is_infix ~affix:"autonomous" text)
+         (texts (Tui.keeper_message_activity_rows state))))
     [ [], None
     ; [running ~keeper_name:"beta" Turn_lane_autonomous], None
-    ; [running Turn_lane_chat_operation], None
-    ; [running Turn_lane_autonomous], Some "timeout"
     ; [{ Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_idle }], None
     ; [{ Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_unavailable "offline" }], None
     ];
   let state = state () in
   state.keeper_turns <- [running Turn_lane_maintenance];
   ignore (live state (Some Live.Queued));
-  check string "same Keeper maintenance is observed background work"
-    "Your message is queued behind this Keeper's current turn; start time unknown"
-    (last (Tui.keeper_message_activity_rows state))
+  check bool "same Keeper maintenance is observed background work" true
+    (List.exists (fun text -> Astring.String.is_infix ~affix:"maintenance" text)
+       (texts (Tui.keeper_message_activity_rows state)))
 
 let test_started_and_finished_requests_stop_waiting () =
   let state = state () in
   let log = live state (Some Live.Queued) in
   state.keeper_turns <- [running Turn_lane_chat_operation];
   Tui.turn_log_add ~now:4. log ~seq:(Some 1) Live.Run_started;
-  check (list string) "run started supersedes its old queued acceptance"
-    ["Current direct conversation · request-1 · in progress"]
-    (Tui.keeper_message_activity_rows state);
+  check (list string) "a started run is the live progress row's, not the band's" []
+    (texts (Tui.keeper_message_activity_rows state));
   state.keeper_turns <- [];
   Tui.turn_log_add ~now:5. log ~seq:(Some 2) Live.Run_finished;
   check (list string) "settled run is not queued" []
-    (Tui.keeper_message_activity_rows state);
+    (texts (Tui.keeper_message_activity_rows state));
   ignore (live ~keeper_name:"beta" state (Some Live.Queued));
   check (list string) "another Keeper's pending submission stays out" []
-    (Tui.keeper_message_activity_rows state)
+    (texts (Tui.keeper_message_activity_rows state))
 
 let test_local_queue_is_not_server_admission () =
   let state = state () in
@@ -95,10 +107,10 @@ let test_local_queue_is_not_server_admission () =
   add "beta" "local-beta";
   check (list string) "only target's unsent messages are counted"
     ["Queue (1 waiting · auto-next:on) NEXT: \"hello\" · Ctrl-T:queue"]
-    (Tui.keeper_message_activity_rows state);
+    (texts (Tui.keeper_message_activity_rows state));
   state.msg_target_keeper_name <- None;
   check (list string) "no target has no attributed activity" []
-    (Tui.keeper_message_activity_rows state)
+    (texts (Tui.keeper_message_activity_rows state))
 
 let test_working_request_survives_newer_queued_view () =
   let state = state () in
@@ -110,10 +122,11 @@ let test_working_request_survives_newer_queued_view () =
   let active = List.hd state.msg_inflight in
   ignore (live ~request_id:"queued-2" state (Some Live.Queued));
   state.msg_inflight <- state.msg_inflight @ [active];
-  check (list string) "active execution and independent queue stay visible"
-    ["Current direct conversation · shared-execution · in progress";
-     "Your message is queued behind this Keeper's current turn; start time unknown"]
-    (Tui.keeper_message_activity_rows state);
+  (* The live row draws the newer queued request; the working one under it
+     is named by the band, since nothing else on screen names it. *)
+  check (list string) "the working request the live row is not drawing stays visible"
+    ["Current direct conversation · shared-execution · in progress"]
+    (texts (Tui.keeper_message_activity_rows state));
   check (list string) "stale autonomous interrupt rows are suppressed" []
     (Tui.keeper_observed_interrupt_rows state)
 
@@ -125,21 +138,24 @@ let test_esc_hint_follows_the_observed_turn () =
   state.keeper_turns <- [running Turn_lane_chat_operation];
   check (option (pair (float 0.001) string)) "a running row is the target"
     (Some (1., "fixture-token")) (Tui.keeper_observed_turn state "alpha");
-  check (list string) "the hint offers the stop Esc will send"
-    ["Esc: stop and pause queue · Enter:send update · /queue: manage"]
+  check bool "the row naming the turn offers the stop Esc will send" true
+    (List.exists (fun text -> Astring.String.is_infix ~affix:"Esc stops it" text)
+       (texts (Tui.keeper_message_activity_rows state)));
+  check (list string) "and no row of its own says it again" []
     (Tui.keeper_observed_interrupt_rows state);
   state.keeper_turns_error <- Some "poll failed";
   check (option (pair (float 0.001) string)) "a failing poll leaves Esc without a target"
     None (Tui.keeper_observed_turn state "alpha");
-  check (list string) "no row offers a stop Esc would not send" []
-    (Tui.keeper_observed_interrupt_rows state)
+  check bool "no row offers a stop Esc would not send" false
+    (List.exists (fun text -> Astring.String.is_infix ~affix:"Esc" text)
+       (texts (Tui.keeper_message_activity_rows state)))
 
 let () =
   run "TUI chat activity"
     [ "request and lane states",
       [ test_case "Working request stays visible behind newer queued view" `Quick test_working_request_survives_newer_queued_view
-      ; test_case "admission distinguishes Waiting states" `Quick
-          test_admission_is_not_inferred_from_waiting_phase
+      ; test_case "the band does not repeat the admission" `Quick
+          test_the_band_does_not_repeat_the_admission
       ; test_case "queue does not invent its blocker" `Quick
           test_queue_does_not_invent_a_blocking_turn
       ; test_case "started, finished, and other Keeper requests" `Quick

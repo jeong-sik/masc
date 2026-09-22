@@ -2708,9 +2708,14 @@ let render_keeper_message (state : state) =
                   (Keeper_chat.terminal_safe_text
                      entry.sent_request.keeper_name)))
            others);
+    (* The lead -- the mark, the lane, the age -- in the status colour; the
+       detail after it receded. Drawn whole in the status colour, five rows of
+       band read as five warnings and none stood out. *)
     List.iter
-      (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-        ("  " ^ text))
+      (fun (row : Masc_tui_answering.chat_activity_row) ->
+        box_line chat_buf chat_cols
+          (Printf.sprintf "  %s%s%s%s%s%s" (Theme.warn ()) row.lead Ansi.reset
+             (Theme.recede ()) row.rest Ansi.reset))
       (Masc_tui_types.keeper_message_activity_rows state);
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       (Masc_tui_types.keeper_observed_interrupt_rows state);

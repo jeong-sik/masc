@@ -221,6 +221,38 @@ status: reference
   `Exact_lane_run_registry.lane`의 생성자 전부이고 `all_lanes`로 열거된다.
   → [tui_decode.mli](../../lib/tui_decode.mli)
 
+**Reasoning Effort (추론 노력)**
+: OpenAI 호환 wire가 싣는 추론 노력의 정규 typed 값. `Reasoning_effort.t`가
+  유일한 SSOT이고 일곱 단계다 — `None_`·`Minimal`·`Low`·`Medium`·`High`·
+  `XHigh`·`Max`. 토큰 예산은 다른 provider wire이고, 이 모듈은 숫자 예산에서
+  노력 등급을 절대 추측하지 않는다. provider별 별칭은 `Reasoning_dialect`가
+  맡는다.
+  → [Reasoning_effort](../../packages/agent_core/lib/llm_provider/reasoning_effort.mli)
+
+**Effort Ladder (노력 사다리)**
+: 일곱 노력의 서열 — `None_`=0 … `Max`=6. `rank`가 자리, `compare`가 순서다.
+  catalog가 요청한 노력을 모델이 받는 집합으로 깎을 때(clamping) 이 사다리로
+  요청보다 아래인 가장 가까운 받는 노력을 고른다.
+  → [Reasoning_effort.rank](../../packages/agent_core/lib/llm_provider/reasoning_effort.mli)
+
+**Accepted Reasoning Efforts (받는 노력 집합)**
+: 한 provider·모델이 받는 노력의 부분집합. `Capabilities.t`의
+  `accepted_reasoning_efforts`가 싣고, 모델 행이 아니라 provider base에 산다 —
+  provider가 자기 추론 모델 전체에 사다리 하나를 선언하고, 모델이 빠진 단계는
+  거절이 아니라 아래 단계로 내려서 처리하기 때문이다(xAI가 그렇다). 선언이
+  없으면(`None`) 닫힌 실패다.
+  → [Capabilities.accepted_reasoning_efforts](../../packages/agent_core/lib/llm_provider/capabilities.mli)
+
+**Reasoning Effort Rejection (노력 거절)**
+: 요청을 wire에 싣기 전 `validate_reasoning_effort_request_typed`가 내는 typed
+  거절. `Unsupported_reasoning_effort`(집합 밖), `Undeclared_reasoning_effort_capability`
+  (선언 없음), `Explicit_disable_outside_ladder`(명시 끄기가 사다리 밖),
+  `Reasoning_undeclared_on_auto_enabling_wire`(스스로 켜는 wire인데 노력도
+  `reasoning_uncontrolled`도 안 밝힘). 검사하는 값은 wire가 실을 값이다 — 명시
+  `enable_thinking = Some false`는 노력 `none`으로 가므로, `none`이 없는 사다리는
+  그 끄기를 `Explicit_disable_outside_ladder`로 거절한다.
+  → [Provider_config.reasoning_effort_request_rejection](../../packages/agent_core/lib/llm_provider/provider_config.mli)
+
 **Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)

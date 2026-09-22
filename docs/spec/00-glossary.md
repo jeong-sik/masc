@@ -69,6 +69,24 @@ status: reference
   관찰하고 자율 turn을 실행한다. 이어 실행할 상태는 runtime에 따라 AGENT_CORE 또는
   공식 클라이언트가 관리한다([`Runtime_execution.checkpoint_owner`](../../lib/runtime/runtime_execution.mli)).
 
+**Keeper Prompt (Keeper 시스템 프롬프트)**
+: 한 Keeper turn의 모델 호출에 실리는 system prompt. `Keeper_prompt.build_keeper_system_prompt`가
+  `config/prompts/keeper.md`의 슬롯을 정해진 순서로 조립한다. 순서는 공유 접두를 최대로
+  남기기 위한 것이다(KV 캐시 재사용): `<system>` 공유 본문(keeper.md 첫 마커 앞, 모든
+  Keeper가 글자 그대로 공유) → `keeper.worldview` → `keeper.constitution` →
+  `keeper.identity` → `keeper.workspace` → `<role>`.
+  `keeper.worldview`는 이 세계가 무엇을 잘한 일로 치는가다. 운영자가 덮어쓰며, 배포
+  기본값은 "따로 정한 가치관이 없다 — 각 Keeper의 역할이 정한다"이다. 슬롯은 항상 렌더된다.
+  `keeper.constitution`은 세계가 쓴 규범(RFC-0442)이고, 조항이 없으면 통째로 빠진다.
+  `<role>`은 그 Keeper의 `instructions`(Keeper TOML)를 적힌 그대로 감싸며 앞에 제목을
+  붙이지 않는다.
+  `keeper.identity`·`keeper.workspace`는 각각 Keeper 이름과 샌드박스 루트를 받는다.
+  전체 지도는 [Prompt Map](../PROMPT-MAP.md)을 따른다.
+  경계: 여기의 "role"은 Message의 role(`System`·`User`·`Assistant`·`Tool`)도, Board
+  Interest 판정의 `keeper_role {name, board_interests}`도, Fusion 심판의 `judge_role`
+  (Fusion Judge Role)도 아니다.
+  → [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
+
 **Board Interest**
 : Keeper가 직접 지목되지 않은 Board post와 comment를
   의미 판정 대상으로 받을 수 있는 주제 선언. `board_interests = []`이면 이

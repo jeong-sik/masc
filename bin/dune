@@ -418,7 +418,9 @@
  ; masc for the wire's own routing table: which event types are whole-projection
  ; pushes is the wire's business, and this decoder used to keep a copy that had
  ; drifted by two.
- (libraries masc agent_core masc_tui_keeper_chat_projection yojson))
+ ; masc.runtime for the telemetry push's name, read from the collector that
+ ; broadcasts it.
+ (libraries masc masc.runtime agent_core masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_lane_declaration)

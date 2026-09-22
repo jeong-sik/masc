@@ -145,6 +145,10 @@ type event =
      could not be shown removed. It rides the agent-core family on the wire,
      but it is the lane runtime's fact, not an agent's. *)
   | Lane_resource of lane_resource
+  (* One LLM call's measurements, pushed by the collector behind the
+     dashboard's telemetry page. The same thing the agent-core family's own
+     telemetry is: numbers about a call, not something a keeper did. *)
+  | Telemetry_sample of { total_ms : float; output_tokens : int option; at : float }
   | Snapshot of string
   | Other of string
 
@@ -173,7 +177,7 @@ let chat_appended_keeper = function
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _
   | Fusion_run_status _ | Internal_agent_runs_changed | Lane_resource _
-  | Snapshot _ | Other _ ->
+  | Telemetry_sample _ | Snapshot _ | Other _ ->
       None
 
 (* Field readers over one object's assoc list. Each answers [None] for an
@@ -308,6 +312,22 @@ let decode_lane_resource ~type_name ~lifecycle fields =
        ; lr_detail = detail
        ; lr_at = at
        })
+
+let decode_telemetry_sample ~type_name fields =
+  let* at = required float_field fields "ts_unix" ~event:type_name in
+  let* entry =
+    match assoc_field fields "payload" with
+    | Some entry -> Ok entry
+    | None -> Error (type_name ^ " carries no payload object")
+  in
+  let* sample =
+    match assoc_field entry "sample" with
+    | Some sample -> Ok sample
+    | None -> Error (type_name ^ " carries no sample object")
+  in
+  let* total_ms = required float_field sample "total_duration_ms" ~event:type_name in
+  let* output_tokens = optional_int_field sample "output_tokens" ~event:type_name in
+  Ok (Telemetry_sample { total_ms; output_tokens; at })
 
 let decode_keeper_heartbeat fields =
   let event = "keeper_heartbeat" in
@@ -486,6 +506,10 @@ let event_of_json (json : Yojson.Safe.t) =
       | Some type_name
         when String.equal type_name Masc.Internal_agent_runs_event.event_type ->
           Ok Internal_agent_runs_changed
+      | Some type_name
+        when String.equal type_name Dashboard_agent_core_bridge.sample_event_type
+        ->
+          decode_telemetry_sample ~type_name fields
       | Some ("keeper_chat_appended" as event) ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_chat_appended

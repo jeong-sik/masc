@@ -109,6 +109,9 @@ let summary = function
   | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
   | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
+  | Observer.Event (Observer.Telemetry_sample { total_ms; output_tokens; _ }) ->
+      Printf.sprintf "telemetry(%.0f,%s)" total_ms
+        (Option.fold ~none:"-" ~some:string_of_int output_tokens)
   | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
     ->
       Printf.sprintf "lane_resource(%s,%s,%s)" lr_package lr_instance
@@ -455,6 +458,38 @@ let test_a_lane_resource_without_a_reason_says_so () =
     [ "lane_resource(masc-dos,inst-7,-)" ]
     (List.map summary (decode_all [ lane_resource_frame Lane_events.Acquired ]))
 
+(* The collector's per-call push, as the collector builds it. *)
+let telemetry_frame ~output_tokens =
+  let sample =
+    { Dashboard_agent_core_bridge.provider_id = "runtime"
+    ; model_id = "runtime"
+    ; ttfb_ms = 800.
+    ; total_duration_ms = 3400.
+    ; serialization_ms = 2.
+    ; usage_reported = Option.is_some output_tokens
+    ; input_tokens = None
+    ; output_tokens
+    ; throughput_tokens_per_s = None
+    ; cost_usd = None
+    ; cache_hit = None
+    ; status = Dashboard_agent_core_bridge.Success
+    ; retry_count = 0
+    }
+  in
+  "data: "
+  ^ Yojson.Safe.to_string
+      (Dashboard_agent_core_bridge.sample_event_json (sample, 1790088332.5))
+  ^ "\n\n"
+
+let test_the_telemetry_push_is_read_as_a_sample () =
+  check (list string) "the collector's frame decodes to its call's numbers"
+    [ "telemetry(3400,512)"; "telemetry(3400,-)" ]
+    (List.map summary
+       (decode_all
+          [ telemetry_frame ~output_tokens:(Some 512)
+          ; telemetry_frame ~output_tokens:None
+          ]))
+
 let test_what_this_build_was_not_taught_keeps_its_name () =
   check (list string) "snapshots are named, not retained; unknown types are named"
     [ "snapshot:execution_snapshot"
@@ -663,6 +698,8 @@ let () =
             `Quick test_every_lane_resource_lifecycle_is_read_with_its_payload
         ; test_case "a lane resource without a reason says so" `Quick
             test_a_lane_resource_without_a_reason_says_so
+        ; test_case "the telemetry push is read as a sample" `Quick
+            test_the_telemetry_push_is_read_as_a_sample
         ; test_case "what this build was not taught keeps its name" `Quick
             test_what_this_build_was_not_taught_keeps_its_name
         ; test_case "streaming telemetry names no agent" `Quick

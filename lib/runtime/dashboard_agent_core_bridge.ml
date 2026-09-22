@@ -117,18 +117,20 @@ let provider_json = function
   | Some _ -> `String public_runtime_provider_label
   | None -> `Null
 
+let sample_event_type = "agent_core_telemetry_sample"
+
+let sample_event_json ((_sample, recorded_at) as entry) =
+  `Assoc
+    [
+      ("type", `String sample_event_type);
+      ("payload", sample_entry_to_yojson entry);
+      ("provider_id", `String public_runtime_provider_label);
+      ("model_id", `String public_runtime_model_label);
+      ("ts_unix", `Float recorded_at);
+    ]
+
 let broadcast_sample_entry entry =
-  let sample, recorded_at = entry in
-  let json =
-    `Assoc
-      [
-        ("type", `String "agent_core_telemetry_sample");
-        ("payload", sample_entry_to_yojson entry);
-        ("provider_id", `String public_runtime_provider_label);
-        ("model_id", `String public_runtime_model_label);
-        ("ts_unix", `Float recorded_at);
-      ]
-  in
+  let json = sample_event_json entry in
   try Atomic.get broadcast_hook json
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

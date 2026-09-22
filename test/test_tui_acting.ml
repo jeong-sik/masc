@@ -392,6 +392,22 @@ let test_a_repeating_container_failure_is_one_row_under_turns () =
   check int "actions still lists every failure" 5
     (List.length (List.filter (Acting.visible Acting.Actions) events_oldest_first))
 
+(* One LLM call's numbers are telemetry, like the agent-core family's own:
+   the everything scope keeps them as a quiet row, the scopes that show what a
+   keeper did do not. On the live fleet the push arrived untaught and drew a
+   look-here mark under turns. *)
+let test_the_telemetry_push_is_not_a_keepers_act () =
+  let sample =
+    Observer.Telemetry_sample { total_ms = 3400.; output_tokens = Some 512; at = 100. }
+  in
+  check bool "turns does not draw it" false (Acting.visible Acting.Turns sample);
+  check bool "actions does not draw it" false (Acting.visible Acting.Actions sample);
+  check bool "everything does" true (Acting.visible Acting.Everything sample);
+  let row = Acting.row_of_event ~at:100. ~duration_ms:None sample in
+  check bool "quietly" true (row.Acting.glyph = Acting.Quiet);
+  check string "with the call's duration and output" "3.4s \xc2\xb7 512 tok out"
+    row.Acting.detail
+
 (* A reply sends one stream frame per token, so a single keeper answering fills
    the retained ring on its own. Before these frames were decoded they arrived
    as Other, which the actions filter admits, and a screen asked for actions
@@ -1278,7 +1294,9 @@ let test_call_key_prefers_the_provider_id () =
 let () =
   run "tui acting"
     [ ( "rows"
-      , [ test_case "a repeating container failure is one row under turns" `Quick
+      , [ test_case "the telemetry push is not a keeper's act" `Quick
+            test_the_telemetry_push_is_not_a_keepers_act
+        ; test_case "a repeating container failure is one row under turns" `Quick
             test_a_repeating_container_failure_is_one_row_under_turns
         ; test_case "a lane container failure is drawn with its reason" `Quick
             test_a_lane_container_failure_is_drawn_with_its_reason

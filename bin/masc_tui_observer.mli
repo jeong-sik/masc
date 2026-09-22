@@ -198,6 +198,11 @@ type event =
           and is recognised by the names {!Masc.Lane_addon_resource_events}
           mints, as {!Masc.Keeper_event_bridge.public_custom_event_type}
           spells them on the wire. *)
+  | Telemetry_sample of { total_ms : float; output_tokens : int option; at : float }
+      (** One LLM call's measurements, pushed by the collector behind the
+          dashboard's telemetry page ({!Dashboard_agent_core_bridge}): how long
+          the call took and, when the provider said, how many tokens it
+          produced. Numbers about a call, not a keeper's act. *)
   | Snapshot of string
       (** A whole-projection push; the name is kept, the payload is not. Which
           types these are comes from the wire's own routing table

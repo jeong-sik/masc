@@ -181,6 +181,14 @@ val status_to_yojson : status -> Yojson.Safe.t
 val sample_to_yojson : sample -> Yojson.Safe.t
 (** JSON projection of the twelve-signal sample fields. *)
 
+val sample_event_type : string
+(** The [type] of the push each recorded sample is broadcast as. A reader
+    recognises the push by this, not by a copy of the name. *)
+
+val sample_event_json : sample * float -> Yojson.Safe.t
+(** The whole push for one sample and the time it was recorded: the frame
+    Observer SSE sessions receive. *)
+
 val recent_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t
 (** Dashboard payload for
     [GET /api/v1/dashboard/agent_core/telemetry/recent?provider=P&limit=N].

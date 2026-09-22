@@ -52,7 +52,10 @@ let visible filter (event : Observer.event) =
           match lr_lifecycle with
           | Masc.Lane_addon_resource_events.Acquire_failed | Masc.Lane_addon_resource_events.Release_incomplete -> true
           | Masc.Lane_addon_resource_events.Acquired | Masc.Lane_addon_resource_events.Release_confirmed -> false)
-      | Observer.Agent_core { Observer.kind = Observer.Telemetry; _ } -> false
+      | Observer.Agent_core { Observer.kind = Observer.Telemetry; _ }
+      (* The collector's per-call push is the same kind of fact. *)
+      | Observer.Telemetry_sample _ ->
+          false
       | Observer.Agent_core _ -> true
       | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
       | Observer.Snapshot _
@@ -105,7 +108,8 @@ let retained_as_action (event : Observer.event) =
   | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
-  | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Lane_resource _ | Observer.Telemetry_sample _
+  | Observer.Snapshot _ | Observer.Other _ ->
       visible Actions event
 
 let retain ~actions ~quiet ~event_of entries =
@@ -264,7 +268,7 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
   | Observer.Internal_agent_runs_changed | Observer.Lane_resource _
-  | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Telemetry_sample _ | Observer.Snapshot _ | Observer.Other _ ->
       "server"
 
 let row_of_event ~at ~duration_ms (event : Observer.event) =
@@ -384,6 +388,13 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
         | None -> resource.Observer.lr_package
       in
       { at; keeper = "server"; glyph; label; detail }
+  | Observer.Telemetry_sample { total_ms; output_tokens; _ } ->
+      let detail =
+        match output_tokens with
+        | Some tokens -> Printf.sprintf "%s \xc2\xb7 %d tok out" (elapsed_text total_ms) tokens
+        | None -> elapsed_text total_ms
+      in
+      { at; keeper = "server"; glyph = Quiet; label = "llm call"; detail }
   | Observer.Internal_agent_runs_changed ->
       { at
       ; keeper = "server"
@@ -559,7 +570,7 @@ let member_of_event (event : Observer.event) =
   | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Snapshot _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
-  | Observer.Lane_resource _ | Observer.Other _ ->
+  | Observer.Lane_resource _ | Observer.Telemetry_sample _ | Observer.Other _ ->
       None
 
 let empty_chunk ~keeper ~at =
@@ -733,7 +744,8 @@ let observation_of_event (event : Observer.event) =
   | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
   | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
-  | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Lane_resource _ | Observer.Telemetry_sample _
+  | Observer.Snapshot _ | Observer.Other _ ->
       None
 
 (* The agent session's ordinal a member states, if it states one. *)
@@ -875,8 +887,8 @@ let lane_fold_key (event : Observer.event) =
   | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _
-  | Observer.Internal_agent_runs_changed | Observer.Snapshot _
-  | Observer.Other _ ->
+  | Observer.Internal_agent_runs_changed | Observer.Telemetry_sample _
+  | Observer.Snapshot _ | Observer.Other _ ->
       None
 
 (* The newest occurrence's row, with how many the screen holds in front of
@@ -1042,7 +1054,8 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_chat_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _
           | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
-          | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
+          | Observer.Lane_resource _ | Observer.Telemetry_sample _
+          | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before
 

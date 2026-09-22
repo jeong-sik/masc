@@ -105,6 +105,12 @@ type librarian_position =
           before [end_atom] are in the keeper's memory, and nothing is
           carried in their place. *)
 
+val chosen_position : continuity -> librarian_position
+(** The choice on its own, for a caller that reports which of the three the
+    turn made and has no list to check it against
+    ([Keeper_continuity_observation]). {!librarian_position} is what a lane
+    cutting a list calls. *)
+
 val librarian_position :
   messages:Agent_core.Types.message list ->
   continuity ->

@@ -154,6 +154,16 @@ type librarian_position =
   | Librarian_snapshot of Librarian_continuity_snapshot.t
   | Librarian_progress of { end_atom : int }
 
+(* Which of the three the turn chose, with no list to check it against. A
+   caller that only reports the choice ([Keeper_continuity_observation]) has
+   no messages to hand over, and re-reading the list would answer a question
+   it is not asking. *)
+let chosen_position = function
+  | Summarized { snapshot; _ } -> Librarian_snapshot snapshot
+  | Absorbed { end_atom; _ } -> Librarian_progress { end_atom }
+  | Without_snapshot -> No_position
+;;
+
 (* The one continuity this turn chose, as a position in the exact list a
    lane is about to cut. An official client composes its own request from
    that list more than once in a turn, and the list grows between
@@ -161,11 +171,7 @@ type librarian_position =
    Core branch checks each request ([validate_continuity]). *)
 let librarian_position ~messages continuity =
   Result.map
-    (fun () ->
-       match continuity with
-       | Summarized { snapshot; _ } -> Librarian_snapshot snapshot
-       | Absorbed { end_atom; _ } -> Librarian_progress { end_atom }
-       | Without_snapshot -> No_position)
+    (fun () -> chosen_position continuity)
     (validate_continuity ~messages continuity)
 ;;
 

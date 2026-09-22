@@ -447,16 +447,15 @@ let continuity_observation_input ~trace_id ~continuity front =
   | Librarian_progress { end_atom }, _ -> Keeper_continuity_observation.Absorbed { trace_id; end_atom }
   | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _), None ->
     Keeper_continuity_observation.Not_applied
-  | ( (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _)
-    , Some Keeper_turn_driver_try_provider.Without_snapshot ) ->
-    Keeper_continuity_observation.Without_snapshot
-  | ( (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _)
-    , Some
-        ( Keeper_turn_driver_try_provider.Summarized _
-        | Keeper_turn_driver_try_provider.Absorbed _ ) ) ->
-    (* The turn chose a Librarian point and this request did not start
-       there: the seed or the lane's own cut sat past it. *)
-    Keeper_continuity_observation.Not_applied
+  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _), Some continuity ->
+    (match Keeper_turn_driver_try_provider.chosen_position continuity with
+     | Keeper_turn_driver_try_provider.No_position ->
+       Keeper_continuity_observation.Without_snapshot
+     | Keeper_turn_driver_try_provider.Librarian_snapshot _
+     | Keeper_turn_driver_try_provider.Librarian_progress _ ->
+       (* The turn chose a Librarian point and this request did not start
+          there: the seed or the lane's own cut sat past it. *)
+       Keeper_continuity_observation.Not_applied)
 ;;
 
 (* Where a start seed begins (RFC keeper-context-window-in-tokens §10.4). The

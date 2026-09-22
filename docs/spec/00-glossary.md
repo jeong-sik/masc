@@ -829,6 +829,28 @@ status: reference
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
+  이 위치의 출처(`Keeper_carried_front.origin`)는 다섯이다 — `Carried`(seed에서 온
+  위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기),
+  `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),
+  `Librarian_progress`(저장본이 이 History에 맞지 않을 때 Librarian의 durable Read
+  Position), `Turn_start`(앞머리도 맞는 저장본도 없음: 이 History에서 마지막으로
+  끝난 turn이 끝난 자리에서 시작한다), `Turn_start_unknown`(그 경계마저 못 읽음:
+  가장 새 Atom 하나에서 시작한다). Agent Core는 맞는 저장본 → Librarian이 읽은
+  위치 → 마지막으로 끝난 turn의 경계 순으로 고르고, 원장·씨앗은 turn이 연속성을
+  고르지 않았을 때(trace 없음·복구 뷰)만 읽는다. 공식 클라이언트 레인은 씨앗이
+  레인 자체의 자르기와 같거나 그 뒤에 있으면 씨앗에서 시작한다(마지막으로 끝난 turn의
+  경계보다 오래돼도 그렇다). 씨앗이 없으면 레인의 자르기와 turn 경계 중 뒤쪽에서
+  시작한다 (`RFC-keeper-context-window-in-tokens` §13.4·§13.6).
+  `Librarian_progress`는 그 위치가 이 trace를 지목하고 그 앞 Atom이 위치가 기록한
+  Message로 열릴 때만 채택하며, 그때 요청은 읽지 않은 Atom부터 실리고 그 앞을
+  요약하지 않는다. `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞 Atom은
+  Librarian의 다음 회차를 기다린다. `Turn_start`의 `end_atom`은 그 경계 자체를 적는다 —
+  범위가 열린 Atom이 아니라 turn-boundary 저장소가 말하는 완료 경계다. 그래서 경계가
+  가장 새 Atom과 같거나 그보다 뒤여도(옛 번호로 남은 경계) 그 값을 그대로 적고, 범위가
+  어디서 열릴지는 clamp가 정한다. `end_atom`이 0인 경우는 하나다 — 끝난 turn이 없는 새
+  Keeper의 짧은 History 전체다. 경계 저장소를 못 읽었거나 어떤 경계도 이 History와 맞지
+  않으면 그 값은 `Turn_boundary_unknown`이고, 출처는 `Turn_start_unknown`이며 요청은
+  가장 새 Atom 하나만 싣는다 — 모르는 시작을 0으로 접어 이력 전체를 보내지 않는다.
 
   저장된 응답 관측의 범위는 당시의 사실이다. 현재 카탈로그에서 그 runtime을
   지우거나 바꾸어도 이 사실을 취소하지 않으며, 현재 History의 같은 위치·digest로 검증한다.
@@ -836,6 +858,7 @@ status: reference
   응답 없는 기록이 쌓여도 이 관측을 가리지 않는다. 재시도가 같은 turn 번호를 쓰면
   나중에 저장한 응답 관측을 선택한다. 다음 요청 예측도 같은 reader를 쓴다.
   RFC 코퍼스는 이 자리를 **앞머리**라 부른다.
+  → [Keeper_carried_front](../../lib/keeper/keeper_carried_front.mli)
 
 **Model Input Ledger (모델 입력 원장)**
 : Keeper·runtime·trace별로 응답에서 확인한 Atom 범위와 제공된 usage를 기록한 프로세스 내 원장.
@@ -912,6 +935,22 @@ status: reference
   cluster의 같은 이름 Keeper가 이어서 쓰는 공유 진행도가 아니다.
   Librarian이 이 값을 언제부터 읽고 쓰는지는 `RFC-librarian-lifecycle` §8을 본다.
 
+**Librarian Range Receipt (완료 범위 영수증)**
+: Memory snapshot을 바꾸기 전에 쓰는 영수증 원장
+  (`<config keepers_dir>/<keeper>.librarian-range-commit.json`). 파일은 `receipts`
+  배열이고, 각 영수증은 `prepared` → `committed` 두 상태를 갖는다. `prepared`는
+  곧 쓸 snapshot의 revision과 전체 바이트 SHA256을 적고, 저장이 끝나면 같은 영수증을
+  `committed`로 바꾼다. 모든 Memory writer는 snapshot을 바꾸기 전에 기존 `prepared`를
+  먼저 판정한다 — SHA256이 현재 snapshot과 같으면 이미 저장된 범위라 `committed`로
+  복구하고, 다르면 저장 전 실패라 영수증을 지운다. 그래서 범위를 저장한 뒤 다른
+  write가 먼저 와도 완료 증거를 덮어쓰지 않는다. Read Position(진행 파일)과 다른
+  파일이고, Keeper purge는 snapshot·journal·진행 파일과 함께 이 원장도 지운다.
+  배포 preflight가 이 원장을 읽어 새 빌드가 못 읽는 원장을 배포 전에 잡는다.
+  끝난 turn의 `Keeper_execution_receipt`(Terminal Reason·Operator Disposition)와
+  다른 영수증이다.
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.mli),
+  `RFC-librarian-lifecycle` §4.6
+
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.
 
@@ -961,6 +1000,28 @@ status: reference
   표시한다. 일반 Memory 소비자의 `drained`와 별개이며 다음 실행을 통제하지 않는다.
   `no_source`는 새로 읽을 완료 구간을 얻지 못했다는 뜻으로, 전체 요약 완료를
   증명하지 않는다. 구간이 없거나 관측 전이면 알 수 없음으로 표시한다.
+
+**Continuity Request Observation (요청 입력 관측)**
+: 직렬화된 요청 하나가 무엇을 실었는지에 대한 읽기 전용 관측
+  (`Keeper_continuity_observation.input`). Agent Core 는 직렬화한 요청 본문을,
+  공식 클라이언트 레인은 클라이언트에 넘긴 범위를 기록한다. 이 관측은 History 삭제를
+  승인하지 않고 provider가 요청을 받아들였음을 증명하지도 않는다. 종류는 넷이다 —
+  `Summarized of frontier`(하던 일 저장본이 대신하는 경계까지 요약; frontier는 trace·
+  끝 Atom·경계 줄), `Absorbed of { trace_id; end_atom }`(Librarian의 durable Read
+  Position에서 시작하고 그 앞을 요약하지 않음 — Agent Core 와 공식 클라이언트 레인
+  모두에서 성립), `Without_snapshot`(turn이 Librarian 지점을 고르지 않아, 요청이
+  씨앗·레인 자체의 자르기·turn 경계 중 한 곳에서 시작함),
+  `Not_applied`(저장된 맥락을 적용하지 않음: turn 이 아무 선택도 안 했거나(추적 없음·
+  복구 뷰), 공식 클라이언트 레인에서 씨앗이나 레인 자체의 자르기가 turn 이 고른 지점보다
+  뒤에 있었음). `Absorbed`는 경계 줄이 없어 모양이
+  trace와 Atom뿐이다. Dashboard의 `context_cycle.prepared.input.kind`가
+  `summarized`·`absorbed`·`without_snapshot`·`not_applied`로, TUI Memory 화면이
+  `summary …`·`absorbed to atom N · trace X · no summary`·`no snapshot: this turn only`·
+  `saved context not applied`로 그린다. 같은 `context_cycle`의 `synthesis`를 담는
+  Continuity Synthesis Observation과 다른 필드이고, 저장된 파일인 Continuity
+  Snapshot과도 다르다.
+  → [Keeper_continuity_observation](../../lib/keeper/keeper_continuity_observation.mli),
+  [dashboard 투영](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
 
 **Librarian Round (Librarian 회차)**
 : Librarian이 한 번 도는 일. Keeper마다 따로 돌고, 같은 신호(서버 기동·턴 끝·받은 일

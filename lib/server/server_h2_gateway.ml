@@ -188,6 +188,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     in
     let h2_respond_auth_error h2_reqd err =
       let status = http_status_of_auth_error err in
+      Server_auth.log_auth_refusal
+        ~protocol:"h2"
+        ~path:(Http.Request.path httpun_request)
+        ~status;
       h2_respond_json
         h2_reqd
         (auth_error_json err)

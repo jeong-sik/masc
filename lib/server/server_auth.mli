@@ -281,7 +281,20 @@ val auth_error_cors_headers : Httpun.Request.t -> (string * string) list
 val respond_auth_error :
   Httpun.Request.t -> Httpun.Reqd.t -> Masc_domain.masc_error -> unit
 (** Compose [http_status_of_auth_error] + [auth_error_json] + generic Bearer
-    challenge + CORS. *)
+    challenge + CORS, and log the refused path and status once for both
+    protocols. *)
+
+val log_auth_refusal : protocol:string -> path:string -> status:int -> unit
+(** Log a refused request's endpoint and status. The h2 gateway answers through
+    its own responder and calls this so both protocols leave the same line. The
+    raw bearer is never logged. *)
+
+val auth_refusal_details : protocol:string -> path:string -> status:int -> Yojson.Safe.t
+(** The structured details [log_auth_refusal] emits: the protocol, the refused
+    path and the status. *)
+
+val auth_refusal_message : protocol:string -> path:string -> status:int -> string
+(** The human-readable line [log_auth_refusal] emits. *)
 
 val agent_rl_key_of_request : Httpun.Request.t -> string option
 (** Extract a per-agent rate-limit key from the request.  Prefers the

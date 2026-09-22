@@ -187,7 +187,5 @@ val wire_provider_error_network_timeout_prefix : string
     transient wire codes ([wire_api_error_timeout] / [wire_api_error_network])
     or a provider timeout marker. The API timeout matches remain exact, so
     every other [api_error_*] code returns [false]. Every
-    non-[Provider_runtime_failure] variant is [false].
-    The disposition classifier routes a [true] result to a runtime-advance
-    disposition instead of [Disp_pause_human]. *)
+    non-[Provider_runtime_failure] variant is [false]. *)
 val is_transient_provider_runtime_failure : t -> bool

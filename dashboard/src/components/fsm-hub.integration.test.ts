@@ -64,11 +64,23 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
     runtime_state: 'done',
     selected_model: 'glm-4.5',
   },
+  runtime_attention: {
+    state: 'ok',
+    needs_attention: false,
+    blocked: false,
+    fiber_stop_requested: false,
+    reason: null,
+    raw_phase: 'running',
+    is_live: false,
+    source: 'composite_snapshot',
+  },
   recommended_actions: [],
 }
 
-/** Real-world payload observed from `keeper_composite_observer.ml`
-    snapshot_to_json — the schema MUST accept this without transformation.
+/** Real-world payload served by `/api/v1/keepers/:name/composite`:
+    `keeper_composite_observer.ml` snapshot_to_json plus the
+    `runtime_attention` the composite enrich step adds — the schema MUST
+    accept this without transformation.
     FSM strings are lowercase snake_case because the observer serializes
     via `Keeper_state_machine.phase_to_string` (and the parallel
     *_to_string for turn_phase / decision / runtime).  The
@@ -92,6 +104,16 @@ const REAL_COMPOSITE_PAYLOAD = {
   fsm_guard_violation_breakdown: [],
   is_live: false,
   last_outcome: null,
+  runtime_attention: {
+    state: 'ok',
+    needs_attention: false,
+    blocked: false,
+    fiber_stop_requested: false,
+    reason: null,
+    raw_phase: 'running',
+    is_live: false,
+    source: 'composite_snapshot',
+  },
 }
 
 /** Decoded gate keeper product values consumed by FsmHub. */

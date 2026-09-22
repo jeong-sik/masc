@@ -8,95 +8,6 @@ let input_trace_id (inp : Keeper_librarian.input) =
   Ids.Turn_ref.trace_id inp.turn_ref
 ;;
 
-let cadence_turns () =
-  Env_config.KeeperMemoryOs.librarian_cadence_turns ()
-;;
-
-let cadence_mu = Eio.Mutex.create ()
-let cadence_counters : (string, string * int) Hashtbl.t = Hashtbl.create 16
-let fresh_counter = -1
-
-let cadence_step ~cadence ~counter =
-  if cadence <= 1
-  then 0, true
-  else if counter < 0
-  then cadence, true
-  else (
-    let next = counter + 1 in
-    if next >= cadence then cadence, true else next, false)
-;;
-
-let cadence_step_keyed ~cadence ~current_trace ~prior =
-  let counter =
-    match prior with
-    | Some (trace, counter) when String.equal trace current_trace -> counter
-    | Some _ | None -> fresh_counter
-  in
-  let updated, due = cadence_step ~cadence ~counter in
-  (current_trace, updated), due
-;;
-
-let cadence_due ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    let prior = Hashtbl.find_opt cadence_counters keeper_id in
-    let value, due =
-      cadence_step_keyed
-        ~cadence:(cadence_turns ())
-        ~current_trace:trace_id
-        ~prior
-    in
-    Hashtbl.replace cadence_counters keeper_id value;
-    due)
-;;
-
-let cadence_record_success ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
-;;
-
-let cadence_record_attempt ~keeper_id ~trace_id =
-  Eio_guard.with_mutex cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
-;;
-
-let cadence_counter_entries () =
-  Eio_guard.with_mutex_ro cadence_mu (fun () ->
-    Hashtbl.length cadence_counters)
-;;
-
-let max_messages () =
-  Env_config.KeeperMemoryOs.librarian_max_messages ()
-;;
-
-let prompt_max_messages () =
-  max_messages () * cadence_turns ()
-;;
-
-let select_recent_messages ~max_messages messages =
-  let max_messages = max 0 max_messages in
-  let drop_count = max 0 (List.length messages - max_messages) in
-  let rec drop remaining = function
-    | messages when remaining <= 0 -> messages
-    | [] -> []
-    | _ :: rest -> drop (remaining - 1) rest
-  in
-  drop drop_count messages
-;;
-
-let prompt_input_for_librarian (inp : Keeper_librarian.input) =
-  let max_messages = prompt_max_messages () in
-  { inp with
-    messages =
-      select_recent_messages
-        ~max_messages
-        inp.messages
-  ; counterpart_observations =
-      select_recent_messages
-        ~max_messages
-        inp.counterpart_observations
-  }
-;;
-
 let message role text =
   Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
@@ -291,15 +202,14 @@ let resolve_librarian_prompt ?continuity input =
 ;;
 
 let prompt_and_input_for_librarian (inp : Keeper_librarian.input) =
-  let input = prompt_input_for_librarian inp in
   let open Result.Syntax in
   (* One asset, one message: the librarian's role statement lives at the top
      of the selection prompt it is rendered with, so there is no second file
      to keep in step. *)
   let+ prompt =
-    render_librarian_prompt input
+    render_librarian_prompt inp
   in
-  input, prompt
+  inp, prompt
 ;;
 
 let messages_and_input_for_librarian inp =
@@ -738,7 +648,7 @@ let execute_exact_output_classified
    undiagnosable from disk afterwards. Every failure path routes here so the
    log severity and the recorded line resolve snapshot presence from the same
    read and cannot disagree about one instant. *)
-let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail ~cadence_deferred =
+let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
   let snapshot_absent =
     match
       Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -764,8 +674,7 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail ~cadence_defe
       ~trace_id
       ~kind
       ~detail
-      ~snapshot_present:(not snapshot_absent)
-      ~cadence_deferred)
+      ~snapshot_present:(not snapshot_absent))
 ;;
 
 let current_selection_registry_summary = function
@@ -864,19 +773,7 @@ let context_write_json = function
   | Write_failed detail -> `Assoc ["status", `String "failed"; "detail", `String detail]
 ;;
 
-type trigger = Conversation_completed | Queue_changed | Durable_range
-
 type write_scope = Context_only | Context_and_memory
-
-type input_projection =
-  | Recent_window
-  | Already_selected_range
-
-let input_for_projection projection input =
-  match projection with
-  | Recent_window -> prompt_input_for_librarian input
-  | Already_selected_range -> input
-;;
 
 let commit_continuity ~commit ~observe =
   (* The executor job has its own cancellation scope. Keep its caller alive
@@ -888,8 +785,6 @@ let commit_continuity ~commit ~observe =
 ;;
 
 let run_best_effort
-      ?(trigger = Conversation_completed)
-      ?(input_projection = Recent_window)
       ?(write_scope = Context_and_memory)
       ?continuity
       ?(on_memory_committed = fun () -> ())
@@ -905,11 +800,6 @@ let run_best_effort
       (inp : Keeper_librarian.input)
   =
   let trace_id = input_trace_id inp in
-  if
-    (match trigger with
-     | Queue_changed | Durable_range -> true
-     | Conversation_completed -> cadence_due ~keeper_id ~trace_id)
-  then (
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
@@ -922,8 +812,7 @@ let run_best_effort
           | None -> 0
           | Some current -> List.length current.facts
         in
-        let prompt_input = input_for_projection input_projection inp
-          |> input_for_continuity continuity in
+        let prompt_input = input_for_continuity continuity inp in
         let prompt_variables, prompt_material =
           resolve_librarian_prompt ?continuity prompt_input
         in
@@ -1169,7 +1058,6 @@ let run_best_effort
                ~selected_slot
                Exact_lane_run_registry.Succeeded
                (completed_output ~inp ~exact_output ~absorb_gate snapshot);
-             cadence_record_success ~keeper_id ~trace_id;
              Log.Keeper.info
                ~keeper_name:keeper_id
                "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
@@ -1201,16 +1089,9 @@ let run_best_effort
                Keeper_metrics.(to_string MemoryOsLibrarianFailures)
                ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
                ();
-             (* Every failure defers the next pass by the full cadence. The
-                old split re-ran the "safe to retry" classes (setup, prompt
-                render, no-outward-effect execution, snapshot write) on EVERY
-                subsequent turn, because a due pass leaves the counter at the
-                cadence value — but those classes are exactly the ones that
-                tend to persist (an unpublished registry, a broken template),
-                so the lane burned its heaviest prompt each turn for as long
-                as the condition lasted. A three-turn delay on recovery is
-                the cheaper side of that trade. *)
-             cadence_record_attempt ~keeper_id ~trace_id;
+             (* A failed pass leaves the read position where it was; the next
+                signal on this keeper reads the same range again. Nothing here
+                schedules that retry or holds it back. *)
              record_failure
                ~keepers_dir
                ~keeper_id
@@ -1220,8 +1101,7 @@ let run_best_effort
                  (Printf.sprintf
                     "memory os librarian failed lane=%s: %s"
                     exact_lane_id
-                    detail)
-               ~cadence_deferred:true;
+                    detail);
              Eio.Fiber.check ()
          with
          (* A cancelled pass reached the lane registry and stopped there, so the
@@ -1255,9 +1135,6 @@ let run_best_effort
                if not run_completed then
                  complete ~selected_slot Exact_lane_run_registry.Cancelled
                    (completed_output ~inp ~exact_output ~absorb_gate snapshot);
-               (* Cadence follows the Memory commit, even when the remaining
-                  side effects of the pass did not all finish. *)
-               cadence_record_success ~keeper_id ~trace_id;
                Log.Keeper.warn
                  ~keeper_name:keeper_id
                  "memory os librarian cancelled after snapshot commit revision=%d; post-commit work may be incomplete"
@@ -1275,13 +1152,10 @@ let run_best_effort
                  ~detail:
                    (Printf.sprintf
                       "memory os librarian cancelled lane=%s"
-                      exact_lane_id)
-                   (* Cancellation is not the pass declining its own turn, so the
-                      cadence counter remains due. A later turn can schedule a
-                      new pass, but it does not replay this immutable input;
-                      graceful lifecycle boundaries therefore drain accepted
-                      work instead of cancelling it. *)
-                 ~cadence_deferred:false);
+                      exact_lane_id));
+           (* A later signal reads the same position again, but it does not
+              replay this immutable input; graceful lifecycle boundaries
+              therefore drain accepted work instead of cancelling it. *)
            raise exn
          | exn ->
            complete
@@ -1305,7 +1179,6 @@ let run_best_effort
             (Printf.sprintf
                "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
                exact_lane_id)
-          ~cadence_deferred:false
     with
     | Eio.Cancel.Cancelled _ as error -> raise error
     | exn ->
@@ -1323,7 +1196,6 @@ let run_best_effort
              "memory os librarian failed lane=%s: %s"
              exact_lane_id
              (Printexc.to_string exn))
-        ~cadence_deferred:false)
 ;;
 
 module For_testing = struct
@@ -1333,6 +1205,5 @@ module For_testing = struct
   let classified_error_kind = extraction_error_kind
   let execute_exact_output_classified = execute_exact_output_classified
   let record_failure = record_failure
-  let input_for_projection = input_for_projection
   let commit_continuity = commit_continuity
 end

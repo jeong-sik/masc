@@ -252,7 +252,6 @@ let test_context_commits_when_memory_store_fails () =
     }
   in
   Runtime.run_best_effort
-    ~trigger:Runtime.Queue_changed
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None inp;
   check int "the exact provider ran" 1 (Fixture.post_count server);
   (match Keeper_librarian_context.read ~keepers_dir ~keeper_id with

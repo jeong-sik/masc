@@ -743,7 +743,11 @@ let cached_keeper_chat_history_json config name =
 
 let offline_keeper_composite_json ~config name (m : Keeper_meta_contract.keeper_meta) =
   let now = Time_compat.now () in
-  let phase = if m.paused then "paused" else "offline" in
+  let phase, attention_state =
+    if m.paused
+    then "paused", Server_dashboard_http_composite_claims.Attention_paused
+    else "offline", Server_dashboard_http_composite_claims.Attention_offline
+  in
   let reason =
     if m.paused then "paused_without_registry_entry" else "registry_absent"
   in
@@ -778,7 +782,10 @@ let offline_keeper_composite_json ~config name (m : Keeper_meta_contract.keeper_
     ; "secret_projection", secret_projection
     ; ( "runtime_attention"
       , `Assoc
-          [ "state", `String phase
+          [ ( "state"
+            , `String
+                (Server_dashboard_http_composite_claims.runtime_attention_state_to_wire
+                   attention_state) )
           ; "needs_attention", `Bool true
           ; "blocked", `Bool false
           ; "fiber_stop_requested", `Bool false

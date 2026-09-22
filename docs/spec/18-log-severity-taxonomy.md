@@ -16,6 +16,3 @@ correlation id, timestamp, and provenance. Repeated failures remain repeated
 observations; they are not silently rate-limited and do not escalate into
 Keeper pause, risk class, or operator hierarchy. HITL pending is an expected
 Gate state and does not imply that the Keeper is blocked.
-
-Historical completion-contract, pause-human, command-syntax, and
-provider-specific severity patterns are not part of this contract.

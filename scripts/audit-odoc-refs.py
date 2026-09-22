@@ -59,6 +59,9 @@ EXTERNAL_MODULE_PREFIXES = frozenset(
         "Cohttp",
         "Digestif",
         "Domain",
+        # ocaml-dos, an opam dependency: lib/dos_lane calls into it and
+        # names it in its own docs, the same way lib/msx_lane names Msx.
+        "Dos_machine",
         "Eio",
         "Filename",
         "Float",

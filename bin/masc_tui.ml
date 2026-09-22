@@ -9499,7 +9499,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Acting_pane_tab_unknown word ->
       Buffer.clear state.msg_input;
       notice ~role:Message_error
-        (Printf.sprintf "/activity takes fleet, changes or order, not %s" word)
+        (Printf.sprintf "/activity takes fleet, changes, order or scroll, not %s" word)
   | Masc_tui_command.Set_acting_pane_call_order which ->
       Buffer.clear state.msg_input;
       (* The calls are drawn on the fleet tab, so the order is set with that
@@ -9525,6 +9525,36 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       notice ~role:Message_error
         (Printf.sprintf
            "/activity order takes newest, oldest, longest or tool, not %s" word)
+  | Masc_tui_command.Scroll_acting_pane how ->
+      Buffer.clear state.msg_input;
+      (* Scrolling a pane the frame does not draw would move it unseen, and
+         the reader would meet the change after the next Ctrl-L. The two
+         reasons it is not drawn are said the way the toggle says them. *)
+      let _rows, cols = Masc_tui_ansi.get_terminal_size () in
+      if Masc_tui_render.acting_pane_suppressed state then
+        notice ~role:Message_error
+          "Activity pane is not drawn over this surface; nothing to scroll"
+      else if
+        Masc_tui_acting_pane.drawn_cols ~layout:state.acting_pane_layout ~cols = 0
+      then
+        notice ~role:Message_error
+          "Activity pane is not shown; Ctrl-L or /activity shows it"
+      else begin
+        (match how with
+         | `Top -> state.acting_pane_scroll <- 0
+         | `Up -> scroll_acting_pane state ~delta:(-wheel_notch_rows)
+         | `Down -> scroll_acting_pane state ~delta:wheel_notch_rows
+         | `By rows -> scroll_acting_pane state ~delta:rows);
+        notice ~role:Message_local
+          (Printf.sprintf "Activity pane scrolled to row %d of %d"
+             (state.acting_pane_scroll + 1)
+             (Masc_tui_render.acting_pane_scroll_limit () + 1))
+      end
+  | Masc_tui_command.Acting_pane_scroll_unknown word ->
+      Buffer.clear state.msg_input;
+      notice ~role:Message_error
+        (Printf.sprintf
+           "/activity scroll takes up, down, top, +N or -N, not %s" word)
   | Masc_tui_command.Lane_addons input ->
       Buffer.clear state.msg_input;
       (match Masc_tui_lane_addons.parse_request input with
@@ -12261,6 +12291,8 @@ let handle_composer_key state ~base_path ~mailbox key =
          | Masc_tui_command.Acting_pane_tab_unknown _
          | Masc_tui_command.Set_acting_pane_call_order _
          | Masc_tui_command.Acting_pane_call_order_unknown _
+         | Masc_tui_command.Scroll_acting_pane _
+         | Masc_tui_command.Acting_pane_scroll_unknown _
          | Masc_tui_command.Lane_addons _
          | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
          | Masc_tui_command.Open_link_preview _

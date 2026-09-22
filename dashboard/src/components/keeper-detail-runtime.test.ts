@@ -797,7 +797,7 @@ describe('RuntimeLensSection', () => {
       },
       compositeSnapshot: compositeFixture({
         runtime_attention: {
-          state: 'healthy',
+          state: 'ok',
           needs_attention: false,
           blocked: false,
           reason: null,

@@ -26,6 +26,7 @@ import {
   number,
   object,
   optional,
+  picklist,
   string,
   unknown,
   type BaseIssue,
@@ -191,8 +192,23 @@ const KeeperCompositeExecutionSchema = object({
   config_drift: optional(unknown()),
 })
 
+// Closed set written by `runtime_attention_state_to_wire`
+// (server_dashboard_http_composite_claims.ml). Unlike the FSM axes above,
+// this value is the server's judgment and the fleet matrix maps every member
+// to a level, so an unknown state is a drift error instead of an opaque
+// string.
+const KeeperRuntimeAttentionStateSchema = picklist([
+  'blocked',
+  'stop_requested',
+  'idle_stale',
+  'stale',
+  'ok',
+  'paused',
+  'offline',
+])
+
 const KeeperRuntimeAttentionSchema = object({
-  state: string(),
+  state: KeeperRuntimeAttentionStateSchema,
   needs_attention: boolean(),
   blocked: boolean(),
   fiber_stop_requested: optional(boolean()),
@@ -307,7 +323,7 @@ export const KeeperCompositeSnapshotSchema = object({
   idle_seconds: optional(number()),
   last_turn_ts: optional(number()),
   execution: optional(KeeperCompositeExecutionSchema),
-  runtime_attention: optional(KeeperRuntimeAttentionSchema),
+  runtime_attention: KeeperRuntimeAttentionSchema,
   secret_projection: optional(KeeperSecretProjectionSchema),
   recommended_actions: fallback(array(OperatorRecommendedActionSchema), []),
   /** @deprecated kept only for old backend experiments; new payloads use `execution`. */

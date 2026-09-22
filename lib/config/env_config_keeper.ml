@@ -267,12 +267,8 @@ module KeeperMemoryOs = struct
     | Disabled
     | Invalid
 
-  let get_int_logged = Env_config_memory.get_int_logged
-
   let recall_enabled_default = true
   let librarian_enabled_default = true
-  let librarian_cadence_turns_default = 3
-  let librarian_max_messages_default = 24
 
   (* Env-key SSOT: the config-introspection registry
      (env_config_snapshot.ml memory_entries) and the tests reference these
@@ -280,8 +276,6 @@ module KeeperMemoryOs = struct
      compilation instead of silently drifting into a phantom registry entry. *)
   let recall_env_key = "MASC_KEEPER_MEMORY_OS_RECALL"
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
-  let librarian_cadence_turns_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
-  let librarian_max_messages_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
@@ -312,31 +306,6 @@ module KeeperMemoryOs = struct
       recall_env_key
       ~default:recall_enabled_default
   ;;
-
-  (** Turns between librarian extraction attempts per keeper. Default: 3,
-      floored to 1.
-      @category Runtime
-      @ops_class operator *)
-  let librarian_cadence_turns () =
-    max
-      1
-      (get_int_logged
-         librarian_cadence_turns_env_key
-         ~default:librarian_cadence_turns_default)
-  ;;
-
-  (** Base recent-message window for librarian extraction. Default: 24,
-      floored to 1.
-      @category Runtime
-      @ops_class operator *)
-  let librarian_max_messages () =
-    max
-      1
-      (get_int_logged
-         librarian_max_messages_env_key
-         ~default:librarian_max_messages_default)
-  ;;
-
 end
 
 (** {1 Keeper Vision Tool Configuration} *)

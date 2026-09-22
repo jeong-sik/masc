@@ -1365,7 +1365,7 @@ let test_config_footer_names_child_hops () =
      in no list at all -- which pane each belongs to is in the help the ?
      overlay draws, and a pane's own footer carries only its own. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -1460,9 +1460,13 @@ let test_config_pane_footer_actions () =
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
     enabled "f" (pane = Config_themes);
     enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
+    (* #36650 moved params off the bare [e]: there the key rides in the pinned
+       pair [e / Enter], because both spellings open the same field. The pane
+       still answers [e] -- [footer_has_key] reads the item's key whole, and
+       the item it belongs to is now the pair, which the row below checks. *)
     enabled "e"
       (List.mem pane
-         [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
+         [ Config_runtime; Config_models; Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
     List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "o" ];
     (* [a] answers on two panes now: the prompt fragments, and the keeper-voice
@@ -1499,6 +1503,22 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("params keeps " ^ key ^ " at 120 columns") true
         (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_params))))
     [ "Enter"; "E"; "x" ];
+  (* #36650, measured: this pane does two things -- the type-aware field and
+     the JSON one. While [e] and [Enter] were two items for the first, 80
+     cells held both of them and dropped [E], the only item for the second.
+     The fitter reads position, not meaning, so the row that survived showed
+     two doors to one action and no sign of the other. One item for one
+     action is what buys the cell back. *)
+  let params_at_80 =
+    fitted_footer ~cols:80 (Masc_tui_keys.footer_hints_config ~pane:Config_params)
+  in
+  Alcotest.(check bool) "params keeps its other action at 80 columns" true
+    (footer_has_key "E" params_at_80);
+  (* [footer_has_key] reads an item's key up to its first colon, and the pair
+     spells that key with spaces around the slash -- so ask for the atom the
+     pin is read by rather than for the pair's whole spelling. *)
+  Alcotest.(check bool) "params keeps the shared field at 80 columns" true
+    (footer_has_key "Enter" params_at_80);
   (* The themes list pages now, and its own keys still fit the row. *)
   List.iter
     (fun key ->

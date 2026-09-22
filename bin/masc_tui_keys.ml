@@ -55,13 +55,25 @@ let config_bindings =
   ; b Navigate "t" "tools"
       ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
   ; b Act "e" "edit"
-      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
-      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]
+      ~help:"runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
+    (* One item, because they are one action: on params [e] and [Enter] both
+       open the same type-aware field ([handle_runtime_param_edit_open]
+       ~advanced:false). Apart, this pane spent two of its slots on one door,
+       and the fitter -- which reads position, not meaning -- gave up [E] at
+       80 cells, the only other thing the pane does. A reader left with
+       [e:edit] and [Enter:edit / use] would also read the pane as having one
+       way to edit and no advanced one. *)
+  ; b Act "e / Enter" "edit"
+      ~help:"on params: edit the selected value with a type-aware field",
+      Some [ Config_params ]
   ; b Act "E" "advanced JSON"
       ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
-  ; b Act "Enter" "edit / use"
-      ~help:"edit the selected param; on themes, use that colour scheme",
-      Some [ Config_params; Config_themes ]
+    (* Split from the pair above. What [Enter] does on themes is not editing,
+       and one label reading "edit / use" made each pane carry the other's
+       word: a params reader met "use" with nothing to use. *)
+  ; b Act "Enter" "use"
+      ~help:"on themes, use that colour scheme", Some [ Config_themes ]
   ; b Act "x" "default / clear"
       ~help:"params return to default; prompts clear override; themes follow terminal colours",
       Some [ Config_params; Config_prompts; Config_themes ]

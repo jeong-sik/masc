@@ -346,10 +346,10 @@ let memory_updated_width = 16
 let memory_facts_width = 5
 let memory_size_width = 9
 let memory_source_width = 20
-(* [+12 -23] is 7 cells, and a cell that overruns is cut in the middle: the
-   column drew [+\xe2\x80\xa6 -23] and the added count was gone. Measured on the
-   live fleet (2026-09-22): the widest pair was [+11 -16]. Three digits each
-   keeps a large revision whole. *)
+(* The column carries a pair of counts, and a cell that overruns folds in the
+   middle, which takes the first count. Three digits each keeps a large
+   revision whole; the widest pair on the live fleet (2026-09-22) was
+   [+11 -16]. *)
 let memory_delta_width = 9
 
 type memory_columns = {

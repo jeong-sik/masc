@@ -38,8 +38,8 @@ let slots_floor_cells = 16
 
 (* What the slot list may take while the histogram is still drawn beside it.
    With the histogram gone the cap has nothing left to protect, and the list
-   takes what it needs of the room instead: at 114 cells it stopped at the cap
-   and left eleven cells of the row blank behind a reading it had cut. *)
+   takes what it needs of the room instead of leaving the row blank behind a
+   reading it cut. *)
 let slots_shared_cap_cells = 28
 
 (* The same for the observed histogram, which is the wider of the two: a
@@ -69,12 +69,11 @@ let widest header value_of cap readings =
     readings
   |> min cap
 
-(* The table's two measured columns. Both lists can run past any width, and
-   the row used to draw them anyway and let the line's own cut take whatever
-   was at the end: at 114 cells the header itself read "OB\xe2\x80\xa6" and
-   every row's last two columns were half a runtime id. A column with no room
-   is left out, and the one that stays is fitted to the room there is; the
-   selected lane's block under the table prints both lists whole. *)
+(* The table's two measured columns. Both lists can run past any width, and a
+   list cut at the end of the line is half a runtime id under a half-word
+   header. So a column with no room is left out, and the one that stays is
+   fitted to the room there is; the selected lane's block under the table
+   prints both lists whole. *)
 let columns ~inner readings =
   let label_cells =
     widest "LANE" (fun reading -> reading.label) label_cap_cells readings

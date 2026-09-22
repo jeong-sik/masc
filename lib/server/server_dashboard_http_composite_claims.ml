@@ -367,7 +367,6 @@ let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_a
 
 let composite_execution_blocked execution =
   composite_execution_claim_no_eligible execution
-  || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
   || (match json_string "terminal_reason_code" execution with
       | Some terminal ->
         not (String.equal terminal "")

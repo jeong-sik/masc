@@ -267,7 +267,6 @@ function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolea
   const execution = snapshot.execution
   if (!execution) return false
   if (hasPreviousTurnExecutionReceipt(snapshot)) return false
-  if (execution.operator_disposition === 'pause_human') return true
   if (execution.outcome === 'receipt_failed') return true
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') return true
   return false
@@ -355,13 +354,6 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
   const execution = snapshot.execution
   if (!execution) return 'blocking execution evidence present'
   const parts: string[] = []
-  if (execution.operator_disposition === 'pause_human') {
-    parts.push(
-      execution.operator_disposition_reason
-        ? `blocked: ${execution.operator_disposition_reason}`
-        : 'blocked by operator disposition',
-    )
-  }
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') {
     parts.push(`terminal: ${execution.terminal_reason_code}`)
   }
@@ -382,9 +374,6 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
   }
   if (execution.terminal_reason_code === 'api_error_timeout') {
     return 'runtime lane의 provider timeout receipt 확인'
-  }
-  if (execution.operator_disposition === 'pause_human') {
-    return 'blocker gate/approval 상태와 최신 receipt 확인'
   }
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') {
     return `terminal=${execution.terminal_reason_code} receipt 확인`

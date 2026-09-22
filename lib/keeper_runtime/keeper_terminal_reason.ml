@@ -181,8 +181,7 @@ let to_wire = function
 (* A [Provider_runtime_failure] whose underlying error is a retry-recoverable
    transient (idle-chunk liveness kill wrapped as [Api.Timeout], or a
    transient [Api.NetworkError]). The keeper's in-turn retry typically
-   self-heals these on the next attempt, so the disposition classifier must
-   advance to the next runtime/model rather than page a human.
+   self-heals these on the next attempt.
 
    Matched by exact equality against the two transient wire constants. This
    excludes every other [api_error_*] code (rate_limited, overloaded, server:*,

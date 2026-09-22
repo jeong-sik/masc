@@ -257,7 +257,7 @@ describe('parseKeeperCompositeSnapshot', () => {
         recorded_at: '2026-04-25T05:07:00Z',
         outcome: 'error',
         terminal_reason_code: 'config_error',
-        operator_disposition: 'pause_human',
+        operator_disposition: 'operator_action_required',
         operator_disposition_reason: 'provider_runtime_error',
         model_used: 'claude-code:auto',
         stop_reason: null,

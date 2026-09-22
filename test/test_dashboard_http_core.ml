@@ -4754,7 +4754,23 @@ let test_composite_blocked_uses_terminal_contract_not_observational_metadata () 
     (blocked
        (execution
           ~terminal_reason_code:"opaque_terminal_failure"
-          ~operator_disposition_reason:"success"))
+          ~operator_disposition_reason:"success"));
+  (* Every receipt the classifier marks [Disp_operator_action_required] ends
+     on a failed terminal, so the terminal alone blocks it. *)
+  let module R = Masc.Keeper_execution_receipt in
+  check bool
+    "an operator-action receipt is blocked by its failed terminal"
+    true
+    (blocked
+       (`Assoc
+          [ "terminal_reason_code", `String "config_error"
+          ; ( "operator_disposition"
+            , `String
+                (R.operator_disposition_kind_to_string R.Disp_operator_action_required) )
+          ; ( "operator_disposition_reason"
+            , `String (R.operator_disposition_reason_to_string R.Reason_config_invalid) )
+          ; "error", `Null
+          ]))
 
 (* Context-window shrink guard (#25062/#25268): reducing max_context_override
    must be detected so the config POST can require an explicit

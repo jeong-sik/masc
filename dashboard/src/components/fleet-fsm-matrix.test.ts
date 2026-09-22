@@ -193,13 +193,13 @@ describe('tallyInvariantViolations', () => {
 describe('runtimeAttentionForSnapshot', () => {
   const generatedAt = Date.parse('2026-04-25T07:40:00Z') / 1000
 
-  it('flags a Running-but-not-live keeper with pause_human evidence as blocked', () => {
+  it('flags a Running-but-not-live keeper with a failed receipt as blocked', () => {
     const snap = snapshot({
       is_live: false,
       execution: execution({
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
-        operator_disposition: 'pause_human',
+        operator_disposition: 'retry_later',
         operator_disposition_reason: 'provider_runtime_error',
         error: {
           kind: 'api',
@@ -213,7 +213,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.level).toBe('blocked')
     expect(attention.label).toBe('정체')
     expect(attention.reason).toContain('is_live=false')
-    expect(attention.reason).toContain('operator=pause_human')
+    expect(attention.reason).toContain('operator=retry_later')
     expect(attention.reason).toContain('reason=provider_runtime_error')
     expect(attention.title).toContain('latest activity 10m ago')
   })
@@ -312,7 +312,7 @@ describe('runtimeAttentionForSnapshot', () => {
         recorded_at: '2026-04-25T07:30:00Z',
         outcome: 'receipt_failed',
         terminal_reason_code: 'runtime_exhausted',
-        operator_disposition: 'alert_exhausted',
+        operator_disposition: 'fail_open_next_runtime',
         operator_disposition_reason: 'runtime_exhausted',
         error: {
           kind: 'internal',
@@ -384,7 +384,7 @@ describe('runtimeAttentionForSnapshot', () => {
       execution: execution({
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
-        operator_disposition: 'pause_human',
+        operator_disposition: 'retry_later',
       }),
     })
     const stale = snapshot({
@@ -429,8 +429,8 @@ describe('runtimeAttentionForSnapshot', () => {
       execution: execution({
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error_timeout',
-        operator_disposition: 'pause_human',
-        operator_disposition_reason: 'runtime_timeout',
+        operator_disposition: 'retry_later',
+        operator_disposition_reason: 'transient_runtime_retry',
       }),
     })
 
@@ -438,27 +438,6 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.level).toBe('blocked')
     expect(attention.cause).toContain('terminal: api_error_timeout')
     expect(attention.reason).toContain('terminal=api_error_timeout')
-    expect(attention.nextStep).toBe('runtime lane의 provider timeout receipt 확인')
-  })
-
-  it('routes provider timeout blockers away from generic approval guidance', () => {
-    const snap = snapshot({
-      is_live: true,
-      execution: execution({
-        outcome: 'receipt_failed',
-        terminal_reason_code: 'api_error_timeout',
-        operator_disposition: 'pause_human',
-        operator_disposition_reason: 'provider_runtime_error',
-        error: {
-          kind: 'api',
-          message_preview: 'Timeout after 1785s',
-          message_truncated: false,
-        },
-      }),
-    })
-
-    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
-    expect(attention.level).toBe('blocked')
     expect(attention.nextStep).toBe('runtime lane의 provider timeout receipt 확인')
   })
 })
@@ -473,7 +452,7 @@ describe('fleetCellPresentation', () => {
       execution: execution({
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
-        operator_disposition: 'pause_human',
+        operator_disposition: 'retry_later',
         operator_disposition_reason: 'provider_runtime_error',
       }),
     })
@@ -486,7 +465,7 @@ describe('fleetCellPresentation', () => {
     expect(cell.className).toContain('var(--bad-light)')
     expect(cell.title).toContain('KSM Running')
     expect(cell.title).toContain('runtime 정체')
-    expect(cell.title).toContain('blocked: provider_runtime_error')
+    expect(cell.title).toContain('terminal: api_error')
   })
 
   it('keeps non-KSM lanes tied to their raw FSM state', () => {
@@ -514,7 +493,7 @@ describe('buildRuntimeAssistPrompt', () => {
       execution: execution({
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
-        operator_disposition: 'pause_human',
+        operator_disposition: 'retry_later',
         operator_disposition_reason: 'provider_runtime_error',
       }),
     })
@@ -523,10 +502,10 @@ describe('buildRuntimeAssistPrompt', () => {
 
     expect(prompt).toContain('감독형 런타임 진단 요청: blocked')
     expect(prompt).toContain('cause=')
-    expect(prompt).toContain('blocked: provider_runtime_error')
+    expect(prompt).toContain('terminal: api_error')
     expect(prompt).toContain('evidence=')
     expect(prompt).toContain('"terminal_reason_code":"api_error"')
-    expect(prompt).toContain('"operator_disposition":"pause_human"')
+    expect(prompt).toContain('"operator_disposition":"retry_later"')
     expect(prompt).toContain('KSM=Running')
     expect(prompt).toContain('resolve 후보')
     expect(prompt).toContain('keeper_probe')
@@ -699,7 +678,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
           execution: execution({
             outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
-            operator_disposition: 'pause_human',
+            operator_disposition: 'retry_later',
           }),
         }),
       ]),
@@ -743,7 +722,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
           execution: execution({
             outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
-            operator_disposition: 'pause_human',
+            operator_disposition: 'retry_later',
             operator_disposition_reason: 'provider_runtime_error',
           }),
         }),
@@ -768,7 +747,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
         keeperName: 'blocked',
         attention: expect.objectContaining({
           level: 'blocked',
-          cause: expect.stringContaining('provider_runtime_error'),
+          cause: expect.stringContaining('terminal: api_error'),
         }),
         message: expect.stringContaining('resolve 후보'),
       }),
@@ -789,7 +768,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
           execution: execution({
             outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
-            operator_disposition: 'pause_human',
+            operator_disposition: 'retry_later',
             operator_disposition_reason: 'provider_runtime_error',
           }),
           recommended_actions: [

@@ -631,6 +631,17 @@ status: reference
   도구 호출(`actions`)을 별도로 붙인다. 이후 호출이 있다는 사실만으로 Skill이
   그 행동의 원인이었거나 작업을 성공시켰다고 판정하지 않는다.
 
+**Skill State (Skill 상태)**
+: 로그가 Skill 행 하나에 적는 닫힌 여덟 값(`Masc_tui_keeper_chat_transcript.skill_state`).
+  `keeper_skill` 호출이 성공했다는 사실은 본문이 실렸다는 뜻일 뿐, 제공자가 그것을
+  받았거나(delivered) 이후 도구가 그 Skill을 썼다는(used) 뜻이 아니다 — 그래서 상태가
+  그 셋을 나눠 적는다. 생애 순서는 `Skill_calling` → `Skill_served_pending` →
+  `Skill_served_only` → `Skill_delivered` → `Skill_used` 이고, 나머지 셋(`Skill_failed`·
+  `Skill_evidence_missing`·`Skill_evidence_unavailable`)은 그 생애의 걸음이 아니라 증거가
+  실패·부재·형식 불일치인 경우를 말한다. Instruction Skill 은 읽고 Composition Skill 은
+  자기 이름의 도구로 실행하므로, 앞 세 상태의 문구가 "읽음"과 "실행됨"으로 갈린다.
+  → [Masc_tui_keeper_chat_transcript](../../bin/masc_tui_keeper_chat_transcript.mli)
+
 ## Repository Execution
 
 **Repository Catalog**

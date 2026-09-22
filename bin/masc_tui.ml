@@ -13080,7 +13080,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  journal_follow_for_frame state ~keeper_name ~operation_id ~seq ~at
                with
                | Follow_nothing -> ()
-               | Follow_read_after_inflight -> journal_read_wanted state operation_id
+               | Follow_read_after_inflight ->
+                   journal_read_wanted state operation_id seq
                | Follow_read { started_at; since_seq } ->
                    launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
                      [ (operation_id, started_at, since_seq) ])
@@ -14685,15 +14686,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
          result below is folded, so the next read starts past it and a turn
          that just ended asks for nothing. *)
       let read_again () =
-        if take_journal_wanted state operation_id then
-          match
-            journal_follow_for_frame state ~keeper_name ~operation_id ~seq:None
-              ~at:started_at
-          with
-          | Follow_nothing | Follow_read_after_inflight -> ()
-          | Follow_read { started_at; since_seq } ->
-              launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
-                [ (operation_id, started_at, since_seq) ]
+        match take_journal_wanted state operation_id with
+        | Not_wanted -> ()
+        | Wanted { highest_seq } -> (
+            (* Against the highest seq the frames named: a read that reached
+               it has answered them, and the chain ends here rather than with
+               one more empty read. *)
+            match
+              journal_follow_for_frame state ~keeper_name ~operation_id
+                ~seq:highest_seq ~at:started_at
+            with
+            | Follow_nothing | Follow_read_after_inflight -> ()
+            | Follow_read { started_at; since_seq } ->
+                launch_keeper_chat_journal_loads state ~mailbox ~keeper_name
+                  [ (operation_id, started_at, since_seq) ])
       in
       (match journal with
       | Ok lines ->
@@ -14705,7 +14711,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             match settled_log_for_request state ~keeper_name operation_id with
             | Some held when not (turn_log_holds_the_turn held) -> held
             | Some _ | None ->
-                turn_log_create ~keeper_name ~request_id:operation_id ~started_at
+                turn_log_create ~keeper_name ~request_id:operation_id
+                  ~started_at:(journal_log_started_at ~fallback:started_at lines)
           in
           turn_log_add_journaled log lines;
           Keeper_chat_log.commit log.tl_log;

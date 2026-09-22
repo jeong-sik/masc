@@ -1884,6 +1884,16 @@ let test_a_journal_log_of_the_live_execution_is_not_observed () =
        (Tui_types.observed_logs_for_keeper state "alpha"))
 ;;
 
+let fresh_state_with_running_log () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  Tui_types.hold_settled_log state
+    (journal_log ~request_id:"op-1" ~started_at:100. ~finished:false ());
+  state
+;;
+
 (* A stream frame of a turn this pane did not open is the fact that the
    turn's journal grew; the answer is a read from where the pane's record
    ends, not a fold of the frame. What the frame asks depends on what the
@@ -1902,15 +1912,13 @@ let test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends () =
   in
   (match follow (fresh ()) with
    | Tui_types.Follow_read { started_at; since_seq } ->
-       check (float 0.) "an operation the pane knows nothing of: the whole journal, from the frame's clock" 300. started_at;
+       (* The frame's clock is the fallback the read carries; the log the
+          read creates takes the journal head's own time
+          ([journal_log_started_at]). *)
+       check (float 0.) "an operation the pane knows nothing of: the whole journal" 300. started_at;
        check bool "from the start" true (since_seq = Masc.Keeper_chat_event_log.Whole_turn)
    | Follow_nothing | Follow_read_after_inflight -> fail "a fresh operation is read");
-  let held_state () =
-    let state = fresh () in
-    Tui_types.hold_settled_log state
-      (journal_log ~request_id:"op-1" ~started_at:100. ~finished:false ());
-    state
-  in
+  let held_state = fresh_state_with_running_log in
   (match follow ~seq:(Some 2) (held_state ()) with
    | Tui_types.Follow_nothing -> ()
    | Follow_read _ | Follow_read_after_inflight ->
@@ -1961,18 +1969,49 @@ let test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends () =
        fail "the pane's own stream feeds its own request")
 ;;
 
-(* One wanted mark per operation, taken once. *)
+(* One wanted mark per operation carrying the highest seq the frames named,
+   taken once. A read that lands having reached that seq ends the chain; the
+   seq-less settle terminal never lowers it. *)
 let test_a_wanted_journal_read_is_remembered_once_and_taken_once () =
   let state =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
   in
-  Tui_types.journal_read_wanted state "op-1";
-  Tui_types.journal_read_wanted state "op-1";
-  Tui_types.journal_read_wanted state "op-2";
-  check (list string) "one entry per operation" [ "op-2"; "op-1" ] state.msg_journal_wanted;
-  check bool "taken" true (Tui_types.take_journal_wanted state "op-1");
-  check bool "taken once" false (Tui_types.take_journal_wanted state "op-1");
-  check (list string) "the other stays" [ "op-2" ] state.msg_journal_wanted
+  Tui_types.journal_read_wanted state "op-1" (Some 4);
+  Tui_types.journal_read_wanted state "op-1" (Some 9);
+  Tui_types.journal_read_wanted state "op-1" None;
+  Tui_types.journal_read_wanted state "op-2" None;
+  check (list string) "one entry per operation" [ "op-2"; "op-1" ]
+    (List.map fst state.msg_journal_wanted);
+  (match Tui_types.take_journal_wanted state "op-1" with
+   | Tui_types.Wanted { highest_seq } ->
+       check (option int) "the highest seq named" (Some 9) highest_seq
+   | Not_wanted -> fail "op-1 was wanted");
+  check bool "taken once" true
+    (Tui_types.take_journal_wanted state "op-1" = Tui_types.Not_wanted);
+  check (list string) "the other stays" [ "op-2" ] (List.map fst state.msg_journal_wanted);
+  (* The landed read reached the line the frames named: the pane holds
+     seq 2 of op-1 and the frames named 2, so nothing more is read. *)
+  let held = fresh_state_with_running_log () in
+  (match
+     Tui_types.journal_follow_for_frame held ~keeper_name:"alpha"
+       ~operation_id:"op-1" ~seq:(Some 2) ~at:300.
+   with
+   | Tui_types.Follow_nothing -> ()
+   | Follow_read _ | Follow_read_after_inflight ->
+       fail "a read that reached the named seq ends the chain")
+;;
+
+(* A log built from a journal read stands at the journal head's own time,
+   not at the moment the read was asked for. *)
+let test_a_journal_built_log_starts_at_the_journal_head () =
+  let head = line 0 100. (E.Run_started { run_id = "r"; thread_id = "keeper:alpha" }) in
+  let later = line 3 100.3 (E.Text_delta "said") in
+  check (float 0.) "a read from the head takes the head's time" 100.
+    (Tui_types.journal_log_started_at ~fallback:300. [ head; later ]);
+  check (float 0.) "a read that resumes past the head keeps the fallback" 300.
+    (Tui_types.journal_log_started_at ~fallback:300. [ later ]);
+  check (float 0.) "an empty read keeps the fallback" 300.
+    (Tui_types.journal_log_started_at ~fallback:300. [])
 ;;
 
 (* The frame reaches the read: the observer batch decides per operation
@@ -1986,16 +2025,17 @@ let test_stream_frames_are_wired_to_journal_reads () =
   let decides = in_binding ~binding_name:"apply_async_message" ~callee:"journal_follow_for_frame" in
   let wants = in_binding ~binding_name:"apply_async_message" ~callee:"journal_read_wanted" in
   let takes = in_binding ~binding_name:"apply_async_message" ~callee:"take_journal_wanted" in
+  let heads = in_binding ~binding_name:"apply_async_message" ~callee:"journal_log_started_at" in
   (* Two launch sites: the frame's own, and the read-again after a landing. *)
   let launches =
     in_binding ~binding_name:"apply_async_message"
       ~callee:"launch_keeper_chat_journal_loads"
   in
-  if decides < 2 || wants < 1 || takes < 1 || launches < 3
+  if decides < 2 || wants < 1 || takes < 1 || launches < 3 || heads < 1
   then
     failf
-      "stream frames must reach the journal reads: decides=%d wants=%d takes=%d launches=%d"
-      decides wants takes launches
+      "stream frames must reach the journal reads: decides=%d wants=%d takes=%d launches=%d heads=%d"
+      decides wants takes launches heads
 ;;
 
 (* The renderer knows the wrapped transcript's real maximum only after it has
@@ -3213,6 +3253,8 @@ let () =
             test_a_stream_frame_asks_for_a_journal_read_from_where_the_record_ends
         ; test_case "a wanted journal read is remembered once and taken once" `Quick
             test_a_wanted_journal_read_is_remembered_once_and_taken_once
+        ; test_case "a journal-built log starts at the journal head" `Quick
+            test_a_journal_built_log_starts_at_the_journal_head
         ; test_case "stream frames are wired to journal reads" `Quick
             test_stream_frames_are_wired_to_journal_reads
         ; test_case "promoted queue request owns a typed slot" `Quick

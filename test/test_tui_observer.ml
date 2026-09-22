@@ -217,6 +217,13 @@ let chat_stream_custom_frame =
    \"operation_id\":\"op-1\",\"ts_unix\":1787507571.5,\
    \"ag_ui_event\":{\"type\":\"CUSTOM\",\"name\":\"KEEPER_TOOL_RESULT_READY\"}}\n\n"
 
+(* A seq of the wrong shape is a frame this build cannot read, not the
+   seq-less settle terminal. *)
+let chat_stream_malformed_seq_frame =
+  "data: {\"type\":\"keeper_chat_operation_event\",\"name\":\"test-keeper\",\
+   \"operation_id\":\"op-1\",\"ts_unix\":1787507572.0,\"seq\":\"41\",\
+   \"ag_ui_event\":{\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"hi\"}}\n\n"
+
 let waiting_inventory_frame =
   "data: {\"type\":\"keeper_waiting_inventory_changed\",\
    \"keeper_name\":\"lane-smith\",\"queue_kind\":\"board\",\
@@ -251,7 +258,10 @@ let test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock () =
              operation_id ^ "@"
              ^ (match seq with Some seq -> string_of_int seq | None -> "-")
          | _ -> "?")
-       (decode_all [ chat_stream_delta_frame; chat_stream_custom_frame ]))
+       (decode_all [ chat_stream_delta_frame; chat_stream_custom_frame ]));
+  check (list string) "a seq of the wrong shape fails the frame, not reads as absent"
+    [ "undecodable:keeper_chat_operation_event carries a non-integer seq" ]
+    (List.map summary (decode_all [ chat_stream_malformed_seq_frame ]))
 
 let operator_digest_frame =
   "data: {\"type\":\"operator_digest\",\"ts_unix\":1787507573.0}\n\n"

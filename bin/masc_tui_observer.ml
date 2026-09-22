@@ -200,6 +200,15 @@ let optional_string_field fields name ~event =
   | Some (`String value) -> Ok (Some value)
   | Some _ -> Error (Printf.sprintf "%s carries a non-string %s" event name)
 
+(* Absent is a fact the frame states ([None]); a value of the wrong shape is
+   a frame this build cannot read, and is said so rather than read as
+   absent. *)
+let optional_int_field fields name ~event =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) -> Ok (Some value)
+  | Some _ -> Error (Printf.sprintf "%s carries a non-integer %s" event name)
+
 let agent_core_kind_of_event_type = function
   | "tool_called" -> Tool_called
   | "tool_completed" -> Tool_completed
@@ -351,7 +360,7 @@ let decode_keeper_chat_operation_event fields =
   (* The journal seq of the event this frame projects
      ([Keeper_chat_broadcast.operation_event]); the wire terminal a settle
      synthesises carries none. *)
-  let seq = int_field fields "seq" in
+  let* seq = optional_int_field fields "seq" ~event in
   Ok (Keeper_chat_stream_frame { keeper; operation_id; seq; frame; at })
 
 (* Names the keeper in [keeper_name] rather than [name] -- the one broadcast

@@ -152,11 +152,16 @@ type event =
       ; operation_id : string
           (** The chat operation the frame belongs to. The chat pane reads it
               to follow a turn it did not open: a frame says that operation's
-              journal has grown, and the journal is what the pane draws. *)
+              journal has grown, and the journal is what the pane draws.
+              The server sends these frames for operations whose
+              continuation channel is the dashboard (the dashboard, the TUI,
+              the API); a turn a connector opened sends none. *)
       ; seq : int option
           (** The journal seq of the event this frame projects, when the
               server attached one; a log already holding it has nothing to
-              read. [None] on the terminal the server synthesises at settle. *)
+              read. [None] on the terminal the server synthesises at settle.
+              A seq of another shape fails the frame rather than reading as
+              absent. *)
       ; frame : string option
       ; at : float
       }

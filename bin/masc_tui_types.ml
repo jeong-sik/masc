@@ -5838,11 +5838,12 @@ type state = {
   (* Operations whose journal a fiber is reading right now, so a load that
      arrives before the read returns does not start a second one. *)
   mutable msg_journal_inflight: string list;
-  (* Operations a stream frame named while their journal was being read: the
-     read in flight may have stopped short of the line the frame announced,
-     so when it lands another read starts from where it stopped. One entry
-     per operation, however many frames arrived. *)
-  mutable msg_journal_wanted: string list;
+  (* Operations a stream frame named while their journal was being read,
+     with the highest journal seq the frames named: the read in flight may
+     have stopped short of that line, so when it lands another read starts
+     from where it stopped -- unless it reached the line, which ends the
+     chain. One entry per operation, however many frames arrived. *)
+  mutable msg_journal_wanted: (string * int option) list;
   (* The server refused this client's credential for the journal endpoint.
      Said once; no journal is asked for again this session. *)
   mutable msg_journal_reads_refused: bool;
@@ -6159,23 +6160,49 @@ let journal_read_finished state operation_id =
       state.msg_journal_inflight
 ;;
 
-let journal_read_wanted state operation_id =
-  if not (List.exists (String.equal operation_id) state.msg_journal_wanted)
-  then state.msg_journal_wanted <- operation_id :: state.msg_journal_wanted
+(* The highest seq named wins; a frame with no seq (the settle terminal)
+   never lowers what an earlier frame named. *)
+let journal_read_wanted state operation_id seq =
+  let highest =
+    match List.assoc_opt operation_id state.msg_journal_wanted, seq with
+    | Some (Some held), Some seq -> Some (max held seq)
+    | Some (Some held), None -> Some held
+    | Some None, seq | None, seq -> seq
+  in
+  state.msg_journal_wanted <-
+    (operation_id, highest)
+    :: List.remove_assoc operation_id state.msg_journal_wanted
 ;;
 
+type journal_wanted =
+  | Not_wanted
+  | Wanted of { highest_seq : int option }
+
 (* Whether a read was wanted for this operation while one was in flight, and
-   the fact taken: the caller starts the read it stands for. *)
+   the fact taken: the caller decides the read it stands for, against the
+   seq the frames named. *)
 let take_journal_wanted state operation_id =
-  if List.exists (String.equal operation_id) state.msg_journal_wanted
-  then begin
-    state.msg_journal_wanted <-
-      List.filter
-        (fun wanted -> not (String.equal wanted operation_id))
-        state.msg_journal_wanted;
-    true
-  end
-  else false
+  match List.assoc_opt operation_id state.msg_journal_wanted with
+  | Some highest_seq ->
+      state.msg_journal_wanted <-
+        List.remove_assoc operation_id state.msg_journal_wanted;
+      Wanted { highest_seq }
+  | None -> Not_wanted
+;;
+
+(* The moment a log built from a journal read stands at. The journal's first
+   line (seq 0, the operation's acceptance) is the turn's start; a read that
+   begins there says so itself, and a log created for it takes that rather
+   than the moment the read was asked for -- a stream frame's clock, on the
+   read a frame launched before the history named the turn's first row,
+   which would have aged the turn from the first frame seen and left the
+   span short by everything before it. [fallback] stands where the read did
+   not start at the head. *)
+let journal_log_started_at ~fallback
+    (lines : Masc.Keeper_chat_event_log.journaled_event list) =
+  match lines with
+  | { Masc.Keeper_chat_event_log.seq = 0; ts; _ } :: _ -> ts
+  | _ :: _ | [] -> fallback
 ;;
 
 
@@ -6201,7 +6228,12 @@ let journal_resume_position state ~keeper_name operation_id =
    and the journal alone already carries every line in order. So a frame is
    the fact that the operation's journal has grown, and the answer is a read
    from where the log's record of it ends: one round trip behind the token
-   instead of a refresh cadence behind it. *)
+   instead of a history load behind it.
+
+   The server sends these frames for operations whose continuation channel
+   is the dashboard -- opened from the dashboard, this TUI or the API. A
+   turn a connector (Discord, Slack, another keeper's queue) opened sends
+   none and stays on the history loads. *)
 type journal_follow =
   | Follow_nothing
       (** Not this pane's to read: a request of its own is streaming the

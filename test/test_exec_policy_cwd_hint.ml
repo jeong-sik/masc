@@ -197,6 +197,76 @@ let test_cwd_outside_workdir_is_rejected_even_when_requires_existing_dir_false (
         "cwd outside workdir must be rejected even when requires_existing_dir is false")
 ;;
 
+(* A [cd] operand inside the command -- an argv [cd masc] stage, or the
+   [cd masc && ...] a re-opened [sh -c] script opens with -- is judged by the
+   same existence rule as the stage's cwd: required where the command runs on
+   this filesystem, not for a guest whose checkouts the host cannot see. Every
+   microvm keeper's "cd masc" was refused on the host for a checkout its own
+   prompt listed (2026-09-22). *)
+let stage ~bin_name ~workdir args =
+  let bin =
+    match Masc_exec.Exec_program.of_string bin_name with
+    | Ok bin -> bin
+    | Error _ -> Alcotest.failf "literal %s executable must be non-empty" bin_name
+  in
+  ignore workdir;
+  Masc_exec.Shell_ir.Simple
+    { bin
+    ; args = List.map lit args
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+;;
+
+let test_cd_operand_into_missing_dir_is_rejected_on_host () =
+  with_temp_tree (fun workdir ->
+    List.iter
+      (fun ir ->
+         match Exec_policy.validate_shell_ir_paths ~workdir ir with
+         | Error msg ->
+           Alcotest.(check bool)
+             "a cd operand naming a missing host directory is cwd_not_directory"
+             true
+             (String_util.contains_substring msg "cwd_not_directory")
+         | Ok () -> Alcotest.fail "a cd operand naming a missing host directory must fail on the host")
+      [ stage ~bin_name:"cd" ~workdir [ "masc" ]
+      ; stage ~bin_name:"sh" ~workdir [ "-c"; "cd masc && ls" ]
+      ])
+;;
+
+let test_cd_operand_into_missing_dir_is_allowed_for_a_guest () =
+  with_temp_tree (fun workdir ->
+    List.iter
+      (fun ir ->
+         match Exec_policy.validate_shell_ir_paths ~requires_existing_dir:false ~workdir ir with
+         | Ok () -> ()
+         | Error msg ->
+           Alcotest.failf
+             "a guest's cd operand must not be judged against the host filesystem, got: %s"
+             msg)
+      [ stage ~bin_name:"cd" ~workdir [ "masc" ]
+      ; stage ~bin_name:"sh" ~workdir [ "-c"; "cd masc && ls" ]
+      ])
+;;
+
+let test_cd_operand_outside_workdir_is_rejected_for_a_guest () =
+  with_temp_tree (fun workdir ->
+    match
+      Exec_policy.validate_shell_ir_paths
+        ~requires_existing_dir:false
+        ~workdir
+        (stage ~bin_name:"cd" ~workdir [ "/etc" ])
+    with
+    | Error msg ->
+      Alcotest.(check bool)
+        "containment still applies to a guest's cd operand"
+        true
+        (String_util.contains_substring_ci msg outside_whitelist_prefix)
+    | Ok () -> Alcotest.fail "a cd operand outside the workdir must be rejected for a guest too")
+;;
+
 let dummy_runner
       ~on_stdout_chunk:_
       ~on_stderr_chunk:_
@@ -372,6 +442,18 @@ let () =
             "outside workdir is rejected even when requires_existing_dir is false"
             `Quick
             test_cwd_outside_workdir_is_rejected_even_when_requires_existing_dir_false
+        ; Alcotest.test_case
+            "cd operand into a missing directory is rejected on the host"
+            `Quick
+            test_cd_operand_into_missing_dir_is_rejected_on_host
+        ; Alcotest.test_case
+            "cd operand into a missing directory is allowed for a guest"
+            `Quick
+            test_cd_operand_into_missing_dir_is_allowed_for_a_guest
+        ; Alcotest.test_case
+            "cd operand outside the workdir is rejected for a guest"
+            `Quick
+            test_cd_operand_outside_workdir_is_rejected_for_a_guest
         ; Alcotest.test_case
             "subst child redirect is jailed"
             `Quick

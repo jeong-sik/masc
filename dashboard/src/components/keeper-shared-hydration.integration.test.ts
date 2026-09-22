@@ -32,6 +32,13 @@ const { fetchKeeperToolCalls, fetchKeeperWaitingInventory } = vi.hoisted(() => (
   fetchKeeperWaitingInventory: vi.fn(async () => ({ keepers: [] })),
 }))
 
+// #35924: a linked trace step renders ok only after the exact per-execution
+// endpoint verifies the output — the bulk tool_calls hydration alone does not.
+// This registry stands in for that endpoint, keyed `${keeper}:${execution_id}`.
+const { exactToolCallLookup } = vi.hoisted(() => ({
+  exactToolCallLookup: new Map<string, { keeper: string; execution_id: string; entry: ToolCallEntry }>(),
+}))
+
 vi.mock('../api/keeper', () => ({
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
@@ -50,7 +57,14 @@ vi.mock('../api/mcp', () => ({ callMcpTool: vi.fn() }))
 vi.mock('../api/core', async importOriginal => ({
   ...await importOriginal<typeof import('../api/core')>(),
   runOperatorAction: vi.fn(),
-  get: vi.fn(async () => { throw new Error('Historical output not provided by this fixture') }),
+  get: vi.fn(async (path: string) => {
+    const [, keeper, executionId] = /^\/api\/v1\/keepers\/([^/]+)\/tool-calls\?execution_id=([^&]+)$/.exec(path) ?? []
+    const response = keeper !== undefined && executionId !== undefined
+      ? exactToolCallLookup.get(`${decodeURIComponent(keeper)}:${decodeURIComponent(executionId)}`)
+      : undefined
+    if (response) return response
+    throw new Error('Historical output not provided by this fixture')
+  }),
 }))
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
@@ -91,6 +105,16 @@ import {
 import { _clearTrackedKeeperChatOperationsForTests } from '../keeper-chat-operations-local'
 import { _resetChatStoreForTests } from '../keeper-chat-store'
 
+// Serve one execution through the exact tool-calls endpoint, mirroring the row
+// the bulk endpoint already returned for it.
+function stubExactToolCallLookup(entry: ToolCallEntry & { keeper: string; execution_id: string }): void {
+  exactToolCallLookup.set(`${entry.keeper}:${entry.execution_id}`, {
+    keeper: entry.keeper,
+    execution_id: entry.execution_id,
+    entry,
+  })
+}
+
 describe('KeeperConversationPanel hydration wiring', () => {
   let container: HTMLDivElement
 
@@ -120,6 +144,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
     _clearTrackedKeeperChatOperationsForTests()
     _resetChatStoreForTests()
     resetToolCallOutputs()
+    exactToolCallLookup.clear()
   })
 
   afterEach(() => {
@@ -231,21 +256,19 @@ describe('KeeperConversationPanel hydration wiring', () => {
         },
       },
     ])
-    fetchKeeperToolCalls.mockResolvedValueOnce({
-      entries: [
-        {
-          ts: 1_783_267_211,
-          keeper: 'sangsu',
-          tool: 'keeper_context_status',
-          input: {},
-          output: 'context status joined from tool_calls_endpoint',
-          wire_outcome: 'ok',
-          duration_ms: 42,
-          tool_use_id: 'tc-api-success',
-          execution_id: 'exec-api-success',
-        },
-      ],
-    })
+    const toolCallEntry = {
+      ts: 1_783_267_211,
+      keeper: 'sangsu',
+      tool: 'keeper_context_status',
+      input: {},
+      output: 'context status joined from tool_calls_endpoint',
+      wire_outcome: 'ok',
+      duration_ms: 42,
+      tool_use_id: 'tc-api-success',
+      execution_id: 'exec-api-success',
+    } satisfies ToolCallEntry
+    fetchKeeperToolCalls.mockResolvedValueOnce({ entries: [toolCallEntry] })
+    stubExactToolCallLookup(toolCallEntry)
 
     render(
       html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
@@ -368,29 +391,27 @@ describe('KeeperConversationPanel hydration wiring', () => {
       }
       throw new Error(`unexpected keeper ${keeperName}`)
     })
+    const alphaToolCallEntry = {
+      ts: 1_783_267_221,
+      keeper: 'alpha',
+      tool: 'keeper_context_status',
+      input: {},
+      output: 'alpha output joined from tool_calls_endpoint',
+      wire_outcome: 'ok',
+      duration_ms: 31,
+      tool_use_id: 'tc-alpha-scope',
+      execution_id: 'exec-alpha-scope',
+    } satisfies ToolCallEntry
     fetchKeeperToolCalls.mockImplementation(async (keeperName?: string) => {
       if (keeperName === 'alpha') {
-        return {
-          entries: [
-            {
-              ts: 1_783_267_221,
-              keeper: 'alpha',
-              tool: 'keeper_context_status',
-              input: {},
-              output: 'alpha output joined from tool_calls_endpoint',
-              wire_outcome: 'ok',
-              duration_ms: 31,
-              tool_use_id: 'tc-alpha-scope',
-              execution_id: 'exec-alpha-scope',
-            },
-          ],
-        }
+        return { entries: [alphaToolCallEntry] }
       }
       if (keeperName === 'beta') {
         throw new Error('HTTP 503 beta')
       }
       throw new Error(`unexpected keeper ${keeperName}`)
     })
+    stubExactToolCallLookup(alphaToolCallEntry)
 
     render(
       html`

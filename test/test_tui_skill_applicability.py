@@ -16,35 +16,27 @@ import test_tui_keyboard_input as h
 
 
 def _row_success(row: dict[str, Any]) -> bool:
-    """Mirror ``Tui_decode.decode_keeper_call``'s success fallback (#37461,
-    #37650 review).
+    """Whether the call succeeded, read the way
+    ``Tool_result.recorded_call_outcome`` reads a tool-call record:
+    ``disposition`` first, ``wire_outcome`` when the row has none.
 
-    The durable tool-call record stopped always carrying a boolean
-    ``success``: a real row (as ``test_keeper_task_skill_turn_exact``
-    prints below) carries only ``wire_outcome`` and sometimes
-    ``disposition``, never ``success``. Read ``success`` first for any
-    row that does send it explicitly; otherwise fall back to
-    ``disposition`` then ``wire_outcome``, oldest-first, exactly as the
-    OCaml decoder does. ``wire_outcome == "unknown"`` is not a success
-    signal there either: the decoder refuses the row outright (a wire
-    that does not know the outcome is not evidence the call completed),
-    so this raises the same way rather than guessing ``True``.
+    This picks which needles the rendered call must show, so the fixture row
+    must carry a settled outcome. A deferred, unsettled, or unreadable row
+    raises here instead of guessing a needle set.
     """
-    if "success" in row:
-        return cast(bool, row["success"])
-    disposition = row.get("disposition")
-    if disposition in ("completed", "deferred"):
-        return True
-    if disposition == "failed":
-        return False
+    if "disposition" in row:
+        disposition = row["disposition"]
+        if disposition == "completed":
+            return True
+        if disposition == "failed":
+            return False
+        raise ValueError(f"row disposition {disposition!r} is not a settled outcome")
     wire_outcome = row.get("wire_outcome")
     if wire_outcome == "ok":
         return True
     if wire_outcome == "error":
         return False
-    if wire_outcome == "unknown":
-        raise ValueError("row wire_outcome is unknown; the TUI decoder refuses it")
-    raise KeyError("row has no success, disposition, or wire_outcome field")
+    raise ValueError(f"row wire_outcome {wire_outcome!r} is not a settled outcome")
 
 
 def _rendered_output(screen: bytes, call_index: int) -> bytes:

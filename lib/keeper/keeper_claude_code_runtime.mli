@@ -127,13 +127,12 @@ val run :
     when it is at or past the seed that holds, or the ceiling's cut when no
     seed holds, so the range never moves back behind either; [turn_start] is
     not weighed against it, since it is where a range with no absorbed point
-    begins. The ceiling cuts before the working state is known, so a range
-    that carries one is windowed once more at the declared max-prompt-bytes:
-    atoms in front of the working state go until it fits, the working state
-    stays, and a ceiling that the pinned messages and the newest atom alone
-    do not fit refuses the request, as Antigravity's window does. A reader
-    error refuses the request, as the same check refuses an Agent Core
-    request.
+    begins. The ceiling cuts before the working state is known, so whether
+    it goes is decided by {!Keeper_official_client_host.compose_librarian_range}
+    (RFC-0460): it is carried only where it displaces none of the range's
+    atoms, and otherwise the Librarian position goes alone and the turn is
+    not refused. A reader error refuses the request, as the same check
+    refuses an Agent Core request.
 
     [on_carried_front] receives the front the range started from and the
     range's bytes in the canonical encoding, once per composition that cut a

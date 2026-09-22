@@ -619,8 +619,18 @@ let render_overview (state : state) =
           if run > 1 then Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
           else ""
         in
-        Printf.sprintf "%s[%s]%s %s%s"
+        (* After the clock, so the clock column stays one column down the
+           panel and only the rows that carry a mark give up its two cells. *)
+        let mark =
+          match Masc_tui_types.overview_event_mark e with
+          | None -> ""
+          | Some glyph ->
+              Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph
+                Ansi.reset
+        in
+        Printf.sprintf "%s[%s]%s %s%s%s"
           Ansi.dim e.timestamp Ansi.reset
+          mark
           (Terminal_text.single_line e.content)
           tail
     in
@@ -4346,6 +4356,26 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
     ]
 
 
+(* The conditions that share a phase with another: either health reading
+   makes a keeper failing, and a pending launch is one of the ways it is
+   offline. Each of the other conditions has a phase of its own, which the
+   lifecycle word already says, so naming it again would add nothing. *)
+let keeper_lane_phase_causes (conditions : Tui_decode.keeper_lane_conditions) =
+  List.filter_map
+    (fun (holds, words) -> if holds then Some words else None)
+    [ (not conditions.klc_turn_healthy, "last turn failed")
+    ; (not conditions.klc_heartbeat_healthy, "heartbeat failed")
+    ; (conditions.klc_launch_pending, "launch pending")
+    ]
+
+let keeper_lane_lifecycle_text (lane : Tui_decode.keeper_lane) =
+  let phase =
+    Terminal_text.single_line (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+  in
+  match keeper_lane_phase_causes lane.kl_conditions with
+  | [] -> phase
+  | causes -> Printf.sprintf "%s (%s)" phase (String.concat ", " causes)
+
 let keeper_operations_outcome_text = function
   | None -> "—"
   | Some (outcome : Tui_decode.keeper_lane_last_outcome) ->
@@ -4392,8 +4422,7 @@ let keeper_operations_preview (state : state) =
                   ; "  OPERATIONS"
                   ; Ansi.reset
                   ; "  lifecycle "
-                  ; Terminal_text.single_line
-                      (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+                  ; keeper_lane_lifecycle_text lane
                   ; " · turn "
                   ; Terminal_text.single_line
                       (Tui_decode.keeper_lane_turn_phase_to_string
@@ -4402,9 +4431,6 @@ let keeper_operations_preview (state : state) =
                   ; keeper_lane_idle_text lane.kl_idle_seconds
                   ; " · last "
                   ; keeper_operations_outcome_text lane.kl_last_outcome
-                  ; " · "
-                  ; Terminal_text.single_line_or ~default:"no diagnosis"
-                      lane.kl_diagnosis
                   ; target_note
                   ]
             | None ->
@@ -4489,7 +4515,9 @@ let render_keeper_list (state : state) =
          else (Theme.warn ())
        in
        let blocker =
-         match fleet.fs_blocker with None -> "" | Some b -> "   blocker: " ^ b
+         match Masc_tui_fleet_line.blocker_text fleet with
+         | None -> ""
+         | Some text -> "   " ^ text
        in
        box_line buf cols
          (Printf.sprintf
@@ -4499,20 +4527,8 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
-       (* The phase snapshot partitions failing keepers into recovering,
-          configuration errors and explicit official-client session recovery.
-          Every failing Keeper belongs to exactly one class, so these three
-          counts sum to the displayed failing count. The latter two require
-          action beyond repeating the same turn. *)
        let failing_entry =
-         if fleet.fs_failing_count = 0 then []
-         else
-           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d · session-recovery-required %d)"
-               fleet.fs_failing_count
-               fleet.fs_recovering_count
-               fleet.fs_turn_configuration_error_count
-               fleet.fs_official_client_recovery_required_count
-           ]
+         Option.to_list (Masc_tui_fleet_line.failing_text fleet)
        in
        let counts =
          failing_entry
@@ -5198,7 +5214,7 @@ let render_lanes_overview (state : state) =
    | Some picker ->
        box_line_styled buf cols ~style:(Theme.info ())
          (Printf.sprintf
-            "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+            "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
             (Terminal_text.single_line picker.Masc_tui_types.rlp_lane));
        if picker.Masc_tui_types.rlp_choices = [] then
          box_line_styled buf cols ~style:(Theme.recede ())
@@ -6728,7 +6744,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                         | _ -> id)
                      lane.rrl_runtime_ids)
               in
-              add_row "Failover Chain:" hops;
+              add_row "Candidate Chain:" hops;
               (match lane.rrl_runtime_ids with
                | first :: _ -> add_row "Head Candidate:" first
                | [] -> ())
@@ -6801,7 +6817,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
             activity.Keeper_activity.aw_output_tokens);
        add_row "Cost:"
-         (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
+         (match activity.Keeper_activity.aw_cost_usd with
+          | Some cost -> Printf.sprintf "$%.4f" cost
+          | None -> Ansi.dim ^ "not priced by the provider" ^ Ansi.reset);
        add_row "Tool Calls:"
          (string_of_int activity.Keeper_activity.aw_tool_calls);
        add_row "Top Tools:"
@@ -8773,19 +8791,6 @@ let render_harness (state : state) =
        | None -> render_harness_list state)
   | Some _, None | None, _ -> render_harness_list state
 
-let fusion_run_stage_compact = function
-  | Fusion_stage_accepted -> "accepted"
-  | Fusion_stage_panel { frs_expected } ->
-      Printf.sprintf "panel(%d)" frs_expected
-  | Fusion_stage_judge { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "judge(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_computed { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "computed(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_recording_evidence { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "recording(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_completed -> "completed"
-  | Fusion_stage_failed -> "failed"
-
 (* What became of the selected run, in one row under the list. It opened
    with "Flow: Question → Panel → Judge → Evidence" on every run: the four
    stops are the same for every run and say nothing about this one, the
@@ -8955,11 +8960,8 @@ let render_fusion_list (state : state) =
               Ansi.reverse ^ ">" ^ Ansi.reset else " " in
           box_line buf cols (marker ^ " " ^ line)
       | Some (Tui_decode.Fusion_retained_run run) ->
-          let status = fusion_run_status_to_string run.fur_status in
           let state_text =
-            match run.fur_status with
-            | Fusion_running -> fusion_run_stage_compact run.fur_stage
-            | Fusion_completed | Fusion_failed _ -> status
+            fusion_run_state_text ~status:run.fur_status ~stage:run.fur_stage
           in
           let line =
             Render_schedule.fusion_row columns
@@ -11449,7 +11451,7 @@ let render_runtime (state : state) =
    | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
    | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
        c.push_styled ~style:(Theme.info ())
-         "  [runtime].media_failover — the order the vision fleet is called in";
+         "  [runtime].media_failover — the Runtime Candidate Order for the vision fleet";
        let entries = Masc_tui_types.slot_editor_rows state in
        if entries = [] then
          c.push_styled ~style:(Theme.recede ())
@@ -11475,10 +11477,10 @@ let render_runtime (state : state) =
               Printf.sprintf "  first runtime of new lane %s — j/k move, Enter create, e cancel"
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
-              Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+              Printf.sprintf "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_media_failover ->
-              "  adding to the vision fleet [runtime].media_failover — j/k move, Enter append, e cancel"
+              "  adding to [runtime].media_failover, the Runtime Candidate Order for the vision fleet — j/k move, Enter append, e cancel"
           | Masc_tui_types.Pick_route_default ->
               (* Replaces rather than appends, and the row it replaces is
                  marked "(already a candidate)" in the choices below. *)
@@ -11518,7 +11520,7 @@ let render_runtime (state : state) =
       | Page_unread -> page_unread_note
       | Page_empty ->
           (match state.runtime_mode with
-           | Masc_tui_types.Runtime_lanes -> "  (no runtime lanes configured)"
+           | Masc_tui_types.Runtime_lanes -> "  (no runtime candidate orders configured)"
            | Masc_tui_types.Runtime_all -> "  (no runtimes configured)")
     in
     c.push_styled ~style:(Theme.recede ()) empty;
@@ -11888,8 +11890,12 @@ let render_keeper_calls (state : state) =
     |> List.mapi (fun call_index (call : Masc.Tui_decode.keeper_call) ->
          let open Masc.Tui_decode in
          let glyph, style =
-           if call.kc_success then ("✓", Ansi.reset)
-           else ("✗", (Theme.bad ()))
+           match call.kc_outcome with
+           | Tool_result.Recorded_succeeded -> ("✓", Ansi.reset)
+           | Tool_result.Recorded_failed -> ("✗", (Theme.bad ()))
+           | Tool_result.Recorded_deferred -> ("◌", (Theme.info ()))
+           | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
+             ("?", Ansi.reset)
          in
          let duration =
            match call.kc_duration_ms with
@@ -11918,7 +11924,12 @@ let render_keeper_calls (state : state) =
            | None -> []
            | Some output ->
              labeled_rows ~call_index
-               ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
+               ~style:
+                 (match call.kc_outcome with
+                  | Tool_result.Recorded_failed -> Theme.bad ()
+                  | Tool_result.Recorded_succeeded | Tool_result.Recorded_deferred
+                  | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
+                    Ansi.dim)
                ~label:"output" output
          in
          (call_index, style, summary) :: exact_rows @ output_rows)

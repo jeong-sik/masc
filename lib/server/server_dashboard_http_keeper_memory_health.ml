@@ -35,20 +35,52 @@ type librarian_health =
 type context_cycle =
   { saved : Keeper_continuity_observation.frontier option
   ; saved_read_error : string option
+  ; read_position : int option
+        (** Where the Librarian has read to ({!Keeper_librarian_progress}),
+            next to where its snapshot cuts ([saved]). The two move apart
+            when the durable round commits and the continuity round does not,
+            and a reader cannot tell that from [saved] alone: the snapshot
+            still fits the history, so requests keep starting at its cut and
+            carry every atom the failed rounds left behind (#37793). The
+            distance is the subtraction; neither number is stored as one. *)
+  ; read_position_read_error : string option
+        (** ["progress_unreadable"] when the position file could not be read.
+            [read_position] is then [None] for a reason, not for absence. *)
+  ; rewriting_through : int option
+        (** [catch_up_end_atom] of a snapshot the Librarian is rewriting from
+            atom 0: where a request starts until the rewrite reaches it. Absent
+            on a snapshot that is not being rewritten. *)
   ; prepared : Keeper_continuity_observation.t option
   ; synthesis : Keeper_continuity_observation.synthesis option
   }
 
 let context_cycle ~config ~keeper_name =
-  let saved, saved_read_error =
+  let saved, saved_read_error, rewriting_through =
     match Keeper_librarian_continuity.read ~config ~keeper_name with
-    | Ok None -> None, None
+    | Ok None -> None, None, None
     | Ok (Some snapshot) ->
-      Some { Keeper_continuity_observation.trace_id = snapshot.trace_id;
-        end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }, None
-    | Error _ -> None, Some "snapshot_unreadable"
+      ( Some { Keeper_continuity_observation.trace_id = snapshot.trace_id;
+          end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }
+      , None
+      , snapshot.catch_up_end_atom )
+    | Error _ -> None, Some "snapshot_unreadable", None
   in
-  { saved; saved_read_error;
+  (* The position lives under the runtime keepers dir, next to the snapshot
+     read above, not under the config keepers dir this handler's other
+     stores use. Read from the config dir this was [Ok None] for every
+     keeper and the screen said nothing had been read (#37870 fixed the
+     same read in [continuity_unread_atoms]). *)
+  let read_position, read_position_read_error =
+    match
+      Keeper_librarian_progress.read
+        ~keepers_dir:(Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper_name
+    with
+    | Ok None -> None, None
+    | Ok (Some progress) -> Some progress.position.end_atom, None
+    | Error _ -> None, Some "progress_unreadable"
+  in
+  { saved; saved_read_error; read_position; read_position_read_error; rewriting_through;
     prepared = Keeper_continuity_observation.latest ~config ~keeper_name;
     synthesis = Keeper_continuity_observation.latest_synthesis ~config ~keeper_name }
 ;;
@@ -72,6 +104,10 @@ let context_cycle_to_json cycle =
       "input", `Assoc ["kind", `String kind; "frontier", input_frontier]] in
   `Assoc ["saved", nullable frontier cycle.saved;
     "saved_read_error", nullable (fun value -> `String value) cycle.saved_read_error;
+    "read_position", nullable (fun value -> `Int value) cycle.read_position;
+    "read_position_read_error",
+      nullable (fun value -> `String value) cycle.read_position_read_error;
+    "rewriting_through", nullable (fun value -> `Int value) cycle.rewriting_through;
     "prepared", nullable prepared cycle.prepared;
     "synthesis", nullable Keeper_continuity_observation.synthesis_to_json cycle.synthesis]
 ;;

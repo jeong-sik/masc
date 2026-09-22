@@ -184,6 +184,17 @@ val record_mcp_auth_reject :
   Server_mcp_transport_http_types.auth_failure ->
   unit
 
+(** [record_mcp_auth_reject_metric ~endpoint failure] increments
+    [masc_mcp_auth_rejects_total{endpoint,reason}] without emitting a log
+    line. Use where the refusal is already logged through another responder —
+    the WebSocket upgrade path logs through [Server_auth.respond_auth_error],
+    so calling {!record_mcp_auth_reject} there would leave two WARN lines for
+    one reject. *)
+val record_mcp_auth_reject_metric :
+  endpoint:string ->
+  Server_mcp_transport_http_types.auth_failure ->
+  unit
+
 (** [respond_mcp_auth_error ~deps ~request_authority ~endpoint request
     reqd ~session_id ~protocol_version failure] records the reject
     (see {!record_mcp_auth_reject}) and writes the standard

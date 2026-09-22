@@ -106,8 +106,8 @@ let runtime_keys =
       (b Navigate "c" "clients"
          ~help:"everyone attached to this workspace, off the ring under Runtime")
   ; Keeper_lanes_only
-      (b Act "e" "add failover"
-         ~help:"append a failover candidate to the lane under the cursor (keeper lanes only)")
+      (b Act "e" "add candidate"
+         ~help:"append a candidate to the candidate order of the lane under the cursor (keeper lanes only)")
   ; Keeper_lanes_only
       (b Act "a" "new lane"
          ~help:"name a new lane, then pick its first runtime; e adds the rest")
@@ -235,7 +235,7 @@ let keeper_actions =
   [ b Act "c" "chat" ~help:"chat with the keeper"
   ; b Act "l" "logs"
   ; b Act keeper_calls_key "calls" ~help:"tool calls"
-  ; b Act "u" "runtime" ~help:"pick a runtime lane"
+  ; b Act "u" "runtime" ~help:"pick a runtime candidate order"
   ; b Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
   ; b Act "p / w" "pause / wake"
   ; b Act "s" "shutdown"
@@ -367,7 +367,7 @@ let for_surface = function
                     Masc_tui_types.keeper_detail_tabs))
       ; b Act "o" "logs"
           ~help:"open container logs in Sandbox; Keeper activity elsewhere"
-      ; b Act "U" "runtime" ~help:"pick a runtime lane"
+      ; b Act "U" "runtime" ~help:"pick a runtime candidate order"
       ; b Act "Left / Esc" "back"
       ; b Navigate "Home/End" "top/bottom" ~help:"the ends of this tab"
       ]
@@ -447,7 +447,7 @@ let for_surface = function
       ; b Act "Right / Enter" "runs"
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
-          ~help:"add a failover candidate to this lane's walk order"
+          ~help:"add a candidate to this lane's walk order"
       ; b Act "s" "slots"
           ~help:"edit the lane's declared slots in walk order: x drops, J/K \
                  reorders, Esc closes"

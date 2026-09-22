@@ -220,6 +220,8 @@ val candidate_id_of_signal :
     hashes (keeper, kind, post_id) only — volatile post fields (updated_at,
     content) must not participate, or the backlog scanner's re-synthesized
     signals mint a fresh candidate per post update (#28607).
+    [Board_post_updated] includes the source-owned content update time, so a
+    repeated edit converges while a later edit gets a new judgment.
     [Board_comment_added] hashes (keeper, kind, post_id, comment_id), so equal
     bodies on distinct comments remain distinct. Exported so test fixtures
     derive ids from this function instead of copying the formula. *)

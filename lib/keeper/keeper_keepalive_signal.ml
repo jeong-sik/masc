@@ -563,6 +563,7 @@ let wakeup_relevant_keeper_for_board_signal
   let signal_kind_label =
     match signal.kind with
     | Board_dispatch.Board_post_created -> "post_created"
+    | Board_dispatch.Board_post_updated _ -> "post_updated"
     | Board_dispatch.Board_comment_added _ -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
     | Board_dispatch.Board_vote_cast _ -> "vote_cast"
@@ -585,7 +586,8 @@ let wakeup_relevant_keeper_for_board_signal
       (Keeper_board_audience.classification_error_to_string error)
   | Ok audience ->
     (match audience with
-     | Keeper_board_audience.Discoverable ->
+     | Keeper_board_audience.Discoverable
+       when signal.kind = Board_dispatch.Board_post_created ->
        (* An unaddressed post has no immediate wake target. The Keeper owner
           already scans the durable Board with its per-lane cursor and owns
           candidate creation. Repeating that fleet-wide scan in the HTTP
@@ -670,7 +672,8 @@ let wakeup_relevant_keeper_for_board_signal
          uninitialized_entries
      | ( Keeper_board_audience.Targets _
        | Keeper_board_audience.Broadcast
-       | Keeper_board_audience.Thread_participants ) ->
+       | Keeper_board_audience.Thread_participants
+       | Keeper_board_audience.Discoverable ) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string BoardSignalRoutedTotal)
          ~labels:
@@ -753,15 +756,11 @@ let wakeup_relevant_keeper_for_board_signal
                ()
            | Keeper_world_observation_board_signal.Available
                Keeper_board_audience.Judge_discoverable -> (
-             (* The outer audience match excludes [Discoverable]. A comment
-                signal routed through [Thread_participants] legitimately lands
-                here (#27329): a lane that never touched the thread has no
-                deterministic address, and this push path is the only
-                producer of comment judgment candidates, so the lane records
-                an attention candidate. Every other kind still violates the
-                boundary — keep that fail-visible. *)
+             (* Comments and edits carry their own identity. Persist each
+                live event now; a post cursor is not an edit-event ledger. *)
              match signal.kind with
-             | Board_dispatch.Board_comment_added _ ->
+             | Board_dispatch.Board_comment_added _
+             | Board_dispatch.Board_post_updated _ ->
                record_board_attention_candidate
                  ~config
                  ~signal_kind_label

@@ -20,6 +20,7 @@ type board_reaction_event =
 
 type pending_board_event_kind =
   | Board_post_created
+  | Board_post_updated
   | Board_comment_added
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change
@@ -61,6 +62,7 @@ let is_board_activity_event (event : pending_board_event) =
   match event.event_kind with
   | Schedule_due _ -> false
   | Board_post_created
+  | Board_post_updated
   | Board_comment_added
   | Board_reaction_changed _
   | Board_vote_cast _
@@ -89,6 +91,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   match event.event_kind with
   | Schedule_due _ -> true
   | Board_post_created
+  | Board_post_updated
   | Board_comment_added
   | Board_reaction_changed _
   | Board_vote_cast _
@@ -106,6 +109,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   match event.event_kind with
   | Completion_authority_rejected _ -> true
   | Board_post_created
+  | Board_post_updated
   | Board_comment_added
   | Board_reaction_changed _
   | Board_vote_cast _
@@ -125,6 +129,7 @@ let is_task_outcome_event (event : pending_board_event) =
   match event.event_kind with
   | Task_outcome _ -> true
   | Board_post_created
+  | Board_post_updated
   | Board_comment_added
   | Board_reaction_changed _
   | Board_vote_cast _
@@ -148,6 +153,7 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Composition_completed
   | Ask_answered_row
   | Board_post_created
+  | Board_post_updated
   | Board_comment_added
   | Board_reaction_changed _
   | Board_vote_cast _
@@ -561,6 +567,7 @@ let pending_board_event_kind_of_observation
   =
   match observation.kind with
   | Board_signal.Observed_post_created -> Board_post_created
+  | Board_signal.Observed_post_updated _ -> Board_post_updated
   | Board_signal.Observed_comment_added _ -> Board_comment_added
   | Board_signal.Observed_reaction_changed reaction ->
     Board_reaction_changed (board_reaction_event_of_dispatch reaction)
@@ -585,6 +592,17 @@ let pending_board_event_of_board_observation
   | Ok post_snapshot ->
     let title, preview, hearth, post_kind, updated_at =
       let post : Board.post = post_snapshot in
+      match observation.kind with
+      | Board_signal.Observed_post_updated { content_updated_at } ->
+        ( observation.title
+        , short_preview ~max_len:80 observation.content
+        , observation.hearth
+        , post.post_kind
+        , content_updated_at )
+      | Board_signal.Observed_post_created
+      | Board_signal.Observed_comment_added _
+      | Board_signal.Observed_reaction_changed _
+      | Board_signal.Observed_vote_cast _ ->
       ( post.title
       , short_preview ~max_len:80 post.body
       , post.hearth
@@ -594,7 +612,7 @@ let pending_board_event_of_board_observation
     let event_kind = pending_board_event_kind_of_observation observation in
     let comment_derived =
       match observation.kind with
-      | Board_signal.Observed_post_created -> Ok (None, None, None)
+      | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _ -> Ok (None, None, None)
       | Board_signal.Observed_comment_added _ ->
         (match check_self_comment_status ~self_ids ~post_id:observation.post_id with
          | Board_signal.Unavailable unavailable -> Error unavailable

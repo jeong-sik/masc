@@ -252,6 +252,7 @@ let queue_vote_to_yojson (vote : Board_dispatch.board_vote_change) =
 
 let signal_kind_to_string = function
   | Board_dispatch.Board_post_created -> "post_created"
+  | Board_dispatch.Board_post_updated _ -> "post_updated"
   | Board_dispatch.Board_comment_added _ -> "comment_added"
   | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
   | Board_dispatch.Board_vote_cast _ -> "vote_cast"
@@ -264,6 +265,7 @@ let signal_to_yojson (signal : Board_dispatch.board_signal) =
       ( Some (Board.Comment_id.to_string identity.comment_id)
       , Option.map Board.Comment_id.to_string identity.parent_id )
     | Board_dispatch.Board_post_created
+    | Board_dispatch.Board_post_updated _
     | Board_dispatch.Board_reaction_changed _
     | Board_dispatch.Board_vote_cast _ -> None, None
   in
@@ -282,11 +284,14 @@ let signal_to_yojson (signal : Board_dispatch.board_signal) =
          | Board_dispatch.Board_reaction_changed reaction ->
            queue_reaction_to_yojson reaction
          | Board_dispatch.Board_post_created
+    | Board_dispatch.Board_post_updated _
          | Board_dispatch.Board_comment_added _
          | Board_dispatch.Board_vote_cast _ -> `Null )
      ]
      @
      match signal.kind with
+     | Board_dispatch.Board_post_updated { content_updated_at } ->
+       [ "content_updated_at", `Float content_updated_at ]
      | Board_dispatch.Board_vote_cast vote -> [ "vote", queue_vote_to_yojson vote ]
      | Board_dispatch.Board_post_created
      | Board_dispatch.Board_comment_added _
@@ -318,6 +323,13 @@ let candidate_id_of_signal ~keeper_name (signal : Board_dispatch.board_signal) =
         ; "kind", `String (signal_kind_to_string signal.kind)
         ; "post_id", `String signal.post_id
         ]
+    | Board_dispatch.Board_post_updated { content_updated_at } ->
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "kind", `String "post_updated"
+        ; "post_id", `String signal.post_id
+        ; "content_updated_at", `Float content_updated_at
+        ]
     | Board_dispatch.Board_comment_added identity ->
       `Assoc
         [ "keeper_name", `String keeper_name
@@ -346,6 +358,9 @@ let signal_identity_equal
   match left.kind, right.kind with
   | Board_dispatch.Board_post_created, Board_dispatch.Board_post_created ->
     String.equal left.post_id right.post_id
+  | Board_dispatch.Board_post_updated left_edit, Board_dispatch.Board_post_updated right_edit ->
+    String.equal left.post_id right.post_id
+    && Float.equal left_edit.content_updated_at right_edit.content_updated_at
   | ( Board_dispatch.Board_comment_added left_identity
     , Board_dispatch.Board_comment_added right_identity ) ->
     String.equal left.post_id right.post_id
@@ -356,22 +371,20 @@ let signal_identity_equal
     left = right
   | Board_dispatch.Board_vote_cast _, Board_dispatch.Board_vote_cast _ -> left = right
   | Board_dispatch.Board_post_created,
-    ( Board_dispatch.Board_comment_added _
-    | Board_dispatch.Board_reaction_changed _
-    | Board_dispatch.Board_vote_cast _ )
+    ( Board_dispatch.Board_post_updated _ | Board_dispatch.Board_comment_added _
+    | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ )
+  | Board_dispatch.Board_post_updated _,
+    ( Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added _
+    | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ )
   | Board_dispatch.Board_comment_added _,
-    ( Board_dispatch.Board_post_created
-    | Board_dispatch.Board_reaction_changed _
-    | Board_dispatch.Board_vote_cast _ )
+    ( Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _
+    | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ )
   | Board_dispatch.Board_reaction_changed _,
-    ( Board_dispatch.Board_post_created
-    | Board_dispatch.Board_comment_added _
-    | Board_dispatch.Board_vote_cast _ )
+    ( Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _
+    | Board_dispatch.Board_comment_added _ | Board_dispatch.Board_vote_cast _ )
   | Board_dispatch.Board_vote_cast _,
-    ( Board_dispatch.Board_post_created
-    | Board_dispatch.Board_comment_added _
-    | Board_dispatch.Board_reaction_changed _ ) ->
-    false
+    ( Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _
+    | Board_dispatch.Board_comment_added _ | Board_dispatch.Board_reaction_changed _ ) -> false
 ;;
 
 let of_board_signal
@@ -897,11 +910,11 @@ let signal_of_yojson json =
   let* fields = assoc ~context json in
   let* kind_json = field ~context "kind" fields in
   let* kind_raw = string_json ~context:(context ^ ".kind") kind_json in
-  (* A vote row carries the extra [vote] key; every other v7 signal carries
-     exactly the base keys. *)
+  (* Kind-specific fields are required only for the variant that owns them. *)
   let* expected_fields =
     match kind_raw with
     | "vote_cast" -> Ok (signal_base_fields @ [ "vote" ])
+    | "post_updated" -> Ok (signal_base_fields @ [ "content_updated_at" ])
     | "post_created" | "comment_added" | "reaction_changed" -> Ok signal_base_fields
     | value -> Error (Printf.sprintf "unknown Board signal kind %S" value)
   in
@@ -926,6 +939,10 @@ let signal_of_yojson json =
   let* kind =
     match kind_raw, reaction_json with
     | "post_created", `Null -> no_comment_identity Board_dispatch.Board_post_created
+    | "post_updated", `Null ->
+      let* json = field ~context "content_updated_at" fields in
+      let* content_updated_at = finite_float_json ~context:(context ^ ".content_updated_at") json in
+      no_comment_identity (Board_dispatch.Board_post_updated { content_updated_at })
     | "comment_added", `Null ->
       (match comment_id with
        | None -> Error (context ^ ".comment_id is required for comment_added")

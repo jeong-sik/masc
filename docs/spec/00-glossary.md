@@ -204,6 +204,8 @@ status: reference
   글의 `content_updated_at`은 생성 또는 제목·본문·작성자가 실제로 바뀐 시각이다.
   댓글·투표·고정 등 일반 활동이 갱신하는 `updated_at`과 구분한다.
   같은 내용으로 다시 저장하면 `content_updated_at`은 유지한다.
+  `Board_post_updated`는 실제 편집 저장이 성공한 뒤 발행한다. 게시글 ID와
+  `content_updated_at`이 같은 편집은 한 사건이며, 뒤의 편집은 새 사건이다.
 
 **Broadcast**
 : 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.

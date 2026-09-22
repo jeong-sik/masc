@@ -30,6 +30,9 @@ type post_id = string
 
 type board_stimulus_kind =
   | Post_created
+  | Post_updated of { content_updated_at : float }
+      (** A content edit identified by its finite producer-issued timestamp.
+          Board activity timestamps and display text do not change edit identity. *)
   | Comment_added of { comment_id : string; parent_id : string option }
       (** Unverified wire strings: the queue is a leaf and cannot depend on
           Board, so decoding only checks that they are non-empty. They become

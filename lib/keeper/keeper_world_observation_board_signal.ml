@@ -13,6 +13,7 @@ type match_result =
 
 type board_observation_kind =
   | Observed_post_created
+  | Observed_post_updated of { content_updated_at : float }
   | Observed_comment_added of Board_dispatch.board_comment_identity
   | Observed_reaction_changed of Board_dispatch.board_reaction_change
   | Observed_vote_cast of Board_dispatch.board_vote_change
@@ -207,6 +208,8 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   { Keeper_event_queue.kind =
       (match signal.kind with
        | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
+       | Board_dispatch.Board_post_updated { content_updated_at } ->
+         Keeper_event_queue.Post_updated { content_updated_at }
        | Board_dispatch.Board_comment_added comment ->
          Keeper_event_queue.Comment_added
            { comment_id = Board.Comment_id.to_string comment.comment_id
@@ -243,6 +246,8 @@ let board_observation_of_board_stimulus
   let* kind =
     match bs.kind with
     | Keeper_event_queue.Post_created -> Ok Observed_post_created
+    | Keeper_event_queue.Post_updated { content_updated_at } ->
+      Ok (Observed_post_updated { content_updated_at })
     | Keeper_event_queue.Comment_added { comment_id; parent_id } ->
       let* comment_id = parse_comment_id comment_id in
       let* parent_id =
@@ -302,7 +307,8 @@ let text (signal : Board_dispatch.board_signal) =
 
 let address_text (signal : Board_dispatch.board_signal) =
   match signal.kind with
-  | Board_dispatch.Board_post_created ->
+  | Board_dispatch.Board_post_created
+  | Board_dispatch.Board_post_updated _ ->
     String.concat
       "\n"
       (List.filter
@@ -323,7 +329,7 @@ let mention_ids_of_signal signal = mention_ids_of_text (address_text signal)
 
 let address_text_of_observation observation =
   match observation.kind with
-  | Observed_post_created ->
+  | Observed_post_created | Observed_post_updated _ ->
     String.concat
       "\n"
       (List.filter
@@ -486,6 +492,7 @@ let reaction_touches_self_activity ~self_ids ~(signal : Board_dispatch.board_sig
          | Available `Never -> Available false
          | Available (`No_new_external | `New_external _) -> Available true))
   | Board_dispatch.Board_post_created
+  | Board_dispatch.Board_post_updated _
   | Board_dispatch.Board_comment_added _
   | Board_dispatch.Board_vote_cast _ -> Available false
 ;;
@@ -540,5 +547,5 @@ let wake_reason
           | Available (`New_external _) ->
             Available (Some Thread_reply_after_self_comment)
           | Available (`Never | `No_new_external) -> Available None))
-    | Board_dispatch.Board_post_created -> Available None)
+    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ -> Available None)
 ;;

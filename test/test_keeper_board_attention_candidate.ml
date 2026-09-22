@@ -521,6 +521,41 @@ let test_distinct_comment_ids_with_the_same_body_are_distinct_candidates () =
        (A.candidate_id_of_signal ~keeper_name:"alpha" second))
 ;;
 
+let test_edit_candidates_preserve_revision_identity () =
+  with_temp_base "board-edit-candidates" @@ fun base_path ->
+  let edited at =
+    { (signal "post-edited") with
+      kind = Masc.Board_dispatch.Board_post_updated { content_updated_at = at }
+    }
+  in
+  let first = candidate (edited 10.0) in
+  let persisted = record ~base_path first in
+  let replay = candidate { (edited 10.0) with updated_at = Some 99.0 } in
+  (match A.record ~base_path replay with
+   | A.Duplicate existing ->
+     Alcotest.(check bool) "same edit converges" true (existing = persisted)
+   | _ -> Alcotest.fail "same edit was not deduplicated");
+  let next = candidate (edited 20.0) in
+  ignore (record ~base_path next);
+  let loaded = ok "reload edits" (A.load_candidates ~base_path ~keeper_name:"alpha") in
+  Alcotest.(check int) "different edits remain separate" 2 (List.length loaded);
+  Alcotest.(check bool) "typed edit survives persistence" true
+    (List.exists (fun item -> item.A.signal = next.signal) loaded);
+  let invalid fields =
+    match A.candidate_to_json first with
+    | `Assoc candidate_fields ->
+      let json = `Assoc (List.map (function
+        | "signal", `Assoc signal_fields -> "signal", `Assoc (fields signal_fields)
+        | field -> field) candidate_fields) in
+      Alcotest.(check bool) "invalid edit coordinate rejected" true
+        (Result.is_error (A.candidate_of_json json))
+    | _ -> Alcotest.fail "candidate encoder did not emit an object"
+  in
+  invalid (List.remove_assoc "content_updated_at");
+  invalid (fun fields -> ("content_updated_at", `Float nan)
+    :: List.remove_assoc "content_updated_at" fields)
+;;
+
 let test_codec_rejects_malformed_comment_identity () =
   let valid = candidate (signal "post-record-validation") in
   let invalid_signal replacements =
@@ -1229,6 +1264,10 @@ let () =
             "old relevant comment cannot override current unrelated signal"
             `Quick
             test_old_relevant_comment_cannot_override_current_unrelated_signal
+        ; Alcotest.test_case
+            "edit candidates preserve revision identity"
+            `Quick
+            test_edit_candidates_preserve_revision_identity
         ; Alcotest.test_case
             "distinct comment ids with the same body are distinct candidates"
             `Quick

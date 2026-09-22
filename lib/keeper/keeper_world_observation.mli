@@ -19,6 +19,7 @@ type board_reaction_event = {
 
 type pending_board_event_kind =
   | Board_post_created
+  | Board_post_updated
   | Board_comment_added
   | Board_reaction_changed of board_reaction_event
   | Board_vote_cast of Board_dispatch.board_vote_change

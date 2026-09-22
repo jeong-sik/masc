@@ -7,6 +7,7 @@ type match_result =
 
 type board_observation_kind =
   | Observed_post_created
+  | Observed_post_updated of { content_updated_at : float }
   | Observed_comment_added of Board_dispatch.board_comment_identity
   | Observed_reaction_changed of Board_dispatch.board_reaction_change
   | Observed_vote_cast of Board_dispatch.board_vote_change

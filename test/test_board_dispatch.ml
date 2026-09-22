@@ -151,6 +151,72 @@ let test_content_update_time_survives_activity_and_reload () =
     (Option.is_none (Board.post_of_yojson (`Assoc
       (("content_updated_at", `Float nan) :: List.remove_assoc "content_updated_at" fields))))
 
+let test_edit_emits_exact_signal_only_for_changed_content () =
+  let get = function Ok value -> value | Error error -> Alcotest.fail (Board.show_board_error error) in
+  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"initial body"
+      ~title:"thread" ~body:"initial body" ~post_kind:Board.Human_post ()) in
+  let post_id = Board.Post_id.to_string post.id in
+  let signals = ref [] in
+  Board_dispatch.set_board_signal_hook (fun signal -> signals := signal :: !signals);
+  let edit body = get (Board_dispatch.update_post ~post_id ~editor:"editor"
+      ~content:body ~title:"thread" ~body ()) in
+  ignore (edit "initial body");
+  Alcotest.(check int) "no-op emits no event" 0 (List.length !signals);
+  let updated = edit "@reader inspect this edit" in
+  (match !signals with
+   | [{ Board_dispatch.signal; audience = Board.Targets [target] }] ->
+     Alcotest.(check string) "edited mention is the recipient" "reader" (Board.Agent_id.to_string target);
+     Alcotest.(check string) "signal carries edited body" updated.body signal.content;
+     (match signal.kind with
+      | Board_dispatch.Board_post_updated { content_updated_at } ->
+        Alcotest.(check (float 0.)) "signal uses persisted content clock" updated.content_updated_at content_updated_at
+      | _ -> Alcotest.fail "edit must not masquerade as post creation")
+   | _ -> Alcotest.fail "expected one addressed edit event");
+  ignore (edit "@reader inspect this edit");
+  Alcotest.(check int) "repeated normalized content emits no new event" 1 (List.length !signals);
+  let fetched = get (Board_dispatch.get_post ~post_id) in
+  Alcotest.(check string) "published edit is readable" updated.body fetched.body
+
+let test_edit_rejects_invalid_audience_before_mutation () =
+  let get = function Ok value -> value | Error error -> Alcotest.fail (Board.show_board_error error) in
+  let post = get (Board_dispatch.create_post ~author:"editor" ~content:"@reader private"
+      ~title:"private" ~body:"@reader private" ~visibility:Board.Direct ~post_kind:Board.Human_post ()) in
+  let post_id = Board.Post_id.to_string post.id in
+  let signals = ref 0 in
+  Board_dispatch.set_board_signal_hook (fun _ -> incr signals);
+  (match Board_dispatch.update_post ~post_id ~editor:"editor" ~content:"unaddressed"
+      ~title:"private" ~body:"unaddressed" () with
+   | Error (Board.Validation_error _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok _ -> Alcotest.fail "invalid direct audience must reject edit");
+  Alcotest.(check int) "invalid edit emits nothing" 0 !signals;
+  Alcotest.(check string) "invalid edit preserves body" post.body (get (Board_dispatch.get_post ~post_id)).body
+
+let test_edit_persistence_failure_emits_no_signal () =
+  let post = match Board_dispatch.create_post ~author:"editor" ~content:"original"
+      ~post_kind:Board.Human_post () with
+    | Ok post -> post | Error error -> Alcotest.fail (Board.show_board_error error) in
+  let signals = ref 0 in
+  Board_dispatch.set_board_signal_hook (fun _ -> incr signals);
+  let original_base = Sys.getenv "MASC_BASE_PATH" in
+  ignore (block_board_masc_dir_with_file ());
+  (match Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
+      ~editor:"editor" ~content:"@reader failed persistence" () with
+   | Error (Board.Io_error _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok _ -> Alcotest.fail "blocked persistence must fail");
+  Alcotest.(check int) "unpersisted edit emits nothing" 0 !signals;
+  (match Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id) with
+   | Ok unchanged ->
+     Alcotest.(check string) "failed edit preserves in-memory body" post.body unchanged.body;
+     Alcotest.(check (float 0.)) "failed edit preserves content clock" post.content_updated_at unchanged.content_updated_at
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  Unix.putenv "MASC_BASE_PATH" original_base;
+  (match Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
+      ~editor:"editor" ~content:"@reader failed persistence" () with
+   | Ok _ -> () | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check int) "same-content retry emits exactly one edit" 1 !signals
+
 let test_update_post_by_owner () =
   match
     Board_dispatch.create_post ~author:"editor-agent"
@@ -958,6 +1024,7 @@ let test_comment_signal_preserves_comment_and_parent_identity () =
          (Some (Board.Comment_id.to_string parent.id))
          (Option.map Board.Comment_id.to_string parent_id)
      | Board_dispatch.Board_post_created
+     | Board_dispatch.Board_post_updated _
      | Board_dispatch.Board_reaction_changed _
      | Board_dispatch.Board_vote_cast _ ->
        Alcotest.fail "comment write emitted the wrong Board signal kind")
@@ -2381,6 +2448,9 @@ let () =
       Alcotest.test_case "returns jsonl" `Quick (with_eio test_backend_returns_jsonl);
     ];
     "posts", [
+      Alcotest.test_case "edit emits only changed content" `Quick (with_eio test_edit_emits_exact_signal_only_for_changed_content);
+      Alcotest.test_case "edit rejects invalid audience" `Quick (with_eio test_edit_rejects_invalid_audience_before_mutation);
+      Alcotest.test_case "failed edit persistence emits no signal" `Quick (with_eio test_edit_persistence_failure_emits_no_signal);
       Alcotest.test_case "create and get" `Quick (with_eio test_create_and_get_post);
       Alcotest.test_case "content clock survives activity and reload" `Quick
         (with_eio test_content_update_time_survives_activity_and_reload);

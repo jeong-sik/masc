@@ -480,7 +480,9 @@ let evaluation_to_yojson { endpoint; model; state; questions; result } =
       in
       answers
       @ [ "request_body_sha256", `String evaluated.request_body_sha256
-        ; "destination_uri", `String evaluated.destination_uri
+        ; "destination_uri", `String evaluated.destination.destination_uri
+        ; "requested_model", `String evaluated.destination.model
+        ; "passed_over", `List (List.map Typesafeai_client.attempt_to_yojson evaluated.passed_over)
         ; "usage",
           (match evaluated.response.usage with
            | None -> `Null
@@ -576,8 +578,11 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
           log names exactly what was sent (the Board gate keeps the same
           value as provenance). *)
        let evaluations = ref [] in
+       let destination = { Typesafeai_client.endpoint; model; api_key } in
        let evaluate ~state ~questions =
-         let result = Typesafeai_client.evaluate ?clock ~endpoint ~model ~api_key ~state ~questions () in
+         let result =
+           Typesafeai_client.evaluate ?clock ~destinations:(destination, []) ~state ~questions ()
+         in
          let endpoint = Typesafeai_client.endpoint_for_observation endpoint in
          evaluations := { endpoint; model; state; questions; result } :: !evaluations;
          publish (Incomplete (List.rev !evaluations));

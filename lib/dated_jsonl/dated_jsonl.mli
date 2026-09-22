@@ -137,7 +137,9 @@ val collect_matching :
     Day files are walked newest-first and scanned backwards in fixed-size
     chunks. The scan stops at the [n]-th match and never materialises a whole
     day file; memory is bounded by the current chunk/line fragment plus the
-    selected values.
+    selected values. A day file removed by concurrent retention after the
+    directory snapshot is skipped; other open failures still reach the
+    caller.
 
     [offset] skips selected values, not rows. Ordering and malformed-row
     skipping match {!filter_map_recent}, including that {b [f] is called

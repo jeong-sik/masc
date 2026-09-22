@@ -222,21 +222,27 @@ let test_deny_response_fails_closed () =
     ]
 
 let test_approval_flow_rejects_stale_results () =
-  let flow, old_generation = Projection.Flow.reserve_refresh Projection.Flow.initial in
-  let old_generation = Option.get old_generation in
+  (* [observe] never advances the generation itself (#37461, #37609 review):
+     only [begin_action] does. So an observation taken before an action
+     opens reads a generation the action then supersedes, and observing
+     again while that action is still open reads the action's own
+     generation back -- there is nothing left for a caller to suppress at
+     the [Flow] level; that decision (skip the read while an action is
+     open) lives at each call site via [action_inflight], which the AST
+     checks in [test_tui_http_ast.ml] cover. *)
+  let old_generation = Projection.Flow.observe Projection.Flow.initial in
   let flow, action_generation =
-    match Projection.Flow.begin_action flow with
+    match Projection.Flow.begin_action Projection.Flow.initial with
     | Ok value -> value
     | Error `Already_inflight -> fail "first action unexpectedly in flight"
   in
-  check bool "pre-action refresh is stale" false
+  check bool "pre-action observation is stale" false
     (Projection.Flow.is_current flow old_generation);
   check bool "action generation is current" true
     (Projection.Flow.is_current flow action_generation);
-  let unchanged, refresh = Projection.Flow.reserve_refresh flow in
-  check bool "refresh suppressed during action" true (Option.is_none refresh);
-  check bool "action remains in flight" true
-    (Projection.Flow.action_inflight unchanged);
+  check bool "observing during an open action reads the action's generation"
+    true
+    (Projection.Flow.observe flow = action_generation);
   let unchanged, owned = Projection.Flow.finish_action flow old_generation in
   check bool "stale completion does not own action" false owned;
   check bool "stale completion cannot clear action" true
@@ -245,6 +251,66 @@ let test_approval_flow_rejects_stale_results () =
   check bool "current completion owns action" true owned;
   check bool "current completion clears action" false
     (Projection.Flow.action_inflight finished)
+
+(* task-1672: two fetches of one listing can be out at once, and the network
+   decides which lands first. The press clock alone cannot order them -- both
+   observed the same generation -- so the older answer, landing last, used to
+   put back what the newer one had replaced. *)
+let test_listing_order_keeps_the_newest_answer () =
+  let flow = Projection.Flow.initial in
+  let order = Projection.Listing_order.initial in
+  let order, older = Projection.Listing_order.dispatch order flow in
+  let order, newer = Projection.Listing_order.dispatch order flow in
+  let order, admitted = Projection.Listing_order.admit order flow newer in
+  check bool "the newer answer lands first and is shown" true admitted;
+  let order, admitted = Projection.Listing_order.admit order flow older in
+  check bool "the older answer landing last is dropped" false admitted;
+  let order, next = Projection.Listing_order.dispatch order flow in
+  let _order, admitted = Projection.Listing_order.admit order flow next in
+  check bool "a dropped answer does not hold back the next fetch" true admitted
+
+let test_listing_order_in_sequence_answers_all_land () =
+  let flow = Projection.Flow.initial in
+  let order = Projection.Listing_order.initial in
+  let order, first = Projection.Listing_order.dispatch order flow in
+  let order, admitted = Projection.Listing_order.admit order flow first in
+  check bool "first answer shown" true admitted;
+  let order, second = Projection.Listing_order.dispatch order flow in
+  let _order, admitted = Projection.Listing_order.admit order flow second in
+  check bool "second answer shown" true admitted
+
+(* #37461: separate listings keep separate sequences, so one listing's fetch
+   never drops another's answer. *)
+let test_listings_do_not_supersede_each_other () =
+  let flow = Projection.Flow.initial in
+  let stances, stance = Projection.Listing_order.dispatch Projection.Listing_order.initial flow in
+  let held, held_call = Projection.Listing_order.dispatch Projection.Listing_order.initial flow in
+  let _held, held_call_again = Projection.Listing_order.dispatch held flow in
+  let _stances, admitted = Projection.Listing_order.admit stances flow stance in
+  check bool "stance answer survives the held-call fetches" true admitted;
+  ignore held_call;
+  ignore held_call_again
+
+(* #37609 review: a press that opens after the fetch went out supersedes its
+   answer, whether the press is still open or already closed. *)
+let test_listing_order_press_supersedes () =
+  let order, ticket =
+    Projection.Listing_order.dispatch Projection.Listing_order.initial
+      Projection.Flow.initial
+  in
+  let flow, generation =
+    match Projection.Flow.begin_action Projection.Flow.initial with
+    | Ok value -> value
+    | Error `Already_inflight -> fail "first action unexpectedly in flight"
+  in
+  let _order, admitted = Projection.Listing_order.admit order flow ticket in
+  check bool "dropped while the press is open" false admitted;
+  let closed, _owned = Projection.Flow.finish_action flow generation in
+  let order, admitted = Projection.Listing_order.admit order closed ticket in
+  check bool "still dropped after the press closed" false admitted;
+  let order, after = Projection.Listing_order.dispatch order closed in
+  let _order, admitted = Projection.Listing_order.admit order closed after in
+  check bool "a fetch sent after the press is shown" true admitted
 
 (* The Gate and held-tool resolve paths in the TUI now take the same
    single-action slot the operator-confirm path takes, so a decision keypress
@@ -349,6 +415,14 @@ let () =
             test_approval_flow_rejects_stale_results
         ; test_case "second action blocked while inflight" `Quick
             test_second_action_blocked_while_inflight
+        ; test_case "listing keeps the newest answer" `Quick
+            test_listing_order_keeps_the_newest_answer
+        ; test_case "listing answers in sequence all land" `Quick
+            test_listing_order_in_sequence_answers_all_land
+        ; test_case "listings do not supersede each other" `Quick
+            test_listings_do_not_supersede_each_other
+        ; test_case "press supersedes a listing answer" `Quick
+            test_listing_order_press_supersedes
         ; test_case "two-key safety gate" `Quick test_two_key_gate
         ; test_case "refresh preserves selected token" `Quick
             test_refresh_preserves_selected_token

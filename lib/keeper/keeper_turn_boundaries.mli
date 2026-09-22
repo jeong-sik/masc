@@ -43,8 +43,9 @@
       overlap -- the Keeper Owner runs one child turn at a time and holds that
       slot until the whole child returns, so the append is inside it
       ({!Keeper_owner}) -- and the reader rules of RFC §4.4 rely on that.
-      [masc_keeper_clear] is not a turn and can append its line while a turn
-      runs. [turn_ref] is not a key either: the turn number is read from the
+      [masc_keeper_clear] runs in the owner's idle maintenance slot
+      ({!Keeper_owner_registry.run_maintenance_if_idle}), so its line never
+      lands inside a turn either. [turn_ref] is not a key: the turn number is read from the
       keeper's meta when the turn starts, and a trace rotation changes the
       trace while that count keeps running.
     - Two lines say that the atoms of a trace are numbered from zero again: a
@@ -56,8 +57,7 @@
       checkpoint loads the restarted history or a later one. What a reader
       does with these lines is RFC §4.4.
     - The lines of an earlier history of the same trace stay in the file, and
-      so can a line whose history was never stored (the last bullet, and a
-      turn that reused its last save while a clear landed). A line is a cut
+      so can a line whose history was never stored (the last bullet). A line is a cut
       point of the history a reader loaded only when its [end_atom] and
       [last_atom_digest] match that checkpoint. The content a reader takes is
       always the checkpoint's, so a line that does not match costs a cut

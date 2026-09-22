@@ -1050,31 +1050,15 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
     let provider_reported_context_window_exceeded =
       (* The CLI states why its query loop terminated as a typed enum on this
          frame; [prompt_too_long] is the CLI's own promotion of every provider
-         context-window rejection ("Prompt is too long" / "Input is too long
-         for requested model", either status, or a 413 naming the window), and
-         [blocking_limit] is the same verdict reached before sending, while
+         context-window rejection (either status, or a 413 naming the window),
+         [blocking_limit] is the same verdict reached before sending, and
          [rapid_refill_breaker] reports repeated refills after compaction.
-         A frame that carries the verdict is authoritative in both directions, like
-         the codex lane's [codexErrorInfo].
-
-         Frames without the enum fall back to the CLI's own sentence table,
-         with no status requirement. The historical 400 requirement missed
-         real frames: on 2026-08-14 the CLI reported three resumed-session
-         overflows as [subtype=success, is_error=true] with no
-         [api_error_status] and no [terminal_reason] — only the sentence —
-         so the overflow fell to the generic-failure path and surfaced as an
-         unmapped internal error. Both sentences appear verbatim in the CLI
-         binary (2.1.232). *)
+         A frame that carries the verdict is authoritative in both directions,
+         like the codex lane's [codexErrorInfo]; a frame without it is not an
+         overflow. *)
       match terminal_reason with
       | Some (Prompt_too_long | Blocking_limit | Rapid_refill_breaker) -> true
-      | Some (Other_terminal_reason _) -> false
-      | None ->
-        Option.exists
-          (fun detail ->
-             let detail = String.trim detail in
-             String.starts_with ~prefix:"Prompt is too long" detail
-             || String.starts_with ~prefix:"Input is too long for requested model" detail)
-          result
+      | Some (Other_terminal_reason _) | None -> false
     in
     if structurally_quota_blocked
     then
@@ -1096,11 +1080,10 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
     else if is_error
     then
       (* [result] is the one field on this frame that says why the turn failed.
-         The prompt-too-long verdict above (typed [terminal_reason], or the
-         exact 400 prefix for pre-enum CLIs) has its own typed path;
-         unrelated 400s and every other terminal rejection still retain the
-         provider's sentence instead of collapsing to the status code
-         (#28071). *)
+         The prompt-too-long verdict above (typed [terminal_reason]) has its
+         own typed path; unrelated 400s and every other terminal rejection
+         still retain the provider's sentence instead of collapsing to the
+         status code (#28071). *)
       Error
         (Turn_failed_with_observation
            { detail = terminal_failure_detail ()

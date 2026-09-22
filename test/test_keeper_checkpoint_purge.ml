@@ -964,6 +964,7 @@ let test_a_fitting_working_state_keeps_its_prefix () =
     match
       Masc.Librarian_continuity_snapshot.capture_checkpoint_prefix
         ~end_atom:3
+        ~catch_up_end_atom:None
         ~trace_id:fixture_trace
         ~lines
         ~messages

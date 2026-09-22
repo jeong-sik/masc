@@ -116,7 +116,7 @@ let test_file_pair () =
 
 let test_captured_partial_prefix () =
   let lines=[1, boundary ~fresh:false history] in
-  let snapshot=S.capture_checkpoint_prefix ~end_atom:1 ~trace_id ~lines ~messages:history
+  let snapshot=S.capture_checkpoint_prefix ~end_atom:1 ~catch_up_end_atom:None ~trace_id ~lines ~messages:history
     ~working_state:state () |> require in
   check int "real completed anchor" 2 snapshot.covering_end_atom;
   check int "cut at whole first atom" 1 snapshot.end_atom;
@@ -129,10 +129,33 @@ let test_captured_partial_prefix () =
     (S.restore ~trace_id ~lines:[1,boundary ~fresh:false ~turn:2 history] ~messages:history snapshot);
   check bool "explicit source survives codec" true ((S.of_json (S.to_json snapshot) |> require) = snapshot);
   expect_error "cut outside completed prefix accepted"
-    (S.capture_checkpoint_prefix ~end_atom:3 ~trace_id ~lines ~messages:history ~working_state:state ());
-  let whole=S.capture_checkpoint_prefix ~trace_id ~lines ~messages:history ~working_state:state () |> require in
+    (S.capture_checkpoint_prefix ~end_atom:3 ~catch_up_end_atom:None ~trace_id ~lines ~messages:history ~working_state:state ());
+  let whole=S.capture_checkpoint_prefix ~catch_up_end_atom:None ~trace_id ~lines ~messages:history ~working_state:state () |> require in
   check bool "whole assistant atom includes tool result" true
     ((S.restore ~trace_id ~lines ~messages:history whole |> require).messages=[pinned])
+;;
+
+(* A rewrite from atom 0 carries where requests started when it began. The
+   key is written only while the snapshot is short of it, so an ordinary
+   snapshot keeps the shape it always had. *)
+let test_catch_up_target_codec () =
+  let lines=[1, boundary ~fresh:false history] in
+  let capture target = S.capture_checkpoint_prefix ~end_atom:1 ~catch_up_end_atom:target
+    ~trace_id ~lines ~messages:history ~working_state:state () |> require in
+  let catching_up = capture (Some 2) in
+  check (option int) "a target past the end is kept" (Some 2) catching_up.catch_up_end_atom;
+  let fields = match S.to_json catching_up with `Assoc fields -> fields | _ -> fail "not an object" in
+  check bool "the target is on the wire" true (List.mem_assoc "catch_up_end_atom" fields);
+  check bool "and survives the codec" true ((S.of_json (S.to_json catching_up) |> require) = catching_up);
+  let reached = capture (Some 1) in
+  check (option int) "a target the end already reached is dropped" None reached.catch_up_end_atom;
+  (match S.to_json reached with
+   | `Assoc fields -> check bool "an ordinary snapshot has no such key" false (List.mem_assoc "catch_up_end_atom" fields)
+   | _ -> fail "not an object");
+  let with_target value = `Assoc (List.map (fun (key, v) ->
+    if key = "catch_up_end_atom" then key, value else key, v) fields) in
+  expect_error "a target not past the end accepted" (S.of_json (with_target (`Int 1)));
+  expect_error "a target that is not an integer accepted" (S.of_json (with_target (`String "2")))
 ;;
 
 let () = run "offline continuity snapshot"
@@ -140,4 +163,5 @@ let () = run "offline continuity snapshot"
             test_case "source identities" `Quick test_identity_rejections;
             test_case "restart witness required" `Quick test_capture_requires_witness;
             test_case "strict codec" `Quick test_exact_codec;
+            test_case "catch-up target codec" `Quick test_catch_up_target_codec;
             test_case "atomic file pair" `Quick test_file_pair]]

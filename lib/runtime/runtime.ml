@@ -986,6 +986,10 @@ let exact_lane_of_id = function
   | _ -> None
 ;;
 
+(* [Server_workspace_memory_curator.execute] refuses a run whose lane declares
+   any CLI slot, so [false] here is that refusal read in advance. The two are
+   tied by these comments alone; making a CLI slot on such a lane unloadable
+   would leave one rule and let that refusal go. *)
 let exact_lane_supports_cli_tail = function
   | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true
   | Workspace_curator -> false

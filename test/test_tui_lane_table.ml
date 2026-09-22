@@ -43,11 +43,9 @@ let total_cells (columns : Lane_table.columns) ~slots ~observed =
   Lane_table.fixed_cells ~label_cells:columns.label_cells
   + width (Lane_table.tail columns ~slots ~observed)
 
-(* The row drew both lists whatever the frame was and let the line's own cut
-   take what was past its end. Beside the roster pane the header itself read
-   "OB\xe2\x80\xa6" and every row's last two columns were half a runtime id:
-   the reader could not tell which runtime answered, which is the one thing
-   the column is there for. A column the frame has no room for leaves. *)
+(* A column the frame has no room for leaves rather than being cut at the end
+   of the line: half a runtime id under a half-word header does not say which
+   runtime answered, which is the one thing the column is there for. *)
 let test_a_narrow_frame_drops_a_column_rather_than_cutting_it () =
   for inner = fixed_floor to 220 do
     let columns = Lane_table.columns ~inner live_lanes in
@@ -98,11 +96,9 @@ let test_the_observed_column_never_outlives_the_slot_list () =
         true (columns.slots_cells > 0)
   done
 
-(* Beside the roster pane the row has room for one of the two. The cap on the
-   slot list is there to leave the histogram its cells; with the histogram gone
-   the list takes what is left instead of stopping at the cap and leaving the
-   row blank behind a reading it had cut -- eleven cells of it, on the live
-   fleet's 114. *)
+(* Beside the roster pane (114 cells) the row has room for one of the two. The
+   cap on the slot list is there to leave the histogram its cells; with the
+   histogram gone the list takes what is left of the row. *)
 let test_the_slot_list_takes_the_row_the_histogram_left () =
   let columns = Lane_table.columns ~inner:114 live_lanes in
   check int "the histogram has no room" 0 columns.observed_cells;

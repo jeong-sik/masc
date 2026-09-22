@@ -14252,24 +14252,11 @@ let render_themes (state : state) =
        ~hints:(Masc_tui_keys.footer_hints_config ~pane:state.config_pane));
   finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
 
-(* The model knobs sit in different tables -- [reasoning-effort] and
-   [temperature] under [models.NAME], [max-tokens] under
-   [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
-   bottom never puts them side by side. On 2026-08-29 nine of ten
-   ollama_cloud bindings carried neither; a request with no reasoning_effort
-   has Ollama turn thinking on by itself, and one keeper spent a turn
-   producing 2,000 characters of reasoning and no answer. This pane is the
-   same source the runtime.toml pane shows, arranged so a missing knob is a
-   column and not an absence.
-
-   Read-only. Editing lands in the runtime.toml pane next door, which already
-   has the preview-checked write path. *)
 (* Where the config file being read lives, for the title row beside the strip
-   that already names the file. Said from the server's masc root: the prefix is
-   the same for every screen in the session, the Config pane's identity row
-   names it, and spending it here cut the reading in the middle -- the row read
-   "/Users/d\xe2\x80\xa6onfig/runtime.toml". Until the server has said where
-   its root is, the whole path is the only honest reading. *)
+   that already names the file. Said from the server's masc root, which is the
+   same for every screen in the session and named on the Config pane's identity
+   row. Until the server has said where its root is, the whole path is the only
+   honest reading. *)
 let config_path_note (state : state) =
   match state.runtime_config_view with
   | Some reading ->
@@ -14284,6 +14271,18 @@ let config_path_note (state : state) =
   | None ->
       Ansi.dim ^ title_missing_reading ~error:state.runtime_config_view_error ^ Ansi.reset
 
+(* The model knobs sit in different tables -- [reasoning-effort] and
+   [temperature] under [models.NAME], [max-tokens] under
+   [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
+   bottom never puts them side by side. On 2026-08-29 nine of ten
+   ollama_cloud bindings carried neither; a request with no reasoning_effort
+   has Ollama turn thinking on by itself, and one keeper spent a turn
+   producing 2,000 characters of reasoning and no answer. This pane is the
+   same source the runtime.toml pane shows, arranged so a missing knob is a
+   column and not an absence.
+
+   Read-only. Editing lands in the runtime.toml pane next door, which already
+   has the preview-checked write path. *)
 let render_config_models (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in

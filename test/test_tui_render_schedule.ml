@@ -802,10 +802,9 @@ let test_memory_columns_never_exceed_their_width () =
       (used <= max inner_width memory_minimum_row_width)
   done
 
-(* The Δ column carries a pair, and a cell past its width is cut in the
-   middle: at six cells the fleet's own [+12 -23] drew as [+… -23] and the
-   added count was gone. Two digits each is the daily shape (the widest pair
-   on the live fleet was +11 -16); three each is what a large revision
+(* The Δ column carries a pair, and a cell past its width folds in the middle,
+   which takes the first count. Two digits each is the daily shape (the widest
+   pair on the live fleet was +11 -16); three each is what a large revision
    needs. *)
 let test_the_memory_delta_column_holds_a_pair_of_counts () =
   let columns = Schedule.allocate_memory_columns ~inner_width:240 in

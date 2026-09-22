@@ -3009,9 +3009,14 @@ let render_keeper_message (state : state) =
        [Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail]
        and the draft row was a bare prompt. The hint sits after the caret, so
        the caret column does not move, and it goes while a capture or
-       continuous mode runs, because the footer's meter says it louder. *)
+       continuous mode runs, because the footer's meter says it louder.
+
+       Only where speech-to-text is set up. Without a transcriber the keys it
+       names refuse, and the sentence sat beside every empty draft of every
+       operator who never set voice up. *)
     let voice_hint =
       if String.equal input ""
+         && state.voice_stt_set_up
          && state.keeper_message_focus = Right_pane
          && Option.is_none state.voice_capture
          && Option.is_none state.voice_continuous

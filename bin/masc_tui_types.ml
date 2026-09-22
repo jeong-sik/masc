@@ -4707,6 +4707,12 @@ type state = {
      in the draft either way, and that draft is also where a spoken
      half-sentence waits for typing. *)
   mutable voice_send_on_stop: bool;
+  (* Whether speech-to-text is set up where this TUI runs
+     ([Masc.Voice_bridge.stt_set_up]): read at boot and again whenever the
+     voice config is re-read. An empty draft names the capture keys only
+     then -- to an operator without a transcriber they named a key that
+     refuses. *)
+  mutable voice_stt_set_up: bool;
   mutable answering_open: bool;
   mutable answering_scroll: int;
   (* The Memory facts list's [Enter] detail: the whole fact text in its own
@@ -6969,6 +6975,7 @@ let create_state
   keeper_queue_inflight = [];
   keeper_run_next_pending = None;
   voice_send_on_stop = false;
+  voice_stt_set_up = false;
   answering_open = false;
   answering_scroll = 0;
   answering_cursor = 0;

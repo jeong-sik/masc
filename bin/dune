@@ -1449,7 +1449,6 @@
   digestif
   masc.string_util
   masc.keeper_runtime
-  masc.config
   masc.voice_wizard
   masc.voice_setup
   masc.voice_config

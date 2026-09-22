@@ -22,6 +22,20 @@ status: reference
   코드 식별자는 `agent_core`와 `Agent_core`다.
   → [Agent Core 경계](13-agent-core.md)
 
+**Agent Run (에이전트 실행)**
+: `Agent_core.Agent`를 거치는 한 번의 실행. 그 수명주기를 `Agent_core.Event_bus`의 typed
+  event가 그린다 — `agent_started`·`agent_completed`·`agent_failed`·`agent_yielded`·`…`.
+  Keeper turn과 같은 단위가 아니며, 그 안에 여러 agent core Turn이 있다.
+  `agent_completed`·`agent_yielded`는 걸린 시간(`elapsed_s`)을, `agent_failed`는 걸린
+  시간과 오류의 `error_code`·`error`를, `agent_input_required`는 요청(`request`)을
+  payload에 싣는다. 이 event들은 payload의 `task_id`에 **Agent run ID**를 싣는다 —
+  `Event_envelope.fresh_id`가 만드는 `evt-` 접두 id이고, `agent_lifecycle_events`가
+  `AgentStarted`에서 연 run id를 그대로 쓴다. 이 값은 MASC **Task**의 id가 아니다.
+  필드 이름이 `task_id`라 Activity row가 이것을 Task로 읽어 `evt-…`를 그대로 찍은
+  적이 있다(#37910에서 고침).
+  → [Agent_core.Event_bus](../../packages/agent_core/lib/event_bus.mli),
+  [agent_lifecycle_events](../../packages/agent_core/lib/agent/agent_lifecycle_events.ml)
+
 **Official Client Lane**
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
   provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.

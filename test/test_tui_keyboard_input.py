@@ -5894,15 +5894,24 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
     )
 
 
-ERROR_DETAIL_PREFIX = b"Keeper turn failed: Provider stream parse failed: json decoder"
+ERROR_DETAIL_REASON = (
+    b"Provider stream parse failed: json decoder rejected nested payload "
+    b"at byte 8192; exact terminal detail survives wrapping"
+)
+# The whole row the pane draws for the failure: its badge, then the complete
+# detail, in order. Checked as one phrase so a detail missing its middle, or
+# drawn with its end above its start, does not pass on its two ends.
+ERROR_DETAIL_ROW = b"ERROR Keeper turn failed: " + ERROR_DETAIL_REASON
 ERROR_DETAIL_TAIL = b"exact terminal detail survives wrapping"
 # The tail as it may arrive on the wire: wrapped at any of its spaces, with
 # the row's padding and the next row's cursor move between the words. Where
 # the wrap falls depends on the body width, which the speaker column sets,
 # so a needle that requires the phrase on one row pins the column instead
-# of the detail.
+# of the detail. The gap between two words is a row's padding and cursor
+# move, or a whole redrawn row when the two arrive in different frames, so
+# it is bounded at a screen's width of bytes rather than a line's.
 ERROR_DETAIL_TAIL_WRAPPED = re.compile(
-    b".{0,400}?".join(re.escape(word) for word in ERROR_DETAIL_TAIL.split()),
+    b".{0,4000}?".join(re.escape(word) for word in ERROR_DETAIL_TAIL.split()),
     re.DOTALL,
 )
 
@@ -5923,10 +5932,7 @@ def keeper_chat_failed_response(request_body: bytes) -> RawHttpResponse:
     keeper_name = request.get("name")
     run_id = f"keeper-operation-run-{request_id}"
     thread_id = f"keeper:{keeper_name}"
-    reason = (
-        "Provider stream parse failed: json decoder rejected nested payload "
-        "at byte 8192; exact terminal detail survives wrapping"
-    )
+    reason = ERROR_DETAIL_REASON.decode()
     events = [
         {
             "type": "CUSTOM",
@@ -5979,13 +5985,11 @@ def keeper_chat_error_detail_interaction() -> Interaction:
             process, master_fd, output, b"\r", ERROR_DETAIL_TAIL_WRAPPED
         )
         plain = unwrapped(screen_text(bytes(output)))
-        for needle in (b"ERROR", ERROR_DETAIL_PREFIX, ERROR_DETAIL_TAIL):
-            if unwrapped(needle) not in plain:
-                raise AssertionError(
-                    f"wrapped Keeper error omitted {needle!r}: {failed!r}"
-                )
-        if unwrapped(ERROR_DETAIL_PREFIX) + b"\xe2\x80\xa6" in plain:
-            raise AssertionError(f"Keeper error was cell-truncated: {failed!r}")
+        if unwrapped(ERROR_DETAIL_ROW) not in plain:
+            raise AssertionError(
+                "the Keeper error row did not carry its badge and whole detail "
+                f"in order: {plain!r}"
+            )
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 

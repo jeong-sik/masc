@@ -24,6 +24,9 @@ description: "masc TUI 채팅 화면이 무엇을 어떤 기호로 그리는지 
 | `·` | `Thinking` | 생각 중 |
 | `✗` | `Error` | 오류 |
 
+같은 `✗` 는 Overview 의 TUI Session Events 패널에서도 오류를 뜻한다. `event_type = "error"` 인 행만
+시계 뒤에 `✗ ` 를 달고, 나머지 레벨은 표식 없이 그린다(`Masc_tui_types.overview_event_mark`).
+
 ### 이 표를 만든 규칙 둘
 
 - **기호는 도형이다.** `?` 같은 문장 부호는 쓰지 않는다. 끝난 줄에 물음표가 남으면 아무도 답하지

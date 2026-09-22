@@ -12685,18 +12685,6 @@ let contact_of_connection_status :
   | Masc_tui_types.Reconnecting ->
       Masc_tui_server_lifecycle.Undecided
 
-(* A mint and a failure are not the same news. Both were reported as errors,
-   which reads a working first start as a broken one -- and on a first
-   install, where the client mints for itself, that is the ordinary path.
-   Waiting for the workspace is that same ordinary path one step earlier, so
-   it reads as system too; only a workspace that refused a credential is a
-   fault the operator has to act on. *)
-let credential_notice_level = function
-  | Masc_tui_credential.Mint_failed _ -> "error"
-  | Masc_tui_credential.Held | Masc_tui_credential.Minted
-  | Masc_tui_credential.Not_required
-  | Masc_tui_credential.Workspace_pending -> "system"
-
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.
 
@@ -12737,7 +12725,7 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
     if not (Masc_tui_credential.outcome_needs_retry outcome) then begin
       tui_credential_retry_pending := false;
       Option.iter
-        (add_event state (credential_notice_level outcome))
+        (add_event state (Masc_tui_credential.outcome_level outcome))
         (Masc_tui_credential.outcome_notice outcome)
     end
   end
@@ -16268,7 +16256,7 @@ let main
    tui_credential_retry_pending :=
      Masc_tui_credential.outcome_needs_retry outcome;
    match Masc_tui_credential.outcome_notice outcome with
-   | Some notice -> add_event state (credential_notice_level outcome) notice
+   | Some notice -> add_event state (Masc_tui_credential.outcome_level outcome) notice
    | None -> ());
   start_http_refresh state ~host ~port ~intent:Revalidate
     ~refresh_inflight:http_refresh_inflight

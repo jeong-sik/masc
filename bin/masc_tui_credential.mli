@@ -90,3 +90,11 @@ val outcome_needs_retry : outcome -> bool
     empty base path. The other outcomes are settled -- a later workspace does
     not change a bearer already held, already minted, not required, or a mint
     that failed against a workspace that was already there. *)
+
+val outcome_level : outcome -> string
+(** How loudly {!outcome_notice} is said, as the event level the caller logs it
+    under. Only {!Mint_failed} is an "error": it is a fault the operator has to
+    act on. A first install's {!Workspace_pending} is the ordinary path one step
+    earlier and reads as "system", as do a held, minted, or not-required
+    bearer. Reporting the pending workspace as an error made a working first
+    start read as a broken one. *)

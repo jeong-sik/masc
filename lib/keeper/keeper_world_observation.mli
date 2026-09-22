@@ -360,7 +360,9 @@ type board_signal_match = {
 (** Collect Board source changes after the Keeper registry cursor. A Keeper
     without a cursor initializes at the current Board head; pending durable
     queue entries are admitted separately. Posts, content edits and comments
-    use the same audience routing as live delivery.
+    use the same audience routing as live delivery. Directly addressed events
+    enter the durable queue before cursor advancement and are returned through
+    normal queue intake, not as unadmitted prompt observations.
     Returns [(events, new_post_count, mention_count)].
     Used by both the world observation builder and the deliberation triage
     in keepalive to populate board-related triggers. *)

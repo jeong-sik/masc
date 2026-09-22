@@ -1193,6 +1193,10 @@ let pending_board_event_of_stimulus
     Ok None
 ;;
 
+type board_replay_failure =
+  | Source_unavailable of Board_signal.board_unavailable
+  | Delivery_failed of string
+
 (** Collect recent board activity using cursor-based tracking.
     Cursor state lives in Keeper_registry as [(updated_at, post_id)].
     Returns (structured events, new post count, mention count).
@@ -1297,7 +1301,7 @@ let collect_board_events_with_cursor_policy
         Ok None
       | Ok audience ->
         (match Board_audience.route_for_keeper ~audience ~meta ~signal with
-         | Board_signal.Unavailable unavailable -> Error unavailable
+         | Board_signal.Unavailable unavailable -> Error (Source_unavailable unavailable)
          | Board_signal.Available Board_audience.Ignore -> Ok None
          | Board_signal.Available Board_audience.Judge_discoverable ->
            (* Prompt previews never persist candidates or wake a lane. *)
@@ -1327,19 +1331,36 @@ let collect_board_events_with_cursor_policy
              | Error detail ->
                raise (Keeper_board_attention_candidate.Candidate_unavailable detail));
            Ok None
-         | Board_signal.Available (Board_audience.Deliver _) ->
-           Result.bind
-             (Board_signal.board_observation_of_board_stimulus
-                ~post_id:signal.post_id
-                (Board_signal.board_stimulus_of_board_signal signal))
-             (pending_board_event_of_board_observation ~meta
-                ~arrived_at:(Time_compat.now ()))
-           |> Result.map Option.some)
+         | Board_signal.Available (Board_audience.Deliver reason) ->
+           let result =
+             if advance_cursor then (
+               let stimulus = Board_signal.board_signal_stimulus
+                   ~arrived_at:(Time_compat.now ()) ~reason signal in
+               match Keeper_registry_event_queue.enqueue_stimulus_durable_result
+                       ~base_path meta.name stimulus with
+               | Keeper_registry_event_queue.Stimulus_enqueued
+               | Keeper_registry_event_queue.Stimulus_already_present -> Ok None
+               | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+                 Error (Delivery_failed detail))
+             else
+               Result.bind
+                 (Board_signal.board_observation_of_board_stimulus
+                    ~post_id:signal.post_id
+                    (Board_signal.board_stimulus_of_board_signal signal))
+                 (pending_board_event_of_board_observation ~meta
+                    ~arrived_at:(Time_compat.now ()))
+               |> Result.map Option.some
+               |> Result.map_error (fun error -> Source_unavailable error)
+           in
+           (match result with
+            | Ok _ when reason = Board_signal.Explicit_mention -> incr mention_count
+            | Ok _ | Error _ -> ());
+           result)
     in
     let events_of_post (p : Board.post) =
       let post_id = Board.Post_id.to_string p.id in
       match Board_dispatch.get_comments ~post_id with
-      | Error error -> Error { Board_signal.operation = Board_signal.Get_comments; post_id; error }
+      | Error error -> Error (Source_unavailable { Board_signal.operation = Board_signal.Get_comments; post_id; error })
       | Ok comments ->
         let post_signal : Board_dispatch.board_signal =
           { kind =
@@ -1376,10 +1397,15 @@ let collect_board_events_with_cursor_policy
         let next_cursor = board_cursor_token_of_post p in
         match events_of_post p with
         | Ok events ->
-          mention_count := !mention_count + List.length
-              (List.filter (fun (event : pending_board_event) -> event.explicit_mention) events);
           consume_posts (Some next_cursor) (List.rev_append events acc) rest
-        | Error unavailable ->
+        | Error (Delivery_failed detail) ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string ObservationQueryFailures)
+            ~labels:[ "operation", Runtime_observation_query_operation.(to_label Board_events) ] ();
+          Log.Keeper.warn "board catchup retained cursor: keeper=%s post=%s delivery=%s"
+            meta.name (Board.Post_id.to_string p.id) detail;
+          List.rev acc, last_cursor
+        | Error (Source_unavailable unavailable) ->
           (match log_and_count_unavailable ~context:"signal replay" unavailable with
            | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
            | Board_signal.Transient -> List.rev acc, last_cursor)

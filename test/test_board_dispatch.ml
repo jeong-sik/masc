@@ -661,18 +661,27 @@ let test_first_board_observation_starts_at_current_head () =
          | Ok post -> post
          | Error error -> Alcotest.fail (Board.show_board_error error)
        in
+       let snapshot () =
+         Keeper_event_queue_persistence.load_result ~base_path ~keeper_name
+         |> function Ok queue -> Keeper_event_queue.to_list queue
+           | Error detail -> Alcotest.fail detail in
+       let preview, _, _ = Keeper_world_observation.collect_board_events_without_advancing_cursor
+           ~base_path ~meta in
+       Alcotest.(check int) "read-only preview shows new event" 1 (List.length preview);
+       Alcotest.(check int) "preview does not queue event" 0 (List.length (snapshot ()));
        let events, new_count, mention_count =
          Keeper_world_observation.collect_board_events ~base_path ~meta
        in
-       Alcotest.(check int) "new event is observed once" 1 (List.length events);
+       Alcotest.(check int) "live collection returns no ephemeral delivery" 0 (List.length events);
+       Alcotest.(check int) "new event is durably queued once" 1 (List.length (snapshot ()));
        Alcotest.(check int) "new post count" 1 new_count;
        Alcotest.(check int) "new mention count" 1 mention_count;
-       match events with
+       match snapshot () with
        | [ event ] ->
          Alcotest.(check string)
            "new event id"
            (Board.Post_id.to_string new_post.id)
-           event.Keeper_world_observation.post_id
+           event.Keeper_event_queue.post_id
        | _ -> Alcotest.fail "expected exactly one new Board event")
 
 let test_dashboard_projection_does_not_produce_attention_candidate () =

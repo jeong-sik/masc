@@ -681,8 +681,20 @@ let test_board_replay_routes_exact_replies () =
   List.iter (fun (meta : Keeper_meta_contract.keeper_meta) ->
     ignore (Keeper_registry.For_testing.register ~base_path meta.name meta);
     ignore (Keeper_world_observation.collect_board_events ~base_path ~meta)) metas;
-  let collect meta =
-    let events, _, _ = Keeper_world_observation.collect_board_events ~base_path ~meta in events
+  let collect (meta : Keeper_meta_contract.keeper_meta) =
+    let snapshot () =
+      match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:meta.name with
+      | Ok queue -> Keeper_event_queue.to_list queue | Error detail -> fail detail in
+    let before = snapshot () in
+    let events, _, _ = Keeper_world_observation.collect_board_events ~base_path ~meta in
+    check int "live replay uses durable queue, not ephemeral events" 0 (List.length events);
+    snapshot ()
+    |> List.filter (fun source ->
+         not (List.exists (Keeper_event_queue.stimulus_identity_equal source) before))
+    |> List.filter_map (fun source ->
+         match Keeper_world_observation.pending_board_event_of_stimulus ~meta source with
+         | Ok event -> event
+         | Error unavailable -> fail (Keeper_world_observation_board_signal.unavailable_to_string unavailable))
   in
   ignore (add_comment ~post_id ~author:"external" "top-level comment" : string);
   check int "post author receives top-level reply on own post" 1 (List.length (collect poster));
@@ -717,6 +729,35 @@ let test_board_replay_routes_exact_replies () =
   ignore (add_comment ~post_id ~author:"external" "unrelated later comment" : string);
   check int "later comment does not repeat inherited post mention" 0
     (List.length (collect bystander))
+;;
+
+let test_catchup_storage_failure_retains_cursor () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let meta = test_meta "catchup-storage" in
+  ignore (Keeper_registry.For_testing.register ~base_path meta.name meta);
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path meta.name)
+  @@ fun () ->
+  ignore (create_thread ~title:"baseline" "before cursor" : string);
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta);
+  let before = Keeper_registry.get_board_cursor ~base_path meta.name in
+  ignore (create_thread ~title:"addressed" "@catchup-storage preserve this" : string);
+  let path = Filename.concat
+      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) meta.name)
+      Keeper_event_queue_schema.snapshot_filename in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Unix.mkdir path 0o700;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path && Sys.is_directory path then Unix.rmdir path)
+    (fun () ->
+      ignore (Keeper_world_observation.collect_board_events ~base_path ~meta);
+      check bool "failed admission did not advance cursor" true
+        (before = Keeper_registry.get_board_cursor ~base_path meta.name));
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta);
+  let queue = match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:meta.name with
+    | Ok queue -> queue | Error detail -> fail detail in
+  check int "retry durably admits the missed event" 1 (Keeper_event_queue.length queue);
+  check bool "successful admission advances cursor" true
+    (before <> Keeper_registry.get_board_cursor ~base_path meta.name)
 ;;
 
 (* [`Reply] queues a comment with a parent, [`Top_level] one without: the
@@ -854,6 +895,10 @@ let () =
         ] )
     ; ( "replies after own comment"
       , [ test_case
+            "catchup storage failure retains cursor"
+            `Quick
+            (with_eio test_catchup_storage_failure_retains_cursor)
+        ; test_case
             "accepted comment identity survives queue projection"
             `Quick
             (with_eio (accepted_comment_identity_survives_queue_projection ~shape:`Reply))

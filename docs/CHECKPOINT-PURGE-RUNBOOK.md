@@ -55,16 +55,19 @@ equal-watermark re-save through the locked validated store.
    not be `active`/`keepalive_running`. A live keeper's next save overwrites
    the purge. (`masc_keeper_down <name>` if needed; restart is an operator
    decision.)
-2. **Dry-run first.** Always. The report shows per-rule counts and the byte
+2. **Dry-run first.** Always. The keeper's meta names the trace; pass
+   `--trace <trace-id>` only to have the tool refuse when the keeper is on
+   another trace. The checkpoint's own `agent_name` is the agent's runtime
+   id, not the keeper, so the tool never reads it. The report shows per-rule counts and the byte
    delta; a second dry-run after an apply must show all zeros (fixpoint).
 
    ```sh
-   masc-checkpoint-purge --trace <trace-id> --base <base-path>
+   masc-checkpoint-purge --keeper <keeper-name> --base <base-path>
    ```
 3. **Apply.** The tool writes a byte-exact backup before saving:
 
    ```sh
-   masc-checkpoint-purge --trace <trace-id> --base <base-path> --apply
+   masc-checkpoint-purge --keeper <keeper-name> --base <base-path> --apply
    # backup: {runtime-root}/backups-checkpoint-purge-<trace>-<ts>Z/<trace>.json
    ```
 4. **Verify fixpoint.** Re-run the dry-run; expect `+0.0%` and zero rule

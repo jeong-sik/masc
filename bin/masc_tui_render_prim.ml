@@ -2354,15 +2354,12 @@ let fusion_run_stage_compact = function
   | Fusion_stage_completed -> "completed"
   | Fusion_stage_failed -> "failed"
 
-(* A failed run says how it failed. The cell read [failed] on eight of
-   eighteen live runs and nothing more, while each run carried the server's
-   failure code all along -- [timeout], [provider_error],
-   [panels_unavailable] on the live fleet -- and only the line under the
-   table that follows the cursor drew it, so reading why eight runs failed
-   took eight moves. The code is a tag from the judge's or the delivery's
-   closed set, not a sentence, so it fits the cell; it is still drawn in the
-   failure colour, the title row counts the failures, and the line under the
-   table keeps the full error for the selected run. *)
+(* A failed run says how it failed: the list is scanned for why runs fail,
+   and a timeout, a provider error and panels that never answered are three
+   different things to go and fix. The code is a tag from the judge's or the
+   delivery's closed set, not a sentence, so it fits the cell; it is drawn in
+   the failure colour, and the line under the table carries the full error for
+   the selected run. *)
 let fusion_run_state_text ~status ~stage =
   match status with
   | Fusion_running -> fusion_run_stage_compact stage

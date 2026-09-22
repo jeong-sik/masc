@@ -5,11 +5,8 @@ module Decode = Masc.Tui_decode
 
 let state status stage = Prim.fusion_run_state_text ~status ~stage
 
-(* Eight of eighteen live runs read [failed] in this cell and nothing more,
-   while each carried its failure code; only the line under the table that
-   follows the cursor drew it. The code is what the list is scanned for:
-   timeouts, provider errors and panels that never answered are three
-   different things to go and fix. *)
+(* The code is what the list is scanned for: timeouts, provider errors and
+   panels that never answered are three different things to go and fix. *)
 let test_a_failed_run_says_how_it_failed () =
   List.iter
     (fun code ->

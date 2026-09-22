@@ -1502,10 +1502,23 @@ Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
 Skill usage, and the registered Tool catalog. This keeps the Skill views from
 being buried below a long Tool list.
 
-The Skill Usage pane shows each Keeper's invocation/delivery/action counts and
-the producer-recorded `last_used_at` value. If retained usage coverage has no
-time, it says `time unavailable`; it does not turn bounded evidence into a
-`never used` claim.
+The Skill Usage pane puts each Keeper on its own row under the skill, in
+columns: `TRIGGERED`, `DELIVERED`, `ACTIONS`, and when it last ran, in this
+terminal's zone like every other clock on the screen. If retained usage
+coverage has no time, the row says `time unavailable`; it does not turn
+bounded evidence into a `never used` claim.
+
+The effective surface lists a skill's name, kind and sizes; a composition
+also carries the shape of its plan (`nodes`, `batches`, `parallel`), which an
+instruction skill has none of. `why loaded` is drawn only when something
+other than the catalog chose the skill - a Keeper profile or a task - or when
+nothing accounts for it at all.
+
+The Skill activations pane reads as counts rather than as the ledger's field
+names: per scope, `triggered / delivered / handed off / actions` for
+instruction and composition, then what it served and which runtimes it ran
+on. The scope itself is the skill, its revision, its turn and its snapshot;
+the JSON encoding of the same reference is not drawn beside them.
 
 ### Runtime
 

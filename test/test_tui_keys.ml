@@ -541,7 +541,7 @@ let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
      exercises j, r, Enter, PgDn, and detail Esc through the real dispatch. *)
   check str "fusion names its list keys"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Home/End:top/bottom  Enter:open  Y:copy  Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Home/End:top/bottom  Enter:open  a:new run  Y:copy  Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
 
 (* K and B answer in the detail as on the list; the detail footer named

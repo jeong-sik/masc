@@ -690,6 +690,55 @@ let test_config_council_preset_is_staged_eligible () =
      | presets ->
        Alcotest.failf "expected exactly one preset, got %d" (List.length presets))
 
+(* Every seat of a shipped preset must name something the same file declares:
+   a [runtime.lanes.X] route or a [provider.model] binding. A seat that names
+   neither resolves to nothing, and the preset that looks configured fails at
+   the first run instead of at the build. *)
+let test_shipped_runtime_preset_seats_name_declared_routes () =
+  let seed = In_channel.with_open_bin "../../config/runtime.toml" In_channel.input_all in
+  let toml = Otoml.Parser.from_string seed in
+  let table path =
+    match Otoml.find_opt toml Otoml.get_table path with
+    | Some entries -> List.map fst entries
+    | None -> []
+  in
+  let lanes = table [ "runtime"; "lanes" ] in
+  let bindings =
+    List.concat_map
+      (fun provider -> List.map (fun model -> provider ^ "." ^ model) (table [ provider ]))
+      (table [ "providers" ])
+  in
+  let declared route = List.mem route lanes || List.mem route bindings in
+  let policy =
+    match Fusion_config.of_toml toml with
+    | Ok policy -> policy
+    | Error errors ->
+      Alcotest.failf "shipped runtime.toml must load: %s"
+        (String.concat "; " (List.map Fusion_config.config_error_message errors))
+  in
+  Alcotest.(check bool) "the seed declares lanes and bindings to check against" true
+    (lanes <> [] && bindings <> []);
+  List.iter
+    (fun validated ->
+       let preset = raw validated in
+       let seats =
+         List.concat_map
+           (fun (group : Fusion_policy.panel_group) -> group.models)
+           preset.Fusion_policy.panels
+         @ (preset.Fusion_policy.judge
+            :: List.map
+                 (fun (judge : Fusion_policy.judge_spec) -> judge.jmodel)
+                 preset.Fusion_policy.judges)
+       in
+       List.iter
+         (fun route ->
+            Alcotest.(check bool)
+              (Printf.sprintf "%s seat %s is declared" preset.Fusion_policy.name route)
+              true (declared route))
+         seats)
+    policy.Fusion_policy.presets
+;;
+
 let test_shipped_runtime_council_is_staged_eligible () =
   let runtime_toml =
     In_channel.with_open_bin "../../config/runtime.toml" In_channel.input_all
@@ -1834,6 +1883,8 @@ let () =
             test_config_bad_staged_judge_group_size
         ; Alcotest.test_case "council_staged_eligible" `Quick
             test_config_council_preset_is_staged_eligible
+        ; Alcotest.test_case "shipped_runtime_preset_seats_name_declared_routes" `Quick
+            test_shipped_runtime_preset_seats_name_declared_routes
         ; Alcotest.test_case "shipped_runtime_council_staged_eligible" `Quick
             test_shipped_runtime_council_is_staged_eligible
         ; Alcotest.test_case "two_judges_not_staged_eligible" `Quick

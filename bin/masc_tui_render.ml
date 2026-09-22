@@ -6728,7 +6728,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                         | _ -> id)
                      lane.rrl_runtime_ids)
               in
-              add_row "Failover Chain:" hops;
+              add_row "Candidate Chain:" hops;
               (match lane.rrl_runtime_ids with
                | first :: _ -> add_row "Head Candidate:" first
                | [] -> ())

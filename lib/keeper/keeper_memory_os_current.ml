@@ -422,6 +422,7 @@ let read_durable_range_receipts ~keepers_dir ~keeper_id =
 ;;
 
 let validate_durable_range_receipts ~keepers_dir ~keeper_id =
+  (* See read_durable_range_receipts: the read is the validation; the receipt value is intentionally discarded. *)
   read_durable_range_receipts ~keepers_dir ~keeper_id |> Result.map ignore
 ;;
 

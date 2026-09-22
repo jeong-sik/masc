@@ -822,7 +822,8 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
     (is_null (member "rewriting_through" observed));
   (* An unreadable position file is why there is no number, which a keeper
      that has read nothing does not say. *)
-  Out_channel.with_open_bin (P.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+  Out_channel.with_open_bin
+    (P.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name)
     (fun oc -> output_string oc "{not json");
   let unreadable = cycle () in
   Alcotest.(check string) "an unreadable position says so" "progress_unreadable"

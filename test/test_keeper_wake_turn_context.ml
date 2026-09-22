@@ -464,8 +464,13 @@ let test_small_failed_payloads_remain_retrievable () =
   check bool "briefing shrinks without cutting source" true (String.length body < String.length original);
   check bool "call identity and rejected outcome remain visible" true
     (contains ~needle:"[turn 42] Edit" body && contains ~needle:"REJECTED" body);
-  check bool "digest and ordinary row both retain the complete argument reference" true
-    (count_occurrences ~needle:projected_call.input body >= 3);
+  (* The digest and both ordinary rows must expose the same retrievable blob
+     identity. Compare the typed SHA rather than the complete marker: the
+     marker also carries a preview whose rendering is allowed to differ. *)
+  check bool "digest and ordinary rows retain the blob identity" true
+    (count_occurrences ~needle:argument_ref.sha256 body >= 3);
+  check bool "both ordinary rows retain the complete argument reference" true
+    (count_occurrences ~needle:projected_call.input body >= 2);
   check string "original source remains unchanged" original (render source);
   let blocked = Filename.concat base_path "blocked-store" in
   Out_channel.with_open_bin blocked (fun channel -> output_string channel "not a directory");

@@ -724,6 +724,7 @@ let test_claim_generation_change_discards_without_sibling_selection () =
             | P.Running _
             | P.Completed _
             | P.Settled _
+            | P.Abandoned _
             | P.Blocked _ -> running, ready)
          (0, 0)
   in
@@ -827,6 +828,7 @@ let test_exact_claim_retry_exhaustion_has_no_self_wake () =
             | P.Running _
             | P.Completed _
             | P.Settled _
+            | P.Abandoned _
             | P.Blocked _ -> count)
          0
   in
@@ -2645,7 +2647,7 @@ let test_undrained_outcomes_are_not_routine () =
    beta 13x/25min the next, before both were data-cut by hand). This pins
    that the finalizer now settles such a partition once, terminally, and
    never revisits it. *)
-let test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_retired
+let test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_retired
   ()
   =
   with_temp_base "board-attention-worker-quarantine-retired" @@ fun base_path ->
@@ -2676,14 +2678,17 @@ let test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_r
   in
   Sys.remove ledger_path;
   (* Before the fix this returned Error "partition candidate is absent during
-     quarantine reconciliation: ..." and fataled the worker at process start. *)
+     quarantine reconciliation: ..." and fataled the worker at process start.
+     Since task-1676 the give-up is [Abandoned]: no judgment is on record, so
+     a still-[Resumable_pending] candidate can still reopen the root later. *)
   ok
-    "reconcile settles the orphaned quarantine instead of failing"
+    "reconcile abandons the orphaned quarantine instead of failing"
     (W.For_testing.reconcile_quarantines ~now:10.0 ~base_path ~keeper_name:"alpha");
   (match (load_one_partition ~base_path).state with
-   | P.Settled _ -> ()
-   | _ ->
-     Alcotest.fail "blocked partition with a retired candidate did not reach Settled");
+   | P.Abandoned { abandoned_at } ->
+     Alcotest.(check (float 0.0)) "give-up time recorded" 10.0 abandoned_at
+   | P.Settled _ -> Alcotest.fail "give-up recorded as a judgment (Settled)"
+   | _ -> Alcotest.fail "blocked partition with a retired candidate did not get abandoned");
   ok
     "second reconciliation pass stays a no-op"
     (W.For_testing.reconcile_quarantines ~now:11.0 ~base_path ~keeper_name:"alpha")
@@ -2929,7 +2934,7 @@ let () =
         ; Alcotest.test_case
             "reconcile_quarantines settles a blocked partition whose candidate was retired"
             `Quick
-            test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_retired
+            test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_retired
         ] )
     ]
 ;;

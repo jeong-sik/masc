@@ -120,7 +120,8 @@ let claim ~base_path ~worker_epoch ~now =
     |> List.find_opt (fun (partition : P.t) ->
       match partition.state with
       | P.Ready -> true
-      | P.Running _ | P.Completed _ | P.Settled _ | P.Blocked _ -> false)
+      | P.Running _ | P.Completed _ | P.Settled _ | P.Abandoned _
+      | P.Blocked _ -> false)
   in
   let target =
     match target with
@@ -296,14 +297,16 @@ let test_a_still_pending_candidate_reopens_its_settled_root () =
      [status] never advances past [Pending] — task-1660's live shape: the
      Candidate ledger never recorded a judgment for this occurrence even
      though its only durable root settled (e.g. the worker's "candidate
-     permanently absent" path settles a [Blocked] root without ever judging
-     it, [keeper_board_attention_worker.ml]'s [reconcile_quarantines]).
-     [ensure_roots] must reopen the same deterministic identity rather than
-     leaving it Pending forever. *)
+     permanently absent" path gives up on a [Blocked] root without ever
+     judging it, [keeper_board_attention_worker.ml]'s
+     [reconcile_quarantines]). Since task-1676 that give-up is no longer
+     spelled [Settled]; a legacy [Settled] row is reclassified
+     ([Settled]->[Abandoned], the only transition that leaves [Settled]) and
+     then reopened, so one [ensure_roots] pass appends exactly two rows. *)
   let replayed = { original with recorded_at = 99.0 } in
   Alcotest.(check int)
     "a still-pending candidate reopens its settled root"
-    1
+    2
     (ok
        "reopen settled root"
        (P.ensure_roots ~base_path ~keeper_name:"alpha" [ replayed ]));
@@ -313,6 +316,26 @@ let test_a_still_pending_candidate_reopens_its_settled_root () =
       "reopened root keeps its original deterministic identity"
       true
       (String.equal partition_id settled.P.partition_id);
+    (* The ledger keeps both rows: the reclassification of the give-up and
+       the reopen. The view only shows the latest state per identity. *)
+    let states =
+      ledger_lines (P.For_testing.path ~base_path ~keeper_name:"alpha")
+      |> List.map (fun line ->
+             match P.of_yojson (Yojson.Safe.from_string line) with
+             | Ok partition -> (
+               match partition.P.state with
+               | P.Ready -> "ready"
+               | P.Running _ -> "running"
+               | P.Completed _ -> "completed"
+               | P.Settled _ -> "settled"
+               | P.Abandoned _ -> "abandoned"
+               | P.Blocked _ -> "blocked")
+             | Error _ -> "undecodable")
+    in
+    Alcotest.(check (list string))
+      "reclassification then reopen are both durable"
+      [ "ready"; "running"; "running"; "completed"; "completed"; "settled"; "abandoned"; "ready" ]
+      states;
     Alcotest.(check (float 0.0)) "original creation time is retained" 1.0 created_at;
     Alcotest.(check bool)
       "reopened root advances to the next generation"
@@ -949,7 +972,8 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
      |> List.filter_map (fun (partition : P.t) ->
        match partition.state with
        | P.Ready -> Some partition.candidate_id
-       | P.Running _ | P.Completed _ | P.Settled _ | P.Blocked _ -> None))
+       | P.Running _ | P.Completed _ | P.Settled _ | P.Abandoned _
+       | P.Blocked _ -> None))
 ;;
 
 let test_provider_neutral_blocked_reason_codec () =
@@ -1035,8 +1059,17 @@ let test_strict_current_schema_rejects_old_json () =
     "strict codec roundtrip"
     true
     (ok "decode" (P.of_yojson encoded) = created);
+  (* task-1676: ledgers written before [Abandoned] existed are read without
+     migration — a v6 row decodes into today's shape (no [Abandoned] can
+     appear in it), while older schemas stay rejected. *)
+  Alcotest.(check bool)
+    "immediate prior schema v6 loads without migration"
+    true
+    (match P.of_yojson (replace_field "schema_version" (`Int 6) encoded) with
+     | Ok decoded -> created = decoded
+     | Error _ -> false);
   expect_error
-    "immediate prior schema v5 is rejected without migration"
+    "schema v5 is rejected without migration"
     (P.of_yojson (replace_field "schema_version" (`Int 5) encoded));
   expect_error
     "old schema is rejected without migration"
@@ -1071,7 +1104,7 @@ let test_strict_current_schema_rejects_old_json () =
 
 let inject_torn_tail ledger_path =
   let output = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 ledger_path in
-  output_string output "{\"schema_version\":6,\"partition_id\":\"torn-partial";
+  output_string output "{\"schema_version\":7,\"partition_id\":\"torn-partial";
   close_out output
 ;;
 
@@ -1231,6 +1264,136 @@ let test_predispatch_rejection_chain_binds_agent_core_selected_third_slot () =
   | _ -> Alcotest.fail "third AGENT_CORE-selected slot was not bindable"
 ;;
 
+(* task-1676: the give-up recorded by [reconcile_quarantines] is [Abandoned],
+   not [Settled]. Judgment-shaped [Settled] stays a real terminal. *)
+let test_abandon_records_a_give_up_not_a_judgment () =
+  with_temp_base "board-attention-partition-abandon-give-up" @@ fun base_path ->
+  let absent = candidate ~id:"candidate-abandoned-give-up" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ absent ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  let proof = provenance ~slot_id:"abandon-slot" ~call_id:"abandon-call" () in
+  let bound =
+    P.bind_before_dispatch ~worker_epoch:owner ~base_path ~partition:claimed ~provenance:proof
+    |> ok "bind before abandoning"
+    |> fsynced "bind before abandoning"
+  in
+  let blocked =
+    P.block
+      ~now:11.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:bound
+      (P.Exact_execution_quarantined (P.Bound proof))
+    |> ok "block the abandoned candidate"
+    |> fsynced "block the abandoned candidate"
+  in
+  let abandoned =
+    ok "abandon" (P.abandon ~now:12.0 ~base_path ~partition:blocked)
+  in
+  let abandoned_again =
+    ok "abandon idempotently" (P.abandon ~now:99.0 ~base_path ~partition:abandoned)
+  in
+  Alcotest.(check bool) "abandon is idempotent" true (abandoned = abandoned_again);
+  match abandoned.P.state with
+  | P.Abandoned { abandoned_at } ->
+    Alcotest.(check bool) "give-up time is recorded" true (Float.equal abandoned_at 12.0)
+  | P.Settled _ -> Alcotest.fail "give-up still recorded as a judgment (Settled)"
+  | _ -> Alcotest.fail "abandon did not produce a terminal give-up state"
+;;
+
+(* task-1676: a legacy [Settled] give-up (ledgers written before [Abandoned])
+   reclassifies to [Abandoned] and reopens in the same [ensure_roots] batch. *)
+let test_legacy_settled_give_up_reclassifies_and_reopens () =
+  with_temp_base "board-attention-partition-legacy-settled-give-up" @@ fun base_path ->
+  let pending =
+    candidate ~id:"candidate-legacy-settled" ~recorded_at:1.0 ()
+  in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  let proof = provenance ~slot_id:"legacy-slot" ~call_id:"legacy-call" () in
+  let bound =
+    P.bind_before_dispatch ~worker_epoch:owner ~base_path ~partition:claimed ~provenance:proof
+    |> ok "bind before legacy settle"
+    |> fsynced "bind before legacy settle"
+  in
+  let blocked =
+    P.block
+      ~now:11.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:bound
+      (P.Exact_execution_quarantined (P.Bound proof))
+    |> ok "block the legacy candidate"
+    |> fsynced "block the legacy candidate"
+  in
+  let legacy_settled =
+    ok "settle (legacy shape)" (P.settle ~now:12.0 ~base_path ~partition:blocked)
+  in
+  ignore legacy_settled;
+  (* The candidate replay keeps its own status [Pending] on disk — exactly
+     the 21 legacy rows task-1660 measured: the Candidate ledger never
+     recorded a judgment for this occurrence, while its durable root was
+     given up as [Settled]. One [ensure_roots] pass must produce
+     [Settled] -> [Abandoned] -> [Ready]. *)
+  let reloaded = ok "load legacy settled" (P.load ~base_path ~keeper_name:"alpha") in
+  let before =
+    List.find_opt
+      (fun (p : P.t) ->
+         String.equal p.P.candidate_id "candidate-legacy-settled"
+         &&
+         match p.P.state with
+         | P.Settled _ | P.Abandoned _ -> true
+         | _ -> false)
+      reloaded
+  in
+  (match before with
+   | Some { P.state = P.Settled _; _ } -> ()
+   | Some { P.state = P.Abandoned _; _ } ->
+     Alcotest.fail "legacy row was rewritten on load (readers must not rewrite)"
+   | _ -> Alcotest.fail "legacy settled give-up was not persisted");
+  let reopened_count =
+    ok
+      "ensure_roots over legacy settled"
+      (P.ensure_roots ~base_path ~keeper_name:"alpha" [ pending ])
+  in
+  Alcotest.(check int) "one pass appends reclassification plus reopen" 2
+    reopened_count;
+  let reloaded_after = ok "load after reopen" (P.load ~base_path ~keeper_name:"alpha") in
+  let latest =
+    List.find_opt
+      (fun (p : P.t) -> String.equal p.P.candidate_id "candidate-legacy-settled")
+      reloaded_after
+  in
+  (match latest with
+   | Some { P.state = P.Ready; _ } -> ()
+   | other -> Alcotest.fail "legacy give-up did not end reopened to Ready");
+  (* The append-only ledger keeps the whole story: the give-up as [Settled],
+     its reclassification to [Abandoned] (with the original give-up time),
+     then the reopen to [Ready]. *)
+  let state_kind (partition : P.t) =
+    match partition.P.state with
+    | P.Ready -> "ready"
+    | P.Running _ -> "running"
+    | P.Completed _ -> "completed"
+    | P.Settled _ -> "settled"
+    | P.Abandoned _ -> "abandoned"
+    | P.Blocked _ -> "blocked"
+  in
+  let states =
+    ledger_lines (P.For_testing.path ~base_path ~keeper_name:"alpha")
+    |> List.map (fun line ->
+           match P.of_yojson (Yojson.Safe.from_string line) with
+           | Ok partition -> state_kind partition
+           | Error _ -> "undecodable")
+  in
+  Alcotest.(check (list string))
+    "reclassification then reopen are both durable"
+    [ "ready"; "running"; "running"; "blocked"; "settled"; "abandoned"; "ready" ]
+    states
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_partition"
@@ -1299,6 +1462,14 @@ let () =
             "invalid or mismatched provenance never rewrites"
             `Quick
             test_invalid_or_mismatched_provenance_never_rewrites
+        ; Alcotest.test_case
+            "abandon records a give-up, not a judgment"
+            `Quick
+            test_abandon_records_a_give_up_not_a_judgment
+        ; Alcotest.test_case
+            "legacy settled give-up reclassifies and reopens"
+            `Quick
+            test_legacy_settled_give_up_reclassifies_and_reopens
         ] )
     ]
 ;;

@@ -288,6 +288,23 @@ let test_add_missing_source () =
     Alcotest.(check (list string)) "no document written" [] (library_documents ctx)
   )
 
+(* The reader requires [author], so the writer refuses a caller with no name
+   instead of writing a document the library then reports as unreadable. *)
+let test_add_with_blank_author_is_refused () =
+  with_temp_base_path (fun ctx ->
+    let ctx = { ctx with Tool_library.agent_name = "  " } in
+    let args = `Assoc [
+      ("title", `String "unsigned doc");
+      ("content", `String "some content");
+      ("source", `String "research");
+    ] in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_add" ~args in
+    Alcotest.(check bool) "blank author fails" false ok;
+    Alcotest.(check bool) "names the author" true
+      (msg_contains ~needle:"no agent name" msg);
+    Alcotest.(check (list string)) "no document written" [] (library_documents ctx)
+  )
+
 (* The library is the caller's workspace, not whatever MASC_BASE_PATH the
    process happens to hold. *)
 let test_library_follows_context_base_path () =
@@ -574,6 +591,7 @@ let () =
       Alcotest.test_case "missing content" `Quick test_add_missing_content;
       Alcotest.test_case "invalid source" `Quick test_add_invalid_source;
       Alcotest.test_case "missing source" `Quick test_add_missing_source;
+      Alcotest.test_case "blank author" `Quick test_add_with_blank_author_is_refused;
       Alcotest.test_case "success" `Quick test_add_success;
       Alcotest.test_case "with tags" `Quick test_add_with_tags;
       Alcotest.test_case "library follows the context base path" `Quick

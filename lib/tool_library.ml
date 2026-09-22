@@ -253,6 +253,12 @@ let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
 
   if String.equal title "" then missing_required ~tool_name ~start_time "title"
   else if String.equal content "" then missing_required ~tool_name ~start_time "content"
+  else if String.equal (String.trim ctx.agent_name) ""
+  then
+    (* The reader requires [author]; a document this handler writes must read
+       back through it, so a caller with no name is refused here rather than
+       leaving a header the library then reports as unreadable. *)
+    workflow_err ~tool_name ~start_time "the caller has no agent name to write as author"
   else begin
     (* The schema requires [source]. A missing or unknown value is refused,
        never filled in: the frontmatter records what kind of work the writer

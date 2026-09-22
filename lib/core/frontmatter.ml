@@ -11,20 +11,21 @@ type t =
   ; body : string
   }
 
+type block =
+  | Absent
+  | Unclosed
+  | Closed of t
+
 let empty content = { fields = []; body = content }
 
-let parse content =
+let read content =
   let lines = String.split_on_char '\n' content in
   match lines with
   | first :: rest when String.equal (String.trim first) "---" ->
-    (* A block that never closes is not frontmatter. Reading it as one threw
-       the whole document away: every line became a field candidate and the
-       body came back empty, so a prompt with a typo in its closing delimiter
-       loaded as blank (#26599). Hand the content back unread instead. *)
     let rec collect acc = function
-      | [] -> empty content
+      | [] -> Unclosed
       | line :: remaining when String.equal (String.trim line) "---" ->
-        { fields = List.rev acc; body = String.concat "\n" remaining }
+        Closed { fields = List.rev acc; body = String.concat "\n" remaining }
       | line :: remaining ->
         let acc =
           match String.index_opt line ':' with
@@ -39,26 +40,30 @@ let parse content =
         collect acc remaining
     in
     collect [] rest
-  | _ -> empty content
+  | _ -> Absent
 ;;
 
-let has_frontmatter content =
-  match String.split_on_char '\n' content with
-  | first :: _ -> String.equal (String.trim first) "---"
-  | [] -> false
-;;
-
-let field t name =
-  match List.assoc_opt name t.fields with
-  | Some value -> value
-  | None -> ""
+(* A block that never closes is not frontmatter. Reading it as one threw the
+   whole document away: every line became a field candidate and the body came
+   back empty, so a prompt with a typo in its closing delimiter loaded as blank
+   (#26599). Hand the content back unread instead; a reader that must tell the
+   two apart asks [read]. *)
+let parse content =
+  match read content with
+  | Closed parsed -> parsed
+  | Absent | Unclosed -> empty content
 ;;
 
 (* `tags: [a, b, c]` and `tags: a, b, c` both appeared among the readers this
    replaced. Accept either: dropping the unbracketed form would silently lose
-   tags that one of them used to return. *)
-let list_field t name =
-  let raw = String.trim (field t name) in
+   tags that one of them used to return.
+
+   This takes the value, not the field name. The caller has already looked
+   the field up, and whether a missing field is an error or an empty list is
+   its call; answering [""] for an absent field here was the third silent
+   default this file used to carry. *)
+let list_value value =
+  let raw = String.trim value in
   let len = String.length raw in
   let inner =
     if len >= 2 && Char.equal raw.[0] '[' && Char.equal raw.[len - 1] ']'

@@ -1280,10 +1280,11 @@ let post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~(host 
      | Error _, _ | Ok _, _ -> ());
     result
 
-let post_keeper_run_next ~host ~port ~keeper_name ~request_id ~interrupt_token =
+(* Run-next reorders the queue and stops nothing: the server signals only
+   the token it is given, and this client gives none. *)
+let post_keeper_run_next ~host ~port ~keeper_name ~request_id =
   let body = Yojson.Safe.to_string (`Assoc
-    ["name", `String keeper_name; "request_id", `String request_id;
-     "interrupt_token", Option.fold ~none:`Null ~some:(fun value -> `String value) interrupt_token]) in
+    ["name", `String keeper_name; "request_id", `String request_id; "interrupt_token", `Null]) in
   match post_json ~host ~port ~path:"/api/v1/keepers/turn/run-next" ~body with
   | Error detail -> Error detail
   | Ok (`Assoc fields) ->

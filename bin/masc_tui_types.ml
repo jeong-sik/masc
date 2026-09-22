@@ -4698,7 +4698,10 @@ type state = {
   mutable keeper_chat_control_pending : (string * int64) list;
   mutable keeper_interactive_waiting : (string * string * local_intervention) list;
   mutable keeper_queue_inflight : string list;
-  mutable keeper_run_next_pending : (Masc_tui_keeper_chat_projection.request * string option) option;
+  (* A promoted message waiting for the server to admit it as Queued, after
+     which run-next asks for first place. Run-next never carries an interrupt
+     token, so nothing about the running turn is kept here. *)
+  mutable keeper_run_next_pending : Masc_tui_keeper_chat_projection.request option;
   (* Whether ^Y ending a voice capture also sends what was heard
      ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken

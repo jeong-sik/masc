@@ -1337,11 +1337,14 @@ let project_input_for_attempt
           RFC-0265 had run and given up. While the scan, the image projection
           and the strip cover the same blocks, this arm is not reached: a
           runtime that takes two modalities one at a time also takes them
-          together (the bundle rule in
-          [Runtime_agent.caps_admit_required_modalities]), so a refused turn
-          holds a block of a refused modality, and either the projection counts
-          it or the strip removes it. This row is what the operator reads when
-          one of them stops covering a block the scan reported. *)
+          together in [Runtime_agent.caps_admit_required_modalities], because
+          document admission reads [supports_multimodal_inputs], the flag
+          that also grants the bundle. So a refused turn holds a block of a
+          refused modality, and either the projection counts it or the strip
+          removes it. Admitting documents on [supports_document_input] instead
+          would make an image plus document turn on a non-multimodal runtime
+          land here. Today this row is what the operator reads when one of the
+          three stops covering a block the scan reported. *)
        Log.Keeper.warn
          "%s: RFC-0265 media degrade unavailable on %s -- required %s, nothing \
           strippable; the capability floor rejects this attempt"

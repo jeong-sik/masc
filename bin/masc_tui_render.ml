@@ -1139,10 +1139,9 @@ let draw_ask_questions buf cols (state : state) ~budget =
     | Ask_answering { aam_ask_id } -> Some aam_ask_id
     | Ask_browsing -> None
   in
-  match state.asks_snapshot with
+  match Masc_tui_types.approvals_open_questions state with
   | None -> ()
-  | Some snapshot -> (
-      let open_rows = Ask_projection.open_rows snapshot in
+  | Some open_rows -> (
       box_divider buf cols;
       box_line buf cols
         (Printf.sprintf "  %s%s[?] Questions waiting on you (%d) · a:open answers%s" Ansi.bold (Theme.warn ())
@@ -1430,11 +1429,7 @@ let render_approvals (state : state) =
   (* The questions a Keeper is waiting on are the fourth kind this surface
      answers, and the only one whose word takes a plural, so it is built
      beside the three rather than inside their format. *)
-  let question_count =
-    match state.asks_snapshot with
-    | Some snapshot -> List.length (Ask_projection.open_rows snapshot)
-    | None -> 0
-  in
+  let question_count = Masc_tui_types.approvals_open_question_count state in
   let count_text =
     let kinds =
       [ (Theme.warn (), List.length state.keeper_tool_approvals, "held")

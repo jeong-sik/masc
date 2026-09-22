@@ -9634,12 +9634,22 @@ let approval_items (state : state) =
    seen from. The badge number is therefore the SUM of approval rows and open
    questions, not an approval count: a badge of 3 may be three approvals,
    three questions, or a mix. *)
-let approvals_surface_pending (state : state) =
-  List.length (approval_items state)
-  +
-  match state.asks_snapshot with
-  | Some snapshot -> List.length (Masc_tui_ask_projection.open_rows snapshot)
+(* The questions behind the count, so the three places that say how many there
+   are cannot count different things: this surface's title, the block heading
+   above the questions themselves, and the badge below. [None] is a reading
+   that has not come back, which is not the same answer as a reading with no
+   question in it -- the block draws nothing for the first and says so for the
+   second. *)
+let approvals_open_questions (state : state) =
+  Option.map Masc_tui_ask_projection.open_rows state.asks_snapshot
+
+let approvals_open_question_count (state : state) =
+  match approvals_open_questions state with
+  | Some rows -> List.length rows
   | None -> 0
+
+let approvals_surface_pending (state : state) =
+  List.length (approval_items state) + approvals_open_question_count state
 
 let is_surface_active (state : state) (s : surface) =
   match s with

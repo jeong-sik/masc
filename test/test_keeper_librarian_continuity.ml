@@ -457,7 +457,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
    with Eio.Cancel.Cancelled _ -> ());
   check bool "cancellation replaces running state" true ((observation ()).state = O.Cancelled);
   O.record ~config ~keeper_name
-    {prepared_at=1000.;runtime_id="fixture";input=O.Uncompressed;request_bytes=1};
+    {prepared_at=1000.;runtime_id="fixture";input=O.Without_snapshot;request_bytes=1};
   O.forget ~config ~keeper_name;
   check bool "forget clears both observations" true
     (Option.is_none (O.latest_synthesis ~config ~keeper_name)

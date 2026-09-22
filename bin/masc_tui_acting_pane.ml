@@ -298,13 +298,27 @@ type detail_part =
   | Detail_input
   | Detail_output
 
+(* Where a call sits in the model response it came from. When the focus
+   block splits the record into responses, the call row draws it in the
+   border cell: a bracket per response, [\xe2\x94\x8c] over the first call,
+   [\xe2\x94\x82] beside the ones between, [\xe2\x94\x94] at the last, and
+   [\xe2\x94\x80] beside a response of one call. Measured on the ledger
+   (2026-09, 21,250 records with more than one response), a response holds
+   1.38 calls on average: a line of its own over each would have been close
+   to half the list, and the bracket costs no row. *)
+type response_place =
+  | Ungrouped
+  | Alone
+  | Opens
+  | Inside
+  | Closes
+
 type logical_row =
   | Fleet_row of keeper * Acting.chunk option
   | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
   | Approval_row of string
   | Calls_heading
-  | Response_break of int
-  | Tool_row of Acting.chunk * Acting.chunk_tool * record_state
+  | Tool_row of Acting.chunk * Acting.chunk_tool * record_state * response_place
   | Call_detail of Acting.chunk * Acting.chunk_tool * detail_part
   | Earlier_turn of Acting.chunk * Reading.keeper_health_reading option
   | Rule
@@ -624,7 +638,17 @@ let dispatch_marks (tool : Acting.chunk_tool) =
   in
   [ batch; deferred; { text = String.make gap_cells ' '; tone = Plain } ]
 
-let tool_line ~cols ~state (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
+(* The border cell of a call row. Out of a bracket it is the pane's edge
+   like every other row; in one it is the bracket, drawn plain so it reads
+   over the dim edge, the calls between included. *)
+let rail_span = function
+  | Ungrouped -> border
+  | Alone -> { text = rule_glyph; tone = Plain }
+  | Opens -> { text = "\xe2\x94\x8c"; tone = Plain }
+  | Inside -> { border with tone = Plain }
+  | Closes -> { text = "\xe2\x94\x94"; tone = Plain }
+
+let tool_line ~cols ~state ~place (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
   let duration =
     match tool.Acting.ct_duration_ms with
     | Some ms -> { text = Acting.elapsed_text ms; tone = Dim }
@@ -648,32 +672,11 @@ let tool_line ~cols ~state (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
   let right = Layout.display_width duration.text in
   let name_room = max 0 (inner - right - (if right > 0 then gap_cells else 0)) in
   fit_line ~cols
-    (with_border
-       ((glyph :: dispatch_marks tool)
-        @ [ { text = Layout.fit_width tool.Acting.ct_tool name_room; tone = Plain }
-          ; { text = (if right > 0 then String.make gap_cells ' ' else ""); tone = Plain }
-          ; duration
-          ]))
-
-(* The line over one model response's calls: a short rule, how many calls
-   are filed under that response, and the rule on to the edge. The eye finds where
-   one response ends without reading the rows. No number for the response:
-   the feed can open mid-turn, and "response 1" would name the first one
-   this screen saw, not the turn's first. *)
-let response_break_line ~cols calls =
-  let count = match calls with 1 -> "1 call" | n -> Printf.sprintf "%d calls" n in
-  let lead = rule_glyph ^ " " in
-  let label = "response" ^ middle_dot ^ count ^ " " in
-  let used =
-    border_cells + mark_cells + Layout.display_width lead + Layout.display_width label
-  in
-  fit_line ~cols
-    (with_border
-       [ { text = String.make mark_cells ' '; tone = Plain }
-       ; { text = lead ^ label; tone = Dim }
-       ; { text = String.concat "" (List.init (max 0 (cols - used)) (fun _ -> rule_glyph))
-         ; tone = Dim
-         }
+    (rail_span place
+     :: (glyph :: dispatch_marks tool)
+     @ [ { text = Layout.fit_width tool.Acting.ct_tool name_room; tone = Plain }
+       ; { text = (if right > 0 then String.make gap_cells ' ' else ""); tone = Plain }
+       ; duration
        ])
 
 (* The heading over the calls: which order they are in. Beside it the
@@ -875,7 +878,7 @@ let ordered_calls order (calls : Acting.chunk_tool list) =
 
    One path breaks the neighbour rule: a deferred composition runs its plan
    under the parent's ordinal after the tool returns, so a child that
-   settles after the next response's calls draws under a line of its own.
+   settles after the next response's calls draws as a response of its own.
    Grouping by ordinal value instead would fix that and merge two responses
    whenever a fresh agent session reuses an ordinal inside one keeper turn,
    which is the worse claim; the ledger of 2026-09-20..22 shows neither
@@ -931,8 +934,8 @@ let focus_rows input chunks name =
     | current :: earlier ->
         let state = record_state ~health current in
         let ordered = ordered_calls input.call_order (Acting.chunk_tools current) in
-        let call_rows tool =
-          Tool_row (current, tool, state)
+        let call_rows (tool, place) =
+          Tool_row (current, tool, state, place)
           ::
           (if is_expanded input ~keeper:name (Acting.call_key tool) then
              List.map
@@ -940,15 +943,24 @@ let focus_rows input chunks name =
                [ Detail_facts; Detail_input; Detail_output ]
            else [])
         in
-        let calls =
+        let placed =
           match responses input.call_order ordered with
           | Some groups ->
               List.concat_map
                 (fun group ->
-                  Response_break (List.length group) :: List.concat_map call_rows group)
+                  match group with
+                  | [ only ] -> [ (only, Alone) ]
+                  | first :: rest ->
+                      let last = List.length rest - 1 in
+                      (first, Opens)
+                      :: List.mapi
+                           (fun i tool -> (tool, if i = last then Closes else Inside))
+                           rest
+                  | [] -> [])
                 groups
-          | None -> List.concat_map call_rows ordered
+          | None -> List.map (fun tool -> (tool, Ungrouped)) ordered
         in
+        let calls = List.concat_map call_rows placed in
         (* A call-less record draws no body row: the header already states
            the observation state and its receipt age. The heading names the
            order only when there are calls in it. *)
@@ -1101,8 +1113,7 @@ let fleet_lines ~below ~scroll (body, overview) =
    reader. Naming four columns over one sentence spends a row saying nothing. *)
 let row_uses_the_columns = function
   | Fleet_row _ | Tool_row _ | Earlier_turn _ -> true
-  | Focus_header _ | Approval_row _ | Calls_heading | Response_break _ | Call_detail _
-  | Rule | More _
+  | Focus_header _ | Approval_row _ | Calls_heading | Call_detail _ | Rule | More _
   | Indicator _ | File_row _ | Formatted_status _ -> false
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
@@ -1208,9 +1219,9 @@ let materialize_row ~cols input = function
       focus_header_line ~cols ~now:input.now ~health name current, Target_none
   | Approval_row tool -> approval_line ~cols tool, Target_none
   | Calls_heading -> calls_heading_line ~cols input.call_order, Target_call_order
-  | Response_break calls -> response_break_line ~cols calls, Target_none
-  | Tool_row (chunk, tool, state) ->
-      tool_line ~cols ~state chunk tool, Target_call (chunk.Acting.ck_keeper, Acting.call_key tool)
+  | Tool_row (chunk, tool, state, place) ->
+      ( tool_line ~cols ~state ~place chunk tool
+      , Target_call (chunk.Acting.ck_keeper, Acting.call_key tool) )
   | Call_detail (chunk, tool, part) ->
       ( call_detail_line ~cols ~now:input.now tool part
       , Target_call (chunk.Acting.ck_keeper, Acting.call_key tool) )

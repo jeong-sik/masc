@@ -1438,7 +1438,7 @@ let test_the_order_cycles_through_all_four () =
   check bool "the first press from newest first turns time around" true
     (Pane.next_call_order Pane.Newest_first = Pane.Oldest_first)
 
-(* ── calls: one line over each model response ───────────────────────── *)
+(* ── calls: a bracket per model response ───────────────────────────── *)
 
 (* The hook's per-call report: provider call [session] ran while runner had
    eleven keeper turns done, so it belongs to keeper turn 12. With it the
@@ -1453,47 +1453,90 @@ let observed ~at session =
       ; to_at = at
       } )
 
-(* One keeper turn, two model responses: the first asked for a Read and a
-   Grep, the second for an Execute. *)
+(* One keeper turn, two model responses: the first asked for a Read, a Grep
+   and a Glob, the second for an Execute. *)
 let two_responses =
   [ observed ~at:940. 7
   ; runner_call ~at:950. ~duration_ms:5. ~id:"r1" ~session:(Some 7) "Read"
-  ; runner_call ~at:955. ~duration_ms:5. ~id:"r2" ~session:(Some 7) "Grep"
+  ; runner_call ~at:953. ~duration_ms:5. ~id:"r2" ~session:(Some 7) "Grep"
+  ; runner_call ~at:956. ~duration_ms:5. ~id:"r3" ~session:(Some 7) "Glob"
   ; observed ~at:960. 8
-  ; runner_call ~at:970. ~duration_ms:5. ~id:"r3" ~session:(Some 8) "Execute"
+  ; runner_call ~at:970. ~duration_ms:5. ~id:"r4" ~session:(Some 8) "Execute"
   ]
 
-let responses_view ?(order = Pane.Newest_first) calls =
+let responses_view ?(order = Pane.Newest_first) ?(expanded = []) calls =
   Pane.lines ~rows ~cols ~scroll:0
-    { (runner_input ~order ()) with Pane.chunks = chunks [ "runner" ] (entries calls) }
+    { (runner_input ~order ~expanded ()) with
+      Pane.chunks = chunks [ "runner" ] (entries calls)
+    }
 
-let says_response texts = List.exists (contains "response") texts
+let opens = "\xe2\x94\x8c"
+let inside = "\xe2\x94\x82"
+let closes = "\xe2\x94\x94"
+let alone = "\xe2\x94\x80"
 
-let test_each_model_response_gets_a_line_over_its_calls () =
+(* The border cell a row starts with, and its tone. *)
+let rail (line : Pane.line) =
+  match line with span :: _ -> (span.Pane.text, span.Pane.tone) | [] -> ("", Pane.Plain)
+
+(* Every call row keeps the pane's dim edge: no bracket anywhere. *)
+let no_bracket label view =
+  let calls =
+    List.combine view.Pane.rows view.Pane.targets
+    |> List.filter_map (fun (row, target) ->
+           match target with Pane.Target_call _ -> Some row | _ -> None)
+  in
+  check bool (label ^ ": the calls draw") true (calls <> []);
+  List.iteri
+    (fun i row ->
+      check bool
+        (Printf.sprintf "%s: call row %d keeps the dim edge" label i)
+        true
+        (rail row = (inside, Pane.Dim)))
+    calls
+
+let test_each_model_response_gets_a_bracket_beside_its_calls () =
   List.iter
     (fun (order, label, expected) ->
       let view = responses_view ~order two_responses in
-      let texts = List.map text view.Pane.rows in
+      (* The four calls take the four rows under the heading: the bracket
+         added none. *)
       List.iteri
-        (fun i want ->
-          check bool (Printf.sprintf "%s: row %d says %s" label i want) true
-            (contains want (List.nth texts (first_call_row + i))))
+        (fun i (glyph, tool) ->
+          let row = List.nth view.Pane.rows (first_call_row + i) in
+          check bool (Printf.sprintf "%s: row %d is %s" label i tool) true
+            (contains tool (text row));
+          check bool (Printf.sprintf "%s: %s wears its place, plain" label tool) true
+            (rail row = (glyph, Pane.Plain));
+          check int (Printf.sprintf "%s: row %d width" label i) cols (width row))
         expected;
-      List.iteri
-        (fun i (row, target) ->
-          if contains "response" (text row) then begin
-            check string (label ^ ": a response line opens nothing") "none"
-              (target_text target);
-            check int (Printf.sprintf "%s: response line %d width" label i) cols (width row)
-          end)
-        (List.combine view.Pane.rows view.Pane.targets))
+      check bool (label ^ ": the heading keeps the dim edge") true
+        (rail (List.nth view.Pane.rows (first_call_row - 1)) = (inside, Pane.Dim)))
     [ ( Pane.Oldest_first
       , "oldest first"
-      , [ "response · 2 calls"; "Read"; "Grep"; "response · 1 call"; "Execute" ] )
+      , [ (opens, "Read"); (inside, "Grep"); (closes, "Glob"); (alone, "Execute") ] )
     ; ( Pane.Newest_first
       , "newest first"
-      , [ "response · 1 call"; "Execute"; "response · 2 calls"; "Grep"; "Read" ] )
+      , [ (alone, "Execute"); (opens, "Glob"); (inside, "Grep"); (closes, "Read") ] )
     ]
+
+(* An opened call's detail rows are the call's, not the response's: they
+   keep the pane's edge and the next call picks the bracket up again. *)
+let test_an_opened_call_inside_a_bracket_keeps_its_detail_on_the_edge () =
+  let view =
+    responses_view ~order:Pane.Oldest_first
+      ~expanded:[ "runner", Acting.Call_by_id "r2" ]
+      two_responses
+  in
+  let row i = List.nth view.Pane.rows (first_call_row + i) in
+  check bool "Grep inside the bracket" true (rail (row 1) = (inside, Pane.Plain));
+  List.iter
+    (fun i ->
+      check bool (Printf.sprintf "detail row %d on the dim edge" i) true
+        (rail (row i) = (inside, Pane.Dim)))
+    [ 2; 3; 4 ];
+  check bool "Glob closes it after the detail" true
+    (rail (row 5) = (closes, Pane.Plain) && contains "Glob" (text (row 5)))
 
 (* The planned index is not the response. A concurrent batch settles in any
    order, so one response's calls arrive as steps 2, 1, 3; and a CLI lane
@@ -1503,11 +1546,7 @@ let test_one_ordinal_is_one_response_whatever_the_planned_index_says () =
   let concurrent step = schedule ~step ~batch_index:0 ~at_once:3 Contract.Concurrent in
   let serial step = schedule ~step ~batch_index:0 ~at_once:1 Contract.Serial in
   List.iter
-    (fun (label, calls) ->
-      let texts = List.map text (responses_view calls).Pane.rows in
-      check bool (label ^ ": every call draws") true
-        (List.for_all (fun tool -> List.exists (contains tool) texts) [ "Read"; "Grep"; "WebFetch" ]);
-      check bool (label ^ ": one response, no line") false (says_response texts))
+    (fun (label, calls) -> no_bracket label (responses_view calls))
     [ ( "a batch settling out of plan order"
       , [ runner_call ~at:950. ~duration_ms:5. ~id:"b2" ~schedule:(concurrent 2) "Read"
         ; runner_call ~at:951. ~duration_ms:5. ~id:"b1" ~schedule:(concurrent 1) "Grep"
@@ -1520,13 +1559,9 @@ let test_one_ordinal_is_one_response_whatever_the_planned_index_says () =
         ] )
     ]
 
-let test_the_sorts_draw_no_response_line () =
+let test_the_sorts_draw_no_bracket () =
   List.iter
-    (fun (order, label) ->
-      let texts = List.map text (responses_view ~order two_responses).Pane.rows in
-      check bool (label ^ ": every call draws") true
-        (List.for_all (fun tool -> List.exists (contains tool) texts) [ "Read"; "Grep"; "Execute" ]);
-      check bool (label ^ ": no response line") false (says_response texts))
+    (fun (order, label) -> no_bracket label (responses_view ~order two_responses))
     [ Pane.Longest_first, "longest first"; Pane.By_tool, "by tool" ]
 
 (* A call that states no ordinal could belong to either response beside it,
@@ -1534,12 +1569,13 @@ let test_the_sorts_draw_no_response_line () =
 let test_a_call_without_an_ordinal_leaves_the_responses_unsaid () =
   let calls =
     two_responses
-    @ [ runner_call ~at:980. ~duration_ms:5. ~id:"r4" ~session:None "Write" ]
+    @ [ runner_call ~at:980. ~duration_ms:5. ~id:"r5" ~session:None "Write" ]
   in
-  let texts = List.map text (responses_view calls).Pane.rows in
+  let view = responses_view calls in
+  let texts = List.map text view.Pane.rows in
   check bool "the unnumbered call draws in the same record" true
     (List.exists (contains "Write") texts && List.exists (contains "Read") texts);
-  check bool "no response line" false (says_response texts)
+  no_bracket "an unnumbered call" view
 
 (* A runtime whose ledger is silent is drawn from the wire, and its frames
    carry the same ordinal. *)
@@ -1556,13 +1592,12 @@ let test_wire_calls_split_into_responses_too () =
     ; wire ~at:970. ~turn:8 ~id:"w2" "Execute"
     ]
   in
-  let texts = List.map text (responses_view ~order:Pane.Oldest_first calls).Pane.rows in
-  check bool "a line over the first response" true
-    (contains "response · 1 call" (List.nth texts first_call_row));
-  check bool "its call" true (contains "Read" (List.nth texts (first_call_row + 1)));
-  check bool "a line over the second" true
-    (contains "response · 1 call" (List.nth texts (first_call_row + 2)));
-  check bool "its call" true (contains "Execute" (List.nth texts (first_call_row + 3)))
+  let view = responses_view ~order:Pane.Oldest_first calls in
+  let row i = List.nth view.Pane.rows (first_call_row + i) in
+  check bool "the first response, alone" true
+    (rail (row 0) = (alone, Pane.Plain) && contains "Read" (text (row 0)));
+  check bool "the second, alone" true
+    (rail (row 1) = (alone, Pane.Plain) && contains "Execute" (text (row 1)))
 
 let test_a_call_row_names_the_call_a_press_opens () =
   let view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ()) in
@@ -1648,12 +1683,13 @@ let () =
             test_the_order_cycles_through_all_four
         ] )
     ; ( "responses"
-      , [ test_case "each model response gets a line over its calls" `Quick
-            test_each_model_response_gets_a_line_over_its_calls
+      , [ test_case "each model response gets a bracket beside its calls" `Quick
+            test_each_model_response_gets_a_bracket_beside_its_calls
+        ; test_case "an opened call inside a bracket keeps its detail on the edge" `Quick
+            test_an_opened_call_inside_a_bracket_keeps_its_detail_on_the_edge
         ; test_case "one ordinal is one response, whatever the planned index says" `Quick
             test_one_ordinal_is_one_response_whatever_the_planned_index_says
-        ; test_case "the sorts draw no response line" `Quick
-            test_the_sorts_draw_no_response_line
+        ; test_case "the sorts draw no bracket" `Quick test_the_sorts_draw_no_bracket
         ; test_case "a call without an ordinal leaves the responses unsaid" `Quick
             test_a_call_without_an_ordinal_leaves_the_responses_unsaid
         ; test_case "wire calls split into responses too" `Quick

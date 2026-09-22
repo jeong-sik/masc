@@ -224,11 +224,15 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     it ran in a batch with others, [>] when it returned a deferral.
 
     Under either receipt order, a record whose calls came from more than one
-    model response draws a line over each response's calls saying how many
-    calls are filed under it (a composition's calls count with the response
-    that asked for the composition). The response is the call's session ordinal, not its planned
-    index. No line draws under the two sorts, which interleave responses,
-    for a single response, or when any call states no ordinal.
+    model response brackets each response in the call rows' border cell:
+    [\xe2\x94\x8c] beside its first call, [\xe2\x94\x82] beside the calls
+    between, [\xe2\x94\x94] beside its last, [\xe2\x94\x80] beside a
+    response of one call, all plain over the dim edge. No row is added. A
+    composition's calls sit with the response that asked for the
+    composition. The response is the call's session ordinal, not its
+    planned index. Call rows keep the plain edge under the two sorts, which
+    interleave responses, for a single response, and when any call states
+    no ordinal.
 
     Recent tab under [Selected_only]: the fleet rows of keepers waiting on
     an approval, then the selected keeper's focus block, windowed like the

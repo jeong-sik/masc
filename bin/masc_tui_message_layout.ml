@@ -1091,6 +1091,18 @@ let wrap_words ~max_cells text =
   in
   loop [] (String.split_on_char ' ' text)
 
+(* [HH:MM:SS] cut to the minute for the inline margin. Seconds earn their
+   width on a row of their own; in a margin they are paid for once per message.
+   Text that is not a clock of that shape is left as it is rather than cut
+   blind. *)
+let short_clock timestamp =
+  if
+    String.length timestamp = 8
+    && Char.equal timestamp.[2] ':'
+    && Char.equal timestamp.[5] ':'
+  then String.sub timestamp 0 5
+  else timestamp
+
 (* Consecutive messages from one speaker share a heading. Repeating
    "[time] speaker request" on each of them spent a row per message saying who
    was talking, and a keeper answering in four parts said it four times.
@@ -1119,14 +1131,39 @@ let continues_previous ~(previous : entry option) (entry : entry) =
    [timestamp] is display text, not a time. A heading without a clock draws
    nothing in the clock's place; a continuation that cannot say when it
    moved has no row to draw. *)
+(* Who a row speaks for inside one request. A keeper's reply and the work it
+   did to get there -- reasoning, tool calls, skills -- are one voice, the
+   turn's. Everyone else in the request speaks for themselves: the operator
+   who asked, a keeper writing in, the server's status, the pane's own
+   notes. *)
+let speaks_for_turn = function
+  | Keeper | Tool | Skill _ | Thinking -> true
+  | User | Inbound | Status | Local | Journal | Error -> false
+
+(* Under [Origin_row] a heading opens a turn, not a block. A turn that thought,
+   called a tool and answered, eight rounds over, drew a heading above each of
+   its twenty-three blocks -- the same request, the same clock, the same name
+   -- and the blocks it separated were already told apart by how they draw:
+   reasoning dim, tool calls on their rail, the reply in plain text. *)
+let continues_turn ~(previous : entry) (entry : entry) =
+  (not (String.equal entry.request_label ""))
+  && String.equal previous.request_label entry.request_label
+  && speaks_for_turn previous.style
+  && speaks_for_turn entry.style
+
 let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
   let clock =
     match entry.timeline_bucket with
     | Some _ -> Some entry.timestamp
     | None -> None
   in
+  let within_turn =
+    match previous with
+    | Some previous -> continues_turn ~previous entry
+    | None -> false
+  in
   let metadata =
-    if not (continues_previous ~previous entry) then
+    if not (within_turn || continues_previous ~previous entry) then
       Some
         ( Origin
             { clock;
@@ -1139,6 +1176,14 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
     else
       match clock, previous with
       | None, _ -> None
+      (* Inside a turn the clock is the minute, the unit the inline margin
+         already counts in: seconds between a call and the reasoning after it
+         are the turn working, not a pause worth a row. *)
+      | Some _, Some previous
+        when within_turn
+             && String.equal (short_clock previous.timestamp)
+                  (short_clock entry.timestamp) ->
+          None
       | Some _, Some previous
         when String.equal previous.timestamp entry.timestamp ->
           None
@@ -1150,7 +1195,10 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
   | Some (metadata, text) ->
     let fitted, _, _ = cell_prefix text inner_width in
     Some
-      { style = entry.style
+      { style =
+          (* The heading stands for the whole turn, so it draws as the keeper
+             speaking whichever block the turn happened to open with. *)
+          (if speaks_for_turn entry.style then Keeper else entry.style)
       ; kind = Metadata metadata
       ; shade = Shade_none
       ; text = fitted
@@ -1235,10 +1283,6 @@ let wrap_body ?markdown ~max_cells ~sanitize text =
    [rows_of_entry] has always floored it at. *)
 let min_body_cells = 4
 
-(* [HH:MM:SS] cut to the minute for the inline margin. Seconds earn their
-   width on a row of their own; in a margin they are paid for once per message.
-   Text that is not a clock of that shape is left as it is rather than cut
-   blind. *)
 (* Every row's clock takes the same cells. A settled row says "23:38" and the
    streaming turn says "live", and the gutter's width is what the body's width
    is taken from, so one cell of difference wrapped the live body differently
@@ -1249,14 +1293,6 @@ let pad_clock text =
   let cells = display_width text in
   if cells >= chat_clock_column then text
   else String.make (chat_clock_column - cells) ' ' ^ text
-
-let short_clock timestamp =
-  if
-    String.length timestamp = 8
-    && Char.equal timestamp.[2] ':'
-    && Char.equal timestamp.[5] ':'
-  then String.sub timestamp 0 5
-  else timestamp
 
 (* [Origin_row] leaves the origin on a row of its own. The other two fold it
    into the body's left margin, which buys back a row per message -- eight

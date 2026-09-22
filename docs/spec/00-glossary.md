@@ -133,6 +133,24 @@ status: reference
   ([`Runtime_execution.t`](../../lib/runtime/runtime_execution.mli)). MASC는 해당 레인의 결과를
   조율·기록한다.
 
+**Keeper Fleet Blocker (Keeper fleet 차단 사유)**
+: Keeper fleet가 설정된 만큼 돌지 못하는 첫 번째 까닭. fleet scan이 `blocker`로 보고한다.
+  `Keeper_fleet_blocker.t`가 닫힌 일곱 이름을 소유한다 — `Keeper_bootstrap_disabled`(Keeper
+  boot가 꺼져 아무 Keeper도 turn을 못 잡음), `No_executable_keeper_fibers`(turn을 돌릴
+  Keeper fiber가 없음), `Turn_configuration_error`(Keeper의 turn 설정이 무효라 재시도해도
+  안 바뀜), `Official_client_recovery_required`(공식 클라이언트 Keeper 세션이 명시적 복구를
+  기다림), `Reaction_capacity_below_target`(fleet가 설정된 수보다 적은 Keeper가 반응함),
+  `Active_task_owner_without_executable_fiber`(활성 task를 쥔 Keeper에 그 task를 돌릴 fiber가
+  없음), `Durable_paused_autoboot_enabled`(스스로 boot하도록 둔 Keeper가 durable pause에
+  걸림). scan은 이 타입의 순서대로 검사해 처음 성립하는 하나만 이름 붙인다 — 여럿이 동시에
+  성립해도 하나만 말한다. 서버가 wire 이름을 쓰고 터미널 클라이언트가 `of_wire_name`으로
+  되읽으므로 양쪽이 제 사본을 두지 않는다. 이 build가 모르는 이름은 `None`이고, TUI 헤더는
+  그 이름을 서버가 쓴 그대로 그린다(`Masc_tui_fleet_line.blocker_text`) — 더 새 서버의 사유도
+  사유다. 아는 이름은 아래 counts 줄이 같은 Keeper 무리에 쓰는 말로 그린다(예: "autoboot
+  keepers paused"). 이 줄은 까닭만 말하고 수는 아래 줄이 나른다.
+  → [Keeper_fleet_blocker](../../lib/keeper/keeper_fleet_blocker.mli),
+  [Masc_tui_fleet_line](../../bin/masc_tui_fleet_line.mli)
+
 **Terminal Reason**
 : 끝난 Keeper turn의 이유를 담은 영수증 필드(`terminal_reason_code`).
   `Keeper_terminal_reason.of_wire`가 이 wire 문자열을 닫힌 합타입으로 한 번 파싱하고,

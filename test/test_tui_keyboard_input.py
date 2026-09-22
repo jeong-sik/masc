@@ -8625,13 +8625,19 @@ def skills_usage_clarity_interaction(
         ]
         expected.extend(f"Unavailable: {reason}".encode() for reason in unavailable)
         if observed:
-            expected.extend((b"work-intake", b"alpha 12/12/9", b"2026-08-28T03:04:05Z"))
+            expected.extend((b"work-intake", b"alpha"))
         for needle in expected:
             if needle not in rendered:
                 raise AssertionError(f"Skill usage did not show {needle!r}: {usage!r}")
+        # One keeper, one row, counts in their own columns (#37830). The time is
+        # the terminal's zone, so only the date's shape is pinned.
+        if observed and not re.search(rb"alpha\s+12\s+12\s+9\s+\d{4}-", rendered):
+            raise AssertionError(
+                f"the keeper's counts are not in their own columns: {usage!r}"
+            )
         if b"never invoked" in rendered:
             raise AssertionError(f"Unknown historical usage was called never invoked: {usage!r}")
-        if not observed and b"alpha 12/12/9" in rendered:
+        if not observed and re.search(rb"alpha\s+12\s+12\s+9", rendered):
             raise AssertionError(f"Unobserved usage inherited a previous count: {usage!r}")
         os.write(master_fd, b"q")
 
@@ -8686,7 +8692,7 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
             if initial_error:
                 if b"unavailable (no catalog reading)" not in rendered:
                     raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
-            elif b"alpha 12/12/9" not in rendered:
+            elif not re.search(rb"alpha\s+12\s+12\s+9\s+\d{4}-", rendered):
                 raise AssertionError(f"Refresh failure lost the previous known counts: {frame!r}")
             os.write(master_fd, b"q")
 

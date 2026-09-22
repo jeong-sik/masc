@@ -23,6 +23,7 @@ import { fetchKeepersComposite } from '../api/keeper'
 import type {
   FleetCompositeSnapshot,
   KeeperCompositeSnapshot,
+  KeeperRuntimeAttention,
 } from '../api/keeper'
 import { fleetCompositeSnapshot } from '../composite-signals'
 import { dispatchOperatorAction } from '../operator-store'
@@ -115,7 +116,13 @@ export type KeeperFleetHistory = Record<string, Record<LaneKey, string[]>>
 
 const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'runtime']
 
-export type FleetRuntimeAttentionLevel = 'ok' | 'stale' | 'idle' | 'blocked'
+export type FleetRuntimeAttentionLevel =
+  | 'ok'
+  | 'stale'
+  | 'idle'
+  | 'blocked'
+  | 'paused'
+  | 'offline'
 
 export type FleetRuntimeAttention = {
   level: FleetRuntimeAttentionLevel
@@ -152,6 +159,8 @@ const RUNTIME_ATTENTION_CLASS: Record<FleetRuntimeAttentionLevel, string> = {
   stale: 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   idle: 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   blocked: 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
+  paused: 'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
+  offline: 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
 }
 
 const RUNTIME_ACTION_TYPES = new Set([
@@ -256,42 +265,67 @@ function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   return parts
 }
 
-function backendRuntimeAttentionLevel(
-  state: string,
-  blocked: boolean,
-): FleetRuntimeAttentionLevel {
-  if (blocked || state === 'blocked' || state === 'stop_requested') return 'blocked'
-  if (state === 'idle_stale') return 'idle'
-  if (state === 'stale') return 'stale'
-  return 'ok'
+type BackendAttentionJudgment = {
+  level: FleetRuntimeAttentionLevel
+  label: string
+  nextStep: string
 }
 
-function backendRuntimeAttentionLabel(
-  level: FleetRuntimeAttentionLevel,
-  state: string,
-): string {
-  if (state === 'stop_requested') return '정지 요청'
-  if (level === 'blocked') return '정체'
-  if (level === 'stale') return 'stale'
-  if (level === 'idle') return '무전환'
-  return 'live'
-}
-
-function backendRuntimeAttentionNextStep(
-  level: FleetRuntimeAttentionLevel,
-  state: string,
+// One arm per server state (`runtime_attention_state_to_wire`). The schema
+// rejects anything outside the set, so there is no fallback level.
+function backendAttentionJudgment(
+  state: KeeperRuntimeAttention['state'],
   reason: string,
-): string {
-  if (state === 'stop_requested') return 'supervisor 회수 또는 shutdown 완료 여부 확인'
-  if (level === 'blocked') return `backend runtime_attention blocker 확인: ${reason}`
-  if (level === 'stale') return 'latest runtime evidence refresh 또는 keeper_probe 실행'
-  if (level === 'idle') return 'backlog, admission, trigger가 없는지 확인'
-  return '조치 불필요'
+  isLive: boolean,
+): BackendAttentionJudgment {
+  switch (state) {
+    case 'blocked':
+      return {
+        level: 'blocked',
+        label: '정체',
+        nextStep: `backend runtime_attention blocker 확인: ${reason}`,
+      }
+    case 'stop_requested':
+      return {
+        level: 'blocked',
+        label: '정지 요청',
+        nextStep: 'supervisor 회수 또는 shutdown 완료 여부 확인',
+      }
+    case 'idle_stale':
+      return {
+        level: 'idle',
+        label: '무전환',
+        nextStep: 'backlog, admission, trigger가 없는지 확인',
+      }
+    case 'stale':
+      return {
+        level: 'stale',
+        label: 'stale',
+        nextStep: 'latest runtime evidence refresh 또는 keeper_probe 실행',
+      }
+    case 'ok':
+      return { level: 'ok', label: isLive ? 'live' : '대기', nextStep: '조치 불필요' }
+    case 'paused':
+      return {
+        level: 'paused',
+        label: '일시정지',
+        nextStep: '운영자가 멈춘 keeper · 재개 여부 결정',
+      }
+    case 'offline':
+      return {
+        level: 'offline',
+        label: '미실행',
+        nextStep: 'registry 에 없는 keeper · 기동 여부 확인',
+      }
+    default: {
+      const unreachable: never = state
+      throw new Error(`unsupported runtime_attention state: ${String(unreachable)}`)
+    }
+  }
 }
 
-// The backend's `composite_runtime_attention` is the only judge of whether a
-// keeper is blocked, stale, or idle. The receipt fields only feed the
-// evidence text.
+// The backend is the only judge of whether a keeper is blocked, stale, idle,
+// paused, or offline. The receipt fields only feed the evidence text.
 function runtimeAttentionFromBackend(
   snapshot: KeeperCompositeSnapshot,
   ageSec: number | null,
@@ -299,30 +333,27 @@ function runtimeAttentionFromBackend(
   evidenceText: string,
 ): FleetRuntimeAttention {
   const backend = snapshot.runtime_attention
-  if (
-    backend.state === 'ok' &&
-    !backend.needs_attention &&
-    !backend.blocked &&
-    !backend.fiber_stop_requested
-  ) {
+  const reason = backend.reason ?? backend.state
+  const { level, label, nextStep } = backendAttentionJudgment(
+    backend.state,
+    reason,
+    snapshot.is_live,
+  )
+  if (level === 'ok') {
     const cause = snapshot.is_live
       ? `live turn 관측 중 · latest ${ageText}`
       : `live turn 없음 · latest ${ageText}`
     return {
-      level: 'ok',
-      label: snapshot.is_live ? 'live' : '대기',
+      level,
+      label,
       reason: ageText,
       cause,
-      nextStep: '조치 불필요',
+      nextStep,
       title: `원인: ${cause} · 증거: ${evidenceText}`,
       ageSec,
     }
   }
-  const reason = backend.reason ?? backend.state
-  const level = backendRuntimeAttentionLevel(backend.state, backend.blocked)
-  const label = backendRuntimeAttentionLabel(level, backend.state)
   const cause = `${backend.source}: ${backend.state}${reason ? ` · ${reason}` : ''}`
-  const nextStep = backendRuntimeAttentionNextStep(level, backend.state, reason)
   const reasonText = backend.needs_attention
     ? `backend runtime_attention · ${backend.state}${reason ? ` · ${reason}` : ''}`
     : `backend runtime_attention · ${backend.state}`
@@ -911,7 +942,11 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
               let rowTone = ''
               if (anyViolated || attention.level === 'blocked') {
                 rowTone = 'border-l-2 border-[var(--bad-20)]'
-              } else if (attention.level === 'stale' || attention.level === 'idle') {
+              } else if (
+                attention.level === 'stale'
+                || attention.level === 'idle'
+                || attention.level === 'offline'
+              ) {
                 rowTone = 'border-l-2 border-[var(--warn-20)]'
               }
               const name = inferKeeperNameFrom(snap)

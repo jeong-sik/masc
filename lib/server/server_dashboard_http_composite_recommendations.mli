@@ -73,7 +73,7 @@ type composite_runtime_attention =
   cra_stale_without_live_turn : bool;
   cra_needs_attention : bool;
   cra_reason : string option;
-  cra_state : string;
+  cra_state : Server_dashboard_http_composite_claims.runtime_attention_state;
 }
 val composite_runtime_attention :
   snapshot:Yojson.Safe.t ->

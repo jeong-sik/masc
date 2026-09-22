@@ -440,6 +440,14 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(() => parseKeeperCompositeSnapshot(noAttention)).toThrow(CompositeSchemaDriftError)
   })
 
+  it('throws CompositeSchemaDriftError for a runtime_attention state outside the server set', () => {
+    const unknownState = {
+      ...VALID_SNAPSHOT,
+      runtime_attention: { ...VALID_SNAPSHOT.runtime_attention, state: 'healthy' },
+    }
+    expect(() => parseKeeperCompositeSnapshot(unknownState)).toThrow(CompositeSchemaDriftError)
+  })
+
   it('throws CompositeSchemaDriftError for non-object input', () => {
     expect(() => parseKeeperCompositeSnapshot('string')).toThrow(CompositeSchemaDriftError)
     expect(() => parseKeeperCompositeSnapshot(null)).toThrow(CompositeSchemaDriftError)

@@ -418,6 +418,30 @@ let composite_execution_current_for_runtime_state ~snapshot ~execution =
       | _ -> false)
 ;;
 
+(* The closed set of [runtime_attention.state] wire values.
+   [composite_runtime_attention] judges a keeper in the registry and yields one
+   of the first five. [Server_dashboard_http_keeper_api.offline_keeper_composite_json]
+   answers for a keeper that has meta on disk but no registry entry and yields
+   [Attention_paused] or [Attention_offline]. *)
+type runtime_attention_state =
+  | Attention_blocked
+  | Attention_stop_requested
+  | Attention_idle_stale
+  | Attention_stale
+  | Attention_ok
+  | Attention_paused
+  | Attention_offline
+
+let runtime_attention_state_to_wire = function
+  | Attention_blocked -> "blocked"
+  | Attention_stop_requested -> "stop_requested"
+  | Attention_idle_stale -> "idle_stale"
+  | Attention_stale -> "stale"
+  | Attention_ok -> "ok"
+  | Attention_paused -> "paused"
+  | Attention_offline -> "offline"
+;;
+
 type composite_runtime_attention =
   { cra_is_live : bool
   ; cra_fiber_stop_requested : bool
@@ -431,7 +455,7 @@ type composite_runtime_attention =
   ; cra_stale_without_live_turn : bool
   ; cra_needs_attention : bool
   ; cra_reason : string option
-  ; cra_state : string
+  ; cra_state : runtime_attention_state
   }
 
 let composite_runtime_attention ~snapshot ~execution =
@@ -487,14 +511,14 @@ let composite_runtime_attention ~snapshot ~execution =
   in
   let state =
     if blocked
-    then "blocked"
+    then Attention_blocked
     else if fiber_stop_requested
-    then "stop_requested"
+    then Attention_stop_requested
     else if idle_attention
-    then "idle_stale"
+    then Attention_idle_stale
     else if stale_without_live_turn
-    then "stale"
-    else "ok"
+    then Attention_stale
+    else Attention_ok
   in
   { cra_is_live = is_live
   ; cra_fiber_stop_requested = fiber_stop_requested
@@ -514,7 +538,7 @@ let composite_runtime_attention ~snapshot ~execution =
 
 let composite_runtime_attention_json attention ~snapshot =
   `Assoc
-    [ "state", `String attention.cra_state
+    [ "state", `String (runtime_attention_state_to_wire attention.cra_state)
     ; "needs_attention", `Bool attention.cra_needs_attention
     ; "blocked", `Bool attention.cra_blocked
     ; "fiber_stop_requested", `Bool attention.cra_fiber_stop_requested

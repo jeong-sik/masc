@@ -3244,6 +3244,40 @@ let test_offline_keeper_composite_exposes_secret_projection () =
     false
     (String_util.contains_substring (Yojson.Safe.to_string json) sentinel)
 
+let test_offline_keeper_composite_names_why_the_keeper_is_not_running () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let module Claims = Server_dashboard_http_composite_claims in
+  let attention_state ~paused =
+    let keeper_name = if paused then "offline-paused" else "offline-absent" in
+    let meta =
+      match
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+             [ "name", `String keeper_name
+             ; "trace_id", `String (keeper_name ^ "-trace")
+             ])
+      with
+      | Ok meta -> { meta with Masc.Keeper_meta_contract.paused }
+      | Error err -> Alcotest.failf "meta fixture failed: %s" err
+    in
+    Server_dashboard_http_keeper_api.offline_keeper_composite_json
+      ~config
+      keeper_name
+      meta
+    |> Yojson.Safe.Util.member "runtime_attention"
+    |> Yojson.Safe.Util.member "state"
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string)
+    "a paused keeper without a registry entry reads as paused"
+    (Claims.runtime_attention_state_to_wire Claims.Attention_paused)
+    (attention_state ~paused:true);
+  Alcotest.(check string)
+    "an unpaused keeper without a registry entry reads as offline"
+    (Claims.runtime_attention_state_to_wire Claims.Attention_offline)
+    (attention_state ~paused:false)
+
 let keeper_state_diagram_meta ?last_runtime_attempt_provider name =
   let runtime_attempt_fields =
     match last_runtime_attempt_provider with
@@ -6328,6 +6362,8 @@ let () =
             test_execution_trust_does_not_call_full_keeper_projection;
           test_case "offline keeper composite exposes secret projection" `Quick
             test_offline_keeper_composite_exposes_secret_projection;
+          test_case "offline keeper composite names why the keeper is not running" `Quick
+            test_offline_keeper_composite_names_why_the_keeper_is_not_running;
           test_case "state diagram runtime projection redacts live evidence" `Quick
             test_state_diagram_runtime_projection_redacts_live_runtime_evidence;
           test_case "activation config materializes missing TOML" `Quick

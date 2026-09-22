@@ -422,6 +422,37 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(result.reason).toContain('idle_composite')
   })
 
+  it('draws the offline fallback states as paused or not running, not as live', () => {
+    const paused = snapshot({
+      phase: 'paused',
+      runtime_attention: attention({
+        state: 'paused',
+        needs_attention: true,
+        reason: 'paused_without_registry_entry',
+        source: 'offline_composite_fallback',
+      }),
+    })
+    const offline = snapshot({
+      phase: 'offline',
+      runtime_attention: attention({
+        state: 'offline',
+        needs_attention: true,
+        reason: 'registry_absent',
+        source: 'offline_composite_fallback',
+      }),
+    })
+
+    const pausedAttention = runtimeAttentionForSnapshot(paused, generatedAt)
+    expect(pausedAttention.level).toBe('paused')
+    expect(pausedAttention.label).toBe('일시정지')
+    expect(pausedAttention.cause).toContain('paused_without_registry_entry')
+
+    const offlineAttention = runtimeAttentionForSnapshot(offline, generatedAt)
+    expect(offlineAttention.level).toBe('offline')
+    expect(offlineAttention.label).toBe('미실행')
+    expect(offlineAttention.cause).toContain('registry_absent')
+  })
+
   it('counts live, blocked, stale, and idle runtime truth separately', () => {
     const live = snapshot({
       name: 'live',

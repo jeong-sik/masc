@@ -534,7 +534,9 @@ let carried_start_range
         ; absorbed_through = snapshot.end_atom
         ; working_state = snapshot.working_state
         }
-    | Absorbed _ | No_position -> Plain seed_or_lane
+    | Absorbed _ | No_position ->
+      let first_atom, front = seed_or_lane in
+      Plain (first_atom, front)
   in
   let carried_messages, first_atom, front =
     match plan with

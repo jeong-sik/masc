@@ -295,7 +295,14 @@ let validate_shell_ir_paths ?(requires_existing_dir = true) ?workdir shell_ir =
   in
   let judge_operands () =
     Execute_script_paths.judge_operands
-      ~judge:validate_path_value
+      ~judge:(fun ~requires_existing_dir:is_cd value ->
+        (* A cd operand must name an existing directory only where the
+           command runs on this filesystem: [requires_existing_dir] is false
+           for a guest (micro-VM, SSH, delegated) whose checkouts the host
+           cannot see. Judging every cd operand with [is_cd] alone refused
+           "cd masc" on every microvm keeper for a checkout its own prompt
+           listed -- 145 tool_execute rejections on 2026-09-22. *)
+        validate_path_value ~requires_existing_dir:(is_cd && requires_existing_dir) value)
       ~limit:16
       shell_ir
   in

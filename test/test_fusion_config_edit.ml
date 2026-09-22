@@ -60,13 +60,51 @@ let read path =
     (fun () -> really_input_string channel (in_channel_length channel))
 ;;
 
+(* Boot tolerates a runtime whose models the AGENT_CORE catalog does not know;
+   a commit does not, and every operation here commits. The fixture's models
+   are declared to the catalog so the write reaches the fusion edit rather than
+   stopping at the catalog gate. *)
+let model_catalog =
+  {|
+[[models]]
+id_prefix = "gpt-5.4"
+provider_name = "stub-http"
+base = "openai_chat"
+max_context_tokens = 200000
+supports_tools = true
+|}
+;;
+
+let write_file path content =
+  let channel = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out channel) (fun () -> output_string channel content)
+;;
+
+let with_model_catalog f =
+  let previous = Llm_provider.Model_catalog.global () in
+  let path = Filename.temp_file "fusion-config-edit-models" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous with
+       | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+       | None -> Llm_provider.Model_catalog.clear_global ());
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       write_file path model_catalog;
+       match Llm_provider.Model_catalog.load_file path with
+       | Error detail -> failf "test AGENT_CORE model catalog must load: %s" detail
+       | Ok catalog ->
+         Llm_provider.Model_catalog.set_global catalog;
+         f ())
+;;
+
 let with_config f =
+  with_model_catalog @@ fun () ->
   let snapshot = Runtime.For_testing.snapshot () in
   let dir = Filename.temp_dir "fusion-config-edit" "" in
   let path = Filename.concat dir "runtime.toml" in
-  let channel = open_out_bin path in
-  output_string channel fixture;
-  close_out channel;
+  write_file path fixture;
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore snapshot)
     (fun () ->

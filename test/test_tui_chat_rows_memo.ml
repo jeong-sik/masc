@@ -26,7 +26,7 @@ let entry_at ?(keeper = "alpha") ?(request_id = "") at : Tui_types.msg_entry =
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
-  ; me_skill_activity = None
+  ; me_skill_block = []
   ; me_timestamp = ""
   ; me_request_id = request_id
   ; me_at = at

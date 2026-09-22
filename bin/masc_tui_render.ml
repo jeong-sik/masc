@@ -4515,7 +4515,9 @@ let render_keeper_list (state : state) =
          else (Theme.warn ())
        in
        let blocker =
-         match fleet.fs_blocker with None -> "" | Some b -> "   blocker: " ^ b
+         match Masc_tui_fleet_line.blocker_text fleet with
+         | None -> ""
+         | Some text -> "   " ^ text
        in
        box_line buf cols
          (Printf.sprintf
@@ -4525,20 +4527,8 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
-       (* The phase snapshot partitions failing keepers into recovering,
-          configuration errors and explicit official-client session recovery.
-          Every failing Keeper belongs to exactly one class, so these three
-          counts sum to the displayed failing count. The latter two require
-          action beyond repeating the same turn. *)
        let failing_entry =
-         if fleet.fs_failing_count = 0 then []
-         else
-           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d · session-recovery-required %d)"
-               fleet.fs_failing_count
-               fleet.fs_recovering_count
-               fleet.fs_turn_configuration_error_count
-               fleet.fs_official_client_recovery_required_count
-           ]
+         Option.to_list (Masc_tui_fleet_line.failing_text fleet)
        in
        let counts =
          failing_entry

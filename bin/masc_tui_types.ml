@@ -1931,10 +1931,14 @@ type planning_backlog = Tui_decode.planning_backlog
   pb_cancelled: int;
 }
 
+type fleet_blocker = Tui_decode.fleet_blocker =
+  | Blocker of Masc.Keeper_fleet_blocker.t
+  | Unrecognised_blocker of string
+
 type fleet_safety = Tui_decode.fleet_safety
   = {
   fs_status: string;
-  fs_blocker: string option;
+  fs_blocker: fleet_blocker option;
   fs_operator_action_required: bool;
   fs_bootable_count: int;
   fs_running_count: int;

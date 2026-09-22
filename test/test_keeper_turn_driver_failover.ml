@@ -4819,10 +4819,21 @@ let test_access_failover_preserves_effect_and_caller_authority () =
 ;;
 
 let test_exhausted_access_errors_rotate_and_deterministic_requests_remain_terminal () =
+  (* A request that did not parse is the request's own defect: every walk
+     predicate refuses it, so no other candidate is asked (#37631 keeps
+     Json_parse_error terminal while an unknown 400 walks on). *)
+  let unparsed_request =
+    Agent_core.Error.Api
+      (Agent_core.Retry.InvalidRequest
+         { message = "request body is not valid JSON"
+         ; reason = Agent_core.Retry.Json_parse_error
+         })
+  in
   let cases =
+    (unparsed_request, ["first"])
     (* HTTP 400 carries no machine-readable reason, so the lane walk advances to
        the next declared candidate (attempt_rejected_should_try_next). *)
-    (access_error_from_http 400, ["first"; "last"])
+    :: (access_error_from_http 400, ["first"; "last"])
     :: (Masc.Keeper_codex_runtime.For_testing.codex_error_to_core_error
           (Runtime_codex_app_server.Invalid_config "bad path"), ["first"])
     :: List.map (fun (_, error) -> error, ["first"; "last"])

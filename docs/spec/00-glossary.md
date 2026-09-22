@@ -43,12 +43,19 @@ status: reference
 : TUI 세션이 왜 끝났는지 자기 stderr 로그(`.masc/logs/masc-tui-<pid>.log`)에 남기는 한 줄.
   `Masc_tui_exit_reason.t`가 닫힌 어휘를 소유한다 — `Quit_key`(q·Q·Ctrl-Q),
   `Interrupt`(첫 Ctrl-C가 아직 살아 있는 동안의 두 번째 Ctrl-C), `Terminate of string`
-  (SIGTERM·SIGHUP·SIGQUIT), `Exception of string`(루프를 빠져나온 잡히지 않은 예외).
+  (SIGTERM·SIGHUP·SIGQUIT), `Exception of string`(루프를 빠져나온 잡히지 않은 예외),
+  `Unrecorded`(사유를 적지 않고 루프를 떠난 경우). 마지막 것이 `Exception`과 따로 있는
+  까닭은 아무도 예외를 관측하지 않았기 때문이다 — 없던 실패를 지어내면 읽는 쪽이 그것을
+  찾아 나선다.
   `is_normal`이 정상/비정상을 가른다: 정상은 운영자나 세션 주인이 의도해 끝낸 것
-  (`Quit_key`·`Interrupt`·`Terminate`), 비정상은 요청 없이 표면이 떠난 것(`Exception`)이다.
-  줄은 `exit: normal (quit key)` 꼴이고, detail에 제어 바이트가 있으면 먼저 한 줄로
-  평탄화한다 — 로그를 한 줄씩 읽기 때문이다. 이 줄이 끝의 유일한 기록이다: 로그에는
-  기동 줄만 있어, 끝난 세션은 사유를 남기지 않았다. **Terminal Reason**과 다른 축이다 —
+  (`Quit_key`·`Interrupt`·`Terminate`), 비정상은 요청 없이 표면이 떠난 것
+  (`Exception`·`Unrecorded`)이다.
+  줄은 `[masc-tui] exit: normal (quit key)` 꼴이다 — 접두까지 넣어 grep해야 이 줄만
+  모인다. detail에 제어 바이트가 있으면 먼저 한 줄로 평탄화하고, 200바이트를 넘는 사유는
+  UTF-8 문자 경계에서 자른 뒤 `[+N bytes]`로 버린 양을 적는다 — 로그를 한 줄씩 읽는
+  데다, 백트레이스 하나가 한 줄을 킬로바이트로 만들면 이 줄의 목적이 사라지기 때문이다.
+  이 줄이 끝의 유일한 기록이다: 로그에는 기동 줄만 있어, 끝난 세션은 사유를 남기지
+  않았다. **Terminal Reason**과 다른 축이다 —
   Terminal Reason은 끝난 Keeper turn의 영수증 필드이고, Exit Reason은 TUI 프로세스
   세션이 끝난 까닭이다.
   → [Masc_tui_exit_reason](../../bin/masc_tui_exit_reason.mli), [TUI 안내](../TUI-GUIDE.md)
@@ -132,6 +139,24 @@ status: reference
   Agent run 또는 공식 클라이언트의 모델·도구 실행을 사용한다
   ([`Runtime_execution.t`](../../lib/runtime/runtime_execution.mli)). MASC는 해당 레인의 결과를
   조율·기록한다.
+
+**Keeper Fleet Blocker (Keeper fleet 차단 사유)**
+: Keeper fleet가 설정된 만큼 돌지 못하는 첫 번째 까닭. fleet scan이 `blocker`로 보고한다.
+  `Keeper_fleet_blocker.t`가 닫힌 일곱 이름을 소유한다 — `Keeper_bootstrap_disabled`(Keeper
+  boot가 꺼져 아무 Keeper도 turn을 못 잡음), `No_executable_keeper_fibers`(turn을 돌릴
+  Keeper fiber가 없음), `Turn_configuration_error`(Keeper의 turn 설정이 무효라 재시도해도
+  안 바뀜), `Official_client_recovery_required`(공식 클라이언트 Keeper 세션이 명시적 복구를
+  기다림), `Reaction_capacity_below_target`(fleet가 설정된 수보다 적은 Keeper가 반응함),
+  `Active_task_owner_without_executable_fiber`(활성 task를 쥔 Keeper에 그 task를 돌릴 fiber가
+  없음), `Durable_paused_autoboot_enabled`(스스로 boot하도록 둔 Keeper가 durable pause에
+  걸림). scan은 이 타입의 순서대로 검사해 처음 성립하는 하나만 이름 붙인다 — 여럿이 동시에
+  성립해도 하나만 말한다. 서버가 wire 이름을 쓰고 터미널 클라이언트가 `of_wire_name`으로
+  되읽으므로 양쪽이 제 사본을 두지 않는다. 이 build가 모르는 이름은 `None`이고, TUI 헤더는
+  그 이름을 서버가 쓴 그대로 그린다(`Masc_tui_fleet_line.blocker_text`) — 더 새 서버의 사유도
+  사유다. 아는 이름은 아래 counts 줄이 같은 Keeper 무리에 쓰는 말로 그린다(예: "autoboot
+  keepers paused"). 이 줄은 까닭만 말하고 수는 아래 줄이 나른다.
+  → [Keeper_fleet_blocker](../../lib/keeper/keeper_fleet_blocker.mli),
+  [Masc_tui_fleet_line](../../bin/masc_tui_fleet_line.mli)
 
 **Terminal Reason**
 : 끝난 Keeper turn의 이유를 담은 영수증 필드(`terminal_reason_code`).
@@ -651,6 +676,26 @@ status: reference
   기록한다.
   → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
 
+**Transcript Tail Recovery (전사 꼬리 복구)**
+: 프로세스가 죽어 열린 채 남은 tool cycle을 부팅 때 닫는 일
+  (`Keeper_transcript_tail_recovery.recover_open_tails`). `Recovering_requests` 부팅
+  단계에서 Keeper loop가 시작되기 전에 돈다. checkpoint 저장이 진행 중이던 tool
+  cycle을 일부러 남겨 두므로(어느 호출이 dispatch됐는지 복구가 알 수 있게), 아무도
+  닫지 않으면 provider가 매 reload마다 history를 거절해 lane이 영영 resume되지
+  못한다. Keeper마다 독립이라 하나가 실패해도 나머지 sweep을 멈추지 않는다.
+  Keeper별 결과는 닫힌 여섯이다(`keeper_outcome`): `Already_dispatchable`(캐리어
+  없음 — 실을 metadata도, 아직 canonical checkpoint도, 열린 꼬리도 없음),
+  `Closed`(캐리어 `{tool_use_ids : string list}` — 닫은 호출 id), `Unparseable`
+  (캐리어 `Keeper_transcript_unit.structural_error` — 진짜 손상, 열린 꼬리만 복구
+  가능), `Meta_unavailable`(캐리어 `string`), `Checkpoint_unavailable`(캐리어
+  `Keeper_checkpoint_store.checkpoint_ref_load_error`), `Commit_rejected`(캐리어
+  `Keeper_checkpoint_store.checkpoint_cas_error`).
+  **경계**: `Checkpoint_unavailable`은 이름이 "checkpoint 없음"으로 읽히지만 실제로는
+  checkpoint ref를 **못 읽은** 것이다(load error). checkpoint가 아직 없는 정상 상태는
+  `Already_dispatchable`이다 — checkpoint가 없는 것은 실패가 아니다. `Unparseable`도
+  실패로 세지 않는다(정당한 거절). `failed`는 metadata·load·commit 실패만 센다.
+  → [Keeper_transcript_tail_recovery](../../lib/keeper/keeper_transcript_tail_recovery.mli)
+
 **받은 일 정리**
 : 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
   checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다. 정리 하나가
@@ -692,6 +737,23 @@ status: reference
   갈라지면 provider가 요청을 거절하므로 자르는 자리는 Atom 경계에만 온다. Atom의
   크기는 고르지 않아서 Atom 개수는 위치를 말할 뿐 요청 크기를 말하지 않는다.
 
+**Seed (씨앗)**
+: 요청에 실리는 범위가 어디서 시작하는지를 그 근거와 함께 적은 값
+  (`Keeper_carried_front.seed`). 시작 Atom의 번호(`first_atom`)와 그 Atom을 여는
+  Message의 digest(`front_digest`), 그리고 그 위치가 어디서 왔는지(`source`)로
+  이뤄진다. `Carried Front`가 흡수 지점(가장 오래된 Atom)이라면 씨앗은 그 범위의
+  시작을 정하는 값이다. 프로세스가 (Keeper, runtime) 쌍의 원장을 쥐고 있으면
+  위치는 원장의 것이고(`Ledger`), 없으면 — 부팅 뒤 첫 turn이거나 이 runtime의
+  첫 turn이면 — 가장 새 turn 기록이 실제 provider 응답과 이어진 범위가 위치가
+  된다(`Turn_record`). 거절이 앞을 옮긴 뒤에는 그 이동을 이름으로 남긴다
+  (`Halved_after_refusal`·`Evicted_after_refusal`).
+  위치는 번호와 digest의 쌍이라, 손에 든 History가 같은 번호를 같은 Message로
+  열 때만 쓴다(`for_history`). History의 Atom 개수는 비교하지 않는다.
+  RFC 코퍼스는 이 자리를 **씨앗**이라 부른다.
+  **다른 뜻**: `RFC-0457:85·150`의 "씨앗 설정"은 초기 예시 config를 가리키는 다른
+  말이다 — 이 항목의 씨앗과 구분한다.
+  → [Keeper_carried_front.seed](../../lib/keeper/keeper_carried_front.mli)
+
 **Carried Front (실어 보낼 이력의 시작 위치)**
 : 요청에 실리는 가장 오래된 Atom의 번호와 그 Atom을 여는 Message의 digest.
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
@@ -725,6 +787,7 @@ status: reference
   원장이 없으면 보관 중인 기록에서 같은 trace의 마지막 응답 관측까지 거슬러 찾는다.
   응답 없는 기록이 쌓여도 이 관측을 가리지 않는다. 재시도가 같은 turn 번호를 쓰면
   나중에 저장한 응답 관측을 선택한다. 다음 요청 예측도 같은 reader를 쓴다.
+  RFC 코퍼스는 이 자리를 **앞머리**라 부른다.
   → [Keeper_carried_front](../../lib/keeper/keeper_carried_front.mli)
 
 **Model Input Ledger (모델 입력 원장)**
@@ -771,6 +834,24 @@ status: reference
   Checkpoint를 그대로 둔 성공적 no-op)과 이름을 공유하지만 다른 값이다 — 하나는
   저장 결과, 하나는 turn 경계 위치다.
   → [Keeper_turn_boundaries](../../lib/keeper/keeper_turn_boundaries.ml)
+
+**Turn Start (턴 시작 위치)**
+: 씨앗도 흡수 지점도 없을 때 이번 요청이 어디서 시작하는가를 정한 값
+  (`Keeper_carried_front.turn_start`). 닫힌 둘이고 wire `kind`가 이름이다 —
+  `Turn_boundary { end_atom }`(`turn_boundary`), `Turn_boundary_unknown { reason }`
+  (`turn_boundary_unknown`). `Turn_boundary`는 이 History에서 마지막으로 끝난 turn의
+  경계이고, 그 경계를 지금 History와 digest로 맞춰 본 값만 쓴다. 끝난 turn이 없는
+  History에서는 0이라 갖고 있는 전부를 싣는다(새 Keeper의 짧은 History). 경계
+  저장소를 못 읽었거나 어떤 경계도 지금 History와 맞지 않으면
+  `Turn_boundary_unknown`이고, 요청은 가장 새 Atom 하나만 싣는다 — 모르는 시작을
+  0으로 접어 History 전체를 보내지 않는다. 요청이 어디서 시작했는지는 `origin`이
+  따로 적는다(`Turn_start`·`Turn_start_unknown`).
+  **경고**: `turn_start`의 `Turn_boundary`·`Turn_boundary_unknown`과 `origin`의
+  `Turn_start`·`Turn_start_unknown`은 `Turn Boundary Position`의 닫힌 넷
+  (`Atom_history`·`Empty_atom_history`·`No_atom_history`·`Stale_noop`)과 **다른
+  타입**이다. 이름이 겹쳐 보여도 하나는 요청이 시작한 자리, 하나는 turn이 끝난
+  History의 끝 위치다.
+  → [Keeper_carried_front.turn_start](../../lib/keeper/keeper_carried_front.mli)
 
 **Read Position**
 : Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
@@ -821,6 +902,10 @@ status: reference
   `working_state` 인자이고 Continuity Snapshot 파일에 저장된다. 턴은 이 값이 덮는
   atom들을 보내는 대신 이 값을 보낸다. 저장본이 덮는 범위와 이 값이 대신하는 범위는
   같다.
+  요약을 못 실은 띠는 닫힌 셋이다(`working_state_left_out`) — 요약이 Atom을
+  밀어내는 경우, 실을 turn이 없는 경우, 요약이 창에 안 맞는 경우다. 관측 이름과
+  카운터는 그 카탈로그를 따른다(`keeper_official_client_host.mli`). 요약이 빠져도
+  turn은 거절하지 않고 WARN으로 알린다.
   → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
 **Continuity Synthesis Observation (대화 요약 진행 관측)**

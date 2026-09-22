@@ -2222,6 +2222,30 @@ let lowercase_contains ~needle haystack =
 let identity_names ~query (id, label) =
   lowercase_contains ~needle:query label || lowercase_contains ~needle:query id
 
+(** Which Keeper a connected client is acting for, where that is a reading
+    its row does not already carry.
+
+    A Keeper's own session is filed under the Keeper's name, so the cell
+    repeated the name beside it on every Keeper row -- twelve of fourteen on
+    a live workspace -- while the row's type already said it was a Keeper.
+    What the column is for is the other case: a client bound to a Keeper's
+    session under a name of its own. *)
+let client_acting_for ~name ~keeper_name =
+  match keeper_name with
+  | Some keeper when not (String.equal keeper name) -> Some keeper
+  | Some _ | None -> None
+
+(** Whether any row in a client listing has a Keeper to name. Where none
+    does, the column is seventeen blank cells and the clock at the end of the
+    row is what loses them. *)
+let clients_act_for_others rows =
+  List.exists
+    (fun (row : Tui_decode.client_row) ->
+      Option.is_some
+        (client_acting_for ~name:row.Tui_decode.cr_name
+           ~keeper_name:row.Tui_decode.cr_keeper_name))
+    rows
+
 let identity_connectable ?(query = "") providers =
   List.filter_map
     (function

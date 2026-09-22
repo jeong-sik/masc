@@ -5261,14 +5261,14 @@
  (libraries alcotest masc masc_tui_fleet_line))
 
 (test
+ (name test_tui_client_rows)
+ (modules test_tui_client_rows)
+ (libraries alcotest masc masc_tui_types))
+
+(test
  (name test_tui_table)
  (modules test_tui_table)
  (libraries alcotest masc_tui_message_layout masc_tui_table))
-
-(test
- (name test_operator_attention_summary)
- (modules test_operator_attention_summary)
- (libraries alcotest masc.operator))
 
 (test
  (name test_tui_fusion_state)

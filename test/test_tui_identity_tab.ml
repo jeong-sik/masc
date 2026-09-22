@@ -8,6 +8,13 @@
 
 let check = Alcotest.check
 
+let contains needle text =
+  let n = String.length needle and len = String.length text in
+  let rec seek i =
+    i + n <= len && (String.equal (String.sub text i n) needle || seek (i + 1))
+  in
+  n = 0 || seek 0
+
 let declared ?tools ?(also_on = []) ?enabled ?switch_problem id label =
   Masc_tui_types.Identity_declared
     { idp_id = id
@@ -173,7 +180,7 @@ let test_the_provider_row_sits_below_the_preamble () =
      Both sides read the preamble rather than counting it, so a line added
      to the header moves the cursor's target with it. *)
   let preamble =
-    List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~summary:"  2 services"
+    List.length (Masc_tui_types.identity_preamble ~summary:"  2 services"
        ~notice:[])
   in
   check Alcotest.int "first provider" preamble
@@ -202,28 +209,46 @@ let test_no_notice_reserves_no_room () =
      "just in case" is a row the list is pushed down by on every screen that
      has nothing to report.
 
-     The sentence above it stays because the tab's hint row does not reach the
-     screen: at 150 columns the title is cut inside "Automation", 79 cells of
-     tab labels before the hint begins. Measured 2026-09-12. The tally sits
-     between them: what this Keeper holds, before the list that spells it
-     service by service. *)
-  check Alcotest.int "the hint, the tally and one blank, and that is all" 3
-    (List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~summary:"  2 services"
+     The tally is what stands above the list: what this Keeper holds, before
+     the list that spells it service by service. *)
+  check Alcotest.int "the tally and one blank, and that is all" 2
+    (List.length (Masc_tui_types.identity_preamble ~summary:"  2 services"
        ~notice:[]));
-  check Alcotest.bool "and the keys are named there" true
+  (* And no key of its own. The footer draws the tab's keys, the way every
+     other surface does; a sentence here would be a second copy of the key
+     table, drifting from it on its own schedule. *)
+  check Alcotest.bool "no key is spelled here" false
     (List.exists
-       (fun line ->
-         List.exists
-           (fun word ->
-             let n = String.length word in
-             let rec seek i =
-               i + n <= String.length line
-               && (String.equal (String.sub line i n) word || seek (i + 1))
-             in
-             seek 0)
+       (fun line -> List.exists (fun word -> contains word line)
            [ "arrows"; "filter"; "refresh"; "toggle" ])
-       (Masc_tui_types.identity_preamble ~keeper:"k" ~summary:"  2 services"
-       ~notice:[]))
+       (Masc_tui_types.identity_preamble ~summary:"  2 services" ~notice:[]));
+  (* The footer is where they are. Not the hint string alone: the row the
+     operator reads is what the fitter left of it, so the widths are measured
+     through the fitter. At 120 every key survives; at 80 the fitter gives up
+     /:filter and R:refresh, in that order, and says so with [?]. *)
+  let hint = Masc_tui_keys.keeper_detail_tab_hint Masc_tui_types.Detail_identity in
+  let drawn ~cols =
+    match
+      Masc_tui_footer.drop_hint_items ~max_cells:cols ~conflicts:[]
+        (hint ^ "  Left / Esc:back  q:quit")
+    with
+    | Some row -> row
+    | None -> Alcotest.failf "no footer row fits %d columns" cols
+  in
+  let wide = drawn ~cols:120 in
+  List.iter
+    (fun key ->
+      check Alcotest.bool (key ^ " is drawn at 120 columns") true
+        (contains key wide))
+    [ "[ ]:tab"; "arrows+enter:connect"; "T:toggle"; "A:app"; "/:filter"; "R:refresh" ];
+  let narrow = drawn ~cols:80 in
+  List.iter
+    (fun key ->
+      check Alcotest.bool (key ^ " is still drawn at 80 columns") true
+        (contains key narrow))
+    [ "[ ]:tab"; "arrows+enter:connect"; "T:toggle"; "A:app" ];
+  check Alcotest.bool "and the row says what it gave up" true
+    (contains "?" narrow)
 
 (* ── typing to narrow the list ──────────────────────────────────────── *)
 

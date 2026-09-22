@@ -142,6 +142,17 @@ let overview_event_collapse_key event =
   event.event_type ^ "\x00" ^ event.content
 ;;
 
+(* What an Overview event row says about its level, beside its clock. The
+   level was recorded on every event and read only by the fold key above, so
+   a failed mint and a first install waiting for its workspace drew the same
+   row: the operator could tell them apart only by reading the sentence.
+   Only an error is marked, with the glyph the chat pane draws for one, so
+   the ordinary rows keep every cell of the panel for their text. A shape and
+   not a colour alone: under NO_COLOR the mark is still there. *)
+let overview_event_mark event =
+  if String.equal event.event_type "error" then Some "\xe2\x9c\x97" else None
+;;
+
 (** Keeper metadata (from Tui_decode) *)
 type keeper = Tui_decode.keeper
 type keeper_runtime = Tui_decode.keeper_runtime

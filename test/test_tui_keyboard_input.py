@@ -2952,6 +2952,51 @@ def first_install_waits_for_its_workspace_interaction(
         raise AssertionError(
             f"a first install was handed the login command: {screen!r}"
         )
+    # The pending workspace is the ordinary path, so its row carries no error
+    # mark: the clock's bracket is followed straight by the sentence.
+    if b"] no operator token yet" not in screen:
+        raise AssertionError(
+            f"the pending workspace row is marked as an error: {screen!r}"
+        )
+    os.write(master_fd, b"q")
+
+
+def seed_a_workspace_that_refuses_a_credential(base_path: str) -> None:
+    """A workspace that is here and cannot take a credential.
+
+    ``.masc/auth`` exists, so the boot decision is to mint; ``agents`` beside
+    it is a file where the credential store is a directory, so the mint's
+    write fails. A file rather than a read-only directory because a runner
+    that tests as root writes through a mode bit, and would mint.
+    """
+    auth = Path(base_path) / ".masc" / "auth"
+    auth.mkdir(parents=True)
+    (auth / "agents").write_text("not a directory\n", encoding="utf-8")
+
+
+def failed_mint_is_marked_as_an_error_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A mint that failed reads as an error on the Overview events pane.
+
+    Its row carries the chat pane's failure glyph after the clock, which a
+    pending workspace's row does not; the mark is a shape, so it holds under
+    NO_COLOR as well. The pane trims the sentence at its width, so the needle
+    is the mark and the notice's opening.
+    """
+    wait_for_output(
+        process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+    )
+    drain_until_quiet(process, master_fd, output)
+    screen = screen_text(bytes(output))
+    if b"\xe2\x9c\x97 no operator token, and" not in screen:
+        raise AssertionError(
+            f"a failed mint did not read as a marked error: {screen!r}"
+        )
     os.write(master_fd, b"q")
 
 
@@ -14788,6 +14833,14 @@ def run_first_install_credential_regression(executable: str) -> None:
         description="a first install waits for its workspace instead of the login command",
         interact=first_install_waits_for_its_workspace_interaction,
         http_fixtures=overview_event_http_fixtures(),
+        omit_operator_token=True,
+    )
+    run_terminal_scenario(
+        executable,
+        description="a mint that failed is marked as an error on the events pane",
+        interact=failed_mint_is_marked_as_an_error_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=seed_a_workspace_that_refuses_a_credential,
         omit_operator_token=True,
     )
 

@@ -5887,6 +5887,25 @@ def keeper_chat_succeeded_response(request_body: bytes) -> RawHttpResponse:
 
 ERROR_DETAIL_PREFIX = b"Keeper turn failed: Provider stream parse failed: json decoder"
 ERROR_DETAIL_TAIL = b"exact terminal detail survives wrapping"
+# The tail as it may arrive on the wire: wrapped at any of its spaces, with
+# the row's padding and the next row's cursor move between the words. Where
+# the wrap falls depends on the body width, which the speaker column sets,
+# so a needle that requires the phrase on one row pins the column instead
+# of the detail.
+ERROR_DETAIL_TAIL_WRAPPED = re.compile(
+    b".{0,400}?".join(re.escape(word) for word in ERROR_DETAIL_TAIL.split()),
+    re.DOTALL,
+)
+
+
+def unwrapped(plain: bytes) -> bytes:
+    """Screen text with the chat rows' chrome read as blanks -- the turn
+    rail's box-drawing glyphs (U+2500..U+257F) down the left margin -- and
+    every run of blanks (a wrap's padding, the next row's indent) read as
+    one space, so a phrase wrapped across rows compares equal to the
+    phrase."""
+    without_rail = re.sub(rb"\xe2[\x94\x95][\x80-\xbf]", b" ", plain)
+    return re.sub(rb"\s+", b" ", without_rail)
 
 
 def keeper_chat_failed_response(request_body: bytes) -> RawHttpResponse:
@@ -5948,17 +5967,16 @@ def keeper_chat_error_detail_interaction() -> Interaction:
         send_and_wait(process, master_fd, output, b"c", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
         send_and_wait(process, master_fd, output, b"trigger-error", b"trigger-error")
         failed = send_and_wait(
-            process, master_fd, output, b"\r", ERROR_DETAIL_TAIL
+            process, master_fd, output, b"\r", ERROR_DETAIL_TAIL_WRAPPED
         )
-        frame = frame_containing(failed, ERROR_DETAIL_TAIL)
-        plain = CSI_RE.sub(b"", frame)
+        plain = unwrapped(screen_text(bytes(output)))
         for needle in (b"ERROR", ERROR_DETAIL_PREFIX, ERROR_DETAIL_TAIL):
-            if needle not in plain:
+            if unwrapped(needle) not in plain:
                 raise AssertionError(
-                    f"wrapped Keeper error omitted {needle!r}: {frame!r}"
+                    f"wrapped Keeper error omitted {needle!r}: {failed!r}"
                 )
-        if ERROR_DETAIL_PREFIX + b"\xe2\x80\xa6" in plain:
-            raise AssertionError(f"Keeper error was cell-truncated: {frame!r}")
+        if unwrapped(ERROR_DETAIL_PREFIX) + b"\xe2\x80\xa6" in plain:
+            raise AssertionError(f"Keeper error was cell-truncated: {failed!r}")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
 

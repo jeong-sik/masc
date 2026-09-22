@@ -23,6 +23,7 @@
 
 ### Fixed
 
+- The Keepers fleet row says when its task-owner scan came up short. The scan reports what it could not read, and only a backlog failure moves the fleet status off `ok`, so a Keeper whose profile did not load left its tasks out of the count with nothing on the row saying so. The count now carries its own shortfall: `task owner without fiber 0 (2 sources unread)` (#38012).
 - The Identity tab no longer repeats the keys its footer draws. The sentence above the service list spelled them because the title row carried the hint and cut it (#35539); the keys have since moved to the footer, which draws all six at 120 columns and gives up `/:filter` and `R:refresh` at 80 with `?` naming what it dropped (#38011).
 - The Approvals title counts what its tab badge counts. The badge is the sum of the approval rows and the questions Keepers have open, and the Overview row reads the same helper, but the title counted the approval rows alone: with one open question the tab read `Approvals·1` and the screen it opened read `MASC Approvals (0)`. The title now reads `(1 question)`, naming the kind beside the three approval kinds (#38006).
 - A repository whose clone or fetch failed says what went wrong. The failure is stamped on the repository with the git message and the route writes it to the wire, but nothing read it: the Workspace surface drew `error` in a nine-cell column and the cause was on no screen. The status is now read as the closed type the store keeps, with the cause inside it, and the selected row's context draws it (#38002).

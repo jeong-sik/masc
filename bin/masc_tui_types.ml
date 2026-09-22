@@ -1957,6 +1957,7 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_official_client_recovery_required_names: string list;
   fs_active_task_owner_without_fiber_count: int;
   fs_completion_authority_pending_count: int;
+  fs_active_task_owner_scan_error_count: int;
 }
 
 type planning_goal_history = Tui_decode.planning_goal_history

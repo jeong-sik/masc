@@ -19,6 +19,11 @@
   and the glossary now carries a `media_failover` entry fencing it from the
   renamed concept.
 
+### Fixed
+
+- A Librarian working state carried into a keeper's next request no longer wears the extra-system-context tag. The prompt-context check counted that tag and found two carriers, so it reported `prompt_context_presence_mismatch` or `prompt_context_carrier_repeated` on every request and left the turn record's `input_components` empty. The working state now carries its own `masc.librarian_working_state.v1` tag, and the tail window pins it the same way (#37894).
+
+
 ## [0.36.0] - 2026-09-22
 
 > Before you upgrade: read the five items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), the removed `--dup-threshold` purge option (#37751), the new Fusion `deliberation_evidence` shape that earlier run records do not read as (#37783), the required `--keeper` argument of `masc-checkpoint-purge` (#37802), and the continuity-lag keys the keeper memory health payload now carries, which a TUI or dashboard from the other side of that change refuses (#37856).

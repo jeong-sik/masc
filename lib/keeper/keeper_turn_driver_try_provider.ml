@@ -1012,7 +1012,7 @@ let compose_carried_model_input
         { role = Agent_core.Types.User
         ; content = [ Agent_core.Types.Text (working_state_text snapshot) ]
         ; name = None; tool_call_id = None
-        ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+        ; metadata = Runtime_model_input_tail_window.working_state_metadata
         }
       in
       let projection, transmitted_bytes =

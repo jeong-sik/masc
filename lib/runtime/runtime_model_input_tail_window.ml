@@ -24,6 +24,21 @@ let is_synthetic_preamble (message : Agent_core.Types.message) =
   | Some _ | None -> false
 ;;
 
+(* The Librarian working state opens a summarized range
+   ([Keeper_turn_driver_try_provider]) and must survive every cut, like the
+   per-turn context. It is not that context: AGENT_CORE appends the per-turn
+   carrier once per provider round and [Keeper_agent_prompt_metrics] expects
+   exactly one, so a working state under the carrier's tag read as a second
+   carrier, or as a carrier the params hook never announced, on every
+   request that carried one (10,864 warnings on 2026-09-22, every turn
+   record of those keepers without an input composition). *)
+let working_state_marker_key = "masc.librarian_working_state.v1"
+let working_state_metadata = [ (working_state_marker_key, `Bool true) ]
+
+let is_working_state (message : Agent_core.Types.message) =
+  List.mem_assoc working_state_marker_key message.metadata
+;;
+
 type budget_error =
   | Reservation_exceeds_capacity of
       { capacity_bytes : int
@@ -92,11 +107,11 @@ let budget_error_to_core_error error =
 ;;
 
 (* A message is pinned when it must survive every cut: [System] entries
-   (defensive — the runtime carries the system prompt out of band) and any
-   message with extra-system-context provenance. [Invalid]/[Duplicate]
-   provenance still means the per-turn context assembler authored the
-   message, so it is pinned rather than exposed to the cut on a malformed
-   tag. *)
+   (defensive — the runtime carries the system prompt out of band), any
+   message with extra-system-context provenance, and the Librarian working
+   state. [Invalid]/[Duplicate] provenance still means the per-turn context
+   assembler authored the message, so it is pinned rather than exposed to
+   the cut on a malformed tag. *)
 let is_extra_context (msg : Agent_core.Types.message) =
   match
     Agent_core.Types.Extra_system_context_provenance.classify msg.metadata
@@ -106,6 +121,8 @@ let is_extra_context (msg : Agent_core.Types.message) =
   | Agent_core.Types.Extra_system_context_provenance.Invalid
   | Agent_core.Types.Extra_system_context_provenance.Duplicate -> true
 ;;
+
+let is_pinned msg = is_extra_context msg || is_working_state msg
 
 type label =
   | Pinned
@@ -123,7 +140,7 @@ let annotate (messages : Agent_core.Types.message list) :
   let labelled_rev, atom_count =
     List.fold_left
       (fun (acc, count) (msg : Agent_core.Types.message) ->
-         if is_extra_context msg
+         if is_pinned msg
          then ((msg, Pinned) :: acc, count)
          else (
            match msg.role with

@@ -8,6 +8,7 @@
 
 ### Upgrade notes
 
+- `masc-checkpoint-purge` now takes `--keeper <name>`; the keeper's meta names the trace and `--trace` only cross-checks it. A call with `--trace` alone exits 1. The tool used to look for the keeper's Librarian position, boundary log and continuity snapshot under the checkpoint's `agent_name`, which on a live keeper is the agent's runtime id, so it never found them and `--apply` moved no position (#37770).
 - TypeSafe AI settings now live in `runtime.toml` under `[typesafeai]`; the previous `MASC_TYPESAFEAI_*` environment variables are no longer read. Only `TYPESAFEAI_API_KEY` stays in the environment (#37453).
 - Operator-facing failure reasons now separate invalid configuration from provider authorization refusal. Tooling that reads the old `preflight_config_error` reason must read the new reasons instead (#37457).
 - Tool-call log rows no longer carry the top-level `success` boolean. Every new row records `wire_outcome` (`unknown` when nothing was observed); tooling that reads `success` should read the typed disposition or `wire_outcome` instead (#37487).
@@ -45,6 +46,7 @@
 
 ### Fixed
 
+- `masc-checkpoint-purge` reads and moves the Librarian position, boundary log and continuity snapshot of the keeper named by `--keeper`, instead of a directory named after the checkpoint's `agent_name` that does not exist (#37770).
 - A keeper whose turn-boundary store cannot be read, or matches no boundary of its history, no longer sends its whole history as if the last completed turn ended at atom 0. The request opens on the newest atom alone and its origin says `turn_start_unknown` with the reader's reason, in the TUI band and the request forecast as well (#37746).
 - A Librarian working state that cannot be read, cannot be checked against the turn-boundary log, or covers conversation bytes that changed no longer refuses every Agent-Core turn. The request starts at the Librarian's read position, or at the turn's own boundary, as it does when the working state no longer fits, and the reason is logged as a warning. A refused turn also ran no Librarian round, so a working state whose covered bytes changed was never written again; a working-state file or boundary log that cannot be read now leaves turns running and names the file to fix (#37762).
 - Setup fixture substitutions now fail at the exact changed fixture location instead of silently passing and blaming the wrong field (#37434).

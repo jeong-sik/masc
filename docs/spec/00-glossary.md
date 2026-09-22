@@ -277,8 +277,8 @@ status: reference
 **Runtime Candidate Order (런타임 후보 순서)**
 : Keeper turn이 배정된 runtime이 실패했을 때 시도할 runtime 후보의 순서 있는 목록.
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
-  그 값이다. 옛 이름 "Runtime Lane"·"failover"를 대신하며, TUI 화면은 이제
-  "runtime candidate order"로 읽는다. `[runtime].media_failover`(vision fleet)와
+  그 값이다. TUI 화면은 "runtime candidate order"로 읽는다.
+  `[runtime].media_failover`(vision fleet)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
   런타임 후보 순서와 별개 축이며, 개명되지 않는다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)

@@ -280,10 +280,11 @@ type row = {
   text : string;
   gutter_rail_cells : int;
       (** Cells at the head of {!gutter} holding the turn rail and the space
-          after it. Zero where no rail is drawn at all, so a pane that never
-          shows one pays nothing for it. The renderer draws these cells in the
-          quiet tone: the rail is structure, and colour on this row is already
-          spent saying status. *)
+          after it, and the blank run that moves a line someone else wrote into
+          its own column ({!inbound_indent}). Zero where neither is drawn, so a
+          pane that never shows one pays nothing for it. The renderer draws
+          these cells in the quiet tone: the rail is structure, and colour on
+          this row is already spent saying status. *)
   gutter_clock_cells : int;
       (** Cells of {!gutter} between the rail's end and the mark's start that
           the renderer paints as the receded clock column, trailing space
@@ -311,7 +312,9 @@ type row = {
       (** What to draw left of the body's rule. Empty under {!Origin_row};
           under the other two it holds the origin on a message's first row and
           the same width in blanks on the rest, so a wrapped body lines up
-          under where it started. *)
+          under where it started. A line someone else wrote carries its
+          {!inbound_indent} here in every mode; on a heading row that blank run
+          is all the gutter holds, and the heading starts after it. *)
   action : row_action;
       (** What a press on this row opens, {!Action_none} on every row but the
           first of an entry that carries one. The fold marker sits at the end
@@ -567,6 +570,13 @@ val wrap_body :
     terminal vocabulary of its own, and so is [markdown]: given one, it renders
     the escaped text and owns the wrapping, because fenced code keeps breaks a
     word wrap would ruin. *)
+
+val inbound_indent : inner_width:int -> entry -> int
+(** Cells a line someone else wrote ({!Inbound}) starts in from the left, so
+    it reads in a column of its own beside the conversation (RFC
+    chat-turn-rail-and-side-lanes §4.6): a third of the pane's inner width,
+    on a pane at least as wide as a 100-column terminal's. Zero on a narrower
+    pane and for every other style. *)
 
 val visible_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->

@@ -1450,6 +1450,51 @@ let test_journal_rows_hang_the_claim_under_itself () =
   | _ -> fail "the first row should open on its sign and its category's tone"
 ;;
 
+(* A line someone else wrote reads in a column of its own on a pane wide
+   enough for two (RFC chat-turn-rail-and-side-lanes §4.6): a third of the way
+   in, after the rail, in every origin mode. Narrower, and for anyone in the
+   conversation itself, nothing moves. *)
+let test_an_arrival_takes_the_right_column_on_a_wide_pane () =
+  let arrival = entry Layout.Inbound "pangyo" "tui-..dddddddd" "claimed #37740" in
+  let reply = entry Layout.Keeper "alpha" "tui-..eeeeeeee" "noted" in
+  check int "a third of a wide pane" 40 (Layout.inbound_indent ~inner_width:120 arrival);
+  check int "nothing on a pane narrower than a 100-column terminal's" 0
+    (Layout.inbound_indent ~inner_width:95 arrival);
+  check int "nothing for the conversation's own rows" 0
+    (Layout.inbound_indent ~inner_width:120 reply);
+  let body_rows origin width entry =
+    Layout.visible_rows ~origin ~inner_width:width ~height:20 [ entry ]
+    |> List.filter (fun (row : Layout.row) ->
+           match row.kind with
+           | Layout.Body -> true
+           | Layout.Metadata _ | Layout.Viewport_gap _ -> false)
+  in
+  (match body_rows Layout.Origin_inline 120 arrival with
+   | row :: _ ->
+       check int "the rail's cells carry the indent" (Layout.turn_rail_cells + 40)
+         row.gutter_rail_cells;
+       check bool "the blank run follows the rail" true
+         (String.equal
+            (String.sub row.gutter Layout.turn_rail_cells 40)
+            (String.make 40 ' '))
+   | [] -> fail "the arrival drew no body row");
+  (match body_rows Layout.Origin_inline 95 arrival with
+   | row :: _ ->
+       check int "a narrow pane keeps one column" Layout.turn_rail_cells
+         row.gutter_rail_cells
+   | [] -> fail "the arrival drew no body row");
+  match
+    Layout.visible_rows ~origin:Layout.Origin_row ~inner_width:120 ~height:20
+      [ arrival ]
+    |> without_hour_rail
+  with
+  | heading :: body :: _ ->
+      check string "the heading starts in the column" (String.make 40 ' ')
+        heading.gutter;
+      check string "so does its body" (String.make 40 ' ') body.gutter
+  | _ -> fail "the arrival drew no heading and body"
+;;
+
 (* Scrollback. Ten one-line entries render to twenty-one rows -- the hour
    rail above them, then a metadata row and a body row each -- so the
    arithmetic below is checkable by hand.
@@ -2620,7 +2665,9 @@ let () =
             test_a_trailing_newline_opens_a_line
         ] )
     ; ( "scrollback"
-      , [ test_case "journal rows hang the claim under itself" `Quick
+      , [ test_case "an arrival takes the right column on a wide pane" `Quick
+            test_an_arrival_takes_the_right_column_on_a_wide_pane
+        ; test_case "journal rows hang the claim under itself" `Quick
             test_journal_rows_hang_the_claim_under_itself
         ; test_case "one speaker keeps one heading" `Quick
             test_one_speaker_keeps_one_heading

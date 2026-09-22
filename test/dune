@@ -3511,6 +3511,7 @@
   fmt
   masc
   masc_tui_types
+  masc_tui_fusion_launch
   masc_tui_ask_projection
   masc.voice_setup
   masc.voice_wizard))
@@ -6581,6 +6582,16 @@
  (name test_tui_lane_subscriptions)
  (modules test_tui_lane_subscriptions)
  (libraries alcotest yojson masc masc_tui_lane_subscriptions))
+
+(test
+ (name test_tui_fusion_launch)
+ (modules test_tui_fusion_launch)
+ (libraries alcotest yojson masc masc.fusion_core masc_tui_fusion_launch))
+
+(test
+ (name test_tui_fusion_seat_routes)
+ (modules test_tui_fusion_seat_routes)
+ (libraries alcotest masc masc_tui_fusion_seat_routes))
 
 (rule
  (alias runtest-test_tui_lane_package_pty)

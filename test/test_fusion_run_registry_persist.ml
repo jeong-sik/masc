@@ -280,6 +280,33 @@ let test_replay_skips_malformed_lines () =
     (String_util.contains_substring (Fs_compat.load_file path) "not-json")
 ;;
 
+(* 명단 키의 모양은 replay 가 검사한다. 문자열이 아닌 원소가 섞인 줄은 그 실행만
+   버리고, 옆의 온전한 줄은 그대로 읽는다. *)
+let test_replay_rejects_a_non_string_panel_route () =
+  let path = fresh_path "-bad-roster.jsonl" in
+  Fs_compat.save_file
+    path
+    (String.concat
+       "\n"
+       [ {|{"event":"register","id":"bad","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple","panel_routes":["a",7]}}|}
+       ; {|{"event":"complete","id":"bad","completion":{"result":{"outcome":"succeeded"},"finished_at":2.0}}|}
+       ; {|{"event":"register","id":"good","started_at":3.0,"registration":{"keeper":"k","preset":"p","topology":"simple","panel_routes":["a"]}}|}
+       ; {|{"event":"complete","id":"good","completion":{"result":{"outcome":"succeeded"},"finished_at":4.0}}|}
+       ; ""
+       ]);
+  let t = R.replay path in
+  check bool "a non-string panel route drops that run" true
+    (Option.is_none (R.get t ~run_id:"bad"));
+  match R.get t ~run_id:"good" with
+  | Some run ->
+    check
+      (testable Fusion_types.pp_roster Fusion_types.equal_roster)
+      "the neighbouring run still reads its roster"
+      ({ judge_route = None; panel_routes = Some [ "a" ] } : Fusion_types.roster)
+      run.R.roster
+  | None -> fail "a valid roster line must survive its malformed neighbour"
+;;
+
 (* (5) Replay streams raw JSONL lines and compacts the retained state. *)
 let test_replay_streams_and_compacts () =
   let path = fresh_path "-stream.jsonl" in
@@ -380,6 +407,8 @@ let () =
       , [ test_case "startup replay diagnostics" `Quick test_startup_replay_diagnostics
         ; test_case "register+complete append JSONL" `Quick test_persist_register_complete
         ; test_case "roster survives replay" `Quick test_roster_survives_replay
+        ; test_case "replay rejects a non-string panel route" `Quick
+            test_replay_rejects_a_non_string_panel_route
         ; test_case "failure detail survives replay" `Quick test_persist_failure_detail
         ; test_case "reprojection preserves first completion after restart" `Quick
             test_reprojection_preserves_first_completion_after_restart

@@ -204,6 +204,10 @@ type carried_start_front =
       (** No seed held and the lane cut nothing later, so the range starts
           where the last completed turn on this history ended: this turn's
           own atoms (RFC keeper-context-window-in-tokens §13.4). *)
+  | Turn_start_unknown of { reason : string }
+      (** No seed, no lane cut, and the turn start could not be read
+          ({!Keeper_carried_front.Turn_boundary_unknown}): the range opened
+          on the newest atom alone. *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -224,7 +228,7 @@ val carried_start_range
   -> runtime_id:string
   -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
   -> own_first_atom:int
-  -> turn_start:int
+  -> turn_start:Keeper_carried_front.turn_start
   -> Agent_core.Types.message list
   -> carried_start
 (** Where an official client's start seed begins

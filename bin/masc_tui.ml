@@ -6753,9 +6753,6 @@ let goto_surface state ~mailbox (destination : surface) =
      The transport-list palette hides it explicitly before arriving here.
      Repository changes can overlay any surface, so every jump closes them. *)
   leave_browser_lane_for_surface state destination;
-  if Masc_tui_types.leave_fusion_launch state ~destination then
-    add_event state "system"
-      "Fusion launch left while its answer was out; the run may have started - r refreshes the list";
   if state.repository_changes_open then close_repository_changes state;
   (match state.view with
    | Config when state.config_pane = Config_themes && destination <> Config ->
@@ -18018,6 +18015,13 @@ and is loaded on demand through keeper_skill.
            (Masc_tui_http.ms_of_ns gap_ns);
        last_loop_at_ns := now_ns);
       ensure_acting_pane_changes state ~mailbox:async_messages;
+      (* The Fusion launch form outlives nothing: whatever moved the surface
+         -- a key, the Activity pane's mouse handler, or an async message
+         that jumps to a Keeper chat -- it is gone before this iteration
+         dispatches anything. *)
+      if Masc_tui_types.reconcile_fusion_launch state then
+        add_event state "system"
+          "Fusion launch left while its answer was out; the run may have started - r refreshes the list";
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
         (not compact_viewport) && state.view = Keepers Keeper_message

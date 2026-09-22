@@ -187,15 +187,22 @@ status: reference
   → [Runtime.t](../../lib/runtime/runtime.mli)
 
 **Lane**
-: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다.
+: Keeper turn 밖에서 고정 신원으로 도는 실행 경로. `[runtime.exact_output_lanes.<name>]`
+  설정과 `Exact_lane_run_registry.lane`이 이 뜻이다. Keeper turn이 Runtime 후보를
+  시도하는 순서는 Runtime Candidate Order라 부른다 — 'lane'은 이 고정 실행 경로
+  전용이다.
+  → [Exact_lane_run_registry.lane](../../lib/exact_lane_run_registry.mli)
+
+**Runtime Candidate Order**
+: Keeper turn이 Runtime 후보를 시도할 순서. `[runtime.lanes.<name>]`의 `candidates`가
+  선언한다. 코드 타입 이름은 `Runtime_lane.t`이지만 제품 용어는 candidate order다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
-  admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane
-  (Runtime Lane)과 다른 것이다 — Runtime Lane은 Keeper turn이 Runtime 후보를
-  시도할 순서이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
-  실행했는지의 투영이다. 두 축을 함께 갖는다:
+  admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane과 같은
+  뜻의 관찰이다 — Lane은 고정 실행 경로이고, Standalone Lane은 그 lane이 무엇을
+  실행할 수 있고 무엇을 실행했는지의 투영이다. 두 축을 함께 갖는다:
   - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·
     `Standalone_degraded`·`Standalone_no_retained_observation`·
     `Standalone_unavailable`.
@@ -216,8 +223,9 @@ status: reference
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)
 
 **Exact-output route**
-: Librarian 같은 단독 모델 작업의 목적별 실행 경로. 해당 설정은 API slot과
-  후속 CLI 후보 순서를 선언한다. 코드 이름은 `exact_output_lane_decl`이다.
+: Librarian 같은 단독 모델 작업의 목적별 실행 경로. 위의 Lane과 같은 뜻이다.
+  해당 설정은 API slot과 후속 CLI 후보 순서를 선언한다. 코드 이름은
+  `exact_output_lane_decl`이다.
   → [선언](../../lib/runtime/runtime_schema.mli),
   [작업 기록](../../lib/exact_lane_run_registry.mli)
 

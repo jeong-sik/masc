@@ -20,7 +20,7 @@ agent completes it through the public MASC command/API/tool surface.
 
 ## 2. The product in one sentence
 
-Give MASC a project, let the active declarative Keeper fleet keep working through typed Runtime slots, and always show what is moving, what is blocked, why, and what happens next. The application-owned system LLM verifier reviews typed completion evidence outside the Keeper lifecycle.
+Give MASC a project, let the active declarative Keeper fleet keep working through typed Runtime candidate orders, and always show what is moving, what is blocked, why, and what happens next. The application-owned system LLM verifier reviews typed completion evidence outside the Keeper lifecycle.
 
 ## 3. North star
 
@@ -37,7 +37,7 @@ new turn delta
 
 Deterministic code may remove protocol shells, exact duplicates, whitespace, and typed disposable tool mechanics. It must not invent, summarize, or discard semantic meaning.
 
-If an LLM cannot produce a valid semantic update, MASC preserves the source, tries the next declared Runtime slot, reports the reason, and keeps the Keeper alive.
+If an LLM cannot produce a valid semantic update, MASC preserves the source, tries the next declared Runtime candidate order, reports the reason, and keeps the Keeper alive.
 
 ## 4. Fresh-state fleet
 
@@ -90,7 +90,7 @@ Partial source evidence does not satisfy this definition.
 | Layer | Owns | Must not own |
 |---|---|---|
 | MASC domain | the question, domain schema, semantic validator, and use of the accepted value | provider names, model quirks, wire dialects, or candidate ranking |
-| Runtime slot | opaque identity plus the declared execution specification | hidden policy inferred from pricing, tier, or past preference |
+| Runtime candidate order | opaque identity plus the declared execution specification | hidden policy inferred from pricing, tier, or past preference |
 | agent core | provider/model resolution, capability facts, vendor wire encoding, strict output parsing, typed transport errors, and frozen-order failover | MASC domain meaning, Task state, Keeper lifecycle, or domain persistence |
 | Dashboard/API | read-only projections of the same MASC domain state and agent core evidence | a second status calculation or mutable execution truth |
 
@@ -317,7 +317,7 @@ The required path is:
 
 ```text
 typed agent core failure
-  -> next declared Runtime slot
+  -> next declared Runtime candidate order
   -> visible exhausted reason if none remain
   -> Keeper remains alive
 ```

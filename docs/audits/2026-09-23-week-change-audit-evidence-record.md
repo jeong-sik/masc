@@ -169,10 +169,17 @@ Keeper pangyo-preachers). Continuity 절(426~703행)에서 찾은 것:
   이 세션에서 어댑터의 Python 테스트 193개는 통과했다(`.venv/bin/python -m pytest -q tests`, 20초).
   `dist/manifest.json` 은 release 0.35.22 를 가리키고 최신 태그는 v0.36.0 이다. `dist/` 는 git 에 없고
   `fetch_masc.sh` 가 실행 때 최신 릴리스를 받으므로 낡은 것은 로컬 사본뿐이다. 벤치 실행은 하지 않았다.
+  로컬 데이터셋 사본(`results/datasets/terminal-bench-4.0.0`)은 지금 `task.toml` 이 없는 불완전 상태라
+  `dataset_plan.py` 가 "download it again" 으로 거절한다(09-22 기록의 CPU·메모리 거절과 다른 이유).
 - HITL·Access Control·Multi Lane·Schedule: 로그의 오류 모양만 봤다(위 "결함 아님" 셋).
   실제 전이·권한 거절·취소 경로는 이번에 읽지 않았다.
 - Skills 재생성: 09-19 기록의 "자동 생산 경로 미구현"(#37633) 이후 새 producer 를 찾지 못했다.
-- TUI 배선: 이번 세션은 Memory 화면의 연속성 밀림(#37856·#37863·#37867·#37870, 병합)만 봤다.
+- TUI 배선: 이 주에 Memory/Keeper 화면에 더해진 키 세 묶음(연속성 밀림, 요약 진행 관측, JEV 준비 상태)은
+  서버 writer 와 TUI reader 가 file:line 단위로 짝이 맞고, reader 만 있거나 writer 만 있는 키는 없었다
+  (별도 탐색 에이전트, origin/main 기준). `64f20a0187` 은 #37856 이 `.ml` 에만 필드를 더하고 `.mli` 를 빠뜨려
+  깨진 빌드를 다음 날 고친 것이다. "not measured"(`bin/masc_tui_render_memory.ml:132`)는 서버가 관측하지
+  못한 `None` 을 그대로 보여 주는 자리이고, 색 분기는 전부 typed variant 매치다. `String.starts_with` 는
+  JSON 본문 판별과 경로 접두어 축약 두 곳뿐이다. lane declaration 화면과 dashboard(TypeScript)는 보지 않았다.
 
 ## 근거
 

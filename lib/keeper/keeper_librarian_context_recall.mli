@@ -9,5 +9,7 @@ val publish : base_path:string -> keepers_dir:string -> keeper_name:string ->
     The artifact is historical context: sources and execution progress must be
     revalidated before acting. Failure never changes original input authority. *)
 val render : keepers_dir:string -> keeper_name:string -> string option
-(** Reads only the fixed-shape index. No source revalidation, queue traversal,
-    snapshot serialization, or blob writes occur on the first-token path. *)
+(** Reads the fixed-shape index and injects it only when its exact generation
+    and revision still match the authoritative working-context snapshot. No
+    source revalidation, queue traversal, snapshot serialization, or blob
+    writes occur on the first-token path. *)

@@ -28,6 +28,8 @@ val prompt_json : input -> Yojson.Safe.t
 val pockets_of_json : sources:source list -> Yojson.Safe.t -> (pocket list, string) result
 val select : input -> Yojson.Safe.t -> (pocket list, string) result
 val pockets_to_json : pocket list -> Yojson.Safe.t
+val snapshot_json : snapshot -> Yojson.Safe.t
+(** Exact decoded snapshot projection used by the Admin inventory endpoint. *)
 val path : keepers_dir:string -> keeper_id:string -> string
 val read : keepers_dir:string -> keeper_id:string -> (snapshot option, string) result
 val read_with_snapshot_sha256 : keepers_dir:string -> keeper_id:string ->

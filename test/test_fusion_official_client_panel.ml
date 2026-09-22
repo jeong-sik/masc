@@ -52,6 +52,13 @@ turn-timeout-s = 0
     claude_cli
 ;;
 
+(* The judge prompt is rendered from the registry, so resolution must point at
+   the repo's own prompt files or the render raises inside the dune sandbox. *)
+let () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  Masc.Prompt_defaults.init ()
+;;
+
 let official_client_runtime = "claude_code.claude-sonnet-5"
 let agent_core_runtime = "stub-http.stub-model"
 
@@ -199,6 +206,111 @@ let test_official_client_panelist_reaches_its_client () =
     | None -> fail "official-client execution did not publish Tool trace coverage")
 ;;
 
+(* A judge seat is routed by the same predicate as a panel seat. Judged by the
+   marker, as above: the stub emits no result event, so the judge fails either
+   way, and what separates the two routes is whether the client ran at all.
+   Remove the official branch from fusion_judge.ml and the marker stops
+   appearing while the failure turns into [Build_error]. *)
+let test_official_client_judge_reaches_its_client () =
+  let base_dir = Filename.temp_dir "fusion-official-client-judge" "" in
+  let marker = Filename.concat base_dir "spawned" in
+  let claude_cli = Filename.concat base_dir "stub-claude" in
+  let observed_trace = ref None in
+  let actor =
+    Fusion_types.Judge_actor
+      { role = Fusion_types.Single; identity = official_client_runtime }
+  in
+  write_file ~path:claude_cli ~perm:0o700 (stub_cli_script ~marker);
+  with_initialized_runtime ~claude_cli (fun () ->
+    let result =
+      Eio_main.run (fun env ->
+        Eio_context.set_env env;
+        Eio.Switch.run (fun sw ->
+          Eio_context.with_test_env
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~mono_clock:(Eio.Stdenv.mono_clock env)
+            ~sw
+            (fun () ->
+               Masc.Fusion_judge.run
+                 ~base_dir
+                 ~sw
+                 ~net:(Eio.Stdenv.net env)
+                 ~judge_system_prompt:"Judge the panel."
+                 ~judge_model:official_client_runtime
+                 ~question:"ping"
+                 ~panel:
+                   [ Fusion_types.Answered
+                       { model = agent_core_runtime
+                       ; answer = "pong"
+                       ; usage = Fusion_types.zero_usage
+                       }
+                   ]
+                 ~web_tools:false
+                 ~tool_trace:(actor, fun trace -> observed_trace := Some trace)
+                 ())))
+    in
+    check bool "the official client was executed" true (Sys.file_exists marker);
+    (match result with
+     | Ok _ -> fail "the stub client emits no result, so no synthesis can come back"
+     | Error (Fusion_types.Build_error detail, _) ->
+       failf "an official-client judge must not reach build_agent: %s" detail
+     | Error (_, usage) ->
+       check bool "an official client reports no token usage" true
+         (Fusion_types.equal_usage usage Fusion_types.zero_usage));
+    match !observed_trace with
+    | Some
+        { Fusion_types.observed_actors = []
+        ; events = []
+        ; dropped_events = 0
+        ; gaps = [ { actor = gap_actor; reason = Fusion_types.Official_client_uninstrumented } ]
+        } ->
+      check bool "the trace gap names the judge actor" true
+        (Fusion_types.equal_tool_trace_actor actor gap_actor)
+    | Some _ -> fail "an official-client judge must publish one explicit trace gap"
+    | None -> fail "an official-client judge did not publish Tool trace coverage")
+;;
+
+(* Each client's own timeout reaches Fusion as [Timeout], and every other
+   client failure stays [Provider_error]. The detail line keeps what the
+   projection folds away. *)
+let test_client_timeouts_project_to_timeout () =
+  let project failure =
+    Masc.Fusion_official_client.panel_failure ~runtime_id:official_client_runtime failure
+  in
+  let is_timeout failure =
+    Fusion_types.equal_panel_failure (project failure) Fusion_types.Timeout
+  in
+  check bool "Claude turn timeout" true
+    (is_timeout (Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Timeout 3.0)));
+  check bool "Claude admission timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Claude_admission_failure (Runtime_claude_code.Timeout 3.0)));
+  check bool "Codex timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Codex_failure
+          (Runtime_codex_app_server.Timeout { seconds = 3.0; turn_accepted = false })));
+  check bool "Antigravity timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Antigravity_failure (Runtime_antigravity.Timeout 3.0)));
+  let turn_failed =
+    Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Turn_failed "boom")
+  in
+  (match project turn_failed with
+   | Fusion_types.Provider_error _ -> ()
+   | other ->
+     failf "a non-timeout client failure must stay Provider_error, got %s"
+       (Fusion_types.show_panel_failure other));
+  let detail =
+    Masc.Fusion_official_client.failure_detail ~runtime_id:official_client_runtime
+      (Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Timeout 3.0))
+  in
+  check bool "the detail line names the runtime" true
+    (String.starts_with ~prefix:(official_client_runtime ^ ": ") detail);
+  check bool "the detail line keeps more than the projection" true
+    (not (String.equal detail (official_client_runtime ^ ": timeout")))
+;;
+
 (* The message has to name which handle is absent. It did not, and that cost a
    build cycle: publishing Eio_context.set_env in bin/fusion_run left the text
    identical, so the clock being the other half was invisible until the code was
@@ -269,6 +381,10 @@ let () =
             "unbounded Claude panel keeps login probe bounded"
             `Quick
             test_unbounded_claude_panel_keeps_login_probe_bounded
+        ; test_case
+            "client timeouts project to Timeout"
+            `Quick
+            test_client_timeouts_project_to_timeout
         ] )
     ; ( "eio context diagnostics"
       , [ test_case
@@ -285,6 +401,10 @@ let () =
             "official-client panelist reaches its client"
             `Quick
             test_official_client_panelist_reaches_its_client
+        ; test_case
+            "official-client judge reaches its client"
+            `Quick
+            test_official_client_judge_reaches_its_client
         ] )
     ]
 ;;

@@ -102,9 +102,17 @@ type failure =
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
 
+val failure_detail : runtime_id:string -> failure -> string
+(** The adapter's own failure text, prefixed with [runtime_id]. For log and
+    status lines that should keep what {!panel_failure} folds away, such as a
+    timeout's seconds. *)
+
 val panel_failure : runtime_id:string -> failure -> Fusion_types.panel_failure
-(** Legacy panel projection. Keep [failure] intact until transport-specific
-    failover decisions have consumed its admission/effect observations. *)
+(** Project a client failure onto the panel vocabulary. Each adapter's own
+    [Timeout] becomes {!Fusion_types.Timeout}; every other failure becomes
+    [Provider_error] carrying the runtime id. Keep [failure] intact until
+    transport-specific failover decisions have consumed its admission/effect
+    observations. *)
 
 val run_with_images
   :  images:image_input list

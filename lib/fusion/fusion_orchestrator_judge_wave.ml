@@ -61,6 +61,7 @@ let first_judge_timeout_s ~(preset : Fusion_policy.preset) (j : Fusion_policy.ju
 ;;
 
 let run_first_judge
+      ~base_dir
       ~sw
       ~net
       ~preset
@@ -78,6 +79,7 @@ let run_first_judge
   in
   let result =
     Fusion_judge.run
+      ~base_dir
       ~sw
       ~net
       ?max_tokens:(first_judge_max_tokens ~preset j)
@@ -95,6 +97,7 @@ let run_first_judge
 ;;
 
 let run_first_judges
+      ~base_dir
       ~sw
       ~net
       ~preset
@@ -107,6 +110,7 @@ let run_first_judges
   =
   let run_first_judge =
     run_first_judge
+      ~base_dir
       ~sw
       ~net
       ~preset

@@ -872,8 +872,7 @@ let execution_of_vision_outcome = function
     failed ~failure_class ~detail "provider_error"
   | Vo_official_failure { runtime_id; failure } ->
     let effect_disposition = official_failure_effect failure in
-    let detail = Fusion_official_client.panel_failure ~runtime_id failure
-      |> Fusion_types.show_panel_failure in
+    let detail = Fusion_official_client.failure_detail ~runtime_id failure in
     let failure_class, code = match failure with
       | Codex_failure (Timeout _)
       | Claude_failure (Timeout _) | Claude_admission_failure (Timeout _) ->

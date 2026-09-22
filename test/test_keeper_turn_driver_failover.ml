@@ -4823,6 +4823,16 @@ let test_exhausted_access_errors_rotate_and_deterministic_requests_remain_termin
     (* HTTP 400 carries no machine-readable reason, so the lane walk advances to
        the next declared candidate (attempt_rejected_should_try_next). *)
     (access_error_from_http 400, ["first"; "last"])
+    (* A JSON parse failure says our own payload is malformed, so every
+       candidate would receive the same broken request and the lane would
+       report the last one's error instead of this one. It stays terminal;
+       #37631 kept it out of the rotating arm and nothing else pins that. *)
+    :: ( Agent_core.Error.Api
+           (Agent_core.Retry.InvalidRequest
+              { message = "malformed response body"
+              ; reason = Agent_core.Retry.Json_parse_error
+              })
+       , ["first"] )
     :: (Masc.Keeper_codex_runtime.For_testing.codex_error_to_core_error
           (Runtime_codex_app_server.Invalid_config "bad path"), ["first"])
     :: List.map (fun (_, error) -> error, ["first"; "last"])

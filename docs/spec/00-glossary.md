@@ -116,6 +116,21 @@ status: reference
   제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상 Keeper다.
   접수 응답은 실행 완료를 뜻하지 않는다.
 
+**Turn Row Source (턴 행 출처)**
+: 채팅 transcript가 한 turn의 행을 그리는 출처. 한 turn의 행은 한 번에 한 출처에서만
+  나온다. 넷이다 — `live`(이 pane이 연 요청의 SSE stream), `observed`(이 pane이 열지
+  않은 turn: operation journal을 읽어 따라간다), `settled`(stream이나 journal이 끝을
+  전한 held log), `committed only`(그 turn의 log가 없어 transcript page의 행을 그대로
+  그린다). log가 그 turn을 대신하면(`turn_log_holds_the_turn`: log가 committed이고
+  stream이 실패를 전했거나 기록된 reply와 함께 끝났을 때) 그 log가 스스로 그리는
+  committed 행은 timeline에서 빠지고(`rows_the_logs_do_not_draw`), 끝날 수 없게 된
+  Working log(journal을 못 읽거나 reply·failure가 기록됨)는 observed 집합에서 빠져
+  committed 행이 그 turn을 대신한다. `live`는 `log_projection ~committed:false`,
+  `observed`는 `held_projection ~committed:false`, `settled`는 `held_projection
+  ~committed:true`로 그린다.
+  → [Masc_tui_types](../../bin/masc_tui_types.ml),
+  [Masc_tui_render_chat](../../bin/masc_tui_render_chat.ml)
+
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고

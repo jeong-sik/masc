@@ -1713,17 +1713,27 @@ type fusion_mode =
   | Fusion_detail of string
   | Fusion_historical_detail of Tui_decode.fusion_historical_evidence
 
+(** How many list reads a started run is waited for. The read that was
+    already in flight when the run started cannot carry it, so one more is
+    the smallest number that lets a fresh read arrive. Past that the wait
+    ends whether or not the registry retained the run: an unbounded wait
+    would move the cursor onto that run at some arbitrary later refresh,
+    wherever the operator had navigated to by then. *)
+let fusion_started_list_reads = 2
+
 (** The launch form over the Fusion list. Reading the presets is a request
     of its own, so the form has a state before it exists; the generation
     tells a late answer from the read the operator is waiting on. Once the
     server accepts a run, the list is asked again and the cursor lands on
-    that run when the list next carries it -- a list already in flight when
-    the run started does not carry it, so the selection waits for one that
-    does. *)
+    that run when a read carries it, within
+    [fusion_started_list_reads] reads. *)
 type fusion_launch =
   | Fusion_launch_reading_presets of int
   | Fusion_launch_open of Masc_tui_fusion_launch.t
-  | Fusion_launch_started of string
+  | Fusion_launch_started of
+      { fls_run_id : string
+      ; fls_reads_left : int
+      }
 
 (** Actor-scoped pending confirmation from the exact operator projection. *)
 type approval_item = Masc_tui_operator_projection.approval_item
@@ -6063,6 +6073,26 @@ let settle_voice_transcript (state : state) ~keeper =
     state.voice_level_db <- None;
     Some disposition
   end
+
+(* The launch form belongs to the Fusion surface and to nothing else. Every
+   jump away abandons it, generation bumped so the answer to a preset read or
+   a submit still in flight cannot open a form on a surface the operator has
+   left -- invisible, holding no keys, and built from a cursor that has since
+   moved. The mouse reaches [goto_surface] from the Activity pane before any
+   key handler runs, so the form's own Esc is not the only way out of it.
+
+   Answers whether a submit was in flight, because leaving does not unsend
+   the request and the operator should hear that the run may have started. *)
+let leave_fusion_launch (state : state) ~(destination : surface) =
+  match state.fusion_launch with
+  | None -> false
+  | Some _ when destination = Fusion -> false
+  | Some launch ->
+      state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+      state.fusion_launch <- None;
+      (match launch with
+       | Fusion_launch_open form -> Masc_tui_fusion_launch.submitting form
+       | Fusion_launch_reading_presets _ | Fusion_launch_started _ -> false)
 
 type text_input_target =
   | Text_browser_url

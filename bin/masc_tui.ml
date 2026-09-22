@@ -5921,7 +5921,10 @@ let launch_fusion_launch_options_load state ~mailbox =
       enqueue_async mailbox
         (Fusion_launch_options_loaded (generation, Error "Eio switch is unavailable"))
 
-let launch_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) =
+(* Named apart from [Masc_tui_loader.launch_fusion_run], which it calls: one
+   name for both is a shadow that turns a missing qualifier into unbounded
+   recursion rather than a compile error. *)
+let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) =
   state.fusion_launch_generation <- state.fusion_launch_generation + 1;
   let generation = state.fusion_launch_generation in
   let host = server_peer_host in
@@ -6750,6 +6753,9 @@ let goto_surface state ~mailbox (destination : surface) =
      The transport-list palette hides it explicitly before arriving here.
      Repository changes can overlay any surface, so every jump closes them. *)
   leave_browser_lane_for_surface state destination;
+  if Masc_tui_types.leave_fusion_launch state ~destination then
+    add_event state "system"
+      "Fusion launch left while its answer was out; the run may have started - r refreshes the list";
   if state.repository_changes_open then close_repository_changes state;
   (match state.view with
    | Config when state.config_pane = Config_themes && destination <> Config ->
@@ -10433,20 +10439,30 @@ let apply_fusion_runs_load state = function
       state.fusion_error <- None;
       (* A run the form just started is selected the first time the list
          carries it, and the wait ends there. *)
-      let started_cursor =
-        match state.fusion_launch with
-        | Some (Fusion_launch_started run_id) ->
-            fusion_snapshot_entries snapshot
-            |> List.find_index (function
-                 | Tui_decode.Fusion_retained_run run -> String.equal run.fur_run_id run_id
-                 | Tui_decode.Fusion_historical_evidence _ -> false)
-        | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) | None -> None
-      in
-      (match started_cursor with
-       | Some cursor ->
-           state.fusion_cursor <- cursor;
-           state.fusion_launch <- None
-       | None -> state.fusion_cursor <- next_cursor);
+      (match state.fusion_launch with
+       | Some (Fusion_launch_started started) -> (
+           match
+             fusion_snapshot_entries snapshot
+             |> List.find_index (function
+                  | Tui_decode.Fusion_retained_run run ->
+                      String.equal run.fur_run_id started.fls_run_id
+                  | Tui_decode.Fusion_historical_evidence _ -> false)
+           with
+           | Some cursor ->
+               state.fusion_cursor <- cursor;
+               state.fusion_launch <- None
+           | None ->
+               state.fusion_cursor <- next_cursor;
+               (* Each read that does not carry it spends one of the waits.
+                  Spent, the wait ends rather than moving the cursor onto
+                  that run at whatever later refresh first carries it. *)
+               let reads_left = started.fls_reads_left - 1 in
+               state.fusion_launch <-
+                 (if reads_left > 0 then
+                    Some (Fusion_launch_started { started with fls_reads_left = reads_left })
+                  else None))
+       | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) | None ->
+           state.fusion_cursor <- next_cursor);
       (match state.fusion_mode, current_selected_id with
        | Fusion_detail run_id, Some selected
          when String.equal ("run:" ^ run_id) selected
@@ -15471,7 +15487,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (match result with
             | Error detail ->
                 state.fusion_launch <- None;
-                state.fusion_error <- Some detail
+                (* [fusion_error] draws the reason now and the event keeps it:
+                   a successful list load clears that line, and the cadence
+                   issues one every two seconds, so the line alone would show
+                   the reason for less time than it takes to read. *)
+                state.fusion_error <- Some detail;
+                add_event state "system" ("Fusion launch: " ^ detail)
             | Ok options ->
                 let keepers = List.map (fun (k : keeper) -> k.k_name) state.keepers in
                 (* The run under the cursor names the Keeper the operator is
@@ -15488,7 +15509,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                      state.fusion_error <- None
                  | Error detail ->
                      state.fusion_launch <- None;
-                     state.fusion_error <- Some detail))
+                     state.fusion_error <- Some detail;
+                     add_event state "system" ("Fusion launch: " ^ detail)))
        | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
        | None -> ())
   | Fusion_launched (generation, result) ->
@@ -15500,11 +15522,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             | Error detail ->
                 state.fusion_launch <-
                   Some (Fusion_launch_open (Masc_tui_fusion_launch.refused ~detail launch));
-                state.fusion_scroll <- 0
+                state.fusion_scroll <- 0;
+                add_event state "system" ("Fusion launch refused: " ^ detail)
             | Ok run_id ->
                 (* The list selects the run once it carries it; a list read
                    already in flight may answer without it. *)
-                state.fusion_launch <- Some (Fusion_launch_started run_id);
+                state.fusion_launch <-
+                  Some
+                    (Fusion_launch_started
+                       { fls_run_id = run_id
+                       ; fls_reads_left = Masc_tui_types.fusion_started_list_reads
+                       });
                 state.fusion_scroll <- 0;
                 add_event state "system" ("Fusion run " ^ run_id ^ " started");
                 launch_fusion_runs_load state ~mailbox)
@@ -18560,17 +18588,25 @@ and is loaded on demand through keeper_skill.
                        <- Masc_tui_types.scroll_down_from state.fusion_scroll
                             ~by:(surface_page_rows state)
                  | _ ->
+                     let was_submitting = Masc_tui_fusion_launch.submitting launch in
                      (match Masc_tui_fusion_launch.edit ~key launch with
                       | Masc_tui_fusion_launch.Closed ->
-                          state.fusion_launch <- None;
-                          state.fusion_scroll <- 0
+                          (* Bumped through the same rule a surface jump uses,
+                             so a late answer cannot reopen what was left. *)
+                          ignore
+                            (Masc_tui_types.leave_fusion_launch state ~destination:Overview);
+                          state.fusion_scroll <- 0;
+                          if was_submitting then
+                            add_event state "system"
+                              "Fusion launch left while its answer was out; the run may have \
+                               started - r refreshes the list"
                       | Masc_tui_fusion_launch.Editing next ->
                           state.fusion_launch <- Some (Fusion_launch_open next);
                           state.fusion_scroll <- 0
                       | Masc_tui_fusion_launch.Submitted (next, request) ->
                           state.fusion_launch <- Some (Fusion_launch_open next);
                           state.fusion_scroll <- 0;
-                          launch_fusion_run state ~mailbox:async_messages ~request))
+                          start_fusion_run state ~mailbox:async_messages ~request))
             | Some (Fusion_launch_started _) | None -> ())
        | Some _
          when quit_key

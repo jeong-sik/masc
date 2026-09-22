@@ -359,6 +359,46 @@ let test_github_token_claims_input_when_active () =
   check target "no input when not editing token" None (resolved state)
 ;;
 
+(* Leaving Fusion ends the form. Without this the form outlives the surface:
+   the Activity pane's mouse handler reaches [goto_surface] before any key
+   handler runs, so there is a way out of Fusion that the form's own Esc
+   never sees, and the form came back later built from a cursor that had
+   moved. *)
+let test_leaving_fusion_abandons_the_launch_form () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Fusion;
+  let options =
+    { Masc.Tui_decode.flo_enabled = true
+    ; flo_default_preset = "trio"
+    ; flo_presets = [ "trio" ]
+    }
+  in
+  let form () =
+    match Masc_tui_fusion_launch.open_form ~keepers:[ "analyst" ] ~keeper:None ~options with
+    | Ok form -> form
+    | Error detail -> fail detail
+  in
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_open (form ()));
+  let generation = state.Tui_types.fusion_launch_generation in
+  check bool "staying on Fusion keeps the form" false
+    (Tui_types.leave_fusion_launch state ~destination:Tui_types.Fusion);
+  check bool "kept" true (Option.is_some state.Tui_types.fusion_launch);
+  check int "and spends no generation" generation
+    state.Tui_types.fusion_launch_generation;
+  check bool "leaving with nothing submitted reports no request in flight" false
+    (Tui_types.leave_fusion_launch state ~destination:Tui_types.Changes);
+  check bool "the form is gone" true (Option.is_none state.Tui_types.fusion_launch);
+  check target "and takes no more text" None (resolved state);
+  check bool "a late answer cannot reopen it" true
+    (state.Tui_types.fusion_launch_generation > generation);
+  (* A read still in flight is abandoned the same way. *)
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_reading_presets 1);
+  check bool "an unfinished preset read reports nothing in flight" false
+    (Tui_types.leave_fusion_launch state ~destination:Tui_types.Overview);
+  check bool "and is dropped" true (Option.is_none state.Tui_types.fusion_launch);
+  check bool "nothing open means nothing to leave" false
+    (Tui_types.leave_fusion_launch state ~destination:Tui_types.Overview)
+
 let () =
   Alcotest.run
     "tui text input target"
@@ -399,7 +439,9 @@ let () =
           test_case "a new lane name claims typing on Runtime" `Quick
             test_a_new_lane_name_claims_typing_on_runtime;
           test_case "the Fusion launch form claims while open" `Quick
-            test_the_fusion_launch_form_claims_while_open
+            test_the_fusion_launch_form_claims_while_open;
+          test_case "leaving Fusion abandons the launch form" `Quick
+            test_leaving_fusion_abandons_the_launch_form
         ] )
     ]
 ;;

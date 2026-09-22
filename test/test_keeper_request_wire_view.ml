@@ -64,6 +64,7 @@ let view ~front history : Try_provider.request_view =
     ~last_resort:false
     ~base_path:""
     ~demote_before:0
+    ~completed_end_atom:0
     ~materialize:(fun ~pending:_ messages -> messages)
     history
 ;;

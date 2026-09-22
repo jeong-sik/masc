@@ -12187,7 +12187,7 @@ let render_acting (state : state) =
             | Acting.Call_started -> (Theme.info ())
             | Acting.Call_returned -> (Theme.ok ())
             | Acting.Turn_boundary -> Ansi.reset
-            | Acting.Turn_settled -> Ansi.bold
+            | Acting.Turn_done -> Ansi.bold
             | Acting.Failure -> (Theme.bad ())
             | Acting.Attention -> (Theme.warn ())
             | Acting.Quiet -> Ansi.dim

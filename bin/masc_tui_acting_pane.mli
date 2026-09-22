@@ -82,8 +82,8 @@ type feed =
 (** One keeper as the fleet block draws it. [mark] is the one-cell health
     glyph the roster draws ({!Masc_tui_keeper_mark}); [mark_tone] is the
     colour the caller reads out of the same health. [health] is that same
-    reading. A gone process marks an unsettled feed record with [!]; every
-    other unsettled record wears [~], without asserting a current turn. *)
+    reading. A gone process marks an open feed record with [!]; every
+    other open record wears [~], without asserting a current turn. *)
 type keeper = {
   name : string;
   mark : string;
@@ -266,12 +266,12 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     Changes tab. The focus header says what the keeper is doing now when the
     record carries it -- [running <tool> 4s] while a wire call is out,
     [waiting on model 12s] while a provider call is in flight, [idle 3m] on
-    a settled record -- each with its own clock and, on a settled record,
+    a finished record -- each with its own clock and, on a finished record,
     the turn number after it. A record that says none of the three (between
     a tool's return and the next provider call, or a CLI lane, which sends
-    no turn markers) keeps the older reading: a settled turn by its number
-    alone, an unsettled record spelling its state, and the age of the
-    newest event. Under [Whole_fleet], two layouts.
+    no turn markers) keeps the older reading: a finished turn by its number
+    alone, every other record spelling its state ([open], [no end, process
+    gone]), and the age of the newest event. Under [Whole_fleet], two layouts.
     At [scroll = 0] the overview: the fleet takes at
     most half the rows below the header when the focus block has something to
     show, a fold line counts the keepers left out, and the focus block takes
@@ -291,10 +291,10 @@ val keeper_state_text :
   Masc_tui_acting.chunk option ->
   span list
 (** The fleet row's recent observation: approval first, then the record's
-    glyph ([~] unsettled, [!] unsettled with the process gone, the settled
-    mark otherwise) and its words: the newest tool and the observed count
-    ([4+ calls], [no calls yet]) before a settle, the settle's count
-    ([12 calls]) and the tokens after. Unknown settled counts stay unknown.
+    glyph ([~] open, [!] open with the process gone, the done mark
+    otherwise) and its words: the newest tool and the observed count
+    ([4+ calls], [no calls yet]) before the end event, that event's count
+    ([12 calls]) and the tokens after. Unknown counts stay unknown.
     No clock: the age of the newest event is on the focus header. *)
 
 val tokens_text : int option * int option -> string

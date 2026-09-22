@@ -218,7 +218,7 @@ type rendering = {
 
 let middle_dot = " \xc2\xb7 "
 let open_record_glyph = "~"
-let settled_glyph = Acting.glyph_text Acting.Turn_settled
+let done_glyph = Acting.glyph_text Acting.Turn_done
 let attention_glyph = Acting.glyph_text Acting.Attention
 let rule_glyph = "\xe2\x94\x80"
 let ellipsis = "\xe2\x80\xa6"
@@ -308,7 +308,7 @@ let latest_tool (chunk : Acting.chunk) =
   | [] -> None
 
 (* One word for the count. A settle reports the whole turn: [12 calls]. An
-   unsettled record only knows what this feed observed, which may have
+   open record only knows what this feed observed, which may have
    started mid-turn or lost rows, so it says at least that many: [4+ calls],
    and [no calls yet] when it saw none. *)
 let chunk_calls_text (chunk : Acting.chunk) =
@@ -333,7 +333,7 @@ let calls_figure (chunk : Acting.chunk) =
     | 0 -> "-"
     | seen -> string_of_int seen ^ "+"
 
-type record_state = Record_open | Record_unfinished | Record_settled
+type record_state = Record_open | Record_unfinished | Record_done
 
 (* Window logical rows before formatting text or measuring display cells. These
    descriptors live for one frame; presentation still uses that frame's input. *)
@@ -385,7 +385,7 @@ type logical_row =
   | Formatted_status of line * row_target
 
 let record_state ~health (chunk : Acting.chunk) =
-  if chunk.Acting.ck_settled then Record_settled
+  if chunk.Acting.ck_settled then Record_done
   else
     match health with
     | Some Reading.Health_offline -> Record_unfinished
@@ -395,22 +395,32 @@ let record_state ~health (chunk : Acting.chunk) =
     | None -> Record_open
 
 (* The record's state in words, for the focus header and the earlier-turn
-   rows; a fleet row carries only the glyph. An unsettled record is a turn
-   no settle has closed; it does not say the keeper is at work. When the
-   process is gone none will come, and the long form says so. *)
+   rows; a fleet row carries only the glyph. "open" is a turn no end event
+   has closed; it does not say the keeper is at work. When the process is
+   gone no end will come, and the long form says so.
+
+   These read "settled" and "unsettled" until an operator asked what the
+   words meant (2026-09-22). One of them covered two states -- an open record
+   and a gone one parted by tone alone -- while the narrow column below
+   called the second one something else again. The word also names three
+   other facts in this repository: a tool dispatch that returned a result,
+   a ledger row whose outcome is unknown, an owner not yet chosen. And it
+   reads first as "calm", which is why this comment and the one on
+   [state_column_word] both had to deny that the keeper is running. The feed
+   event is [Keeper_turn_complete]; the screen now says the same thing. *)
 let record_word = function
-  | Record_open -> ("unsettled", Dim)
-  | Record_unfinished -> ("unsettled", Warn)
-  | Record_settled -> ("settled", Dim)
+  | Record_open -> ("open", Dim)
+  | Record_unfinished -> ("no end", Warn)
+  | Record_done -> ("done", Dim)
 
 let record_word_long = function
-  | Record_unfinished -> ("unsettled, process gone", Warn)
-  | (Record_open | Record_settled) as state -> record_word state
+  | Record_unfinished -> ("no end, process gone", Warn)
+  | (Record_open | Record_done) as state -> record_word state
 
 let record_glyph = function
   | Record_open -> open_record_glyph
   | Record_unfinished -> unfinished_glyph
-  | Record_settled -> settled_glyph
+  | Record_done -> done_glyph
 
 (* Fixed columns, so the eye can run down one and compare rows instead of
    reading each as a sentence. Every row spends the same cells on the same
@@ -420,9 +430,8 @@ let record_glyph = function
    on one line and a call count on the next.
 
    The four add up to [reading_cells] exactly. Widest members measured:
-   "unsettled" 9 and "no events" 9 in a 10-cell state column, whose last cell
-   is the gap to the next -- without it "unsettled" and a tool name ran
-   together; "tool_execute" 12; "999+" 4 under a 5-cell "calls" heading;
+   "no events" 9 in a 10-cell state column, whose last cell is the gap to
+   the next -- without it the state word and a tool name ran together; "tool_execute" 12; "999+" 4 under a 5-cell "calls" heading;
    "999.9k" 6 under a 9-cell "tok/turn". Widening one has to narrow another,
    and [test_widest_settled_reading_fits_whole] fails when the sum drifts. *)
 let state_cells = 10
@@ -440,13 +449,15 @@ let pad_left width text =
   let text = Layout.take_cells text width in
   String.make (max 0 (width - Layout.display_width text)) ' ' ^ text
 
-(* The word in the state column. The record vocabulary, unchanged: "unsettled"
-   is a record that has not closed, which is not the same claim as a keeper
-   that is running, and this row has no evidence for the second. *)
+(* The word in the state column, the same three words [record_word] uses:
+   "open" is a record that has not closed, which is not the same claim as a
+   keeper that is running, and this row has no evidence for the second. The
+   [!] glyph is what says the process is gone; the word says what that did
+   to the record. *)
 let state_column_word = function
-  | Record_open -> ("unsettled", Dim)
-  | Record_unfinished -> ("gone", Warn)
-  | Record_settled -> ("settled", Dim)
+  | Record_open -> ("open", Dim)
+  | Record_unfinished -> ("no end", Warn)
+  | Record_done -> ("done", Dim)
 
 (* The glyph is the record's state; the words are the newest tool and the
    count, or the count and the tokens once settled. No clock here: the age
@@ -478,7 +489,7 @@ let keeper_state_text ~health ~approval (chunk : Acting.chunk option) =
        one. Each fact keeps its own column either way. *)
     let tool, tokens =
       match state with
-      | Record_settled -> ("", tokens_sum_figure chunk.Acting.ck_tokens)
+      | Record_done -> ("", tokens_sum_figure chunk.Acting.ck_tokens)
       | Record_open | Record_unfinished ->
         ((match latest_tool chunk with Some tool -> tool | None -> ""), "")
     in
@@ -733,8 +744,8 @@ let tool_line ~cols ~now ~state ~place (chunk : Acting.chunk) (tool : Acting.chu
         then
           (match state with
            | Record_unfinished -> { text = unfinished_glyph ^ " "; tone = Warn }
-           | Record_open | Record_settled -> { text = open_record_glyph ^ " "; tone = Dim })
-        else { text = settled_glyph ^ " "; tone = Dim }
+           | Record_open | Record_done -> { text = open_record_glyph ^ " "; tone = Dim })
+        else { text = done_glyph ^ " "; tone = Dim }
   in
   let age =
     if is_wide ~cols then
@@ -873,7 +884,7 @@ let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
   in
   let prefix =
     match state with
-    | Record_settled -> { text = settled_glyph ^ " "; tone = Dim }
+    | Record_done -> { text = done_glyph ^ " "; tone = Dim }
     | Record_open | Record_unfinished ->
         let word, tone = record_word state in
         { text = record_glyph state ^ " " ^ word; tone }
@@ -940,10 +951,10 @@ let now_text ~now ~health ~state (chunk : Acting.chunk) =
   | Some Reading.Health_running -> (
       match state with
       | Record_open | Record_unfinished -> working ()
-      | Record_settled -> None)
+      | Record_done -> None)
   | Some Reading.Health_idle -> (
       match state with
-      | Record_settled -> Some ("idle " ^ age_text ~now chunk.Acting.ck_at)
+      | Record_done -> Some ("idle " ^ age_text ~now chunk.Acting.ck_at)
       | Record_open | Record_unfinished -> None)
   | Some Reading.Health_failing | Some Reading.Health_offline | None -> None
 
@@ -960,7 +971,7 @@ let focus_header_line ~cols ~now ~health name current =
          state, the long form first, and gives that up before the clock. *)
       let states =
         match turn_name current with
-        | Some turn when state = Record_settled -> [ [ { text = middle_dot ^ turn; tone = Plain } ] ]
+        | Some turn when state = Record_done -> [ [ { text = middle_dot ^ turn; tone = Plain } ] ]
         | Some _ | None ->
             List.map
               (fun (word, tone) -> [ { text = middle_dot ^ word; tone } ])
@@ -977,7 +988,7 @@ let focus_header_line ~cols ~now ~health name current =
             let now_span = { text = middle_dot ^ text; tone = Info } in
             let named =
               match turn_name current with
-              | Some turn when state = Record_settled ->
+              | Some turn when state = Record_done ->
                   [ [ now_span; { text = middle_dot ^ turn; tone = Plain } ] ]
               | Some _ | None -> []
             in

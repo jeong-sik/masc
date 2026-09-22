@@ -279,7 +279,8 @@ status: reference
   `[runtime.lanes.<이름>]` 표가 이름을 붙이고 `Runtime_lane.t`(`{id; candidates}`)가
   그 값이다. 옛 이름 "Runtime Lane"·"failover"를 대신하며, TUI 화면은 이제
   "runtime candidate order"로 읽는다. `[runtime].media_failover`(vision fleet)와
-  다른 메커니즘이다.
+  exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md:394`)는
+  런타임 후보 순서와 별개 축이며, 개명되지 않는다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
 **Standalone Lane**

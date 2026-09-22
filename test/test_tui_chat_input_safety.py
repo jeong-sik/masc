@@ -252,7 +252,7 @@ def quiet_leave_belongs_to_the_chat_surface(binary: str) -> None:
         # the letters below would land nowhere.
         h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
         h.select_keeper_row(process, fd, output, b"alpha")
-        h.send_and_wait(process, fd, output, b"i", b"Ctrl-Y to speak")
+        h.send_and_wait(process, fd, output, b"i", h.COMPOSER_FOCUSED)
         h.send_and_wait(process, fd, output, b"zqx", b"zqx")
         os.write(fd, b"\x11")
         h.drain_until_quiet(process, fd, output)

@@ -31,6 +31,15 @@ Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None
 HttpResponse = tuple[int, object]
 Needle = bytes | re.Pattern[bytes]
 
+# The composer row redrawn focused: its prompt "› to <keeper>" with nothing
+# after the name but blanks. Unfocused it ends in "(i to write)". The voice
+# keys hint used to be what a step waited for after i, but it is drawn only
+# where speech-to-text is set up, and a fixture without a voice config is the
+# ordinary case.
+COMPOSER_FOCUSED = re.compile(
+    rb"\xe2\x80\xba to [^\s\x1b]+(?=\s|\x1b)(?! *\(i to write\))"
+)
+
 
 class RawHttpResponse:
     """A response the fixture sends byte for byte: its own content type and

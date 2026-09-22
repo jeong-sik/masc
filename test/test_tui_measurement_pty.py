@@ -346,7 +346,7 @@ def run(executable: str, scenario: str, evidence: Path | None) -> None:
             return
 
         def submit_command(text: str, needle: bytes) -> None:
-            h.send_and_wait(process, master, output, b"i", b"Ctrl-Y to speak")
+            h.send_and_wait(process, master, output, b"i", h.COMPOSER_FOCUSED)
             command = text.encode()
             h.send_and_wait(
                 process,

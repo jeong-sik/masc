@@ -8,6 +8,7 @@ type error =
   | Preset_absent of string
   | Preset_exists of string
   | Unaddressable_preset of string
+  | Unaddressable_settings
   | Unreadable of string
 
 let error_message = function
@@ -18,6 +19,9 @@ let error_message = function
       "preset %s is not one [fusion.presets.%s] table holding all its keys, with only \
        its panels and judges entries right below it; edit it in the raw runtime.toml"
       name name
+  | Unaddressable_settings ->
+    "fusion is not written as a [fusion] table with its keys right below the header; \
+     edit it in the raw runtime.toml"
   | Unreadable detail -> "runtime.toml does not parse as TOML: " ^ detail
 ;;
 
@@ -27,8 +31,25 @@ type settings =
   ; staged_judge_group_size : int
   }
 
+let fusion_path = [ "fusion" ]
+let panels_key = "panels"
+let judges_key = "judges"
+let panel_key = "panel"
+
+(* A file the writer can edit: it parses, and [fusion], when present, is a
+   table. Writing [\[fusion.presets.x\]] beside a scalar [fusion] would name
+   the key twice. *)
 let parse content =
-  Result.map_error (fun detail -> Unreadable detail) (Otoml.Parser.from_string_result content)
+  let* toml =
+    Result.map_error (fun detail -> Unreadable detail) (Otoml.Parser.from_string_result content)
+  in
+  match Otoml.find_opt toml Fun.id fusion_path with
+  | None | Some (Otoml.TomlTable _) -> Ok toml
+  | Some
+      ( Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ | Otoml.TomlArray _
+      | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ ) -> Error Unaddressable_settings
 ;;
 
 (* ── line classification ─────────────────────────────────────────────── *)
@@ -70,10 +91,27 @@ let classify lines =
     lines
 ;;
 
+type source =
+  { line_list : string list
+  ; lines : string array
+  ; kinds : line_kind array
+  ; trailing_newline : bool
+  }
+
 let read_lines content =
-  let line_list, _trailing = E.split_lines content in
-  line_list, Array.of_list line_list, Array.of_list (classify line_list)
+  let line_list, trailing_newline = E.split_lines content in
+  { line_list
+  ; lines = Array.of_list line_list
+  ; kinds = Array.of_list (classify line_list)
+  ; trailing_newline
+  }
 ;;
+
+(* Lines read on their own, as the grammar reads them in the file. A CRLF
+   file keeps its [\r] on every line, so a value that spans lines holds the
+   same line endings the loader read; the final newline makes the last line
+   whole. *)
+let parse_lines lines = Otoml.Parser.from_string_result (String.concat "\n" lines ^ "\n")
 
 let header_path = function
   | E.Table path | E.Table_array path -> path
@@ -87,10 +125,6 @@ let rec has_prefix ~prefix path =
   | _ :: _, [] -> false
 ;;
 
-let fusion_path = [ "fusion" ]
-let panels_key = "panels"
-let judges_key = "judges"
-let panel_key = "panel"
 let preset_path name = fusion_path @ [ "presets"; name ]
 let panels_path name = preset_path name @ [ panels_key ]
 let judges_path name = preset_path name @ [ judges_key ]
@@ -176,13 +210,19 @@ let header_outside_region kinds region name =
 
 (* ── the region as keys and entries ────────────────────────────────────── *)
 
-(* One key and its lines: the comments and blanks since the previous value,
-   then every line the value spans. *)
+(* One key and its lines: the comments and blanks above it, every line the
+   value spans, and the comments right below the value. A comment block sits
+   with the key it touches without a blank line; a block touching neither, or
+   both, is the lead of the key below (TOML comments precede what they
+   describe). *)
 type item =
   { key : string
   ; lead : string list
   ; value_lines : string list
+  ; trail : string list
   }
+
+let item_lines (item : item) = item.lead @ item.value_lines @ item.trail
 
 type entry_kind =
   | Panels
@@ -194,27 +234,51 @@ let same_kind a b =
   | Panels, Judges | Judges, Panels -> false
 ;;
 
+(* What an entry names, read from its own lines: the label and the routes a
+   panel group holds, or a first judge's label and model. *)
+type identity =
+  { label : string
+  ; routes : string list
+  }
+
 type entry =
   { kind : entry_kind
   ; head : string list  (** comments and blanks above the header *)
   ; header : string
   ; items : item list
+  ; identity : identity
   }
 
 type layout =
   { body : item list
   ; entries : entry list  (** in file order *)
-  ; tail : string list
   }
 
-let empty_layout = { body = []; entries = []; tail = [] }
+let empty_layout = { body = []; entries = [] }
 
 type reading =
   { read : item list
-  ; after : string list  (** comments and blanks after the last item *)
+  ; after : string list  (** the lead of what follows the last item *)
   ; next : int
   ; at_header : E.header option  (** the header at [next]; [None] at [stop] *)
   }
+
+(* The comments and blanks between two values, split between them: what
+   comes before the last blank line trails the value above, the last blank
+   and what follows lead the key or header below. With no blank line the
+   block leads what follows; with nothing following it trails. *)
+let split_between ~follows pending =
+  let rec last_blank index best = function
+    | [] -> best
+    | line :: rest -> last_blank (index + 1) (if is_blank line then Some index else best) rest
+  in
+  match follows, last_blank 0 None pending with
+  | false, _ -> pending, []
+  | true, None -> [], pending
+  | true, Some at ->
+    ( List.filteri (fun index _ -> index < at) pending
+    , List.filteri (fun index _ -> index >= at) pending )
+;;
 
 (* Items from [index] until a header or [stop]. *)
 let read_items lines kinds ~stop index =
@@ -227,9 +291,18 @@ let read_items lines kinds ~stop index =
       | Data -> value_end (index + 1)
       | Header _ | Key _ | Comment | Blank -> index)
   in
+  let settle ~follows pending read =
+    let pending = List.rev pending in
+    match read with
+    | [] -> read, pending
+    | (last : item) :: earlier ->
+      let trail, lead = split_between ~follows pending in
+      { last with trail } :: earlier, lead
+  in
   let rec walk index pending read =
     let finish at_header =
-      { read = List.rev read; after = List.rev pending; next = index; at_header }
+      let read, after = settle ~follows:(Option.is_some at_header) pending read in
+      { read = List.rev read; after; next = index; at_header }
     in
     if index >= stop
     then finish None
@@ -238,7 +311,8 @@ let read_items lines kinds ~stop index =
       | Header header -> finish (Some header)
       | Key key ->
         let next = value_end (index + 1) in
-        walk next [] ({ key; lead = List.rev pending; value_lines = slice index next } :: read)
+        let read, lead = settle ~follows:true pending read in
+        walk next [] ({ key; lead; value_lines = slice index next; trail = [] } :: read)
       | Comment | Blank | Data -> walk (index + 1) (lines.(index) :: pending) read)
   in
   walk index [] []
@@ -250,40 +324,77 @@ let entry_kind name = function
   | E.Table_array _ | E.Table _ -> None
 ;;
 
+(* A key the loader reads with a default: absent reads as [absent]. A value
+   of another type is the loader's type error, so the entry has no identity. *)
+let read_key toml key accessor ~absent =
+  if Otoml.path_exists toml [ key ]
+  then Otoml.find_result toml accessor [ key ]
+  else Ok absent
+;;
+
+let entry_identity kind (items : item list) =
+  let* toml = parse_lines (List.concat_map (fun (item : item) -> item.value_lines) items) in
+  let* label = read_key toml "label" Otoml.get_string ~absent:"" in
+  match kind with
+  | Panels ->
+    let* routes = read_key toml panel_key (Otoml.get_array Otoml.get_string) ~absent:[] in
+    Ok { label; routes }
+  | Judges ->
+    let* model = read_key toml "model" Otoml.get_string ~absent:"" in
+    Ok { label; routes = [ model ] }
+;;
+
 (* [None] when a header in the region opens something other than a panels or
-   judges entry of this preset. *)
+   judges entry of this preset, or an entry's identity does not read. *)
 let read_layout lines kinds region name =
   let first = read_items lines kinds ~stop:region.stop (region.start + 1) in
   let rec entries acc (reading : reading) =
     match reading.at_header with
-    | None -> Some { body = first.read; entries = List.rev acc; tail = reading.after }
+    | None -> Some { body = first.read; entries = List.rev acc }
     | Some header ->
       (match entry_kind name header with
        | None -> None
        | Some kind ->
          let inner = read_items lines kinds ~stop:region.stop (reading.next + 1) in
-         entries
-           ({ kind; head = reading.after; header = lines.(reading.next); items = inner.read }
-            :: acc)
-           inner)
+         (match entry_identity kind inner.read with
+          | Error _ -> None
+          | Ok identity ->
+            entries
+              ({ kind
+               ; head = reading.after
+               ; header = lines.(reading.next)
+               ; items = inner.read
+               ; identity
+               }
+               :: acc)
+              inner))
   in
   entries [] first
 ;;
 
-(* Every key of the preset's table must come from the region. A key written
-   elsewhere, such as a dotted [presets.x.min_answered] under [\[fusion\]],
-   would stay where it is beside the one the writer writes. *)
+(* Every key of the preset's table must come from the region, and panels and
+   judges only from entries. A key written elsewhere, such as a dotted
+   [presets.x.min_answered] under [\[fusion\]], or an inline [judges = \[...\]]
+   in the body, would stay where it is beside what the writer writes. A flat
+   [panel] beside entries is the two grammars at once, which the loader
+   refuses. *)
 let keys_in_region toml name (layout : layout) =
-  let has_entry kind = List.exists (fun (entry : entry) -> same_kind entry.kind kind) layout.entries in
+  let has_entry kind =
+    List.exists (fun (entry : entry) -> same_kind entry.kind kind) layout.entries
+  in
+  let body_has key = List.exists (fun (item : item) -> String.equal item.key key) layout.body in
   match Otoml.find_result toml Otoml.get_table (preset_path name) with
   | Error _ -> false
   | Ok table ->
-    List.for_all
-      (fun (key, _) ->
-         List.exists (fun (item : item) -> String.equal item.key key) layout.body
-         || (String.equal key panels_key && has_entry Panels)
-         || (String.equal key judges_key && has_entry Judges))
-      table
+    (not (body_has panels_key))
+    && (not (body_has judges_key))
+    && not (body_has panel_key && has_entry Panels)
+    && List.for_all
+         (fun (key, _) ->
+            body_has key
+            || (String.equal key panels_key && has_entry Panels)
+            || (String.equal key judges_key && has_entry Judges))
+         table
 ;;
 
 let addressable_layout toml lines kinds region name =
@@ -353,7 +464,7 @@ let field_of_toml = function
 
 (* The value an item's own lines hold. [None] when they do not read alone. *)
 let item_field (item : item) =
-  match Otoml.Parser.from_string_result (String.concat "\n" item.value_lines) with
+  match parse_lines item.value_lines with
   | Error _ -> None
   | Ok toml -> Option.bind (Otoml.find_opt toml Fun.id [ item.key ]) field_of_toml
 ;;
@@ -472,7 +583,7 @@ let render_items items fields =
     List.concat_map
       (fun (item : item) ->
          match List.assoc_opt item.key fields with
-         | None -> item.lead @ item.value_lines
+         | None -> item_lines item
          | Some presence ->
            (match resolve presence ~present:true with
             | None -> []
@@ -482,8 +593,11 @@ let render_items items fields =
                 | Some read -> same_value field read
                 | None -> false
               in
-              item.lead
-              @ (if unchanged then item.value_lines else field_lines ~key:item.key field)))
+              item_lines
+                { item with
+                  value_lines =
+                    (if unchanged then item.value_lines else field_lines ~key:item.key field)
+                }))
       items
   in
   let added =
@@ -502,62 +616,28 @@ let render_items items fields =
 
 (* ── entries ───────────────────────────────────────────────────────────── *)
 
-type identity =
-  { label : string
-  ; routes : string list
-  }
-
 let equal_identity a b = String.equal a.label b.label && List.equal String.equal a.routes b.routes
-
-(* A key the loader reads with a default: absent reads as [absent]; a value of
-   another type leaves the entry without an identity. *)
-let read_key toml key accessor ~absent =
-  if Otoml.path_exists toml [ key ]
-  then Result.to_option (Otoml.find_result toml accessor [ key ])
-  else Some absent
-;;
-
-let old_identity (entry : entry) =
-  let text = String.concat "\n" (List.concat_map (fun (item : item) -> item.value_lines) entry.items) in
-  match Otoml.Parser.from_string_result text with
-  | Error _ -> None
-  | Ok toml ->
-    Option.bind (read_key toml "label" Otoml.get_string ~absent:"") (fun label ->
-      match entry.kind with
-      | Panels ->
-        Option.map
-          (fun routes -> { label; routes })
-          (read_key toml panel_key (Otoml.get_array Otoml.get_string) ~absent:[])
-      | Judges ->
-        Option.map
-          (fun model -> { label; routes = [ model ] })
-          (read_key toml "model" Otoml.get_string ~absent:""))
-;;
 
 (* Pair each wanted entry with the old entry it continues: first the one with
    the same label and routes, then, among those left, the one with the same
-   non-empty label. An identity that two old entries share, or a label that two
-   wanted entries still share, pairs with neither. *)
+   non-empty label, then the next old entry still unpaired. An identity that
+   two old entries share, or a label that two wanted entries still share,
+   pairs with neither in the first two passes. *)
 let pair_entries (old : entry list) (wanted : (identity * 'a) list) =
-  let old = Array.of_list (List.map (fun entry -> entry, old_identity entry) old) in
+  let old = Array.of_list old in
   let wanted = Array.of_list wanted in
   let claimed = Array.make (Array.length old) false in
   let paired = Array.make (Array.length wanted) None in
   let claim index matches =
     let candidates =
       List.filter
-        (fun at ->
-           (not claimed.(at))
-           &&
-           match snd old.(at) with
-           | Some identity -> matches identity
-           | None -> false)
+        (fun at -> (not claimed.(at)) && matches old.(at).identity)
         (List.init (Array.length old) Fun.id)
     in
     match candidates with
     | [ at ] ->
       claimed.(at) <- true;
-      paired.(index) <- Some (fst old.(at))
+      paired.(index) <- Some old.(at)
     | [] | _ :: _ :: _ -> ()
   in
   Array.iteri (fun index (identity, _) -> claim index (equal_identity identity)) wanted;
@@ -572,6 +652,19 @@ let pair_entries (old : entry list) (wanted : (identity * 'a) list) =
           && (not (String.equal identity.label ""))
           && not (shared identity.label)
        then claim index (fun (candidate : identity) -> String.equal candidate.label identity.label))
+    wanted;
+  (* What neither pass paired continues the old entries left, in order: an
+     unlabelled group's identity is its routes, so editing its routes must
+     still keep its lines. *)
+  Array.iteri
+    (fun index _ ->
+       if Option.is_none paired.(index)
+       then (
+         match List.find_opt (fun at -> not claimed.(at)) (List.init (Array.length old) Fun.id) with
+         | Some at ->
+           claimed.(at) <- true;
+           paired.(index) <- Some old.(at)
+         | None -> ()))
     wanted;
   Array.to_list (Array.mapi (fun index (_, value) -> paired.(index), value) wanted)
 ;;
@@ -611,28 +704,45 @@ let place_entries ~slots ~panels ~judges =
 (* The grammar the file already uses wins: a preset written with [[panels]]
    entries keeps them, a flat one stays flat while it has one group. A new
    preset is flat when its one group has no label. *)
+let had_flat_panel (layout : layout) =
+  List.exists (fun (item : item) -> String.equal item.key panel_key) layout.body
+;;
+
 let flat_group (layout : layout) (preset : Fusion_policy.preset) =
   let had_entries =
     List.exists (fun (entry : entry) -> same_kind entry.kind Panels) layout.entries
   in
-  let had_flat_panel = List.exists (fun (item : item) -> String.equal item.key panel_key) layout.body in
   match preset.panels with
-  | [ group ] when (not had_entries) && (had_flat_panel || String.equal group.label "") ->
+  | [ group ] when (not had_entries) && (had_flat_panel layout || String.equal group.label "") ->
     Some group
   | [] | [ _ ] | _ :: _ :: _ -> None
 ;;
 
+(* The group keys, by name only: what a body sheds when its groups move into
+   entries. *)
+let group_keys_only : Fusion_policy.panel_group =
+  { models = []
+  ; label = ""
+  ; system_prompt = ""
+  ; web_tools = false
+  ; max_output_tokens = None
+  ; timeout_s = None
+  }
+;;
+
 let render_region ~header_line (layout : layout) (preset : Fusion_policy.preset) =
   let flat = flat_group layout preset in
+  (* A flat preset that grows into entries loses its body group keys: the
+     loader refuses a flat [panel] beside entries. A preset that already had
+     entries keeps whatever group keys its body carries; the loader does not
+     read them. *)
   let body_fields =
     match flat with
     | Some group -> group_fields group @ judge_fields preset
     | None ->
-      (* With entries the body holds no group keys: the loader would refuse a
-         flat [panel] beside them, and ignore the rest. *)
-      List.concat_map
-        (fun group -> List.map (fun (key, _) -> key, When_set None) (group_fields group))
-        preset.panels
+      (if had_flat_panel layout
+       then List.map (fun (key, _) -> key, When_set None) (group_fields group_keys_only)
+       else [])
       @ judge_fields preset
   in
   let render_entries kind ~header wanted =
@@ -664,9 +774,7 @@ let render_region ~header_line (layout : layout) (preset : Fusion_policy.preset)
          preset.judges)
   in
   let slots = List.map (fun (entry : entry) -> entry.kind) layout.entries in
-  (header_line :: render_items layout.body body_fields)
-  @ place_entries ~slots ~panels ~judges
-  @ layout.tail
+  (header_line :: render_items layout.body body_fields) @ place_entries ~slots ~panels ~judges
 ;;
 
 (* ── edits ─────────────────────────────────────────────────────────────── *)
@@ -677,7 +785,7 @@ let splice lines ~start ~stop replacement =
   before @ replacement @ after
 ;;
 
-let join lines = E.join_lines lines ~trailing_newline:true
+let join (source : source) lines = E.join_lines lines ~trailing_newline:source.trailing_newline
 
 (* Where a new preset goes: after the last region whose header sits under
    [fusion], so the section stays together; at the end of the file when there is
@@ -715,22 +823,22 @@ let insertion_index kinds =
 ;;
 
 (* [block] at [at], with a blank line on each side it does not already have. *)
-let insert_block lines ~at block =
-  let count = Array.length lines in
-  let separator = if at > 0 && not (is_blank lines.(at - 1)) then [ "" ] else [] in
-  let trailer = if at < count && not (is_blank lines.(at)) then [ "" ] else [] in
+let insert_block (source : source) ~at block =
+  let count = Array.length source.lines in
+  let separator = if at > 0 && not (is_blank source.lines.(at - 1)) then [ "" ] else [] in
+  let trailer = if at < count && not (is_blank source.lines.(at)) then [ "" ] else [] in
   separator @ block @ trailer
 ;;
 
 let upsert_preset content validated =
   let (preset : Fusion_policy.preset) = Fusion_policy.Validated_preset.preset validated in
   let* toml = parse content in
-  let line_list, lines, kinds = read_lines content in
-  match find_region kinds preset.name with
+  let source = read_lines content in
+  match find_region source.kinds preset.name with
   | Some region ->
-    let* layout = addressable_layout toml lines kinds region preset.name in
-    let rendered = render_region ~header_line:lines.(region.start) layout preset in
-    Ok (join (splice line_list ~start:region.start ~stop:region.stop rendered))
+    let* layout = addressable_layout toml source.lines source.kinds region preset.name in
+    let rendered = render_region ~header_line:source.lines.(region.start) layout preset in
+    Ok (join source (splice source.line_list ~start:region.start ~stop:region.stop rendered))
   | None ->
     if preset_declared toml preset.name
     then Error (Unaddressable_preset preset.name)
@@ -738,17 +846,18 @@ let upsert_preset content validated =
       let rendered =
         render_region ~header_line:(table_header (preset_path preset.name)) empty_layout preset
       in
-      let at = insertion_index kinds in
-      Ok (join (splice line_list ~start:at ~stop:at (insert_block lines ~at rendered))))
+      let at = insertion_index source.kinds in
+      let block = insert_block source ~at rendered in
+      Ok (join source (splice source.line_list ~start:at ~stop:at block)))
 ;;
 
 let locate content name =
   let* toml = parse content in
-  let line_list, lines, kinds = read_lines content in
-  match find_region kinds name with
+  let source = read_lines content in
+  match find_region source.kinds name with
   | Some region ->
-    let* _layout = addressable_layout toml lines kinds region name in
-    Ok (toml, line_list, kinds, region)
+    let* _layout = addressable_layout toml source.lines source.kinds region name in
+    Ok (toml, source, region)
   | None ->
     if preset_declared toml name
     then Error (Unaddressable_preset name)
@@ -761,7 +870,8 @@ let is_blank_kind = function
 ;;
 
 let delete_preset content ~name =
-  let* _toml, line_list, kinds, region = locate content name in
+  let* _toml, source, region = locate content name in
+  let kinds = source.kinds in
   let start = attached_comments_start kinds region.start in
   (* One blank line separated the preset from what came before. Left behind,
      it would stack on the blank below, or end the file with a blank line. *)
@@ -772,49 +882,16 @@ let delete_preset content ~name =
     then start - 1
     else start
   in
-  Ok (join (splice line_list ~start ~stop:region.stop []))
+  Ok (join source (splice source.line_list ~start ~stop:region.stop []))
 ;;
 
-let rename_preset content ~from ~target =
-  if String.equal from target
-  then Result.map (fun _ -> content) (locate content from)
-  else
-    let* toml, line_list, kinds, region = locate content from in
-    if preset_declared toml target
-    then Error (Preset_exists target)
-    else (
-      let old_prefix = preset_path from in
-      let renamed path = preset_path target @ List.filteri (fun index _ -> index >= 3) path in
-      let keep_comment line header =
-        header ^ Option.value ~default:"" (E.header_trailing_comment line)
-      in
-      let line_list =
-        List.mapi
-          (fun index line ->
-             if index < region.start || index >= region.stop
-             then line
-             else (
-               match kinds.(index) with
-               | Header (E.Table path) when has_prefix ~prefix:old_prefix path ->
-                 keep_comment line (table_header (renamed path))
-               | Header (E.Table_array path) when has_prefix ~prefix:old_prefix path ->
-                 keep_comment line (table_array_header (renamed path))
-               | Header _ | Key _ | Comment | Blank | Data -> line))
-          line_list
-      in
-      let renamed_content = join line_list in
-      match Otoml.find_result toml Otoml.get_string (fusion_path @ [ "default_preset" ]) with
-      | Ok current when String.equal current from ->
-        Ok
-          (E.edit_table_scalar renamed_content ~path:(render_path fusion_path)
-             ~key:"default_preset" ~value:(Some target))
-      | Ok _ | Error _ -> Ok renamed_content)
-;;
-
-let set_settings content (settings : settings) =
-  let line_list, lines, kinds = read_lines content in
+(* The [\[fusion\]] table's own keys, written like a preset body. [fusion]
+   written without that header (dotted keys at the root, an inline table)
+   cannot take a key by lines. Without any [fusion] the table opens before the
+   first [fusion] sub-table, or at the end of the file. *)
+let write_fusion_table toml (source : source) fields =
+  let kinds = source.kinds in
   let count = Array.length kinds in
-  let fields = settings_fields settings in
   let rec find_header index ~matches =
     if index >= count
     then None
@@ -829,17 +906,64 @@ let set_settings content (settings : settings) =
   in
   match find_header 0 ~matches:is_fusion_table with
   | Some header ->
-    let reading = read_items lines kinds ~stop:count (header + 1) in
-    let rendered = (lines.(header) :: render_items reading.read fields) @ reading.after in
-    join (splice line_list ~start:header ~stop:reading.next rendered)
+    let reading = read_items source.lines kinds ~stop:count (header + 1) in
+    let rendered = (source.lines.(header) :: render_items reading.read fields) @ reading.after in
+    Ok (join source (splice source.line_list ~start:header ~stop:reading.next rendered))
   | None ->
-    let table = table_header fusion_path :: render_items [] fields in
-    let at =
-      match
-        find_header 0 ~matches:(fun header -> has_prefix ~prefix:fusion_path (header_path header))
-      with
-      | Some first -> attached_comments_start kinds first
-      | None -> count
-    in
-    join (splice line_list ~start:at ~stop:at (insert_block lines ~at table))
+    if Otoml.path_exists toml fusion_path
+    then Error Unaddressable_settings
+    else (
+      let table = table_header fusion_path :: render_items [] fields in
+      let at =
+        match
+          find_header 0 ~matches:(fun header -> has_prefix ~prefix:fusion_path (header_path header))
+        with
+        | Some first -> attached_comments_start kinds first
+        | None -> count
+      in
+      Ok (join source (splice source.line_list ~start:at ~stop:at (insert_block source ~at table))))
+;;
+
+let rename_preset content ~from ~target =
+  if String.equal from target
+  then Result.map (fun _ -> content) (locate content from)
+  else
+    let* toml, source, region = locate content from in
+    if preset_declared toml target
+    then Error (Preset_exists target)
+    else (
+      let old_prefix = preset_path from in
+      let renamed path =
+        preset_path target @ List.filteri (fun index _ -> index >= List.length old_prefix) path
+      in
+      let keep_comment line header =
+        match E.header_trailing_comment line with
+        | None -> header
+        | Some comment -> header ^ comment
+      in
+      let line_list =
+        List.mapi
+          (fun index line ->
+             if index < region.start || index >= region.stop
+             then line
+             else (
+               match source.kinds.(index) with
+               | Header (E.Table path) when has_prefix ~prefix:old_prefix path ->
+                 keep_comment line (table_header (renamed path))
+               | Header (E.Table_array path) when has_prefix ~prefix:old_prefix path ->
+                 keep_comment line (table_array_header (renamed path))
+               | Header _ | Key _ | Comment | Blank | Data -> line))
+          source.line_list
+      in
+      let renamed_content = join source line_list in
+      match Otoml.find_result toml Otoml.get_string (fusion_path @ [ "default_preset" ]) with
+      | Ok current when String.equal current from ->
+        write_fusion_table toml (read_lines renamed_content)
+          [ "default_preset", Always (Text target) ]
+      | Ok _ | Error _ -> Ok renamed_content)
+;;
+
+let set_settings content (settings : settings) =
+  let* toml = parse content in
+  write_fusion_table toml (read_lines content) (settings_fields settings)
 ;;

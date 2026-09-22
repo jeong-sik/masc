@@ -579,7 +579,9 @@ let narrowing_fixture ~slot_count ~answer f =
     Sys.rename session_dir hidden;
     Fun.protect ~finally:(fun () -> Sys.rename hidden session_dir) body
   in
-  f ~bodies ~pass ~coverage ~hide_source
+  (* What a server restart does to the loop's memory. *)
+  let restart () = Masc.Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name in
+  f ~bodies ~pass ~coverage ~hide_source ~restart
 
 let narrowing_ceiling = 65_000
 let accepted_answer =
@@ -594,7 +596,7 @@ let test_refused_width_carries_to_the_next_pass () =
       if String.length body > narrowing_ceiling
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
-  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ->
   pass ();
   check (option int) "a refused source commits nothing" None (coverage ());
   check int "the refused pass sends one request and does not retry in place" 1
@@ -623,7 +625,7 @@ let test_refused_width_carries_to_the_next_pass () =
 let test_a_refusal_that_is_not_about_size_keeps_the_width () =
   narrowing_fixture ~slot_count:1
     ~answer:(fun _index _body -> `Too_many_requests, refused "rate_limit_error")
-  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ->
   pass ();
   pass ();
   check int "each pass sends one request" 2 (List.length !bodies);
@@ -637,7 +639,7 @@ let test_an_unreadable_source_keeps_the_width () =
       if String.length body > narrowing_ceiling
       then `Request_entity_too_large, refused "invalid_request_error"
       else `OK, accepted_answer)
-  @@ fun ~bodies ~pass ~coverage ~hide_source ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source ~restart:_ ->
   pass ();
   check (option int) "the first pass is refused and commits nothing" None (coverage ());
   (* prepare answers with no source both for a backlog read to its end and for
@@ -652,6 +654,24 @@ let test_an_unreadable_source_keeps_the_width () =
   pass ();
   check (option int) "and the source is read to its end" (Some 8) (coverage ())
 
+(* RFC-librarian-lifecycle §4.3 keeps the limit in the loop's memory and
+   accepts that a restart reads everything again. Pinned so that making the
+   width durable is a decision someone takes, not a side effect. *)
+let test_a_restart_forgets_the_width () =
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index body ->
+      if String.length body > narrowing_ceiling
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else `OK, accepted_answer)
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart ->
+  pass ();
+  restart ();
+  pass ();
+  check int "each pass sends one request" 2 (List.length !bodies);
+  check bool "after a restart the pass offers the whole backlog again" true
+    (List.nth !bodies 1 = List.nth !bodies 0);
+  check (option int) "and is refused again" None (coverage ())
+
 let test_a_size_refusal_anywhere_in_the_walk_narrows () =
   narrowing_fixture ~slot_count:2
     ~answer:(fun index _body ->
@@ -662,7 +682,7 @@ let test_a_size_refusal_anywhere_in_the_walk_narrows () =
       if index = 0
       then `Request_entity_too_large, refused "invalid_request_error"
       else `Too_many_requests, refused "rate_limit_error")
-  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ->
   pass ();
   check int "the walk tried both slots" 2 (List.length !bodies);
   pass ();
@@ -680,6 +700,7 @@ let () = run "production continuity pair"
     test_case "a refusal that is not about size keeps the width" `Quick test_a_refusal_that_is_not_about_size_keeps_the_width;
     test_case "a size refusal anywhere in the walk narrows" `Quick test_a_size_refusal_anywhere_in_the_walk_narrows;
     test_case "an unreadable source keeps the width" `Quick test_an_unreadable_source_keeps_the_width;
+    test_case "a restart forgets the width" `Quick test_a_restart_forgets_the_width;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
     test_case "split only an oversized work unit" `Quick test_fit_splits_only_oversized_work_unit;
     test_case "fit preserves exact Memory recovery" `Quick test_fit_keeps_exact_recovery_range;

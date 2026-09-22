@@ -58,9 +58,9 @@ vi.mock('../api/core', async importOriginal => ({
   ...await importOriginal<typeof import('../api/core')>(),
   runOperatorAction: vi.fn(),
   get: vi.fn(async (path: string) => {
-    const exact = /^\/api\/v1\/keepers\/([^/]+)\/tool-calls\?execution_id=([^&]+)$/.exec(path)
-    const response = exact
-      ? exactToolCallLookup.get(`${decodeURIComponent(exact[1])}:${decodeURIComponent(exact[2])}`)
+    const [, keeper, executionId] = /^\/api\/v1\/keepers\/([^/]+)\/tool-calls\?execution_id=([^&]+)$/.exec(path) ?? []
+    const response = keeper !== undefined && executionId !== undefined
+      ? exactToolCallLookup.get(`${decodeURIComponent(keeper)}:${decodeURIComponent(executionId)}`)
       : undefined
     if (response) return response
     throw new Error('Historical output not provided by this fixture')
@@ -266,7 +266,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       duration_ms: 42,
       tool_use_id: 'tc-api-success',
       execution_id: 'exec-api-success',
-    }
+    } satisfies ToolCallEntry
     fetchKeeperToolCalls.mockResolvedValueOnce({ entries: [toolCallEntry] })
     stubExactToolCallLookup(toolCallEntry)
 
@@ -401,7 +401,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       duration_ms: 31,
       tool_use_id: 'tc-alpha-scope',
       execution_id: 'exec-alpha-scope',
-    }
+    } satisfies ToolCallEntry
     fetchKeeperToolCalls.mockImplementation(async (keeperName?: string) => {
       if (keeperName === 'alpha') {
         return { entries: [alphaToolCallEntry] }

@@ -6350,16 +6350,6 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
      row it says the coverage, and on an unattached one it says the service
      is already in use somewhere, which is the row an operator is most likely
      to have lost track of. *)
-  let switch_of id =
-    List.find_map
-      (function
-        | Masc_tui_types.Identity_declared
-            { idp_id; idp_enabled; idp_switch_problem; _ }
-          when String.equal idp_id id -> Some (idp_enabled, idp_switch_problem)
-        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _
-          -> None)
-      providers
-  in
   let also_on id =
     List.find_map
       (function
@@ -6374,24 +6364,22 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     List.mapi
       (fun index (id, label) ->
         (* Attached-and-offering-nothing is a third state. Reading it as "not
-           attached" would tell an operator to consent again for no reason. *)
+           attached" would tell an operator to consent again for no reason.
+           The reading itself is [Masc_tui_types.identity_row_state], which
+           is also what the summary above the list counts, so the line and
+           the rows cannot disagree about what this Keeper holds. *)
         let row_state =
-          match tools_of id with
-          | None -> Ansi.dim ^ "not attached" ^ Ansi.reset
-          | Some [] -> Ansi.dim ^ "attached, no tools" ^ Ansi.reset
-          | Some names -> (
-              (* The switch outranks the tool count: a service an operator
-                 turned off is handing this keeper nothing, however many
-                 tools its catalog names, and an unreadable switch store
-                 must not render as on. *)
-              match switch_of id with
-              | Some (_, Some _) ->
-                  (Theme.bad ()) ^ "switch unreadable" ^ Ansi.reset
-              | Some (Some false, None) ->
-                  (Theme.warn ()) ^ "off" ^ Ansi.reset
-              | Some ((Some true | None), None) | None ->
-                  Printf.sprintf "%s%s%s" (Theme.ok ())
-                    (Masc_tui_message_layout.count_noun (List.length names) "tool") Ansi.reset)
+          match Masc_tui_types.identity_row_state ~providers ~id with
+          | Masc_tui_types.Identity_not_attached ->
+              Ansi.dim ^ "not attached" ^ Ansi.reset
+          | Identity_attached_without_tools ->
+              Ansi.dim ^ "attached, no tools" ^ Ansi.reset
+          | Identity_switch_unreadable ->
+              (Theme.bad ()) ^ "switch unreadable" ^ Ansi.reset
+          | Identity_switched_off -> (Theme.warn ()) ^ "off" ^ Ansi.reset
+          | Identity_attached tools ->
+              Printf.sprintf "%s%s%s" (Theme.ok ())
+                (Masc_tui_message_layout.count_noun tools "tool") Ansi.reset
         in
         (* The row the arrows are on is marked rather than merely numbered:
            past nine the number is no longer a key an operator can press,
@@ -6509,6 +6497,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   if numbered = [] && rejected = [] && state.identity_filter <> None then
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
+      ~summary:(Masc_tui_types.identity_summary ~providers ~query)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
@@ -6518,6 +6507,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   else
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
+      ~summary:(Masc_tui_types.identity_summary ~providers ~query)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)

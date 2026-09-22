@@ -119,17 +119,69 @@ let test_nothing_connectable_names_nothing () =
     "no row to start" None
     (Masc_tui_types.identity_cursor_provider ~query:"" ~providers 0)
 
+(* The pane lists every declared service alphabetically, and a live Keeper
+   declares over a hundred. The question it opens with -- what does this
+   Keeper hold -- was answered only by scrolling the whole list. *)
+let test_the_tally_counts_what_the_rows_say () =
+  let providers =
+    [ declared ~tools:[ "getJiraIssue"; "createJiraIssue" ] "atlassian" "Atlassian"
+    ; declared ~tools:[ "listBases" ] ~enabled:false "airtable" "Airtable"
+    ; declared ~tools:[] "asana" "Asana"
+    ; declared ~tools:[ "search" ] ~switch_problem:"store unreadable" "box" "Box"
+    ; declared "calendly" "Calendly"
+    ]
+  in
+  check Alcotest.string "the tally reads the rows"
+    "  5 services · 1 attached · 1 switched off · 1 attached with no tools · 1 \
+     with an unreadable switch"
+    (Masc_tui_types.identity_summary ~providers ~query:"");
+  check Alcotest.string "a filtered pane says how much of the set it draws"
+    "  1 of 5 services · 1 attached"
+    (Masc_tui_types.identity_summary ~providers ~query:"atlas")
+
+(* A Keeper that holds nothing has nothing to tally: every row already says
+   "not attached", and repeating that above them adds no reading. *)
+let test_a_keeper_that_holds_nothing_tallies_nothing () =
+  let providers = [ declared "atlassian" "Atlassian"; declared "box" "Box" ] in
+  check Alcotest.string "the count of services, and no more" "  2 services"
+    (Masc_tui_types.identity_summary ~providers ~query:"")
+
+(* The row and the tally are one reading. *)
+let test_a_row_state_is_what_the_tally_counts () =
+  let providers =
+    [ declared ~tools:[ "a"; "b" ] "atlassian" "Atlassian"
+    ; declared ~tools:[ "a" ] ~enabled:false "airtable" "Airtable"
+    ; declared ~tools:[] "asana" "Asana"
+    ; declared ~tools:[ "a" ] ~switch_problem:"unreadable" "box" "Box"
+    ; declared "calendly" "Calendly"
+    ]
+  in
+  let state id = Masc_tui_types.identity_row_state ~providers ~id in
+  check Alcotest.bool "two tools" true (state "atlassian" = Masc_tui_types.Identity_attached 2);
+  check Alcotest.bool "switched off" true (state "airtable" = Masc_tui_types.Identity_switched_off);
+  check Alcotest.bool "attached with nothing to offer" true
+    (state "asana" = Masc_tui_types.Identity_attached_without_tools);
+  check Alcotest.bool "an unreadable switch is not an off switch" true
+    (state "box" = Masc_tui_types.Identity_switch_unreadable);
+  check Alcotest.bool "never attached" true
+    (state "calendly" = Masc_tui_types.Identity_not_attached);
+  check Alcotest.bool "a service the list does not declare" true
+    (state "unknown" = Masc_tui_types.Identity_not_attached)
+
 let test_the_provider_row_sits_below_the_preamble () =
   (* The key handler scrolls the pane to the line a provider is drawn on.
      Both sides read the preamble rather than counting it, so a line added
      to the header moves the cursor's target with it. *)
   let preamble =
-    List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[])
+    List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~summary:"  2 services"
+       ~notice:[])
   in
   check Alcotest.int "first provider" preamble
-    (Masc_tui_types.identity_provider_line ~notice:[] ~index:0);
+    (Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice:[]
+       ~index:0);
   check Alcotest.int "fourth provider" (preamble + 3)
-    (Masc_tui_types.identity_provider_line ~notice:[] ~index:3)
+    (Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice:[]
+       ~index:3)
 
 let test_a_notice_pushes_the_list_down () =
   (* A refusal from one provider is drawn where the operator is looking,
@@ -137,8 +189,10 @@ let test_a_notice_pushes_the_list_down () =
      it or the cursor lands on the wrong line by however tall the message
      is -- and the messages worth showing are the long ones. *)
   let notice = [ "first line"; "second line" ] in
-  let bare = Masc_tui_types.identity_provider_line ~notice:[] ~index:0 in
-  let with_notice = Masc_tui_types.identity_provider_line ~notice ~index:0 in
+  let bare = Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice:[]
+       ~index:0 in
+  let with_notice = Masc_tui_types.identity_provider_line ~summary:"  2 services" ~notice
+       ~index:0 in
   check Alcotest.bool "the list starts lower" true (with_notice > bare);
   check Alcotest.int "by exactly the notice it was given"
     (bare + List.length notice) with_notice
@@ -150,9 +204,12 @@ let test_no_notice_reserves_no_room () =
 
      The sentence above it stays because the tab's hint row does not reach the
      screen: at 150 columns the title is cut inside "Automation", 79 cells of
-     tab labels before the hint begins. Measured 2026-09-12. *)
-  check Alcotest.int "the hint and one blank, and that is all" 2
-    (List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[]));
+     tab labels before the hint begins. Measured 2026-09-12. The tally sits
+     between them: what this Keeper holds, before the list that spells it
+     service by service. *)
+  check Alcotest.int "the hint, the tally and one blank, and that is all" 3
+    (List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~summary:"  2 services"
+       ~notice:[]));
   check Alcotest.bool "and the keys are named there" true
     (List.exists
        (fun line ->
@@ -165,7 +222,8 @@ let test_no_notice_reserves_no_room () =
              in
              seek 0)
            [ "arrows"; "filter"; "refresh"; "toggle" ])
-       (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[]))
+       (Masc_tui_types.identity_preamble ~keeper:"k" ~summary:"  2 services"
+       ~notice:[]))
 
 (* ── typing to narrow the list ──────────────────────────────────────── *)
 
@@ -342,7 +400,13 @@ let () =
           Alcotest.test_case "nothing connectable names nothing" `Quick
             test_nothing_connectable_names_nothing;
           Alcotest.test_case "a provider row sits below the preamble" `Quick
-            test_the_provider_row_sits_below_the_preamble;
+            test_the_provider_row_sits_below_the_preamble
+        ; Alcotest.test_case "the tally counts what the rows say" `Quick
+            test_the_tally_counts_what_the_rows_say
+        ; Alcotest.test_case "a keeper that holds nothing tallies nothing" `Quick
+            test_a_keeper_that_holds_nothing_tallies_nothing
+        ; Alcotest.test_case "a row state is what the tally counts" `Quick
+            test_a_row_state_is_what_the_tally_counts;
           Alcotest.test_case "a notice pushes the list down" `Quick
             test_a_notice_pushes_the_list_down;
           Alcotest.test_case "no notice reserves no room" `Quick

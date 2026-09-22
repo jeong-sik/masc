@@ -656,7 +656,7 @@ let tool_line ~cols ~state (chunk : Acting.chunk) (tool : Acting.chunk_tool) =
           ]))
 
 (* The line over one model response's calls: a short rule, how many calls
-   that response asked for, and the rule on to the edge. The eye finds where
+   are filed under that response, and the rule on to the edge. The eye finds where
    one response ends without reading the rows. No number for the response:
    the feed can open mid-turn, and "response 1" would name the first one
    this screen saw, not the turn's first. *)
@@ -871,7 +871,16 @@ let ordered_calls order (calls : Acting.chunk_tool list) =
    across the whole turn. Receipt order keeps a response's calls together,
    forwards or backwards; the two sorts interleave them. A call that states
    no ordinal leaves the boundary beside it unknown, and a single response
-   has nothing to split. *)
+   has nothing to split.
+
+   One path breaks the neighbour rule: a deferred composition runs its plan
+   under the parent's ordinal after the tool returns, so a child that
+   settles after the next response's calls draws under a line of its own.
+   Grouping by ordinal value instead would fix that and merge two responses
+   whenever a fresh agent session reuses an ordinal inside one keeper turn,
+   which is the worse claim; the ledger of 2026-09-20..22 shows neither
+   (0 deferred compositions in 359, 0 ordinals reappearing in 852
+   multi-response turns). *)
 let responses order (calls : Acting.chunk_tool list) =
   let keeps_responses_together =
     match order with

@@ -112,10 +112,11 @@ type chunk_tool = {
   ct_tool_use_id : string option;
   ct_session_turn : int option;
       (** The agent session's ordinal of the provider call that asked for
-          this one. The calls one model response asked for share it, and the
-          next response has the next ordinal, so equal neighbours are one
-          response. A CLI lane runs a whole keeper turn as one provider call:
-          all its calls share one. [None] when the frame stated none. *)
+          this one. The calls one model response asked for share it, as do
+          the calls a composition runs for one of them, and the next response
+          has the next ordinal, so equal neighbours are one response. A CLI
+          lane runs a whole keeper turn as one provider call: all its calls
+          share one. [None] when the frame stated none. *)
   ct_disposition : (Masc.Tui_decode.keeper_call_disposition, string) result option;
       (** The ledger's word for what became of the call. [None] on a call the
           wire plane stood in for: that plane reports no disposition. *)

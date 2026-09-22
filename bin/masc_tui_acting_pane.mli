@@ -225,7 +225,8 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
 
     Under either receipt order, a record whose calls came from more than one
     model response draws a line over each response's calls saying how many
-    it asked for. The response is the call's session ordinal, not its planned
+    calls are filed under it (a composition's calls count with the response
+    that asked for the composition). The response is the call's session ordinal, not its planned
     index. No line draws under the two sorts, which interleave responses,
     for a single response, or when any call states no ordinal.
 

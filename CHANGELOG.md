@@ -53,6 +53,7 @@
 
 ### Fixed
 - Antigravity panelists and judges in Fusion now receive their system prompt, so perspective instructions reach them instead of being dropped (#37784).
+- A provider runtime failure that is not a timeout (a repeated generation the lane already moved past, a rate limit, a quota, an auth refusal) is shown as its own code and detail. The status used to label it a catch-all and tell the operator to inspect a typed cause the code already named. The boundary's non-timeout classification is now called `No_timeout_observed`, which is all it ever meant.
 
 - `masc-checkpoint-purge` reads and moves the Librarian position, boundary log and continuity snapshot of the keeper named by `--keeper`, instead of a directory named after the checkpoint's `agent_name` that does not exist (#37770).
 - A keeper whose turn-boundary store cannot be read, or matches no boundary of its history, no longer sends its whole history as if the last completed turn ended at atom 0. The request opens on the newest atom alone and its origin says `turn_start_unknown` with the reader's reason, in the TUI band and the request forecast as well (#37746).

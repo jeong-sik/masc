@@ -2,6 +2,16 @@
     Memory progress and queued-input pockets do not authorize this frontier. *)
 type prepared
 val path : config:Workspace.config -> keeper_name:string -> string
+val path_for_keepers_dir : keepers_dir:string -> keeper_name:string -> string
+
+type removal = Snapshot_removed | Snapshot_absent
+val remove : keepers_dir:string -> keeper_name:string -> (removal, string) result
+(** Unlink the saved snapshot. Taken by the checkpoint purge after it installs
+    a renumbered history: the snapshot's atom numbers and digests belong to the
+    old numbering and are no place in the new one, and the Librarian's next
+    pass writes a fresh one. The read position is not touched; the purge moves
+    it. A snapshot left behind is not read past its numbering either: a turn
+    that finds it does not fit starts at the read position instead. *)
 val read : config:Workspace.config -> keeper_name:string ->
   (Librarian_continuity_snapshot.t option, string) result
 val prepare : ?end_atom:int -> config:Workspace.config -> keeper_name:string -> trace_id:string -> unit ->

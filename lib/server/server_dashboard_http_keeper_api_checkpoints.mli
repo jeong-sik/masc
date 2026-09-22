@@ -33,6 +33,18 @@ type purge_report =
   ; tool_results_cleared : int
   }
 
+(** What an applied purge did to the keeper's continuity snapshot
+    ({!Keeper_librarian_continuity.remove}). A preview, a refused apply and
+    a no-op leave it [Snapshot_untouched]. *)
+type continuity_snapshot =
+  | Snapshot_untouched
+  | Snapshot_removed
+  | Snapshot_absent
+  | Snapshot_not_removed of string
+      (** The checkpoint and position are installed; the unlink failed. The
+          next turn starts at the position until the Librarian's next pass
+          replaces the snapshot. *)
+
 type purge_result =
   { keeper : string
   ; trace_id : string
@@ -41,6 +53,7 @@ type purge_result =
   ; backup_path : string option
   ; report : purge_report
   ; warnings : string list
+  ; continuity_snapshot : continuity_snapshot
   }
 
 type purge_error =
@@ -72,9 +85,10 @@ val purge_error_to_string : purge_error -> string
     serializes that check with same-Keeper boot registration. A rewrite is
     refused while the Librarian has atoms left to read
     ({!Keeper_checkpoint_purge.librarian_rebase}); otherwise apply cancels and
-    awaits the server-owned Librarian lane, installs the checkpoint, and
-    writes the rebased position after it. The canonical checkpoint is
-    installed only if its exact source reference is unchanged. *)
+    awaits the server-owned Librarian lane, installs the checkpoint, writes
+    the rebased position after it, and removes the continuity snapshot, whose
+    numbering the rewrite made stale. The canonical checkpoint is installed
+    only if its exact source reference is unchanged. *)
 val purge_current :
   Workspace.config ->
   keeper_name:string ->

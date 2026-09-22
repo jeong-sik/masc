@@ -58,7 +58,7 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
-  ; me_skill_activity = None
+  ; me_skill_block = []
   ; me_timestamp = ""
   ; me_request_id = ""
   ; me_at = at
@@ -85,7 +85,7 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
-  ; me_skill_activity = None
+  ; me_skill_block = []
   ; me_timestamp = Printf.sprintf "%.0f" at
   ; me_request_id = request_id
   ; me_at = at

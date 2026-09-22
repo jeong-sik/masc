@@ -479,7 +479,9 @@ type msg_entry = {
           durable transcript replaces the session copy and used as that input
           phase's source clock; never set on tool or output rows. *)
   me_tool_block: Masc_tui_keeper_chat_transcript.tool_block option;
-  me_skill_activity: Masc_tui_keeper_chat_transcript.skill_activity option;
+  me_skill_block: Masc_tui_keeper_chat_transcript.skill_activity list;
+      (** One turn's Skill invocations, for the pane to count on the row and
+          unfold under the tool toggle. Empty on every other row. *)
   me_timestamp: string;
   me_keeper_name: string;
   me_request_id: string;

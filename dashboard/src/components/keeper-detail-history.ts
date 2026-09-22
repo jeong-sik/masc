@@ -368,7 +368,7 @@ export function KeeperCheckpointPanel({
           <div>
             <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">현재 checkpoint 청소</div>
             <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-              닫힌 tool 결과, unsigned reasoning, 반복 메시지만 정리합니다. 대화 구조와 최근 20개 메시지는 보존합니다.
+              닫힌 tool 결과와 unsigned reasoning 만 정리합니다. 메시지 순서와 개수, 최근 20개 메시지는 그대로 둡니다.
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
@@ -398,11 +398,10 @@ export function KeeperCheckpointPanel({
 
         ${purgePreview
           ? html`
-              <div class="mt-3 grid grid-cols-2 gap-2 text-2xs md:grid-cols-4" data-testid="keeper-checkpoint-purge-report">
+              <div class="mt-3 grid grid-cols-2 gap-2 text-2xs md:grid-cols-3" data-testid="keeper-checkpoint-purge-report">
                 <div><span class="text-[var(--color-fg-muted)]">크기</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${formatBytes(purgePreview.report.bytes_before)} → ${formatBytes(purgePreview.report.bytes_after)}</div></div>
                 <div><span class="text-[var(--color-fg-muted)]">tool 결과</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.tool_results_cleared}</div></div>
                 <div><span class="text-[var(--color-fg-muted)]">reasoning</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.reasoning_blocks_stripped}</div></div>
-                <div><span class="text-[var(--color-fg-muted)]">반복 메시지</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.duplicates_dropped}</div></div>
               </div>
               ${!purgePreview.apply_allowed
                 ? html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]" role="status">적용하려면 먼저 상단의 종료 버튼으로 Keeper를 완전히 종료하세요. 미리보기는 현재 상태에서도 안전합니다.</div>`
@@ -413,11 +412,6 @@ export function KeeperCheckpointPanel({
               ${purgePreview.warnings.length > 0
                 ? html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--rose-light)]" role="alert">${purgePreview.warnings.join(' · ')}</div>`
                 : null}
-              ${purgePreview.continuity_snapshot.kind === 'removed'
-                ? html`<div class="mt-3 text-3xs text-[var(--color-fg-muted)]" data-testid="keeper-checkpoint-purge-continuity">continuity snapshot 을 지웠어요. 다음 Librarian 회차가 새 이력의 것을 써요.</div>`
-                : purgePreview.continuity_snapshot.kind === 'not_removed'
-                  ? html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--rose-light)]" role="alert" data-testid="keeper-checkpoint-purge-continuity">continuity snapshot 을 못 지웠어요: ${purgePreview.continuity_snapshot.detail}</div>`
-                  : null}
             `
           : null}
       </div>

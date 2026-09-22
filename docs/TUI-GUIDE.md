@@ -713,6 +713,21 @@ cycles those rows through summary, full, and hidden; the header names the two
 non-default states as `journal:full` and `journal:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
 
+Under `journal:full` a committed revision draws its summary, then each fact
+in two columns: the sign and category at the left, padded to the revision's
+widest category, and the claim wrapped under itself. A blank row separates
+the facts; a pane too narrow for the claim column wraps the claim under its
+lead at the full width.
+
+```
+◈ JOURNAL  ┊ Librarian · revision 454 · +2 −1 · 63 retained
+           ┊
+           ┊ + lesson   verifier_exact cannot read the job log,
+           ┊            so ancestry alone never satisfies …
+           ┊
+           ┊ − blocker  pr-check.yml has no pnpm step …
+```
+
 The folded tool row retains exact outcome counts and ends with
 `Ctrl-D: full calls / schedule / diffs`, so full names, typed execution state,
 actual batch/concurrent scheduling, exact served input/output, and the hidden
@@ -720,7 +735,13 @@ change view are discoverable from the row that owns it. The typed calls
 themselves stay attached to the message, so
 changing the view does not reconstruct facts from rendered glyphs. Expanded
 Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
-a mixed block does not collapse into an anonymous tool count. A held tool call
+a mixed block does not collapse into an anonymous tool count. An `Execute`
+call whose result reads as the output schema its descriptor declares draws
+`status` (`exit 0 · 808 ms`, `signal 9 · …`), the command's `output`, any
+`stderr`, and the rest of the result on one `context` line
+(`cwd=… · execution_location.scope=… · via=microvm`); a result that does
+not read is drawn as it arrived. The Keeper Calls view (`t`) keeps the stored
+output whole. A held tool call
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.

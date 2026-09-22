@@ -28,8 +28,8 @@
     ({!Runtime_model_input_tail_window.atom_opening_digest}). A seed is used
     only while the history in hand opens the same index with the same
     message ({!for_history}); the history's atom count is not compared. A
-    history one unsaved atom shorter keeps the position, and a purge before
-    the front moves another message under the index and drops it. *)
+    history one unsaved atom shorter keeps the position, and a checkpoint
+    purge that rewrote the message opening the front drops it. *)
 
 type source =
   | Ledger  (** The pair's ledger, moved by every eviction since its last request. *)
@@ -64,8 +64,11 @@ type origin =
       (** No absorbed point and no seed: the range begins where the last
           completed turn on this history ended, so only this turn's own
           atoms go out and the atoms before them wait for the Librarian
-          (§13.4). [end_atom] is 0 on a history with no completed turn,
-          where that is the short history a fresh keeper has. *)
+          (§13.4). [end_atom] is that boundary as the turn-boundary store
+          states it, not the atom the range opened on: a boundary at or past
+          the newest atom still carries that atom ({!clamp}). It is 0 on a
+          history with no completed turn, where that is the short history a
+          fresh keeper has. *)
 
 val of_ledger : Keeper_model_input_ledger.t -> seed option
 (** The ledger's front with the digest the ledger recorded for it; [None]

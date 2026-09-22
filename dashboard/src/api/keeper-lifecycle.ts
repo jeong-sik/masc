@@ -260,9 +260,7 @@ export interface KeeperCheckpointPurgeReport {
   bytes_before: number
   bytes_after: number
   bytes_removed: number
-  duplicates_dropped: number
   reasoning_blocks_stripped: number
-  reasoning_messages_dropped: number
   tool_results_cleared: number
 }
 
@@ -277,15 +275,8 @@ export interface KeeperCheckpointPurgeResponse {
   backup_path: string | null
   report: KeeperCheckpointPurgeReport
   warnings: string[]
-  /** What an applied purge did to the keeper's continuity snapshot: a
-   *  preview, a refused apply and a no-op leave it untouched. */
-  continuity_snapshot: KeeperCheckpointPurgeContinuitySnapshot
   inventory: KeeperCheckpointInventory
 }
-
-export type KeeperCheckpointPurgeContinuitySnapshot =
-  | { kind: 'untouched' | 'removed' | 'absent'; detail: null }
-  | { kind: 'not_removed'; detail: string }
 
 export async function fetchKeeperCheckpoints(
   name: string,

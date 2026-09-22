@@ -752,6 +752,12 @@
  (libraries masc_tui_keeper_chat_projection masc_tui_message_layout yojson))
 
 (library
+ (name masc_tui_execute_result)
+ (wrapped false)
+ (modules masc_tui_execute_result)
+ (libraries masc unix yojson))
+
+(library
  (name masc_tui_keeper_chat_diff)
  (wrapped false)
  (modules masc_tui_keeper_chat_diff)
@@ -1410,6 +1416,7 @@
   masc_tui_ansi
   masc_tui_markdown_render_cache
   masc_tui_message_layout
+  masc_tui_execute_result
   masc_tui_tool_detail
   masc_tui_theme
   masc_tui_gate_text

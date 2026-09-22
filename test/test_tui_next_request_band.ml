@@ -254,9 +254,12 @@ let test_the_turn_start_and_refusal_fronts_say_why () =
               })
             measured))
   in
-  Alcotest.(check bool) "the turn start" true
-    (says "no front to start from: this turn's own atoms, from atom 3577"
-       (with_origin (Inspector.Carried_turn_start { end_atom = 3577 })));
+  let turn_start = with_origin (Inspector.Carried_turn_start { end_atom = 3577 }) in
+  Alcotest.(check bool) "the turn start names the boundary" true
+    (says "no front to start from: this turn's own atoms; the last completed turn ended at atom 3577"
+       turn_start);
+  Alcotest.(check bool) "and the range's own first atom stays on the fact line" true
+    (says "from atom 3100" turn_start);
   Alcotest.(check bool) "a halved front" true
     (says "front halved after a refusal (retry 2)"
        (with_origin (Inspector.Carried_halved_after_refusal { retry = 2 })));

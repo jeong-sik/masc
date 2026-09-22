@@ -46,6 +46,7 @@ module Response_shape = Llm_provider.Response_shape
 module Canonical_tool = Llm_provider.Canonical_tool
 module Tool_set = Tool_set
 module Log = Log
+module Caller_scope = Caller_scope
 module Event_envelope = Event_envelope
 module Event_bus = Event_bus
 module Telemetry_bus = Telemetry_bus

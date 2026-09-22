@@ -924,7 +924,7 @@ let payload_of_yojson json =
   | value -> Error ("unknown execution payload: " ^ value)
 ;;
 
-let schema_version_current = 3
+let schema_version_current = 4
 
 let to_yojson event =
   `Assoc
@@ -962,6 +962,7 @@ let of_yojson json =
           ; "parent_event_id"
           ; "caused_by"
           ; "source_clock"
+          ; "caller_scope"
           ]
         ~optional:[]
         envelope_json

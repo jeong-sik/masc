@@ -24,6 +24,17 @@ type recommended_action = {
   suggested_payload : Yojson.Safe.t;
 }
 
+val keeper_attention_summary :
+  name:string ->
+  reason:string option ->
+  runtime_blocker_summary:string option ->
+  string
+(** What one Keeper's attention row says: which Keeper, and why. Every item in
+    this projection needs operator attention and every surface that draws one
+    says so above the list, so the row does not spell it again -- except where
+    there is neither a reason nor a blocker summary, and the phrase is the
+    whole reading. *)
+
 val severity_rank : operator_severity -> int
 
 val health_from_attention_items : attention_item list -> string

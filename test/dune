@@ -5203,6 +5203,11 @@
  (libraries alcotest masc_tui_message_layout masc_tui_table))
 
 (test
+ (name test_operator_attention_summary)
+ (modules test_operator_attention_summary)
+ (libraries alcotest masc.operator))
+
+(test
  (name test_tui_config_path)
  (modules test_tui_config_path)
  (libraries alcotest masc_tui_render_prim))

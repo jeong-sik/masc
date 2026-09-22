@@ -398,6 +398,31 @@ describe('fetchKeeperMemoryHealth', () => {
     expect(response.totals.librarian_unread_turns).toBeNull()
   })
 
+  it('keeps an unmeasured continuity lag as null and counts it beside the sum', async () => {
+    const payload = keeperMemoryHealthPayload()
+    payload.keepers[0]!.librarian.continuity_unread_atoms = null
+    payload.keepers[1]!.librarian.continuity_unread_atoms = 4
+    payload.totals.librarian_continuity_unread_atoms = 4
+    payload.totals.librarian_continuity_unmeasured = 1
+    getMock.mockResolvedValue(payload)
+    const response = await fetchKeeperMemoryHealth()
+    expect(response.keepers[0]?.librarian.continuity_unread_atoms).toBeNull()
+    expect(response.keepers[1]?.librarian.continuity_unread_atoms).toBe(4)
+    expect(response.totals.librarian_continuity_unread_atoms).toBe(4)
+    expect(response.totals.librarian_continuity_unmeasured).toBe(1)
+  })
+
+  it('rejects a continuity sum or an unmeasured count that disagrees with the rows', async () => {
+    const summed = keeperMemoryHealthPayload()
+    summed.keepers[0]!.librarian.continuity_unread_atoms = 4
+    getMock.mockResolvedValue(summed)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+    const counted = keeperMemoryHealthPayload()
+    counted.keepers[0]!.librarian.continuity_unread_atoms = null
+    getMock.mockResolvedValue(counted)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+  })
+
   it('rejects a numeric fleet total when any keeper count is unknown', async () => {
     const payload = keeperMemoryHealthPayload()
     payload.keepers[0]!.librarian.unread_atom_turns = null

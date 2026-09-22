@@ -441,6 +441,62 @@ let test_render_memory_body_with_keepers () =
   check bool "rows rendered" true (!count > 0 && !count <= 20)
 ;;
 
+(* RFC librarian-lifecycle §4.9: a continuity lag the server could not take
+   prints as "?", since zero is what a caught-up keeper shows, and the fleet
+   header carries the measured sum beside how many keepers it left out. *)
+let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
+  let with_lag (keeper : Decode.memory_keeper_health) lag =
+    { keeper with
+      mkh_librarian = { keeper.mkh_librarian with Decode.mlh_continuity_unread_atoms = lag } }
+  in
+  let unmeasured = with_lag (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024) None in
+  let behind = with_lag (make_keeper_health ~keeper_id:"beta" ~facts:4 ~snapshot_bytes:512) (Some 3) in
+  let health : Decode.memory_health_snapshot =
+    { mhs_generated_at = 1000.0
+    ; mhs_keepers = [ unmeasured; behind ]
+    ; mhs_total_facts = 14
+    ; mhs_total_observed_facts = 14
+    ; mhs_total_derived_facts = 0
+    ; mhs_total_support_invalidations = 0
+    ; mhs_total_snapshot_bytes = 1536
+    ; mhs_total_source_facts = 0
+    ; mhs_total_source_invalidations = 0
+    ; mhs_total_source_snapshot_bytes = 0
+    ; mhs_total_librarian_failures = 0
+    ; mhs_total_librarian_unread_turns = Some 0
+    ; mhs_total_librarian_continuity_unread_atoms = 3
+    ; mhs_total_librarian_continuity_unmeasured = 1
+    ; mhs_total_vision_ingest_errors = 0
+    ; mhs_total_read_errors = 0
+    ; mhs_total_source_read_errors = 0
+    ; mhs_warn_alerts = 0
+    ; mhs_error_alerts = 0
+    ; mhs_starving_keepers = 0
+    }
+  in
+  (* The Librarian line is drawn for the selected keeper only, so each keeper
+     is read at its own cursor. *)
+  let render cursor =
+    let state = make_state () in
+    state.memory_health <- Some health;
+    state.memory_health_cursor <- cursor;
+    let lines = ref [] in
+    Render_memory.render_memory_body ~cols:100 ~budget:20 state
+      ~push:(fun line -> lines := line :: !lines)
+      ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
+      ~push_selected:(fun line -> lines := line :: !lines)
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" !lines
+  in
+  let both = render 0 ^ "\n" ^ render 1 in
+  check bool "an unmeasured lag prints as a question, not as zero" true
+    (contains "continuity behind ?" both);
+  check bool "a measured lag prints its number" true (contains "continuity behind 3" both);
+  check bool "the header sums the measured keepers and counts the rest" true
+    (contains "3 atoms behind in continuity (1 keepers not measured)" both)
+;;
+
 let test_render_memory_body_cursor_clamping () =
   let state = make_state () in
   let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:5 ~snapshot_bytes:512 in
@@ -1100,6 +1156,8 @@ let () =
     ; ( "render_body"
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
+        ; test_case "the librarian line says when the continuity lag is unknown" `Quick
+            test_the_librarian_line_says_when_the_continuity_lag_is_unknown
         ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping

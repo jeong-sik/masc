@@ -1141,10 +1141,9 @@ let draw_ask_questions buf cols (state : state) ~budget =
     | Ask_answering { aam_ask_id } -> Some aam_ask_id
     | Ask_browsing -> None
   in
-  match state.asks_snapshot with
+  match Masc_tui_types.approvals_open_questions state with
   | None -> ()
-  | Some snapshot -> (
-      let open_rows = Ask_projection.open_rows snapshot in
+  | Some open_rows -> (
       box_divider buf cols;
       box_line buf cols
         (Printf.sprintf "  %s%s[?] Questions waiting on you (%d) · a:open answers%s" Ansi.bold (Theme.warn ())
@@ -1432,11 +1431,7 @@ let render_approvals (state : state) =
   (* The questions a Keeper is waiting on are the fourth kind this surface
      answers, and the only one whose word takes a plural, so it is built
      beside the three rather than inside their format. *)
-  let question_count =
-    match state.asks_snapshot with
-    | Some snapshot -> List.length (Ask_projection.open_rows snapshot)
-    | None -> 0
-  in
+  let question_count = Masc_tui_types.approvals_open_question_count state in
   let count_text =
     let kinds =
       [ (Theme.warn (), List.length state.keeper_tool_approvals, "held")
@@ -4570,15 +4565,17 @@ let render_keeper_list (state : state) =
        let failing_entry =
          Option.to_list (Masc_tui_fleet_line.failing_text fleet)
        in
+       let entry label n =
+         if n > 0 then [ Printf.sprintf "%s %d" label n ] else []
+       in
+       (* The owner count keeps its place in the row and brings its own
+          shortfall, which is the only reading that says the scan came up
+          short: an unread Keeper does not move the fleet status. *)
        let counts =
          failing_entry
-         @ (List.filter (fun (_, n) -> n > 0)
-              [ ("paused", fleet.fs_paused_count)
-              ; ( "task owner without fiber"
-                , fleet.fs_active_task_owner_without_fiber_count )
-              ; ("awaiting verdict", fleet.fs_completion_authority_pending_count)
-              ]
-            |> List.map (fun (label, n) -> Printf.sprintf "%s %d" label n))
+         @ entry "paused" fleet.fs_paused_count
+         @ Option.to_list (Masc_tui_fleet_line.owner_scan_text fleet)
+         @ entry "awaiting verdict" fleet.fs_completion_authority_pending_count
        in
        if counts <> [] then
          box_line buf cols

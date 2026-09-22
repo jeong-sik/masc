@@ -9,3 +9,8 @@ val blocker_text : Masc.Tui_decode.fleet_safety -> string option
 val failing_text : Masc.Tui_decode.fleet_safety -> string option
 (** [failing N] with the classes that hold a failing Keeper, each class only
     when it holds one. [None] when nothing is failing. *)
+
+val owner_scan_text : Masc.Tui_decode.fleet_safety -> string option
+(** [task owner without fiber N], and how many sources the scan could not read
+    when any were unread -- their tasks are missing from [N]. [None] when the
+    count is zero and the scan read everything. *)

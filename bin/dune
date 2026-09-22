@@ -889,7 +889,7 @@
  (name masc_tui_fleet_line)
  (wrapped false)
  (modules masc_tui_fleet_line)
- (libraries masc masc_tui_ansi))
+ (libraries masc masc_tui_ansi masc_tui_message_layout))
 
 (library
  (name masc_tui_table)

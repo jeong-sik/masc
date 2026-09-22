@@ -2,8 +2,19 @@ open Alcotest
 module Tui_decode = Masc.Tui_decode
 module Keeper_fleet_blocker = Masc.Keeper_fleet_blocker
 
+let contains needle text =
+  let text_length = String.length text in
+  let needle_length = String.length needle in
+  let rec walk index =
+    if index + needle_length > text_length then false
+    else if String.sub text index needle_length = needle then true
+    else walk (index + 1)
+  in
+  walk 0
+
 let fleet ?blocker ?(failing = 0) ?(retrying = 0) ?(config_blocked = 0)
-    ?(session_recovery = 0) () : Tui_decode.fleet_safety =
+    ?(session_recovery = 0) ?(owners_without_fiber = 0) ?(scan_errors = 0) ()
+    : Tui_decode.fleet_safety =
   { fs_status = "ok"
   ; fs_blocker = blocker
   ; fs_operator_action_required = false
@@ -22,8 +33,9 @@ let fleet ?blocker ?(failing = 0) ?(retrying = 0) ?(config_blocked = 0)
   ; fs_executable_names = []
   ; fs_turn_configuration_error_names = []
   ; fs_official_client_recovery_required_names = []
-  ; fs_active_task_owner_without_fiber_count = 0
+  ; fs_active_task_owner_without_fiber_count = owners_without_fiber
   ; fs_completion_authority_pending_count = 0
+  ; fs_active_task_owner_scan_error_count = scan_errors
   }
 
 let known blocker = Tui_decode.Blocker blocker
@@ -111,6 +123,47 @@ let test_failing_names_only_the_classes_that_hold_a_keeper () =
 let test_nothing_failing_draws_nothing () =
   check (option string) "no failing" None (failing_text (fleet ()))
 
+let owner_scan_text = Masc_tui_fleet_line.owner_scan_text
+
+(* A Keeper whose profile does not load is a scan error: its tasks are left out
+   of the owner count, and only a backlog failure moves the fleet status off
+   "ok". So an unread source has to be said beside the count it shortened, or
+   the row reports a complete reading it never made. *)
+let test_an_unread_source_is_named_beside_the_count () =
+  check (option string) "the count and what it is missing"
+    (Some "task owner without fiber 0+ (2 sources unread)")
+    (owner_scan_text (fleet ~scan_errors:2 ()));
+  check (option string) "one source reads as one"
+    (Some "task owner without fiber 3+ (1 source unread)")
+    (owner_scan_text (fleet ~owners_without_fiber:3 ~scan_errors:1 ()))
+
+(* The number a shortened scan reports is a lower bound, so it never stands as
+   a total. Without the [+], a scan that read nothing says "0", which reads as
+   "there are none" -- the one reading the unread sources rule out. *)
+let test_a_shortened_count_is_a_lower_bound () =
+  List.iter
+    (fun (owners, scan_errors) ->
+      let drawn =
+        match owner_scan_text (fleet ~owners_without_fiber:owners ~scan_errors ())
+        with
+        | Some text -> text
+        | None -> Alcotest.fail "a scan with an unread source draws a row"
+      in
+      check bool
+        (Printf.sprintf "%S states its number as a lower bound" drawn)
+        true
+        (contains (Printf.sprintf "fiber %d+ (" owners) drawn))
+    [ (0, 2); (3, 1); (12, 7) ]
+
+let test_a_complete_scan_says_only_the_count () =
+  check (option string) "nothing to qualify"
+    (Some "task owner without fiber 3")
+    (owner_scan_text (fleet ~owners_without_fiber:3 ()))
+
+(* Zero over a complete reading is a row spent saying nothing happened. *)
+let test_nothing_found_and_nothing_missed_draws_nothing () =
+  check (option string) "no row" None (owner_scan_text (fleet ()))
+
 let () =
   run "tui fleet line"
     [ ( "blocker names"
@@ -130,6 +183,16 @@ let () =
             test_an_unknown_blocker_is_drawn_by_name
         ; test_case "no blocker draws nothing" `Quick
             test_no_blocker_draws_nothing
+        ] )
+    ; ( "task owner scan"
+      , [ test_case "an unread source is named beside the count" `Quick
+            test_an_unread_source_is_named_beside_the_count
+        ; test_case "a shortened count is a lower bound" `Quick
+            test_a_shortened_count_is_a_lower_bound
+        ; test_case "a complete scan says only the count" `Quick
+            test_a_complete_scan_says_only_the_count
+        ; test_case "nothing found and nothing missed draws nothing" `Quick
+            test_nothing_found_and_nothing_missed_draws_nothing
         ] )
     ; ( "failing"
       , [ test_case "names only the classes that hold a keeper" `Quick

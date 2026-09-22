@@ -16,6 +16,7 @@ module Magnitude = Masc_tui_magnitude
 module Board_comment_thread = Masc_tui_board_comment_thread
 module Message_layout = Masc_tui_message_layout
 module Tool_detail = Masc_tui_tool_detail
+module Lane_table = Masc_tui_lane_table
 module Retained_view = Masc_tui_retained_view
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
@@ -4692,50 +4693,15 @@ let standalone_lane_slots_text (lane : Tui_decode.standalone_lane) =
   | [] -> base
   | dropped -> base ^ " (dropped " ^ String.concat "," dropped ^ ")"
 
-(* The lane table's two measured columns. Every other column has a fixed
-   width; the lane's name and its slot list are the two the data sizes, and
-   the name column was a literal 15 that "Workspace Curator" overran, pushing
-   its whole row two cells right of the others. Measured from the rows the
-   way Schedules measures its subject, floored at the header's own word and
-   capped so one long slot list cannot take the row. *)
-let standalone_lane_status_cells = 14
-let standalone_lane_ok_fail_cancel_cells = 14
-let standalone_lane_p50_cells = 6
+(* What one lane contributes to the table's measurement. Fit for a terminal
+   line here, once, so the width a column is measured at is the width the row
+   draws. *)
+let standalone_lane_reading (lane : Tui_decode.standalone_lane) =
+  { Lane_table.label = Terminal_text.single_line lane.sl_label
+  ; slots = Terminal_text.single_line (standalone_lane_slots_text lane)
+  }
 
-let standalone_lane_columns (lanes : Tui_decode.standalone_lane list) =
-  let widest header value_of cap =
-    List.fold_left
-      (fun widest lane ->
-        max widest (Message_layout.display_width (Terminal_text.single_line (value_of lane))))
-      (Message_layout.display_width header) lanes
-    |> min cap
-  in
-  ( widest "LANE" (fun (lane : Tui_decode.standalone_lane) -> lane.sl_label) 24
-  , widest "SLOTS" standalone_lane_slots_text 28 )
-
-(* The header the rows share, so a reader meets each label once instead of
-   on every row: the rows carried "slots", "active", "runs", "ok/fail/cancel",
-   "p50" and "observed" as words of their own, which beside the roster pane
-   cut every row at "runs 12" and left the failure counts off the screen for
-   all five lanes. The mark's cell is blank here.
-
-   The counts come before the slot list. They are what a reader compares
-   down the column, and they are fixed-width; the slot list is the one cell
-   that can run long, and the block under the list prints the selected lane's
-   slots in full, so it is the cell to lose first when the frame is narrow. *)
-let standalone_lane_header ~label_cells ~slots_cells width =
-  fit_width
-    (Printf.sprintf "    %s  %s  %6s  %4s  %s  %s  %s  %s"
-       (fit_width "LANE" label_cells)
-       (fit_width "STATUS" standalone_lane_status_cells)
-       "ACTIVE" "RUNS"
-       (fit_width "OK/FAIL/CANCEL" standalone_lane_ok_fail_cancel_cells)
-       (fit_width "P50" standalone_lane_p50_cells)
-       (fit_width "SLOTS" slots_cells)
-       "OBSERVED")
-    width
-
-let standalone_lane_row ~now ~frame ~label_cells ~slots_cells width
+let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
     (lane : Tui_decode.standalone_lane) =
   let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
   (* A lane that is running says so twice and neither says for how long: the
@@ -4785,19 +4751,25 @@ let standalone_lane_row ~now ~frame ~label_cells ~slots_cells width
   in
   let prefix = standalone_lane_status_style lane.sl_status in
   let line =
-    Printf.sprintf "  %s%s %s  %s%s  %6d  %4d  %s  %s  %s  %s"
+    Printf.sprintf "  %s%s %s  %s%s  %s  %s  %s  %s%s"
       prefix mark
-      (fit_width (Terminal_text.single_line lane.sl_label) label_cells)
-      (fit_width status standalone_lane_status_cells)
+      (fit_width (Terminal_text.single_line lane.sl_label) columns.label_cells)
+      (fit_width status Lane_table.status_cells)
       Ansi.reset
-      lane.sl_running_count lane.sl_retained_run_count
+      (Lane_table.pad_left
+         (string_of_int lane.sl_running_count)
+         Lane_table.active_cells)
+      (Lane_table.pad_left
+         (string_of_int lane.sl_retained_run_count)
+         Lane_table.runs_cells)
       (fit_width
          (Printf.sprintf "%d/%d/%d" lane.sl_succeeded_count lane.sl_failed_count
             lane.sl_cancelled_count)
-         standalone_lane_ok_fail_cancel_cells)
-      (fit_width p50 standalone_lane_p50_cells)
-      (fit_width (Terminal_text.single_line slots) slots_cells)
-      observed_slots
+         Lane_table.ok_fail_cancel_cells)
+      (fit_width p50 Lane_table.p50_cells)
+      (Lane_table.tail columns
+         ~slots:(Terminal_text.single_line slots)
+         ~observed:(Terminal_text.single_line observed_slots))
   in
   fit_width line width
 
@@ -5076,17 +5048,18 @@ let render_lanes_overview (state : state) =
         Message_layout.count_noun count "installed");
   (match state.standalone_lanes with
    | Some snapshot ->
-       let label_cells, slots_cells =
-         standalone_lane_columns snapshot.Tui_decode.sls_lanes
+       let columns =
+         Lane_table.columns ~inner
+           (List.map standalone_lane_reading snapshot.Tui_decode.sls_lanes)
        in
        if snapshot.sls_lanes <> [] then
          box_line_styled buf cols ~style:(Theme.recede ())
-           (standalone_lane_header ~label_cells ~slots_cells inner);
+           (Lane_table.header columns inner);
        List.iteri
          (fun index (lane : Tui_decode.standalone_lane) ->
            let row =
              standalone_lane_row ~now:(Unix.gettimeofday ())
-               ~frame:state.activity_frame ~label_cells ~slots_cells inner lane
+               ~frame:state.activity_frame ~columns inner lane
            in
            if
              index = state.lanes_standalone_cursor
@@ -14291,18 +14264,32 @@ let render_themes (state : state) =
 
    Read-only. Editing lands in the runtime.toml pane next door, which already
    has the preview-checked write path. *)
+(* Where the config file being read lives, for the title row beside the strip
+   that already names the file. Said from the server's masc root: the prefix is
+   the same for every screen in the session, the Config pane's identity row
+   names it, and spending it here cut the reading in the middle -- the row read
+   "/Users/d\xe2\x80\xa6onfig/runtime.toml". Until the server has said where
+   its root is, the whole path is the only honest reading. *)
+let config_path_note (state : state) =
+  match state.runtime_config_view with
+  | Some reading ->
+      let path = Terminal_text.single_line reading.rcv_path in
+      let shown =
+        match state.server_identity with
+        | Some identity ->
+            path_from_root ~root:identity.Tui_decode.sid_masc_root path
+        | None -> path
+      in
+      Ansi.dim ^ shown ^ Ansi.reset
+  | None ->
+      Ansi.dim ^ title_missing_reading ~error:state.runtime_config_view_error ^ Ansi.reset
+
 let render_config_models (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
-  let path_note =
-    match state.runtime_config_view with
-    | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
-    | None -> Ansi.dim
-        ^ title_missing_reading ~error:state.runtime_config_view_error
-        ^ Ansi.reset
-  in
+  let path_note = config_path_note state in
   let before = screen_title " MASC Models" ^ tab_strip_gap in
   box_line buf cols
     (config_pane_title ~cols ~before ~note:path_note state);
@@ -14792,13 +14779,7 @@ let render_voice (state : state) =
 let render_config (state : state) =
   if state.runtime_config_status_open then render_runtime_config_status state else
   let terminal_rows, cols = get_terminal_size () in
-  let path_note =
-    match state.runtime_config_view with
-    | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
-    | None -> Ansi.dim
-        ^ title_missing_reading ~error:state.runtime_config_view_error
-        ^ Ansi.reset
-  in
+  let path_note = config_path_note state in
   let before = screen_title " MASC Config" ^ tab_strip_gap in
   let title =
     config_pane_title ~cols ~before ~note:path_note

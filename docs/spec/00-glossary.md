@@ -474,6 +474,9 @@ status: reference
   `list_posts ?hearth`가 한 hearth로 좁힌다. TUI Board 목록은 `f`/`F`로 hearth를
   돌리고 `H`로 chooser를 연다. hearth별 글 수 목록을 **census**라 부르고, Board
   제목이 목록이 실은 수와 게시판이 가진 수를 함께 말할 때 쓴다(`(50 of 109)`).
+  hearth 슬러그가 어떤 SubBoard의 slug와 같으면 그 글은 그 SubBoard에 묶여 접근 정책을
+  따르고, SubBoard가 지워지면 소속 글의 hearth는 orphan 정책으로 지워진다
+  (`11-board.md` §11).
   → [11-board.md §8](11-board.md),
   [board_types](../../lib/board_types/board_types.mli),
   [board_votes](../../lib/board/board_votes.mli)

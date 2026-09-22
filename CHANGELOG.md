@@ -13,6 +13,8 @@
 - Tool-call log rows no longer carry the top-level `success` boolean. Every new row records `wire_outcome` (`unknown` when nothing was observed); tooling that reads `success` should read the typed disposition or `wire_outcome` instead (#37487).
 
 ### Added
+- Catalog: dedicated rows for Z.AI GLM coding models (glm-5.2 through glm-4.5-air) and Kimi coding plans, with measured context windows and output limits, so coding-plan bindings resolve real values instead of falling back to bare GLM defaults (#37767).
+- Catalog: measured OpenRouter rows for claude-fable-5.1, claude-haiku-4.5, gpt-6-astra, gpt-5.6-terra, gpt-5.6-luna, gemini-3.1-pro-preview, grok-4.7, qwen3.8-flash and glm-5.3-flashx, with per-model tool-choice and reasoning-effort support as measured; review follow-ups unbind OpenRouter minimax-m3 (empty answers at high effort; still available via ollama_cloud) and turn off glm-5.3-flashx structured output (#37782, #37789).
 
 - DOS graphics sessions now show whether a frame contains visible pixels and support a click action for mouse-driven games (#37402).
 - The librarian preserves committed Memory snapshots and completed-run evidence when cancellation arrives after the commit (#37464).
@@ -26,6 +28,11 @@
 - The Lanes screen can now remove an exact-lane slot and move it up or down, not only append one; slots the catalog rejected are kept in the file (#37482).
 
 ### Changed
+- The trailing `· Ctrl-N` hint on summarized journal rows and the voice-key hint on empty input lines are gone; both keys stay documented in the footer and the chat help table (#37786).
+- The operator's own failed actions (for example, pasting when the clipboard holds no image) no longer land in the conversation history; they are reported briefly in the footer of the pane being viewed and logged to the event log (#37796).
+- In chat panes 96 columns wide or more (100-column terminal), lines arriving from other keepers, people, or connectors start at one third of the pane width, keeping the operator column and keeper replies on the left; narrower terminals keep the single-column layout (#37773).
+- metadata:full header rows show only the speaker mark, rule line and clock: the per-turn request id is gone, and the mark no longer leaks its color into the text after it (#37780).
+- An Execute call expanded under tools:full shows its status, output and stderr; the unreadable context envelope line is gone, and the full result stays on the Keeper Calls screen (#37792).
 
 - Checkpoint purge (dashboard and `masc-checkpoint-purge`) keeps every message, and keeps byte-exact the last atom, the reply each completed turn ended on, and whatever a fitting Librarian working state covers, so the Librarian position, turn-boundary lines, working state and request front all still match the purged checkpoint. The report counts stripped reasoning blocks and cleared tool results; a dashboard apply keeps new Librarian units out until it finishes (#37751).
 - A keeper request with no Librarian snapshot that fits the current history starts at the Librarian's read position when that position is a place in the history, and otherwise, with no seed, at the end of the last completed turn, instead of carrying the whole history; official-client lanes without a seed start at that boundary too. The Memory screen and dashboard show the position-only case as `absorbed`. The turn-record and forecast origin `whole_history` is replaced by `turn_start` with its `end_atom`, and the Memory screen's continuity input `uncompressed` by `without_snapshot` (#37734, #37745).
@@ -44,6 +51,7 @@
 - The librarian now reads official-client turns from those history lines instead of only the turn's final assistant answer (#37527).
 
 ### Fixed
+- Antigravity panelists and judges in Fusion now receive their system prompt, so perspective instructions reach them instead of being dropped (#37784).
 
 - A keeper whose turn-boundary store cannot be read, or matches no boundary of its history, no longer sends its whole history as if the last completed turn ended at atom 0. The request opens on the newest atom alone and its origin says `turn_start_unknown` with the reader's reason, in the TUI band and the request forecast as well (#37746).
 - A Librarian working state that cannot be read, cannot be checked against the turn-boundary log, or covers conversation bytes that changed no longer refuses every Agent-Core turn. The request starts at the Librarian's read position, or at the turn's own boundary, as it does when the working state no longer fits, and the reason is logged as a warning. A refused turn also ran no Librarian round, so a working state whose covered bytes changed was never written again; a working-state file or boundary log that cannot be read now leaves turns running and names the file to fix (#37762).

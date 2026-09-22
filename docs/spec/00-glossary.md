@@ -652,7 +652,7 @@ status: reference
   필요하다. 연속성 회차가 만든 이 값은 `Keeper_librarian_continuity.commit`의
   `working_state` 인자이고 Continuity Snapshot 파일에 저장된다. 턴은 이 값이 덮는
   atom들을 보내는 대신 이 값을 보낸다. 저장본이 덮는 범위와 이 값이 대신하는 범위는
-  같다 — 전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
+  같다.
   → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
 **Continuity Synthesis Observation (대화 요약 진행 관측)**
@@ -700,11 +700,10 @@ status: reference
   atom 번호가 다시 매겨지므로 비교하지 않고 새 값으로 바꾸고, 같은 trace 안에서는 더
   좁은 값만 남는다. 끝 atom이 아니라 폭을 남기므로 커밋한 회차 다음에는 같은 자리가
   아니라 그다음 자리를 읽는다. 좁히는 것은 작은 요청이 같은 벽을 피할 수 있는 실패뿐이고,
-  그 판정은 세 함수가 한다 — `cause_is_not_about_size`(실행 원인),
-  `rejection_is_not_about_size`(디스패치 전 사전 거절), `extraction_walk_never_about_size`
-  (걸음 전체). 판정은 걸음의 마지막 슬롯이 아니라 걸음 전체에 묻는다. 폭은 이번 호출이
-  무언가를 커밋한 뒤 소스가 비었을 때만 푼다. 커밋마다
-  풀면 다음 회차가 다시 넓은 범위에서 시작해 같은 사다리를 처음부터 걷는다. 루프
+  그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli:47`)가 들고, 원인별 판정
+  규칙은 RFC-librarian-lifecycle §4.3이 정한다. 판정은 걸음의 마지막 슬롯이 아니라 걸음
+  전체에 묻는다. 폭은 backlog를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
+  거절했던 범위가 이제 들어간다는 증거가 아니다. 루프
   메모리에만 있으므로 서버가 재시작하면 폭은 사라지고 다시 전부 읽기부터 시작한다(RFC
   librarian-lifecycle §4.3).
   → [keeper_librarian_queue_refresh](../../lib/keeper/keeper_librarian_queue_refresh.ml)

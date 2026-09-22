@@ -202,7 +202,7 @@ P4e 설계. 상태는 이미 프로세스 안에 있다(`pending`·`deliveries` 
 
 #### 재측정 — 11:10Z 재기동, 세 PR 이 든 빌드
 
-부팅: 11:08:30Z 포트 응답(ready 아님) → 11:10:15Z 이전 ready. 측정 토큰은 `~/me/.masc/auth/admin.token`(환경의 `MASC_OPERATOR_TOKEN` 은 401).
+부팅: 11:08:30Z 포트 응답(ready 아님) → 11:10:15Z 이전 ready. 측정 토큰은 `~/me/.masc/auth/admin.token`.
 
 | 읽기 | ready+36초 | ready+6분 |
 |---|---|---|

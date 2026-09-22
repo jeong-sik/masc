@@ -156,11 +156,9 @@ val to_yojson : t -> Yojson.Safe.t
     [raw_token_file] / [dashboard_url] / [mcp_url] / [mcp_client]. *)
 
 val render_shell : t -> string
-(** [render_shell report] returns four newline-separated [export]
+(** [render_shell report] returns two newline-separated [export]
     statements suitable for [eval] in a POSIX shell:
 
-    - [MASC_OPERATOR_AGENT]
-    - [MASC_OPERATOR_TOKEN]
     - [<mcp_token_env_var>] (caller-supplied env var name)
     - [MASC_DASHBOARD_URL]
 

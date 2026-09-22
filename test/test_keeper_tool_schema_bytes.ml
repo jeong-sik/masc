@@ -262,7 +262,12 @@ open Alcotest
 (* 2026-09-21: the merged inventory, including DOS mouse control and main's
    keeper_memory_search description, measures 121,200 bytes across 137 tools.
    Pin the measured surface without speculative renderer headroom. *)
-let ceiling_bytes = 121_200
+(* 2026-09-22: 121,242 across 137 tools, measured by targeted CI at
+   32cf5892f8. masc_library_list's keeper_projection grows 42 bytes to say
+   that a document whose header does not read is listed by filename and
+   reason, which is the row the reader now returns instead of skipping it.
+   Pin the measured surface with no headroom. *)
+let ceiling_bytes = 121_242
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

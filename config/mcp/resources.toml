@@ -95,19 +95,19 @@ title = "Event Log (JSON)"
 description = "Recent event log snapshot as JSON"
 mime_type = "application/json"
 
-# Library - curated knowledge from direct research
+# Library - documents in <base_path>/docs/library
 [[resources]]
 uri = "masc://library"
 name = "Library Index"
-title = "Research Library"
-description = "List of curated library documents (direct research only)"
+title = "Knowledge Library"
+description = "Library documents with title, source, and tags. A document whose frontmatter does not read is listed by filename with the reason."
 mime_type = "text/markdown"
 
 [[resources]]
 uri = "masc://library.json"
 name = "Library Index (JSON)"
-title = "Research Library (JSON)"
-description = "List of curated library documents as JSON with full metadata"
+title = "Knowledge Library (JSON)"
+description = "Library documents as JSON with title, source, author, created, and tags. A document whose frontmatter does not read carries the reason in unreadable instead."
 mime_type = "application/json"
 
 [[resources]]
@@ -156,7 +156,7 @@ mime_type = "text/markdown"
 uri_template = "masc://library/{topic}.json"
 name = "Library Document (JSON)"
 title = "Library Document (JSON)"
-description = "Read a specific library document as JSON with metadata"
+description = "Read a specific library document as JSON: its content with title, source, author, created, and tags, or with the reason in unreadable when its frontmatter does not read"
 mime_type = "application/json"
 
 [[resource_templates]]

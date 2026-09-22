@@ -9713,9 +9713,19 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
     | [] -> "none assigned"
     | names -> String.concat ", " names
   in
+  (* The status column has room for the word and not for the cause, and a
+     repository whose clone or fetch failed keeps that cause in its status.
+     The row says "error" and this says what it was; every other status has
+     nothing here to add. *)
+  let failure =
+    match Masc.Tui_decode.repository_status_reason repo.rp_status with
+    | None -> []
+    | Some reason -> wrap "Error" reason
+  in
   wrap "Path" repo.rp_resolved_local_path
   @ stored_path
   @ wrap "Keepers" keepers
+  @ failure
 
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
@@ -9855,7 +9865,9 @@ let render_repository_list (state : state) =
                         Terminal_text.single_line r.rp_name
                     ; wrow_branch =
                         Terminal_text.single_line r.rp_default_branch
-                    ; wrow_status = Terminal_text.single_line r.rp_status
+                    ; wrow_status =
+                        Terminal_text.single_line
+                          (Masc.Tui_decode.repository_status_word r.rp_status)
                     ; wrow_sync = (if r.rp_auto_sync then "auto" else "manual")
                     ; wrow_path =
                         Terminal_text.single_line r.rp_resolved_local_path

@@ -2322,7 +2322,9 @@ let test_workspace_activity_offers_no_row_search () =
   let repository : Tui_decode.repository =
     { rp_id = "masc"; rp_name = "masc"; rp_codebase = None; rp_url = ""
     ; rp_local_path = "."; rp_resolved_local_path = "/tmp/masc"
-    ; rp_default_branch = "main"; rp_status = "ready"; rp_keepers = []
+    ; rp_default_branch = "main"
+    ; rp_status = Tui_decode.Repository_status Repo_manager_types.Active
+    ; rp_keepers = []
     ; rp_auto_sync = false }
   in
   state.view <- Repositories;

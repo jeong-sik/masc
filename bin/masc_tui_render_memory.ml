@@ -421,14 +421,23 @@ let detail_label label =
 
 let detail_field label value = "    " ^ detail_label label ^ value
 
+(* A claim is prose a Keeper wrote, often paragraphs and a numbered list. The
+   list rows fold it to one line because a row has one line to give it; the
+   detail pane has the height, so it keeps the claim's own breaks. Each line is
+   escaped on its own -- escaping the whole claim turns every newline into a
+   printed \x0A (#37017) -- and wrapped at spaces, so a word is not cut in two
+   at the pane's edge. A blank line stays a blank row: it is a paragraph break,
+   not an absence. *)
+let detail_claim_lines ~inner_width claim =
+  Message_layout.wrap_body ~max_cells:inner_width
+    ~sanitize:Terminal_text.single_line claim
+  |> List.map (fun line -> if String.equal line "" then "" else "    " ^ line)
+
 let memory_fact_detail_lines ~cols (row : memory_fact_row) =
   let inner_width = max 30 (cols - 6) in
   match row with
   | Memory_row_fact fact ->
-      let claim_lines =
-        Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.mf_claim)
-        |> List.map (fun line -> "    " ^ line)
-      in
+      let claim_lines = detail_claim_lines ~inner_width fact.mf_claim in
       let history =
         Printf.sprintf "Retrieved %d · %s · last %s · Retracted %d · Revised from %d"
           fact.mf_events.mfe_retrieved_count
@@ -458,10 +467,7 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
       @ history_lines
       @ [ detail_field "Memory ID:" fact.mf_memory_id ]
   | Memory_row_source_fact fact ->
-      let claim_lines =
-        Message_layout.split_cells ~max_cells:inner_width (Terminal_text.single_line fact.msf_claim)
-        |> List.map (fun line -> "    " ^ line)
-      in
+      let claim_lines = detail_claim_lines ~inner_width fact.msf_claim in
       [ Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
       @ [ detail_field "Bound Path:" fact.msf_path

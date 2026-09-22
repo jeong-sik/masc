@@ -43,6 +43,7 @@ type agent_core_kind =
   | Agent_completed of { elapsed_s : float }
   | Agent_failed of { elapsed_s : float; error_code : string; error : string }
   | Agent_yielded of { elapsed_s : float }
+  | Agent_input_required of { elapsed_s : float; request_id : string; question : string }
   | Tool_approval_completed
   | Telemetry
   | Agent_core_other of string
@@ -260,6 +261,13 @@ let agent_core_kind ~event_type payload =
           Agent_yielded { elapsed_s = p.elapsed_s })
         (read_payload ~event_type Sse_event.Json.agent_yielded_payload_of_string
            payload)
+  | "agent_input_required" ->
+      Result.map
+        (fun (p : Sse_event.Types.agent_input_required_payload) ->
+          Agent_input_required
+            { elapsed_s = p.elapsed_s; request_id = p.request_id; question = p.question })
+        (read_payload ~event_type
+           Sse_event.Json.agent_input_required_payload_of_string payload)
   | "tool_approval_completed" -> Ok Tool_approval_completed
   | "telemetry_event" -> Ok Telemetry
   | other -> Ok (Agent_core_other other)

@@ -499,7 +499,8 @@ status: reference
   `Librarian_progress`(저장본이 이 History에 맞지 않을 때 Librarian의 durable Read
   Position), `Turn_start`(앞머리도 맞는 저장본도 없음: 이 History에서 마지막으로
   끝난 turn이 끝난 자리에서 시작한다). 고르는 순서는 맞는 저장본 → Librarian이 읽은
-  위치 → 마지막으로 끝난 turn의 경계다(`RFC-keeper-context-window-in-tokens` §13.4).
+  위치 → 씨앗(원장·turn 기록) → 마지막으로 끝난 turn의 경계다
+  (`RFC-keeper-context-window-in-tokens` §13.4·§13.6).
   `Librarian_progress`는 그 위치가 이 trace를 지목하고 그 앞 Atom이 위치가 기록한
   Message로 열릴 때만 채택하며, 그때 요청은 읽지 않은 Atom부터 실리고 그 앞을
   요약하지 않는다. `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞 Atom은

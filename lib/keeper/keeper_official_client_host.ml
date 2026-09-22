@@ -697,6 +697,155 @@ let carried_start_range
   }
 ;;
 
+(* A carried range as a lane's declared window left it: the list that goes
+   out, and how many of the range's durable atoms are in it. *)
+type windowed_range =
+  { carried : carried_start
+  ; sent : Agent_core.Types.message list
+  ; atoms_kept : int
+  }
+
+let carried_atoms (carried : carried_start) =
+  carried.projection.Runtime_model_input_tail_window.atom_count
+  - carried.projection.Runtime_model_input_tail_window.dropped_atoms
+;;
+
+(* The window numbers the list composed from a range from atom 0. An
+   omission preamble the range opened on is that atom: dropped first, and put
+   back by the window when the new head still needs one, so it is no durable
+   atom lost. What a lane appends after the range (a Gate replay reference)
+   is newer than every durable atom, so a drop from the front reaches it only
+   after all of them went. *)
+let durable_atoms_kept (carried : carried_start) ~window_dropped =
+  let range = carried_atoms carried in
+  let preamble_dropped =
+    match carried.messages with
+    | head :: _
+      when Runtime_model_input_tail_window.is_synthetic_preamble head && window_dropped > 0 -> 1
+    | _ :: _ | [] -> 0
+  in
+  range - Int.min range (window_dropped - preamble_dropped)
+;;
+
+(* The window reading in the history's own vocabulary: the atoms the range
+   kept, counted against the whole history, so the front it names is an atom
+   a later seed can reopen. *)
+let windowed_projection (windowed : windowed_range) : Runtime_model_input_tail_window.projection =
+  { messages = windowed.sent
+  ; dropped_atoms = windowed.carried.history_atom_count - windowed.atoms_kept
+  ; atom_count = windowed.carried.history_atom_count
+  }
+;;
+
+(* Why a working state stayed out of a request. *)
+type working_state_left_out =
+  | Displaces_atoms of { kept_with : int; kept_without : int }
+      (** Carried, it would have pushed out atoms after the range it covers:
+          the window kept [kept_with] of them with it, [kept_without] alone. *)
+  | Leaves_no_turn
+      (** Carried, the window would have kept no atom: a summary with no turn
+          to answer. *)
+  | Does_not_fit of Agent_core.Error.t
+      (** The working state and the messages no cut removes exceed the
+          ceiling on their own. *)
+
+let working_state_left_out_label = function
+  | Displaces_atoms _ -> "displaces_atoms"
+  | Leaves_no_turn -> "leaves_no_turn"
+  | Does_not_fit _ -> "does_not_fit"
+;;
+
+let working_state_left_out_detail = function
+  | Displaces_atoms { kept_with; kept_without } ->
+    Printf.sprintf "atoms_kept_with=%d atoms_kept_without=%d" kept_with kept_without
+  | Leaves_no_turn -> "atoms_kept_with=0"
+  | Does_not_fit error -> Agent_core.Error.to_string error
+;;
+
+let carries_working_state (windowed : windowed_range) =
+  match windowed.carried.front with
+  | Librarian_snapshot _ -> true
+  | Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Librarian_progress _ ->
+    false
+;;
+
+(* RFC-0460. A working state stands in for the atoms before the range it
+   leads, so it goes out only where it displaces none of the atoms after it.
+   Pinned in front of a range the window then has to cut, it would leave
+   atoms that the summary does not cover and the request does not hold -- the
+   gap the lane's own cut exists to keep out of the range. So the range is
+   composed with it first; when that window kept every atom of the range, it
+   goes. Otherwise the same position is composed alone
+   ([Librarian_progress] at the snapshot's end: the atoms before it are in
+   the keeper's memory, and nothing stands in for them), and the working
+   state goes only if the window kept as many atoms with it as without it
+   and at least the newest one.
+
+   Leaving it out is not a refusal. The band where it does not fit is
+   usually the Librarian not having caught up with a long history, which
+   clears as it reads on, and a refused turn there would stop a keeper for
+   nothing an operator can fix. The turn goes out, and the counter and the
+   line below say that it went without its summary and by how much. A
+   request the position alone cannot carry is still refused, with the error
+   of that composition. *)
+let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
+  match librarian_front with
+  | Keeper_turn_driver_try_provider.Librarian_progress _
+  | Keeper_turn_driver_try_provider.No_position -> compose librarian_front
+  | Keeper_turn_driver_try_provider.Librarian_snapshot
+      (snapshot : Librarian_continuity_snapshot.t) ->
+    let with_state = compose librarian_front in
+    (match with_state with
+     | Ok windowed when not (carries_working_state windowed) ->
+       (* The snapshot did not win the range -- the seed or the lane's own
+          cut sat past it -- so nothing was pinned, and the position alone
+          would be this same range. *)
+       with_state
+     | Ok windowed
+       when windowed.atoms_kept >= 1 && windowed.atoms_kept = carried_atoms windowed.carried ->
+       with_state
+     | Ok _ | Error _ ->
+       let* alone =
+         compose
+           (Keeper_turn_driver_try_provider.Librarian_progress
+              { end_atom = snapshot.end_atom })
+       in
+       let leave_out reason =
+         Log.Keeper.warn
+           ~keeper_name
+           "model input working state not carried runtime=%s reason=%s \
+            summary_end=%d first_atom=%d %s: the Librarian position goes \
+            alone until it has read far enough for its summary to fit"
+           runtime_id
+           (working_state_left_out_label reason)
+           snapshot.end_atom
+           (alone.carried.history_atom_count - alone.atoms_kept)
+           (working_state_left_out_detail reason);
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string WorkingStateNotCarried)
+           ~labels:
+             [ "keeper", keeper_name
+             ; "runtime", runtime_id
+             ; "reason", working_state_left_out_label reason
+             ]
+           ();
+         Ok alone
+       in
+       (match with_state with
+        | Ok windowed
+          when windowed.atoms_kept >= 1 && windowed.atoms_kept >= alone.atoms_kept ->
+          (* The ceiling cut both compositions alike: the working state
+             displaced nothing, and it carries more than the position
+             alone. *)
+          with_state
+        | Ok windowed when windowed.atoms_kept = 0 -> leave_out Leaves_no_turn
+        | Ok windowed ->
+          leave_out
+            (Displaces_atoms
+               { kept_with = windowed.atoms_kept; kept_without = alone.atoms_kept })
+        | Error error -> leave_out (Does_not_fit error)))
+;;
+
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
     ~initial_messages ~model_input_projection ~hooks ~configured_reasoning_effort
     =

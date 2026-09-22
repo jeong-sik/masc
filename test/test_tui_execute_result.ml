@@ -1,7 +1,7 @@
-(* An Execute result read against the output schema its descriptor declares.
-   The fixture is the shape a live call returned (goo-yang-bong, 2026-09-22):
-   the command's output sat inside an envelope whose cwd appeared three times,
-   and the full calls drew all of it as JSON with the output buried in it. *)
+(* An Execute result read for what a reader looks for first: how the command
+   ended and what it printed. The fixture is the shape a live call returned
+   (goo-yang-bong, 2026-09-22): the output sits in an envelope that also says
+   where it ran, three times over, and none of that is read. *)
 
 open Alcotest
 module R = Masc_tui_execute_result
@@ -14,6 +14,16 @@ let live_result =
      "output":"9feab5497  fix(test): pass\n272394615  feat(keeper): trim",
      "typed":true,"execution_time_ms":808,"via":"microvm"}|}
 
+let digest = "9f3a12c4d5e6" ^ String.make 52 '0'
+
+let stored_result =
+  Printf.sprintf
+    {|{"ok":true,"status":{"kind":"exit","code":0},"output_completeness":"complete",
+       "output_artifact":{"_blob":{"sha256":%S,"bytes":48213,"mime":"text/plain","preview":"a"}},
+       "stdout_artifact":{"_blob":{"sha256":%S,"bytes":48213,"mime":"text/plain","preview":"a"}},
+       "typed":true,"execution_time_ms":2400}|}
+    digest digest
+
 let test_a_result_reads_into_its_parts () =
   match R.of_result live_result with
   | None -> fail "a result of the declared shape did not read"
@@ -21,44 +31,61 @@ let test_a_result_reads_into_its_parts () =
       check bool "ok" true result.ok;
       check string "how it ended and how long it ran" "exit 0 \xc2\xb7 808 ms"
         (R.status_text result);
-      check (option string) "what it printed, whole"
-        (Some "9feab5497  fix(test): pass\n272394615  feat(keeper): trim")
-        result.output;
-      check (option string) "the rest on one line, nested members by path"
-        (Some
-           "cwd=/p/goo-yang-bong \xc2\xb7 execution_location.cwd=/p/goo-yang-bong \
-            \xc2\xb7 execution_location.cwd_source=explicit_cwd \xc2\xb7 \
-            execution_location.scope=playground_root \xc2\xb7 \
-            execution_location.repo_name=null \xc2\xb7 \
-            output_completeness=capture_only \xc2\xb7 typed=true \xc2\xb7 via=microvm")
-        (R.rest_text result)
+      check bool "what it printed, whole" true
+        (match result.output with
+         | Some (R.Printed "9feab5497  fix(test): pass\n272394615  feat(keeper): trim") -> true
+         | Some (R.Printed _ | R.Stored _) | None -> false);
+      check (option string) "no stderr on a command that worked" None result.stderr
 
-(* The exit report copies a failing command's stderr into [error] as well;
-   drawn twice it would be the same paragraph twice. An [error] that says
-   something else is a fact of its own and stays. *)
-let test_a_failure_says_its_stderr_once () =
-  let failing error =
-    Printf.sprintf
-      {|{"ok":false,"status":{"kind":"signal","signal":9},"typed":true,
-         "execution_time_ms":1200,"stderr":"killed","error":%S}|}
-      error
-  in
-  (match R.of_result (failing "killed") with
-   | Some result ->
-       check string "a signal says which" "signal 9 \xc2\xb7 1200 ms" (R.status_text result);
-       check (option string) "stderr is its own field" (Some "killed") result.stderr;
-       check (option string) "the copy under error is not repeated"
-         (Some "typed=true") (R.rest_text result)
-   | None -> fail "a failing result did not read");
-  match R.of_result (failing "timed out after 30s") with
+(* Past the size a result carries inline, the output is an artifact; the
+   reader is told where it went and how big it is, not given an empty
+   output. *)
+let test_a_stored_output_says_where_it_went () =
+  match R.of_result stored_result with
+  | None -> fail "a result whose output is an artifact did not read"
+  | Some result -> (
+      match result.output with
+      | Some (R.Stored reference) ->
+          check string "the short digest and the size"
+            "artifact sha256:9f3a12c4d5e6\xe2\x80\xa6 \xc2\xb7 48213 bytes"
+            (R.stored_text reference)
+      | Some (R.Printed _) | None -> fail "the artifact was not read as the output")
+
+let test_a_failure_says_its_stderr () =
+  match
+    R.of_result
+      {|{"ok":false,"status":{"kind":"exit","code":2},"typed":true,
+         "execution_time_ms":40,"output":"","stderr":"ls: nope: No such file",
+         "error":"ls: nope: No such file"}|}
+  with
   | Some result ->
-      check (option string) "a different error stays"
-        (Some "typed=true \xc2\xb7 error=timed out after 30s") (R.rest_text result)
+      check bool "not ok" false result.ok;
+      check string "the exit code" "exit 2 \xc2\xb7 40 ms" (R.status_text result);
+      check (option string) "stderr" (Some "ls: nope: No such file") result.stderr
   | None -> fail "a failing result did not read"
 
-(* What does not match the schema is not guessed at: the caller draws it as
-   it arrived. *)
+(* A command stopped for time dies to a signal; the status says it was the
+   limit, so a reader does not go looking for what else killed it. *)
+let test_a_timeout_says_the_limit () =
+  match
+    R.of_result
+      {|{"ok":false,"status":{"kind":"signal","signal":9},"typed":true,
+         "timeout":{"limit_sec":30.0,"source":"default"},
+         "execution_time_ms":30012,"output":""}|}
+  with
+  | Some result ->
+      check string "the signal, the time and the limit"
+        "signal 9 \xc2\xb7 30012 ms \xc2\xb7 timed out at 30 s" (R.status_text result)
+  | None -> fail "a timed-out result did not read"
+
+(* What does not match the shape the producer writes is not guessed at: the
+   caller draws it as it arrived. *)
 let test_what_is_not_the_declared_shape_does_not_read () =
+  let ok_with extra =
+    Printf.sprintf
+      {|{"ok":true,"status":{"kind":"exit","code":0},"typed":true,"execution_time_ms":1%s}|}
+      extra
+  in
   List.iter
     (fun (why, text) -> check bool why true (Option.is_none (R.of_result text)))
     [ ("not JSON", "exit 0")
@@ -68,13 +95,25 @@ let test_what_is_not_the_declared_shape_does_not_read () =
         {|{"ok":true,"status":{"kind":"vanished","code":0},"typed":true,"execution_time_ms":1}|} )
     ; ( "a duration that is not an integer",
         {|{"ok":true,"status":{"kind":"exit","code":0},"typed":true,"execution_time_ms":"1"}|} )
+    ; ("an output that is not a string", ok_with {|,"output":3|})
+    ; ("an artifact that is not a blob reference", ok_with {|,"output_artifact":"x"|})
+    ; ( "an output both inline and stored",
+        ok_with
+          (Printf.sprintf
+             {|,"output":"a","output_artifact":{"_blob":{"sha256":%S,"bytes":1,"mime":"text/plain","preview":"a"}}|}
+             digest) )
+    ; ("a stderr that is not a string", ok_with {|,"stderr":{}|})
+    ; ("a timeout without its limit", ok_with {|,"timeout":{"source":"default"}|})
     ]
 
 let () =
   run "tui_execute_result"
     [ ( "execute result",
         [ test_case "a result reads into its parts" `Quick test_a_result_reads_into_its_parts
-        ; test_case "a failure says its stderr once" `Quick test_a_failure_says_its_stderr_once
+        ; test_case "a stored output says where it went" `Quick
+            test_a_stored_output_says_where_it_went
+        ; test_case "a failure says its stderr" `Quick test_a_failure_says_its_stderr
+        ; test_case "a timeout says the limit" `Quick test_a_timeout_says_the_limit
         ; test_case "what is not the declared shape does not read" `Quick
             test_what_is_not_the_declared_shape_does_not_read
         ] )

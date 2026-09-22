@@ -1060,17 +1060,14 @@ let keeper_message_tool_activity_details state ~keeper_name
                (said "status"
                   (Masc_tui_execute_result.status_text result)
                   (if result.ok then Theme.ok () else Theme.bad ()))
-           (* Absent is not empty: a large output rides an artifact, which
-              the context line names. *)
            ; Option.map
-               (fun output ->
-                 if String.equal output "" then said "output" "(empty)" ""
-                 else served "output" output)
+               (function
+                 | Masc_tui_execute_result.Printed "" -> said "output" "(empty)" ""
+                 | Masc_tui_execute_result.Printed output -> served "output" output
+                 | Masc_tui_execute_result.Stored reference ->
+                     said "output" (Masc_tui_execute_result.stored_text reference) "")
                result.output
            ; Option.map (served "stderr") result.stderr
-           ; Option.map
-               (fun text -> said "context" text "")
-               (Masc_tui_execute_result.rest_text result)
            ])
     @ [ Option.map (fun (label, value) -> said label value "") result_field
       ; Some (said "identity" identity "")

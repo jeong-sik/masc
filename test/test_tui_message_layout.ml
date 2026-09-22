@@ -1111,6 +1111,65 @@ let test_one_speaker_keeps_one_heading () =
        ])
 ;;
 
+(* Under metadata:full a heading opens a turn, not a block. A turn that
+   thought, called a tool and answered drew a heading above each block, every
+   one the same request at the same clock. The blocks are told apart by how
+   they draw; the heading is said once, as the keeper. *)
+let test_a_turn_keeps_one_heading_across_its_blocks () =
+  let rows entries =
+    Layout.visible_rows ~inner_width:60 ~height:40 entries |> without_hour_rail
+  in
+  let text rows = List.map (fun (row : Layout.row) -> row.text) rows in
+  let at ?(timestamp = "12:34:56") style role body =
+    entry ~timestamp ~timeline_bucket:twelve_o_clock style role "tui-..dddddddd" body
+  in
+  let turn =
+    [ at Layout.User "you" "look"
+    ; at Layout.Thinking "" "find it"
+    ; at Layout.Tool "" "read_file a.ml"
+    ; at ~timestamp:"12:34:59" Layout.Keeper "keeper.one" "found"
+    ; at ~timestamp:"12:35:02" Layout.Thinking "" "check again"
+    ; at ~timestamp:"12:35:03" Layout.Keeper "keeper.one" "done"
+    ]
+  in
+  let drawn = rows turn in
+  check (list string) "the operator's heading, the turn's, and one clock row"
+    [ "[12:34:56] From [you] tui-..dddddddd"
+    ; "  look"
+    ; "[12:34:56] From [] tui-..dddddddd"
+    ; "  find it"
+    ; "  read_file a.ml"
+    ; "  found"
+    ; "[12:35:02]"
+    ; "  check again"
+    ; "  done"
+    ]
+    (text drawn);
+  (match
+     List.filter_map
+       (fun (row : Layout.row) ->
+         match row.kind with
+         | Layout.Metadata (Layout.Origin _) -> Some row.style
+         | Layout.Metadata (Layout.Continued_at _ | Layout.Timeline_break _)
+         | Layout.Body | Layout.Viewport_gap _ ->
+             None)
+       drawn
+   with
+   | [ Layout.User; Layout.Keeper ] -> ()
+   | _ -> fail "the turn opened on reasoning should draw its heading as the keeper");
+  check (list string) "a new request opens a new turn"
+    [ "[12:34:56] From [] tui-..dddddddd"
+    ; "  first"
+    ; "[12:34:56] From [] tui-..eeeeeeee"
+    ; "  second"
+    ]
+    (text
+       (rows
+          [ entry ~timeline_bucket:twelve_o_clock Layout.Tool "" "tui-..dddddddd" "first"
+          ; entry ~timeline_bucket:twelve_o_clock Layout.Tool "" "tui-..eeeeeeee" "second"
+          ]))
+;;
+
 let test_metadata_keeps_a_typed_origin () =
   let rows =
     Layout.visible_rows ~inner_width:80 ~height:10
@@ -1395,14 +1454,14 @@ let test_journal_rows_hang_the_claim_under_itself () =
    rail above them, then a metadata row and a body row each -- so the
    arithmetic below is checkable by hand.
 
-   Each carries its own second, and a time the layout trusts: a clock row is
-   drawn only where the time moved, and only from a trustworthy time. Ten
-   messages stamped the same second are one message as far as the pane is
-   concerned and share a heading, which is the point of the grouping and
-   would make this twelve rows rather than twenty-one. *)
+   Each carries its own minute, and a time the layout trusts: inside one turn
+   a clock row is drawn only where the minute moved, and only from a
+   trustworthy time. Ten messages of one turn inside one minute share the
+   turn's heading, which is the point of the grouping and would make this
+   twelve rows rather than twenty-one. *)
 let ten_entries =
   List.init 10 (fun index ->
-      entry ~timestamp:(Printf.sprintf "12:34:%02d" index)
+      entry ~timestamp:(Printf.sprintf "12:%02d:00" index)
         ~timeline_bucket:twelve_o_clock Layout.Keeper "keeper.one"
         "tui-..dddddddd"
         (Printf.sprintf "line-%d" index))
@@ -2565,6 +2624,8 @@ let () =
             test_journal_rows_hang_the_claim_under_itself
         ; test_case "one speaker keeps one heading" `Quick
             test_one_speaker_keeps_one_heading
+        ; test_case "a turn keeps one heading across its blocks" `Quick
+            test_a_turn_keeps_one_heading_across_its_blocks
         ; test_case "metadata keeps a typed origin" `Quick
             test_metadata_keeps_a_typed_origin
         ; test_case "the origin carries the speaker whole" `Quick

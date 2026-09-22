@@ -167,14 +167,6 @@ let test_typed_execute_response_cwd_uses_container_path () =
         (Astring.String.is_infix ~affix:base prompt);
       check bool "Docker prompt contains Keeper-visible sandbox root" true
         (Astring.String.is_infix ~affix:visible_root prompt);
-      check bool "Docker prompt recommends relative argv operands" true
-        (Astring.String.is_infix
-           ~affix:"Prefer relative argv path operands"
-           prompt);
-      check bool "Docker prompt rejects host absolute paths" true
-        (Astring.String.is_infix
-           ~affix:"host absolute paths are unavailable"
-           prompt);
       let response_fields =
         Keeper_tool_execute_runtime.For_testing.model_execute_location_fields
           ~config

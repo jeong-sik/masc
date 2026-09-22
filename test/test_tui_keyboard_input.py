@@ -7202,15 +7202,18 @@ def memory_journal_timeline_interaction(
             )
         for pattern, label in (
             (re.compile("▶\\s+YOU".encode()), "direct turn start"),
-            (re.compile("●\\s+alpha".encode()), "post-Journal continuation"),
+            # The reply resumes after the Journal row under a heading of its
+            # own. It carries the turn's request, not the keeper's name: the
+            # breadcrumb already says whose chat this is.
+            (re.compile("●\\s+tui-di".encode()), "post-Journal continuation"),
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {plain!r}")
         # Speaker labels are dim-styled, not reverse-video, in the current
-        # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2malpha"). The colored
+        # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2mtui-di.."). The colored
         # bold arrow/circle glyph checked above is what actually marks the
         # causal role; this only confirms the label itself still renders.
-        for label in (b"YOU", b"alpha"):
+        for label in (b"YOU", b"tui-di"):
             if b"\x1b[2m" + label not in drawn:
                 raise AssertionError(
                     f"Direct causal label lost its dim-styled badge {label!r}: "
@@ -9023,9 +9026,13 @@ def message_origin_badge_interaction(
     # waited on by the short clock instead -- the one thing neither other stop
     # draws.
     full_row = send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
+    # The pane's own keeper is not named on its full heading -- the
+    # breadcrumb says whose chat this is -- so its row opens on the mark and
+    # goes straight into the rule.
+    keeper_full_heading = "● ─".encode()
     for badge, body, description in (
         (operator_badge, operator_body, "operator"),
-        (keeper_badge, keeper_body, "Keeper"),
+        (keeper_full_heading, keeper_body, "Keeper"),
     ):
         row, gap = origin_screen_shape(output, badge, body)
         if gap != 1:
@@ -9040,12 +9047,16 @@ def message_origin_badge_interaction(
             raise AssertionError(
                 f"the full {description} origin row did not end on its clock: {row!r}"
             )
-    for name in (b"vincent", b"alpha"):
-        if b"\x1b[7m" + name not in full_row:
-            raise AssertionError(
-                f"chat origin did not keep its reverse-video badge for {name!r}: "
-                f"{full_row!r}"
-            )
+    if b"\x1b[7mvincent" not in full_row:
+        raise AssertionError(
+            f"chat origin did not keep its reverse-video badge for vincent: "
+            f"{full_row!r}"
+        )
+    keeper_heading, _ = origin_screen_shape(output, keeper_full_heading, keeper_body)
+    if b"alpha" in keeper_heading:
+        raise AssertionError(
+            f"the full heading named the pane's own keeper: {keeper_heading!r}"
+        )
     assert_bodies_unwashed(full_row, "the full origin row")
 
     bare = send_and_wait(process, master_fd, output, b"\x06", b"metadata:off")

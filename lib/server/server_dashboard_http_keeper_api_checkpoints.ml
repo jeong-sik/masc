@@ -206,6 +206,12 @@ type purge_report =
   ; tool_results_cleared : int
   }
 
+type continuity_snapshot =
+  | Snapshot_untouched
+  | Snapshot_removed
+  | Snapshot_absent
+  | Snapshot_not_removed of string
+
 type purge_result =
   { keeper : string
   ; trace_id : string
@@ -214,6 +220,7 @@ type purge_result =
   ; backup_path : string option
   ; report : purge_report
   ; warnings : string list
+  ; continuity_snapshot : continuity_snapshot
   }
 
 type purge_error =
@@ -350,6 +357,14 @@ let purge_report_json report =
     ]
 ;;
 
+let continuity_snapshot_json = function
+  | Snapshot_untouched -> `Assoc [ "kind", `String "untouched"; "detail", `Null ]
+  | Snapshot_removed -> `Assoc [ "kind", `String "removed"; "detail", `Null ]
+  | Snapshot_absent -> `Assoc [ "kind", `String "absent"; "detail", `Null ]
+  | Snapshot_not_removed detail ->
+    `Assoc [ "kind", `String "not_removed"; "detail", `String detail ]
+;;
+
 let purge_result_json ~action result =
   `Assoc
     [ "schema", `String "masc.keeper_checkpoint_purge.v1"
@@ -362,6 +377,7 @@ let purge_result_json ~action result =
     ; "backup_path", Json_util.string_opt_to_json result.backup_path
     ; "report", purge_report_json result.report
     ; "warnings", Json_util.json_string_list result.warnings
+    ; "continuity_snapshot", continuity_snapshot_json result.continuity_snapshot
     ]
 ;;
 
@@ -516,6 +532,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
                          ^ Keeper_checkpoint_purge.refusal_to_string refusal
                        ]
                      | Ok _ -> [])
+                ; continuity_snapshot = Snapshot_untouched
                 }
             else (
               match rebase with
@@ -531,6 +548,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
                     ; backup_path = None
                     ; report
                     ; warnings = []
+                    ; continuity_snapshot = Snapshot_untouched
                     }
                 else
                   (match
@@ -576,6 +594,22 @@ let purge_current_unlocked config ~keeper_name ~apply =
                              (Purge_librarian_position_not_written
                                 (Keeper_librarian_progress.write_error_to_string error))
                          | Ok () ->
+                           (* The continuity snapshot follows the position:
+                              its numbers and digests are the old history's,
+                              and the Librarian's next pass writes one for
+                              the new. One that stays behind is not read
+                              past its numbering: a turn that finds it does
+                              not fit starts at the position instead, so a
+                              failed unlink is reported, not fatal. *)
+                           let continuity_snapshot =
+                             match
+                               Keeper_librarian_continuity.remove
+                                 ~keepers_dir:runtime_keepers_dir ~keeper_name
+                             with
+                             | Ok Keeper_librarian_continuity.Snapshot_removed -> Snapshot_removed
+                             | Ok Keeper_librarian_continuity.Snapshot_absent -> Snapshot_absent
+                             | Error detail -> Snapshot_not_removed detail
+                           in
                            Ok
                              { keeper = keeper_name
                              ; trace_id
@@ -587,6 +621,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
                                  List.map
                                    checkpoint_installation_auxiliary_to_string
                                    installed.auxiliary
+                             ; continuity_snapshot
                              }))))))
 ;;
 

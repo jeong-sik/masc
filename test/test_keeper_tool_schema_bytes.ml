@@ -1,7 +1,7 @@
 (** A ceiling on the complete model-visible tool schema inventory.
 
-    [test_keeper_system_prompt_bytes] pins the assembled system prompt, which is
-    the smaller half of the fixed per-turn cost. The tool array is the larger
+    [test_keeper_system_prompt_blocks] checks the assembled system prompt, which
+    is the smaller half of the fixed per-turn cost. The tool array is the larger
     one and had no measurement at all: a tool added with a generous schema, or a
     description that grows a paragraph at a time, enlarges the available surface
     and nothing said so.

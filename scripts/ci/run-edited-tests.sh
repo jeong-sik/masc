@@ -209,17 +209,17 @@ test/test_tools_coverage.ml"
   # test/*.ml.
 
   # config/prompts is the same shape a third time. Every keeper turn is built
-  # from the assembled system prompt, and test_keeper_system_prompt_bytes pins
-  # it byte for byte for fixed inputs; it is the one suite that resolves the
-  # repository's own config/prompts rather than a temp dir it wrote. The 44
-  # other suites that name that directory pin the registry so the build does
-  # not raise inside the dune sandbox, and assert nothing about what ships
-  # there, so mapping them here would spend the whole budget on suites the
-  # change cannot break. The same nightly measured the golden at 4,998 bytes
-  # against an assembled 8,083.
+  # from the assembled system prompt, and test_keeper_system_prompt_blocks
+  # checks that every block of it arrives once, in order, and filled; it is
+  # the one suite that resolves the repository's own config/prompts to check
+  # the assembly rather than a temp dir it wrote. The 44 other suites that
+  # name that directory pin the registry so the build does not raise inside
+  # the dune sandbox, and assert nothing about what ships there, so mapping
+  # them here would spend the whole budget on suites the change cannot
+  # break.
   prompts_changed=$( { printf '%s\n' "${changed}" \
     | grep -E '^config/prompts/' || [ $? -eq 1 ]; } | head -1)
-  prompt_guard="test/test_keeper_system_prompt_bytes.ml"
+  prompt_guard="test/test_keeper_system_prompt_blocks.ml"
 
   # config/themes is the same shape a fourth time, and the only one of the
   # three where the suite is not in doubt. 53 base16 schemes ship out of that
@@ -1176,8 +1176,8 @@ self_test() {
     "packages/agent_core/lib/dune"
   # Only tool definitions reach the second one; a prompt asset has no first
   # line to fit.
-  check "a prompt asset reaches the asset guard and the prompt golden" \
-    "test/test_keeper_system_prompt_bytes.ml test/test_managed_assets_sync_from_binary.ml" \
+  check "a prompt asset reaches the asset guard and the prompt block check" \
+    "test/test_keeper_system_prompt_blocks.ml test/test_managed_assets_sync_from_binary.ml" \
     "config/prompts/foo.md"
   # And not the asset guard: it runs the real sync, whose domains are Prompts,
   # Tools and Mcp. A scheme is embedded but never synced, so that guard has

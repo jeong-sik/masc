@@ -570,7 +570,7 @@ let halve ~first_atom ~atom_count =
 
 ### 13.4 앞머리가 없으면 이번 턴만 싣는다
 
-흡수한 지점은 둘 중 하나다: 맞는 스냅숏(하던 일과 위치, `Librarian_snapshot`), 그것이 없으면 Librarian 의 읽은 위치(`librarian-progress.json`, 위치만, `Librarian_progress`; §13.6). purge 는 위치를 새 번호로 옮기지만 스냅숏은 옛 번호로 남기므로, purge 뒤 첫 턴은 두 번째 갈래로 간다(2026-09-22 goo-yang-bong: 16.4 MB → 169 KB). 둘 다 이 이력의 자리가 아니고 씨앗도 없으면 요청은 이 이력에서 마지막으로 끝난 턴의 경계(`Keeper_carried_front.Turn_start`)부터 싣는다. 이번 턴의 원문만 나가고, 그 앞은 Librarian 의 다음 회차가 스냅숏으로 채운다. 끝난 턴이 없는 이력은 그 경계가 0 이라 갖고 있는 전부를 싣는데, 그것은 새 Keeper 의 짧은 이력이다. 공식 클라이언트 레인도 씨앗이 없으면 같은 자리에서 시작한다(`Keeper_official_client_host.carried_start_range` 의 `turn_start`).
+흡수한 지점은 둘 중 하나다: 맞는 스냅숏(하던 일과 위치, `Librarian_snapshot`), 그것이 없으면 Librarian 의 읽은 위치(`librarian-progress.json`, 위치만, `Librarian_progress`; §13.6). purge 는 위치를 새 번호로 옮기고 옛 번호의 스냅숏은 지우므로, purge 뒤 첫 턴은 두 번째 갈래로 가고 다음 Librarian 회차가 새 스냅숏을 쓴다(2026-09-22 goo-yang-bong: 스냅숏을 옛 번호로 남겨 두던 때 16.4 MB, 위치부터 실으니 169 KB). 둘 다 이 이력의 자리가 아니고 씨앗도 없으면 요청은 이 이력에서 마지막으로 끝난 턴의 경계(`Keeper_carried_front.Turn_start`)부터 싣는다. 이번 턴의 원문만 나가고, 그 앞은 Librarian 의 다음 회차가 스냅숏으로 채운다. 끝난 턴이 없는 이력은 그 경계가 0 이라 갖고 있는 전부를 싣는데, 그것은 새 Keeper 의 짧은 이력이다. 공식 클라이언트 레인도 씨앗이 없으면 같은 자리에서 시작한다(`Keeper_official_client_host.carried_start_range` 의 `turn_start`).
 
 "시작할 자리가 없다"를 "전부 보낸다"로 접지 않는다. `software-development.md` §AI 코드 생성 안티패턴 2 가 금지하는 형태다 — unknown 을 편리한 기본값으로 압축하지 않는다. 경계는 고른 숫자가 아니라 일어난 일(턴 끝 기록의 위치)이고, 지금 이력과 digest 로 맞춰 본 값만 쓴다(`Keeper_turn_driver_try_provider.turn_start`).
 

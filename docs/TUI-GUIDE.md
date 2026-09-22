@@ -616,7 +616,8 @@ when chat opened from detail.
  Message to: sangsu  ● active · running anthropic.claude-opus-5  (port 8935)
    ► YOU · tui-019... ──────────────────────────────────────── 14:35:01
      hello, how are you?
-   ● sangsu · tui-019... ───────────────────────────────────── 14:35:03
+   ● tui-019... ────────────────────────────────────────────── 14:35:03
+   │ ✓ Read a.ml
      ...reply text...
    > type here_
   Enter:send  Ctrl-G:next Keeper  Esc:list  Ctrl-U:clear
@@ -624,9 +625,12 @@ when chat opened from detail.
 
 That is the `metadata:full` heading (`Ctrl-F`): the speaker whole at the
 left, the request id after it, the clock at the right edge and a rule
-between. A later row from the same speaker draws only the rule and its
-clock. A row without a trustworthy time draws no clock and the rule runs to
-the edge.
+between. A heading opens a turn, not a block: the keeper's reasoning, tool
+calls and reply in one request share it, and a later minute of that turn
+draws only the rule and its clock. The pane's own keeper is not named on
+its headings, since the header already says whose chat it is; the operator,
+another keeper writing in, `STATUS` and `AUTO` still are. A row without a
+trustworthy time draws no clock and the rule runs to the edge.
 
 The header joins the selected Keeper's published status with its typed runtime
 phase and producer-owned canonical `runtime_id`, using the same roster reading

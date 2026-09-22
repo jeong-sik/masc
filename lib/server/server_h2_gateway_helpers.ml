@@ -13,8 +13,18 @@ let maybe_compress ?(compress = true) h2_reqd body =
    Closing right after the last write sent the first window's worth of bytes,
    then END_STREAM, and the client saw a 200 with a short body. The close here
    runs once every byte written so far has left the body, so END_STREAM only
-   goes out when nothing is pending. [`Closed] means the connection is gone;
-   the writer is closed then too, as it was before. *)
+   goes out when nothing is pending.
+
+   Write the whole body before calling this. A write after it is cut the same
+   way the old close was, because the flush only covers the bytes already
+   written.
+
+   While the window stays 0 the callback does not run at all, with neither
+   argument: h2 reaches a response body only through Reqd.flush_response_body,
+   which skips it while the window is 0, and that is the only path that drains
+   the body when the connection dies. The writer is then left open and goes
+   when the stream does. Measured on a peer RST_STREAM, on a connection kept
+   alive for 30 pings afterwards, and on transport close. *)
 let h2_close_after_flush writer =
   H2.Body.Writer.flush writer (function
     | `Written | `Closed -> H2.Body.Writer.close writer)
@@ -101,7 +111,7 @@ let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
   in
   let response = H2.Response.create ~headers status in
   let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-  H2.Body.Writer.close writer
+  h2_close_after_flush writer
 
 let h2_read_body h2_reqd callback =
   let body = H2.Reqd.request_body h2_reqd in

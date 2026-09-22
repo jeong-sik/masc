@@ -57,7 +57,7 @@ let transfer lane next_write report_write read =
    WINDOW_UPDATE. A server that ends the stream early completes the exchange
    with a short body; a server that never sends the rest, or never ends the
    stream, stops making progress and the pump fails instead of hanging. *)
-let exchange ~handler target =
+let exchange ?error_handler ~handler target =
   let status = ref None in
   let body = Buffer.create response_size in
   let complete = ref false in
@@ -89,7 +89,7 @@ let exchange ~handler target =
         consume ())
   in
   H2.Body.Writer.close writer;
-  let server = H2.Server_connection.create handler in
+  let server = H2.Server_connection.create ?error_handler handler in
   let to_server = { pending = "" } in
   let to_client = { pending = "" } in
   let rec pump () =
@@ -114,8 +114,10 @@ let exchange ~handler target =
   | Some status -> { status; body = Buffer.contents body }
   | None -> fail "the response carried no headers"
 
-(* Every position holds a letter that depends on it, so a body that arrives
-   reordered or with a stretch missing does not compare equal. *)
+(* A repeating alphabet rather than one byte over and over, so a body pasted
+   together in the wrong order shows up in the comparison unless the pieces
+   happen to be multiples of 26. What catches a missing stretch is the length
+   check. *)
 let payload =
   let alphabet = "abcdefghijklmnopqrstuvwxyz" in
   String.init response_size (fun index ->
@@ -143,6 +145,29 @@ let test_empty_response_still_ends_its_stream () =
   check int "answered" 200 reply.status;
   check string "no body" "" reply.body
 
+(* The gateway's error handler writes its message and closes the body the same
+   way, and it is the one site where h2 has already set the stream's error
+   code, so the stream ends with RST_STREAM once the body is out. Its message
+   is the exception's text, which is how this case gets an error body larger
+   than the window. The text goes to the log too, so the console writer is
+   swapped for one that keeps it out of the test output. *)
+let test_error_handler_body_arrives_whole () =
+  let expected = Printexc.to_string (Failure payload) in
+  Console_sink.For_testing.reset ();
+  Console_sink.For_testing.set_writer (Some (fun _line -> ()));
+  let reply =
+    Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
+      exchange
+        ~error_handler:(Server_h2_gateway.make_error_handler () ())
+        ~handler:(fun reqd -> H2.Reqd.report_exn reqd (Failure payload))
+        "/boom")
+  in
+  check int "answered as an internal error" 500 reply.status;
+  check int "every byte arrived" (String.length expected)
+    (String.length reply.body);
+  check bool "the bytes are the ones written" true
+    (String.equal expected reply.body)
+
 let () =
   run "H2 response window"
     [ ( "flow control"
@@ -150,5 +175,7 @@ let () =
             test_response_over_the_window_arrives_whole
         ; test_case "an empty response still ends its stream" `Quick
             test_empty_response_still_ends_its_stream
+        ; test_case "an error handler's body arrives whole" `Quick
+            test_error_handler_body_arrives_whole
         ] )
     ]

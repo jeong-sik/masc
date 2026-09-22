@@ -222,6 +222,12 @@ blocking_lints() {
   run_lint "HITL exact-flow boundary" bash scripts/check-hitl-exact-flow-boundary.sh
   run_lint "Turn-records envelope parity" bash scripts/check-turn-records-envelope-parity.sh
   run_lint "Drain loops yield" bash scripts/ci/check-drain-loop-yields.sh
+  # h2 0.13.0 cuts a closed body at the peer's flow-control window, so every
+  # H2 response body closes through one helper (#37942). That is a rule about
+  # a single line, and the next route writes it from memory unless something
+  # reads the tree.
+  run_lint "H2 body close goes through the helper" \
+    bash scripts/ci/check-h2-body-close.sh
   run_lint "Log severity anti-patterns" bash scripts/ci/check-log-severity-anti-patterns.sh
   run_lint "Determinism contract" bash scripts/ci/check-determinism-contract.sh
   run_lint "TLA variant sync" bash scripts/ci/check-tla-variant-sync.sh

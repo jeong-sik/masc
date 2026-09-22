@@ -374,7 +374,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                ] @ cors) in
                let response = H2.Response.create ~headers:resp_headers `Not_modified in
                let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-               H2.Body.Writer.close writer
+               h2_close_after_flush writer
            | _ ->
                let extra = [("etag", etag_value); ("cache-control", dashboard_index_cache_control); ("vary", "Accept-Encoding")] @ cors in
                h2_respond_html h2_reqd body ~extra_headers:extra)

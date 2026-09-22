@@ -54,17 +54,11 @@ let parse content =
   | Absent | Unclosed -> empty content
 ;;
 
-let field t name =
-  match List.assoc_opt name t.fields with
-  | Some value -> value
-  | None -> ""
-;;
-
 (* `tags: [a, b, c]` and `tags: a, b, c` both appeared among the readers this
    replaced. Accept either: dropping the unbracketed form would silently lose
    tags that one of them used to return. *)
 let list_field t name =
-  let raw = String.trim (field t name) in
+  let raw = String.trim (Option.value ~default:"" (List.assoc_opt name t.fields)) in
   let len = String.length raw in
   let inner =
     if len >= 2 && Char.equal raw.[0] '[' && Char.equal raw.[len - 1] ']'

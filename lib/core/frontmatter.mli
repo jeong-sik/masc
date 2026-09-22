@@ -25,9 +25,6 @@ val parse : string -> t
 (** {!read} for a caller that does not need to tell the cases apart: [Absent]
     and [Unclosed] both answer empty [fields] with the whole input as [body]. *)
 
-val field : t -> string -> string
-(** The value for [name], or [""] when absent. *)
-
 val list_field : t -> string -> string list
 (** [name: \[a, b, c\]] and [name: a, b, c] both split and trim to the same
     list. An absent or empty value answers [[]]. *)

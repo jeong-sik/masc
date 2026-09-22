@@ -98,7 +98,7 @@ let test_frontmatter_crlf_delimiter_is_seen () =
      the third read it fine. *)
   let content = "---\r\ntitle: Example\r\n---\r\nbody" in
   let parsed = Frontmatter.parse content in
-  check string "title is read" "Example" (Frontmatter.field parsed "title")
+  check string "title is read" "Example" (Option.value ~default:"" (List.assoc_opt "title" parsed.Frontmatter.fields))
 
 let test_frontmatter_absent_returns_whole_content () =
   let content = "no frontmatter here" in
@@ -146,7 +146,7 @@ let test_frontmatter_read_tells_absent_unclosed_and_closed_apart () =
     match Frontmatter.read content with
     | Frontmatter.Absent -> "absent"
     | Frontmatter.Unclosed -> "unclosed"
-    | Frontmatter.Closed parsed -> "closed:" ^ Frontmatter.field parsed "title"
+    | Frontmatter.Closed parsed -> "closed:" ^ Option.value ~default:"" (List.assoc_opt "title" parsed.Frontmatter.fields)
   in
   check string "no opening delimiter" "absent" (block "title: T\nbody");
   check string "no closing delimiter" "unclosed" (block "---\ntitle: T\nbody");
@@ -154,7 +154,7 @@ let test_frontmatter_read_tells_absent_unclosed_and_closed_apart () =
 
 let test_frontmatter_line_without_colon_is_skipped () =
   let parsed = Frontmatter.parse "---\njust text\ntitle: T\n---\n" in
-  check string "title still read" "T" (Frontmatter.field parsed "title");
+  check string "title still read" "T" (Option.value ~default:"" (List.assoc_opt "title" parsed.Frontmatter.fields));
   check int "only one field" 1 (List.length parsed.Frontmatter.fields)
 
 (* The predicate both config-root seeds ask ([masc init] and the server's own

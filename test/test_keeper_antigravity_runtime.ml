@@ -1601,6 +1601,73 @@ let test_a_working_state_the_window_holds_goes () =
     (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
+(* The window numbers what it is handed from atom 0, and a range that opens
+   on an assistant turn is handed with the omission preamble in front. That
+   preamble is the first atom the window drops, and it is no durable atom:
+   the reading must count only the history's atoms that went out, or its
+   front names the atom after the one sent and the next request's seed
+   starts one atom late. *)
+let test_a_dropped_preamble_is_not_a_durable_atom () =
+  let history =
+    List.init 40 (fun index ->
+      if index mod 2 = 0
+      then plain_user_message (Printf.sprintf "turn-%02d" index)
+      else
+        ({ role = Assistant
+         ; content = [ Text (Printf.sprintf "reply-%02d" index) ]
+         ; name = None
+         ; tool_call_id = None
+         ; metadata = []
+         }
+         : Agent_core.Types.message))
+  in
+  let measure = Keeper_antigravity_runtime.For_testing.measure_model_input_message_bytes in
+  let preamble_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        history
+    with
+    | Some bytes -> bytes
+    | None -> fail "the fixture history has no shrinkable atom"
+  in
+  (* The range opens at 21, an assistant turn, so it goes with a preamble.
+     The ceiling holds that preamble and the atoms from 30. *)
+  let capacity =
+    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes ~system_prompt:"system"
+      ~goal:"goal"
+    + preamble_bytes
+    + List.fold_left
+        (fun total message -> total + measure message)
+        0
+        (List.filteri (fun index _ -> index >= 30) history)
+  in
+  let observed = ref None in
+  let sent =
+    project_with_capacity
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 21 })
+      ~on_model_input_window_observation:(fun reading -> observed := Some reading)
+      ~capacity
+      history
+  in
+  let durable =
+    List.filter
+      (fun message -> not (Runtime_model_input_tail_window.is_synthetic_preamble message))
+      sent
+  in
+  check (list string) "the atoms from 30 go"
+    (encoded_history (List.filteri (fun index _ -> index >= 30) history))
+    (encoded_history durable);
+  match !observed with
+  | None -> fail "the projection reported no window"
+  | Some reading ->
+    check int "the reading counts the atoms that went, not the preamble"
+      (List.length durable) reading.transmitted_atoms;
+    check (option string) "so its front is the first atom sent"
+      (Runtime_model_input_tail_window.atom_opening_digest history 30)
+      (Some reading.front_atom_digest)
+;;
+
 let test_a_front_from_another_history_is_dropped () =
   let messages = carried_front_history () in
   let other =
@@ -1705,6 +1772,10 @@ let () =
             "a working state the window holds goes"
             `Quick
             test_a_working_state_the_window_holds_goes
+        ; test_case
+            "a dropped preamble is not a durable atom"
+            `Quick
+            test_a_dropped_preamble_is_not_a_durable_atom
           ; test_case
               "a front from another history is dropped"
               `Quick

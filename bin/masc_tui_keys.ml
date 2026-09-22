@@ -215,9 +215,10 @@ let global =
              keeper, so the column starts hidden; this brings it back on a \
              terminal wide enough to hold it"
   ; b Meta "Ctrl-L"
-      "show or hide the Activity pane: what every keeper is doing right now, and \
-       on its Changes tab the selected keeper's files (press the header to switch)"
-      ~help:"the wheel over it scrolls the full list; a press picks a keeper, a second press opens its chat"
+      "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
+       right now, and on its Changes tab the selected keeper's files (press the header to switch)"
+      ~help:"the wheel over it scrolls the full list; a press picks a keeper, a second press opens its chat; \
+             /activity order turns the order of its calls"
   ; b Meta "Ctrl-^" "show or hide Browser Lane; retain tab and scroll"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
   ; b Navigate "Ctrl-]" "follow the reference under the cursor"

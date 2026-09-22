@@ -1183,7 +1183,8 @@ let bounded_model_input_projection
          it did. *)
       if Lazy.is_val cold_seed
       then (
-        match (Lazy.force cold_seed).Keeper_carried_front.unreadable with
+        let read = Lazy.force cold_seed in
+        (match read.Keeper_carried_front.unreadable with
         | Some unreadable ->
           Log.Keeper.warn
             ~keeper_name:ctx.keeper_name
@@ -1192,7 +1193,16 @@ let bounded_model_input_projection
             ctx.runtime_id
             unreadable.Keeper_carried_front.count
             unreadable.Keeper_carried_front.first_reason
-        | None -> ()));
+        | None -> ());
+        Option.iter
+          (fun detail ->
+             Log.Keeper.warn
+               ~keeper_name:ctx.keeper_name
+               "model input carried range seed read refused the turn-boundary store runtime=%s detail=%s"
+               ctx.runtime_id
+               detail)
+          read.Keeper_carried_front.boundary_error);
+      );
     (match composed.outlived_seed with
      | Some (seed, dropped) when not !outlived_reported ->
        outlived_reported := true;

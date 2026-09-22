@@ -402,30 +402,58 @@ let test_earlier_unclosed_record_is_not_presented_as_settled () =
 
 (* ── width contract ─────────────────────────────────────────────────── *)
 
-let wide = Pane.threshold_cols + 20
+(* A terminal that holds either pane, one that holds only the narrow one,
+   and one that holds neither. *)
+let roomy = Pane.wide_threshold_cols + 20
+let middling = Pane.wide_threshold_cols - 1
 let narrow = Pane.threshold_cols - 1
 
-let test_shown_needs_room_and_consent () =
-  check bool "wide and wanted" true (Pane.shown ~hidden:false ~cols:wide);
-  check bool "wide but put away" false (Pane.shown ~hidden:true ~cols:wide);
-  check bool "narrow, whatever the reader wants" false (Pane.shown ~hidden:false ~cols:narrow)
+let layout =
+  testable (fun ppf l -> Format.pp_print_string ppf (Pane.layout_label l)) ( = )
 
-let test_toggle_changes_only_a_visible_preference () =
-  check (option bool) "wide can hide" (Some true) (Pane.toggle_hidden ~hidden:false ~cols:wide);
-  check (option bool) "wide can show" (Some false) (Pane.toggle_hidden ~hidden:true ~cols:wide);
-  check (option bool) "narrow leaves the preference" None
-    (Pane.toggle_hidden ~hidden:false ~cols:narrow)
+let test_drawn_cols_follow_the_choice_and_the_room () =
+  check int "narrow, with room" Pane.pane_cols (Pane.drawn_cols ~layout:Pane.Narrow ~cols:roomy);
+  check int "wide, with room" Pane.wide_pane_cols
+    (Pane.drawn_cols ~layout:Pane.Wide ~cols:roomy);
+  check int "wide, room for the narrow pane only: drawn narrow" Pane.pane_cols
+    (Pane.drawn_cols ~layout:Pane.Wide ~cols:middling);
+  check int "hidden takes nothing" 0 (Pane.drawn_cols ~layout:Pane.Hidden ~cols:roomy);
+  check int "no room, whatever the reader chose" 0
+    (Pane.drawn_cols ~layout:Pane.Wide ~cols:narrow);
+  check int "no room for the narrow pane either" 0
+    (Pane.drawn_cols ~layout:Pane.Narrow ~cols:narrow);
+  check int "exactly room for the wide pane" Pane.wide_pane_cols
+    (Pane.drawn_cols ~layout:Pane.Wide ~cols:Pane.wide_threshold_cols);
+  check int "exactly room for the narrow pane" Pane.pane_cols
+    (Pane.drawn_cols ~layout:Pane.Wide ~cols:Pane.threshold_cols)
+
+let test_ctrl_l_walks_narrow_wide_hidden () =
+  let step layout_now cols = Pane.next_layout ~layout:layout_now ~cols in
+  check (option layout) "narrow to wide" (Some Pane.Wide) (step Pane.Narrow roomy);
+  check (option layout) "wide to hidden" (Some Pane.Hidden) (step Pane.Wide roomy);
+  check (option layout) "hidden to narrow" (Some Pane.Narrow) (step Pane.Hidden roomy);
+  check (option layout) "no room for wide: narrow to hidden" (Some Pane.Hidden)
+    (step Pane.Narrow middling);
+  check (option layout) "no room at all leaves the choice" None (step Pane.Narrow narrow);
+  check (option layout) "exactly room for wide: narrow to wide" (Some Pane.Wide)
+    (step Pane.Narrow Pane.wide_threshold_cols);
+  check (option layout) "exactly room for narrow: hidden to narrow" (Some Pane.Narrow)
+    (step Pane.Hidden Pane.threshold_cols)
 
 let test_content_cols_give_the_surface_the_rest () =
-  check int "shown takes the pane" (wide - Pane.pane_cols)
-    (Pane.content_cols ~hidden:false ~cols:wide);
-  check int "hidden takes nothing" wide (Pane.content_cols ~hidden:true ~cols:wide);
-  check int "narrow takes nothing" narrow (Pane.content_cols ~hidden:false ~cols:narrow)
+  check int "narrow takes the narrow pane" (roomy - Pane.pane_cols)
+    (Pane.content_cols ~layout:Pane.Narrow ~cols:roomy);
+  check int "wide takes the wide pane" (roomy - Pane.wide_pane_cols)
+    (Pane.content_cols ~layout:Pane.Wide ~cols:roomy);
+  check int "hidden takes nothing" roomy (Pane.content_cols ~layout:Pane.Hidden ~cols:roomy);
+  check int "no room takes nothing" narrow (Pane.content_cols ~layout:Pane.Narrow ~cols:narrow)
 
 let test_threshold_leaves_the_surface_the_roster_floor () =
   check int "surface floor is what the roster leaves"
     (Masc_tui_roster_pane.threshold_cols - Masc_tui_roster_pane.pane_cols)
-    (Pane.threshold_cols - Pane.pane_cols)
+    (Pane.threshold_cols - Pane.pane_cols);
+  check int "the wide pane leaves the same floor" (Pane.threshold_cols - Pane.pane_cols)
+    (Pane.wide_threshold_cols - Pane.wide_pane_cols)
 
 (* ── rows ───────────────────────────────────────────────────────────── *)
 
@@ -444,7 +472,7 @@ let test_header_states_tabs_fleet_and_feed () =
   check bool "states the live feed" true (contains "live" (nth 0));
   check bool "the transport is explicit" true (contains "feed live" (nth 0));
   check bool "cumulative frame counts are omitted" false (contains "events" (nth 0));
-  check bool "the legend row is drawn whole" true (contains Pane.legend (nth 1))
+  check bool "the legend row is drawn whole" true (contains (Pane.legend ~cols) (nth 1))
 
 let test_fleet_orders_waiting_then_working_then_settled_then_quiet () =
   let polisher = index_of "polisher" and tester = index_of "tester"
@@ -614,7 +642,7 @@ let test_legend_preserves_reachable_targets_in_small_windows () =
           check int "small window keeps target budget" rows (List.length value.Pane.targets);
           List.iter (fun line -> check int "small row width" cols (width line)) value.Pane.rows;
           check bool "legend stays visible while scrolling" true
-            (contains Pane.legend (text (List.nth value.Pane.rows 1))))
+            (contains (Pane.legend ~cols) (text (List.nth value.Pane.rows 1))))
         windows)
     [ 3; 4; 5; 6 ];
   List.iter
@@ -907,7 +935,7 @@ let test_tokens_and_ages_are_compact () =
 (* Each legend row is drawn whole: a legend cut at the edge would define a
    word with half a sentence. *)
 let test_legend_row_fits_whole () =
-  check bool "legend is whole" true (contains Pane.legend (nth 1))
+  check bool "legend is whole" true (contains (Pane.legend ~cols) (nth 1))
 
 (* A three-digit settle with two large parts is the widest settled reading;
    it fits the pane whole now that no clock shares the row. *)
@@ -1007,7 +1035,7 @@ let test_beside_the_roster_only_the_selected_keepers_record_draws () =
   check bool "the header names the tabs" true (contains "[Recent]" (List.nth texts 0));
   check bool "the header states the feed" true (contains "feed live" (List.nth texts 0));
   check bool "the header does not count the fleet" false (contains "keepers" (List.nth texts 0));
-  check bool "the legend stays" true (contains Pane.legend (List.nth texts 1));
+  check bool "the legend stays" true (contains (Pane.legend ~cols) (List.nth texts 1));
   check (list string) "no fleet row" [] (keeper_targets view);
   check bool "no rule" false (List.exists (fun row -> contains rule_glyphs row) texts);
   check bool "the selected keeper's header is first under the legend" true
@@ -1094,7 +1122,7 @@ let test_the_column_names_wait_for_a_row_that_uses_them () =
   let view = Pane.lines ~rows ~cols ~scroll:0 input in
   let texts = List.map text view.Pane.rows in
   check bool "no row uses the columns" false
-    (List.exists (fun row -> contains Pane.legend row) texts);
+    (List.exists (fun row -> contains (Pane.legend ~cols) row) texts);
   check bool "the sentence is under the header" true
     (contains "tester" (List.nth texts 1)
      && contains "no events on this feed yet" (List.nth texts 1));
@@ -1236,11 +1264,12 @@ module Contract = Agent_core.Tool_contract
 let schedule ~step ~batch_index ~at_once execution_mode : Contract.schedule =
   { Contract.planned_index = step - 1; batch_index; batch_size = at_once; execution_mode }
 
-let runner_call ~at ?duration_ms ~id ?schedule ?disposition ?input ?output tool =
+let runner_call ~at ?duration_ms ~id ?(session = Some 12) ?schedule ?disposition ?input
+    ?output tool =
   ( at
   , Observer.Keeper_tool_call
       { Observer.kt_keeper = "runner"
-      ; kt_turn = Some 12
+      ; kt_turn = session
       ; kt_tool = tool
       ; kt_duration_ms = duration_ms
       ; kt_disposition = disposition
@@ -1433,7 +1462,279 @@ let test_the_order_cycles_through_all_four () =
     else walk (order :: seen) (Pane.next_call_order order)
   in
   check int "four orders before it comes back" 4
-    (List.length (walk [] Pane.Oldest_first))
+    (List.length (walk [] Pane.Oldest_first));
+  check bool "the first press from newest first turns time around" true
+    (Pane.next_call_order Pane.Newest_first = Pane.Oldest_first)
+
+(* ── calls: a bracket per model response ───────────────────────────── *)
+
+(* The hook's per-call report: provider call [session] ran while runner had
+   eleven keeper turns done, so it belongs to keeper turn 12. With it the
+   fold files calls from two provider calls into one record, as the live
+   feed does. *)
+let observed ~at session =
+  ( at
+  , Observer.Keeper_turn_observation
+      { Observer.to_keeper = "runner"
+      ; to_session_turn = Some session
+      ; to_total_turns = Some 11
+      ; to_at = at
+      } )
+
+(* One keeper turn, two model responses: the first asked for a Read, a Grep
+   and a Glob, the second for an Execute. *)
+let two_responses =
+  [ observed ~at:940. 7
+  ; runner_call ~at:950. ~duration_ms:5. ~id:"r1" ~session:(Some 7) "Read"
+  ; runner_call ~at:953. ~duration_ms:5. ~id:"r2" ~session:(Some 7) "Grep"
+  ; runner_call ~at:956. ~duration_ms:5. ~id:"r3" ~session:(Some 7) "Glob"
+  ; observed ~at:960. 8
+  ; runner_call ~at:970. ~duration_ms:5. ~id:"r4" ~session:(Some 8) "Execute"
+  ]
+
+let responses_view ?(cols = cols) ?(order = Pane.Newest_first) ?(expanded = []) calls =
+  Pane.lines ~rows ~cols ~scroll:0
+    { (runner_input ~order ~expanded ()) with
+      Pane.chunks = chunks [ "runner" ] (entries calls)
+    }
+
+let opens = "\xe2\x94\x8c"
+let inside = "\xe2\x94\x82"
+let closes = "\xe2\x94\x94"
+
+(* The border cell a row starts with, and its tone. *)
+let rail (line : Pane.line) =
+  match line with span :: _ -> (span.Pane.text, span.Pane.tone) | [] -> ("", Pane.Plain)
+
+(* Every call row keeps the pane's dim edge: no bracket anywhere. *)
+let no_bracket label view =
+  let calls =
+    List.combine view.Pane.rows view.Pane.targets
+    |> List.filter_map (fun (row, target) ->
+           match target with Pane.Target_call _ -> Some row | _ -> None)
+  in
+  check bool (label ^ ": the calls draw") true (calls <> []);
+  check bool (label ^ ": the heading counts no responses") false
+    (List.exists (fun row -> contains "responses" (text row)) view.Pane.rows);
+  List.iteri
+    (fun i row ->
+      check bool
+        (Printf.sprintf "%s: call row %d keeps the dim edge" label i)
+        true
+        (rail row = (inside, Pane.Dim)))
+    calls
+
+let test_each_model_response_gets_a_bracket_beside_its_calls () =
+  List.iter
+    (fun (order, label, expected) ->
+      let view = responses_view ~order two_responses in
+      (* The four calls take the four rows under the heading: the bracket
+         added none. *)
+      List.iteri
+        (fun i (glyph, tone, tool) ->
+          let row = List.nth view.Pane.rows (first_call_row + i) in
+          check bool (Printf.sprintf "%s: row %d is %s" label i tool) true
+            (contains tool (text row));
+          check bool (Printf.sprintf "%s: %s wears its place" label tool) true
+            (rail row = (glyph, tone));
+          check int (Printf.sprintf "%s: row %d width" label i) cols (width row))
+        expected;
+      check bool (label ^ ": the heading counts the responses") true
+        (contains "calls \xc2\xb7 " (text (List.nth view.Pane.rows (first_call_row - 1)))
+         && contains "\xc2\xb7 2 responses" (text (List.nth view.Pane.rows (first_call_row - 1))));
+      check bool (label ^ ": the heading keeps the dim edge") true
+        (rail (List.nth view.Pane.rows (first_call_row - 1)) = (inside, Pane.Dim)))
+    [ ( Pane.Oldest_first
+      , "oldest first"
+      , [ (opens, Pane.Plain, "Read")
+        ; (inside, Pane.Plain, "Grep")
+        ; (closes, Pane.Plain, "Glob")
+        ; (inside, Pane.Dim, "Execute")
+        ] )
+    ; ( Pane.Newest_first
+      , "newest first"
+      , [ (inside, Pane.Dim, "Execute")
+        ; (opens, Pane.Plain, "Glob")
+        ; (inside, Pane.Plain, "Grep")
+        ; (closes, Pane.Plain, "Read")
+        ] )
+    ]
+
+(* An opened call's detail rows are the call's, not the response's: they
+   keep the pane's edge and the next call picks the bracket up again. *)
+let test_an_opened_call_inside_a_bracket_keeps_its_detail_on_the_edge () =
+  let view =
+    responses_view ~order:Pane.Oldest_first
+      ~expanded:[ "runner", Acting.Call_by_id "r2" ]
+      two_responses
+  in
+  let row i = List.nth view.Pane.rows (first_call_row + i) in
+  check bool "Grep inside the bracket" true (rail (row 1) = (inside, Pane.Plain));
+  List.iter
+    (fun i ->
+      check bool (Printf.sprintf "detail row %d on the dim edge" i) true
+        (rail (row i) = (inside, Pane.Dim)))
+    [ 2; 3; 4 ];
+  check bool "Glob closes it after the detail" true
+    (rail (row 5) = (closes, Pane.Plain) && contains "Glob" (text (row 5)))
+
+(* The planned index is not the response. A concurrent batch settles in any
+   order, so one response's calls arrive as steps 2, 1, 3; and a CLI lane
+   runs the whole keeper turn as one provider call, counting its calls
+   across the turn. Neither is two responses. *)
+let test_one_ordinal_is_one_response_whatever_the_planned_index_says () =
+  let concurrent step = schedule ~step ~batch_index:0 ~at_once:3 Contract.Concurrent in
+  let serial step = schedule ~step ~batch_index:0 ~at_once:1 Contract.Serial in
+  List.iter
+    (fun (label, calls) -> no_bracket label (responses_view calls))
+    [ ( "a batch settling out of plan order"
+      , [ runner_call ~at:950. ~duration_ms:5. ~id:"b2" ~schedule:(concurrent 2) "Read"
+        ; runner_call ~at:951. ~duration_ms:5. ~id:"b1" ~schedule:(concurrent 1) "Grep"
+        ; runner_call ~at:952. ~duration_ms:5. ~id:"b3" ~schedule:(concurrent 3) "WebFetch"
+        ] )
+    ; ( "a CLI lane counting across the turn"
+      , [ runner_call ~at:950. ~duration_ms:5. ~id:"c1" ~schedule:(serial 1) "Read"
+        ; runner_call ~at:951. ~duration_ms:5. ~id:"c2" ~schedule:(serial 2) "Grep"
+        ; runner_call ~at:952. ~duration_ms:5. ~id:"c3" ~schedule:(serial 3) "WebFetch"
+        ] )
+    ]
+
+let test_the_sorts_draw_no_bracket () =
+  List.iter
+    (fun (order, label) -> no_bracket label (responses_view ~order two_responses))
+    [ Pane.Longest_first, "longest first"; Pane.By_tool, "by tool" ]
+
+(* A call that states no ordinal could belong to either response beside it,
+   so the record says nothing about where responses end. *)
+let test_a_call_without_an_ordinal_leaves_the_responses_unsaid () =
+  let calls =
+    two_responses
+    @ [ runner_call ~at:980. ~duration_ms:5. ~id:"r5" ~session:None "Write" ]
+  in
+  let view = responses_view calls in
+  let texts = List.map text view.Pane.rows in
+  check bool "the unnumbered call draws in the same record" true
+    (List.exists (contains "Write") texts && List.exists (contains "Read") texts);
+  no_bracket "an unnumbered call" view
+
+(* A runtime whose ledger is silent is drawn from the wire, and its frames
+   carry the same ordinal. *)
+let test_wire_calls_split_into_responses_too () =
+  let wire ?(kind = Observer.Tool_called) ~at ~turn ~id tool =
+    ( at
+    , agent_core ~kind ~tool ~turn ~tool_use_id:id ~at ~correlation:"trace-runner" lane )
+  in
+  let calls =
+    [ observed ~at:940. 7
+    ; wire ~at:950. ~turn:7 ~id:"w1" "Read"
+    ; wire ~kind:Observer.Tool_completed ~at:952. ~turn:7 ~id:"w1" "Read"
+    ; observed ~at:960. 8
+    ; wire ~at:970. ~turn:8 ~id:"w2" "Execute"
+    ]
+  in
+  let view = responses_view ~order:Pane.Oldest_first calls in
+  let row i = List.nth view.Pane.rows (first_call_row + i) in
+  (* Two lone calls: no bracket anywhere, so the heading's count is the
+     only thing that tells this record from one response. *)
+  check bool "the heading counts two responses" true
+    (contains "\xc2\xb7 2 responses" (text (List.nth view.Pane.rows (first_call_row - 1))));
+  check bool "the first response, alone on the edge" true
+    (rail (row 0) = (inside, Pane.Dim) && contains "Read" (text (row 0)));
+  check bool "the second, alone on the edge" true
+    (rail (row 1) = (inside, Pane.Dim) && contains "Execute" (text (row 1)))
+
+(* ── the wide pane ──────────────────────────────────────────────────── *)
+
+let wide_cols = Pane.wide_pane_cols
+
+(* A bracketed call row in the wide pane keeps its bracket, its name and
+   its age, and an opened call's facts row says the same age the same way
+   as the row above it. The calls arrived at 950, 953, 956 and 970; now is
+   1000. *)
+let test_a_wide_bracketed_row_and_its_detail_say_one_age () =
+  let view =
+    responses_view ~cols:wide_cols ~order:Pane.Oldest_first
+      ~expanded:[ "runner", Acting.Call_by_id "r2" ]
+      two_responses
+  in
+  let row i = List.nth view.Pane.rows (first_call_row + i) in
+  check bool "Read opens the bracket, ends with its age" true
+    (rail (row 0) = (opens, Pane.Plain)
+     && contains "Read" (text (row 0))
+     && String.ends_with ~suffix:"5ms  50.0s" (text (row 0)));
+  check bool "Grep inside it, with its age" true
+    (rail (row 1) = (inside, Pane.Plain)
+     && String.ends_with ~suffix:"5ms  47.0s" (text (row 1)));
+  check bool "Grep's facts row says the same age" true
+    (contains "47.0s ago" (text (row 2)));
+  check bool "Execute alone, its age at the edge" true
+    (rail (row 6) = (inside, Pane.Dim)
+     && String.ends_with ~suffix:"5ms  30.0s" (text (row 6)))
+
+(* The longest name on the live roster: the narrow pane cuts it, the wide
+   one keeps it whole, and the column names move over with the name column. *)
+let long_name = "kidsnote-slack-context-collector"
+
+let test_the_wide_fleet_row_keeps_a_long_name_whole () =
+  let input =
+    { fixture with
+      Pane.keepers = Some [ keeper long_name; keeper "tester" ]
+    ; selected = Some "tester"
+    ; chunks = chunks [ long_name; "tester" ] fixture_entries
+    }
+  in
+  let texts cols = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  let keeper_row cols =
+    let view = Pane.lines ~rows ~cols ~scroll:0 input in
+    List.combine view.Pane.rows view.Pane.targets
+    |> List.find_map (fun (row, target) ->
+           match target with
+           | Pane.Target_keeper name when String.equal name long_name -> Some (text row)
+           | _ -> None)
+  in
+  (match keeper_row Pane.pane_cols, keeper_row wide_cols with
+   | Some narrow_row, Some wide_row ->
+       check bool "the narrow pane cuts the name" false (contains long_name narrow_row);
+       check bool "the wide pane keeps it whole" true (contains long_name wide_row)
+   | None, _ | _, None -> fail "the long-named keeper's fleet row is missing");
+  let leading_spaces s =
+    let n = String.length s in
+    let rec go i = if i < n && s.[i] = ' ' then go (i + 1) else i in
+    go 0
+  in
+  check int "the column names move over by the extra name cells"
+    (leading_spaces (Pane.legend ~cols:Pane.pane_cols) + wide_cols - Pane.pane_cols)
+    (leading_spaces (Pane.legend ~cols:wide_cols));
+  check bool "the wide legend is drawn whole" true
+    (contains (Pane.legend ~cols:wide_cols) (List.nth (texts wide_cols) 1))
+
+(* In the wide pane a call row ends with its age since receipt, padded to
+   six cells, and the duration sits one gap before it, so both line up at
+   the right edge. runner's calls arrived at 950, 960 and 970; now is 1000. *)
+let test_a_wide_call_row_ends_with_its_age () =
+  let view = Pane.lines ~rows ~cols:wide_cols ~scroll:0 (runner_input ()) in
+  let row i = text (List.nth view.Pane.rows (first_call_row + i)) in
+  check bool "Read: its duration, then its age" true
+    (String.ends_with ~suffix:"5ms  50.0s" (row 0));
+  check bool "masc_delegate: the same columns" true
+    (String.ends_with ~suffix:"50ms  40.0s" (row 1));
+  check bool "Execute, still out: the age alone" true
+    (String.ends_with ~suffix:" 30.0s" (row 2) && not (contains "ms" (row 2)));
+  let narrow_view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ()) in
+  check bool "the narrow pane draws no age" false
+    (List.exists (contains "50.0s") (List.map text narrow_view.Pane.rows))
+
+(* An age past ninety-nine minutes is wider than the six cells the column
+   is padded to: the row widens the age and keeps every digit. *)
+let test_an_old_call_keeps_every_digit_of_its_age () =
+  let old = [ runner_call ~at:(now -. 7_205.) ~duration_ms:5. ~id:"old" "Read" ] in
+  let view =
+    Pane.lines ~rows ~cols:wide_cols ~scroll:0
+      { (runner_input ()) with Pane.chunks = chunks [ "runner" ] (entries old) }
+  in
+  let row = List.nth view.Pane.rows first_call_row in
+  check bool "120m05s whole at the edge" true (String.ends_with ~suffix:"5ms 120m05s" (text row));
+  check int "the row still fits" wide_cols (width row)
 
 let test_a_call_row_names_the_call_a_press_opens () =
   let view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ()) in
@@ -1447,9 +1748,10 @@ let () =
       , [ test_case "hidden Unicode rows remain reachable without layout allocation" `Quick
             test_hidden_rows_do_not_allocate_text_layout ] )
     ; ( "width"
-      , [ test_case "shown needs room and consent" `Quick test_shown_needs_room_and_consent
-        ; test_case "toggle changes only a visible preference" `Quick
-            test_toggle_changes_only_a_visible_preference
+      , [ test_case "drawn cols follow the choice and the room" `Quick
+            test_drawn_cols_follow_the_choice_and_the_room
+        ; test_case "Ctrl-L walks narrow, wide, hidden" `Quick
+            test_ctrl_l_walks_narrow_wide_hidden
         ; test_case "content cols give the surface the rest" `Quick
             test_content_cols_give_the_surface_the_rest
         ; test_case "threshold leaves the surface the roster floor" `Quick
@@ -1517,6 +1819,29 @@ let () =
             test_each_order_lists_the_calls_as_the_heading_says
         ; test_case "the order cycles through all four" `Quick
             test_the_order_cycles_through_all_four
+        ] )
+    ; ( "wide"
+      , [ test_case "a wide bracketed row and its detail say one age" `Quick
+            test_a_wide_bracketed_row_and_its_detail_say_one_age
+        ; test_case "the wide fleet row keeps a long name whole" `Quick
+            test_the_wide_fleet_row_keeps_a_long_name_whole
+        ; test_case "a wide call row ends with its age" `Quick
+            test_a_wide_call_row_ends_with_its_age
+        ; test_case "an old call keeps every digit of its age" `Quick
+            test_an_old_call_keeps_every_digit_of_its_age
+        ] )
+    ; ( "responses"
+      , [ test_case "each model response gets a bracket beside its calls" `Quick
+            test_each_model_response_gets_a_bracket_beside_its_calls
+        ; test_case "an opened call inside a bracket keeps its detail on the edge" `Quick
+            test_an_opened_call_inside_a_bracket_keeps_its_detail_on_the_edge
+        ; test_case "one ordinal is one response, whatever the planned index says" `Quick
+            test_one_ordinal_is_one_response_whatever_the_planned_index_says
+        ; test_case "the sorts draw no bracket" `Quick test_the_sorts_draw_no_bracket
+        ; test_case "a call without an ordinal leaves the responses unsaid" `Quick
+            test_a_call_without_an_ordinal_leaves_the_responses_unsaid
+        ; test_case "wire calls split into responses too" `Quick
+            test_wire_calls_split_into_responses_too
         ] )
     ; ( "scroll"
       , [ test_case "a pane that fits does not scroll" `Quick

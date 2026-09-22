@@ -146,8 +146,9 @@ exception Candidate_unavailable of string
 
 (* v7 is a hard cut: pending rows no longer retain Board thread snapshots,
    [keeper_context] contains only lane identity and normalized interests, and
-   comment identity is the producer-supplied comment id. Older rows are
-   archived under the deployment lease and are never decoded as v7. *)
+   comment identity is the producer-supplied comment id. The deployment
+   preflight rejects a ledger that holds any non-v7 row, so older rows are
+   never decoded as v7. *)
 let schema_version = 7
 
 let quarantine_failure_category_to_string = function

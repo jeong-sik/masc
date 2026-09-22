@@ -26,6 +26,11 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_typesafeai_destinations)
+ (modules test_typesafeai_destinations)
+ (libraries alcotest masc masc_test_deps eio_main))
+
+(test
  (name test_keeper_librarian_absorb_gate)
  (modules test_keeper_librarian_absorb_gate)
  (deps fixtures/librarian_statements_golden.json)

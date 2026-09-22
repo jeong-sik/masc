@@ -110,18 +110,18 @@ let keeper_roster_marquee_target (state : state) ~cols =
         else None
     | _ -> None
 
-let acting_pane_columns (state : state) ~terminal_cols =
+let acting_pane_suppressed (state : state) =
   let modal =
     Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open || state.memory_fact_detail_open
   in
-  if modal
-     || Masc_tui_types.on_activity_screen state.view
-     || Option.is_some (browser_lane_on_screen state)
-  then 0
-  else if Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden ~cols:terminal_cols
-  then Masc_tui_acting_pane.pane_cols
-  else 0
+  modal
+  || Masc_tui_types.on_activity_screen state.view
+  || Option.is_some (browser_lane_on_screen state)
+
+let acting_pane_columns (state : state) ~terminal_cols =
+  if acting_pane_suppressed state then 0
+  else Masc_tui_acting_pane.drawn_cols ~layout:state.acting_pane_layout ~cols:terminal_cols
 
 (* The runtime picker measures this string to decide its column widths, so the
    format lives beside that arithmetic. *)

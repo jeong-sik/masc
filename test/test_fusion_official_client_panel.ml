@@ -386,8 +386,31 @@ let index_of ~needle haystack =
   scan 0
 ;;
 
+(* [lstat], not [Sys.is_directory]: a symlink the client leaves behind is
+   removed as a link, never followed out of the temporary directory. *)
+let rec remove_tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+    Sys.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+    Sys.remove path
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+;;
+
+let frame_label = function
+  | Ok label -> String.trim label
+  | Error detail -> failf "the Antigravity frame label must load: %s" detail
+;;
+
 let test_antigravity_judge_receives_its_system_prompt () =
+  let snapshot = Runtime.For_testing.snapshot () in
   let base_dir = Filename.temp_dir "fusion-agy-judge" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      remove_tree base_dir)
+  @@ fun () ->
   let input_path = Filename.concat base_dir "agy-input" in
   let agy_cli = Filename.concat base_dir "agy" in
   let oauth_source = Filename.concat base_dir "oauth.json" in
@@ -442,11 +465,22 @@ let test_antigravity_judge_receives_its_system_prompt () =
       ~finally:(fun () -> close_in channel)
       (fun () -> really_input_string channel (in_channel_length channel))
   in
-  match index_of ~needle:"LENS-MARKER" input, index_of ~needle:"QUESTION-MARKER" input with
-  | Some lens_at, Some question_at ->
-    check bool "the system prompt comes before the question" true (lens_at < question_at)
-  | None, _ -> fail "the judge system prompt never reached the Antigravity client"
-  | Some _, None -> fail "the question never reached the Antigravity client"
+  let system_label = frame_label (Masc.Antigravity_input_frame.system_instructions_label ()) in
+  let goal_label = frame_label (Masc.Antigravity_input_frame.current_goal_label ()) in
+  let position label needle =
+    match index_of ~needle input with
+    | Some at -> at
+    | None -> failf "%s never reached the Antigravity client" label
+  in
+  let order =
+    [ position "the instructions label" system_label
+    ; position "the judge system prompt" "LENS-MARKER"
+    ; position "the goal label" goal_label
+    ; position "the question" "QUESTION-MARKER"
+    ]
+  in
+  check (list int) "instructions label, lens, goal label, question, in that order"
+    (List.sort Int.compare order) order
 ;;
 
 (* Each client's own timeout reaches Fusion as [Timeout], and every other

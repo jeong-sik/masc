@@ -1629,11 +1629,10 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       [None; Some "provider failed"; Some "operator interrupted the turn"])
 ;;
 
-(* An Execute call under tools:full. The recorded result was drawn as its
-   whole JSON envelope -- cwd three times, the sandbox fields, and the
-   command's output folded inside an "output" member. It now leads with how
-   the command ended and what it printed, and the rest of the envelope is one
-   context line. *)
+(* An Execute call under tools:full: how the command ended and what it
+   printed, and nothing of the envelope around them -- where it ran, the
+   sandbox, the capture mode. Output too large to ride inline is named by the
+   artifact that holds it. *)
 let test_an_execute_call_leads_with_its_exit_and_output () =
   let cache = Masc_tui_ansi.terminal_size_cache in
   let previous_size = Masc_tui_ansi.get_terminal_size () in
@@ -1644,58 +1643,75 @@ let test_an_execute_call_leads_with_its_exit_and_output () =
   in
   Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
     set_size (60, 120);
-    let state =
-      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    let draw result =
+      let state =
+        Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+      in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.roster_pane_hidden <- true;
+      state.msg_target_keeper_name <- Some "alpha";
+      state.msg_tool_visibility <- Tui_types.Tools_full;
+      let calls =
+        `Assoc
+          [ "keeper", `String "alpha"; "count", `Int 1; "health", `String "ok"
+          ; ( "entries"
+            , `List
+                [ `Assoc
+                    [ "ts", `Float 1_790_053_724.; "keeper", `String "alpha"
+                    ; "tool", `String "Execute"
+                    ; "input", `Assoc [ "argv", `List [ `String "git"; `String "log" ] ]
+                    ; "output", `String result; "success", `Bool true
+                    ; "duration_ms", `Float 808.; "execution_id", `String "exec-1"
+                    ; "tool_use_id", `String "call-1"; "result_bytes", `Int 1405
+                    ] ] ) ]
+      in
+      (match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"alpha" calls with
+       | Ok snapshot ->
+           state.keeper_calls_keeper <- Some "alpha";
+           state.keeper_calls <- Some snapshot
+       | Error detail -> fail ("the calls fixture did not decode: " ^ detail));
+      let activity =
+        Masc_tui_keeper_chat_transcript.make_tool_activity ~execution_id:"exec-1"
+          ~call_id:(Some "call-1") ~tool_name:"Execute"
+          ~args:{|{"argv":["git","log"]}|} ~outcome:Masc_tui_keeper_chat_transcript.Returned
+          ~duration:None ()
+      in
+      state.msg_history <-
+        [ { (chat_entry ~request_id:"tui-01a0c788-43a7" ~role:Tui_types.Message_tool
+               ~text:"Execute git log" ~at:1_790_053_724. ())
+            with Tui_types.me_keeper_name = "alpha"
+               ; me_tool_block =
+                   Some (Masc_tui_keeper_chat_transcript.tool_block [ activity ]) } ];
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines
     in
-    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
-    state.roster_pane_hidden <- true;
-    state.msg_target_keeper_name <- Some "alpha";
-    state.msg_tool_visibility <- Tui_types.Tools_full;
-    let result =
-      {|{"ok":true,"status":{"kind":"exit","code":0},"cwd":"/p/alpha","output_completeness":"capture_only","output":"9feab5497  fix(test): pass\n272394615  feat(keeper): trim","typed":true,"execution_time_ms":808,"via":"microvm"}|}
+    let plain =
+      draw
+        {|{"ok":true,"status":{"kind":"exit","code":0},"cwd":"/p/alpha","output_completeness":"capture_only","output":"9feab5497  fix(test): pass\n272394615  feat(keeper): trim","typed":true,"execution_time_ms":808,"via":"microvm"}|}
     in
-    let calls =
-      `Assoc
-        [ "keeper", `String "alpha"; "count", `Int 1; "health", `String "ok"
-        ; ( "entries"
-          , `List
-              [ `Assoc
-                  [ "ts", `Float 1_790_053_724.; "keeper", `String "alpha"
-                  ; "tool", `String "Execute"
-                  ; "input", `Assoc [ "argv", `List [ `String "git"; `String "log" ] ]
-                  ; "output", `String result; "success", `Bool true
-                  ; "duration_ms", `Float 808.; "execution_id", `String "exec-1"
-                  ; "tool_use_id", `String "call-1"; "result_bytes", `Int 1405
-                  ] ] ) ]
-    in
-    (match Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"alpha" calls with
-     | Ok snapshot ->
-         state.keeper_calls_keeper <- Some "alpha";
-         state.keeper_calls <- Some snapshot
-     | Error detail -> fail ("the calls fixture did not decode: " ^ detail));
-    let activity =
-      Masc_tui_keeper_chat_transcript.make_tool_activity ~execution_id:"exec-1"
-        ~call_id:(Some "call-1") ~tool_name:"Execute"
-        ~args:{|{"argv":["git","log"]}|} ~outcome:Masc_tui_keeper_chat_transcript.Returned
-        ~duration:None ()
-    in
-    state.msg_history <-
-      [ { (chat_entry ~request_id:"tui-01a0c788-43a7" ~role:Tui_types.Message_tool
-             ~text:"Execute git log" ~at:1_790_053_724. ())
-          with Tui_types.me_keeper_name = "alpha"
-             ; me_tool_block =
-                 Some (Masc_tui_keeper_chat_transcript.tool_block [ activity ]) } ];
-    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
-    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
     let has affix = List.exists (Astring.String.is_infix ~affix) plain in
     let screen = String.concat "\n" plain in
     check bool ("how it ended and how long it ran:\n" ^ screen) true
       (has "exit 0 \xc2\xb7 808 ms");
     check bool "each line it printed" true
       (has "9feab5497  fix(test): pass" && has "272394615  feat(keeper): trim");
-    check bool "the rest of the envelope on a context line" true
-      (has "output_completeness=capture_only" && has "via=microvm");
-    check bool "no JSON envelope member" false (has "\"output_completeness\""))
+    List.iter
+      (fun member ->
+        check bool (member ^ " is not drawn:\n" ^ screen) false (has member))
+      [ "context"; "output_completeness"; "capture_only"; "microvm"; "/p/alpha" ];
+    let digest = "9f3a12c4d5e6" ^ String.make 52 '0' in
+    let plain =
+      draw
+        (Printf.sprintf
+           {|{"ok":true,"status":{"kind":"exit","code":0},"output_completeness":"complete","output_artifact":{"_blob":{"sha256":%S,"bytes":48213,"mime":"text/plain","preview":"a"}},"typed":true,"execution_time_ms":2400}|}
+           digest)
+    in
+    let screen = String.concat "\n" plain in
+    check bool ("a stored output names its artifact:\n" ^ screen) true
+      (List.exists
+         (Astring.String.is_infix
+            ~affix:"artifact sha256:9f3a12c4d5e6\xe2\x80\xa6 \xc2\xb7 48213 bytes")
+         plain))
 ;;
 
 (* A committed Memory revision under journal:full: the one-line summary, then

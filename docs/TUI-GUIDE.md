@@ -742,11 +742,12 @@ changing the view does not reconstruct facts from rendered glyphs. Expanded
 Tool folds also retain operational kinds (`Skill`, `Keeper`, and `Fusion`), so
 a mixed block does not collapse into an anonymous tool count. An `Execute`
 call whose result reads as the output schema its descriptor declares draws
-`status` (`exit 0 · 808 ms`, `signal 9 · …`), the command's `output`, any
-`stderr`, and the rest of the result on one `context` line
-(`cwd=… · execution_location.scope=… · via=microvm`); a result that does
-not read is drawn as it arrived. The Keeper Calls view (`t`) keeps the stored
-output whole. A held tool call
+`status` (`exit 0 · 808 ms`, `signal 9 · 30012 ms · timed out at 30 s`), the
+command's `output`, and any `stderr`. Output too large to ride inline is named
+by the artifact that holds it (`artifact sha256:9f3a12c4d5e6… · 48213 bytes`).
+Where the command ran and the sandbox around it are not drawn; a result that
+does not read is drawn as it arrived. The Keeper Calls view (`t`) keeps the
+stored result whole. A held tool call
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.

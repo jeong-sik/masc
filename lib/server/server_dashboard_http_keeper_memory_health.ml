@@ -52,7 +52,7 @@ let context_cycle_to_json cycle =
   let prepared (value : Keeper_continuity_observation.t) =
     let kind, saved_frontier = match value.input with
       | Keeper_continuity_observation.Summarized value -> "summarized", Some value
-      | Uncompressed -> "uncompressed", None
+      | Without_snapshot -> "without_snapshot", None
       | Not_applied -> "not_applied", None in
     `Assoc ["prepared_at", `Float value.prepared_at; "runtime_id", `String value.runtime_id;
       "request_bytes", `Int value.request_bytes;

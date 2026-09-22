@@ -95,7 +95,7 @@ export interface ContextCycle {
     prepared_at: number
     runtime_id: string
     input: { kind: 'summarized'; frontier: ContextFrontier }
-      | { kind: 'uncompressed' | 'not_applied'; frontier: null }
+      | { kind: 'without_snapshot' | 'not_applied'; frontier: null }
     request_bytes: number
   } | null
 }
@@ -349,7 +349,7 @@ function decodeContextCycle(raw: unknown): ContextCycle | null {
     const frontier = decodeContextFrontier(p.input.frontier)
     if (frontier === null) return null
     input = { kind: 'summarized', frontier }
-  } else if ((p.input.kind === 'uncompressed' || p.input.kind === 'not_applied')
+  } else if ((p.input.kind === 'without_snapshot' || p.input.kind === 'not_applied')
     && p.input.frontier === null) {
     input = { kind: p.input.kind, frontier: null }
   } else return null

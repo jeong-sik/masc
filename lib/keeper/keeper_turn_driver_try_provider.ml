@@ -48,13 +48,13 @@ type checkpoint_progress =
   | Tool_results_saved
 
 type continuity =
-  | Uncompressed_history
+  | Without_snapshot
   | Summarized of
   { snapshot : Librarian_continuity_snapshot.t
   ; covered_messages : Agent_core.Types.message list
   }
 
-let uncompressed_history = Uncompressed_history
+let without_snapshot = Without_snapshot
 
 let covered_messages ~end_atom messages =
   let labelled, _ = Runtime_model_input_tail_window.annotate messages in
@@ -69,6 +69,34 @@ let completed_history_end ~trace_id ~lines ~messages =
   |> Result.map (fun range -> range.Keeper_librarian_range.end_atom)
 ;;
 
+(* RFC keeper-context-window-in-tokens §13.4: where a request with no
+   absorbed point starts. The end of the last completed turn on this
+   history, verified against it; 0 when the history has no completed turn.
+   A boundary store this process cannot read, or a boundary the history in
+   hand does not match, leaves the start at the oldest atom and says so:
+   the turn goes out rather than not at all, and under the small input
+   policy no completed-turn boundary demotes tool bodies either. *)
+let turn_start ~config ~keeper_name ~trace_id ~messages =
+  match
+    Keeper_turn_boundaries.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+  with
+  | Error detail ->
+    Log.Keeper.warn ~keeper_name
+      "turn start unknown, the range starts at the oldest atom: boundary read failed: %s"
+      detail;
+    0
+  | Ok lines ->
+    (match completed_history_end ~trace_id ~lines ~messages with
+     | Ok end_atom -> end_atom
+     | Error Librarian_continuity_snapshot.Uncovered_history -> 0
+     | Error error ->
+       Log.Keeper.warn ~keeper_name
+         "turn start unknown, the range starts at the oldest atom: %s"
+         (Librarian_continuity_snapshot.error_to_string error);
+       0)
+;;
+
 let prepare_continuity ~trace_id ~lines ~messages snapshot =
   Result.map (fun _ ->
     Summarized { snapshot; covered_messages = covered_messages ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom messages })
@@ -76,7 +104,7 @@ let prepare_continuity ~trace_id ~lines ~messages snapshot =
 ;;
 
 let validate_continuity ~messages = function
-  | Uncompressed_history -> Ok ()
+  | Without_snapshot -> Ok ()
   | Summarized continuity ->
   let current = covered_messages ~end_atom:continuity.snapshot.end_atom messages in
   if List.equal Agent_core.Types.Message_value.equal current continuity.covered_messages
@@ -747,6 +775,7 @@ let compose_carried_model_input
       ~last_resort
       ~base_path
       ~demote_before
+      ~completed_end_atom
       messages
   =
   let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
@@ -810,14 +839,22 @@ let compose_carried_model_input
           planned.Keeper_model_input_demotion.messages
       in
       projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
-    | None, None | Some Uncompressed_history, _ ->
+    | None, None | Some Without_snapshot, _ ->
+      (* No absorbed point and no seed (RFC keeper-context-window-in-tokens
+         §13.4): the range begins where the last completed turn on this
+         history ended, clamped so the newest atom always goes. The atoms
+         before it wait for the Librarian's next pass. A history with no
+         completed turn starts at 0, which is everything it has. *)
+      let first_atom =
+        Keeper_carried_front.clamp ~atom_count:history_atom_count completed_end_atom
+      in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
-          ~first_atom:0
+          ~first_atom
           planned.Keeper_model_input_demotion.messages
       in
-      projection, transmitted_bytes, Keeper_carried_front.Whole_history
+      projection, transmitted_bytes, Keeper_carried_front.Turn_start { end_atom = first_atom }
   in
   { planned
   ; projection
@@ -861,6 +898,7 @@ let request_view
       ~last_resort
       ~base_path
       ~demote_before
+      ~completed_end_atom
       ~materialize
       messages
   =
@@ -874,6 +912,7 @@ let request_view
         ~last_resort
         ~base_path
         ~demote_before
+        ~completed_end_atom
         messages)
   in
   let carried =
@@ -1101,6 +1140,7 @@ let bounded_model_input_projection
         ~last_resort
         ~base_path:demotion_base_path
         ~demote_before
+        ~completed_end_atom:ctx.completed_end_atom
         ~materialize:(fun ~pending messages ->
           (* Blob materialization writes files, so it stays on the owning Eio
              fiber rather than in the CPU domain pool. The store skips writing
@@ -1512,7 +1552,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                        Keeper_continuity_observation.Summarized
                          { trace_id = snapshot.trace_id; end_atom = snapshot.end_atom;
                            boundary_line = snapshot.end_boundary_line }
-                     | Some Uncompressed_history -> Keeper_continuity_observation.Uncompressed
+                     | Some Without_snapshot -> Keeper_continuity_observation.Without_snapshot
                      | None -> Keeper_continuity_observation.Not_applied in
                    if Option.is_some ctx.session_id then
                      Keeper_continuity_observation.record

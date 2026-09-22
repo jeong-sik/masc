@@ -527,6 +527,7 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
     Masc.Keeper_next_request_forecast.carry
       ~measure:(Masc.Keeper_context_core.message_measurer ())
       ~front:read.Front.seed
+      ~turn_start:0
       ~counted_tokens:None
       next_tick
   in
@@ -666,7 +667,9 @@ let test_origin_json_names_its_kind () =
     (kind (Front.Carried (Front.Halved_after_refusal { retry = 1 })));
   check string "evicted" "evicted_after_refusal"
     (kind (Front.Carried (Front.Evicted_after_refusal { retry = 1 })));
-  check string "whole" "whole_history" (kind Front.Whole_history)
+  check string "turn start" "turn_start" (kind (Front.Turn_start { end_atom = 12 }));
+  check int "and the turn start names its atom" 12
+    Yojson.Safe.Util.(Front.origin_to_json (Front.Turn_start { end_atom = 12 }) |> member "end_atom" |> to_int)
 ;;
 
 let () =

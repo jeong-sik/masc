@@ -2512,7 +2512,7 @@ type memory_context_frontier = {
 }
 type memory_context_input =
   | Context_summarized of memory_context_frontier
-  | Context_uncompressed
+  | Context_without_snapshot
   | Context_not_applied
 
 type memory_context_prepared = {
@@ -4848,7 +4848,7 @@ let decode_memory_context_cycle keeper_json =
     let* value = nullable frontier value in
     let* mcp_input = match kind, value with
       | "summarized", Some value -> Ok (Context_summarized value)
-      | "uncompressed", None -> Ok Context_uncompressed
+      | "without_snapshot", None -> Ok Context_without_snapshot
       | "not_applied", None -> Ok Context_not_applied
       | _ -> Error "context input kind disagrees with frontier" in
     Ok {mcp_prepared_at; mcp_runtime_id; mcp_request_bytes; mcp_input} in

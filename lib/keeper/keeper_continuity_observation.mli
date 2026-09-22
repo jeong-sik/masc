@@ -1,7 +1,7 @@
 (** Read-only observations of serialized Agent Core requests. These do not
     authorize history removal or prove a provider accepted the request. *)
 type frontier = { trace_id : string; end_atom : int; boundary_line : int }
-type input = Summarized of frontier | Uncompressed | Not_applied
+type input = Summarized of frontier | Without_snapshot | Not_applied
 type t =
   { prepared_at : float
   ; runtime_id : string

@@ -14843,6 +14843,18 @@ def run_first_install_credential_regression(executable: str) -> None:
         prepare_workspace=seed_a_workspace_that_refuses_a_credential,
         omit_operator_token=True,
     )
+    # The mark is a shape, not a colour, so the same row must read the same
+    # with colour off -- the case the task names. The harness clears NO_COLOR
+    # for every other scenario, so this one sets it back.
+    run_terminal_scenario(
+        executable,
+        description="a mint that failed is marked as an error under NO_COLOR",
+        interact=failed_mint_is_marked_as_an_error_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=seed_a_workspace_that_refuses_a_credential,
+        omit_operator_token=True,
+        extra_env={"NO_COLOR": "1"},
+    )
 
 
 def run_planning_review_regression(executable: str) -> None:

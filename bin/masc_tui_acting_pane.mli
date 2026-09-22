@@ -266,12 +266,12 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     Changes tab. The focus header says what the keeper is doing now when the
     record carries it -- [running <tool> 4s] while a wire call is out,
     [waiting on model 12s] while a provider call is in flight, [idle 3m] on
-    a finished record -- each with its own clock and, on a finished record,
-    the turn number after it. A record that says none of the three (between
-    a tool's return and the next provider call, or a CLI lane, which sends
-    no turn markers) keeps the older reading: a finished turn by its number
-    alone, every other record spelling its state ([open], [no end, process
-    gone]), and the age of the newest event. Under [Whole_fleet], two layouts.
+    a done record -- each with its own clock and, on a done record, the
+    turn number after it. A record that says none of the three (between a
+    tool's return and the next provider call, or a CLI lane, which sends no
+    turn markers) keeps the older reading: a done turn by its number alone,
+    every other record spelling its state ([open], [no end, process gone]),
+    and the age of the newest event. Under [Whole_fleet], two layouts.
     At [scroll = 0] the overview: the fleet takes at
     most half the rows below the header when the focus block has something to
     show, a fold line counts the keepers left out, and the focus block takes

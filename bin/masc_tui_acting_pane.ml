@@ -307,7 +307,7 @@ let latest_tool (chunk : Acting.chunk) =
   | tool :: _ -> Some tool.Acting.ct_tool
   | [] -> None
 
-(* One word for the count. A settle reports the whole turn: [12 calls]. An
+(* One word for the count. The end event reports the whole turn: [12 calls]. An
    open record only knows what this feed observed, which may have
    started mid-turn or lost rows, so it says at least that many: [4+ calls],
    and [no calls yet] when it saw none. *)
@@ -323,7 +323,7 @@ let chunk_calls_text (chunk : Acting.chunk) =
 
 (* The same count as a figure alone, for the fleet row's four-cell column.
    The word "calls" moves to the column header, which says it once for every
-   row instead of once per row. "?" is a settle that named no count, and "-"
+   row instead of once per row. "?" is an end event that named no count, and "-"
    is a record with no call yet: they are different facts and neither is 0. *)
 let calls_figure (chunk : Acting.chunk) =
   if chunk.Acting.ck_settled then
@@ -451,8 +451,8 @@ let pad_left width text =
   let text = Layout.take_cells text width in
   String.make (max 0 (width - Layout.display_width text)) ' ' ^ text
 
-(* The glyph is the record's state; the words are the newest tool and the
-   count, or the count and the tokens once settled. No clock here: the age
+(* The state word, then the newest tool and the count, or the count and
+   the tokens once done. No clock here: the age
    of the newest event is one fact, and it sits on the focus header. *)
 let keeper_state_text ~health ~approval (chunk : Acting.chunk option) =
   let blank width = { text = String.make width ' '; tone = Plain } in
@@ -476,9 +476,9 @@ let keeper_state_text ~health ~approval (chunk : Acting.chunk option) =
     let state = record_state ~health chunk in
     let word, word_tone = record_word state in
     (* Which columns a row fills is the record's shape, not a choice. A turn
-       still open names the tool it is in and has no token count; a settled one
-       carries the counts and names no tool, because a finished turn is not in
-       one. Each fact keeps its own column either way. *)
+       still open names the tool it is in and has no token count; a done one
+       carries the counts and names no tool, because a turn that is over is
+       not in one. Each fact keeps its own column either way. *)
     let tool, tokens =
       match state with
       | Record_done -> ("", tokens_sum_figure chunk.Acting.ck_tokens)
@@ -619,7 +619,7 @@ let approval_for approvals name =
       else None)
     approvals
 
-(* Pending approvals rank first, then unclosed records before settled ones,
+(* Pending approvals rank first, then open records before done ones,
    each by receipt time. The order does not assert current owner-turn state.
    Keepers without observed activity retain the roster's own order. *)
 let fleet_order input newest =
@@ -907,7 +907,7 @@ let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
      that tool is out, and the clock is the call's own start.
    - Running keeper, no call out, [Marker_started] newest: the provider call
      is in flight, so the model has the turn.
-   - Idle keeper on a settled record: the turn is over, and the clock is how
+   - Idle keeper on a done record: the turn is over, and the clock is how
      long the keeper has been quiet.
 
    [None] everywhere else, and the header reads as it did before: the
@@ -957,7 +957,7 @@ let focus_header_line ~cols ~now ~health name current =
       let clock =
         { text = middle_dot ^ last_event_text ~now current.Acting.ck_at; tone = Dim }
       in
-      (* A named turn is a settled one, since only a settle names it: the
+      (* A named turn is a done one, since only the end event names it: the
          number says what the word would, and the word pushed the clock off
          the row behind a sixteen-cell name. Every other record spells its
          state, the long form first, and gives that up before the clock. *)

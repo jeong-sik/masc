@@ -477,6 +477,45 @@ let test_an_unusable_snapshot_starts_without_it () =
    | _ -> fail "a snapshot that fits was not used")
 ;;
 
+(* A snapshot the Librarian is rewriting from atom 0 is not used until its
+   end reaches its target: used now, it would move the start back and send
+   what lies after its end again. An ordinary snapshot behind the position is
+   used, because the atoms after its end are the latest turns, and nothing
+   else in the request carries them. *)
+let test_a_rewriting_snapshot_waits_for_its_target () =
+  let messages = source @ [text T.User "Second request"; text T.Assistant "Second answer"] in
+  let turn_line line absolute_turn history =
+    let position = match Boundary.position_of_messages history with
+      | Ok position -> position | Error detail -> fail detail in
+    line, Ok { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
+      { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn;
+        history_at_start = (if line = 1 then Boundary.Fresh_history else Boundary.Continued_history);
+        position } } in
+  let lines = [turn_line 1 1 source; turn_line 2 2 messages] in
+  let capture catch_up_end_atom =
+    match Snapshot.capture_checkpoint_prefix ~end_atom:2 ~catch_up_end_atom ~trace_id ~lines
+            ~messages ~working_state () with
+    | Ok snapshot -> snapshot | Error error -> fail (Snapshot.error_to_string error) in
+  let digest_at = Window.atom_opening_digest messages in
+  let position = progress ~trace_id ~end_atom:4 ~last_atom_digest:(Option.get (digest_at 3)) in
+  let origin ?(progress = fun () -> Ok (Some position)) snapshot =
+    let continuity =
+      Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages
+        ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) ~progress in
+    (absorbed_view continuity messages).composed.origin in
+  let rewriting = capture (Some 4) in
+  check (option int) "the fixture is catching up" (Some 4) rewriting.Snapshot.catch_up_end_atom;
+  (match origin rewriting with
+   | Front.Librarian_progress {end_atom = 4} -> ()
+   | _ -> fail "a snapshot short of its catch-up target was used");
+  (match origin ~progress:(fun () -> Ok None) rewriting with
+   | Front.Turn_start _ -> ()
+   | _ -> fail "with no position a snapshot short of its target was used");
+  (match origin (capture None) with
+   | Front.Librarian_snapshot {end_atom = 2; _} -> ()
+   | _ -> fail "an ordinary snapshot behind the position was not used")
+;;
+
 let () = run "continuity request projection"
   ["request", [test_case "completed boundary protects resumed work" `Quick test_completed_boundary_protects_resumed_work;
                test_case "small and wide actual body projection" `Quick test_small_externalizes_only_completed_bodies;
@@ -489,4 +528,6 @@ let () = run "continuity request projection"
                test_case "absorbed history starts at the Librarian's position" `Quick
                  test_absorbed_history_starts_at_the_librarians_position;
                test_case "an unusable snapshot starts without it" `Quick
-                 test_an_unusable_snapshot_starts_without_it]]
+                 test_an_unusable_snapshot_starts_without_it;
+               test_case "a rewriting snapshot waits for its target" `Quick
+                 test_a_rewriting_snapshot_waits_for_its_target]]

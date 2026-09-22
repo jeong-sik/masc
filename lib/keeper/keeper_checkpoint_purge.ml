@@ -366,14 +366,16 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity messages =
         (fun atom ->
            Option.iter (fun index -> kept_message.(index) <- true) opener_of_atom.(atom))
         kept_atoms;
-      (* A continuity snapshot that fits this history is the request's front:
-         the turn sends its working state in place of the atoms it covers, and
-         it holds a digest of those atoms' bytes. Rewritten, the snapshot
-         would stop fitting ([Prefix_changed]) and the Librarian would write
-         a working state again, from atom 0 and one completed turn per round,
-         and each request in between would send the history after the first
-         turn in full. So everything ahead of its end stays byte-exact. A
-         snapshot that does not fit is not in use and holds nothing back. *)
+      (* A continuity snapshot that fits this history holds a digest of the
+         bytes of the atoms it covers, and once caught up it is the request's
+         front: the turn sends its working state in place of those atoms.
+         Rewritten, the snapshot would stop fitting ([Prefix_changed]) and the
+         Librarian would write a working state again, from atom 0 and one
+         completed turn per round, and each request until it caught up would
+         carry no working state; a snapshot still catching up would start
+         over. So everything ahead of its end stays byte-exact. A snapshot
+         that does not fit is written again from atom 0 whatever the purge
+         does, so it holds nothing back. *)
       let fitting_continuity =
         match continuity with
         | None -> None

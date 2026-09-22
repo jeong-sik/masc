@@ -205,7 +205,19 @@ let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~pr
      | Error detail -> unusable ~why:("turn boundaries unreadable: " ^ detail)
      | Ok lines ->
        (match prepare_continuity ~trace_id ~lines ~messages snapshot with
-        | Ok restored -> restored
+        | Ok restored ->
+          (match snapshot.Librarian_continuity_snapshot.catch_up_end_atom with
+           | None -> restored
+           | Some target ->
+             (* A rewrite from atom 0 that fits but has not reached where a
+                request starts without it, as of the Librarian's last round:
+                used now, it would move the start back and send everything
+                after its end again. Checked after the fit, so a snapshot
+                that also stopped fitting is logged as not fitting. *)
+             absorbed_or_turn_start
+               ~why:(Printf.sprintf
+                       "the snapshot is being rewritten from atom 0 and ends at atom %d, short of %d"
+                       snapshot.Librarian_continuity_snapshot.end_atom target))
         | Error
             ((Librarian_continuity_snapshot.Trace_mismatch
              | Librarian_continuity_snapshot.History_changed

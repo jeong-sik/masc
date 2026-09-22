@@ -6896,15 +6896,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             | Connector_stale -> "STALE"
           in
           let connection_label (connector : Tui_decode.connector) =
+            let word =
+              Masc_tui_connector_state.badge_word connector.cn_connection
+            in
             match connector.cn_connection with
             | Tui_decode.Connector_connected ->
-                (Theme.ok ()) ^ "● CONNECTED" ^ Ansi.reset
+                (Theme.ok ()) ^ "● " ^ word ^ Ansi.reset
             | Connector_connected_unavailable ->
-                (Theme.warn ()) ^ "● CONNECTED / UNAVAILABLE" ^ Ansi.reset
-            | Connector_disconnected ->
-                (Theme.bad ()) ^ "● DISCONNECTED" ^ Ansi.reset
-            | Connector_offline -> Ansi.dim ^ "○ UNAVAILABLE" ^ Ansi.reset
-            | Connector_stale -> (Theme.warn ()) ^ "● STALE" ^ Ansi.reset
+                (Theme.warn ()) ^ "● " ^ word ^ Ansi.reset
+            | Connector_disconnected -> (Theme.bad ()) ^ "● " ^ word ^ Ansi.reset
+            | Connector_offline -> Ansi.dim ^ "○ " ^ word ^ Ansi.reset
+            | Connector_stale -> (Theme.warn ()) ^ "● " ^ word ^ Ansi.reset
           in
           let transport_rows =
             List.mapi
@@ -7011,16 +7013,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                     (match selected_binding with
                      | None -> "(no binding selected)"
                      | Some binding -> binding_reference binding)
-                ; Printf.sprintf "  %-18s %s · %s" "Connection"
+                  (* The badge is read from the status the row would print
+                     beside it ([decode_connector_connection] takes status,
+                     available and connected), so the word never differs from
+                     the badge and the row said the same thing twice. *)
+                ; Printf.sprintf "  %-18s %s" "Connection"
                     (connection_label connector)
-                    (Terminal_text.single_line connector.cn_status)
                 ; Printf.sprintf "  %-18s %s" "MASC API"
                     (Printf.sprintf "%s:%d"
                        Masc_network_defaults.masc_http_loopback_peer state.port)
                 ; Printf.sprintf "  %-18s %s" "Channel type"
                     (Terminal_text.single_line_or ~default:"-" connector.cn_channel)
                 ]
-                @ optional_row "Runtime state" runtime_state
+                @ optional_row "Runtime state"
+                    (Masc_tui_connector_state.runtime_state_to_draw
+                       ~connection:connector.cn_connection runtime_state)
                 @ optional_row "Status source" connector.cn_status_source
                 @ optional_row "Remote endpoint" connector.cn_endpoint
                 @ optional_row "Status file" connector.cn_status_path

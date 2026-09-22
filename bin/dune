@@ -933,6 +933,12 @@
   agent_core))
 
 (library
+ (name masc_tui_connector_state)
+ (wrapped false)
+ (modules masc_tui_connector_state)
+ (libraries masc))
+
+(library
  (name masc_tui_keeper_mark)
  (wrapped false)
  (modules masc_tui_keeper_mark)
@@ -1504,6 +1510,7 @@
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table
+  masc_tui_connector_state
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
   masc.build_commit

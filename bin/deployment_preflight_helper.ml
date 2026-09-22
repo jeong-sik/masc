@@ -823,6 +823,32 @@ let memory_os_current_store =
   }
 ;;
 
+let librarian_range_receipt_store =
+  { store = "Librarian range receipt ledger"
+  ; on_refusal =
+      "every Memory write for that keeper -- the librarian, keeper_memory_write \
+       and retraction -- reconciles the ledger first and fails, and the \
+       Librarian cannot prove which range it already committed"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir =
+           Config_dir_resolver.keepers_dir_for_base_path ~base_path
+         in
+         Ok
+           (Masc.Keeper_memory_os_current.list_durable_range_receipt_keeper_ids
+              ~keepers_dir
+            |> List.fold_left
+                 (fun report keeper_id ->
+                    count_row
+                      report
+                      (Masc.Keeper_memory_os_current.validate_durable_range_receipts
+                         ~keepers_dir
+                         ~keeper_id
+                       |> Result.map_error (fun detail -> keeper_id ^ ": " ^ detail)))
+                 empty_report))
+  }
+;;
+
 let memory_source_current_store =
   { store = "memory-source current claims"
   ; on_refusal =
@@ -1313,6 +1339,7 @@ let durable_stores =
   [ keeper_meta_store
   ; official_client_session_store
   ; memory_os_current_store
+  ; librarian_range_receipt_store
   ; memory_source_current_store
   ; disposition_receipt_store
   ; board_posts_store

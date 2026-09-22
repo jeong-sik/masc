@@ -281,8 +281,8 @@ type row = {
   text : string;
   gutter_rail_cells : int;
       (** Cells at the head of {!gutter} holding the turn rail and the space
-          after it, and the blank run that moves a line someone else wrote into
-          its own column ({!inbound_indent}). Zero where neither is drawn, so a
+          after it, and the blank run a line someone else wrote steps in by
+          ({!inbound_indent}). Zero where neither is drawn, so a
           pane that never shows one pays nothing for it. The renderer draws
           these cells in the quiet tone: the rail is structure, and colour on
           this row is already spent saying status. *)
@@ -572,12 +572,14 @@ val wrap_body :
     the escaped text and owns the wrapping, because fenced code keeps breaks a
     word wrap would ruin. *)
 
-val inbound_indent : inner_width:int -> entry -> int
-(** Cells a line someone else wrote ({!Inbound}) starts in from the left, so
-    it reads in a column of its own beside the conversation (RFC
-    chat-turn-rail-and-side-lanes §4.6): a third of the pane's inner width,
-    on a pane at least as wide as a 100-column terminal's. Zero on a narrower
-    pane and for every other style. *)
+val inbound_indent_cells : int
+(** How far a line someone else wrote steps in: two cells. *)
+
+val inbound_indent : entry -> int
+(** Cells a line someone else wrote ({!Inbound}) steps in from the
+    conversation (RFC chat-turn-rail-and-side-lanes §4.6); the renderer draws
+    a bar in the sender's colour down that block's left edge. Zero for every
+    other style. *)
 
 val visible_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->

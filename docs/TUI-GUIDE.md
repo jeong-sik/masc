@@ -661,11 +661,9 @@ the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
 inferred from row position.
 
 A line someone else wrote -- another keeper, another person, a connector --
-reads in a column of its own when the chat pane is at least as wide as a
-100-column terminal's: it starts a third of the way in, after the rail's
-`───┤` join, in every `Ctrl-F` layout. The operator's lines, the keeper's
-replies, its work rows and the journal stay at the left. A narrower pane keeps
-the one column.
+steps in two cells and reads behind a solid bar in the sender's colour, where
+the journal's rows carry a dotted one. The operator's lines, the keeper's
+replies and its work rows stay at the conversation's edge.
 
 Chat opens with a short clock beside the speaker mark and label. The clock is
 drawn only where the minute moved, so a run of rows inside one minute leaves

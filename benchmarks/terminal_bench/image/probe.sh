@@ -7,6 +7,11 @@
 # `build-commit` prints, and fetch_masc.sh refused every release it downloaded.
 # The two streams stay apart here.
 #
+# The packaging scripts read the same value the same way: the run() helper in
+# scripts/package-macos-runtime.py passes stderr=subprocess.PIPE before comparing
+# `masc build-commit` to the commit, and package-linux-runtime.py compares through
+# that helper. This probe was the one place that merged the streams.
+#
 # Sourcing this file defines functions and sets defaults; it runs no probe, so a
 # test can call the functions without a download or a container.
 

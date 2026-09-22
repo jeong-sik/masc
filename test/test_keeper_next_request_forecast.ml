@@ -124,7 +124,9 @@ let test_without_a_front_the_range_starts_at_the_turn_start () =
     dropped.first_atom;
   let past_the_end = carried (carry ~turn_start:40 messages) in
   Alcotest.(check int) "a boundary past the newest atom still carries that atom" 9
-    past_the_end.first_atom
+    past_the_end.first_atom;
+  Alcotest.(check bool) "and the origin names the boundary, not the atom it opened on" true
+    (past_the_end.origin = Keeper_carried_front.Turn_start { end_atom = 40 })
 
 (* The real forecast entrypoint reads a persisted meta, checkpoint and turn
    store. A recent-row limit for byte-composition readings must not also

@@ -415,9 +415,14 @@ let carried_start_front_to_string = function
 
    [own_first_atom] is the front the calling lane already chose for its own
    reason — Claude Code cuts its start seed to the runtime's declared
-   max-prompt-bytes — and the range starts at whichever of the positions is
-   latest, so no cut is undone by another. A lane with no cut of its own
-   passes 0; a history with no completed turn has [turn_start] 0.
+   max-prompt-bytes. A seed at or past that cut decides, even when it is
+   older than [turn_start]: the range the last answered request carried is
+   this lane's continuity, and the turn start is only where a lane with no
+   seed begins. Without a seed the range starts at the later of the lane's
+   cut and [turn_start]. A lane with no cut of its own passes 0; a history
+   with no completed turn has [turn_start] 0. The first request after a new
+   keeper or a purge therefore starts at the turn start, and its record seeds
+   the requests after it from that same atom.
 
    Runs on the calling fiber: reading the seed opens the keeper's turn-record
    store, which takes an [Eio.Mutex], so it cannot run on a CPU-pool domain.

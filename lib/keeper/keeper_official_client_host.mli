@@ -244,11 +244,13 @@ val carried_start_range
     has [turn_start] 0.
 
     [own_first_atom] is the front the lane already chose for its own reason
-    (Claude Code cuts its seed to the runtime's declared max-prompt-bytes).
-    The range starts at whichever position is later, so neither cut undoes the
-    other; a lane with no cut of its own passes 0. A seed whose index this
-    history does not open with the seed's message is dropped and reported, and
-    the range starts over as with no seed. *)
+    (Claude Code cuts its seed to the runtime's declared max-prompt-bytes). A
+    seed at or past that cut decides, even when it is older than
+    [turn_start]: the range the last answered request carried is this lane's
+    continuity. Without a seed the range starts at the later of the lane's
+    cut and [turn_start]; a lane with no cut of its own passes 0. A seed
+    whose index this history does not open with the seed's message is
+    dropped and reported, and the range starts over as with no seed. *)
 
 val prepare_turn :
   runtime_label:string ->

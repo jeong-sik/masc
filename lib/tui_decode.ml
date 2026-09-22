@@ -5540,10 +5540,33 @@ let decode_keeper_call json =
   let* kc_at = require_float_field json "ts" in
   let* kc_tool = required_string_field json "tool" in
   let* keeper = required_string_field json "keeper" in
+  (* The durable record stopped always carrying a boolean [success]:
+     [Keeper_tool_call_log]'s `Assoc construction (the one the server
+     actually serves from) writes [wire_outcome] and an optional
+     [disposition], never a [success] key. A real row and every producer
+     built to match it therefore hit the [`Null] arm below unconditionally,
+     so [decode_keeper_call] always errored and the calls detail view never
+     rendered a single keeper's tool calls (#37461). [success] is still read
+     first for any caller that does send it explicitly; [disposition]
+     (the typed completed/deferred/failed outcome) and [wire_outcome]
+     (the untyped wire projection -- explicitly not an outcome SSOT per
+     [Tool_result], but the only field several real rows carry) are tried
+     next, oldest-first, as the closest available approximations. A row
+     naming none of the three still errors, as before. *)
   let* kc_success =
     match member "success" json with
     | `Bool value -> Ok value
-    | `Null -> Error "keeper call has no success field"
+    | `Null -> (
+      match member "disposition" json with
+      | `String "completed" -> Ok true
+      | `String "failed" -> Ok false
+      | `String "deferred" -> Ok true
+      | _ -> (
+        match member "wire_outcome" json with
+        | `String "ok" -> Ok true
+        | `String "error" -> Ok false
+        | `String "unknown" -> Ok true
+        | _ -> Error "keeper call has no success, disposition, or wire_outcome field"))
     | _ -> Error "keeper call success is not a bool"
   in
   let kc_input =

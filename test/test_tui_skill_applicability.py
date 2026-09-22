@@ -15,6 +15,32 @@ import zlib
 import test_tui_keyboard_input as h
 
 
+def _row_success(row: dict[str, Any]) -> bool:
+    """Mirror ``Tui_decode.decode_keeper_call``'s success fallback (#37461).
+
+    The durable tool-call record stopped always carrying a boolean
+    ``success``: a real row (as ``test_keeper_task_skill_turn_exact``
+    prints below) carries only ``wire_outcome`` and sometimes
+    ``disposition``, never ``success``. Read ``success`` first for any
+    row that does send it explicitly; otherwise fall back to
+    ``disposition`` then ``wire_outcome``, oldest-first, exactly as the
+    OCaml decoder does.
+    """
+    if "success" in row:
+        return cast(bool, row["success"])
+    disposition = row.get("disposition")
+    if disposition in ("completed", "deferred"):
+        return True
+    if disposition == "failed":
+        return False
+    wire_outcome = row.get("wire_outcome")
+    if wire_outcome in ("ok", "unknown"):
+        return True
+    if wire_outcome == "error":
+        return False
+    raise KeyError("row has no success, disposition, or wire_outcome field")
+
+
 def run_case(executable: str, row: dict[str, Any]) -> None:
     keeper = cast(str, row["keeper"])
     fixtures = h.keeper_runtime_http_fixtures()
@@ -52,7 +78,7 @@ def run_case(executable: str, row: dict[str, Any]) -> None:
         screen = h.screen_text(bytes(output))
         needles = (
             [b"JEV applicability advice"]
-            if row["success"]
+            if _row_success(row)
             else [
                 b"skill_activation_error",
                 b"skill_applicability",
@@ -82,7 +108,7 @@ def run_case(executable: str, row: dict[str, Any]) -> None:
             + json.dumps(
                 {
                     "keeper": keeper,
-                    "success": row["success"],
+                    "success": _row_success(row),
                     "tool_use_id": row.get("tool_use_id"),
                     "row_sha256": hashlib.sha256(
                         json.dumps(row, sort_keys=True).encode()

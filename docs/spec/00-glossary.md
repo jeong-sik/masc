@@ -89,6 +89,27 @@ status: reference
   ([`Runtime_execution.t`](../../lib/runtime/runtime_execution.mli)). MASC는 해당 레인의 결과를
   조율·기록한다.
 
+**Terminal Reason**
+: 끝난 Keeper turn의 이유를 담은 영수증 필드(`terminal_reason_code`).
+  `Keeper_terminal_reason.of_wire`가 이 wire 문자열을 닫힌 합타입으로 한 번 파싱하고,
+  `to_wire (of_wire s) = s`가 바이트 단위로 성립한다. 분류는 canonical producer
+  바이트만 받고, 나머지는 `Unknown` escape로 간다.
+  → [Keeper_terminal_reason](../../lib/keeper_runtime/keeper_terminal_reason.mli)
+
+**Operator Disposition**
+: 끝난 turn을 운영자 관점에서 분류한 (kind, reason) 쌍. `Keeper_execution_receipt.operator_disposition`이
+  영수증 필드에서 파생한다. kind는 여덟이고 `keeper_execution_receipt.mli`의 `operator_disposition_kind`가
+  전부다 — `Disp_pass`·`Disp_fail_open_next_runtime`·`Disp_retry_later`·`Disp_pass_next_model`·
+  `Disp_operator_action_required`·`Disp_user_cancelled`·`Disp_skipped`·`Disp_unknown`.
+  reason도 닫힌 집합이다. `Disp_operator_action_required`는 운영자만 고칠 수 있는 알려진 원인을
+  가리키며 런타임 연속·폴백을 주장하지 않는다. 그 원인은 둘로 갈린다 — `Reason_config_invalid`는
+  런타임이 provider dispatch 전에 설정값을 거부한 경우(`Keeper_terminal_reason.Config_invalid`)로
+  운영자가 runtime toml을 고치고, `Reason_authorization_refused`는 provider가 권한 사유로 요청을
+  거절한 경우(`Keeper_terminal_reason.Authorization_refused`)로 wire에 주간·5시간 사용량 한도가 실려
+  운영자가 슬롯을 옮긴다.
+  → [Keeper_execution_receipt](../../lib/keeper/keeper_execution_receipt.mli),
+  [Keeper_terminal_reason](../../lib/keeper_runtime/keeper_terminal_reason.mli)
+
 **Keeper Chat Operation**
 : Keeper Owner가 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
   `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론도 이 operation을
@@ -135,6 +156,27 @@ status: reference
   이벤트의 `actor`가 된다. 본문의 `agent_name`은 실패가 보고된 Agent이며,
   감사 상세의 `reported_agent`와 실패 envelope에 보존한다. 허용된 tokenless
   요청의 보고자는 기존 로컬 attribution 정책을 따른다.
+
+**Tool Call Outcome**
+: MCP/AGENT_CORE wire 응답에 대한 가벼운 관측(`Tool_result.tool_call_outcome` =
+  `Ok`·`Error`·`Unknown`). 외부 투영이라 `Deferred`를 표현하지 못하며, MASC 내부 실행
+  결과의 권위가 아니다. 투영 관측이 없으면 필드를 생략하지 않고 `Unknown`으로 기록한다.
+  이 관측은 `Keeper_tool_call_log.wire_outcome` 필드로 기록된다(결과 전달이 나중에
+  실패하면 실행이 완료·지연됐어도 `error`가 될 수 있다). 권위 있는 값은 Execution
+  Disposition이다.
+  → [Tool_result](../../lib/tool_types/tool_result.mli)
+
+**Execution Disposition**
+: 한 번의 도구 호출이 실제로 어떤 결말을 냈는지에 대한 MASC의 권위 있는 분류
+  (`Tool_result.disposition` = `Completed`·`Deferred`·`Failed`). Tool Call Outcome과
+  별개이며, wire outcome이 이를 대체하지 않는다. 판정을 내리는 자리는 세 갈래를
+  그대로 받는다 — 레지스트리와 직렬화기가 그렇다. 반대로 "실패였나" 한 가지만
+  묻는 자리는 boolean 투영을 쓴다(`mcp_server_eio_call_tool.ml`의 `success`는
+  `Deferred`를 `true`로 접는다; 지연은 실패가 아니다). 그 투영은 `Deferred`를
+  표현하지 못하므로(`tool_result.mli`) 원장의 `success` 하나만 보고 결말을
+  되돌릴 수는 없다. turn 수준의 Operator Disposition과 이름이 겹치지만 다른
+  단위를 분류한다.
+  → [Tool_result](../../lib/tool_types/tool_result.mli)
 
 **Provider**
 : 모델에 접속하는 protocol·transport·credential을 소유하는 설정 항목.

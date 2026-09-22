@@ -15,7 +15,11 @@ let with_home f =
   let home = Filename.temp_dir "official-client-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree home) (fun () ->
     Masc_test_deps.with_process_env "HOME" (Some home) (fun () ->
-      Masc_test_deps.with_process_env "CODEX_INSTALL_DIR" None (fun () -> f home)))
+      Masc_test_deps.with_process_env "CODEX_INSTALL_DIR" None (fun () ->
+        (* Each case builds the installer's layout under this throwaway HOME,
+           so the fs_compat test-home guard must let these writes through. *)
+        Masc_test_deps.with_process_env "MASC_TEST_ALLOW_HOME_BASE_PATH" (Some "1") (fun () ->
+          f home))))
 ;;
 
 let with_path directories f =

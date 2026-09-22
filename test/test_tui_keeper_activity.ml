@@ -94,8 +94,23 @@ let test_absent_usage_does_not_invent_a_zero_turn () =
   in
   check int "input" 5 window.Activity.aw_input_tokens;
   check int "output" 7 window.Activity.aw_output_tokens;
-  check (float 0.0001) "cost" 0.25 window.Activity.aw_cost_usd;
+  check (option (float 0.0001)) "cost" (Some 0.25) window.Activity.aw_cost_usd;
   check int "the row without usage is still a turn" 2 window.Activity.aw_turns
+
+(* Providers that price nothing leave every turn row's cost unset, and a day
+   of them is not a day that cost nothing. *)
+let test_a_window_no_provider_priced_has_no_cost () =
+  let since = "2026-08-22T12:00:00Z" in
+  let window =
+    Activity.summarize ~since
+      [ entry ~input:(Some 5) ~output:(Some 7) "2026-08-23T01:00:00Z"
+      ; entry ~input:(Some 9) ~output:(Some 3) "2026-08-23T02:00:00Z"
+      ]
+  in
+  check int "both rows are turns" 2 window.Activity.aw_turns;
+  check int "their tokens are read" 14 window.Activity.aw_input_tokens;
+  check (option (float 0.0001)) "no row stated a price" None
+    window.Activity.aw_cost_usd
 
 let test_no_rows_is_not_a_covered_window () =
   let window = Activity.summarize ~since:"2026-08-22T12:00:00Z" [] in
@@ -132,6 +147,8 @@ let () =
             test_a_window_that_does_not_reach_the_cutoff_says_so
         ; test_case "absent usage does not invent a zero turn" `Quick
             test_absent_usage_does_not_invent_a_zero_turn
+        ; test_case "a window no provider priced has no cost" `Quick
+            test_a_window_no_provider_priced_has_no_cost
         ; test_case "no rows is not a covered window" `Quick
             test_no_rows_is_not_a_covered_window
         ; test_case "no rows is no reading" `Quick test_no_rows_is_no_reading

@@ -6811,7 +6811,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
             activity.Keeper_activity.aw_output_tokens);
        add_row "Cost:"
-         (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
+         (match activity.Keeper_activity.aw_cost_usd with
+          | Some cost -> Printf.sprintf "$%.4f" cost
+          | None -> Ansi.dim ^ "not priced by the provider" ^ Ansi.reset);
        add_row "Tool Calls:"
          (string_of_int activity.Keeper_activity.aw_tool_calls);
        add_row "Top Tools:"

@@ -1072,6 +1072,7 @@ let fleet_safety_json ?(missing = true)
            ; "reaction_capacity_shortfall_count", `Int 1
            ; "active_task_owner_without_executable_fiber_count", `Int 1
            ; "completion_authority_pending_task_count", `Int 1
+           ; "active_task_owner_scan_error_count", `Int 2
            ]
            @ [ ( "bootable_keeper_names"
                , `List
@@ -1086,6 +1087,16 @@ let fleet_safety_json ?(missing = true)
                , `List [ `String "bluebird" ] )
              ]) )
     ]
+
+(* The scan errors ride the same section. A Keeper whose profile did not load
+   is left out of the owner count above and does not move [status], so the row
+   can only say the reading was short if this number reaches it. *)
+let test_decode_fleet_safety_carries_the_scan_shortfall () =
+  match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check int) "sources the scan could not read" 2
+        fleet.Tui_decode.fs_active_task_owner_scan_error_count
 
 let test_decode_fleet_safety_carries_both_name_lists () =
   match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
@@ -10649,6 +10660,8 @@ let () =
       [
         Alcotest.test_case "carries both name lists" `Quick
           test_decode_fleet_safety_carries_both_name_lists;
+        Alcotest.test_case "fleet safety carries the scan shortfall" `Quick
+          test_decode_fleet_safety_carries_the_scan_shortfall;
         Alcotest.test_case "session recovery fields are required" `Quick
           test_decode_fleet_safety_requires_session_recovery_fields;
         Alcotest.test_case "an unknown blocker is kept by name" `Quick

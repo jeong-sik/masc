@@ -2,7 +2,7 @@
 
 ## [0.36.0] - 2026-09-22
 
-> Before you upgrade: read the four items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), the removed `--dup-threshold` purge option (#37751), the new Fusion `deliberation_evidence` shape that earlier run records do not read as (#37783), and the required `--keeper` argument of `masc-checkpoint-purge` (#37802).
+> Before you upgrade: read the five items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), the removed `--dup-threshold` purge option (#37751), the new Fusion `deliberation_evidence` shape that earlier run records do not read as (#37783), the required `--keeper` argument of `masc-checkpoint-purge` (#37802), and the continuity-lag keys the keeper memory health payload now carries, which a TUI or dashboard from the other side of that change refuses (#37856).
 
 ### Upgrade notes
 
@@ -10,6 +10,7 @@
 - `masc-checkpoint-purge` no longer takes `--dup-threshold`; a call that still passes it fails with `unknown argument`. The purge report no longer has `duplicates_dropped` or `reasoning_messages_dropped`, and the dashboard purge table drops the matching column, because a purge no longer removes messages (#37751).
 - Fusion run records saved before this version do not read as the new `deliberation_evidence` shape, which now carries `seat_routes`; there is no compatibility reader for them (#37783).
 - `masc-checkpoint-purge` now takes `--keeper <name>`; the keeper's meta names the trace and `--trace` only cross-checks it. A call with `--trace` alone exits 1. The tool used to look for the keeper's Librarian position, boundary log and continuity snapshot under the checkpoint's `agent_name`, which on a live keeper is the agent's runtime id, so it never found them and `--apply` moved no position (#37770).
+- The keeper memory health payload (`/api/v1/dashboard/keeper-memory-health`) carries the Librarian's continuity lag: `continuity_unread_atoms` on each keeper's `librarian` object, and `librarian_continuity_unread_atoms` with `librarian_continuity_unmeasured` in `totals`. The TUI and the dashboard check the payload's key set exactly, so a server and a TUI or dashboard from different sides of this change do not draw the Memory screen, in either direction: the TUI shows the Memory header as failed and the dashboard shows the health panel's error. Upgrade the server together with the TUI and the dashboard, and roll them back together (#37856, #37863).
 
 ### Added
 
@@ -28,6 +29,7 @@
 - An official-client keeper request (Claude Code, Antigravity) starts where the Librarian read to, as an Agent-Core request already did, and carries the working state in place of the atoms that position covers, instead of resending the conversation the keeper's memory already holds. The latest of the three positions wins: the Librarian's, the lane's own cut and the last turn's seed (#37619).
 - The TUI Fusion screen can start a run: `a` opens a form for the Keeper, preset, topology, prompt and web tools, posts it, and selects the new run once the list carries it. A preset the topology cannot run comes back as the server's own sentence (#37823).
 - A Fusion run's detail lists its seat routes: the route each panel and judge seat was given, the runtime that answered it, and every candidate that failed before that one. Runs recorded without routes draw no block (#37823).
+- The Memory screen shows how far each keeper's continuity snapshot trails the Librarian's read position, beside the durable drain's unread count: the TUI keeper line says `continuity behind N`, the Memory header and the dashboard totals strip sum it over the fleet. A lag that could not be taken, because there is no snapshot, the file does not read, the snapshot names another trace or it sits ahead of the position, reads as `?` and is counted as unmeasured rather than as zero, and the fleet sum covers only the keepers it was taken for (#37856).
 
 ### Changed
 

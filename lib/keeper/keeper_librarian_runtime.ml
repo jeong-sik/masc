@@ -332,9 +332,11 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let librarian_output_requirement =
-  Exact_output.make_output_requirement
-    ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+let librarian_output_requirement continuity =
+  let schema = match continuity with
+    | None -> Keeper_structured_output_schema.librarian_current_output_schema
+    | Some _ -> Keeper_structured_output_schema.librarian_continuity_output_schema in
+  Exact_output.make_output_requirement ~schema
     ~minimum_guarantee:Exact_output.Json_syntax
 ;;
 
@@ -353,13 +355,13 @@ let slot_reason_pairs ?(sep = "; ") (unusable : (string * string) list) : string
     (List.map (fun (slot_id, reason) -> slot_id ^ ": " ^ reason) unusable)
 ;;
 
-let project_slot ~(slot : Runtime_exact_output_registry.selected_slot) ~messages :
+let project_slot ~requirement ~(slot : Runtime_exact_output_registry.selected_slot) ~messages :
   slot_projection =
   match
     Exact_output.project_request_body
       ~target:slot.admitted_target
       ~messages
-      librarian_output_requirement
+      requirement
   with
   | Error error -> Slot_unusable (Exact_output.admission_error_reason error)
   | Ok (_ : Exact_output.request_body_projection) -> Slot_admitted
@@ -374,7 +376,7 @@ type preflight_selection =
    slots it is without, or the error naming every refusal when no slot
    projects. An empty ladder reports nothing -- the production caller routes
    an empty slot list to the cli lane before it gets here. *)
-let preflight_slots ~selected_slots ~messages =
+let preflight_slots ~requirement ~selected_slots ~messages =
   match selected_slots with
   | [] -> Ok { selected_slots = []; unusable = [] }
   | (first : Runtime_exact_output_registry.selected_slot) :: _ ->
@@ -382,7 +384,7 @@ let preflight_slots ~selected_slots ~messages =
       List.fold_left
         (fun (selected_slots, unusable)
              (slot : Runtime_exact_output_registry.selected_slot) ->
-           match project_slot ~slot ~messages with
+           match project_slot ~requirement ~slot ~messages with
            | Slot_admitted -> slot :: selected_slots, unusable
            | Slot_unusable reason ->
              selected_slots, (slot.slot_id, reason) :: unusable)
@@ -429,7 +431,7 @@ let resolve_librarian_slots ~base_path ~keeper_id =
     , resolved.Runtime_exact_output_registry.cli_slots )
 ;;
 
-let prepare_attempt ~selected_slots messages =
+let prepare_attempt ~requirement ~selected_slots messages =
   let open Result.Syntax in
   let* candidates =
     flow_candidates selected_slots
@@ -443,7 +445,7 @@ let prepare_attempt ~selected_slots messages =
             (No_admitted_lane_slots { lane_id = exact_lane_id })))
   | first :: rest ->
     let* snapshot =
-      Exact_output.snapshot_flow ~first ~rest ~messages librarian_output_requirement
+      Exact_output.snapshot_flow ~first ~rest ~messages requirement
       |> Result.map_error (fun error ->
         Exact_setup_failed (Exact_flow_snapshot_failed error))
     in
@@ -494,7 +496,7 @@ let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
       Keeper_librarian_continuity.messages continuity} in
     let* material = snd (resolve_librarian_prompt ~continuity input) in
     let prompt = Keeper_lane_cli_oneshot.prompt_with_schema
-      ~requirement:librarian_output_requirement ~prompt:material.rendered in
+      ~requirement:(librarian_output_requirement (Some continuity)) ~prompt:material.rendered in
     let* actual_chars = Runtime_codex_app_server.prompt_char_count prompt in
     Ok (actual_chars <= capacity.capacity.max_chars))
 ;;
@@ -531,7 +533,22 @@ type cli_fallback_failure =
   | Fitted_prompt_unavailable
   | Slot_failures of Keeper_lane_cli_oneshot.failure list
 
+(* A continuity pass must produce both Memory disposition and its saved
+   working state before either may be published. Ordinary Memory extraction
+   has no continuity obligation and still accepts an absent working state. *)
+let validate_selection ?continuity selected_input output =
+  let open Result.Syntax in
+  let* selection = Keeper_librarian.selection_of_json_result selected_input output in
+  match continuity, selection.Keeper_librarian.working_state with
+  | Some _, None ->
+    Error (Keeper_librarian.Working_state_invalid
+      "continuity requires a nonblank working_state")
+  | None, _ | Some _, Some _ -> Ok selection
+;;
+
 let try_cli_slots
+      ~requirement
+      ~continuity
       ~keeper_id
       ~base_path
       ~cli_runner
@@ -551,10 +568,10 @@ let try_cli_slots
             ~base_dir:base_path
             ~cli_slots
             ~system_prompt:""
-            ~requirement:librarian_output_requirement
+            ~requirement
             ~prompt
             ~validate:(fun output ->
-              Keeper_librarian.selection_of_json_result selected_input output
+              validate_selection ?continuity selected_input output
               |> Result.map (fun selection -> selection, output)
               |> Result.map_error Keeper_librarian.parse_error_to_string)
             ~on_failure:(fun failure ->
@@ -580,6 +597,7 @@ let with_cli_failure prior_error = function
 ;;
 
 let execute_exact_output_classified
+      ~continuity
       ?cli_runner
       ~clock
       ~net
@@ -591,12 +609,13 @@ let execute_exact_output_classified
   =
   let open Result.Syntax in
   let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
+  let requirement = librarian_output_requirement continuity in
   match selected_slots with
   | [] ->
     (* Registry publication rejects a lane with neither transport, and lane
        resolution rejects a lane with no admitted transport. Keep this final
        classification defensive in case either upstream contract changes. *)
-    (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
+    (match try_cli_slots ~requirement ~continuity ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
      | Ok (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
      | Error No_cli_slots -> Error No_transport_declared
@@ -605,11 +624,11 @@ let execute_exact_output_classified
      | Error Fitted_prompt_unavailable ->
        Error (Cli_prompt_unavailable { prior_error = None }))
   | _ :: _ ->
-  match preflight_slots ~selected_slots ~messages with
+  match preflight_slots ~requirement ~selected_slots ~messages with
   | Error error ->
     (* No API slot can project this request. The independently admitted CLI
        slots still own a chance to answer, just as after API exhaustion. *)
-    (match try_cli_slots ~keeper_id ~base_path ~cli_runner ~cli_slots
+    (match try_cli_slots ~requirement ~continuity ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~selected_input ~messages with
      | Ok (runtime_id, selection, output) ->
        Log.Keeper.warn ~keeper_name:keeper_id
@@ -623,11 +642,11 @@ let execute_exact_output_classified
        "librarian lane=%s pre-flight excluded slot(s) from this run: %s"
        exact_lane_id
        (slot_reason_pairs ~sep:", " preflight.unusable));
-  let* attempt = prepare_attempt ~selected_slots:preflight.selected_slots messages in
+  let* attempt = prepare_attempt ~requirement ~selected_slots:preflight.selected_slots messages in
   let validate flow_success =
     let output = Exact_output.flow_success_output flow_success in
     match
-      Keeper_librarian.selection_of_json_result
+      validate_selection ?continuity
         selected_input
         output.output
     with
@@ -660,6 +679,8 @@ let execute_exact_output_classified
      | Exact_output.Advanceable_candidates_exhausted ->
        (match
           try_cli_slots
+            ~requirement
+            ~continuity
             ~keeper_id
             ~base_path
             ~cli_runner
@@ -686,6 +707,8 @@ let execute_exact_output_classified
     in
     (match
        try_cli_slots
+         ~requirement
+         ~continuity
          ~keeper_id
          ~base_path
          ~cli_runner
@@ -972,6 +995,7 @@ let run_best_effort
              in
              let* (selection, exact_output), selected_slot =
                execute_exact_output_classified
+                 ~continuity
                  ?cli_runner
                  ~clock
                  ~net
@@ -1071,8 +1095,8 @@ let run_best_effort
                 never mentions is one it never saw. *)
              (* An absorption the merged claim does not convey is not applied:
                 that memory stays current (RFC-librarian-absorb-gate). The
-                gate only narrows the list; without a key or an answer it is
-                the answer's list. *)
+                gate only narrows the list. A skipped check leaves the answer
+                unchanged; a failed judgment retains unconfirmed originals. *)
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)

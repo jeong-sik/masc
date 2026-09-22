@@ -4546,15 +4546,17 @@ let render_keeper_list (state : state) =
        let failing_entry =
          Option.to_list (Masc_tui_fleet_line.failing_text fleet)
        in
+       let entry label n =
+         if n > 0 then [ Printf.sprintf "%s %d" label n ] else []
+       in
+       (* The owner count keeps its place in the row and brings its own
+          shortfall, which is the only reading that says the scan came up
+          short: an unread Keeper does not move the fleet status. *)
        let counts =
          failing_entry
-         @ (List.filter (fun (_, n) -> n > 0)
-              [ ("paused", fleet.fs_paused_count)
-              ; ( "task owner without fiber"
-                , fleet.fs_active_task_owner_without_fiber_count )
-              ; ("awaiting verdict", fleet.fs_completion_authority_pending_count)
-              ]
-            |> List.map (fun (label, n) -> Printf.sprintf "%s %d" label n))
+         @ entry "paused" fleet.fs_paused_count
+         @ Option.to_list (Masc_tui_fleet_line.owner_scan_text fleet)
+         @ entry "awaiting verdict" fleet.fs_completion_authority_pending_count
        in
        if counts <> [] then
          box_line buf cols

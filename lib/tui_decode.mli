@@ -2046,6 +2046,9 @@ type fleet_safety = {
   fs_official_client_recovery_required_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
+  fs_active_task_owner_scan_error_count : int;
+      (** Sources the task-owner scan could not read, so the count above is
+          short by whatever they held. *)
 }
 (** The operator reading of the keeper fleet, as [/health?full=1] reports it.
 

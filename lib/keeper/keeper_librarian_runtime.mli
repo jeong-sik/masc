@@ -38,7 +38,8 @@ type preflight_selection =
   }
 
 val preflight_slots
-  :  selected_slots:Runtime_exact_output_registry.selected_slot list
+  :  requirement:Agent_core.Exact_output.output_requirement
+  -> selected_slots:Runtime_exact_output_registry.selected_slot list
   -> messages:Agent_core.Types.message list
   -> (preflight_selection, extraction_error) result
 (** The pre-flight over the ladder: the selected slots whose request projected
@@ -122,7 +123,8 @@ module For_testing : sig
   val classified_error_kind : classified_error -> Keeper_memory_os_current.librarian_failure_kind
 
   val execute_exact_output_classified
-    :  ?cli_runner:Keeper_lane_cli_oneshot.runner
+    :  continuity:Keeper_librarian_continuity.prepared option
+    -> ?cli_runner:Keeper_lane_cli_oneshot.runner
     -> clock:_ Eio.Time.clock
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
     -> base_path:string

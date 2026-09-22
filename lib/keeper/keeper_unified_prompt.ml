@@ -130,8 +130,11 @@ let format_fleet_messages
 let rejected_digest_input_bytes = 240
 
 let rejected_digest_input input =
-  String_util.utf8_safe ~max_bytes:rejected_digest_input_bytes ~suffix:"…" input
-  |> String_util.to_string
+  match Tool_output.decode_from_agent_core input with
+  | Tool_output.Decoded _ -> input
+  | Tool_output.Invalid_marker _ | Tool_output.Not_marker ->
+    String_util.utf8_safe ~max_bytes:rejected_digest_input_bytes ~suffix:"…" input
+    |> String_util.to_string
 ;;
 
 let format_own_recent_actions_turn (turn : Keeper_own_recent_actions.turn) : string =

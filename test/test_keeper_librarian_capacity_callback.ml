@@ -3,9 +3,6 @@ module Runtime = Keeper_librarian_runtime
 module Fixture = Exact_output_fixture
 module Runs = Exact_lane_run_registry
 
-let overflow =
-  {|{"id":"capacity","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}
-
 let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -22,7 +19,6 @@ let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_over
     ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all));
     incr posts;
     let body = match status with
-      | `OK -> overflow
       | `Request_entity_too_large -> {|{"error":{"message":"fixture body limit","type":"invalid_request_error"}}|}
       | `Too_many_requests -> {|{"error":{"message":"fixture quota","type":"rate_limit_error"}}|}
       | _ -> {|{"error":{"message":"fixture authorization","type":"authentication_error"}}|} in
@@ -91,6 +87,7 @@ let test_prefit_real_continuity ~base_path () =
   let keeper_id = "prefit-real-continuity" and trace_id = "prefit-source" in
   let config = Workspace.default_config base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
   let queued_source : Context.source =
     {reference="pending-chat"; content=`String "Unrelated pending question."} in
   let pocket : Context.pocket =
@@ -135,7 +132,7 @@ let test_prefit_real_continuity ~base_path () =
     |> Result.map_error B.append_error_to_string |> get;
   let resolver = Fixture.resolver_snapshot ~source:"prefit-cli-only" [] in
   ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
-    ~cli_slot_ids:[Fixture.cli_primary_runtime] resolver);
+    ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] resolver);
   let prepare () = P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> some in
   let input prepared : Keeper_librarian.input =
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
@@ -153,7 +150,7 @@ let test_prefit_real_continuity ~base_path () =
     let _, prompt = Prompt_registry.resolve_and_render_prompt_template
       Prompt_names.librarian variables |> get in
     let requirement = Agent_core.Exact_output.make_output_requirement
-      ~schema:Keeper_structured_output_schema.librarian_current_output_schema
+      ~schema:Keeper_structured_output_schema.librarian_continuity_output_schema
       ~minimum_guarantee:Agent_core.Exact_output.Json_syntax in
     Keeper_lane_cli_oneshot.prompt_with_schema ~requirement ~prompt in
   let chars text = Runtime_codex_app_server.prompt_char_count text |> get in
@@ -163,18 +160,94 @@ let test_prefit_real_continuity ~base_path () =
   let capacity : Keeper_lane_cli_oneshot.input_capacity =
     {runtime_id=Fixture.cli_primary_runtime;
      capacity={actual_chars=chars (rendered full (input full));max_chars}} in
+  let missing_state = `Assoc ["new_claims", `List []; "dropped", `List [];
+    "working_contexts", `List []] in
+  let null_state = match missing_state with
+    | `Assoc fields -> `Assoc (("working_state", `Null) :: fields)
+    | _ -> Alcotest.fail "expected fixture object" in
+  let check_working_state_schema ~continuity output_schema =
+    let open Yojson.Safe.Util in
+    let state = output_schema |> member "properties" |> member "working_state" in
+    let expected = if continuity then `String "string"
+      else `List [`String "string"; `String "null"] in
+    Alcotest.(check string) "CLI schema matches this pass's working-state obligation"
+      (Yojson.Safe.to_string expected) (Yojson.Safe.to_string (member "type" state));
+    if continuity then Alcotest.(check int) "continuity requires nonempty text" 1
+      (state |> member "minLength" |> to_int) in
+  let invalid_calls = ref [] in
+  let invalid_runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt:_ =
+    check_working_state_schema ~continuity:true output_schema;
+    invalid_calls := !invalid_calls @ [runtime_id];
+    Ok (Yojson.Safe.to_string
+      (if runtime_id = Fixture.cli_primary_runtime then null_state else missing_state)) in
+  let invalid_committed = ref false in
+  Runtime.run_best_effort ~trigger:Runtime.Durable_range
+    ~input_projection:Runtime.Already_selected_range ~continuity:half
+    ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id half |> get)
+    ~cli_runner:invalid_runner ~on_memory_committed:(fun () -> invalid_committed := true)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input half);
+  Alcotest.(check (list string)) "missing working states advance through declared slots once"
+    [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !invalid_calls;
+  Alcotest.(check bool) "missing working state never publishes Memory" false !invalid_committed;
+  Alcotest.(check bool) "missing working state leaves no Memory snapshot" true
+    (Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get |> Option.is_none);
+  Alcotest.(check bool) "missing working state leaves no range receipt" false
+    (P.memory_committed ~config ~keeper_name:keeper_id half |> get);
+  Alcotest.(check bool) "missing working state leaves no continuity frontier" true
+    (P.read ~config ~keeper_name:keeper_id |> get |> Option.is_none);
+  let ordinary_runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt:_ =
+    check_working_state_schema ~continuity:false output_schema;
+    Ok (Yojson.Safe.to_string null_state) in
+  (match Runtime.For_testing.execute_exact_output_classified ~continuity:None
+     ~cli_runner:ordinary_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
+     ~selected_input:{(input half) with working_context=Context.empty} ~messages:[Agent_core.Types.user_msg "ordinary Memory"] () with
+   | Ok ((selection, _), _) ->
+     Alcotest.(check bool) "ordinary Memory still accepts null working state" true
+       (Option.is_none selection.Keeper_librarian.working_state)
+   | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error));
+  let api_answer = `Assoc ["new_claims", `List []; "dropped", `List [];
+    "working_contexts", `List []; "working_state", `String "API saved state."] in
+  let api_server output = Fixture.start_server ~sw ~net:env#net ~clock:env#clock
+    (Fixture.Reply (Fixture.openai_response output)) in
+  let invalid_api = api_server null_state and valid_api = api_server api_answer in
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact"
+    ~slot_ids:["missing-state"; "valid-state"]
+    (Fixture.resolver_snapshot ~source:"continuity-api-validation"
+      [{Fixture.id="missing-state";base_url=invalid_api.base_url};
+       {Fixture.id="valid-state";base_url=valid_api.base_url}]));
+  (match Runtime.For_testing.execute_exact_output_classified ~continuity:(Some half)
+     ~clock:env#clock ~net:env#net ~base_path ~keeper_id ~selected_input:{(input half) with working_context=Context.empty}
+     ~messages:[Agent_core.Types.user_msg "synthesize completed source"] () with
+   | Ok ((selection, _), slot) ->
+     Alcotest.(check string) "API validation advances to declared successor" "valid-state" slot;
+     Alcotest.(check (option string)) "API successor supplies working state"
+       (Some "API saved state.") selection.Keeper_librarian.working_state
+   | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error));
+  Alcotest.(check int) "null-state API candidate ran exactly once" 1 (Fixture.post_count invalid_api);
+  Alcotest.(check int) "valid API successor ran exactly once" 1 (Fixture.post_count valid_api);
+  ignore (Fixture.publish_registry ~lane_id:"librarian_exact" ~slot_ids:[]
+    ~cli_slot_ids:[Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] resolver);
   let calls = ref [] in
   let execute prepared state =
     let input = input prepared in
     let expected = rendered prepared input in
-    let runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    let runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt =
+      check_working_state_schema ~continuity:true output_schema;
       calls := prompt :: !calls;
       Alcotest.(check string) "prefit and dispatch use identical full text" expected prompt;
       Alcotest.(check bool) "no oversized CLI probe after learning the bound" true
         (chars prompt <= max_chars);
+      if List.length !calls = 1 then (
+        Alcotest.(check string) "null response belongs to first declared candidate"
+          Fixture.cli_primary_runtime runtime_id;
+        Ok (Yojson.Safe.to_string null_state))
+      else (
+      if List.length !calls = 2 then
+        Alcotest.(check string) "valid successor handles the same source"
+          Fixture.cli_secondary_runtime runtime_id;
       Ok (Yojson.Safe.to_string (`Assoc [
         "new_claims", `List []; "dropped", `List []; "working_contexts", `List [];
-        "working_state", `String state])) in
+        "working_state", `String state]))) in
     let committed = ref false and memory_committed = ref false in
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
     Runtime.run_best_effort ~trigger:Runtime.Durable_range
@@ -212,7 +285,7 @@ let test_prefit_real_continuity ~base_path () =
   let last = fit (prepare ()) in
   Alcotest.(check int) "final selected group reaches the completed boundary" 4 (P.end_atom last);
   execute last "Completed history is saved; publication still requires explicit approval.";
-  Alcotest.(check int) "only the three fitted groups were dispatched" 3 (List.length !calls);
+  Alcotest.(check int) "three fitted groups plus one rejected candidate were dispatched" 4 (List.length !calls);
   Alcotest.(check bool) "no completed work remains; unfinished work is not selected" true
     (P.prepare ~config ~keeper_name:keeper_id ~trace_id () |> get |> Option.is_none);
   let snapshot = P.read ~config ~keeper_name:keeper_id |> get |> some in
@@ -228,7 +301,9 @@ let test_prefit_real_continuity ~base_path () =
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
     ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
-    ~last_resort:false ~base_path ~demote_before:0
+    ~last_resort:false ~base_path
+    ~demote_before:(Driver.completed_history_end ~trace_id ~lines ~messages:canonical
+      |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get)
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in
   let wire = view.wire
     |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in
@@ -273,7 +348,7 @@ let () =
     ["continuity prefit", [Alcotest.test_case "atom groups commit and produce the next request" `Quick
        (test_prefit_real_continuity ~base_path)];
      "actual HTTP outcomes", [
-      case "capacity-final" false `OK 1;
+      case "capacity-final" false `Request_entity_too_large 1;
       case "quota-final" false `Too_many_requests 0;
       case "capacity-then-quota" true `Too_many_requests 0;
       case "capacity-then-auth" true `Unauthorized 0];

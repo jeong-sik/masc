@@ -20,7 +20,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "ci"))
 
-from referencing_suites import file_suites, module_suites, tracked_files  # noqa: E402
+from referencing_suites import (  # noqa: E402
+    exactpath_suites,
+    file_suites,
+    module_suites,
+    tracked_files,
+)
 
 FILES = {
     "lib/widgets/widget.ml": "let make () = ()\n",
@@ -39,20 +44,22 @@ FILES = {
     "test/test_first_class.ml": "let m = (module Widget : S)\n",
     "test/test_comment_only.ml": "(* Widget.make is exercised elsewhere *)\nlet () = ()\n",
     "test/test_nested_comment.ml": "(* outer (* inner *) Widget.make *)\nlet () = ()\n",
-    "test/test_string_only.ml": "let name = \"Widget.make\"\n",
+    "test/test_string_only.ml": 'let name = "Widget.make"\n',
     "test/test_quoted_string_only.ml": "let doc = {|Widget.make|}\nlet tagged = {id|Widget.make|id}\n",
-    "test/test_comment_opener_in_string.ml": "let s = \"(*\"\nlet () = Widget.make ()\n",
+    "test/test_comment_opener_in_string.ml": 'let s = "(*"\nlet () = Widget.make ()\n',
     "test/test_char_quote.ml": "let q = '\"'\nlet () = Widget.make ()\n",
-    "test/test_string_closer_in_comment.ml": "(* \"*)\" Widget.make *)\nlet () = ()\n",
+    "test/test_string_closer_in_comment.ml": '(* "*)" Widget.make *)\nlet () = ()\n',
     "test/test_prefix_name.ml": "let () = Widget_extra.make ()\n",
     "test/sub/test_nested_dir.ml": "let () = Widget.make ()\n",
     "packages/agent_core/test/test_package_root.ml": "let () = Widget.make ()\n",
     "test/test_helper_py.py": "SCRIPT = 'scripts/install-thing.py'\n",
-    "test/test_names_script.ml": "let script = \"install-thing.py\"\n",
-    "test/test_names_longer_script.ml": "let script = \"masc-install-thing.py\"\n",
-    "test/test_names_shared.ml": "let config = \"shared.toml\"\nlet dune = \"dune\"\n",
-    "test/test_names_suite_file.ml": "let other = \"test_qualified.ml\"\n",
-    "test/test_names_new_file.ml": "let added = \"brand-new.toml\"\n",
+    "test/test_names_script.ml": 'let script = "install-thing.py"\n',
+    "test/test_names_longer_script.ml": 'let script = "masc-install-thing.py"\n',
+    "test/test_names_shared.ml": 'let config = "shared.toml"\nlet dune = "dune"\n',
+    "test/test_shared_exact.py": "from pathlib import Path\nPath('config/shared.toml')\n",
+    "test/test_shared_prefix.py": "path = 'config/shared.toml.bak'\n",
+    "test/test_names_suite_file.ml": 'let other = "test_qualified.ml"\n',
+    "test/test_names_new_file.ml": 'let added = "brand-new.toml"\n',
     "test/not_a_suite.ml": "let () = Widget.make ()\n",
 }
 
@@ -91,30 +98,73 @@ def main() -> int:
             "test/sub/test_nested_dir.ml",
             "packages/agent_core/test/test_package_root.ml",
         }
-        expect("an implementation edit names every suite that calls the module",
-               module_suites(root, tracked, ["lib/widgets/widget.ml"]), callers)
-        expect("an interface edit is an edit to the same module",
-               module_suites(root, tracked, ["lib/widgets/widget.mli"]), callers)
-        expect("a source outside bin, lib and packages names no caller",
-               module_suites(root, tracked, ["scripts/widget.ml"]), set())
-        expect("a changed script does not reach the module rule",
-               module_suites(root, tracked, ["scripts/install-thing.py"]), set())
+        expect(
+            "an implementation edit names every suite that calls the module",
+            module_suites(root, tracked, ["lib/widgets/widget.ml"]),
+            callers,
+        )
+        expect(
+            "an interface edit is an edit to the same module",
+            module_suites(root, tracked, ["lib/widgets/widget.mli"]),
+            callers,
+        )
+        expect(
+            "a source outside bin, lib and packages names no caller",
+            module_suites(root, tracked, ["scripts/widget.ml"]),
+            set(),
+        )
+        expect(
+            "a changed script does not reach the module rule",
+            module_suites(root, tracked, ["scripts/install-thing.py"]),
+            set(),
+        )
 
-        expect("a unique file name reaches .ml and runnable-or-not .py suites",
-               file_suites(root, tracked, ["scripts/install-thing.py"]),
-               {"test/test_helper_py.py", "test/test_names_script.ml"})
-        expect("a name inside a longer name is not that file",
-               file_suites(root, tracked, ["scripts/masc-install-thing.py"]),
-               {"test/test_names_longer_script.ml"})
-        expect("a shared name says nothing about which file a suite means",
-               file_suites(root, tracked, ["config/shared.toml", "lib/dune"]), set())
-        expect("an edited test is not a name to look for",
-               file_suites(root, tracked, ["test/test_qualified.ml"]), set())
-        expect("OCaml sources are left to the module rule",
-               file_suites(root, tracked, ["lib/widgets/widget.ml"]), set())
-        expect("a name no tracked file has yet is still looked for",
-               file_suites(root, tracked, ["config/brand-new.toml"]),
-               {"test/test_names_new_file.ml"})
+        expect(
+            "a unique file name reaches .ml and runnable-or-not .py suites",
+            file_suites(root, tracked, ["scripts/install-thing.py"]),
+            {"test/test_helper_py.py", "test/test_names_script.ml"},
+        )
+        expect(
+            "a name inside a longer name is not that file",
+            file_suites(root, tracked, ["scripts/masc-install-thing.py"]),
+            {"test/test_names_longer_script.ml"},
+        )
+        expect(
+            "a shared name says nothing about which file a suite means",
+            file_suites(root, tracked, ["config/shared.toml", "lib/dune"]),
+            set(),
+        )
+        expect(
+            "an edited test is not a name to look for",
+            file_suites(root, tracked, ["test/test_qualified.ml"]),
+            set(),
+        )
+        expect(
+            "OCaml sources are left to the module rule",
+            file_suites(root, tracked, ["lib/widgets/widget.ml"]),
+            set(),
+        )
+        expect(
+            "a name no tracked file has yet is still looked for",
+            file_suites(root, tracked, ["config/brand-new.toml"]),
+            {"test/test_names_new_file.ml"},
+        )
+
+        expect(
+            "an exact path disambiguates a shared basename",
+            exactpath_suites(root, tracked, ["config/shared.toml"]),
+            {"test/test_shared_exact.py"},
+        )
+        expect(
+            "a single-quoted exact path reaches its suite",
+            exactpath_suites(root, tracked, ["scripts/install-thing.py"]),
+            {"test/test_helper_py.py"},
+        )
+        expect(
+            "an edited test is not an exact path to look for",
+            exactpath_suites(root, tracked, ["test/test_shared_exact.py"]),
+            set(),
+        )
 
     if failures:
         print(f"referencing_suites self-test: {len(failures)} case(s) failed")

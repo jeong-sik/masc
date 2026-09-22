@@ -465,15 +465,15 @@ streaming = true
 [models.claude-code-sonnet.capabilities]
 supports-image-input = true
 
-# Two claude_code bindings ship, so scripted `--provider claude_code` needs one
-# named as the wizard's pick; the interactive wizard still lists both.
+# Several claude_code bindings ship, so scripted `--provider claude_code` needs
+# one named as the wizard's pick; the interactive wizard still lists them all.
 [claude_code.claude-code-sonnet]
 wizard-default = true
 
 # Thinking depth on an official client is a model-level `reasoning-effort`, not
 # a capability: the CLI owns the wire, so MASC selects a level rather than
-# encoding a control. One model row per level is the whole mechanism — bind
-# claude-opus-5 three times at low/high/max and assign keepers to the level the
+# encoding a control. One model row per level is the whole mechanism: the rows
+# below bind each model once per level, and a keeper is assigned the level the
 # work deserves. Claude Code rejects "none" and "minimal"; Codex takes both.
 [models.claude-code-opus-high]
 api-name = "claude-opus-5"
@@ -485,6 +485,205 @@ reasoning-effort = "high"
 turn-timeout-s = 600.0
 
 [claude_code.claude-code-opus-high]
+
+# The rest of the Claude Code ladder: Fable 5.1, Opus 5 and Sonnet 5 at every
+# level the CLI takes (low..max), and Haiku 4.5.
+# Haiku 4.5 carries no level, so the CLI picks; its window is 200K
+# (OpenRouter /models anthropic/claude-haiku-4.5, 2026-09-22), and it
+# answered `claude -p --model claude-haiku-4-5` the same day.
+[models.claude-code-sonnet-low]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.claude-code-sonnet-low.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet-low]
+
+[models.claude-code-sonnet-medium]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.claude-code-sonnet-medium.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet-medium]
+
+[models.claude-code-sonnet-high]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.claude-code-sonnet-high.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet-high]
+
+[models.claude-code-sonnet-xhigh]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.claude-code-sonnet-xhigh.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet-xhigh]
+
+[models.claude-code-sonnet-max]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.claude-code-sonnet-max.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-sonnet-max]
+
+[models.claude-code-opus-low]
+api-name = "claude-opus-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.claude-code-opus-low.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-low]
+
+[models.claude-code-opus-medium]
+api-name = "claude-opus-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.claude-code-opus-medium.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-medium]
+
+[models.claude-code-opus-xhigh]
+api-name = "claude-opus-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.claude-code-opus-xhigh.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-xhigh]
+
+[models.claude-code-opus-max]
+api-name = "claude-opus-5"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.claude-code-opus-max.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-opus-max]
+
+[models.claude-code-fable-low]
+api-name = "claude-fable-5-1"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.claude-code-fable-low.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-fable-low]
+
+[models.claude-code-fable-medium]
+api-name = "claude-fable-5-1"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.claude-code-fable-medium.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-fable-medium]
+
+[models.claude-code-fable-high]
+api-name = "claude-fable-5-1"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.claude-code-fable-high.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-fable-high]
+
+[models.claude-code-fable-xhigh]
+api-name = "claude-fable-5-1"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.claude-code-fable-xhigh.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-fable-xhigh]
+
+[models.claude-code-fable-max]
+api-name = "claude-fable-5-1"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.claude-code-fable-max.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-fable-max]
+
+[models.claude-code-haiku]
+api-name = "claude-haiku-4-5"
+max-context = 200000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+
+[models.claude-code-haiku.capabilities]
+supports-image-input = true
+
+[claude_code.claude-code-haiku]
 
 # Codex reads images from its turn/start input list, so the image capability
 # key means the same thing here as it does above.
@@ -501,7 +700,291 @@ tools-support = true
 streaming = true
 reasoning-effort = "low"
 
+# One of several codex bindings now, so the wizard's pick is named.
 [codex_subscription.codex-gpt-5-6]
+wizard-default = true
+
+# Every model the Codex subscription lists, at every level MASC can name.
+# Models, window, levels and input kinds are what the CLI itself caches in
+# ~/.codex/models_cache.json (codex-cli 0.155.1, fetched 2026-09-22): a 272000
+# window and text+image input on all five; low..max on sol, terra, astra and
+# luna, low..xhigh on gpt-5.5. The CLI's "ultra" has no MASC effort value.
+# Not called that day: the plan's usage limit was spent until 2026-09-28.
+[models.codex-gpt-5-6-sol-medium]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-5-6-sol-medium.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-sol-medium]
+
+[models.codex-gpt-5-6-sol-high]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-5-6-sol-high.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-sol-high]
+
+[models.codex-gpt-5-6-sol-xhigh]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-5-6-sol-xhigh.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-sol-xhigh]
+
+[models.codex-gpt-5-6-sol-max]
+api-name = "gpt-5.6-sol"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-5-6-sol-max.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-sol-max]
+
+[models.codex-gpt-5-6-terra-low]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-5-6-terra-low.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-terra-low]
+
+[models.codex-gpt-5-6-terra-medium]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-5-6-terra-medium.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-terra-medium]
+
+[models.codex-gpt-5-6-terra-high]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-5-6-terra-high.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-terra-high]
+
+[models.codex-gpt-5-6-terra-xhigh]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-5-6-terra-xhigh.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-terra-xhigh]
+
+[models.codex-gpt-5-6-terra-max]
+api-name = "gpt-5.6-terra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-5-6-terra-max.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-terra-max]
+
+[models.codex-gpt-6-astra-low]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-6-astra-low.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-astra-low]
+
+[models.codex-gpt-6-astra-medium]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-6-astra-medium.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-astra-medium]
+
+[models.codex-gpt-6-astra-high]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-6-astra-high.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-astra-high]
+
+[models.codex-gpt-6-astra-xhigh]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-6-astra-xhigh.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-astra-xhigh]
+
+[models.codex-gpt-6-astra-max]
+api-name = "gpt-6-astra"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-6-astra-max.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-6-astra-max]
+
+[models.codex-gpt-5-6-luna-low]
+api-name = "gpt-5.6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-5-6-luna-low.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-luna-low]
+
+[models.codex-gpt-5-6-luna-medium]
+api-name = "gpt-5.6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-5-6-luna-medium.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-luna-medium]
+
+[models.codex-gpt-5-6-luna-high]
+api-name = "gpt-5.6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-5-6-luna-high.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-luna-high]
+
+[models.codex-gpt-5-6-luna-xhigh]
+api-name = "gpt-5.6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-5-6-luna-xhigh.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-luna-xhigh]
+
+[models.codex-gpt-5-6-luna-max]
+api-name = "gpt-5.6-luna"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "max"
+
+[models.codex-gpt-5-6-luna-max.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-6-luna-max]
+
+[models.codex-gpt-5-5-low]
+api-name = "gpt-5.5"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "low"
+
+[models.codex-gpt-5-5-low.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-5-low]
+
+[models.codex-gpt-5-5-medium]
+api-name = "gpt-5.5"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "medium"
+
+[models.codex-gpt-5-5-medium.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-5-medium]
+
+[models.codex-gpt-5-5-high]
+api-name = "gpt-5.5"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "high"
+
+[models.codex-gpt-5-5-high.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-5-high]
+
+[models.codex-gpt-5-5-xhigh]
+api-name = "gpt-5.5"
+max-context = 272000
+tools-support = true
+streaming = true
+reasoning-effort = "xhigh"
+
+[models.codex-gpt-5-5-xhigh.capabilities]
+supports-image-input = true
+
+[codex_subscription.codex-gpt-5-5-xhigh]
 
 # Antigravity is the one official client that needs a credentials table, and it
 # is a file reference rather than an environment variable: the CLI writes an
@@ -537,7 +1020,133 @@ max-prompt-bytes = 2078915
 tools-support = true
 streaming = true
 
+# One of several antigravity bindings now, so the wizard's pick is named.
 [antigravity_subscription.antigravity-gemini-3-7-flash-high]
+wizard-default = true
+
+# The rest of `agy models` (2026-09-22); the level is part of each name.
+# Gemini windows are the agent_core catalog's; the two Claude 4.6 models
+# carry Anthropic's published 1M (OpenRouter /models) and gpt-oss-120b 131072.
+# The prompt ceiling is the same measured agy 1.2.6 point as the row above.
+# Called that day: claude-sonnet-4-6 and claude-opus-4-6-thinking answered in
+# 8-10s; every gemini model, the one above included, gave no answer in 80s;
+# gpt-oss-120b-medium answered 503 "No capacity available".
+[models.antigravity-gemini-3-8-flash-high]
+api-name = "gemini-3.8-flash-high"
+max-context = 1048576
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-8-flash-high]
+
+[models.antigravity-gemini-3-8-flash-medium]
+api-name = "gemini-3.8-flash-medium"
+max-context = 1048576
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-8-flash-medium]
+
+[models.antigravity-gemini-3-8-flash-low]
+api-name = "gemini-3.8-flash-low"
+max-context = 1048576
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-8-flash-low]
+
+[models.antigravity-gemini-3-7-flash-medium]
+api-name = "gemini-3.7-flash-medium"
+max-context = 1048576
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-7-flash-medium]
+
+[models.antigravity-gemini-3-7-flash-low]
+api-name = "gemini-3.7-flash-low"
+max-context = 1048576
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-7-flash-low]
+
+[models.antigravity-gemini-3-6-flash-high]
+api-name = "gemini-3.6-flash-high"
+max-context = 1000000
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-6-flash-high]
+
+[models.antigravity-gemini-3-6-flash-medium]
+api-name = "gemini-3.6-flash-medium"
+max-context = 1000000
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-6-flash-medium]
+
+[models.antigravity-gemini-3-6-flash-low]
+api-name = "gemini-3.6-flash-low"
+max-context = 1000000
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-6-flash-low]
+
+[models.antigravity-gemini-3-1-pro-high]
+api-name = "gemini-3.1-pro-high"
+max-context = 1000000
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-1-pro-high]
+
+[models.antigravity-gemini-3-1-pro-low]
+api-name = "gemini-3.1-pro-low"
+max-context = 1000000
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-3-1-pro-low]
+
+[models.antigravity-claude-sonnet-4-6]
+api-name = "claude-sonnet-4-6"
+max-context = 1000000
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-sonnet-4-6]
+
+[models.antigravity-claude-opus-4-6-thinking]
+api-name = "claude-opus-4-6-thinking"
+max-context = 1000000
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-claude-opus-4-6-thinking]
+
+[models.antigravity-gpt-oss-120b-medium]
+api-name = "gpt-oss-120b-medium"
+max-context = 131072
+max-prompt-bytes = 2078915
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gpt-oss-120b-medium]
 
 [models.deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
@@ -648,9 +1257,8 @@ wizard-default = true
 # GLM-5.3 — primary slot of the exact-output judgement lanes (Z.AI 2026-08-14).
 # The api-name is the exact z.ai coding-plan id, confirmed against
 # GET /coding/paas/v4/models on 2026-08-30 (glm-5.3 present; a json_object
-# completion answered on that wire). Window mirrors the AGENT_CORE catalog.
+# completion answered on that wire). The window is the AGENT_CORE catalog's.
 [models.glm-5-3]
-max-context = 200000
 api-name = "glm-5.3"
 tools-support = true
 thinking-support = true
@@ -667,6 +1275,108 @@ max-output-tokens = 128000
 # an empty binding does not mean "defaults" — it means whatever the runtime
 # falls back to. #37039 measured that shape on another lane: a runtime that
 # declares no capacity takes max_int and sends the whole history every turn.
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
+# One of several glm-coding bindings now, so the wizard's pick is named.
+wizard-default = true
+
+# The rest of the coding plan's text models (GET /coding/paas/v4/models,
+# 2026-09-22). All answered a plain and a tool-call completion that day;
+# windows come from their glm-coding catalog rows. glm-5.3-flashx is listed
+# but refused on this plan (code 1311), so it is not bound.
+[models.glm-5-2]
+api-name = "glm-5.2"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-5-2]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
+
+[models.glm-5-1]
+api-name = "glm-5.1"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-5-1]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
+
+[models.glm-5-turbo]
+api-name = "glm-5-turbo"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-5-turbo]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
+
+[models.glm-5]
+api-name = "glm-5"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-5]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
+
+[models.glm-4-7]
+api-name = "glm-4.7"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-4-7]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
+
+[models.glm-4-6]
+api-name = "glm-4.6"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-4-6]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
+
+[models.glm-4-5]
+api-name = "glm-4.5"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-4-5]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
+
+[models.glm-4-5-air]
+api-name = "glm-4.5-air"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[glm-coding.glm-4-5-air]
 context-high-water-tokens = 100000
 context-low-water-tokens = 70000
 max-concurrent = 4
@@ -690,7 +1400,43 @@ temperature = 1.0
 supports-image-input = true
 supports-multimodal-inputs = true
 
+# One of several kimi_coding bindings now, so the wizard's pick is named.
 [kimi_coding.kimi-for-coding]
+wizard-default = true
+
+# K3 on the same plan, at both windows GET /coding/v1/models lists
+# (1048576 and the 262144 k3-256k, 2026-09-22). The endpoint takes temperature
+# 1 only while thinking is on, which is how Keeper requests leave. Not called
+# that day: the plan's weekly quota was spent.
+[models.kimi-k3]
+api-name = "k3"
+tools-support = true
+streaming = true
+temperature = 1.0
+
+[models.kimi-k3.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[kimi_coding.kimi-k3]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
+
+[models.kimi-k3-256k]
+api-name = "k3-256k"
+tools-support = true
+streaming = true
+temperature = 1.0
+
+[models.kimi-k3-256k.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[kimi_coding.kimi-k3-256k]
+context-high-water-tokens = 100000
+context-low-water-tokens = 70000
+max-concurrent = 4
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding. No wire schema guarantee:
 # the 2026-08-29 probe found ollama.com cloud ignores json_schema on /v1 and
@@ -944,6 +1690,23 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.ollama-cloud-kimi-k2-6]
+
+# Kimi K2.7 Code. /api/show 2026-09-22: caps=[vision,thinking,completion,tools],
+# context_length=262144; a plain and a tool-call completion answered that day.
+[models.ollama-cloud-kimi-k2-7-code]
+reasoning-uncontrolled = true
+api-name = "kimi-k2.7-code"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-kimi-k2-7-code.capabilities]
+thinking-control-format = "none"
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-kimi-k2-7-code]
 
 # Moonshot Kimi K3 through Ollama Cloud. /api/show 2026-08-29:
 # caps=[vision,thinking,completion,tools], context_length=1048576.

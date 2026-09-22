@@ -125,6 +125,13 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = true
     }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k2-7-code"
+    ; api_name = "kimi-k2.7-code"
+    ; context = 262144
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k3"
     ; api_name = "kimi-k3"
     ; context = 1048576

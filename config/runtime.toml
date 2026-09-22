@@ -1011,7 +1011,7 @@ path = "~/.gemini/antigravity-cli/antigravity-oauth-token"
 # gemini-3.1-pro-high, claude-opus-4-6-thinking, claude-sonnet-4-6.
 [models.antigravity-gemini-3-7-flash-high]
 api-name = "gemini-3.7-flash-high"
-max-context = 1000000
+max-context = 1048576
 # Last prompt size proven end to end with agy 1.2.6 on 2026-09-18. Long-lived
 # Keepers later reached 21-48 MB and failed before their first turn (#37123).
 # This conservative ceiling is a measured success point, not the CLI maximum
@@ -1421,7 +1421,6 @@ supports-multimodal-inputs = true
 [kimi_coding.kimi-k3]
 context-high-water-tokens = 100000
 context-low-water-tokens = 70000
-max-concurrent = 4
 
 [models.kimi-k3-256k]
 api-name = "k3-256k"
@@ -1436,7 +1435,6 @@ supports-multimodal-inputs = true
 [kimi_coding.kimi-k3-256k]
 context-high-water-tokens = 100000
 context-low-water-tokens = 70000
-max-concurrent = 4
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding. No wire schema guarantee:
 # the 2026-08-29 probe found ollama.com cloud ignores json_schema on /v1 and

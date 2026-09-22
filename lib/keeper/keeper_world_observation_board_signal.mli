@@ -8,7 +8,7 @@ type match_result =
 type board_observation_kind =
   | Observed_post_created
   | Observed_post_updated of { content_updated_at : float }
-  | Observed_comment_added of { comment_id : string; parent_id : string option }
+  | Observed_comment_added of Board_dispatch.board_comment_identity
   | Observed_reaction_changed of Board_dispatch.board_reaction_change
   | Observed_vote_cast of Board_dispatch.board_vote_change
 
@@ -26,6 +26,7 @@ type board_observation =
 type board_read_operation =
   | Get_post
   | Get_comments
+  | Parse_queued_comment_identity
 
 type board_unavailable =
   { operation : board_read_operation
@@ -83,8 +84,10 @@ val unavailable_to_string : board_unavailable -> string
 val board_observation_of_board_stimulus
   :  post_id:string
   -> Keeper_event_queue.board_stimulus
-  -> board_observation
-(** Preserve the queued signal, including comment and parent identities. *)
+  -> (board_observation, board_unavailable) result
+(** Preserve the queued signal. The queued comment and parent identities are
+    wire strings; they are parsed here into {!Board.Comment_id.t}, and one
+    that does not parse is [Error] with [Parse_queued_comment_identity]. *)
 
 val board_stimulus_of_board_signal
   :  Board_dispatch.board_signal

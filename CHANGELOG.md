@@ -27,6 +27,9 @@
 
 ### Changed
 
+- The TUI chat header labels a model the stream named without a runtime id as `model:`, and only an announced runtime id as `turn:`; a model name is no longer shown as the runtime.
+- The next-request band names the wake line in the same estimated tokens as its other figures instead of bytes.
+- The Context pane's title says how long ago its reading was received; the pane refreshes only by hand, so a reading from before the current turn is no longer indistinguishable from a current one.
 - A provider response with no text, thinking, or tool call is now settled as an observed response instead of being retried as an unseen server failure (#37206).
 - Gateway readers now document and consistently treat cancellation as an intentional shutdown rather than a connection failure (#37481).
 - The owner-child cancellation marker is retained only after both cancellation paths were verified, making the lifecycle evidence match the runtime tree (#37488).

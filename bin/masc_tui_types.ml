@@ -4738,6 +4738,11 @@ type state = {
   mutable context_inspector_cancel: (unit -> unit) option;
   mutable context_inspector_reading:
     (string * Masc_tui_context_inspector.reading) option;
+  (* When the reading above was received. The pane refreshes only by hand
+     (open, r, [ and ]), so a reading can be minutes old while the Keeper's
+     turn goes on; the age is drawn beside the title so a reader knows what
+     the numbers describe. [None] until a reading arrives; reset with it. *)
+  mutable context_inspector_read_at: float option;
   mutable context_inspector_tab: Masc_tui_context_inspector.tab;
   mutable context_inspector_cursor: int;
   mutable context_inspector_scroll: int;
@@ -6773,6 +6778,7 @@ let create_state
   context_inspector_generation = 0;
   context_inspector_cancel = None;
   context_inspector_reading = None;
+  context_inspector_read_at = None;
   context_inspector_tab = Masc_tui_context_inspector.Composition;
   context_inspector_cursor = 0;
   context_inspector_scroll = 0;

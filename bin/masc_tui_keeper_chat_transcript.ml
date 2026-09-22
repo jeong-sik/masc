@@ -258,6 +258,13 @@ type t =
            moment when it covered a span, and a turn that ran twenty minutes
            sits under rows typed during it carrying an opening clock (the
            2026-09-10 msx-retro-mania misread). *)
+  ; mutable noted_skills : (string * skill_activity) list
+        (* The exact delivery records [note_skill_activity] took, keyed by
+           the read call's tool-use id, in the order they were first noted.
+           Not a trail node: the stream has no event for a delivery, so
+           [drawn] lays these over the skill items the trail derived from
+           the same calls, and draws the ones whose call the trail never saw
+           (#36882). *)
 
   ; mutable revision : int
         (* Bumped by every mutation: the memo key for anything drawn from
@@ -291,6 +298,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; runtime_named_at = None
   ; reply = None
   ; settled_at = None
+  ; noted_skills = []
   ; revision = 0
   }
 
@@ -2073,6 +2081,38 @@ let note_tool_outcome t ~execution_id ~outcome ~duration =
       bump t;
       true
 
+(* What the durable record knows about a skill read that the wire has no
+   event for: whether the server recorded the delivery, which calls the
+   model made because of it, and the proof ids. Only the states the stream
+   can never reach are taken; calling, pending and failed are the stream's
+   own words, and the two evidence gaps name no read. The record is kept
+   whole, not merged field by field, so the row a held turn draws says what
+   the loaded row it replaces would have said. Keyed by the read call's
+   tool-use id, the one identity the wire and the ledger share; a record
+   without one has nothing to stand over. *)
+let note_skill_activity t (evidence : skill_activity) =
+  match evidence.state with
+  | Skill_calling | Skill_served_pending | Skill_failed | Skill_evidence_missing
+  | Skill_evidence_unavailable ->
+      ()
+  | Skill_served_only | Skill_delivered | Skill_used -> (
+      match evidence.skill_tool_use_id with
+      | None -> ()
+      | Some use_id ->
+          let known =
+            List.exists (fun (noted_id, _) -> String.equal noted_id use_id)
+              t.noted_skills
+          in
+          t.noted_skills <-
+            (if known then
+               List.map
+                 (fun (noted_id, noted) ->
+                   if String.equal noted_id use_id then (noted_id, evidence)
+                   else (noted_id, noted))
+                 t.noted_skills
+             else t.noted_skills @ [ (use_id, evidence) ]);
+          bump t)
+
 let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
   match outcome with
   | Masc.Keeper_turn_outcome.Visible_reply when String.trim reply <> "" -> reply
@@ -2104,6 +2144,63 @@ type drawn_item =
   ; drawn : drawn
   }
 
+(* The drawn items with each noted delivery record standing over the skill
+   item the trail derived from the same read call, and, apart, the noted
+   records no skill item carries: reads whose call the trail never saw -- a
+   cut stream, a gap in the journal -- while the loaded row that carried the
+   record is one a held log leaves out of the timeline. *)
+let with_noted_skills noted items =
+  match noted with
+  | [] -> items, []
+  | noted ->
+      let exact (skill : skill_activity) =
+        match skill.skill_tool_use_id with
+        | None -> skill
+        | Some use_id -> (
+            match
+              List.find_map
+                (fun (noted_id, note) ->
+                  if String.equal noted_id use_id then Some note else None)
+                noted
+            with
+            | Some note -> note
+            | None -> skill)
+      in
+      let skills_of item =
+        match item.drawn with
+        | Drawn_skill skills -> skills
+        | Drawn_thinking _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _
+        | Drawn_status _ ->
+            []
+      in
+      let items =
+        List.map
+          (fun item ->
+            match item.drawn with
+            | Drawn_skill skills ->
+                { item with drawn = Drawn_skill (List.map exact skills) }
+            | Drawn_thinking _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _
+            | Drawn_status _ ->
+                item)
+          items
+      in
+      let drawn_use_ids =
+        List.concat_map
+          (fun item ->
+            List.filter_map
+              (fun (skill : skill_activity) -> skill.skill_tool_use_id)
+              (skills_of item))
+          items
+      in
+      let unseen =
+        List.filter_map
+          (fun (noted_id, note) ->
+            if List.exists (String.equal noted_id) drawn_use_ids then None
+            else Some note)
+          noted
+      in
+      items, unseen
+
 (* The trail, flattened, with the recorded reply reconciled against what
    streamed. Superseded blocks are siblings in the trail, never nested (see
    [trail_item]), so one level of flattening is the whole of it. *)
@@ -2120,7 +2217,10 @@ let drawn t =
     | Trail_superseded { attempt; runtime_id; items } ->
         List.concat_map (flatten (Some attempt) runtime_id) items
   in
-  let items = List.concat_map (flatten None None) (trail t) in
+  let items, unseen =
+    List.concat_map (flatten None None) (trail t)
+    |> with_noted_skills t.noted_skills
+  in
   let current_text = function
     | { superseded = None; drawn = Drawn_text _ } -> true
     | { superseded = Some _; _ }
@@ -2143,6 +2243,27 @@ let drawn t =
         (index + 1, if current_text item then Some index else last))
       (0, None) items
     |> snd
+  in
+  (* A read the trail never saw has no place of its own in it. Every read
+     comes before the turn's terminal message, so it goes ahead of the
+     stretch the reply stands for, or last when no stretch streamed -- ahead
+     of the reply or status row appended below either way. *)
+  let items, last_text =
+    match unseen with
+    | [] -> items, last_text
+    | skills -> (
+        let unseen_item =
+          { superseded = None; superseded_runtime_id = None; drawn = Drawn_skill skills }
+        in
+        match last_text with
+        | None -> items @ [ unseen_item ], None
+        | Some last ->
+            ( List.concat
+                (List.mapi
+                   (fun index item ->
+                     if index = last then [ unseen_item; item ] else [ item ])
+                   items)
+            , Some (last + 1) ))
   in
   match t.reply with
   | None -> items

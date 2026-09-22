@@ -6553,10 +6553,11 @@ let held_turn_of_log turn_log =
 
 (* The rows a turn's log draws itself: the keeper's words, its tool blocks
    (with the durable outcome and duration folded in by
-   [enrich_held_logs_from_rows]), its skills, and its reasoning when it has
-   any. What a person said, what the server said about the turn (gate rows),
-   what the pane said, and a failure are drawn from the committed rows whether
-   or not a log holds the turn -- the log draws none of them. *)
+   [enrich_held_logs_from_rows]), its skills (with the exact delivery record
+   folded in by the same pass), and its reasoning when it has any. What a
+   person said, what the server said about the turn (gate rows), what the
+   pane said, and a failure are drawn from the committed rows whether or not
+   a log holds the turn -- the log draws none of them. *)
 let log_draws_row (held : held_turn) (row : msg_entry) =
   String.equal row.me_request_id held.ht_request_id
   &&
@@ -6581,11 +6582,13 @@ let rows_the_logs_do_not_draw ~held rows =
         rows
 ;;
 
-(* What the durable transcript knows about a held turn's calls that the wire
-   did not carry -- outcome and duration -- folded into the log's transcript
-   by execution id, so the block a held turn is drawn from says what the
-   loaded row it replaces would have said. Run where loaded rows arrive and
-   where a journal log is held. *)
+(* What the durable transcript knows about a held turn that the wire did not
+   carry, folded into the log's transcript by the identity both records
+   share: a call's outcome and duration by its execution id, and a skill
+   read's exact delivery record by the read call's tool-use id. The block a
+   held turn is drawn from then says what the loaded rows it replaces would
+   have said. Run where loaded rows arrive and where a journal log is
+   held. *)
 let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
   List.iter
     (fun turn_log ->
@@ -6606,6 +6609,17 @@ let enrich_held_logs_from_rows state ~keeper_name (rows : msg_entry list) =
                   | None -> ())
                 block.Masc_tui_keeper_chat_transcript.activities
           | Some _ | None -> ())
+        rows;
+      (* The stream has no event for a delivery, so without this the log's
+         skill row stays at what the read call alone says while the loaded
+         row that knew better is left out of the timeline (#36882). *)
+      List.iter
+        (fun (row : msg_entry) ->
+          if String.equal row.me_request_id request_id then
+            List.iter
+              (Masc_tui_keeper_chat_transcript.note_skill_activity
+                 turn_log.tl_transcript)
+              row.me_skill_block)
         rows)
     (List.filter turn_log_holds_the_turn (settled_logs_for_keeper state keeper_name))
 ;;

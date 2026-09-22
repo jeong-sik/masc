@@ -1507,11 +1507,11 @@ let phase_text ~now t =
           | None -> (
             match t.current_runtime_id with
             | Some rid when t.attempt > 0 ->
-                Printf.sprintf "failover: waiting on [%s] (attempt %d)%s"
+                Printf.sprintf "runtime candidate: waiting on [%s] (attempt %d)%s"
                   rid attempt_shown silent_for
             | Some rid -> Printf.sprintf "waiting on [%s]%s" rid silent_for
             | None when t.attempt > 0 ->
-                Printf.sprintf "failover working (attempt %d)" attempt_shown
+                Printf.sprintf "runtime candidate: working (attempt %d)" attempt_shown
             | None -> "working")
       in
       let work =

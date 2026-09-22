@@ -342,7 +342,8 @@ let dump_fsm_transitions ~base_path ~keeper ~turn_id =
     [runtime_contract.keeper_turn_id] = our turn_id.
 
     Current identity fields:
-    - top-level [keeper], [tool], [success], [duration_ms], [ts] (epoch float)
+    - top-level [keeper], [tool], [disposition], [wire_outcome], [duration_ms],
+      [ts] (epoch float)
     - nested [runtime_contract.keeper_turn_id] (int option) *)
 let dump_tool_calls ~base_path ~keeper ~turn_id =
   let root = tool_calls_dir ~base_path in
@@ -407,10 +408,13 @@ let dump_tool_calls ~base_path ~keeper ~turn_id =
           let tool =
             Option.value (string_field json "tool") ~default:"-"
           in
-          let success =
-            match Yojson.Safe.Util.member "success" json with
-            | `Bool b -> if b then "ok" else "fail"
-            | _ -> "-"
+          let outcome =
+            match Tool_result.recorded_call_outcome json with
+            | Tool_result.Recorded_succeeded -> "ok"
+            | Tool_result.Recorded_failed -> "fail"
+            | Tool_result.Recorded_deferred -> "deferred"
+            | Tool_result.Recorded_unsettled -> "-"
+            | Tool_result.Recorded_malformed -> "malformed"
           in
           let duration_ms =
             match Yojson.Safe.Util.member "duration_ms" json with
@@ -426,7 +430,7 @@ let dump_tool_calls ~base_path ~keeper ~turn_id =
           in
           Printf.printf
             "%s [tool %s] %s duration_ms=%s\n"
-            ts tool success duration_ms)
+            ts tool outcome duration_ms)
         matches
 
 let () =

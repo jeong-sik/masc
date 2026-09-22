@@ -265,7 +265,9 @@ type keeper_call = {
           call that returned an empty one. *)
   kc_artifact_refs : Tool_output.artifact_ref list;
       (** Validated durable references, independent of the output preview. *)
-  kc_success : bool;
+  kc_outcome : Tool_result.recorded_call_outcome;
+      (** How the call ended, read by {!Tool_result.recorded_call_outcome}.
+          Never [Recorded_malformed]: the decoder refuses that row. *)
   kc_duration_ms : float option;
   kc_turn : int option;
   kc_task_id : string option;
@@ -925,6 +927,18 @@ type memory_context_prepared = {
 type memory_context_cycle = {
   mcc_saved : memory_context_frontier option;
   mcc_saved_unreadable : bool;
+  mcc_read_position : int option;
+      (** Where the Librarian has read to, beside where its snapshot cuts
+          ([mcc_saved]). A request starts at the cut and carries the atoms up
+          to here, so the two apart is what the turn pays; the distance is the
+          subtraction and is not a field (#37793). *)
+  mcc_read_position_unreadable : bool;
+      (** The position file could not be read, which is why there is no
+          number. A keeper that has read nothing has neither. *)
+  mcc_rewriting_through : int option;
+      (** Where a snapshot being rewritten from atom 0 has to reach before a
+          request starts from it. Always past [mcc_saved]'s cut; [None] on a
+          snapshot that is not being rewritten. *)
   mcc_prepared : memory_context_prepared option;
   mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }

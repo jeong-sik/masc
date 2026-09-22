@@ -5198,7 +5198,7 @@ let render_lanes_overview (state : state) =
    | Some picker ->
        box_line_styled buf cols ~style:(Theme.info ())
          (Printf.sprintf
-            "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+            "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
             (Terminal_text.single_line picker.Masc_tui_types.rlp_lane));
        if picker.Masc_tui_types.rlp_choices = [] then
          box_line_styled buf cols ~style:(Theme.recede ())
@@ -6728,7 +6728,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                         | _ -> id)
                      lane.rrl_runtime_ids)
               in
-              add_row "Failover Chain:" hops;
+              add_row "Candidate Chain:" hops;
               (match lane.rrl_runtime_ids with
                | first :: _ -> add_row "Head Candidate:" first
                | [] -> ())
@@ -11449,7 +11449,7 @@ let render_runtime (state : state) =
    | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
    | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
        c.push_styled ~style:(Theme.info ())
-         "  [runtime].media_failover — the order the vision fleet is called in";
+         "  [runtime].media_failover — the Runtime Candidate Order for the vision fleet";
        let entries = Masc_tui_types.slot_editor_rows state in
        if entries = [] then
          c.push_styled ~style:(Theme.recede ())
@@ -11475,10 +11475,10 @@ let render_runtime (state : state) =
               Printf.sprintf "  first runtime of new lane %s — j/k move, Enter create, e cancel"
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
-              Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+              Printf.sprintf "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_media_failover ->
-              "  adding to the vision fleet [runtime].media_failover — j/k move, Enter append, e cancel"
+              "  adding to [runtime].media_failover, the Runtime Candidate Order for the vision fleet — j/k move, Enter append, e cancel"
           | Masc_tui_types.Pick_route_default ->
               (* Replaces rather than appends, and the row it replaces is
                  marked "(already a candidate)" in the choices below. *)
@@ -11518,7 +11518,7 @@ let render_runtime (state : state) =
       | Page_unread -> page_unread_note
       | Page_empty ->
           (match state.runtime_mode with
-           | Masc_tui_types.Runtime_lanes -> "  (no runtime lanes configured)"
+           | Masc_tui_types.Runtime_lanes -> "  (no runtime candidate orders configured)"
            | Masc_tui_types.Runtime_all -> "  (no runtimes configured)")
     in
     c.push_styled ~style:(Theme.recede ()) empty;
@@ -11888,8 +11888,12 @@ let render_keeper_calls (state : state) =
     |> List.mapi (fun call_index (call : Masc.Tui_decode.keeper_call) ->
          let open Masc.Tui_decode in
          let glyph, style =
-           if call.kc_success then ("✓", Ansi.reset)
-           else ("✗", (Theme.bad ()))
+           match call.kc_outcome with
+           | Tool_result.Recorded_succeeded -> ("✓", Ansi.reset)
+           | Tool_result.Recorded_failed -> ("✗", (Theme.bad ()))
+           | Tool_result.Recorded_deferred -> ("◌", (Theme.info ()))
+           | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
+             ("?", Ansi.reset)
          in
          let duration =
            match call.kc_duration_ms with
@@ -11918,7 +11922,12 @@ let render_keeper_calls (state : state) =
            | None -> []
            | Some output ->
              labeled_rows ~call_index
-               ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
+               ~style:
+                 (match call.kc_outcome with
+                  | Tool_result.Recorded_failed -> Theme.bad ()
+                  | Tool_result.Recorded_succeeded | Tool_result.Recorded_deferred
+                  | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
+                    Ansi.dim)
                ~label:"output" output
          in
          (call_index, style, summary) :: exact_rows @ output_rows)

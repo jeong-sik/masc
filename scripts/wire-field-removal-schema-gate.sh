@@ -25,7 +25,7 @@
 # check-boundary-guard-mli-pairs.sh):
 #   1. If the PR diff touches a protected persistence schema module (see
 #      PROTECTED below) with a REMOVED variant constructor (`| Foo ->` line
-#      deleted) or a REMOVED wire string label (`- let field_x = "x"` /
+#      deleted) or a REMOVED wire string label (`- let key = "x"` /
 #      deleted `"x",` row in an encoder/decoder), the gate fires.
 #   2. It passes only if the same diff ALSO carries one of:
 #      a. a version bump in a protected module (e.g. event-queue-v19 → v20;
@@ -58,9 +58,15 @@ fi
 BASE_REF="${1:-${BASE_REF:-origin/main}}"
 
 # Persistence modules whose wire shapes are load-bearing for live stores.
+# lib/keeper_runtime/keeper_event_queue_schema.ml is the generation registry
+# #35308 created on 2026-09-12: the store/projection markers and snapshot
+# filenames moved out of keeper_event_queue_persistence.ml into it. Leaving
+# it off this list meant a marker row could vanish there with zero gate
+# signal while the gate kept guarding the emptied old address (task-853).
 PROTECTED="
 lib/keeper_runtime/keeper_event_queue_state.ml
 lib/keeper_runtime/keeper_event_queue_persistence.ml
+lib/keeper_runtime/keeper_event_queue_schema.ml
 lib/keeper/keeper_memory_os_current.ml
 lib/types/turn_record.ml
 lib/keeper/keeper_meta_contract.ml
@@ -105,9 +111,13 @@ removed_variant() {
 }
 
 removed_wire_label() {
-  # A deleted wire-key definition or row: `- let field_x = "x"` or a deleted
-  # `("x", ...)` / `| "x" ->` / `;"x"` label row.
-  diff_has '^-[[:space:]]*(let[[:space:]]+field_[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*"|.*\(\")[a-z_][a-z0-9_]*(\".*|.*\|[[:space:]]*\"[a-z_][a-z0-9_]*\")'
+  # A deleted wire-key definition or row: `- let key = "..."`, or a deleted
+  # `("x", ...)` / `| "x" ->` / `;"x"` label row. The let TARGET NAME is not
+  # the signal: #35308 parked the generation markers in the registry as
+  # `let state = "keeper.event_queue.state.v19"`, which the old field_*-only
+  # spelling sailed straight past (task-853), and registry keys carry dots
+  # and dashes, not only [a-z_].
+  diff_has '^-[[:space:]]*(let[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*\"|.*\(\")[a-z_][a-z0-9_.-]*(\".*|.*\|[[:space:]]*\"[a-z_][a-z0-9_]*\")'
 }
 
 version_bump() {
@@ -123,13 +133,32 @@ version_bump() {
     | grep -E '^-' | grep -Eo -- '-v[0-9]+\.(json|jsonl)' | grep -Eo '[0-9]+' | sort -u || true)"
   new_v="$(git -C "${REPO_ROOT}" diff -U0 "${DIFF_RANGE}" -- $PROTECTED 2>/dev/null \
     | grep -E '^\+' | grep -Eo -- '-v[0-9]+\.(json|jsonl)' | grep -Eo '[0-9]+' | sort -u || true)"
-  [ -n "${old_v}" ] || return 1
-  [ -n "${new_v}" ] || return 1
-  for v in ${new_v}; do
-    if ! printf '%s\n' ${old_v} | grep -qx -- "${v}"; then
-      return 0
+  if [ -n "${old_v}" ] && [ -n "${new_v}" ]; then
+    for v in ${new_v}; do
+      if ! printf '%s\n' ${old_v} | grep -qx -- "${v}"; then
+        return 0
+      fi
+    done
+  fi
+  # Registry markers keep their generation inside a quoted string, not a
+  # filename: "masc.keeper_event_queue.transition.v9" has no -vNN.json token,
+  # so a real registry bump (v9 -> v10) never counted and pushed the removal
+  # onto the scripts/ or schema-compat: exits (task-853). Same MOVE rule,
+  # quoted-marker edition: an old generation leaving on a `-` line and a
+  # different generation of the SAME marker family arriving on a `+` line.
+  local old_mk new_mk m k n bumped=1
+  old_mk="$(git -C "${REPO_ROOT}" diff -U0 "${DIFF_RANGE}" -- $PROTECTED 2>/dev/null \
+    | grep -E '^-' | grep -Eo '"[a-z_][a-z0-9_.]*\.v[0-9]+"' | tr -d '"' | sort -u || true)"
+  new_mk="$(git -C "${REPO_ROOT}" diff -U0 "${DIFF_RANGE}" -- $PROTECTED 2>/dev/null \
+    | grep -E '^\+' | grep -Eo '"[a-z_][a-z0-9_.]*\.v[0-9]+"' | tr -d '"' | sort -u || true)"
+  for m in ${new_mk}; do
+    k="${m%.*}"; n="${m##*.v}"
+    printf '%s\n' ${old_mk} | grep -Fq -- "${k}.v" || continue
+    if ! printf '%s\n' ${old_mk} | grep -Fqx -- "${k}.v${n}"; then
+      bumped=0; break
     fi
   done
+  [ "${bumped}" = 0 ] && return 0
   return 1
 }
 

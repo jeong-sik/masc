@@ -36,7 +36,9 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
   ; mkh_removed = 0
   ; mkh_snapshot_present = true
   ; mkh_context_cycle =
-      { mcc_saved = None; mcc_saved_unreadable = false; mcc_prepared = None; mcc_synthesis = None }
+      { mcc_saved = None; mcc_saved_unreadable = false; mcc_read_position = None;
+        mcc_read_position_unreadable = false; mcc_rewriting_through = None;
+        mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
       { Decode.mlh_state = Some "drained"
       ; mlh_detail = None

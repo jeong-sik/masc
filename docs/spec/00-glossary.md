@@ -69,6 +69,24 @@ status: reference
   관찰하고 자율 turn을 실행한다. 이어 실행할 상태는 runtime에 따라 AGENT_CORE 또는
   공식 클라이언트가 관리한다([`Runtime_execution.checkpoint_owner`](../../lib/runtime/runtime_execution.mli)).
 
+**Keeper Prompt (Keeper 시스템 프롬프트)**
+: 한 Keeper turn의 모델 호출에 실리는 system prompt. `Keeper_prompt.build_keeper_system_prompt`가
+  `config/prompts/keeper.md`의 슬롯을 정해진 순서로 조립한다. 순서는 공유 접두를 최대로
+  남기기 위한 것이다(KV 캐시 재사용): `<system>` 공유 본문(keeper.md 첫 마커 앞, 모든
+  Keeper가 글자 그대로 공유) → `keeper.worldview` → `keeper.constitution` →
+  `keeper.identity` → `keeper.workspace` → `<role>`.
+  `keeper.worldview`는 이 세계가 무엇을 잘한 일로 치는가다. 운영자가 덮어쓰며, 배포
+  기본값은 "따로 정한 가치관이 없다 — 각 Keeper의 역할이 정한다"이다. 슬롯은 항상 렌더된다.
+  `keeper.constitution`은 세계가 쓴 규범(RFC-0442)이고, 조항이 없으면 통째로 빠진다.
+  `<role>`은 그 Keeper의 `instructions`(Keeper TOML)를 적힌 그대로 감싸며 앞에 제목을
+  붙이지 않는다.
+  `keeper.identity`·`keeper.workspace`는 각각 Keeper 이름과 샌드박스 루트를 받는다.
+  전체 지도는 [Prompt Map](../PROMPT-MAP.md)을 따른다.
+  경계: 여기의 "role"은 Message의 role(`System`·`User`·`Assistant`·`Tool`)도, Board
+  Interest 판정의 `keeper_role {name, board_interests}`도, Fusion 심판의 `judge_role`
+  (Fusion Judge Role)도 아니다.
+  → [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
+
 **Board Interest**
 : Keeper가 직접 지목되지 않은 Board post와 comment를
   의미 판정 대상으로 받을 수 있는 주제 선언. `board_interests = []`이면 이
@@ -78,6 +96,18 @@ status: reference
   서로 fallback하지 않는다. v7 판정 경계는 현재 typed signal과
   `keeper_role {name, board_interests}`만 사용한다. 과거 post/comment thread,
   instructions, runtime/task identity, mention 목록은 저장하거나 보내지 않는다.
+
+**Board Attention Candidate (Board 판정 후보)**
+: Board_attention lane이 판정할 게시물 하나. 어떤 모델 호출보다 먼저 durable하게
+  저장되고, 생애가 `Pending → Judged → Consumed`다. exact-flow 실패가 확정되면 먼저
+  `Quarantine Quarantined`로 투영되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
+  않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 판정은 소유 lane이 그 후보
+  판정을 durable하게 적용·소비할 때만 넘어가고, 전달 실패는 마지막 실패 증거를 남길
+  뿐 후보를 소비하지 않는다. 대기 작업에는 벽시계 만료가 없다. **`Runtime` 항목과
+  다른 뜻이다** — 코드가 `candidate`라는 한 단어를 두 곳에 쓴다. 여기서는 판정 대상
+  게시물이고, 런타임 쪽(`Runtime_candidate_backpressure.candidate`)은 lane이 시도할
+  실행 후보다.
+  → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli)
 
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
@@ -116,6 +146,23 @@ status: reference
   제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상 Keeper다.
   접수 응답은 실행 완료를 뜻하지 않는다.
 
+**Turn Row Source (턴 행 출처)**
+: 채팅 transcript가 한 turn의 행을 그리는 출처. 코드의 타입 이름이 아니라 이 문서와
+  [pane 해부도](../diagrams/tui-chat-pane-anatomy.html)가 쓰는 라벨이다. 한 turn의 행은
+  한 번에 한 출처에서만 나온다. 넷이다 — `live`(이 pane이 연 요청의 SSE stream),
+  `observed`(이 pane이 열지 않았거나, 열었다가 stream을 잃은 turn: operation journal을
+  읽어 따라간다), `settled`(stream이나 journal이 끝을 전한 held log), `committed only`(그
+  turn을 대신하는 log가 없어 transcript page의 행을 그대로 그린다 — log 없음 · reply 없이
+  끝난 취소 turn · 끝날 수 없게 된 Working log). log가 그 turn을 대신하면
+  (`turn_log_holds_the_turn`: log가 committed이고 stream이 실패를 전했거나 기록된 reply와
+  함께 끝났을 때) 그 log가 스스로 그리는 committed 행은 timeline에서 빠지고
+  (`rows_the_logs_do_not_draw`), 끝날 수 없게 된 Working log(journal을 못 읽거나
+  reply·failure가 기록됨)는 observed 집합에서 빠져 committed 행이 그 turn을 대신한다.
+  `live`는 `log_projection ~committed:false`, `observed`는 `held_projection
+  ~committed:false`, `settled`는 `held_projection ~committed:true`로 그린다.
+  → [Masc_tui_types](../../bin/masc_tui_types.ml),
+  [Masc_tui_render_chat](../../bin/masc_tui_render_chat.ml)
+
 **Checkpoint Load**
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
@@ -127,6 +174,19 @@ status: reference
 
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
+
+**Demotion (강등)**
+: 어떤 항목을 제거하지 않고 우선순위·가시성·전송 여부만 낮추는 처분. 세 곳이 같은
+  불변식을 지킨다 — 강등된 것은 사라지지 않는다.
+  - 도구 결과 강등: 전송 사본에서만 blob 마커로 바뀌고 History 원본은 남는다
+    (`Keeper_model_input_demotion`, RFC-0363).
+  - 후보 강등: 쉬는 중이거나 실패한 runtime 후보를 세 무리(`Not_demoted` ·
+    `Failed_without_rest` · `Told_to_rest`)로 나눠 뒤로 보낸다. 배제가 아니라 순서다 —
+    맨 앞 후보가 쉬는 중이면 그 walk는 그 후보가 풀릴 때까지 기다린다
+    (`Keeper_turn_driver.demote_unavailable_candidates`, RFC-0458 §3.4).
+  - 차단 강등: 낡은 blocker를 "이전 차단"으로 낮춰 보여준다. 감추지 않는다
+    (`agent-roster.ts`).
+  → [Keeper_turn_driver.demote_unavailable_candidates](../../lib/keeper/keeper_turn_driver.ml)
 
 **Official-client Session Recovery**
 : 공식 클라이언트 세션에 기록된 `Input_rejected` 때문에 같은 runtime의 새 실행
@@ -193,11 +253,24 @@ status: reference
   → [Runtime_schema.provider](../../lib/runtime/runtime_schema.mli)
 
 **Runtime**
-: Provider·Model·Binding을 해석해 얻은 실행 후보 하나.
+: Provider·Model·Binding을 해석해 얻은 실행 후보 하나. 코드가 이 후보를 `candidate`라
+  부르는 자리가 있다(`Runtime_candidate_backpressure.candidate` — 시도한 런타임과 그
+  process-local 관측). Board Attention Candidate와 다른 뜻이다.
   → [Runtime.t](../../lib/runtime/runtime.mli)
 
+**media_failover**
+: vision 도구가 이미지를 읽을 때 호출하는 runtime의 순서(`[runtime].media_failover`,
+  "vision read fleet"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
+  Keeper turn은 여기로 파견하지 않고, turn의 이미지 재라우팅은 자기 lane 안에 머문다.
+  이름의 "failover"는 런타임 후보 순서를 가리키던 옛 단어의 잔재이고, 이 키는 그와
+  다른 메커니즘이다 — 키 이름에 옛 단어가 남는 유일한 곳이며, 운영자 설정 파일 호환을
+  위해 동결되었다.
+  → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
+
 **Lane**
-: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다.
+: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다. 이
+  개념의 화면 이름은 **Runtime Candidate Order**다 — TUI help와 상태 줄은
+  "lane" 대신 이 이름으로 읽힌다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
 **Standalone Lane**
@@ -220,6 +293,43 @@ status: reference
   `Librarian`·`Workspace_curator`·verifier exact lane. 앞의 넷은
   `Exact_lane_run_registry.lane`의 생성자 전부이고 `all_lanes`로 열거된다.
   → [tui_decode.mli](../../lib/tui_decode.mli)
+
+**Reasoning Effort (추론 노력)**
+: OpenAI 호환 wire가 싣는 추론 노력의 정규 typed 값. `Reasoning_effort.t`가
+  유일한 SSOT이고 일곱 단계다 — `None_`·`Minimal`·`Low`·`Medium`·`High`·
+  `XHigh`·`Max`. 토큰 예산은 다른 provider wire이고, 이 모듈은 숫자 예산에서
+  노력 등급을 절대 추측하지 않는다. provider별 별칭은 `Reasoning_dialect`가
+  맡는다.
+  → [Reasoning_effort](../../packages/agent_core/lib/llm_provider/reasoning_effort.mli)
+
+**Effort Ladder (노력 사다리)**
+: 일곱 노력의 서열 — `None_`=0 … `Max`=6. `rank`가 자리, `compare`가 순서다.
+  catalog가 요청한 노력을 모델이 받는 집합으로 깎을 때(clamping) 이 사다리로
+  요청보다 아래인 가장 가까운 받는 노력을 고른다.
+  → [Reasoning_effort.rank](../../packages/agent_core/lib/llm_provider/reasoning_effort.mli)
+
+**Accepted Reasoning Efforts (받는 노력 집합)**
+: 한 provider·모델이 받는 노력의 부분집합. `Capabilities.t`의
+  `accepted_reasoning_efforts`가 싣고, 모델 행이 아니라 provider base에 산다 —
+  provider가 자기 추론 모델 전체에 사다리 하나를 선언하고, 모델이 빠진 단계는
+  거절이 아니라 아래 단계로 내려서 처리하기 때문이다(xAI가 그렇다). 선언이
+  없으면(`None`) 닫힌 실패다.
+  → [Capabilities.accepted_reasoning_efforts](../../packages/agent_core/lib/llm_provider/capabilities.mli)
+
+**Reasoning Effort Rejection (노력 거절)**
+: 요청을 wire에 싣기 전 `validate_reasoning_effort_request_typed`가 내는 typed
+  거절. `Unsupported_reasoning_effort`(집합 밖), `Undeclared_reasoning_effort_capability`
+  (선언 없음), `Explicit_disable_outside_ladder`(명시 끄기가 사다리 밖),
+  `Reasoning_undeclared_on_auto_enabling_wire`(스스로 켜는 wire인데 노력도
+  `reasoning_uncontrolled`도 안 밝힘). 검사하는 값은 wire가 실을 값이다 — 명시
+  `enable_thinking = Some false`는 노력 `none`으로 가므로, `none`이 없는 사다리는
+  그 끄기를 `Explicit_disable_outside_ladder`로 거절한다.
+  이 거절은 깎기(Effort Ladder)와 나란한 대안이 아니라 그 뒤의 문지기다 — 공식
+  클라이언트 호스트가 요청 전에 운영자가 선언한 노력을 먼저 깎고(로그 `reasoning
+  effort clamped to catalog`), 문지기는 wire가 실을 값(명시 토글이 적용된 뒤)을 본다.
+  그래서 집합 밖 선언 노력은 깎여 통과하고, 거절로 남는 것은 깎을 기준이 없는 선언
+  없음과, 토글이 사다리 밖으로 만든 값이다.
+  → [Provider_config.reasoning_effort_request_rejection](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
 **Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
@@ -504,7 +614,8 @@ status: reference
 
 **받은 일 정리**
 : 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
-  checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다.
+  checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다. 정리 하나가
+  pocket이고, 저장된 현재 pocket 묶음은 Working Context다.
   `[typesafeai] context_review = true`이면 새 정리 전체의 의미 보존을 JEV Choice로
   평가한다. 원본의 요청·제약·약속과 다음 행동 제안을 함께 보며, 합치는 이전 정리의
   참조 원문도 포함한다. `needs_revision`이면 새 정리의 게시만 보류한다. 미평가·실패·
@@ -581,6 +692,24 @@ status: reference
   이 파일의 Atom 위치는 선택한 cluster의 History만 가리키는
   cluster-scoped 좌표다. 같은 이름의 Keeper라도 다른 cluster와 공유하지 않는다.
 
+**Turn Boundary Position (턴 경계 위치)**
+: `turn-boundaries.jsonl`의 `turn_ended` 줄이 적는, 그 turn이 끝났을 때 History의
+  끝이 어디인가. 닫힌 넷이고 wire `kind`가 이름이다 — `Atom_history { end_atom;
+  last_atom_digest }`(`atom_history`), `Empty_atom_history`(`empty_atom_history`),
+  `No_atom_history`(`no_atom_history`), `Stale_noop`(`stale_noop`). 위치(Atom 수와
+  마지막 Atom의 digest)를 갖는 것은 `Atom_history` 하나다. 저장이 Checkpoint를
+  돌려주면 그 messages에서 위치를 세고, Atom이 하나도 없으면 `Empty_atom_history`다.
+  돌려줄 Checkpoint가 없으면 소유자로 갈린다 — 공식 클라이언트 turn은 Agent Core
+  Checkpoint를 저장하지 않으므로 `No_atom_history`, Agent Core turn은 저장 결과가
+  `Stale_noop`일 때만 Checkpoint가 없으므로 `Stale_noop`이다. 저장이 `Error`면 줄을
+  쓰지 않는다
+  (`keeper_agent_run_finalize_response.ml`의 `turn_boundary_position`). 그래서
+  `No_atom_history` 줄은 공식 클라이언트 turn을 가리킨다. `Stale_noop`은
+  `Keeper_checkpoint_store`의 저장 결과 `Stale_noop`(더 새 writer가 앞서 canonical
+  Checkpoint를 그대로 둔 성공적 no-op)과 이름을 공유하지만 다른 값이다 — 하나는
+  저장 결과, 하나는 turn 경계 위치다.
+  → [Keeper_turn_boundaries](../../lib/keeper/keeper_turn_boundaries.ml)
+
 **Read Position**
 : Librarian이 History를 어디까지 읽었는지 적은 값(`keepers/<keeper>/librarian-progress.json`).
   Turn Boundary와 같은 cluster의 Keeper runtime 디렉터리에 저장한다.
@@ -608,7 +737,8 @@ status: reference
 
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
-  한 파일. 전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
+  한 파일. 설명 절반은 Working State이고, 범위 절반은 완료된 History 구간이다.
+  전송을 시작할 위치는 보존한 범위의 끝(exclusive)이다.
   Librarian Read Position은 합성 없이 기준점을 설정할 때도 움직이므로 이
   저장본을 대신하지 않는다. 받은 요청을 묶는 Working Context와도 구분한다.
   완료 대화 합성 회차는 대기열 정리를 요청하거나 Working Context를 변경하지 않는다.
@@ -618,6 +748,15 @@ status: reference
   상태는 별개이며, 둘 다 모델 생성 설명의 의미 보존을 증명하지는 않는다.
   `masc-librarian-continuity capture/restore`는 같은 파일 경계를 검증한다.
   → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
+
+**Working State (대화 작업 상태)**
+: Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항
+  (`Keeper_librarian.selection.working_state`). Continuity Snapshot이 담는
+  "이어서 할 일의 설명" 절반이며, 같은 파일에 저장된 정확한 대화 범위와 한 쌍이다.
+  큐 원본을 정리한 Working Context(`working_contexts`)나 장기 Memory facts와 다르다.
+  모델의 출력만으로 범위가 소비된 것은 아니며, pair 저장과 소비 시 이력 검증이
+  필요하다.
+  → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli)
 
 **Continuity Synthesis Observation (대화 요약 진행 관측)**
 : 이번 서버 실행에서 Librarian이 마지막으로 선택한 Atom 구간, 그때 확인한
@@ -640,7 +779,9 @@ status: reference
   공식 클라이언트는 자체 문맥 처리를 사용하므로 선택값과 실제 적용 여부를 구분한다.
 
 **Working Context**
-: Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. Memory OS와 같은
+: Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. 각 항목은 받은 일
+  정리가 낸 pocket(`Keeper_librarian_context.pocket`)이고, 현재 묶음은
+  `Keeper_librarian.selection.working_contexts`다. Memory OS와 같은
   operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.
   cluster별 Librarian Read Position과는 별개의 상태다.
 
@@ -718,11 +859,6 @@ status: reference
   서버의 Librarian 실행이 아니라 그 읽기 규칙의 측정 하네스다.
   → [masc_librarian_replay](../../bin/masc_librarian_replay.ml)
 
-**Librarian Continuity**
-: `masc-librarian-continuity` CLI. 의미 보존 측정을 돌리는 하네스다. 개념과
-  결과의 한계는 아래 Continuity Measurement 항목이 정한다.
-  → [masc_librarian_continuity](../../bin/masc_librarian_continuity.ml)
-
 **JEV / Noul**
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이
   참일 확률을 반환하는 응답 종류다. Noul 값은 기억 보존율이나 전체 기능의
@@ -744,14 +880,9 @@ status: reference
 
 **Continuity Measurement (의미 보존 측정)**
 : 특정 턴에서 만든 질문에 이후의 facts와 unread만으로 답하고, 참조 턴과
-  비교해 그 답을 평가하는 관측. `masc-librarian-continuity`는 명시한 합성
-  입력과 각 단계의 결과를 JSON 파일에 저장한다. TUI의 `/measurement SHA`는
-  게시한 결과 사본을 읽는다. 운영 Librarian 실행이나 Memory 변경을 승인하는
-  Gate가 아니다. 실행 방법과 결과의 한계는 [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.
-
-### 대화 작업 상태 (working_state)
-
-Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항.
-같은 파일에 저장된 정확한 대화 범위와 한 쌍이며, 큐 원본을 정리한
-`working_contexts`나 장기 Memory facts와 다릅니다. 모델의 출력만으로 범위가
-소비된 것은 아닙니다. pair 저장과 소비 시 이력 검증이 필요합니다.
+  비교해 그 답을 평가하는 관측. CLI `masc-librarian-continuity`가 이 측정을
+  돌리는 하네스이며, 명시한 합성 입력과 각 단계의 결과를 JSON 파일에 저장한다.
+  TUI의 `/measurement SHA`는 게시한 결과 사본을 읽는다. 운영 Librarian 실행이나
+  Memory 변경을 승인하는 Gate가 아니다. 실행 방법과 결과의 한계는
+  [Benchmark Runbook](../BENCHMARK-RUNBOOK.md)을 본다.
+  → [masc_librarian_continuity](../../bin/masc_librarian_continuity.ml)

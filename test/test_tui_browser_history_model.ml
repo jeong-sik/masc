@@ -49,7 +49,7 @@ let () =
   expect "different artifact identity is rejected"
     (Result.is_error (History.decode_artifact artifact (`Assoc ["sha256",`String (String.make 64 'b');"bytes",`Int 2;"content",`String "{}"])));
   let row refs = `Assoc ["ts",`Float 1.;"keeper",`String "reader";"tool",`String "BrowserRead";
-    "input",`Assoc [];"success",`Bool false;"execution_id",`String "exec-observation";
+    "input",`Assoc [];"wire_outcome",`String "error";"execution_id",`String "exec-observation";
     "artifact_refs",refs] in
   let snapshot refs = Masc.Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"reader"
     (`Assoc ["keeper",`String "reader";"count",`Int 1;"health",`String "ok";"entries",`List [row refs]]) in

@@ -171,6 +171,23 @@ let test_only_a_pending_workspace_is_taken_again () =
     ; ("a mint that failed", Credential.Mint_failed "disk is read-only")
     ]
 
+(* The level is part of the contract, not decoration: a first install's pending
+   workspace is the ordinary path and must not read as an error, while a mint
+   that failed is the one the operator has to act on. Reporting the pending
+   workspace as an error made a working first start read as a broken one. *)
+let test_only_a_failed_mint_is_an_error () =
+  check string "a failed mint is an error" "error"
+    (Credential.outcome_level (Credential.Mint_failed "disk is read-only"));
+  List.iter
+    (fun (label, outcome) ->
+      check string (label ^ " is not an error") "system"
+        (Credential.outcome_level outcome))
+    [ ("a held bearer", Credential.Held)
+    ; ("a fresh mint", Credential.Minted)
+    ; ("a workspace that demands none", Credential.Not_required)
+    ; ("a pending workspace", Credential.Workspace_pending)
+    ]
+
 let () =
   run "tui_credential"
     [ ( "refusal"
@@ -192,5 +209,7 @@ let () =
             test_a_pending_workspace_asks_nothing_of_the_operator
         ; test_case "only a pending workspace is taken again" `Quick
             test_only_a_pending_workspace_is_taken_again
+        ; test_case "only a failed mint is an error" `Quick
+            test_only_a_failed_mint_is_an_error
         ] )
     ]

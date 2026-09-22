@@ -310,7 +310,9 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
   ; mkh_removed = 0
   ; mkh_snapshot_present = true
   ; mkh_context_cycle =
-      { mcc_saved = None; mcc_saved_unreadable = false; mcc_prepared = None; mcc_synthesis = None }
+      { mcc_saved = None; mcc_saved_unreadable = false; mcc_read_position = None;
+        mcc_read_position_unreadable = false; mcc_rewriting_through = None;
+        mcc_prepared = None; mcc_synthesis = None }
   ; mkh_librarian =
       { Decode.mlh_state = Some "drained"
       ; mlh_detail = None
@@ -385,6 +387,9 @@ let test_render_memory_body_with_keepers () =
   let keeper = {keeper with mkh_context_cycle =
     {mcc_saved = Some {mcf_trace_id = "saved-trace"; mcf_end_atom = 5; mcf_boundary_line = 9};
      mcc_saved_unreadable = false;
+     mcc_read_position = Some 11;
+     mcc_read_position_unreadable = false;
+     mcc_rewriting_through = None;
      mcc_synthesis = Some {Masc.Keeper_continuity_observation.observed_at=1000.;
        trace_id=Some "saved-trace"; state=Masc.Keeper_continuity_observation.Not_committed;
        range=Some {start_atom=5; end_atom=8; completed_end_atom=12}};
@@ -432,6 +437,10 @@ let test_render_memory_body_with_keepers () =
   check bool "synthesis stop and unfinished atom range are visible" true
     (contains "Context synthesis · not_committed · last selected atoms [5,8) / observed completed 12" text);
   check bool "saved context shown independently" true (contains "Context saved · atom 5" text);
+  (* The distance between the cut and the read position is what a request
+     pays for, so the line has to carry both (#37793). *)
+  check bool "the read position sits beside the cut" true
+    (contains "read to atom 11, 6 atoms past the cut" text);
   check bool "prepared context names observation boundary" true (contains "Request prepared (not provider success)" text);
   check bool "serialized request bytes shown" true (contains "2048 request bytes" text);
   check bool "an absorbed front names the position and says nothing summarizes it" true

@@ -1974,7 +1974,7 @@ type keeper_call = {
   kc_input : string;
   kc_output : string option;
   kc_artifact_refs : Tool_output.artifact_ref list;
-  kc_success : bool;
+  kc_outcome : Tool_result.recorded_call_outcome;
   kc_duration_ms : float option;
   kc_turn : int option;
   kc_task_id : string option;
@@ -2557,6 +2557,17 @@ type memory_context_prepared = {
 type memory_context_cycle = {
   mcc_saved : memory_context_frontier option;
   mcc_saved_unreadable : bool;
+  (* Where the Librarian has read to, beside where its snapshot cuts. A
+     snapshot that stopped moving while the position kept going is what a
+     request pays for: it starts at the cut and carries every atom since
+     (#37793). The distance is [mcc_read_position - mcc_saved.mcf_end_atom]
+     and is not carried as a field of its own. *)
+  mcc_read_position : int option;
+  mcc_read_position_unreadable : bool;
+  (* Where a snapshot being rewritten from atom 0 has to reach before a
+     request starts from it. [None] on a snapshot that is not being
+     rewritten. *)
+  mcc_rewriting_through : int option;
   mcc_prepared : memory_context_prepared option;
   mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }
@@ -4863,7 +4874,8 @@ let decode_memory_alert json =
 let decode_memory_context_cycle keeper_json =
   let* json = required_member keeper_json "context_cycle" in
   let* () = require_exact_object_fields "context cycle"
-    ["saved"; "saved_read_error"; "prepared"; "synthesis"] json in
+    ["saved"; "saved_read_error"; "read_position"; "read_position_read_error";
+     "rewriting_through"; "prepared"; "synthesis"] json in
   let nullable decode = function `Null -> Ok None | value -> Result.map Option.some (decode value) in
   let frontier json =
     let* () = require_exact_object_fields "context frontier" ["trace_id"; "end_atom"; "boundary_line"] json in
@@ -4909,11 +4921,29 @@ let decode_memory_context_cycle keeper_json =
     | None, _ -> Ok false
     | Some "snapshot_unreadable", None -> Ok true
     | _ -> Error "context saved frontier disagrees with read error" in
+  let* mcc_read_position = required_nullable_int_field json "read_position" in
+  let* () = match mcc_read_position with
+    | Some end_atom when end_atom < 1 -> Error "invalid context read position"
+    | Some _ | None -> Ok () in
+  let* position_read_error = required_nullable_string_field json "read_position_read_error" in
+  let* mcc_read_position_unreadable = match position_read_error, mcc_read_position with
+    | None, _ -> Ok false
+    | Some "progress_unreadable", None -> Ok true
+    | Some _, _ -> Error "context read position disagrees with read error" in
+  let* mcc_rewriting_through = required_nullable_int_field json "rewriting_through" in
+  (* The writer sets this only past the cut it belongs to, on a snapshot that
+     was read. A value without that snapshot, or at or behind its cut, is not
+     a rewrite this reader can describe. *)
+  let* () = match mcc_rewriting_through, mcc_saved with
+    | None, _ -> Ok ()
+    | Some through, Some saved when through > saved.mcf_end_atom -> Ok ()
+    | Some _, (Some _ | None) -> Error "context rewrite target disagrees with the saved cut" in
   let* value = required_member json "prepared" in
   let* mcc_prepared = nullable prepared value in
   let* value = required_member json "synthesis" in
   let* mcc_synthesis = nullable Keeper_continuity_observation.synthesis_of_json value in
-  Ok {mcc_saved; mcc_saved_unreadable; mcc_prepared; mcc_synthesis}
+  Ok {mcc_saved; mcc_saved_unreadable; mcc_read_position; mcc_read_position_unreadable;
+      mcc_rewriting_through; mcc_prepared; mcc_synthesis}
 
 let decode_memory_keeper_health json =
   let* () =
@@ -5622,24 +5652,10 @@ let decode_keeper_call json =
   let* kc_at = require_float_field json "ts" in
   let* kc_tool = required_string_field json "tool" in
   let* keeper = required_string_field json "keeper" in
-  (* The durable record stopped always carrying a boolean [success]:
-     [Keeper_tool_call_log]'s `Assoc construction (the one the server
-     actually serves from) writes [wire_outcome] and an optional
-     [disposition], never a [success] key. A real row and every producer
-     built to match it therefore hit the [`Null] arm below unconditionally,
-     so [decode_keeper_call] always errored and the calls detail view never
-     rendered a single keeper's tool calls (#37461). [success] is still read
-     first for any caller that does send it explicitly. Next, [disposition]
-     is decoded through [keeper_call_disposition_of_string] -- the same
-     parse [kc_disposition] below reuses, and already documented as
-     [Tool_result.string_of_disposition]'s inverse -- instead of matching
-     its three spellings a second time in this function. [wire_outcome]
-     (the untyped wire projection -- explicitly not an outcome SSOT per
-     [Tool_result], but the only field several real rows carry) is tried
-     last, and its own ["unknown"] spelling is not folded into success: a
-     wire that says it does not know the outcome is not evidence that the
-     call completed. A row naming none of the three still errors, as
-     before. *)
+  (* How the call ended is read by the rule every tool-call log reader shares.
+     A row whose outcome fields do not decode is refused: the producer and
+     this reader disagree on the schema. A row with no outcome yet is kept and
+     says so. *)
   let* disposition = optional_string_field json "disposition" in
   let* kc_disposition =
     match disposition with
@@ -5647,20 +5663,12 @@ let decode_keeper_call json =
     | Some raw when String.trim raw = "" -> Ok None
     | Some word -> Result.map Option.some (keeper_call_disposition_of_string word)
   in
-  let* kc_success =
-    match member "success" json with
-    | `Bool value -> Ok value
-    | `Null -> (
-      match kc_disposition with
-      | Some Keeper_call_completed | Some Keeper_call_deferred -> Ok true
-      | Some Keeper_call_failed -> Ok false
-      | None -> (
-        match member "wire_outcome" json with
-        | `String "ok" -> Ok true
-        | `String "error" -> Ok false
-        | `String "unknown" -> Error "keeper call wire_outcome is unknown"
-        | _ -> Error "keeper call has no success, disposition, or wire_outcome field"))
-    | _ -> Error "keeper call success is not a bool"
+  let* kc_outcome =
+    match Tool_result.recorded_call_outcome json with
+    | ( Tool_result.Recorded_succeeded | Tool_result.Recorded_deferred
+      | Tool_result.Recorded_failed | Tool_result.Recorded_unsettled ) as outcome ->
+      Ok outcome
+    | Tool_result.Recorded_malformed -> Error "keeper call outcome is malformed"
   in
   let kc_input =
     match member "input" json with
@@ -5740,7 +5748,7 @@ let decode_keeper_call json =
       ; kc_input
       ; kc_output
       ; kc_artifact_refs
-      ; kc_success
+      ; kc_outcome
       ; kc_duration_ms
       ; kc_turn
       ; kc_task_id = string_opt "task_id"

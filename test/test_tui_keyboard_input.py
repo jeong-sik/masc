@@ -1827,6 +1827,7 @@ def run_terminal_scenario(
     extra_args: tuple[str, ...] = (),
     extra_env: dict[str, str] | None = None,
     conflicting_env_base_path: bool = False,
+    omit_operator_token: bool = False,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
@@ -1895,6 +1896,13 @@ def run_terminal_scenario(
                         "MASC_TOKEN": "masc-tui-keyboard-regression-token",
                     }
                 )
+                if omit_operator_token:
+                    # A first install holds no bearer yet, and the boot decision
+                    # it takes is the one this scenario describes. The harness
+                    # sets MASC_TOKEN above for every other scenario, so the one
+                    # that means "no token" takes it back out here rather than
+                    # leaving the choice to whoever ran the suite.
+                    environment.pop("MASC_TOKEN", None)
                 process = subprocess.Popen(
                     [
                         "/bin/sh",
@@ -2911,6 +2919,39 @@ def ctrl_y_reaches_the_tui_interaction(
     )
     if process.poll() is not None:
         raise AssertionError(f"Ctrl-Y ended the TUI with exit {process.returncode}")
+    os.write(master_fd, b"q")
+
+
+def first_install_waits_for_its_workspace_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A first install's boot line names the missing workspace, not a command.
+
+    The unit suite pins the sentence and the level the boot decision reports;
+    this pins what the operator actually sees. The harness seeds no
+    ``.masc/auth`` and this scenario omits ``MASC_TOKEN``, so the boot decision
+    is the one a fresh install takes -- no workspace to mint into yet. The
+    Overview events pane draws that notice, and the ``masc login`` command the
+    old single-constructor line handed over is not on the screen. The pane
+    trims a long row at the panel width, so the needle is the notice's opening.
+    """
+    wait_for_output(
+        process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+    )
+    drain_until_quiet(process, master_fd, output)
+    screen = screen_text(bytes(output))
+    if b"no operator token yet" not in screen:
+        raise AssertionError(
+            f"a first install did not name the missing workspace: {screen!r}"
+        )
+    if b"masc login" in screen:
+        raise AssertionError(
+            f"a first install was handed the login command: {screen!r}"
+        )
     os.write(master_fd, b"q")
 
 
@@ -6740,6 +6781,9 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                     "context_cycle": {
                         "saved": None,
                         "saved_read_error": None,
+                        "read_position": None,
+                        "read_position_read_error": None,
+                        "rewriting_through": None,
                         "prepared": None,
                         "synthesis": None,
                     },
@@ -8414,7 +8458,6 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
                     "tool": "masc_fusion",
                     "input": {"prompt": "panel-input-exact"},
                     "output": "panel-output-exact",
-                    "success": False,
                     "duration_ms": 1200.0,
                     "execution_id": "exec-fusion-1",
                     "tool_use_id": "call-fusion-1",
@@ -9564,7 +9607,7 @@ def keeper_calls_fixture() -> HttpResponse:
                     "tool": "Read",
                     "input": '{"file_path": "lib/a.ml"}',
                     "output": "sentinel-digest-31506",
-                    "success": True,
+                    "wire_outcome": "ok",
                     "duration_ms": 28.4,
                     "turn": 2143,
                 },
@@ -9573,7 +9616,7 @@ def keeper_calls_fixture() -> HttpResponse:
                     "keeper": "alpha",
                     "tool": "tool_execute",
                     "input": '{"argv": ["dune", "build"]}',
-                    "success": False,
+                    "wire_outcome": "error",
                     "duration_ms": 14534.0,
                     "turn": 2144,
                 },
@@ -14739,6 +14782,16 @@ def run_ctrl_y_regression(executable: str) -> None:
     )
 
 
+def run_first_install_credential_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="a first install waits for its workspace instead of the login command",
+        interact=first_install_waits_for_its_workspace_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        omit_operator_token=True,
+    )
+
+
 def run_planning_review_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -17485,6 +17538,11 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ),
     ScenarioFamily("quit-waiting", "quit with waiting messages regression", (run_quit_waiting_regression,)),
     ScenarioFamily("ctrl-y", "Ctrl-Y regression", (run_ctrl_y_regression,)),
+    ScenarioFamily(
+        "first-install-credential",
+        "first install credential regression",
+        (run_first_install_credential_regression,),
+    ),
     ScenarioFamily("planning-review", "Planning Task Review regression", (run_planning_review_regression,)),
     ScenarioFamily("repositories", "Repositories regression", (run_repositories_regression,)),
     ScenarioFamily("project-changes", "project Git changes regression", (run_project_changes_regression,)),

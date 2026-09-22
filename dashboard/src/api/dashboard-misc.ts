@@ -106,6 +106,14 @@ export interface ContextCycle {
   synthesis: ContextSynthesis | null
   saved: ContextFrontier | null
   saved_read_error: 'snapshot_unreadable' | null
+  /** Where the Librarian has read to, beside where its snapshot cuts. A request
+   *  starts at the cut and carries the atoms up to here, so the two apart is
+   *  what the turn pays; the distance is the subtraction (#37793). */
+  read_position: number | null
+  read_position_read_error: 'progress_unreadable' | null
+  /** Where a snapshot being rewritten from atom 0 has to reach before a request
+   *  starts from it. Always past the saved cut. */
+  rewriting_through: number | null
   prepared: {
     prepared_at: number
     runtime_id: string
@@ -362,14 +370,24 @@ function decodeContextSynthesis(raw: unknown): ContextSynthesis | null {
 }
 
 function decodeContextCycle(raw: unknown): ContextCycle | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['saved', 'saved_read_error', 'prepared', 'synthesis'])) return null
+  if (!isRecord(raw) || !exactKeys(raw, ['saved', 'saved_read_error', 'read_position',
+    'read_position_read_error', 'rewriting_through', 'prepared', 'synthesis'])) return null
   const saved = raw.saved === null ? null : decodeContextFrontier(raw.saved)
   if (raw.saved !== null && saved === null) return null
   if (raw.saved_read_error !== null && raw.saved_read_error !== 'snapshot_unreadable') return null
   if (saved !== null && raw.saved_read_error !== null) return null
+  const read_position = raw.read_position === null ? null : nonNegativeInteger(raw.read_position)
+  if (raw.read_position !== null && (read_position === null || read_position === 0)) return null
+  if (raw.read_position_read_error !== null && raw.read_position_read_error !== 'progress_unreadable') return null
+  if (read_position !== null && raw.read_position_read_error !== null) return null
+  const rewriting_through = raw.rewriting_through === null ? null : nonNegativeInteger(raw.rewriting_through)
+  if (raw.rewriting_through !== null && (rewriting_through === null || rewriting_through === 0)) return null
+  // The writer sets this only past the cut it belongs to, on a snapshot it read.
+  if (rewriting_through !== null && (saved === null || rewriting_through <= saved.end_atom)) return null
   const synthesis = raw.synthesis === null ? null : decodeContextSynthesis(raw.synthesis)
   if (raw.synthesis !== null && synthesis === null) return null
-  const result: ContextCycle = { saved, saved_read_error: raw.saved_read_error, prepared: null, synthesis }
+  const result: ContextCycle = { saved, saved_read_error: raw.saved_read_error, read_position,
+    read_position_read_error: raw.read_position_read_error, rewriting_through, prepared: null, synthesis }
   if (raw.prepared === null) return result
   const p = raw.prepared
   if (!isRecord(p) || !exactKeys(p, ['prepared_at', 'runtime_id', 'input', 'request_bytes'])) return null

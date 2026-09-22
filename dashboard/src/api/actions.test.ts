@@ -11,7 +11,11 @@ const mcpMocks = vi.hoisted(() => ({
 // test pins the contract that a claim is routed through the persisted
 // masc_transition FSM tool.
 vi.mock('./mcp', () => mcpMocks)
-vi.mock('./core', () => ({ get: vi.fn(), post: vi.fn(() => Promise.resolve({ ok: true })) }))
+vi.mock('./core', async importOriginal => ({
+  ...await importOriginal<typeof import('./core')>(),
+  get: vi.fn(),
+  post: vi.fn(() => Promise.resolve({ ok: true })),
+}))
 
 import { claimTask, deleteTask, sendBroadcast } from './actions'
 import { post } from './core'

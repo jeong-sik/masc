@@ -237,7 +237,7 @@ let test_preview_line_marks_breaks_and_escapes_the_rest () =
   Alcotest.(check bool) "the result is one row" false
     (String.contains (Tui_decode.preview_line "x\ny\nz") '\n')
 
-let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn
+let keeper_call_row ~keeper ~tool ?(wire_outcome = "ok") ?duration_ms ?turn
     ?execution_id ?tool_use_id ?planned_index ?batch_index ?batch_size
     ?execution_mode ?result_bytes ?truncated_to ?disposition () =
   `Assoc
@@ -245,7 +245,7 @@ let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn
      ; "keeper", `String keeper
      ; "tool", `String tool
      ; "input", `String "{\"file_path\": \"lib/a.ml\"}"
-     ; "success", `Bool success
+     ; "wire_outcome", `String wire_outcome
      ]
     @ (match duration_ms with None -> [] | Some d -> [ "duration_ms", `Float d ])
     @ (match turn with None -> [] | Some t -> [ "turn", `Int t ])
@@ -371,7 +371,7 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
                 ~turn:2143 ()
             ; keeper_call_row ~keeper:"analyst" ~tool:"Edit" ()
             ; keeper_call_row ~keeper:"largo" ~tool:"tool_execute"
-                ~success:false ()
+                ~wire_outcome:"error" ()
             ] )
       ]
   in
@@ -387,8 +387,8 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
       (match snapshot.Tui_decode.kcs_entries with
        | [ first; second ] ->
            Alcotest.(check string) "order kept" "Read" first.Tui_decode.kc_tool;
-           Alcotest.(check bool) "failure carried" false
-             second.Tui_decode.kc_success;
+           Alcotest.(check bool) "failure carried" true
+             (second.Tui_decode.kc_outcome = Tool_result.Recorded_failed);
            Alcotest.(check (option (Alcotest.float 0.01))) "duration optional"
              (Some 28.4) first.Tui_decode.kc_duration_ms;
            Alcotest.(check (option Alcotest.int)) "turn optional" (Some 2143)
@@ -409,7 +409,7 @@ let test_keeper_calls_carry_what_the_call_answered () =
       ; "keeper", `String "largo"
       ; "tool", `String "Execute"
       ; "input", `String {|{"argv": ["ls"]}|}
-      ; "success", `Bool true
+      ; "disposition", `String "completed"
       ; "output", output
       ]
   in
@@ -451,7 +451,7 @@ let test_keeper_calls_require_the_envelope () =
              ; "count", `Int 0
              ; "health", `String "ok"
              ])));
-  Alcotest.(check bool) "a row without success is an error" true
+  Alcotest.(check bool) "an outcome of the wrong type is an error" true
     (Result.is_error
        (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
           (`Assoc
@@ -464,15 +464,13 @@ let test_keeper_calls_require_the_envelope () =
                        [ "ts", `Float 1.0
                        ; "keeper", `String "largo"
                        ; "tool", `String "Read"
+                       ; "wire_outcome", `Int 1
                        ]
                    ] )
              ])))
 
-(* [Keeper_tool_call_log]'s real durable record never writes a [success]
-   key -- only [wire_outcome], and sometimes [disposition]. A row naming
-   neither carries no success signal and still errors (the case above); a
-   row naming either must decode, or every real keeper's calls detail view
-   is unrenderable (#37461). *)
+(* The row's outcome is read by [Tool_result.recorded_call_outcome]: the
+   [disposition] first, the [wire_outcome] when the row has none. *)
 let test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition () =
   let row extra =
     `Assoc
@@ -491,35 +489,41 @@ let test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition () =
          ; "entries", `List [ row extra ]
          ])
   in
-  let success_of extra =
+  let outcome_of extra =
     match snapshot_of extra with
     | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
     | Ok snapshot -> (
       match snapshot.Tui_decode.kcs_entries with
-      | [ call ] -> call.Tui_decode.kc_success
+      | [ call ] -> (
+        match call.Tui_decode.kc_outcome with
+        | Tool_result.Recorded_succeeded -> "succeeded"
+        | Tool_result.Recorded_deferred -> "deferred"
+        | Tool_result.Recorded_failed -> "failed"
+        | Tool_result.Recorded_unsettled -> "unsettled"
+        | Tool_result.Recorded_malformed -> "malformed")
       | _ -> Alcotest.fail "expected one call")
   in
-  Alcotest.(check bool) "wire_outcome ok reads as success" true
-    (success_of [ "wire_outcome", `String "ok" ]);
-  Alcotest.(check bool) "wire_outcome error reads as failure" false
-    (success_of [ "wire_outcome", `String "error" ]);
-  (* A wire that says it does not know the outcome is not evidence that the
-     call completed: unlike "ok"/"error" this spelling refuses instead of
-     defaulting to success (Unknown -> Permissive Default is the antipattern
-     the earlier fallback fell into; #37650 review caught it). *)
-  (match snapshot_of [ "wire_outcome", `String "unknown" ] with
-   | Ok _ -> Alcotest.fail "wire_outcome unknown must not decode to a call"
+  let check label expected extra =
+    Alcotest.(check string) label expected (outcome_of extra)
+  in
+  check "wire_outcome ok" "succeeded" [ "wire_outcome", `String "ok" ];
+  check "wire_outcome error" "failed" [ "wire_outcome", `String "error" ];
+  (* A wire that does not know the outcome is kept and says so: it is not
+     evidence that the call completed, and not a reason to drop the row. *)
+  check "wire_outcome unknown" "unsettled" [ "wire_outcome", `String "unknown" ];
+  check "no outcome field" "unsettled" [];
+  check "disposition completed" "succeeded" [ "disposition", `String "completed" ];
+  check "disposition failed" "failed" [ "disposition", `String "failed" ];
+  check "disposition deferred is its own case" "deferred"
+    [ "disposition", `String "deferred" ];
+  check "the disposition decides over the wire" "succeeded"
+    [ "disposition", `String "completed"; "wire_outcome", `String "error" ];
+  check "a success flag is not an outcome" "unsettled" [ "success", `Bool true ];
+  (match snapshot_of [ "wire_outcome", `String "maybe" ] with
+   | Ok _ -> Alcotest.fail "an undecodable wire_outcome must not decode to a call"
    | Error detail ->
-     Alcotest.(check string) "the refusal names the unknown wire_outcome"
-       "entries[0]: keeper call wire_outcome is unknown" detail);
-  Alcotest.(check bool) "disposition completed reads as success" true
-    (success_of [ "disposition", `String "completed" ]);
-  Alcotest.(check bool) "disposition failed reads as failure" false
-    (success_of [ "disposition", `String "failed" ]);
-  Alcotest.(check bool) "disposition deferred is not a known failure" true
-    (success_of [ "disposition", `String "deferred" ]);
-  Alcotest.(check bool) "an explicit success still wins over wire_outcome" false
-    (success_of [ "success", `Bool false; "wire_outcome", `String "ok" ])
+     Alcotest.(check string) "the refusal names the malformed outcome"
+       "entries[0]: keeper call outcome is malformed" detail)
 
 let test_timestamp_slices_are_sanitized_after_selection () =
   Alcotest.(check string) "normal clock timestamp, in the zone asked for"
@@ -3433,7 +3437,9 @@ let test_decode_repository_requires_resolved_local_path () =
    the decoder must keep both axes instead of collapsing that row to
    memoryless. *)
 let empty_memory_context_cycle =
-  `Assoc ["saved", `Null; "saved_read_error", `Null; "prepared", `Null; "synthesis", `Null]
+  `Assoc ["saved", `Null; "saved_read_error", `Null; "read_position", `Null;
+    "read_position_read_error", `Null; "rewriting_through", `Null;
+    "prepared", `Null; "synthesis", `Null]
 
 let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let keeper id present failures source_present =
@@ -3567,7 +3573,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   let input = `Assoc ["kind", `String "summarized"; "frontier", frontier] in
   let prepared = `Assoc ["prepared_at", `Float 1700000000.; "runtime_id", `String "fixture-runtime";
     "input", input; "request_bytes", `Int 2048] in
-  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null; "prepared", prepared; "synthesis", `Null] in
+  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null;
+    "read_position", `Int 4; "read_position_read_error", `Null;
+    "rewriting_through", `Null; "prepared", prepared; "synthesis", `Null] in
   let context_payload cycle = map_keeper 0 (replace_field "context_cycle" cycle) json in
   let synthesis = `Assoc ["observed_at", `Float 1700000000.; "trace_id", `String "context-trace";
     "state", `String "not_committed"; "range", `Assoc ["start_atom", `Int 3;
@@ -3979,6 +3987,152 @@ let test_decode_memory_alert_keeps_the_code_contract () =
     (memory_alert_snapshot_with_extra [ ("value", `Float 4.0) ]
        ~code:"librarian_starvation" ~severity:"error"
        ~target:"librarian_starvation")
+
+(* A snapshot that stopped moving while the Librarian kept reading is what a
+   request pays for: it starts at the cut and carries every atom up to the
+   position. The two numbers have to arrive together, or a reader cannot tell
+   an ordinary one-turn lag from rounds that have been failing for a day
+   (#37793). *)
+let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
+  let snapshot_with context_cycle =
+    `Assoc
+      [ ("schema", `String "keeper.memory_os.current_health.v7")
+      ; ("generated_at", `Float 1_775_000_000.0)
+      ; ( "keepers"
+        , `List
+            [ `Assoc
+                [ ("keeper_id", `String "alpha")
+                ; ("revision", `Int 1)
+                ; ("facts", `Int 0)
+                ; ("observed_facts", `Int 0)
+                ; ("derived_facts", `Int 0)
+                ; ("support_invalidations", `Int 0)
+                ; ("snapshot_bytes", `Int 0)
+                ; ("added", `Int 0)
+                ; ("removed", `Int 0)
+                ; ("snapshot_present", `Bool true)
+                ; ("updated_at", `Float 1700000000.)
+                ; ("context_cycle", context_cycle)
+                ; ( "librarian"
+                  , `Assoc
+                      [ ("state", `String "drained")
+                      ; ("detail", `Null)
+                      ; ("measured_at", `Float 1_775_000_000.0)
+                      ; ("unread_atom_turns", `Int 0)
+                      ; ("unread_official_turns", `Int 0)
+                      ; ("continuity_unread_atoms", `Int 0)
+                      ; ("last_success_at", `Null)
+                      ; ("last_failure_kind", `Null)
+                      ] )
+                ; ("librarian_failures", `Int 0)
+                ; ("vision_ingest_errors", `Int 0)
+                ; ("vision_ingest_error_reasons", `List [])
+                ; ("read_error", `Null)
+                ; ("source_revision", `Int 0)
+                ; ("source_facts", `Int 0)
+                ; ("source_invalidations", `Int 0)
+                ; ("source_snapshot_bytes", `Int 0)
+                ; ("source_snapshot_present", `Bool false)
+                ; ("source_read_error", `Null)
+                ; ("alerts", `List [])
+                ] ] )
+      ; ( "totals"
+        , `Assoc
+            [ ("facts", `Int 0); ("observed_facts", `Int 0); ("derived_facts", `Int 0)
+            ; ("support_invalidations", `Int 0); ("snapshot_bytes", `Int 0)
+            ; ("added", `Int 0); ("removed", `Int 0); ("source_facts", `Int 0)
+            ; ("source_invalidations", `Int 0); ("source_snapshot_bytes", `Int 0)
+            ; ("librarian_unread_turns", `Int 0); ("librarian_failures", `Int 0)
+            ; ("librarian_continuity_unread_atoms", `Int 0)
+            ; ("librarian_continuity_unmeasured", `Int 0)
+            ; ("vision_ingest_errors", `Int 0); ("read_errors", `Int 0)
+            ; ("source_read_errors", `Int 0)
+            ] )
+      ; ( "alert_summary"
+        , `Assoc
+            [ ("total_alerts", `Int 0); ("warn_alerts", `Int 0); ("error_alerts", `Int 0)
+            ; ("keepers_with_alerts", `Int 0); ("snapshot_read_error_keepers", `Int 0)
+            ; ("source_snapshot_read_error_keepers", `Int 0)
+            ; ("librarian_stopped_keepers", `Int 0); ("librarian_starving_keepers", `Int 0)
+            ] )
+      ]
+  in
+  let cycle ?(saved = true) ~read_position ~read_error ~rewriting_through () =
+    `Assoc
+      [ ( "saved"
+        , if saved
+          then
+            `Assoc
+              [ ("trace_id", `String "trace-1"); ("end_atom", `Int 7694)
+              ; ("boundary_line", `Int 385) ]
+          else `Null )
+      ; ("saved_read_error", `Null)
+      ; ("read_position", match read_position with None -> `Null | Some value -> `Int value)
+      ; ( "read_position_read_error"
+        , match read_error with None -> `Null | Some value -> `String value )
+      ; ( "rewriting_through"
+        , match rewriting_through with None -> `Null | Some value -> `Int value )
+      ; ("prepared", `Null)
+      ; ("synthesis", `Null)
+      ]
+  in
+  let cycle_of snapshot =
+    match snapshot.Tui_decode.mhs_keepers with
+    | [ keeper ] -> keeper.Tui_decode.mkh_context_cycle
+    | _ -> Alcotest.fail "the fixture holds one keeper"
+  in
+  (match
+     Tui_decode.decode_memory_health_snapshot
+       (snapshot_with
+          (cycle ~read_position:(Some 12887) ~read_error:None
+             ~rewriting_through:(Some 12888) ()))
+   with
+   | Error detail -> Alcotest.failf "decode failed: %s" detail
+   | Ok snapshot ->
+     let cycle = cycle_of snapshot in
+     Alcotest.(check (option int)) "the read position is carried" (Some 12887)
+       cycle.Tui_decode.mcc_read_position;
+     Alcotest.(check (option int)) "the rewrite target is carried" (Some 12888)
+       cycle.Tui_decode.mcc_rewriting_through;
+     Alcotest.(check bool) "the position was readable" false
+       cycle.Tui_decode.mcc_read_position_unreadable;
+     match cycle.Tui_decode.mcc_saved with
+     | None -> Alcotest.fail "the fixture saves a cut"
+     | Some saved ->
+       Alcotest.(check int) "the cut the position is read against" 7694
+         saved.Tui_decode.mcf_end_atom);
+  (* An unreadable position is why there is no number, not a keeper that has
+     read nothing. *)
+  (match
+     Tui_decode.decode_memory_health_snapshot
+       (snapshot_with
+          (cycle ~read_position:None ~read_error:(Some "progress_unreadable")
+             ~rewriting_through:None ()))
+   with
+   | Error detail -> Alcotest.failf "decode failed: %s" detail
+   | Ok snapshot ->
+     Alcotest.(check bool) "an unreadable position says so" true
+       (cycle_of snapshot).Tui_decode.mcc_read_position_unreadable);
+  (* Both halves of the disagreement: a marker with a number, and a rewrite
+     target the cut already reached. *)
+  Alcotest.(check bool) "a read error beside a position is refused" true
+    (Result.is_error
+       (Tui_decode.decode_memory_health_snapshot
+          (snapshot_with
+             (cycle ~read_position:(Some 12887) ~read_error:(Some "progress_unreadable")
+                ~rewriting_through:None ()))));
+  Alcotest.(check bool) "a rewrite target at the cut is refused" true
+    (Result.is_error
+       (Tui_decode.decode_memory_health_snapshot
+          (snapshot_with
+             (cycle ~read_position:(Some 12887) ~read_error:None
+                ~rewriting_through:(Some 7694) ()))));
+  Alcotest.(check bool) "a rewrite target without a cut is refused" true
+    (Result.is_error
+       (Tui_decode.decode_memory_health_snapshot
+          (snapshot_with
+             (cycle ~saved:false ~read_position:(Some 12887) ~read_error:None
+                ~rewriting_through:(Some 12888) ()))))
 
 let test_decode_memory_health_rejects_stale_schema () =
   let json =
@@ -10051,6 +10205,8 @@ let () =
           test_decode_repository_changes_keeps_git_axes;
         Alcotest.test_case "memory health keeps ordinary and source axes" `Quick
           test_decode_memory_health_keeps_ordinary_and_source_axes;
+        Alcotest.test_case "memory health reads the Librarian position beside the cut"
+          `Quick test_decode_memory_health_reads_the_librarian_position_beside_the_cut;
         Alcotest.test_case "memory health rejects stale schema" `Quick
           test_decode_memory_health_rejects_stale_schema;
         Alcotest.test_case "memory alert keeps the code contract" `Quick

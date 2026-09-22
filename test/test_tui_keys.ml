@@ -1515,9 +1515,27 @@ let test_system_logs_owns_only_its_real_filter_keys () =
   Alcotest.(check bool) "the ends stay on Acting" true (List.mem "Home/End" acting);
   Alcotest.(check bool) "f stays on Acting" true (List.mem "f" acting)
 
+(* Read a row the way the fitter reads it. [Masc_tui_footer.item_is_pinned]
+   takes an item's key up to its first colon, splits that key into atoms, and
+   matches a single-atom question against them -- which is why [e / Enter] is
+   pinned by "Enter". This asked a different question: it split the row on one
+   space, so the atoms of a key spelled with spaces became separate tokens and
+   only the last one carried the colon. [footer_has_key "e"] was false on a row
+   holding [e / Enter:edit], and [footer_has_key "y"] false on [y / x:agree /
+   overrule] -- the pane answers both.
+
+   The cost was not the false answers. It was that the answer depended on
+   which atom was written last: spelling the pair [Enter / e] would have
+   flipped two assertions without a word of the table changing meaning. An
+   assertion about a key must not turn on the order its spellings appear in. *)
 let footer_has_key key row =
-  String.split_on_char ' ' row
-  |> List.exists (String.starts_with ~prefix:(key ^ ":"))
+  let asked = Masc_tui_keys.key_atoms key in
+  List.exists
+    (fun item ->
+      let drawn = item_key item in
+      String.equal drawn key
+      || (List.length asked = 1 && List.mem key (Masc_tui_keys.key_atoms drawn)))
+    (footer_items row)
 
 let fitted_footer ~cols hints =
   Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:cols ~port:8935
@@ -1544,13 +1562,15 @@ let test_config_pane_footer_actions () =
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
     enabled "f" (pane = Config_themes);
     enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
-    (* #36650 moved params off the bare [e]: there the key rides in the pinned
-       pair [e / Enter], because both spellings open the same field. The pane
-       still answers [e] -- [footer_has_key] reads the item's key whole, and
-       the item it belongs to is now the pair, which the row below checks. *)
+    (* Every pane that answers [e], including params -- where #36650 moved the
+       key into the pair [e / Enter] because both spellings open the same
+       field ([handle_runtime_param_edit_open] ~advanced:false). The pane was
+       dropped from this list while [footer_has_key] read only a key's last
+       atom, which made the line say "params does not answer e" about a pane
+       whose dispatcher answers it. This is a list of what the panes do. *)
     enabled "e"
       (List.mem pane
-         [ Config_runtime; Config_models; Config_prompts; Config_voice ]);
+         [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
     List.iter (fun key -> enabled key (pane = Config_presets)) [ "n"; "u" ];
     List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "o" ];
     (* [a] answers on two panes now: the prompt fragments, and the keeper-voice
@@ -1598,11 +1618,14 @@ let test_config_pane_footer_actions () =
   in
   Alcotest.(check bool) "params keeps its other action at 80 columns" true
     (footer_has_key "E" params_at_80);
-  (* [footer_has_key] reads an item's key up to its first colon, and the pair
-     spells that key with spaces around the slash -- so ask for the atom the
-     pin is read by rather than for the pair's whole spelling. *)
+  (* Both spellings of the field, asked separately. While [footer_has_key] saw
+     only a key's last atom, the [Enter] line passed and an [e] line would
+     have failed -- so the pair's two doors are named here, and a future
+     spelling of [Enter / e] cannot quietly turn either answer around. *)
   Alcotest.(check bool) "params keeps the shared field at 80 columns" true
     (footer_has_key "Enter" params_at_80);
+  Alcotest.(check bool) "params keeps the field's other spelling at 80 columns" true
+    (footer_has_key "e" params_at_80);
   (* The themes list pages now, and its own keys still fit the row. *)
   List.iter
     (fun key ->

@@ -8039,11 +8039,18 @@ let render_verification_list (state : state) =
                      "cancellation" folds to "ca\xe2\x80\xa6ation" in eight
                      cells. *)
                 ; vrow_verdict =
-                    Masc_domain.verification_intent_to_string
-                      (match r.vr_ask with
-                       | Masc.Tui_decode.Asks_completion ->
+                    (match r.vr_ask with
+                     | Masc.Tui_decode.Asks_completion ->
+                         Masc_domain.verification_intent_to_string
                            Masc_domain.Complete_task
-                       | Asks_cancellation _ -> Masc_domain.Cancel_task)
+                     | Asks_cancellation _ ->
+                         Masc_domain.verification_intent_to_string
+                           Masc_domain.Cancel_task
+                     (* The row does not say which verdict it waits on, and
+                        neither does this cell. A word here would be one the
+                        record never wrote. *)
+                     | Ask_unstated -> ""
+                     | Unrecognised_ask word -> Terminal_text.single_line word)
                 ; vrow_submitted_by =
                     Terminal_text.single_line r.vr_submitted_by
                 ; vrow_evidence = evidence
@@ -8182,7 +8189,11 @@ let verification_detail_lines ~width
       (match request.vr_ask with
        | Masc.Tui_decode.Asks_cancellation _ ->
            "cancel -- only an operator's verdict clears it"
-       | Asks_completion -> "complete")
+       | Asks_completion -> "complete"
+       | Ask_unstated -> "the record does not say"
+       | Unrecognised_ask word ->
+           Printf.sprintf "%s -- a word this build does not know"
+             (Terminal_text.single_line word))
     (* In the terminal's zone, like every other Created on a detail. This
        one printed the server's RFC 3339 text, offset and all, under a header
        clock in local time. *)
@@ -8194,9 +8205,16 @@ let verification_detail_lines ~width
      completion, and a stop is not asking about them. Wrapped, because the
      reason is prose and a cut one argues nothing. *)
   @ (match request.vr_ask with
-     | Masc.Tui_decode.Asks_completion -> []
-     | Asks_cancellation reason ->
-         wrapped_block "WHY IT SHOULD STOP" reason @ [ (Ansi.dim, "") ])
+     | Masc.Tui_decode.Asks_completion | Ask_unstated | Unrecognised_ask _ -> []
+     | Asks_cancellation (Some reason) ->
+         wrapped_block "WHY IT SHOULD STOP" reason @ [ (Ansi.dim, "") ]
+     (* A stop submitted before the record kept the case has none. The block
+        says the copy is missing rather than drawing an empty heading, which
+        would read as a stop nobody argued for. *)
+     | Asks_cancellation None ->
+         wrapped_block "WHY IT SHOULD STOP"
+           "This request kept no copy of the case for stopping."
+         @ [ (Ansi.dim, "") ])
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
      Their three fields were literals in the producer -- "normal", "" and "" --
      so the three rows read the same on every request this pane has ever

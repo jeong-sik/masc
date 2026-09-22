@@ -2341,6 +2341,34 @@ let fusion_run_status_color = function
   | Fusion_completed -> (Theme.ok ())
   | Fusion_failed _ -> (Theme.bad ())
 
+let fusion_run_stage_compact = function
+  | Fusion_stage_accepted -> "accepted"
+  | Fusion_stage_panel { frs_expected } ->
+      Printf.sprintf "panel(%d)" frs_expected
+  | Fusion_stage_judge { frs_answered; frs_failed; _ } ->
+      Printf.sprintf "judge(%d/%d)" frs_answered frs_failed
+  | Fusion_stage_computed { frs_answered; frs_failed; _ } ->
+      Printf.sprintf "computed(%d/%d)" frs_answered frs_failed
+  | Fusion_stage_recording_evidence { frs_answered; frs_failed; _ } ->
+      Printf.sprintf "recording(%d/%d)" frs_answered frs_failed
+  | Fusion_stage_completed -> "completed"
+  | Fusion_stage_failed -> "failed"
+
+(* A failed run says how it failed. The cell read [failed] on eight of
+   eighteen live runs and nothing more, while each run carried the server's
+   failure code all along -- [timeout], [provider_error],
+   [panels_unavailable] on the live fleet -- and only the line under the
+   table that follows the cursor drew it, so reading why eight runs failed
+   took eight moves. The code is a tag from the judge's or the delivery's
+   closed set, not a sentence, so it fits the cell; it is still drawn in the
+   failure colour, the title row counts the failures, and the line under the
+   table keeps the full error for the selected run. *)
+let fusion_run_state_text ~status ~stage =
+  match status with
+  | Fusion_running -> fusion_run_stage_compact stage
+  | Fusion_completed -> fusion_run_status_to_string status
+  | Fusion_failed failure -> Terminal_text.single_line failure.frs_failure_code
+
 
 let fusion_run_progress_text = function
   | Fusion_stage_accepted -> "accepted; waiting for panel dispatch"

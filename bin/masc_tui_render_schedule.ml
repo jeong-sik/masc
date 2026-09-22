@@ -872,7 +872,10 @@ let change_row ~op_style ~result_style ~summary_width values =
 
 let fusion_time_width = 16
 let fusion_age_width = 7
-let fusion_state_width = 18
+(* A running stage ("recording(3/1)") or how the run ended. A failed run
+   draws its failure code, and the widest the server writes is
+   [evidence_unavailable]. *)
+let fusion_state_width = 20
 let fusion_preset_width = 10
 let fusion_minimum_run_width = 12
 

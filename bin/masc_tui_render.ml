@@ -8773,19 +8773,6 @@ let render_harness (state : state) =
        | None -> render_harness_list state)
   | Some _, None | None, _ -> render_harness_list state
 
-let fusion_run_stage_compact = function
-  | Fusion_stage_accepted -> "accepted"
-  | Fusion_stage_panel { frs_expected } ->
-      Printf.sprintf "panel(%d)" frs_expected
-  | Fusion_stage_judge { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "judge(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_computed { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "computed(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_recording_evidence { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "recording(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_completed -> "completed"
-  | Fusion_stage_failed -> "failed"
-
 (* What became of the selected run, in one row under the list. It opened
    with "Flow: Question → Panel → Judge → Evidence" on every run: the four
    stops are the same for every run and say nothing about this one, the
@@ -8955,11 +8942,8 @@ let render_fusion_list (state : state) =
               Ansi.reverse ^ ">" ^ Ansi.reset else " " in
           box_line buf cols (marker ^ " " ^ line)
       | Some (Tui_decode.Fusion_retained_run run) ->
-          let status = fusion_run_status_to_string run.fur_status in
           let state_text =
-            match run.fur_status with
-            | Fusion_running -> fusion_run_stage_compact run.fur_stage
-            | Fusion_completed | Fusion_failed _ -> status
+            fusion_run_state_text ~status:run.fur_status ~stage:run.fur_stage
           in
           let line =
             Render_schedule.fusion_row columns

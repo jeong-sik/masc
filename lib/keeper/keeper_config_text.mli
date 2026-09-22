@@ -21,14 +21,7 @@ val validate_name : string -> bool
 val invalid_name_error : string -> string
 (** Canonical explanation for a value rejected by {!validate_name}. *)
 
-(* ── Configuration constants ────────────────────────────────── *)
-
-val prompt_render_max_bytes : int
-
 (* ── UTF-8 string processing ────────────────────────────────── *)
 
 val utf8_repair_string : string -> string
 
-(* ── Prompt text normalization ──────────────────────────────── *)
-
-val normalize_prompt_text : max_bytes:int -> string -> string

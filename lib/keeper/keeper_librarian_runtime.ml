@@ -33,7 +33,7 @@ type outward_effect =
 
 type exact_execution_error =
   { outward_effect : outward_effect
-  ; capacity_refused : bool
+  ; walk_was_never_about_size : bool
   ; detail : string
   }
 
@@ -364,32 +364,132 @@ let prepare_attempt ~requirement ~selected_slots messages =
       Exact_setup_failed (Exact_flow_start_failed error))
 ;;
 
-let capacity_refused_by_flow = function
-  | Exact_output.Flow_candidates_exhausted { rejection; _ } ->
-    (match Exact_output.candidate_rejection_disposition rejection with
-     | Input_capacity (Context_window_exceeded _
-         | Token_capacity_rejected (Capacity_input_rejected _)) -> true
-     | _ -> false)
-  | Exact_output.Flow_exact_execution_failed { cause; _ } ->
-    (match cause.Exact_output.cause with
-     | Provider_response_refused
-         { refusal = Request_body_refused | Context_overflow | Input_capacity; _ } -> true
-     | _ -> false)
-  | _ -> false
+(* Whether a failure says nothing about the range's size, so reading less
+   cannot answer it. The continuity pass reads less from then on after every
+   other failure and only widens again once the backlog empties, so a refusal
+   that a smaller request would meet just as surely has to be held apart: one
+   quota storm or one expired credential would otherwise walk the source down
+   to a single atom and leave it there, reading the backlog one atom per pass.
+
+   Two groups qualify. A provider momentarily unable to serve a request it
+   accepted (quota, overload, server, network), and a refusal only an
+   operator can lift (authentication, authorization, payment, an absent
+   model). Every constructor is listed: a new provider failure kind has to be
+   placed here rather than fall into a default. *)
+let cause_is_not_about_size (cause : Exact_output.execution_error_cause) =
+  match cause with
+  | Provider_response_refused { refusal; _ } ->
+    (match refusal with
+     | Rate_limited | Overloaded | Server_error | Network_error
+     | Auth_failed | Authorization_refused | Payment_required | Not_found -> true
+     (* Timeout counts as a size cause: RFC-librarian-lifecycle §4.3 names it
+        among the refusals that reading less answers. An unknown 400
+        (Invalid_request, Refusal_body_not_received) reads less too, which is
+        the conservative direction -- it costs a smaller pass, where waiting
+        on it would cost the whole backlog. *)
+     | Request_body_refused | Refusal_body_not_received | Invalid_request
+     | Context_overflow | Input_capacity | Timeout -> false)
+  | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch
+  | Completion_failed | Response_body_deadline_exceeded | Incomplete_output
+  | Missing_output | Ambiguous_output _ | Unexpected_output_content
+  | Invalid_json_output | Internal_non_json_output -> false
 ;;
 
-type capacity_refusal =
-  | Input_limit_unknown
-  | Cli_input_limit of Keeper_lane_cli_oneshot.input_capacity
+(* Each failed visit of the walk, plus the failure that ended it. Reading the
+   whole walk is what makes the verdict independent of the order the slots
+   were tried: the last slot's cause alone gave opposite answers for the same
+   set of causes. *)
 
-let extraction_capacity_refused = function
-  | Exact_execution_failed error ->
-    if error.capacity_refused then Some Input_limit_unknown else None
+(* A candidate the flow turned away before dispatch never reached a provider,
+   but the reason it was turned away is typed, so it answers the same question
+   the refusals do. [Input_capacity] is the projected request not fitting the
+   slot's declared window, which is exactly what reading less addresses. The
+   two that name the slot rather than the request -- it is not available, or
+   its contract cannot carry this output -- are as true of a smaller range.
+   The remaining three do not say, and RFC-librarian-lifecycle §4.3 reads what
+   it does not know toward progress, which is reading less. *)
+let rejection_is_not_about_size rejection =
+  match Exact_output.candidate_rejection_disposition rejection with
+  | Runtime_slot_unavailable | Output_requirement_rejected -> true
+  | Input_capacity _ | Runtime_contract_rejected | Input_contract_rejected
+  | Request_preparation_failed -> false
+;;
+
+let advance_is_not_about_size (receipt : Exact_output.flow_advance_receipt) =
+  match receipt.failed with
+  | Exact_output.Flow_advance_execution_failed { cause; _ } -> cause_is_not_about_size cause
+  | Exact_output.Flow_advance_candidate_rejected rejection ->
+    rejection_is_not_about_size rejection
+;;
+
+(* The evidence every constructor carries, and the verdict on the failure
+   that ended the walk when there is one: an exhausted ladder ends on a
+   rejection, a failed execution on a provider cause, and the rest end before
+   either exists. *)
+let flow_evidence_and_final_verdict = function
+  | Exact_output.Flow_attempt_already_started evidence -> evidence, None
+  | Exact_output.Flow_attempt_start_failed { evidence; _ }
+  | Exact_output.Flow_measurement_start_failed { evidence; _ }
+  | Exact_output.Flow_before_measurement_dispatch_callback_failed { evidence; _ }
+  | Exact_output.Flow_measurement_terminal_callback_failed { evidence; _ }
+  | Exact_output.Flow_before_dispatch_callback_failed { evidence; _ }
+  | Exact_output.Flow_before_advance_callback_failed { evidence; _ } -> evidence, None
+  | Exact_output.Flow_candidates_exhausted { evidence; rejection } ->
+    evidence, Some (rejection_is_not_about_size rejection)
+  | Exact_output.Flow_exact_execution_failed { evidence; cause; _ } ->
+    evidence, Some (cause_is_not_about_size cause.Exact_output.cause)
+;;
+
+let walk_was_never_about_size_flow error =
+  let evidence, final = flow_evidence_and_final_verdict error in
+  let advances = evidence.Exact_output.advances in
+  (* No failure at all means nothing was observed to wait on, so the pass
+     reads less rather than holding the whole range for a reason it cannot
+     name. *)
+  (advances <> [] || Option.is_some final)
+  && List.for_all advance_is_not_about_size advances
+  && Option.value final ~default:true
+;;
+
+(* What a pass that reached a provider and did not commit hands back: the
+   cause for its caller's log, and whether anything it met could have been
+   answered by sending less. *)
+type not_committed =
+  { detail : string
+  ; walk_was_never_about_size : bool
+  }
+
+(* Whether nothing this pass met could be answered by sending less. A failure
+   that never involved a provider judging the request cannot be: the prompt
+   did not render, no transport was declared, the lane would not resolve, the
+   clock was missing, or the model answered and the snapshot write failed.
+   Reading less on those walks the source down toward a single atom over an
+   outage that a smaller range would meet identically, and the width is only
+   released once the backlog empties, so it would stay there.
+
+   Two stay false. A CLI walk reports no typed provider cause, so this cannot
+   tell a quota from an oversized prompt and takes the conservative side. And
+   an invalid domain output is what RFC-librarian-lifecycle §4.3 calls a
+   refused output, which it counts among the failures reading less answers. *)
+let extraction_walk_never_about_size = function
+  | Exact_execution_failed error -> error.walk_was_never_about_size
+  | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
+  | Cli_prompt_unavailable _ | No_transport_declared
+  | Memory_snapshot_write_failed _ -> true
+  | Cli_slots_exhausted _ | Domain_output_invalid _ -> false
+;;
+
+(* Only a CLI slot reports a limit this process can fit against: its refusal
+   carries the server's own character count. An API slot states its limit in
+   tokens inside provider prose, which this process cannot read back into a
+   number, so no fitting is possible from it -- a walk of API slots answers
+   its caller with the width verdict above instead. *)
+let extraction_cli_input_limit = function
   | Cli_slots_exhausted { failures; _ } ->
     (match List.rev failures with
      | final :: _ -> Keeper_lane_cli_oneshot.input_capacity final
-       |> Option.map (fun limit -> Cli_input_limit limit)
      | [] -> None)
+  | Exact_execution_failed _
   | Prompt_render_failed _ | Execution_clock_unavailable | Exact_setup_failed _
   | Cli_prompt_unavailable _ | No_transport_declared
   | Domain_output_invalid _ | Memory_snapshot_write_failed _ -> None
@@ -418,7 +518,10 @@ let exact_execution_error error =
     | Exact_output.Generation_dispatch_started -> Outward_effect_started
   in
   let detail = Keeper_exact_flow_detail.flow_execution_error_detail error in
-  { outward_effect; detail; capacity_refused = capacity_refused_by_flow error }
+  { outward_effect
+  ; walk_was_never_about_size = walk_was_never_about_size_flow error
+  ; detail
+  }
 ;;
 
 (* The librarian's whole prompt is one User message; the cli one-shot needs
@@ -788,7 +891,8 @@ let run_best_effort
       ?(write_scope = Context_and_memory)
       ?continuity
       ?(on_memory_committed = fun () -> ())
-      ?(on_capacity_refused = fun _ -> ())
+      ?(on_cli_input_limit = fun _ -> ())
+      ?(on_not_committed = fun _ -> ())
       ?(on_continuity_committed = fun _ -> ())
       ?durable_range_id
       ?official_range_id
@@ -1071,8 +1175,16 @@ let run_best_effort
                 normally. Propagate it here even when no later I/O yields. *)
              Eio.Fiber.check ()
            | Error error ->
-             Option.iter on_capacity_refused (extraction_capacity_refused error);
+             Option.iter on_cli_input_limit (extraction_cli_input_limit error);
              let detail = extraction_error_to_string error in
+             (* The caller reads less after this pass unless the whole walk
+                was transient, and it names the cause in its log: without the
+                cause an authorization outage and an oversized range leave
+                the same line. *)
+             on_not_committed
+               { detail
+               ; walk_was_never_about_size = extraction_walk_never_about_size error
+               };
              complete
                ?selected_slot:(selected_slot_of_extraction_error error)
                (Exact_lane_run_registry.Failed
@@ -1091,9 +1203,10 @@ let run_best_effort
                Keeper_metrics.(to_string MemoryOsLibrarianFailures)
                ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
                ();
-             (* A failed pass leaves the read position where it was; the next
-                signal on this keeper reads the same range again. Nothing here
-                schedules that retry or holds it back. *)
+             (* A failed pass leaves the read position where it was. What the
+                next signal reads from it is the caller's to decide, from the
+                verdict handed to [on_not_committed] above; nothing here
+                schedules that read or holds it back. *)
              record_failure
                ~keepers_dir
                ~keeper_id
@@ -1172,15 +1285,20 @@ let run_best_effort
          which hid a restart-shaped outage behind the same silence as a healthy
          idle turn. *)
       | _ ->
+        let detail =
+          Printf.sprintf
+            "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
+            exact_lane_id
+        in
+        (* No request was composed, so the range's size is not what stopped
+           this pass and the caller must not read less because of it. *)
+        on_not_committed { detail; walk_was_never_about_size = true };
         record_failure
           ~keepers_dir
           ~keeper_id
           ~trace_id
           ~kind:Keeper_memory_os_current.Runtime_context_unavailable
-          ~detail:
-            (Printf.sprintf
-               "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
-               exact_lane_id)
+          ~detail
     with
     | Eio.Cancel.Cancelled _ as error -> raise error
     | exn ->

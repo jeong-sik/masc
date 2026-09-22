@@ -106,7 +106,7 @@ type provider_timeout =
 
 type t =
   | Provider_timeout of provider_timeout
-  | Not_provider_runtime_failure
+  | No_timeout_observed
 
 (* Direct variant-to-variant translation (RFC-0371 B12): this used to render
    the agent-core phase to its label and re-parse the label into the MASC
@@ -218,7 +218,7 @@ let classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () 
              (provider_runtime_error_timeout_phase_label ~code)
              timeout_phase_of_label)
         }
-    else Not_provider_runtime_failure
+    else No_timeout_observed
 ;;
 
 let provider_timeout ~source ~phase =
@@ -247,7 +247,7 @@ let classify_masc_internal_error = function
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )
   | None ->
-    Not_provider_runtime_failure
+    No_timeout_observed
 ;;
 
 let classify_provider_error = function
@@ -278,7 +278,7 @@ let classify_provider_error = function
   | Llm_provider.Error.InvalidRequest _
   | Llm_provider.Error.NotFound _
   | Llm_provider.Error.ProviderTerminal _ ->
-    Not_provider_runtime_failure
+    No_timeout_observed
 ;;
 
 let classify_core_error (err : Agent_core.Error.t) : t =
@@ -301,12 +301,12 @@ let classify_core_error (err : Agent_core.Error.t) : t =
      | Agent_core.Error.Io _
      | Agent_core.Error.Orchestration _
      | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
-       Not_provider_runtime_failure)
+       No_timeout_observed)
 ;;
 
 let is_provider_timeout = function
   | Provider_timeout _ -> true
-  | Not_provider_runtime_failure -> false
+  | No_timeout_observed -> false
 ;;
 
 let is_provider_timeout_error err =

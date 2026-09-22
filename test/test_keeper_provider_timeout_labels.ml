@@ -20,7 +20,7 @@ let network_prefix = "provider_error_network:timeout:"
 let phase_of code =
   match KPB.classify_provider_runtime_error_record ~code ~detail:"" () with
   | KPB.Provider_timeout { phase; _ } -> phase
-  | KPB.Not_provider_runtime_failure ->
+  | KPB.No_timeout_observed ->
       Alcotest.failf "%S was not read as a provider timeout at all" code
 
 let idle_labels =
@@ -130,7 +130,7 @@ let test_an_unknown_label_has_no_phase_rather_than_a_wrong_one () =
          ()
      with
      | KPB.Provider_timeout { phase = None; _ } -> true
-     | KPB.Provider_timeout _ | KPB.Not_provider_runtime_failure -> false)
+     | KPB.Provider_timeout _ | KPB.No_timeout_observed -> false)
 
 let test_a_code_that_is_not_a_timeout_is_not_read_as_one () =
   List.iter
@@ -141,7 +141,7 @@ let test_a_code_that_is_not_a_timeout_is_not_read_as_one () =
         (match
            KPB.classify_provider_runtime_error_record ~code ~detail:"" ()
          with
-         | KPB.Not_provider_runtime_failure -> true
+         | KPB.No_timeout_observed -> true
          | KPB.Provider_timeout _ -> false))
     [ "provider_error_refused"; "provider_error_network:reset"; "" ]
 

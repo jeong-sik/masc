@@ -1337,12 +1337,52 @@ let handle_keeper_get_subroutes state req request reqd =
        | Error (`Io msg) ->
          Http.Response.json_value ~status:`Internal_server_error
            (`Assoc [ ("error", `String msg) ]) reqd)
+  else if ends_with keeper_suffix_working_context then
+    let name = extract_name keeper_suffix_working_context in
+    if not (Keeper_config.validate_name name)
+    then
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [ "error", `String (Printf.sprintf "invalid keeper name: %s" name) ])
+        reqd
+    else
+      let config = Mcp_server.workspace_config state in
+      let keepers_dir = memory_os_keepers_dir config in
+      let status, json =
+        match
+          Keeper_librarian_context.read_with_snapshot_sha256
+            ~keepers_dir
+            ~keeper_id:name
+        with
+        | Error detail ->
+          `Internal_server_error,
+          `Assoc
+            [ "keeper", `String name
+            ; "read_error", `String detail
+            ]
+        | Ok None ->
+          `OK,
+          `Assoc
+            [ "keeper", `String name
+            ; "present", `Bool false
+            ]
+        | Ok (Some (snapshot, snapshot_sha256)) ->
+          `OK,
+          `Assoc
+            [ "keeper", `String name
+            ; "present", `Bool true
+            ; "snapshot_sha256", `String snapshot_sha256
+            ; "snapshot", Keeper_librarian_context.snapshot_json snapshot
+            ]
+      in
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd
   else if ends_with "/memory-facts" then
     (* What this keeper remembers, fact by fact. The store keeps a closed
        taxonomy and provenance on every row, and the health
        projection reports only counts. Ordinary and source-bound stores are
        two readings and stay two fields, each with its own read error, so
-       one failing store never blanks the other. *)
+       one failing store never blanks the other. The ordinary reading exposes
+       the exact stored-byte SHA-256 beside its revision for admin cleanup CAS. *)
     let name = extract_name "/memory-facts" in
     if not (Keeper_config.validate_name name)
     then
@@ -1417,16 +1457,17 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let ordinary =
         match
-          Keeper_memory_os_current.read_for_keepers_dir
+          Keeper_memory_os_current.read_with_snapshot_sha256
             ~keepers_dir
             ~keeper_id:name
         with
         | Error detail -> `Assoc [ "read_error", `String detail ]
         | Ok None -> `Assoc [ "present", `Bool false ]
-        | Ok (Some snapshot) ->
+        | Ok (Some (snapshot, snapshot_sha256)) ->
           `Assoc
             [ "present", `Bool true
             ; "revision", `Int snapshot.Keeper_memory_os_current.revision
+            ; "snapshot_sha256", `String snapshot_sha256
             ; "updated_at", `Float snapshot.Keeper_memory_os_current.updated_at
             ; "facts", `List (List.map fact_json snapshot.facts)
             ; ( "support_invalidations"

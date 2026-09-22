@@ -1,4 +1,4 @@
-(* Board routing, the Owner-internal turn and durable ACK use production code.
+(* Board catchup, the Owner-internal turn and durable ACK use production code.
    The fixture seeds the runtime registry, injects one transient Board read and
    supplies a loopback model response to a short Board preview. It calls the
    cycle directly, so the outer heartbeat scheduler and its admission checks
@@ -154,13 +154,21 @@ data: [DONE]
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
-  Board_dispatch.set_board_signal_hook
-    (Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config);
+  (* Initialize at an existing head, then deliberately miss the live hook. *)
+  ignore (Board_dispatch.create_post ~author:"synthetic-user" ~content:"cursor baseline"
+    ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error);
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta);
+  Board_dispatch.set_board_signal_hook (fun _ -> ());
   let content = "@" ^ keeper_name ^ " Atlas staging uses PostgreSQL 15." in
   let post = Board_dispatch.create_post ~author:"synthetic-user" ~content
     ~post_kind:Board.Human_post ~visibility:Board.Internal () |> get Board.show_board_error in
   let post_id = Board.Post_id.to_string post.id in
-  require (queue_count config keeper_name = 1) "direct mention did not enqueue exactly once";
+  require (queue_count config keeper_name = 0) "disabled live hook unexpectedly delivered";
+  let caught_up, _, _ = Keeper_world_observation.collect_board_events ~base_path ~meta in
+  require (caught_up = []) "catchup returned an ephemeral addressed event";
+  require (queue_count config keeper_name = 1) "missed live mention was not durably caught up";
+  Board_dispatch.set_board_signal_hook
+    (Keeper_keepalive_signal.wakeup_relevant_keeper_for_board_signal ~config);
   require (queue_count config other_name = 0) "direct mention reached the unaddressed Keeper";
   let pending = Keeper_event_queue.to_list (queue config keeper_name) in
   let stimulus_id = match pending with
@@ -181,6 +189,12 @@ data: [DONE]
   require (Keeper_event_queue.to_list (queue config keeper_name) = pending)
     "transient read changed the durable pending source";
   require (not (evidence config stimulus_id).event_queue_ack_seen) "transient read persisted ACK evidence";
+  let reloaded = Keeper_event_queue_persistence.load_result ~base_path ~keeper_name |> get Fun.id in
+  require (Keeper_event_queue.to_list reloaded = pending)
+    "durable reload lost caught-up source after failed intake";
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:first.meta);
+  require (Keeper_event_queue.to_list (queue config keeper_name) = pending)
+    "advanced catchup cursor lost or duplicated the still-pending source";
   let second = cycle first.meta in
   require (second.stimuli_acked) "actual completed turn did not ACK its source";
   require (queue_count config keeper_name = 0) "source remains queued after completion";
@@ -220,6 +234,50 @@ data: [DONE]
   require (Exact_output_fixture.post_count server = 1) "intake unexpectedly dispatched";
   require ((evidence config stimulus_id).matched_record_count = settled.matched_record_count)
     "empty next intake added another reaction or ACK";
+  (* A later batch contains four distinct sources on the same post. Replay
+     contributes one identical comment, which must not hide the other three. *)
+  let comment_body = "@" ^ keeper_name ^ " identical follow-up" in
+  let add_comment () = Board_dispatch.add_comment ~post_id ~author:"synthetic-user"
+      ~content:comment_body () |> get Board.show_board_error in
+  let first_comment = add_comment () in
+  let second_comment = add_comment () in
+  let edit body = Board_dispatch.update_post ~post_id ~editor:"synthetic-user"
+      ~content:body ~title:"edited thread" ~body () |> get Board.show_board_error in
+  let first_edit = edit ("@" ^ keeper_name ^ " first edit") in
+  let second_edit = edit ("@" ^ keeper_name ^ " second edit") in
+  require (first_edit.content_updated_at <> second_edit.content_updated_at)
+    "two actual persisted edits must carry distinct content update times";
+  let pending = Keeper_event_queue.to_list (queue config keeper_name) in
+  require (List.length pending = 4) "distinct comments/edits were lost before intake";
+  let replay = Keeper_world_observation.pending_board_event_of_stimulus
+      ~meta:second.meta (List.hd pending) |> get
+        Keeper_world_observation_board_signal.unavailable_to_string in
+  let replay = match replay with Some event -> event | None -> failwith "comment replay missing" in
+  let intake = Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS"
+      (Some (string_of_int (List.length pending))) (fun () ->
+        Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+          ~ctx ~meta_after_triage:second.meta ~pending_board_events:[replay]) in
+  require (Keeper_heartbeat_source_batch.count intake.source_batch = 4)
+    "actual intake did not admit all four sources";
+  require (List.length intake.pending_board_events = 4)
+    "intake merged distinct post events or duplicated exact replay";
+  let comments, edits = List.fold_left
+    (fun (comments, edits) (event : Keeper_world_observation.pending_board_event) ->
+      match event.event_kind with
+      | Keeper_world_observation.Board_comment_added { Board_dispatch.comment_id; _ } ->
+        Board.Comment_id.to_string comment_id :: comments, edits
+      | Keeper_world_observation.Board_post_updated -> comments, event.updated_at :: edits
+      | _ -> failwith "unexpected event kind in follow-up intake")
+    ([], []) intake.pending_board_events in
+  require (List.sort String.compare comments = List.sort String.compare
+      [Board.Comment_id.to_string first_comment.id; Board.Comment_id.to_string second_comment.id])
+    "same-body comment identities were not both shown";
+  require (List.sort Float.compare edits = List.sort Float.compare
+      [first_edit.content_updated_at; second_edit.content_updated_at])
+    "distinct edit identities were not both shown";
+  require (queue_count config keeper_name = 4)
+    "preparing observations prematurely acknowledged queued sources";
+  require (Exact_output_fixture.post_count server = 1) "intake unexpectedly ran a model";
   let summary = `Assoc
     ["post_id", `String post_id; "keeper", `String keeper_name
     ; "model_response", `String "synthetic loopback protocol"
@@ -251,5 +309,5 @@ let test_board_source_is_acked_after_completed_turn () =
 let () =
   Alcotest.run "keeper_board_turn_ack"
     [ "continuity",
-      [ Alcotest.test_case "completed Keeper turn ACKs its Board source once"
+      [ Alcotest.test_case "missed live Board source survives catchup and failure until real turn ACK"
           `Quick test_board_source_is_acked_after_completed_turn ] ]

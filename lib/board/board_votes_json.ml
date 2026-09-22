@@ -23,6 +23,7 @@ let post_field_names =
   ; "post_kind"
   ; "visibility"
   ; "created_at"
+  ; "content_updated_at"
   ; "updated_at"
   ; "expires_at"
   ; "votes_up"
@@ -143,6 +144,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , required_string fields "post_kind"
        , required_string fields "visibility"
        , required_float fields "created_at"
+       , required_float fields "content_updated_at"
        , required_float fields "updated_at"
        , required_float fields "expires_at"
        , required_int fields "votes_up"
@@ -162,6 +164,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , Some post_kind_raw
        , Some vis_str
        , Some created_at
+       , Some content_updated_at
        , Some updated_at
        , Some expires_at
        , Some votes_up
@@ -172,7 +175,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , Ok thread_id
        , Ok classification_reason
        , Ok meta_json
-       , Ok origin ) ->
+       , Ok origin ) when Float.is_finite content_updated_at ->
     let post_kind_opt =
       post_kind_of_string post_kind_raw
     in
@@ -197,6 +200,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
           ; meta_json
           ; visibility
           ; created_at
+          ; content_updated_at
           ; updated_at
           ; expires_at
           ; votes_up

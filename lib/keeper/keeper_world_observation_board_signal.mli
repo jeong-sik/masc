@@ -5,9 +5,28 @@ type match_result =
   ; matched_targets : string list
   }
 
+type board_observation_kind =
+  | Observed_post_created
+  | Observed_post_updated of { content_updated_at : float }
+  | Observed_comment_added of Board_dispatch.board_comment_identity
+  | Observed_reaction_changed of Board_dispatch.board_reaction_change
+  | Observed_vote_cast of Board_dispatch.board_vote_change
+
+type board_observation =
+  { kind : board_observation_kind
+  ; post_id : string
+  ; author : string
+  ; title : string
+  ; content : string
+  ; hearth : string option
+  ; updated_at : float option
+  }
+(** Durable queue observation, including the producer-issued comment identity. *)
+
 type board_read_operation =
   | Get_post
   | Get_comments
+  | Parse_queued_comment_identity
 
 type board_unavailable =
   { operation : board_read_operation
@@ -62,17 +81,18 @@ val disposition_of_unavailable : board_unavailable -> disposition
    [unavailable_to_string] below, which is this module's only use of it. *)
 val unavailable_to_string : board_unavailable -> string
 
-val board_signal_of_board_stimulus
+val board_observation_of_board_stimulus
   :  post_id:string
   -> Keeper_event_queue.board_stimulus
-  -> Board_dispatch.board_signal
-(** Total conversion from the typed event-queue board payload to the
-    [Board_dispatch.board_signal] the matchers consume (RFC-0020). *)
+  -> (board_observation, board_unavailable) result
+(** Preserve the queued signal. The queued comment and parent identities are
+    wire strings; they are parsed here into {!Board.Comment_id.t}, and one
+    that does not parse is [Error] with [Parse_queued_comment_identity]. *)
 
 val board_stimulus_of_board_signal
   :  Board_dispatch.board_signal
   -> Keeper_event_queue.board_stimulus
-(** Total inverse conversion used by durable Board-signal producers. *)
+(** Preserve live signal identity and content in the durable queue. *)
 
 (* [post_id_string] is how [cursor_token_of_post] below keys a post; that is
    its only caller. *)
@@ -94,6 +114,11 @@ val match_signal
   -> signal:Board_dispatch.board_signal
   -> match_result
 
+val match_observation
+  :  meta:Keeper_meta_contract.keeper_meta
+  -> observation:board_observation
+  -> match_result
+
 val check_self_comment_status
   :  self_ids:Keeper_identity.Keeper_id.t list
   -> post_id:string
@@ -103,7 +128,7 @@ type wake_reason =
   | Explicit_mention
   | Broadcast
   | Comment_on_self_post
-  | Thread_reply_after_self_comment
+  | Reply_to_self_comment
   | Reaction_after_self_activity
   | Vote_on_self_post
   | Vote_on_self_comment
@@ -112,6 +137,10 @@ type wake_reason =
     so the previously dead ["board_activity"] generic bucket is gone. Semantic
     relatedness is intentionally absent: it must enter through an LLM/Judge
     attention boundary, not through board-publish keyword matching. *)
+
+val board_signal_stimulus :
+  arrived_at:float -> reason:wake_reason -> Board_dispatch.board_signal -> Keeper_event_queue.stimulus
+(** Shared live/catchup stimulus construction; identity and urgency remain identical. *)
 
 val wake_reason_label : wake_reason -> string
 (** Stable string label for logs/metrics. *)

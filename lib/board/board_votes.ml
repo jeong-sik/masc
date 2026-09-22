@@ -572,6 +572,7 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
+    with_persist_lock store (fun () ->
       let result =
         with_lock store (fun () ->
           match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
@@ -586,7 +587,7 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
       match result with
       | Error e -> Error e
       | Ok (previous, updated) ->
-          (match with_persist_lock store (fun () -> append_post updated) with
+          (match append_post updated with
            | Ok () -> Ok ()
            | Error e ->
                with_lock store (fun () ->
@@ -598,7 +599,7 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
                     Hashtbl.replace store.posts key previous;
                     invalidate_post_caches store
                   | _ -> ()));
-               Error e)
+               Error e))
 
 let posts_jsonl_snapshot store =
   let buf = Buffer.create 4096 in
@@ -662,6 +663,7 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
+    with_persist_lock store (fun () ->
     let snapshot =
       with_lock store (fun () ->
       let post_key = Post_id.to_string pid in
@@ -728,9 +730,6 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
      | Error _ as e -> e
      | Ok (posts_jsonl, comments_jsonl, votes_jsonl, reactions_jsonl) ->
        let posts_result, comments_result, votes_result =
-         with_persist_lock store (fun () ->
-           (* Snapshot persistence does not acquire the state lock. Failed
-              writes are re-marked below, after releasing this lock. *)
            let posts_result =
              save_jsonl_snapshot_result ~where:"rewrite_posts" ~path:(persist_path ())
                posts_jsonl
@@ -744,10 +743,10 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
               rewrite errors through the existing persistence observer. *)
            save_jsonl_snapshot ~where:"rewrite_reactions" ~path:(reactions_path ())
              reactions_jsonl;
-           (posts_result, comments_result, votes_result))
+           (posts_result, comments_result, votes_result)
        in
        (* The snapshot cleared dirty flags while holding the state lock.
-          Preserve failed writes for a later flush without nesting locks. *)
+          Preserve failed writes for a later flush. *)
        with_lock store (fun () ->
          (match posts_result, votes_result with
           | Ok (), Ok () -> ()
@@ -755,7 +754,7 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
          match comments_result with
          | Ok () -> ()
          | Error _ -> remark_all_comments_dirty store);
-       Ok ())
+       Ok ()))
 
 (** {1 Global Store}
 
@@ -811,6 +810,7 @@ let reset_global_for_test () =
     flush-write path makes [board_posts.jsonl] a true snapshot file with
     one line per id and atomic rewrite semantics. *)
 let flush_dirty store =
+  with_persist_lock store (fun () ->
   let posts_jsonl, comments_jsonl, vote_log =
     with_lock store (fun () ->
       let had_dirty = store.dirty_posts || store.dirty_comments in
@@ -841,7 +841,6 @@ let flush_dirty store =
   let remark_comments () =
     with_lock store (fun () -> remark_all_comments_dirty store)
   in
-  with_persist_lock store (fun () ->
     Option.iter
       (fun content ->
          match

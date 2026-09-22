@@ -19,9 +19,9 @@
    pins these values a second time so an accidental edit needs two
    conscious changes, not one. *)
 
-let state = "keeper.event_queue.state.v18"
+let state = "keeper.event_queue.state.v19"
 
-let transition_wal = "masc.keeper_event_queue.transition.v8"
+let transition_wal = "masc.keeper_event_queue.transition.v9"
 
 (* Read-only projections: raw queue counts and the externally served health
    verdict have different wire shapes. Neither marker versions a store. *)
@@ -36,11 +36,11 @@ let fleet_health_summary = "masc.keeper_event_queue.fleet_summary.v7"
    to make loud. *)
 let snapshot_filename = "event-queue-v19.json"
 
-(* The WAL file generation rides on the row marker (transition.v8): bump
+(* The WAL file generation rides on the row marker (transition.v9): bump
    both together or a bumped marker writes a file the older binary's
    rotation/lookup never opens — the silent-miss channel that
    "writer 3곳은 전부 참조" diff-only reading missed. *)
-let transition_wal_filename = "event-queue-transitions-v8.jsonl"
+let transition_wal_filename = "event-queue-transitions-v9.jsonl"
 
 type mismatch =
   { store : string (* which store: "snapshot" | "transition_wal" | ... *)

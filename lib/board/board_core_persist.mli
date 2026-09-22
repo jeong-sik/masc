@@ -149,6 +149,8 @@ val create_post_with_audience :
     create and the existing [meta_json] is preserved independently, so editing
     cannot silently drop metadata.
     [post_kind]/[visibility]/[hearth] are preserved. *)
+(** Returns the persisted post and whether its normalized title, body or author
+    changed, compared under the store lock. *)
 val update_post_with_outcome :
   store ->
   post_id:string ->
@@ -158,7 +160,7 @@ val update_post_with_outcome :
   ?body:string ->
   ?new_author:string ->
   unit ->
-  (post, board_error) result
+  (post * bool, board_error) result
 
 (** RFC-0233 §7: maintain the [posts_by_turn_ref] / [posts_by_run_id]
     secondary indexes from a post's [origin].  Idempotent; a [None] origin is

@@ -14,7 +14,7 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 과 params 설�
 
 | id | 도구 | 입력 | 도구 기본값과 다른 점 |
 |---|---|---|---|
-| `memory` | `keeper_memory_search` | `query`, `limit = 5`, `source = "memory"` | 기본값과 같지만 명시한다 |
+| `memory` | `keeper_memory_search` | `query`, `limit = 5`, `source = "current"` | 현재 Memory만 조회하는 기본값을 명시한다 |
 | `library` | `keeper_library_search` | `query` | 이 도구에는 개수 인자가 없다. 제목 한 줄씩만 돌려준다 |
 | `board` | `masc_board_search` | `query`, `limit = 10`, `compact = true` | 기본 `limit` 은 20 이다 |
 
@@ -59,7 +59,7 @@ value = 5
 name = "source"
 [compositions.nodes.input.fields.value]
 kind = "literal"
-value = "memory"
+value = "current"
 
 [[compositions.nodes]]
 id = "library"

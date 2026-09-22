@@ -1,12 +1,12 @@
 (** Durable per-Keeper Event Layer state.
 
     Current writes go to [event-queue-v19.json] with the exact
-    [keeper.event_queue.state.v18] compact-witness schema. The envelope holds
+    [keeper.event_queue.state.v19] compact-witness schema. The envelope holds
     revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v8.jsonl] WAL are queue authority. Every WAL row
+    [event-queue-transitions-v9.jsonl] WAL are queue authority. Every WAL row
     carries the complete pre-transition state needed for snapshot-independent
     recovery. The WAL accepts at most one row and is retired after projection,
     so its retained size is bounded by one complete state. Serializing that

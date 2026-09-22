@@ -772,6 +772,7 @@ let legal_transition previous next =
   | Running _, Blocked _ -> true
   | Blocked _, Ready -> true
   | (Completed _ | Blocked _), Settled _ -> true
+  | Settled _, Ready -> true
   | Ready, _
   | Running _, _
   | Completed _, _
@@ -1219,64 +1220,82 @@ let ensure_roots ~base_path ~keeper_name candidates =
               then Error "candidate Keeper differs from partition ledger Keeper"
               else
                 let* () = valid_time "candidate recorded_at" candidate.recorded_at in
+                let resolve_root ~reopen_settled () =
+                  let* context_key = Candidate.Context_key.of_candidate candidate in
+                  match Id_map.find_opt candidate.candidate_id view.live_candidate_owner with
+                  | Some owner_id ->
+                    (match Id_map.find_opt owner_id view.by_id with
+                     | Some owner
+                       when Candidate.Context_key.equal owner.context_key context_key ->
+                       Ok roots
+                     | Some owner ->
+                       Error
+                         (Printf.sprintf
+                            "candidate %s authority differs from live partition %s"
+                            candidate.candidate_id
+                            owner.partition_id)
+                     | None -> Error ("live owner index lost partition " ^ owner_id))
+                  | None ->
+                    let partition_id =
+                      root_id ~keeper_name ~context_key ~candidate_id:candidate.candidate_id
+                    in
+                    (match Id_map.find_opt partition_id view.by_id with
+                     | None ->
+                       Ok
+                         ({ partition_id
+                          ; keeper_name
+                          ; context_key
+                          ; candidate_id = candidate.candidate_id
+                          ; created_at = candidate.recorded_at
+                          ; generation = Generation.initial
+                          ; state = Ready
+                          }
+                          :: roots)
+                     | Some historical
+                       when String.equal historical.candidate_id candidate.candidate_id
+                            && Candidate.Context_key.equal historical.context_key context_key ->
+                       (* [candidate_id] is the stable typed Board-event identity and
+                          [root_id] hashes it with this exact context. [recorded_at]
+                          deliberately participates in neither identity. A compacted
+                          candidate ledger can be reconstructed after its partition
+                          has already settled, giving the same event a later
+                          observation time. Requiring that volatile time here turned
+                          the deterministic root into a collision with itself and
+                          stopped the whole Keeper's attention worker. *)
+                       (match historical.state with
+                        | Settled _ when reopen_settled ->
+                          (* [Settled] is otherwise terminal ([legal_transition]
+                             refuses every other exit). [reopen_settled] is true only
+                             for a candidate still [Resumable_pending]: the Candidate
+                             ledger never recorded any judgment for it, so its root
+                             settling can only be the desync task-1660 measured (21
+                             live candidates, 360-378h) — e.g. the "candidate
+                             permanently absent" Blocked->Settled path in
+                             [reconcile_quarantines], which settles the root without
+                             ever writing a judgment. A [Resumable_judged] or
+                             [Requeued_resumable] historical match keeps the old
+                             no-op: those already carry (or are mid-quarantine
+                             toward) a judgment, and reopening them here would race
+                             the dedicated quarantine-generation bookkeeping in
+                             [reconcile_quarantines] instead of going through it. *)
+                          let* reopened = advance_state historical Ready in
+                          Ok (reopened :: roots)
+                        | Ready | Running _ | Completed _ | Blocked _ | Settled _ -> Ok roots)
+                     | Some _ -> Error ("partition identity collision: " ^ partition_id))
+                in
                 match Candidate.status_view candidate.status with
                 | Candidate.Suspended_quarantine _
                 | Candidate.Direct_resumable (Candidate.Resumable_consumed _)
                 | Candidate.Requeued_resumable
-                    { resumable = Candidate.Resumable_consumed _; _ } ->
-                  Ok roots
-                | Candidate.Direct_resumable
-                    (Candidate.Resumable_pending _
-                    | Candidate.Resumable_judged _)
+                    { resumable = Candidate.Resumable_consumed _; _ } -> Ok roots
+                | Candidate.Direct_resumable (Candidate.Resumable_pending _) ->
+                  resolve_root ~reopen_settled:true ()
+                | Candidate.Direct_resumable (Candidate.Resumable_judged _)
                 | Candidate.Requeued_resumable
                     { resumable =
-                        (Candidate.Resumable_pending _
-                        | Candidate.Resumable_judged _)
+                        (Candidate.Resumable_pending _ | Candidate.Resumable_judged _)
                     ; _
-                    } ->
-                  let* context_key = Candidate.Context_key.of_candidate candidate in
-                  (match Id_map.find_opt candidate.candidate_id view.live_candidate_owner with
-                   | Some owner_id ->
-                     (match Id_map.find_opt owner_id view.by_id with
-                      | Some owner
-                        when Candidate.Context_key.equal owner.context_key context_key ->
-                        Ok roots
-                      | Some owner ->
-                        Error
-                          (Printf.sprintf
-                             "candidate %s authority differs from live partition %s"
-                             candidate.candidate_id
-                             owner.partition_id)
-                      | None -> Error ("live owner index lost partition " ^ owner_id))
-                   | None ->
-                     let partition_id =
-                       root_id ~keeper_name ~context_key ~candidate_id:candidate.candidate_id
-                     in
-                     (match Id_map.find_opt partition_id view.by_id with
-                      | None ->
-                        Ok
-                          ({ partition_id
-                           ; keeper_name
-                           ; context_key
-                           ; candidate_id = candidate.candidate_id
-                           ; created_at = candidate.recorded_at
-                           ; generation = Generation.initial
-                           ; state = Ready
-                           }
-                           :: roots)
-                      | Some historical
-                        when String.equal historical.candidate_id candidate.candidate_id
-                             && Candidate.Context_key.equal historical.context_key context_key ->
-                        (* [candidate_id] is the stable typed Board-event identity and
-                           [root_id] hashes it with this exact context. [recorded_at]
-                           deliberately participates in neither identity. A compacted
-                           candidate ledger can be reconstructed after its partition
-                           has already settled, giving the same event a later
-                           observation time. Requiring that volatile time here turned
-                           the deterministic root into a collision with itself and
-                           stopped the whole Keeper's attention worker. *)
-                        Ok roots
-                      | Some _ -> Error ("partition identity collision: " ^ partition_id))))
+                    } -> resolve_root ~reopen_settled:false ())
            (Ok [])
       |> Result.map List.rev
     in

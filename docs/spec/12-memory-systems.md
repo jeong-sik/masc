@@ -14,7 +14,6 @@ side derives memory from a model-authored state envelope.
 |---|---|---|
 | agent core checkpoint/context | agent core | active transcript and restartable agent context |
 | Memory OS current snapshot | MASC | supported current claims from librarian updates and explicit writes, minus exact retractions |
-| Procedural memory | MASC | verified reusable procedures |
 | Tool/history logs | MASC | observable evidence and recall source |
 
 Memory OS snapshot path:

@@ -163,7 +163,12 @@ let checkpoint_prefix_range ~trace_id ~lines ~messages =
            end_atom = baseline.position.end_atom;
            last_atom_digest = baseline.position.last_atom_digest})
      | R.Stop error -> Error (Range_stopped error)
-     | R.Baseline _ | R.Position_in_other_trace _ -> Error Uncovered_history)
+     (* The progress given is this trace's own baseline, so select returns
+        neither: it builds a baseline only without progress, and that
+        position names this trace. Each answers what it would mean, as in
+        source_range. *)
+     | R.Position_in_other_trace _ -> Error Trace_mismatch
+     | R.Baseline _ -> Error Uncovered_history)
   | R.Read _ | R.Nothing_to_read | R.Position_in_other_trace _ | R.Stop _ ->
     source_range ~trace_id ~lines ~messages
 ;;

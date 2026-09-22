@@ -1006,7 +1006,11 @@ val set_exact_output_lane_slots :
     that table is read. A lane the file declares other than as its own table
     (inline, or through dotted keys) is refused rather than declared twice, and
     so is a slot the lane already declares as a CLI slot, and a binding whose
-    provider is an official client, which can only be a CLI slot. *)
+    provider is an official client, which can only be a CLI slot — on
+    [Workspace_curator], which walks no CLI tail, no list at all. An empty
+    [slots] is this writer's own floor: it names the whole catalog order.
+    Taking the last catalog slot off a lane that keeps a CLI slot is
+    {!drop_exact_output_lane_slot}. *)
 
 val append_exact_output_lane_slot :
   ?runtime_config_path:string ->
@@ -1020,7 +1024,9 @@ val append_exact_output_lane_slot :
     {!set_exact_output_lane_slots}. A binding whose provider is an official
     client (Codex app-server, Antigravity CLI, Claude Code) goes to
     [cli_slots]; every other id goes to [slots], where the registry admits or
-    reports it when it publishes the lane. A lane table this creates for a CLI
+    reports it when it publishes the lane. An official client is refused on
+    [Workspace_curator]: that lane walks no CLI tail, and its runs refuse a
+    lane declaring one. A lane table this creates for a CLI
     slot also gets an empty [slots], which the parser requires. Declared slots
     the exact-output registry did not admit stay in place. Refused, by name,
     when the lane already declares [slot] as a slot or as a CLI slot. Tables

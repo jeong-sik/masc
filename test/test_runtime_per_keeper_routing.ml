@@ -1615,6 +1615,32 @@ let test_an_exact_append_places_an_official_client_in_cli_slots () =
               ~lane:Runtime.Board_attention ~slots:[ "openai.gpt"; "codex.mini" ] ()))
 ;;
 
+(* [workspace_curator_exact] walks no CLI tail, and
+   [Server_workspace_memory_curator.execute] refuses a run whose lane declares
+   a CLI slot at all. So an official client has nowhere to go there, and both
+   writers say so rather than writing a list that stops the lane. *)
+let test_an_official_client_is_refused_on_the_curator_lane () =
+  with_official_client_runtime_file
+    ~lane:"[runtime.exact_output_lanes.workspace_curator_exact]\nslots = [\"openai.gpt\"]"
+    (fun path ->
+       lane_write_refused "append an official client to the curator lane" ~path
+         ~names:[ "codex.codex is an official client"; "does not walk a CLI tail" ]
+         (fun () ->
+            Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+              ~lane:Runtime.Workspace_curator ~slot:"codex.codex" ());
+       lane_write_refused "set an official client on the curator lane" ~path
+         ~names:[ "codex.codex is an official client"; "does not walk a CLI tail" ]
+         (fun () ->
+            Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+              ~lane:Runtime.Workspace_curator ~slots:[ "codex.codex" ] ());
+       Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Workspace_curator ~slot:"runpod_mtp.qwen" ()
+       |> lane_write_ok "append an HTTP runtime to the curator lane";
+       Alcotest.(check (list string)) "the curator lane keeps only catalog slots"
+         [ "openai.gpt"; "runpod_mtp.qwen" ]
+         (exact_lane_slots path "workspace_curator_exact"))
+;;
+
 (* The parser requires [slots] on every lane table, so a lane an official
    client's append creates is written with an empty one beside it. *)
 let test_a_cli_append_to_an_undeclared_lane_writes_both_keys () =
@@ -3551,6 +3577,10 @@ let () =
             "an exact drop and move edit the CLI slots"
             `Quick
             test_an_exact_drop_and_move_edit_the_cli_slots
+        ; Alcotest.test_case
+            "an official client is refused on the curator lane"
+            `Quick
+            test_an_official_client_is_refused_on_the_curator_lane
         ; Alcotest.test_case
             "an inline exact lane is refused"
             `Quick

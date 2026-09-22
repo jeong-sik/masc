@@ -3546,9 +3546,10 @@ let remove_runtime_lane ?runtime_config_path ~lane_id () =
                 lane_id)))
 ;;
 
-(* Exact-output lanes name their walk order in [slots]; the routing API edits
-   them the same way conversation lanes edit [candidates]. Every exact lane id
-   is a bare key. *)
+(* Exact-output lanes name their walk order in [slots] and, on a lane that
+   walks a CLI tail, in [cli_slots] after them; the routing API edits them the
+   same way conversation lanes edit [candidates]. Every exact lane id is a bare
+   key. *)
 let exact_lane_table_path lane = "runtime.exact_output_lanes." ^ exact_lane_id lane
 
 let exact_lane_decl (config : Runtime_schema.config) lane =
@@ -3618,8 +3619,9 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
   let slots = List.map String.trim slots in
   if slots = []
   then
-    (* Mandatory exact lanes fail the boot fail-closed without a slot; a lane
-       that resolves to nothing is not the edit an operator is making. *)
+    (* This writer names the whole catalog order, and an order of nothing is
+       not the edit an operator is making. Taking the last catalog slot off a
+       lane that keeps a CLI slot is [drop_exact_output_lane_slot]. *)
     Error "an exact-output lane needs at least one slot"
   else if List.exists (String.equal "") slots
   then Error "slots must not contain empty entries"
@@ -3651,7 +3653,11 @@ let set_exact_output_lane_slots ?runtime_config_path ~lane ~slots () =
          | Some slot ->
            Error
              (Printf.sprintf
-                "%s is an official client, so it can only be a CLI slot of %s"
+                (if exact_lane_supports_cli_tail lane
+                 then "%s is an official client, so it can only be a CLI slot of %s"
+                 else
+                   "%s is an official client and %s does not walk a CLI tail, so it \
+                    has no list to go in")
                 slot
                 (exact_lane_id lane))
          | None ->
@@ -3698,6 +3704,17 @@ let append_exact_output_lane_slot ?runtime_config_path ~lane ~slot () =
           Ok
             (Toml_line_editor.edit_table_multiline_array
                content ~path ~key:"slots" ~values:(slots @ [ slot ]))
+        | Cli_slots when not (exact_lane_supports_cli_tail lane) ->
+          (* [Server_workspace_memory_curator.execute] refuses a run whose lane
+             declares any CLI slot, so writing one here would stop the lane
+             instead of extending it. [set_first_run_runtime] drops CLI slots
+             on these lanes for the same reason. *)
+          Error
+            (Printf.sprintf
+               "%s is an official client and %s does not walk a CLI tail, so it has \
+                no list to go in"
+               slot
+               lane_id)
         | Cli_slots ->
           (* A lane table the parser reads must carry [slots], even an empty
              one, so a lane this append creates gets both keys. *)

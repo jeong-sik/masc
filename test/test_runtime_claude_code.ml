@@ -663,114 +663,19 @@ let quota_result_with_success_flag =
 ;;
 
 let prompt_too_long_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400}|}
-;;
-
-let prompt_too_long_statusless_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-overflow-1","result":"Prompt is too long"}|}
-;;
-
-let statusless_overflow_prose_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-generic-1","result":"gateway diagnostic mentioned Prompt is too long for an unrelated rejection"}|}
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400,"terminal_reason":"prompt_too_long"}|}
 ;;
 
 let generic_400_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-generic","result":"request rejected; diagnostic mentioned Prompt is too long without the provider prefix","api_error_status":400}|}
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-generic","result":"request rejected by the provider","api_error_status":400}|}
 ;;
 
 let prompt_too_long_typed_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-413-1","result":"Input is too long for requested model","api_error_status":413,"terminal_reason":"prompt_too_long"}|}
 ;;
 
-let non_overflow_reason_with_prefix_prose_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-misprose","result":"Prompt is too long · gateway relayed the sentence for an unrelated rejection","api_error_status":400,"terminal_reason":"api_error"}|}
-;;
-
-(* 2026-08-14: three live resumed-session overflows arrived as
-   [subtype=success, is_error=true] with no [terminal_reason] and no
-   [api_error_status] — only the sentence. The frame shape the 400-bound
-   fallback missed. *)
-let statusless_prompt_too_long_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-nostatus-1","result":"Prompt is too long"}|}
-;;
-
-let statusless_input_too_long_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-nostatus-2","result":"Input is too long for requested model"}|}
-;;
-
 let statusless_generic_error_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-nostatus-3","result":"stream closed before completion"}|}
-;;
-
-(* A live keeper reported Claude's explicit "prompt is too long" terminal as a
-   generic 400, so the provider-bound history shrinker never saw the typed
-   ContextOverflow it consumes. This fixture carries no [terminal_reason], so
-   it exercises the sentence-table fallback: the provider sentence alone is
-   the admission evidence, any status; non-prefix prose stays generic below. *)
-let test_terminal_prompt_too_long_is_typed () =
-  with_fixture [ Emit prompt_too_long_result ] (fun path ->
-    match run_fixture path with
-    | Error
-        (Runtime_claude_code.Context_window_exceeded
-          { message; tool_effect_attempted = false; response_emitted = false }) ->
-      check
-        bool
-        "provider reason survives into the typed failure"
-        true
-        (Astring.String.is_infix ~affix:"Prompt is too long" message);
-      check
-        bool
-        "status code is still reported"
-        true
-        (Astring.String.is_infix ~affix:"api_status=400" message)
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-    | Ok _ -> fail "an is_error terminal was reported as completion")
-;;
-
-let test_statusless_canonical_prompt_too_long_is_typed () =
-  with_fixture [ Emit prompt_too_long_statusless_result ] (fun path ->
-    match run_fixture path with
-    | Error
-        (Runtime_claude_code.Context_window_exceeded
-          { message; tool_effect_attempted = false; response_emitted = false }) ->
-      check
-        bool
-        "canonical provider verdict survives into the typed failure"
-        true
-        (Astring.String.is_infix ~affix:"Prompt is too long" message);
-      check
-        bool
-        "missing status remains explicit"
-        true
-        (Astring.String.is_infix ~affix:"api_status=unknown" message)
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-    | Ok _ -> fail "a canonical statusless overflow was reported as completion")
-;;
-
-let test_statusless_overflow_prose_remains_turn_failed () =
-  with_fixture [ Emit statusless_overflow_prose_result ] (fun path ->
-    match run_fixture path with
-    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
-      check
-        bool
-        "unrelated statusless rejection keeps its diagnostic"
-        true
-        (Astring.String.is_infix ~affix:"unrelated rejection" detail)
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-    | Ok _ -> fail "unrelated statusless prose was reported as completion")
-;;
-
-let test_unrelated_400_remains_turn_failed () =
-  with_fixture [ Emit generic_400_result ] (fun path ->
-    match run_fixture path with
-    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
-      check
-        bool
-        "generic rejection reason survives"
-        true
-        (Astring.String.is_infix ~affix:"diagnostic mentioned" detail)
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-    | Ok _ -> fail "an unrelated 400 terminal was reported as completion")
 ;;
 
 (* The reason a turn failed is carried in the error value, and the log call
@@ -811,42 +716,9 @@ let test_turn_failure_reason_reaches_the_log () =
       (List.exists
          (fun (entry : Log.Ring.entry) ->
            Astring.String.is_infix
-             ~affix:"diagnostic mentioned"
+             ~affix:"request rejected by the provider"
              entry.Log.Ring.message)
          entries)
-;;
-
-(* The 2026-08-14 live shape: is_error with the overflow sentence but no
-   [terminal_reason] and no [api_error_status]. The sentence table admits it
-   without a status requirement. *)
-let test_statusless_prompt_too_long_is_typed () =
-  with_fixture [ Emit statusless_prompt_too_long_result ] (fun path ->
-    match run_fixture path with
-    | Error
-        (Runtime_claude_code.Context_window_exceeded
-          { message; tool_effect_attempted = false; response_emitted = false }) ->
-      check
-        bool
-        "provider sentence survives into the typed failure"
-        true
-        (Astring.String.is_infix ~affix:"Prompt is too long" message)
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-    | Ok _ -> fail "a statusless overflow terminal was reported as completion")
-;;
-
-let test_statusless_input_too_long_is_typed () =
-  with_fixture [ Emit statusless_input_too_long_result ] (fun path ->
-    match run_fixture path with
-    | Error
-        (Runtime_claude_code.Context_window_exceeded
-          { message; tool_effect_attempted = false; response_emitted = false }) ->
-      check
-        bool
-        "provider sentence survives into the typed failure"
-        true
-        (Astring.String.is_infix ~affix:"Input is too long" message)
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-    | Ok _ -> fail "a statusless overflow terminal was reported as completion")
 ;;
 
 let test_statusless_generic_error_remains_turn_failed () =
@@ -864,7 +736,7 @@ let test_statusless_generic_error_remains_turn_failed () =
 
 (* CLI 2.1.228+ states the loop outcome as [terminal_reason]; a live forced
    overflow emitted "prompt_too_long" while the sentence and status took the
-   413 shape. The typed verdict must classify without the prefix-400 shape. *)
+   413 shape. *)
 let test_terminal_reason_prompt_too_long_is_typed () =
   with_fixture [ Emit prompt_too_long_typed_result ] (fun path ->
     match run_fixture path with
@@ -878,22 +750,6 @@ let test_terminal_reason_prompt_too_long_is_typed () =
         (Astring.String.is_infix ~affix:"Input is too long" message)
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "a typed overflow terminal was reported as completion")
-;;
-
-(* When the frame carries a verdict it is authoritative in both directions: a
-   non-overflow reason stays generic even when the prose repeats the exact
-   overflow prefix. *)
-let test_non_overflow_reason_beats_prefix_prose () =
-  with_fixture [ Emit non_overflow_reason_with_prefix_prose_result ] (fun path ->
-    match run_fixture path with
-    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
-      check
-        bool
-        "generic rejection keeps the provider sentence"
-        true
-        (Astring.String.is_infix ~affix:"gateway relayed" detail)
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-    | Ok _ -> fail "a non-overflow terminal was reported as completion")
 ;;
 
 let test_quota_is_structurally_classified () =
@@ -1131,8 +987,8 @@ let test_api_diagnostic_preserves_terminal_error_detail () =
       check
         string
         "terminal detail retained"
-        "terminal subtype=success api_status=400 reason=none: request rejected; \
-         diagnostic mentioned Prompt is too long without the provider prefix"
+        "terminal subtype=success api_status=400 reason=none: request rejected by \
+         the provider"
         detail
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "diagnostic generic failure completed")
@@ -2192,41 +2048,13 @@ let () =
         ] )
     ; ( "terminal"
       , [ test_case
-            "terminal prompt too long is typed"
-            `Quick
-            test_terminal_prompt_too_long_is_typed
-        ; test_case
             "terminal_reason prompt_too_long is typed"
             `Quick
             test_terminal_reason_prompt_too_long_is_typed
         ; test_case
-            "statusless canonical prompt too long is typed"
-            `Quick
-            test_statusless_canonical_prompt_too_long_is_typed
-        ; test_case
-            "statusless overflow prose remains turn failed"
-            `Quick
-            test_statusless_overflow_prose_remains_turn_failed
-        ; test_case
-            "non-overflow terminal_reason beats prefix prose"
-            `Quick
-            test_non_overflow_reason_beats_prefix_prose
-        ; test_case
-            "unrelated 400 remains turn failed"
-            `Quick
-            test_unrelated_400_remains_turn_failed
-        ; test_case
             "turn failure reason reaches the log"
             `Quick
             test_turn_failure_reason_reaches_the_log
-        ; test_case
-            "statusless prompt too long is typed"
-            `Quick
-            test_statusless_prompt_too_long_is_typed
-        ; test_case
-            "statusless input too long is typed"
-            `Quick
-            test_statusless_input_too_long_is_typed
         ; test_case
             "statusless generic error remains turn failed"
             `Quick

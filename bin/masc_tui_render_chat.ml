@@ -655,8 +655,13 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
               if String.equal speaker "" then ""
               else Printf.sprintf "%s%s%s" Ansi.reverse speaker Ansi.reset
             in
-            Printf.sprintf "%s%s%s%s%s%s%s%s" (Chat_theme.origin row.style)
-              Ansi.bold mark gap badge Ansi.dim request Ansi.reset
+            (* The mark's colour and weight end at the mark. The badge's own
+               reset used to end them, so a heading without a name -- the
+               pane's own keeper, a turn opened by a tool -- carried the
+               speaker's bold colour into the request id that should
+               recede. *)
+            Printf.sprintf "%s%s%s%s%s%s%s%s%s" (Chat_theme.origin row.style)
+              Ansi.bold mark Ansi.reset gap badge Ansi.dim request Ansi.reset
       in
       origin_heading buf cols ~plain ~styled ~clock
 

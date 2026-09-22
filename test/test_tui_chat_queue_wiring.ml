@@ -1758,6 +1758,50 @@ let test_a_journal_revision_draws_its_facts_in_columns () =
       (List.exists (Astring.String.is_infix ~affix:"verifier_exact") summarised))
 ;;
 
+(* A heading without a name -- the pane's own keeper since #37754 -- drew its
+   request id in the mark's bold colour: the badge's reset had been what ended
+   that span, and with no badge nothing did. The id is chrome and recedes; the
+   mark keeps the one colour on the row. *)
+let test_a_nameless_heading_does_not_paint_its_request () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 96);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_row;
+    let request = "tui-01a0c788-43a7" in
+    state.msg_history <-
+      [ { (chat_entry ~request_id:request ~role:Tui_types.Message_keeper
+             ~text:"REPLY" ~at:1_790_053_724. ())
+          with Tui_types.me_keeper_name = "alpha" } ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    match
+      List.find_opt
+        (Astring.String.is_infix ~affix:request)
+        frame.Masc_tui_frame_presenter.lines
+    with
+    | None -> fail "no heading carries the request"
+    | Some line -> (
+        let mark = "\xe2\x97\x8f" in
+        match Astring.String.find_sub ~sub:mark line, Astring.String.find_sub ~sub:request line with
+        | Some at_mark, Some at_request when at_mark < at_request ->
+            let between = String.sub line at_mark (at_request - at_mark) in
+            check bool "the mark's style ends before the request id" true
+              (Astring.String.is_infix ~affix:"\027[0m" between
+               || not (String.contains between '\027'))
+        | _ -> fail ("the heading does not open on the mark: " ^ String.escaped line)))
+;;
+
 (* The origin heading under Ctrl-F's metadata:full. The clock led the row
    ("[14:08:44]  ● e-m…-leader"), so the first cells of every heading were
    time-chrome and the name beside them was cut to the gutter's column on a
@@ -3510,6 +3554,8 @@ let () =
             test_a_folded_reasoning_block_is_the_count_and_the_key
         ; test_case "an execute call leads with its exit and output" `Quick
             test_an_execute_call_leads_with_its_exit_and_output
+        ; test_case "a nameless heading does not paint its request" `Quick
+            test_a_nameless_heading_does_not_paint_its_request
         ; test_case "the origin heading spells the name and ends on the clock" `Quick
             test_origin_row_heading_spells_the_name_and_ends_on_the_clock
         ; test_case "an observed running turn is drawn from its journal" `Quick

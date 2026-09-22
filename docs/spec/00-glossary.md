@@ -242,32 +242,34 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli)
 
 **Lane**
-: 제품에서 "Lane"의 일차 정의는 **작업종류 실행 경로**다 — 특정 종류의 일을 수행하는
-  실행 경로(`docs/KEEPER-FULL-FEATURE-GOAL.md` §1). 제품 SSOT도 librarian·judgment·
-  board-attention을 "sub-lanes"라 부른다(`docs/product/KEEPER-FULL-LIFECYCLE-BEHAVIOR.md`
-  §4). 같은 단어가 다른 실행 개념에도 쓰이므로 문맥 없이 "Lane"만 쓰지 않는다.
-  - **작업종류 Lane** — 위 일차 정의. `librarian`·`verification`·`judge`·`fusion panel`·
-    `meta judge`는 Runtime의 고정 role이 아니라 이 Lane의 이름이다. durable 기록은
-    `Exact_lane_run_registry.lane`(`Librarian`·`Hitl_auto_judge`·`Board_attention`·
-    `Workspace_curator`)이고, verifier exact lane이 다섯째다.
-    → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
-  - **Runtime slot order** — Keeper turn이 Runtime 후보를 시도할 순서. 제품 SSOT는 이
-    개념을 "Runtime slot"·"frozen declared order"라 부르고 "lane"이라 부르지 않는다
-    (§2·§3·§5). 코드 타입 이름만 `Runtime_lane.t`이다.
+: 제품에서 "Lane"은 서로 다른 실행 개념에 쓰인다. 문맥 없이 "Lane"만 쓰지 않는다.
+  - **Runtime Lane** — Keeper turn이 Runtime 후보를 시도할 순서. 제품의 사용자
+    표면(TUI "pick a runtime lane", dashboard "runtime lane cost matrix")과 코드가
+    쓰는 이름이다. 설정은 `[runtime.lanes.<name>]`의 `candidates`이고 Keeper
+    assignment가 이 lane을 지목한다. 제품 SSOT는 같은 메커니즘을 "Runtime slot"·
+    "frozen declared order"라 부른다(§2·§3·§5).
     → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
+  - **고정 Lane** — Keeper turn 밖에서 고정된 신원으로 도는 실행 경로.
+    `librarian`·`hitl_auto_judge`·`board_attention`·`verifier`가 있다. 설정은
+    `[runtime.exact_output_lanes.<name>]`의 `slots`, durable 기록은
+    `Exact_lane_run_registry.lane`(`Librarian`·`Hitl_auto_judge`·`Board_attention`·
+    `Workspace_curator`)이다. 제품 SSOT는 이들을 "sub-lanes"라 부른다(§4).
+    → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
   - **관측·조작 Lane** — `Browser Lane`·`MSX Lane`·`DOS Lane`·`Slack Lane`처럼 Keeper가
     공유 머신·세션을 관찰·조작하는 대상.
     → [Browser_lane](../../lib/browser_lane/browser_lane.ml),
     [Msx_lane](../../lib/msx_lane/msx_lane.mli)
   - **Official Client Lane** — 공식 클라이언트가 자기 프로세스에서 provider 요청을
     보내고 MASC가 조율·관찰하는 실행 경로. (아래 항목)
-  - **Standalone Lane** — 작업종류 Lane의 읽기 전용 투영. (아래 항목)
+  - **Standalone Lane** — 고정 Lane의 읽기 전용 투영. (아래 항목)
   - **Lane Add-on** — 관측·조작 Lane 위에 붙는 선택적 관측·관계 레이어. (아래 항목)
+  Runtime Lane과 고정 Lane이 같은 단어를 쓰는 충돌은 미해결이다 — 개명 제안이
+  진행 중이다.
 
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
   admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane 패밀리에서
-  Runtime slot order가 아니라 **작업종류 Lane**의 투영이다 — 작업종류 Lane이 무엇을 실행할
+  Runtime Lane이 아니라 **고정 Lane**의 투영이다 — 고정 Lane이 무엇을 실행할
   수 있고 무엇을 실행했는지의 투영이다. 두 축을 함께 갖는다:
   - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·
     `Standalone_degraded`·`Standalone_no_retained_observation`·

@@ -1123,6 +1123,9 @@ let test_load_survives_purge_checkpoint_and_resume () =
       match
         Keeper_checkpoint_purge.purge
           ~config:{ Keeper_checkpoint_purge.default_config with keep_recent_messages = 0 }
+          ~trace_id:checkpoint.Agent_core.Checkpoint.session_id
+          ~boundary_lines:[]
+          ~continuity:None
           checkpoint
       with
       | Ok (checkpoint, report) ->

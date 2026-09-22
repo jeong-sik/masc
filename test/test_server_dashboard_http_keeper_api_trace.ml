@@ -754,11 +754,10 @@ let test_checkpoint_inventory_projects_missing_current () =
    says why an apply would be refused; the apply refuses while an atom is
    unread and writes nothing; an apply at the end installs the checkpoint,
    keeps every message and the position where it was (the purge keeps the
-   history's end), leaves [boundary_lines_seen] alone, and removes the
-   Librarian working state hashed against the old bytes. The server-owned
-   Librarian lane is cancelled and awaited before the writes; here it has no
-   unit, so cancellation returns at once. *)
-let test_purge_keeps_the_librarian_position_and_drops_the_working_state () =
+   history's end), and leaves [boundary_lines_seen] alone. The server-owned
+   Librarian lane is closed to new units and cancelled for the apply; here it
+   has no unit, so cancellation returns at once. *)
+let test_purge_keeps_the_librarian_position_and_every_message () =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   with_temp_dir @@ fun dir ->
@@ -845,8 +844,6 @@ let test_purge_keeps_the_librarian_position_and_drops_the_working_state () =
    | Ok _ -> fail "an apply over an unread atom was allowed");
   check string "a refused apply leaves the checkpoint" original (Fs_compat.load_file canonical);
   write_position ~end_atom:count;
-  let working_state = Keeper_librarian_continuity.path ~config ~keeper_name in
-  Fs_compat.save_file working_state "{}";
   (match Checkpoints.purge_current config ~keeper_name ~apply:true with
    | Ok result ->
      check bool "applied" true result.applied;
@@ -854,8 +851,6 @@ let test_purge_keeps_the_librarian_position_and_drops_the_working_state () =
        (result.report.reasoning_blocks_stripped > 0);
      check bool "the result was cleared" true (result.report.tool_results_cleared > 0)
    | Error error -> fail (Checkpoints.purge_error_to_string error));
-  check bool "the working state hashed against the old bytes is gone" false
-    (Sys.file_exists working_state);
   let purged =
     match Store.load_agent_core ~session_dir ~session_id:trace_id with
     | Ok purged -> purged
@@ -1017,9 +1012,9 @@ let () =
         ] )
     ; ( "checkpoint_purge"
       , [ test_case
-            "purge keeps the Librarian position and drops the working state"
+            "purge keeps the Librarian position and every message"
             `Quick
-            test_purge_keeps_the_librarian_position_and_drops_the_working_state
+            test_purge_keeps_the_librarian_position_and_every_message
         ] )
     ]
 ;;

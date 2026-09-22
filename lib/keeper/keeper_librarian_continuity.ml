@@ -22,15 +22,14 @@ let path_in ~keepers_dir ~keeper_name =
   Filename.concat (Filename.concat keepers_dir keeper_name) "librarian-continuity.json"
 let path ~config ~keeper_name =
   path_in ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
-let discard ~keepers_dir ~keeper_name =
-  Keeper_fs.remove_file_durable (path_in ~keepers_dir ~keeper_name)
-  |> Result.map_error Keeper_fs.durable_remove_error_to_string
-let read ~config ~keeper_name =
-  let file = path ~config ~keeper_name in
+let read_in ~keepers_dir ~keeper_name =
+  let file = path_in ~keepers_dir ~keeper_name in
   match Fs_compat.exact_path_kind ~follow:false file with
   | Fs_compat.Exact_missing -> Ok None
   | Fs_compat.Exact_kind _ -> S.load ~path:file |> Result.map Option.some |> Result.map_error S.error_to_string
   | Fs_compat.Exact_unknown -> Error "continuity snapshot path cannot be inspected"
+let read ~config ~keeper_name =
+  read_in ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
 let prepare ?end_atom ~config ~keeper_name ~trace_id () =
   let* lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
   let* previous = read ~config ~keeper_name in

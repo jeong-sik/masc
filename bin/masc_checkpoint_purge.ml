@@ -21,10 +21,9 @@
     The Librarian's atom position moves with the checkpoint (RFC
     librarian-lifecycle §10-2, {!Masc.Keeper_checkpoint_purge.librarian_rebase}):
     the rewrite is refused while the Librarian has atoms left to read, and
-    otherwise the position is written after the checkpoint. The Librarian
-    working state was hashed against the bytes the purge rewrites, so it is
-    removed before the checkpoint is saved
-    ({!Masc.Keeper_librarian_continuity.discard}). *)
+    otherwise the position is written after the checkpoint. The turn-boundary
+    log and the saved Librarian working state are read first: the messages
+    they name stay byte-exact, so both still match the purged checkpoint. *)
 
 let usage =
   {|Usage: masc_checkpoint_purge --trace TRACE_ID [OPTIONS]
@@ -75,16 +74,17 @@ let purge_error_text = function
   | Purge.Invalid_config detail -> "invalid config: " ^ detail
   | Purge.Invalid_input_structure structural ->
     Printf.sprintf
-      "checkpoint failed structural validation and was not modified: %s\n\
-       (a broken history has to be repaired at the write boundary that \
-       admitted it, not by this tool — see #25443)"
+      "checkpoint failed structural validation even with its break set aside, \
+       and was not modified: %s"
       (structural_error_text structural)
   | Purge.Invalid_output_structure structural ->
     Printf.sprintf
       "purge produced an invalid structure — this is a bug in \
        keeper_checkpoint_purge, nothing was written: %s"
       (structural_error_text structural)
-  | (Purge.History_end_unreadable _ | Purge.History_end_moved _) as purge_error ->
+  | ( Purge.Atom_count_changed _
+    | Purge.Kept_atom_rewritten _
+    | Purge.Continuity_no_longer_fits _ ) as purge_error ->
     Purge.purge_error_to_string purge_error
 
 let load_error_text = function
@@ -176,7 +176,27 @@ let () =
   match Store.load_agent_core ~session_dir ~session_id:trace with
   | Error load_error -> error (load_error_text load_error)
   | Ok checkpoint ->
-    (match Purge.purge ~config:!config checkpoint with
+    let boundary_lines =
+      match
+        Masc.Keeper_turn_boundaries.read
+          ~keepers_dir:runtime_keepers_dir
+          ~keeper_id:checkpoint.agent_name
+      with
+      | Ok lines -> lines
+      | Error detail -> error ("turn-boundary log unreadable: " ^ detail)
+    in
+    let continuity =
+      match
+        Masc.Keeper_librarian_continuity.read_in
+          ~keepers_dir:runtime_keepers_dir
+          ~keeper_name:checkpoint.agent_name
+      with
+      | Ok continuity -> continuity
+      | Error detail -> error ("Librarian working state unreadable: " ^ detail)
+    in
+    (match
+       Purge.purge ~config:!config ~trace_id:trace ~boundary_lines ~continuity checkpoint
+     with
      | Error purge_error -> error (purge_error_text purge_error)
      | Ok (purged, report) ->
        let rebase =
@@ -266,20 +286,6 @@ let () =
          let backup_path = Filename.concat backup_dir (trace ^ ".json") in
          write_file_bytes backup_path original_bytes;
          Printf.printf "backup: %s (%d bytes)\n" backup_path before_len;
-         (* The working state was hashed against the bytes this rewrites. It
-            goes before the save: left behind a saved purge, it would refuse
-            every Agent-Core turn with [Prefix_changed]. *)
-         (match
-            Masc.Keeper_librarian_continuity.discard
-              ~keepers_dir:runtime_keepers_dir
-              ~keeper_name:checkpoint.agent_name
-          with
-          | Ok () -> print_endline "librarian working state: removed"
-          | Error detail ->
-            error
-              ("the Librarian working state could not be removed, and nothing was \
-                rewritten (backup retained): "
-               ^ detail));
          (match
             Store.save_agent_core_classified ~session_dir
               ~history_retained:

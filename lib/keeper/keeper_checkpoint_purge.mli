@@ -30,32 +30,55 @@
     it any more, and every turn sent the whole 16 MB history until one
     finally completed. So no rule here removes an atom-opening message.
 
-    The last atom is returned byte-exact along with the tail, so the
-    history's end — its atom count and the digest of the message that opens
-    the last atom — is the same after the purge as before. That end is what a
-    position at the end of the history is keyed by, so the Librarian
-    position, the latest turn-boundary line and the request front all still
-    match. {!purge_messages} checks it and returns {!History_end_moved}
-    rather than a history whose end moved. The exception is a structurally
-    broken input: recovery drops the broken tail, so its end moves by design.
+    {2 The messages a record names are kept}
+
+    A position is an atom index and the digest of the message that opens
+    that atom. Keeping the count is not enough: a completed turn usually ends
+    on an assistant reply, the reasoning strip rewrites it, and the turn's
+    boundary line would stop matching. The request front of a keeper with no
+    Librarian working state starts at the last completed turn that still
+    matches, and at the oldest atom when none does. So these stay
+    byte-exact:
+    - the last atom, returned whole along with the tail. Every position at
+      the history's end names it, the Librarian position included: a rewrite
+      requires that position at the end ({!librarian_rebase}).
+    - the opening message of the atom each completed turn of the trace ended
+      on, which its [Turn_ended] line names. A failed turn can leave the
+      checkpoint past the last such line, so the end alone does not cover
+      it.
+    - everything ahead of the end of a Librarian working state
+      ({!Librarian_continuity_snapshot}) that fits the history. The turn
+      sends that working state in place of the atoms it covers, and the
+      snapshot holds a digest of their bytes; rewritten, it would refuse
+      every Agent-Core turn with [Prefix_changed]. Those atoms do not go out
+      in a request, so leaving them only costs disk.
+    {!purge_messages} checks all three against the history it returns — the
+    atom count, each kept opener's digest, and the working state through
+    {!Librarian_continuity_snapshot.restore} — and returns an error instead
+    of a history they no longer describe.
+
+    A carried-front seed ({!Keeper_carried_front}) names whatever atom a
+    front moved to, and is not kept: when the purge rewrote that atom's
+    opening message the seed no longer matches, and the request starts where
+    the last completed turn ended.
+
+    Recovery from a structurally broken input drops the broken tail, so its
+    end moves by design; atoms are then counted on the history it returns.
+    A working state that covers the dropped tail no longer fits, and the
+    recovery is refused; with the server stopped, removing that working
+    state (the keeper's [librarian-continuity.json]) lets it through, and
+    the Librarian writes it again from atom 0.
 
     Tool protocol cycles are never split, reordered, or dropped. The last
-    [keep_recent_messages] messages, the whole last atom, and the structurally
-    protected suffix from {!Keeper_transcript_unit.partition} are returned
-    byte-exact. Signed thinking ([Thinking] with a signature and
-    [RedactedThinking]) is never removed: providers replay it byte-exact on
-    tool turns.
-
-    The rewritten bytes still differ from what a continuity snapshot hashed
-    (its [prefix_sha256]), so whoever installs a purged checkpoint discards
-    that snapshot first ({!Keeper_librarian_continuity.discard}); left in
-    place, it would refuse every Agent-Core turn with [Prefix_changed].
+    [keep_recent_messages] messages and the structurally protected suffix
+    from {!Keeper_transcript_unit.partition} are returned byte-exact. Signed
+    thinking ([Thinking] with a signature and [RedactedThinking]) is never
+    removed: providers replay it byte-exact on tool turns.
 
     Input and output are both validated with
-    {!Keeper_transcript_unit.validate}; a checkpoint that fails input
-    validation is refused rather than repaired, because a structurally broken
-    history has to be prevented at the write boundary that admitted it
-    (#25443). [session_id], [turn_count], and every other checkpoint field
+    {!Keeper_transcript_unit.validate}: an input that fails is recovered as
+    above, and an output that fails is an error. [session_id], [turn_count],
+    and every other checkpoint field
     outside [messages] pass through unchanged, so
     [Keeper_checkpoint_store.save_agent_core_classified] accepts the result as an
     equal-watermark re-save.
@@ -78,8 +101,9 @@ val default_config : config
     and the last one byte-exact, so the position is answered back unchanged.
     Recovery from a broken transcript drops its tail, and there the position
     moves to the new end. Either way it is only allowed when the position has
-    nothing left to read: the reasoning strip rewrites the messages that open earlier atoms, so
-    a position short of the end would no longer match the message it names.
+    nothing left to read: the rewrite clears tool results and reasoning, and
+    in atoms the Librarian has not read yet that is content it would never
+    absorb.
 
     [boundary_lines_seen] is left as it is. It says which lines of the
     boundary log a round had already counted, so that a restart line beyond
@@ -166,28 +190,43 @@ type purge_error =
   | Invalid_output_structure of Keeper_transcript_unit.structural_error
       (** Defensive re-validation of our own output; reaching this is a bug in
           the transform, never a property of the input. *)
-  | History_end_unreadable of string
-      (** {!Keeper_turn_boundaries.position_of_messages} could not name the end
-          of the input or of the output. *)
-  | History_end_moved of
-      { before : Keeper_turn_boundaries.position
-      ; after : Keeper_turn_boundaries.position
+  | Atom_count_changed of
+      { before : int
+      ; after : int
       }
-      (** A sound input came out with a different atom count or a different
-          message opening its last atom. The rules above keep both, so this is
-          a bug in the transform; the rewrite is refused rather than installed
-          under positions it would no longer match. *)
+      (** The output has a different number of atoms than the history it
+          keeps. No rule removes an atom, so this is a bug in the transform. *)
+  | Kept_atom_rewritten of { atom : int }
+      (** The message opening [atom], which the history's end or a boundary
+          line names, came out different. A bug in the transform. *)
+  | Continuity_no_longer_fits of Librarian_continuity_snapshot.error
+      (** The Librarian working state fits the input and not the output. On a
+          sound input this is a bug in the transform; on a recovery the
+          dropped tail was part of what it covers. *)
 
 val purge_error_to_string : purge_error -> string
 
+type boundary_line =
+  int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result
+(** One line of {!Keeper_turn_boundaries.read}. *)
+
 val purge_messages
   :  config:config
+  -> trace_id:string
+  -> boundary_lines:boundary_line list
+  -> continuity:Librarian_continuity_snapshot.t option
   -> Agent_core.Types.message list
   -> (Agent_core.Types.message list * report, purge_error) result
-(** Pure message-list transform behind {!purge}. Exposed for tests. *)
+(** Pure message-list transform behind {!purge}. [boundary_lines] is the
+    keeper's turn-boundary log and [continuity] its saved Librarian working
+    state, both as they are when the result is installed: they say which
+    messages stay byte-exact. Exposed for tests. *)
 
 val purge
   :  config:config
+  -> trace_id:string
+  -> boundary_lines:boundary_line list
+  -> continuity:Librarian_continuity_snapshot.t option
   -> Agent_core.Checkpoint.t
   -> (Agent_core.Checkpoint.t * report, purge_error) result
 (** Apply {!purge_messages} to [ckpt.messages], leaving every other field

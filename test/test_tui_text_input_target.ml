@@ -225,7 +225,12 @@ let test_the_fusion_launch_form_claims_while_open () =
   state.Tui_types.view <- Tui_types.Overview;
   check target "the form is the Fusion surface's" None (resolved state);
   state.Tui_types.view <- Tui_types.Fusion;
-  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_started "run-1");
+  state.Tui_types.fusion_launch <-
+    Some
+      (Tui_types.Fusion_launch_started
+         { fls_run_id = "run-1"
+         ; fls_reads_left = Tui_types.fusion_started_list_reads
+         });
   check target "a started run is the list again" None (resolved state)
 ;;
 

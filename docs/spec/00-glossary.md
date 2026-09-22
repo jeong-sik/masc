@@ -164,12 +164,9 @@ status: reference
 **Turn Configuration Error (턴 구성 오류)**
 : Keeper turn이 typed Agent Core 구성 오류로 끝나 latch된 실패 원인
   (`Keeper_registry.Turn_configuration_error { code; field; detail }`). 현재 프로세스는
-  운영자가 설정이나 환경을 바꾸지 않고는 이 실패를 고칠 수 없다. `code`는
-  `missing_env_var`·`unsupported_provider`·`credential_unavailable`·
-  `sensitive_value_in_config` 넷이고, `field`는 관련 설정 키다. `code`는 닫힌
-  타입이 아니라 문자열이므로 이 "넷"은 타입이 아니라 생산 지점
-  (`keeper_unified_turn_types.ml`)의 목록이다 — 생산자가 늘면 이 문장이 먼저
-  낡는다. Fleet는 일시정지되지
+  운영자가 설정이나 환경을 바꾸지 않고는 이 실패를 고칠 수 없다. `code`는 닫힌
+  타입이 아니라 문자열이고, 그 값을 만드는 생산 지점은
+  `keeper_unified_turn_types.ml`이다. `field`는 관련 설정 키다. Fleet는 일시정지되지
   않은 `Failing` Keeper의 이 원인을 `turn_configuration_error_keeper_count/names`로
   표시하고, 다른 차단 사유가 없으면 `degraded`로 표시하며 `operator_action_required`를
   참으로 만든다. autoboot 대상만 세는 `configuration_blocked_*`와 달리 이 값은 autoboot
@@ -634,8 +631,12 @@ status: reference
   저장하며 Keeper가 등록돼 있으면 쓸 수 없다. CLI `masc-checkpoint-purge`는 기본이
   dry-run이고 `--apply`가 백업 후 저장한다. checkpoint를 다시 쓰면 atom 번호가 바뀌므로
   Librarian의 atom 위치도 함께 옮기며(`librarian_rebase`), Librarian이 아직 읽을 atom을
-  남겼으면 재작성을 거부한다. 서버의 dashboard 청소 동작은 그 전에 Librarian lane을
-  취소하고 기다린다.
+  남겼으면 재작성을 거부한다. Librarian의 continuity 스냅숏(`librarian-continuity.json`)은
+  옛 번호와 digest를 갖고 있어 새 번호로 옮길 수 없으므로 적용이 지우고, 다음 Librarian
+  회차가 새 이력의 것을 쓴다. 결과 JSON의 `continuity_snapshot`이 그 처리를 알린다 —
+  `untouched`(미리보기·거부·no-op)·`removed`·`absent`·`not_removed`(checkpoint와 위치는
+  설치됐으나 unlink 실패: 다음 턴은 옮긴 위치에서 시작한다). 서버의 dashboard 청소 동작은
+  그 전에 Librarian lane을 취소하고 기다린다.
   → [Keeper_checkpoint_purge](../../lib/keeper/keeper_checkpoint_purge.mli),
   [Runbook](../CHECKPOINT-PURGE-RUNBOOK.md)
 

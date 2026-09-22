@@ -878,6 +878,12 @@ let keeper_call_schedule_label (schedule : Tui_decode.keeper_call_schedule) =
     (schedule.kcs_planned_index + 1)
 
 
+(* What the full calls draw for a recorded result: an Execute result read into
+   its parts, or any result as it arrived. *)
+type tool_output =
+  | Execute_output of Masc_tui_execute_result.t
+  | Served_output of string
+
 let keeper_message_tool_activity_details state ~keeper_name
     (activity : Keeper_chat_transcript.tool_activity) =
   let association = keeper_call_association state ~keeper_name activity in
@@ -890,8 +896,24 @@ let keeper_message_tool_activity_details state ~keeper_name
           | Some schedule -> keeper_call_schedule_label schedule
           | None -> "not recorded"
         in
+        (* An Execute result read against the schema its descriptor
+           declares, so the pane can lead with how the command ended and
+           what it printed. Any other tool, or a result that does not read,
+           is drawn as it arrived. *)
         let output =
-          Option.map (fun value -> "output", value) call.kc_output
+          match call.kc_output with
+          | None -> None
+          | Some value -> (
+              let execute =
+                match Keeper_chat_transcript.descriptor_of_tool_name activity.tool_name with
+                | Some descriptor
+                  when descriptor.runtime_handler = Masc.Keeper_tool_descriptor.Tool_execute ->
+                    Masc_tui_execute_result.of_result value
+                | Some _ | None -> None
+              in
+              match execute with
+              | Some result -> Some (Execute_output result)
+              | None -> Some (Served_output value))
         in
         let disposition =
           match call.kc_disposition with
@@ -982,10 +1004,30 @@ let keeper_message_tool_activity_details state ~keeper_name
     ; Some
         (if String.equal durable_input "" then said "input" "(empty)" ""
          else served "input" durable_input)
-    ; Option.map (fun (label, value) -> served label value) output_field
-    ; Option.map (fun (label, value) -> said label value "") result_field
-    ; Some (said "identity" identity "")
     ]
+    @ (match output_field with
+       | None -> []
+       | Some (Served_output value) -> [ Some (served "output" value) ]
+       | Some (Execute_output result) ->
+           [ Some
+               (said "status"
+                  (Masc_tui_execute_result.status_text result)
+                  (if result.ok then Theme.ok () else Theme.bad ()))
+           (* Absent is not empty: a large output rides an artifact, which
+              the context line names. *)
+           ; Option.map
+               (fun output ->
+                 if String.equal output "" then said "output" "(empty)" ""
+                 else served "output" output)
+               result.output
+           ; Option.map (served "stderr") result.stderr
+           ; Option.map
+               (fun text -> said "context" text "")
+               (Masc_tui_execute_result.rest_text result)
+           ])
+    @ [ Option.map (fun (label, value) -> said label value "") result_field
+      ; Some (said "identity" identity "")
+      ]
     |> List.filter_map Fun.id
   in
   Tool_detail.tree ~palette:(tool_detail_palette ()) fields

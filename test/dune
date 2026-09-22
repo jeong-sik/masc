@@ -3860,6 +3860,11 @@
  (libraries alcotest masc_tui_tool_detail yojson))
 
 (test
+ (name test_tui_execute_result)
+ (modules test_tui_execute_result)
+ (libraries alcotest masc_tui_execute_result))
+
+(test
  (name test_tui_keeper_chat_diff)
  (modules test_tui_keeper_chat_diff)
  (libraries

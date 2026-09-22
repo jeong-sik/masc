@@ -534,8 +534,10 @@ status: reference
   `No_atom_history`(`no_atom_history`), `Stale_noop`(`stale_noop`). 위치(Atom 수와
   마지막 Atom의 digest)를 갖는 것은 `Atom_history` 하나다. 저장이 Checkpoint를
   돌려주면 그 messages에서 위치를 세고, Atom이 하나도 없으면 `Empty_atom_history`다.
-  저장이 `Stale_noop`이라 돌려줄 Checkpoint가 없으면 소유자로 갈린다 — 공식
-  클라이언트 turn은 `No_atom_history`, Agent Core turn은 `Stale_noop`이다
+  돌려줄 Checkpoint가 없으면 소유자로 갈린다 — 공식 클라이언트 turn은 Agent Core
+  Checkpoint를 저장하지 않으므로 `No_atom_history`, Agent Core turn은 저장 결과가
+  `Stale_noop`일 때만 Checkpoint가 없으므로 `Stale_noop`이다. 저장이 `Error`면 줄을
+  쓰지 않는다
   (`keeper_agent_run_finalize_response.ml`의 `turn_boundary_position`). 그래서
   `No_atom_history` 줄은 공식 클라이언트 turn을 가리킨다. `Stale_noop`은
   `Keeper_checkpoint_store`의 저장 결과 `Stale_noop`(더 새 writer가 앞서 canonical

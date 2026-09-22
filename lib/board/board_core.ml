@@ -248,9 +248,10 @@ let add_comment_with_audience
     (match staged with
      | Error _ as e -> e
      | Ok comment ->
-       (match with_persist_lock store (fun () ->
-          let* () = append_comment comment in
-          Ok (with_lock store (fun () ->
+        (match with_persist_lock store (fun () ->
+          match append_comment comment with
+          | Error _ as e -> e
+          | Ok () -> Ok (with_lock store (fun () ->
               (* Commit from a fresh read: the post can change or vanish
                  while the append is in flight; bumping the stale staged
                  copy would clobber a concurrent unrelated mutation. The
@@ -740,8 +741,9 @@ let create_sub_board
           | Error _ as e -> e
           | Ok sb ->
             (match with_persist_lock store (fun () ->
-               let* () = append_sub_board sb in
-               Ok (with_lock store (fun () ->
+               match append_sub_board sb with
+               | Error _ as e -> e
+               | Ok () -> Ok (with_lock store (fun () ->
                    if Hashtbl.mem store.sub_boards_by_slug slug
                    then
                      Error

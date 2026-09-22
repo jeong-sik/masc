@@ -632,8 +632,9 @@ let create_post_with_audience
       | Error _ as e -> e
       | Ok post ->
         (match with_persist_lock store (fun () ->
-           let* () = append_post post in
-           Ok (with_lock store (fun () ->
+           match append_post post with
+           | Error _ as e -> e
+           | Ok () -> Ok (with_lock store (fun () ->
                (* Commit re-checks the policy: staging validated it, but
                   it can flip while the append is in flight, and commit
                   is the authoritative gate — a durable row without a
@@ -647,7 +648,7 @@ let create_post_with_audience
                  index_post_origin store post;
                  Stdlib.incr store.post_count;
                  invalidate_post_caches store;
-                 Ok ()))) with
+                 Ok ()) )) with
          | Error _ as e -> e
          | Ok committed ->
            (match committed with

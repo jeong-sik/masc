@@ -23,6 +23,7 @@
 
 ### Fixed
 
+- The Keepers fleet row says when its task-owner scan came up short. The scan reports what it could not read, and only a backlog failure moves the fleet status off `ok`, so a Keeper whose profile did not load left its tasks out of the count with nothing on the row saying so. The count now carries its own shortfall: `task owner without fiber 0 (2 sources unread)` (#38012).
 - The Board title counts what the board holds rather than the listing page it drew. The listing is one server page of fifty with no key past it, so a board of 109 posts read `MASC Board (50)` and the 59 posts off the page left no trace; the title now reads `(50 of 109)`, and `(41)` where the page carries everything (#37999).
 - Transcript tail recovery reads a missing checkpoint ref as `Already_dispatchable`, as its interface promised, instead of failing the recovery as `Checkpoint_unavailable` on a keeper whose session directory holds no checkpoint yet. A ref that cannot be read, names another identity or session, or cannot be locked still fails it (#37904).
 - A `cd` operand in a keeper's Execute call is checked to exist only under the Host and Docker sandboxes, where the host filesystem is what the command sees. Microvm, SSH and delegated sandboxes keep their checkouts in the guest, so the host check refused every `cd <checkout>` on those keepers with a path error. The containment check still applies under every sandbox (#37908).

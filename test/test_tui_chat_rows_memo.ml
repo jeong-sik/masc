@@ -22,6 +22,7 @@ let entry_at ?(keeper = "alpha") ?(request_id = "") at : Tui_types.msg_entry =
   ; me_image = Masc_tui_image_preview.No_image
   ; me_memory_summary = None
   ; me_journal = []
+  ; me_memory_pass = Masc_tui_message_layout.No_pass
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None

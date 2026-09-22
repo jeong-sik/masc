@@ -1,5 +1,12 @@
 (** RFC-0004 Phase A0.1 PR-1 — typed SSE event wrapper public interface. *)
 
+(** The generated payload types and their JSON readers and writers. A decoder
+    of these events outside the server reads them with these rather than with
+    a copy of the field names, so the two sides share one contract. *)
+module Types = Sse_event_t
+
+module Json = Sse_event_j
+
 type envelope_meta =
   { event_type : string
   ; ts_unix : float

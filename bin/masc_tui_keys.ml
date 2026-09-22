@@ -55,13 +55,25 @@ let config_bindings =
   ; b Navigate "t" "tools"
       ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
   ; b Act "e" "edit"
-      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
-      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]
+      ~help:"runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
+    (* One item, because they are one action: on params [e] and [Enter] both
+       open the same type-aware field ([handle_runtime_param_edit_open]
+       ~advanced:false). Apart, this pane spent two of its slots on one door,
+       and the fitter -- which reads position, not meaning -- gave up [E] at
+       80 cells, the only other thing the pane does. A reader left with
+       [e:edit] and [Enter:edit / use] would also read the pane as having one
+       way to edit and no advanced one. *)
+  ; b Act "e / Enter" "edit"
+      ~help:"on params: edit the selected value with a type-aware field",
+      Some [ Config_params ]
   ; b Act "E" "advanced JSON"
       ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
-  ; b Act "Enter" "edit / use"
-      ~help:"edit the selected param; on themes, use that colour scheme",
-      Some [ Config_params; Config_themes ]
+    (* Split from the pair above. What [Enter] does on themes is not editing,
+       and one label reading "edit / use" made each pane carry the other's
+       word: a params reader met "use" with nothing to use. *)
+  ; b Act "Enter" "use"
+      ~help:"on themes, use that colour scheme", Some [ Config_themes ]
   ; b Act "x" "default / clear"
       ~help:"params return to default; prompts clear override; themes follow terminal colours",
       Some [ Config_params; Config_prompts; Config_themes ]
@@ -623,14 +635,23 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
       ; b Navigate "v" "next Planning tab" ~help:"back round to Goals"
       ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Right / Enter" "verdict" ~help:"open the full evaluator verdict"
+      ; b Act "Right / Enter" "verdict" ~detail:List_only
+          ~help:"open the full evaluator verdict"
       ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "y" "agree" ~help:"record the machine's verdict as yours"
-        (* [x], not [n]: this surface answers the row search, and [n] / [N]
-           step it. Spelled the way Verification spells its own rejection. *)
-      ; b Act "x" "overrule" ~help:"record the opposite verdict; $EDITOR takes the reason"
+        (* One item, spelled the way Verification spells its own pair. Apart,
+           the fitter gives them up one at a time, and the screen that loses
+           them first is the verdict pane -- the one place an operator reads a
+           ruling in full before answering it. [Masc_tui_footer.never_dropped_keys]
+           pins the pair whole; pinning [y] or [x] alone would pin the [y] of
+           every [y / n] and the [x] that deletes a keeper.
+
+           [x], not [n]: this surface answers the row search, and [n] / [N]
+           step it. *)
+      ; b Act "y / x" "agree / overrule"
+          ~help:"y records the machine's verdict as yours; x records the \
+                 opposite, with $EDITOR taking the reason"
       ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
       ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
       ; b Search "n / N" "next / previous match"

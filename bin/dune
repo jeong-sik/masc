@@ -418,7 +418,10 @@
  ; masc for the wire's own routing table: which event types are whole-projection
  ; pushes is the wire's business, and this decoder used to keep a copy that had
  ; drifted by two.
- (libraries masc agent_core masc_tui_keeper_chat_projection yojson))
+ ; masc.sse_event for the agent lifecycle payloads, read with the generated
+ ; readers of the contract the bridge writes them with (RFC-0004).
+ (libraries masc masc.sse_event atdgen-runtime agent_core
+  masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_lane_declaration)
@@ -937,6 +940,12 @@
   ; agent_core for the tool schedule contract a ledger call carries: batch
   ; size and execution mode decide the dispatch marks.
   agent_core))
+
+(library
+ (name masc_tui_connector_state)
+ (wrapped false)
+ (modules masc_tui_connector_state)
+ (libraries masc))
 
 (library
  (name masc_tui_keeper_mark)
@@ -1510,6 +1519,7 @@
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table
+  masc_tui_connector_state
   masc_tui_fleet_line
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.

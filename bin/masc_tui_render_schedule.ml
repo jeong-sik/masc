@@ -885,9 +885,15 @@ let change_row ~op_style ~result_style ~summary_width values =
 
 let fusion_time_width = 16
 let fusion_age_width = 7
-(* A running stage ("recording(3/1)") or how the run ended. A failed run
-   draws its failure code, and the widest the server writes is
-   [evidence_unavailable]. *)
+(* A running stage ("recording(3/1)") or how the run ended: a failed run draws
+   a code from the delivery set or the judge set.
+
+   The column is full. Three vocabularies share it, none of them written near
+   here, and [Table.cell] fits what it is given without a word -- so the
+   widths are checked in [test/test_tui_fusion_state_width.ml], which reads
+   this number and all three sets out of the source. Naming today's longest
+   string here instead would be a copy, and the copy is what goes stale while
+   the screen quietly truncates. *)
 let fusion_state_width = 20
 let fusion_preset_width = 10
 let fusion_minimum_run_width = 12

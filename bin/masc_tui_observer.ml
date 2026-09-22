@@ -40,9 +40,9 @@ type agent_core_kind =
   | Turn_ready
   | Turn_completed
   | Agent_started
-  | Agent_completed
-  | Agent_failed
-  | Agent_yielded
+  | Agent_completed of { elapsed_s : float }
+  | Agent_failed of { elapsed_s : float; error_code : string; error : string }
+  | Agent_yielded of { elapsed_s : float }
   | Tool_approval_completed
   | Telemetry
   | Agent_core_other of string
@@ -62,6 +62,14 @@ type agent_core = {
   run_id : string option;
   caused_by : string option;
   execution_id : string option;
+}
+
+type lane_resource = {
+  lr_lifecycle : Masc.Lane_addon_resource_events.lifecycle;
+  lr_package : string;
+  lr_instance : string;
+  lr_detail : string option;
+  lr_at : float;
 }
 
 type keeper_heartbeat = {
@@ -130,6 +138,13 @@ type event =
      carries no [at]: nothing computes a duration from it. *)
   | Fusion_run_status of
       { keeper : string; run_id : string; status : string }
+  (* Server push with no payload: a run registry changed, and a reader that
+     shows internal runs re-fetches them. *)
+  | Internal_agent_runs_changed
+  (* A Lane Add-on container was acquired, failed to start, was removed, or
+     could not be shown removed. It rides the agent-core family on the wire,
+     but it is the lane runtime's fact, not an agent's. *)
+  | Lane_resource of lane_resource
   | Snapshot of string
   | Other of string
 
@@ -157,7 +172,8 @@ let chat_appended_keeper = function
   | Keeper_turn_complete _
   | Keeper_composite_changed _
   | Keeper_chat_stream_frame _ | Keeper_waiting_inventory_changed _
-  | Fusion_run_status _ | Snapshot _ | Other _ ->
+  | Fusion_run_status _ | Internal_agent_runs_changed | Lane_resource _
+  | Snapshot _ | Other _ ->
       None
 
 (* Field readers over one object's assoc list. Each answers [None] for an
@@ -209,19 +225,44 @@ let optional_int_field fields name ~event =
   | Some (`Int value) -> Ok (Some value)
   | Some _ -> Error (Printf.sprintf "%s carries a non-integer %s" event name)
 
-let agent_core_kind_of_event_type = function
-  | "tool_called" -> Tool_called
-  | "tool_completed" -> Tool_completed
-  | "turn_started" -> Turn_started
-  | "turn_ready" -> Turn_ready
-  | "turn_completed" -> Turn_completed
-  | "agent_started" -> Agent_started
-  | "agent_completed" -> Agent_completed
-  | "agent_failed" -> Agent_failed
-  | "agent_yielded" -> Agent_yielded
-  | "tool_approval_completed" -> Tool_approval_completed
-  | "telemetry_event" -> Telemetry
-  | other -> Agent_core_other other
+(* A lifecycle payload read with the generated reader of the contract the
+   bridge wrote it with. A payload that does not satisfy it is a frame this
+   build cannot read, and is said so rather than drawn without its numbers. *)
+let read_payload ~event_type reader payload =
+  match reader (Yojson.Safe.to_string (`Assoc payload)) with
+  | value -> Ok value
+  | exception (Atdgen_runtime.Oj_run.Error detail | Yojson.Json_error detail) ->
+      Error (Printf.sprintf "%s payload: %s" event_type detail)
+
+let agent_core_kind ~event_type payload =
+  match event_type with
+  | "tool_called" -> Ok Tool_called
+  | "tool_completed" -> Ok Tool_completed
+  | "turn_started" -> Ok Turn_started
+  | "turn_ready" -> Ok Turn_ready
+  | "turn_completed" -> Ok Turn_completed
+  | "agent_started" -> Ok Agent_started
+  | "agent_completed" ->
+      Result.map
+        (fun (p : Sse_event.Types.agent_completed_payload) ->
+          Agent_completed { elapsed_s = p.elapsed_s })
+        (read_payload ~event_type Sse_event.Json.agent_completed_payload_of_string
+           payload)
+  | "agent_failed" ->
+      Result.map
+        (fun (p : Sse_event.Types.agent_failed_payload) ->
+          Agent_failed
+            { elapsed_s = p.elapsed_s; error_code = p.error_code; error = p.error })
+        (read_payload ~event_type Sse_event.Json.agent_failed_payload_of_string payload)
+  | "agent_yielded" ->
+      Result.map
+        (fun (p : Sse_event.Types.agent_yielded_payload) ->
+          Agent_yielded { elapsed_s = p.elapsed_s })
+        (read_payload ~event_type Sse_event.Json.agent_yielded_payload_of_string
+           payload)
+  | "tool_approval_completed" -> Ok Tool_approval_completed
+  | "telemetry_event" -> Ok Telemetry
+  | other -> Ok (Agent_core_other other)
 
 let ( let* ) = Result.bind
 
@@ -245,9 +286,10 @@ let decode_agent_core ~type_name fields =
     | Some index, Some size -> Some (index, size)
     | _, _ -> None
   in
+  let* kind = agent_core_kind ~event_type payload in
   Ok
     (Agent_core
-       { kind = agent_core_kind_of_event_type event_type
+       { kind
        ; agent
        ; tool = string_field fields "tool_name"
        ; task = string_field fields "task_id"
@@ -261,6 +303,36 @@ let decode_agent_core ~type_name fields =
        ; run_id
        ; caused_by
        ; execution_id
+       })
+
+(* A Lane Add-on lifecycle is recognised by walking the producer's own list
+   through the producer's name and the bridge's public spelling of it, so the
+   four names are not copied here. *)
+let lane_resource_lifecycle event_type =
+  List.find_opt
+    (fun lifecycle ->
+      String.equal event_type
+        (Masc.Keeper_event_bridge.public_custom_event_type
+           (Masc.Lane_addon_resource_events.wire_name lifecycle)))
+    Masc.Lane_addon_resource_events.all
+
+let decode_lane_resource ~type_name ~lifecycle fields =
+  let* at = required float_field fields "ts_unix" ~event:type_name in
+  let* payload =
+    match assoc_field fields "payload" with
+    | Some payload -> Ok payload
+    | None -> Error (type_name ^ " carries no payload object")
+  in
+  let* package = required string_field payload "package_id" ~event:type_name in
+  let* instance = required string_field payload "instance_id" ~event:type_name in
+  let* detail = optional_string_field payload "detail" ~event:type_name in
+  Ok
+    (Lane_resource
+       { lr_lifecycle = lifecycle
+       ; lr_package = package
+       ; lr_instance = instance
+       ; lr_detail = detail
+       ; lr_at = at
        })
 
 let decode_keeper_heartbeat fields =
@@ -399,8 +471,12 @@ let event_of_json (json : Yojson.Safe.t) =
       match string_field fields "type" with
       | None -> Error "event carries no type"
       | Some type_name when String.starts_with ~prefix:agent_core_prefix type_name
-        ->
-          decode_agent_core ~type_name fields
+        -> (
+          match
+            Option.bind (string_field fields "event_type") lane_resource_lifecycle
+          with
+          | Some lifecycle -> decode_lane_resource ~type_name ~lifecycle fields
+          | None -> decode_agent_core ~type_name fields)
       | Some "keeper_heartbeat" -> decode_keeper_heartbeat fields
       | Some "keeper_tool_call" -> decode_keeper_tool_call fields
       | Some "keeper_turn_complete" -> decode_keeper_turn_complete fields
@@ -433,6 +509,9 @@ let event_of_json (json : Yojson.Safe.t) =
               | Error detail, _, _ | _, Error detail, _ | _, _, Error detail ->
                   Error detail)
           | None -> Error "fusion_run_status carries no run object")
+      | Some type_name
+        when String.equal type_name Masc.Internal_agent_runs_event.event_type ->
+          Ok Internal_agent_runs_changed
       | Some ("keeper_chat_appended" as event) ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_chat_appended

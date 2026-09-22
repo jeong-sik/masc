@@ -239,10 +239,16 @@ v0.36.0 태그(09-22 12:02Z) 뒤에 병합된 다섯 PR(#37855·#37875·#37867·
 - Terminal-Bench 4.0 전체 실행: 09-22 기록대로 GPU(H100) 3개 task 와 CPU 16개·메모리 16 GiB 를
   이 호스트가 주지 못한다. 어댑터(`benchmarks/terminal_bench`)와 pin(Harbor 0.23.0)은 그대로다.
   이 세션에서 어댑터의 Python 테스트 193개는 통과했다(`.venv/bin/python -m pytest -q tests`, 20초).
-  `dist/manifest.json` 은 release 0.35.22 를 가리키고 최신 태그는 v0.36.0 이다. `dist/` 는 git 에 없고
-  `fetch_masc.sh` 가 실행 때 최신 릴리스를 받으므로 낡은 것은 로컬 사본뿐이다. 벤치 실행은 하지 않았다.
-  로컬 데이터셋 사본(`results/datasets/terminal-bench-4.0.0`)은 지금 `task.toml` 이 없는 불완전 상태라
-  `dataset_plan.py` 가 "download it again" 으로 거절한다(09-22 기록의 CPU·메모리 거절과 다른 이유).
+  로컬 데이터셋 사본(`results/datasets/terminal-bench-4.0.0`)은 09-23 02:00 KST 기준 `.complete` 이고
+  task 66개가 있다. `dataset_plan.py --env docker --concurrency 1` 은 이 Docker(CPU 4, 15,972 MiB)에서
+  GPU 3개와 자원 초과 10개를 빼고 53개를 돌릴 수 있다고 답한다.
+  이 호스트에서 09-22 20:54~22:07 KST 에 `embedding-drift-monitor` 한 task 로 trial 7건이 돌았다
+  (`results/jobs/2026-09-22__*`, 모두 arm e, dist 0.35.22 = `e499b80d59`, head 아님 — #37202 그대로).
+  실패 모양은 넷이다: anthropic `claude-fable-5`·`claude-fable-5-1` 이 "no declared categorical
+  reasoning-effort contract; cannot send high" 로 첫 턴에서 거절(2건, #37849), kimi 주간 quota(1건),
+  openrouter `z-ai/glm-5.3` 의 `repeated_reasoning_cycle`(1건, #36861 과 같은 모양), 6분 만에 끝나고
+  verifier 가 0점(1건). 마지막 trial 은 54분·도구 호출 65(중복 10)·$4.17 로 reward 1.0 이다.
+  한 task 한 번의 통과이며 head 의 결과가 아니다. 벤치 실행은 이 세션이 하지 않았다.
 - HITL·Access Control·Multi Lane·Schedule: 로그의 오류 모양만 봤다(위 "결함 아님" 셋).
   실제 전이·권한 거절·취소 경로는 이번에 읽지 않았다.
 - Skills 재생성: 09-19 기록의 "자동 생산 경로 미구현"(#37633) 이후 새 producer 를 찾지 못했다.

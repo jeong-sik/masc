@@ -13114,7 +13114,7 @@ def fusion_list_detail_interaction(
         send_and_wait(process, master_fd, output, b"\r", b"EVALUATOR VERDICT")
         # The heading precedes asynchronous task/goal enrichment. Inspect one
         # completed screen after both the linked goal and footer are present.
-        observed = (b"masc://planning/goal-ssim-501", b"Left / Esc:list")
+        observed = (b"masc://planning/goal-ssim-501", b"Left / Esc:back")
         for needle in observed:
             wait_for_output(process, master_fd, output, needle,
                             start=verdict_start, timeout=10.0)
@@ -13137,8 +13137,16 @@ def fusion_list_detail_interaction(
             b"masc://planning/goal-ssim-501",
             # #35734 spells hint keys the way the key table does: "Left", not
             # "left"; and with the table's spaces, which is the spelling the
-            # footer's pin reads.
-            b"Left / Esc:list",
+            # footer's pin reads. The label is the table's own ("back") now
+            # that this footer is read from the table rather than written out
+            # in the renderer, where it read "list".
+            b"Left / Esc:back",
+            # #36652: the hand-written row left these two out. [ / ] is
+            # answered here and only here, and the pair that answers a ruling
+            # was missing from the one screen that exists for reading a ruling
+            # in full. The pair is pinned, so a narrow footer keeps it.
+            b"[ / ]:previous / next",
+            b"y / x:agree / overrule",
         ):
             if needle not in verdict_plain:
                 raise AssertionError(

@@ -333,7 +333,7 @@ let split_on_double_space text =
    pin. test_tui_keys names all of them and counts the atom per surface, so
    this paragraph cannot drift from the table it describes. *)
 let never_dropped_keys =
-  [ "Esc"; "q"; "y / n"; "/approve /deny"; "Enter"; "a / x" ]
+  [ "Esc"; "q"; "y / n"; "/approve /deny"; "Enter"; "a / x"; "y / x" ]
 
 (* A compound key names its doors one per atom: [Left / Esc], [Right / Esc]
    and [Left/Esc] all hold the Esc door. The pin used to recognise the

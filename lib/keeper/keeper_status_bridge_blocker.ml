@@ -40,9 +40,9 @@ let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class optio
   | Some (Keeper_turn_driver.Official_client_recovery_required _) -> None
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
-  (* RFC-0159 follow-up (task-194): typed [Internal_*] variants now map to
-     dedicated [blocker_class] values so dashboards/operators can distinguish
-     unhandled internal failures instead of collapsing them to [None]. *)
+  (* Typed [Internal_*] variants map to dedicated [blocker_class] values so
+     dashboards and operators can tell an unhandled internal failure from a
+     clean turn. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _) ->
     Some Internal_unhandled_exception
   | Some (Keeper_turn_driver.Internal_bridge_exception _) ->

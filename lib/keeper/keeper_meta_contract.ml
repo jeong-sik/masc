@@ -75,10 +75,9 @@ type blocker_class =
   | Agent_core_tripwire_violation
   | Agent_core_input_required
   | Internal_unhandled_exception
-    (** RFC-0159 follow-up (task-194): unhandled internal exception escaped the
-        turn driver.  Previously [blocker_class_of_core_error] returned [None]
-        for this variant, so dashboards/operators could not distinguish an
-        unhandled internal failure from a clean turn. *)
+    (** An unhandled internal exception escaped the turn driver. It has its own
+        [blocker_class] so dashboards and operators can tell it from a clean
+        turn. *)
   | Internal_bridge_exception
     (** Internal bridge (AGENT_CORE/stream) exception escaped the turn driver. *)
   | Internal_contract_rejected

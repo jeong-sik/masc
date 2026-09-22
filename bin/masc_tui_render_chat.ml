@@ -429,16 +429,12 @@ let dress_tool_summary (line : string) : string =
 
 ;;
 
-(* The origin heading under [Origin_row]: who and which request at the
-   left, when at the right edge, a rule between.
-
-   The clock led the row before -- "[14:08:44]  ● e-m…-leader" -- so the
-   first thing the eye met on every heading was time-chrome, and the name
-   beside it was cut to the gutter's column on a row that had the whole
-   pane. The clock is still drawn: metadata:full is the mode that shows
-   seconds. It recedes to the right edge, where a chat client's timestamps
-   sit, and the rule between the name and it says where a turn's rows begin
-   without spending a colour on the heading.
+(* The origin heading under [Origin_row]: who at the left, when at the
+   right edge, a rule between. The name is spelt whole on a row that has the
+   whole pane; the clock (metadata:full is the mode that shows seconds) sits
+   at the right edge, where a chat client's timestamps sit, and the rule
+   between them says where a turn's rows begin without spending a colour on
+   the heading.
 
    [plain] is the lead measured, [styled] the same cells dressed; the two
    are kept together by the one caller so the rule is measured against what
@@ -447,6 +443,23 @@ let dress_tool_summary (line : string) : string =
    inner width exactly: the lead, one space and the rule fill the room the
    clock leaves, and the clock takes its cell count plus the space before
    it. *)
+(* The bar down the left edge of a line someone else wrote, in the sender's
+   colour: solid, where the journal's siding is dotted, so the texture says
+   which kind of outside it came from (RFC chat-turn-rail-and-side-lanes
+   §4.6). Plain and styled. The space goes before the bar, not after: in the
+   inline gutter a name that fills its column would otherwise run into it,
+   and the glyph fills only the left quarter of its cell, so the rest of the
+   cell already keeps it off the text. *)
+let arrival_bar (style : Message_layout.style) =
+  match style with
+  | Message_layout.Inbound ->
+      ( " \xe2\x96\x8e",
+        Printf.sprintf " %s\xe2\x96\x8e%s" (Chat_theme.origin style) Ansi.reset )
+  | Message_layout.User | Message_layout.Keeper | Message_layout.Status
+  | Message_layout.Local | Message_layout.Journal | Message_layout.Error
+  | Message_layout.Tool | Message_layout.Skill _ | Message_layout.Thinking ->
+      ("", "")
+
 let origin_heading buf cols ~plain ~styled ~clock =
   let inner = framed_inner_width cols in
   let recede = Theme.recede () in
@@ -596,6 +609,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           match row.style, row.shade with
           | Message_layout.Journal, _ ->
               Printf.sprintf "%s┊%s " (Chat_theme.origin row.style) Ansi.reset
+          | Message_layout.Inbound, _ -> snd (arrival_bar row.style)
           | _, Message_layout.Shade_none -> "  "
           | _, Message_layout.Shade_quoted ->
               Printf.sprintf "%s\xe2\x94\x82%s " (Theme.recede ()) Ansi.reset
@@ -618,31 +632,24 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
   | Message_layout.Metadata (Message_layout.Continued_at { clock }) ->
       (* The same speaker, later. Nothing changed at the left, so the row is
          the heading's tail alone: the rule to the clock. *)
-      origin_heading buf cols ~plain:row.gutter ~styled:row.gutter
-        ~clock:(Some clock)
+      let bar, styled_bar = arrival_bar row.style in
+      origin_heading buf cols ~plain:(row.gutter ^ bar)
+        ~styled:(row.gutter ^ styled_bar) ~clock:(Some clock)
   | Message_layout.Metadata
-      (Message_layout.Origin { clock; speaker; role_label = _; request_label })
+      (Message_layout.Origin { clock; speaker; role_label = _ })
     ->
       (* [speaker], not [role_label]: the label was aligned to the gutter's
          column for the inline modes, and this row has the pane. A name the
-         gutter cut to "e-m…-leader" is spelled whole here. *)
+         gutter cut to "e-m…-leader" is spelled whole here.
+
+         No request id. It groups the rows of a turn, and the rows already
+         show that grouping; as text it was an identifier no reader acts on. *)
       let mark = Message_layout.speaker_mark row.style in
-      (* The dot separates a name from a request; a lane with no name (the
-         tool and reasoning blocks carry an empty label) draws the request
-         alone after its mark rather than a dot with nothing on its left. *)
-      let request =
-        if String.equal request_label "" || String.equal speaker "" then
-          request_label
-        else " \xc2\xb7 " ^ request_label
-      in
-      (* A keeper's own row without a request id has neither, and the mark
-         then stands alone before the rule instead of two spaces. *)
-      let gap =
-        if String.equal speaker "" && String.equal request "" then "" else " "
-      in
+      let gap = if String.equal speaker "" then "" else " " in
       (* A heading in an arrival's column starts after the blank run the
          layout put in its gutter; everywhere else the gutter is empty. *)
-      let plain = row.gutter ^ mark ^ gap ^ speaker ^ request in
+      let bar, styled_bar = arrival_bar row.style in
+      let plain = row.gutter ^ bar ^ mark ^ gap ^ speaker in
       let styled =
         match row.style with
         | Message_layout.Tool | Message_layout.Thinking ->
@@ -658,8 +665,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
               if String.equal speaker "" then ""
               else Printf.sprintf "%s%s%s" Ansi.reverse speaker Ansi.reset
             in
-            Printf.sprintf "%s%s%s%s%s%s%s%s%s" row.gutter (Chat_theme.origin row.style)
-              Ansi.bold mark gap badge Ansi.dim request Ansi.reset
+            (* The mark's colour and weight end at the mark, not at whatever
+               follows it: a heading without a name has no badge to end
+               them, and the rule after it would draw bold in the speaker's
+               colour. *)
+            Printf.sprintf "%s%s%s%s%s%s%s%s" row.gutter styled_bar
+              (Chat_theme.origin row.style) Ansi.bold mark Ansi.reset gap badge
       in
       origin_heading buf cols ~plain ~styled ~clock
 

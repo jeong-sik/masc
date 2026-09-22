@@ -319,7 +319,7 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     local queue_dir="$target_root/.masc/keepers/fixture"
     mkdir -p "$queue_dir"
     jq -n '
-      {schema: "keeper.event_queue.state.v18", revision: 1,
+      {schema: "keeper.event_queue.state.v19", revision: 1,
        pending: [], last_transition: null,
        projected_dispositions: [], transition_outbox: [],
        accepted_transfer_projections: []}

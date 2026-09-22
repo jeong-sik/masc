@@ -13,7 +13,7 @@ type match_result =
 
 type board_observation_kind =
   | Observed_post_created
-  | Observed_comment_added
+  | Observed_comment_added of Board_dispatch.board_comment_identity
   | Observed_reaction_changed of Board_dispatch.board_reaction_change
   | Observed_vote_cast of Board_dispatch.board_vote_change
 
@@ -30,6 +30,7 @@ type board_observation =
 type board_read_operation =
   | Get_post
   | Get_comments
+  | Parse_queued_comment_identity
 
 type board_unavailable =
   { operation : board_read_operation
@@ -115,6 +116,7 @@ let disposition_of_unavailable (unavailable : board_unavailable) =
 let board_read_operation_to_string = function
   | Get_post -> "get_post"
   | Get_comments -> "get_comments"
+  | Parse_queued_comment_identity -> "parse_queued_comment_identity"
 ;;
 
 let unavailable_to_string unavailable =
@@ -205,7 +207,11 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   { Keeper_event_queue.kind =
       (match signal.kind with
        | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
-       | Board_dispatch.Board_comment_added _ -> Keeper_event_queue.Comment_added
+       | Board_dispatch.Board_comment_added comment ->
+         Keeper_event_queue.Comment_added
+           { comment_id = Board.Comment_id.to_string comment.comment_id
+           ; parent_id = Option.map Board.Comment_id.to_string comment.parent_id
+           }
        | Board_dispatch.Board_reaction_changed reaction ->
          Keeper_event_queue.Reaction_changed
            (queue_reaction_change_of_board reaction)
@@ -219,30 +225,46 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   }
 ;;
 
-(* The durable queue intentionally carries less identity than the live Board
-   signal. Keep that projection in its own type: reconstructing an exact
-   [Board_comment_added] without the accepted comment id would make a false
-   identity look valid. *)
+(* The queue keeps the comment identity as its wire string (the queue is a
+   leaf and cannot depend on Board). This is the boundary where it becomes
+   the typed identity the Board store issued, parsed once; an identity that
+   does not parse is a Board read that failed, reported like the others. *)
 let board_observation_of_board_stimulus
       ~(post_id : string)
       (bs : Keeper_event_queue.board_stimulus)
-  : board_observation
+  : (board_observation, board_unavailable) result
   =
-  { kind =
-      (match bs.kind with
-       | Keeper_event_queue.Post_created -> Observed_post_created
-       | Keeper_event_queue.Comment_added -> Observed_comment_added
-       | Keeper_event_queue.Reaction_changed reaction ->
-         Observed_reaction_changed (board_reaction_change_of_queue reaction)
-       | Keeper_event_queue.Vote_cast vote ->
-         Observed_vote_cast (board_vote_change_of_queue vote))
-  ; post_id
-  ; author = bs.author
-  ; title = bs.title
-  ; content = bs.content
-  ; hearth = bs.hearth
-  ; updated_at = bs.updated_at
-  }
+  let ( let* ) = Result.bind in
+  let parse_comment_id raw =
+    Board.Comment_id.of_string raw
+    |> Result.map_error (fun error ->
+      { operation = Parse_queued_comment_identity; post_id; error })
+  in
+  let* kind =
+    match bs.kind with
+    | Keeper_event_queue.Post_created -> Ok Observed_post_created
+    | Keeper_event_queue.Comment_added { comment_id; parent_id } ->
+      let* comment_id = parse_comment_id comment_id in
+      let* parent_id =
+        match parent_id with
+        | None -> Ok None
+        | Some raw -> Result.map Option.some (parse_comment_id raw)
+      in
+      Ok (Observed_comment_added { Board_dispatch.comment_id; parent_id })
+    | Keeper_event_queue.Reaction_changed reaction ->
+      Ok (Observed_reaction_changed (board_reaction_change_of_queue reaction))
+    | Keeper_event_queue.Vote_cast vote ->
+      Ok (Observed_vote_cast (board_vote_change_of_queue vote))
+  in
+  Ok
+    { kind
+    ; post_id
+    ; author = bs.author
+    ; title = bs.title
+    ; content = bs.content
+    ; hearth = bs.hearth
+    ; updated_at = bs.updated_at
+    }
 ;;
 
 let post_id_string (post : Board.post) = Board.Post_id.to_string post.id
@@ -307,7 +329,7 @@ let address_text_of_observation observation =
       (List.filter
          (fun part -> not (String.equal (String.trim part) ""))
          [ observation.title; observation.content ])
-  | Observed_comment_added -> observation.content
+  | Observed_comment_added _ -> observation.content
   | Observed_reaction_changed _ | Observed_vote_cast _ -> ""
 ;;
 

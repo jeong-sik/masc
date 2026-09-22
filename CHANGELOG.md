@@ -51,8 +51,6 @@
 - The librarian now reads official-client turns from those history lines instead of only the turn's final assistant answer (#37527).
 
 ### Fixed
-- Recovery from a corrupted checkpoint now cuts at the last turn end the Librarian counted, so the reading position keeps a turn-boundary line to point at instead of stopping with `Progress_boundary_missing` (#37785).
-- A keeper whose turn-start boundary cannot be read no longer answers 0, which resent the whole history on every request; the start names its reason as unknown and, with no snapshot or seed either, the request carries only the newest atom (#37781).
 - Antigravity panelists and judges in Fusion now receive their system prompt, so perspective instructions reach them instead of being dropped (#37784).
 
 - A keeper whose turn-boundary store cannot be read, or matches no boundary of its history, no longer sends its whole history as if the last completed turn ended at atom 0. The request opens on the newest atom alone and its origin says `turn_start_unknown` with the reader's reason, in the TUI band and the request forecast as well (#37746).

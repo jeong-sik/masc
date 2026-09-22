@@ -1713,8 +1713,9 @@ let run_named
 	            covered. Only the Librarian front is dropped — the seed carries
 	            its own digest of the atom it names and is checked against this
 	            history separately, so a stale position says nothing about it.
-	            The Agent Core lane answers the same three errors the same way
-	            ([prepare_continuity] above). *)
+	            The Agent Core lane goes on to the Librarian's read position when
+	            that is a place in this history; this lane does not read it, and
+	            falls back to the seed or the turn start. *)
 	         Log.Keeper.warn
 	           ~keeper_name
 	           "official client start seed drops the saved librarian position: %s"

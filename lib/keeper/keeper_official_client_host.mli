@@ -284,9 +284,13 @@ val carried_start_range
 
     [librarian_front] answers with the Librarian's saved position for exactly
     the messages it is handed; the caller owns that reading and its
-    validation. The range starts at whichever of the three positions is
-    latest, so a Librarian that read less than the last request carried never
-    moves the range back. The working state goes in front of the range, as
+    validation. That position wins when it is at or past the seed that
+    holds, or the lane's own cut when no seed holds, so a Librarian that read
+    less than the last request carried never moves the range back.
+    [turn_start] is not weighed against it: it is where a request with no
+    absorbed point begins, so a Librarian position behind it still names
+    atoms nothing else carries, and they go out. The working state goes in
+    front of the range, as
     extra system context, exactly when that Librarian position is the one
     that wins: a position the seed or the lane cut already passed stands for
     atoms the range is carrying anyway, and summarising those would say twice

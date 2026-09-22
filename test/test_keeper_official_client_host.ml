@@ -2384,6 +2384,27 @@ let test_a_later_lane_cut_wins () =
      | _ -> false)
 ;;
 
+(* The turn start is where a request with no absorbed point begins, so it is
+   not weighed against the Librarian: a position behind the last completed
+   turn still wins, and the atoms between the two go out instead of being
+   neither carried nor summarised. *)
+let test_a_librarian_position_behind_the_turn_start_still_wins () =
+  let snapshot = absorbed_snapshot () in
+  let carried =
+    start_range
+      ~librarian_front:(fun _ -> Host.Absorbed snapshot)
+      ~turn_start:(snapshot.Snapshot.end_atom + 1)
+      start_seed_messages
+  in
+  check int "the range starts where the Librarian read" snapshot.Snapshot.end_atom
+    carried.Host.first_atom;
+  check bool "and the front is the Librarian's" true
+    (match carried.Host.front with
+     | Host.Librarian_snapshot { absorbed_through } ->
+       absorbed_through = snapshot.Snapshot.end_atom
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start -> false)
+;;
+
 let () =
   run
     "keeper official-client host"
@@ -2617,6 +2638,10 @@ let () =
             "a later lane cut wins"
             `Quick
             test_a_later_lane_cut_wins
+        ; test_case
+            "a Librarian position behind the turn start still wins"
+            `Quick
+            test_a_librarian_position_behind_the_turn_start_still_wins
         ; test_case
             "a fully absorbed history still carries its newest atom"
             `Quick

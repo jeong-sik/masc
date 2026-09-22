@@ -524,11 +524,27 @@ let carried_start_range
     if own_first_atom > turn_start then own_first_atom, Lane_cut
     else turn_start, Turn_start
   in
-  let seed_or_lane =
+  let seed_held =
     match seeded_first_atom with
     | Some (first_atom, source) when first_atom >= own_first_atom ->
-      first_atom, Carried_seed source
-    | Some _ | None -> seedless
+      Some (first_atom, Carried_seed source)
+    | Some _ | None -> None
+  in
+  let seed_or_lane =
+    match seed_held with
+    | Some held -> held
+    | None -> seedless
+  in
+  (* What a Librarian position has to reach to win: the seed that holds, else
+     the lane's own cut. The turn start is not weighed against it. It is where
+     a request with no absorbed point begins (RFC
+     keeper-context-window-in-tokens §13.4), so a Librarian position behind it
+     still names atoms that nothing else carries or summarises, and they go
+     out. *)
+  let librarian_must_reach =
+    match seed_held with
+    | Some (first_atom, _) -> first_atom
+    | None -> own_first_atom
   in
   (* Read after the seed, so a position the seed would outrank costs nothing
      to establish. *)
@@ -539,7 +555,7 @@ let carried_start_range
   let plan =
     match absorbed with
     | Absorbed (snapshot : Librarian_continuity_snapshot.t)
-      when snapshot.end_atom >= fst seed_or_lane ->
+      when snapshot.end_atom >= librarian_must_reach ->
       (* Clamped like every other front: a range always carries the turn it is
          about to answer. Without this, a Librarian that read through the last
          completed atom would leave the request with the summary and no turn,
@@ -592,7 +608,7 @@ let carried_start_range
         rather than arriving with nothing to answer. *)
      Log.Keeper.info
        ~keeper_name
-       "model input carried range keeps the newest atom runtime=%s absorbed_through=%d         first_atom=%d"
+       "model input carried range keeps the newest atom runtime=%s absorbed_through=%d first_atom=%d"
        runtime_id
        absorbed_through
        first_atom

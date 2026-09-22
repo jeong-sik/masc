@@ -119,8 +119,11 @@ val run :
 
     [librarian_front] names the Librarian's own position for the messages it
     is handed: the atoms before it are in the keeper's memory, and its saved
-    working state is carried in their place. The latest of the three
-    positions wins, so the range never moves back; the request can still grow
+    working state is carried in their place. It wins when it is at or past
+    the seed that holds, or the ceiling's cut when no seed holds, so the range
+    never moves back behind either; [turn_start] is not weighed against it,
+    since it is where a range with no absorbed point begins. The request can
+    still grow
     by the working state, which the declared ceiling has already cut around
     before this lane composes.
 

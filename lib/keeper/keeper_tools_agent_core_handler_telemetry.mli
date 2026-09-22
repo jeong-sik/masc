@@ -1,8 +1,11 @@
 (** Telemetry helpers for keeper tool AGENT_CORE handler execution. *)
 
-(** Build the JSON payload for a keeper tool-call SSE event. *)
+(** Build the JSON payload for a keeper tool-call SSE event. [keeper_turn_id]
+    is the keeper turn the tool-call ledger files the call under; [None] is
+    written as null. *)
 val keeper_tool_call_event_json
   :  keeper_name:string
+  -> keeper_turn_id:int option
   -> tool_name:string
   -> duration_ms:int
   -> disposition:('completed, 'deferred, 'failed) Tool_result.disposition
@@ -35,6 +38,7 @@ val agent_core_invocation_fields
     exceptions and logging a warning instead of crashing the turn. *)
 val broadcast_keeper_tool_call_event
   :  keeper_name:string
+  -> keeper_turn_id:int option
   -> tool_name:string
   -> duration_ms:int
   -> disposition:('completed, 'deferred, 'failed) Tool_result.disposition

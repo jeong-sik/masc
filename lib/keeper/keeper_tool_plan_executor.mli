@@ -119,6 +119,7 @@ val execute_keeper
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
+  -> keeper_turn_id:(unit -> int option)
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
@@ -145,6 +146,7 @@ module Compatibility : sig
     -> publication_recovery:
          Keeper_publication_recovery_availability.turn_context
     -> ctx_snapshot:Keeper_types.working_context
+    -> keeper_turn_id:(unit -> int option)
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?continuation_channel:Keeper_continuation_channel.t

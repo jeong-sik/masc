@@ -38,6 +38,7 @@ val key_turn : string
 val key_model_used : string
 val key_tool_calls_made : string
 val key_total_turns : string
+val key_keeper_turn_id : string
 val key_scope : string
 val key_slots : string
 val key_ts_unix : string

@@ -1657,7 +1657,10 @@ let run_turn
                       ?official_task_reference
                       ~on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint
-                      ?event_bus
+                      ?event_bus:
+                        (Option.map
+                           (Keeper_turn_scope.bus ~keeper_turn_id:manifest_keeper_turn_id)
+                           event_bus)
                       ?trace_link
                       ~on_runtime_attempt:
                         (fun attempt ->

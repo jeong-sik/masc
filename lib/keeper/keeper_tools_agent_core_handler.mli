@@ -18,7 +18,12 @@
     The closure's [result_projection] is the projection this call's result
     crosses on its way to the model, resolved for the lane running it. A
     caller that has no lane leaves it out, and a handler that sizes its
-    output falls back to the descriptor's own projection. *)
+    output falls back to the descriptor's own projection.
+
+    [keeper_turn_id] is asked each time a call runs and names the keeper turn
+    the call's [keeper_tool_call] broadcast is filed under -- the one the
+    tool-call ledger row names. It is a function because the turn context it
+    reads is filled after the bundle is built. *)
 val make_keeper_tool_handler
   :  capability_surface:Keeper_capability_surface.t
   -> name:string
@@ -30,6 +35,7 @@ val make_keeper_tool_handler
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
+  -> keeper_turn_id:(unit -> int option)
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
@@ -64,6 +70,7 @@ val make_keeper_tool_handler_from_meta
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
+  -> keeper_turn_id:(unit -> int option)
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t

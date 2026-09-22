@@ -31,7 +31,8 @@ Keeper
       └─ messages  ← 이 문서가 "이력"이라 부르는 것
          ├─ message = { role, content }
          │    role    : System, User, Assistant, Tool
-         │    content : Text, Thinking, ToolUse, ToolResult, Image 의 목록
+         │    content : content_block 의 목록 — Text, Thinking, ReasoningDetails, RedactedThinking,
+         │              ToolUse, ToolResult, Image, Document, Audio 아홉 종(types.mli)
          └─ atom = message 를 묶는 단위
               User 메시지 하나                              → atom 하나
               Assistant 메시지와 그것에 답한 Tool 메시지들   → atom 하나
@@ -60,8 +61,8 @@ Keeper
 | 말 | 뜻 | 코드 이름 |
 |---|---|---|
 | fact | 기억 하나. 문장(`claim`), 분류(`category`), 처음·마지막으로 본 시각, 누가 적었나(`origin`), 무엇에 근거하나(`basis`)로 이뤄진다. id 필드는 없다. id 는 `claim` 글자의 SHA-256 이라 글자가 하나라도 다르면 다른 fact 다 | `Keeper_memory_os_types.fact`, `memory_id` |
-| `authored` / `injected` | 누가 적었나. `authored` 는 Keeper 가 `memory_write` 도구로 직접 적은 것이고 `injected` 는 Librarian 이 대화에서 뽑아 넣은 것이다. "주입"이 아니라 "Librarian 이 뽑음"으로 읽는다 | `origin.kind` |
-| `observed` / `derived` | 무엇에 근거하나. `observed` 는 어디서 읽었는지(자기 대화, Board 글)를 갖고 `derived` 는 근거가 된 다른 fact 의 id 를 갖는다. 근거가 사라지면 `derived` fact 도 무효가 된다 | `basis` |
+| `authored` / `injected` | 누가 적었나. `authored` 는 Keeper 가 `keeper_memory_write` 도구로 직접 적은 것이고 `injected` 는 Librarian 이 대화에서 뽑아 넣은 것이다. "주입"이 아니라 "Librarian 이 뽑음"으로 읽는다 | `origin.kind` |
+| `observed` / `derived` | 무엇에 근거하나. `observed` 는 어디서 읽었는지(자기 대화, Board 글)를 갖고 `derived` 는 유도(derivation)를 하나 이상 갖고 유도마다 전제가 된 다른 fact 의 id 를 갖는다. 전제가 모두 살아 있는 유도가 하나라도 남아 있으면 `derived` fact 는 유효하다(`keeper_memory_os_current.ml` 의 `derivations_supported`) | `basis` |
 | `dropped` | 회차가 "이 기억을 버린다"고 말한 것. 이유를 같이 적는다. 스냅숏에서 빠지고, 저널 커밋 줄에 id·이유와 원문이 남는다 | `dropped_statement`, 저널의 `dropped`·`change.removed` |
 | `supersedes` | 옛 기억 하나를 새 claim 하나가 고쳐 쓴다(1:1). 옛 id 는 같은 답의 `dropped` 에도 있어야 한다. 기억 이벤트에 `revised`(옛 id → 새 id)가 남아 거슬러 올라갈 수 있다 | `revision`, `Keeper_memory_os_events.Revised` |
 | `absorbs` | 기억 여러 개를 새 claim 하나가 대신 말한다(N:1). 흡수된 id 는 `dropped` 에 있으면 안 된다. 스냅숏에서 빠지고 원문은 "어느 claim 으로 들어갔나"와 함께 남아 검색으로 다시 찾을 수 있다 | `absorbed_statement`, `<keeper>.memory-absorbed.jsonl` |

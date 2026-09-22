@@ -1,18 +1,8 @@
 // Read-only composition card for one fusion preset, rendered from the typed
-// config projection (/api/v1/runtime/config/fusion).
-//
-// The Settings panel previously derived this card by running regexes over raw
-// runtime.toml. That reader can only recover `panel` and `judge`, so every
-// other axis the backend already parsed and validated was invisible: per-panel
-// and per-judge deadlines, output-token budgets, and the first-pass judge
-// roster that decides whether the judge-of-judges topologies can run at all. It
-// also had to declare grouped presets ([[fusion.presets.NAME.panels]])
-// unpreviewable, because one flat list cannot represent N groups — while the
-// typed projection has carried them all along.
-//
-// The raw-text reader stays where it belongs: the editor still compares and
-// writes against the source text, because the write path is line-surgical. This
-// card is the read side, and reads the same value the tool executes against.
+// config projection (/api/v1/runtime/config/fusion): every panel group with its
+// deadline and output budget, the meta judge, the first-pass judge roster, the
+// topologies that roster makes runnable, and the quorum. It reads the same
+// value the tool executes against.
 
 import { html } from 'htm/preact'
 import type {

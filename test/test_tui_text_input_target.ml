@@ -25,7 +25,8 @@ let target =
       | Some Tui_types.Text_github_token -> "github-token"
       | Some Tui_types.Text_browser_url -> "browser-url"
       | Some Tui_types.Text_ask_answer -> "ask-answer"
-      | Some Tui_types.Text_board_draft -> "board-draft"))
+      | Some Tui_types.Text_board_draft -> "board-draft"
+      | Some Tui_types.Text_fusion_launch -> "fusion-launch"))
     ( = )
 ;;
 
@@ -192,6 +193,40 @@ let test_a_board_post_being_written_claims_its_draft () =
   state.Tui_types.board_mode <- Tui_types.Board_compose;
   check target "writing a post" (Some Tui_types.Text_board_draft)
     (resolved state)
+;;
+
+(* The Fusion launch form takes typing only once it is open: while the
+   presets are still being read there is no field, and once the run has
+   started the form is gone and the list is back. A compact frame does not
+   draw the form, so it lets go the way the voice wizard does. *)
+let test_the_fusion_launch_form_claims_while_open () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Fusion;
+  check target "the list takes no text" None (resolved state);
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_reading_presets 1);
+  check target "reading presets is not a field" None (resolved state);
+  let options =
+    { Masc.Tui_decode.flo_enabled = true
+    ; flo_default_preset = "trio"
+    ; flo_presets = [ "trio" ]
+    }
+  in
+  let form =
+    match
+      Masc_tui_fusion_launch.open_form ~keepers:[ "analyst" ] ~keeper:None ~options
+    with
+    | Ok form -> form
+    | Error detail -> fail detail
+  in
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_open form);
+  check target "the open form claims typing" (Some Tui_types.Text_fusion_launch)
+    (resolved state);
+  check target "a compact frame lets go" None (resolved ~compact_viewport:true state);
+  state.Tui_types.view <- Tui_types.Overview;
+  check target "the form is the Fusion surface's" None (resolved state);
+  state.Tui_types.view <- Tui_types.Fusion;
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_started "run-1");
+  check target "a started run is the list again" None (resolved state)
 ;;
 
 (* A new lane's name is typed on the Runtime surface, where x, J, K and D are
@@ -362,7 +397,9 @@ let () =
           test_case "the palette claims over a board draft" `Quick
             test_the_palette_claims_over_a_board_draft;
           test_case "a new lane name claims typing on Runtime" `Quick
-            test_a_new_lane_name_claims_typing_on_runtime
+            test_a_new_lane_name_claims_typing_on_runtime;
+          test_case "the Fusion launch form claims while open" `Quick
+            test_the_fusion_launch_form_claims_while_open
         ] )
     ]
 ;;

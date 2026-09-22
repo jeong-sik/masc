@@ -631,6 +631,13 @@ let for_surface = function
           ~help:"while a detail is open, step to the row before or after it"
       ; fusion_caller_key
       ; fusion_board_key
+        (* Spelled as Keepers spells its own [a]: new. The form is the
+           schema form the Lane Add-ons action uses, so its keys are that
+           form's; the footer names them while it is open. *)
+      ; b Act "a" "new run"
+          ~help:"launch a Fusion run from the list: pick the Keeper, preset \
+                 and topology, type the prompt, then Ctrl-S reviews and \
+                 Enter starts it"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching run id, Keeper or preset; an \

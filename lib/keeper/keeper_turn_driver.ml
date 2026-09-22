@@ -1613,13 +1613,25 @@ let run_named
 	     list that no longer holds what the choice covered refuses the request,
 	     as the same check refuses an Agent Core request
 	     ([validate_continuity]): one rule on both lanes for a history that
-	     moved under the turn. *)
-	  let official_client_librarian_front messages =
+	     moved under the turn.
+	
+	     [attempt_messages] is the list this candidate starts from, which is
+	     the turn's history as this candidate sees it: a runtime that cannot
+	     see an image is handed a reading of it in the image's place
+	     ([project_input_for_attempt]). The check is held to that rendering
+	     ([continuity_for_attempt]), so it answers whether the list moved in
+	     flight rather than whether this candidate renders the history the
+	     way the checkpoint stores it (#37812). *)
+	  let official_client_librarian_front ~attempt_messages messages =
 	    match Eio.Lazy.force continuity with
 	    | None -> Ok Keeper_turn_driver_try_provider.No_position
 	    | Some chosen ->
 	      Domain_pool_ref.submit_cpu_or_inline (fun () ->
-	        Keeper_turn_driver_try_provider.librarian_position ~messages chosen)
+	        Keeper_turn_driver_try_provider.librarian_position
+	          ~messages
+	          (Keeper_turn_driver_try_provider.continuity_for_attempt
+	             ~messages:attempt_messages
+	             chosen))
 	  in
 	  (* The same record the Agent Core branch writes before each request
 	     ([pre_dispatch_serialization_observer] in
@@ -2271,7 +2283,8 @@ let run_named
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
-            ~librarian_front:official_client_librarian_front
+            ~librarian_front:
+              (official_client_librarian_front ~attempt_messages:initial_messages)
             ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
             ~turn_start:(Eio.Lazy.force turn_boundary)
             (* Antigravity's CLI assembles the wire, so the shape masc can
@@ -2392,7 +2405,8 @@ let run_named
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
-            ~librarian_front:official_client_librarian_front
+            ~librarian_front:
+              (official_client_librarian_front ~attempt_messages:initial_messages)
             ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
             ~turn_start:(Eio.Lazy.force turn_boundary)
             ~pre_tool_rejects
@@ -2496,7 +2510,14 @@ let run_named
         , claude_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Agent_core runtime_provider_config ->
-       let continuity = Eio.Lazy.force continuity in
+       (* Held to this candidate's own rendering of the history, for the
+          reason [official_client_librarian_front] states. *)
+       let continuity =
+         Option.map
+           (Keeper_turn_driver_try_provider.continuity_for_attempt
+              ~messages:initial_messages)
+           (Eio.Lazy.force continuity)
+       in
        (match
           match provider_config_transform with
           | None -> Ok runtime_provider_config

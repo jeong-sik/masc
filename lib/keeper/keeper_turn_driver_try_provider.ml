@@ -61,6 +61,20 @@ type continuity =
 
 let without_snapshot = Without_snapshot
 
+type continuity_choice =
+  | Chose_no_point
+  | Chose_a_librarian_point
+
+(* The one question a caller outside this module asks of a continuity: did
+   the turn start at a Librarian point, or at none? Answering it here keeps
+   [continuity] abstract -- its constructors carry a snapshot checked against
+   this dispatch's checkpoint, and nothing outside should be able to make
+   one. *)
+let continuity_choice = function
+  | Without_snapshot -> Chose_no_point
+  | Summarized _ | Absorbed _ -> Chose_a_librarian_point
+;;
+
 (* The Librarian's durable position, when it is a place in this history: the
    position names this trace and the atom before it opens with the message
    the position recorded -- the same test the Librarian's own range selection
@@ -147,6 +161,45 @@ let validate_continuity ~messages = function
   then Ok ()
   else Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
     { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
+;;
+
+(* The turn's choice with the baseline the dispatch-time check compares
+   against taken from [messages], the list one attempt starts from.
+
+   The choice itself is the turn's and is made once, on the keeper's
+   checkpoint history ([continuity_for_request]). A candidate can be handed
+   another rendering of that same history: a runtime that cannot see an
+   image is given a reading of it in the image's place, for that candidate
+   alone (RFC-0265 media degrade, [Keeper_vision_ingest]). The bytes under
+   the covered atoms differ then, while no atom moved and nothing was
+   rewritten. Compared against the checkpoint's bytes, every request of such
+   a candidate was refused: pr-updater answered nothing on 66 dispatches on
+   2026-09-21 and 30 more the next day, 15 of them after walking the whole
+   lane, with two image occurrences inside a snapshot that covered almost
+   its entire history (#37812).
+
+   Taken once per attempt from that attempt's own list, the per-request
+   check answers the question it was written for: did this list change while
+   the attempt was in flight. Whether the choice fits the history at all was
+   already answered, against the history itself, when it was made. *)
+let continuity_for_attempt ~messages = function
+  | Without_snapshot -> Without_snapshot
+  | Summarized { snapshot; covered_messages = _ } ->
+    Summarized
+      { snapshot
+      ; covered_messages =
+          covered_messages
+            ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom
+            messages
+      }
+  | Absorbed { trace_id; end_atom; last_atom_digest } ->
+    (match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
+     | Some opening -> Absorbed { trace_id; end_atom; last_atom_digest = opening }
+     | None ->
+       (* This list has no atom where the position points. That is not a
+          rendering of the history the choice was made on, so the digest
+          stands and every request of this attempt is refused, as before. *)
+       Absorbed { trace_id; end_atom; last_atom_digest })
 ;;
 
 type librarian_position =

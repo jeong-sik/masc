@@ -1922,6 +1922,11 @@ type async_msg =
   | Fusion_historical_detail_loaded of
       int * Masc.Tui_decode.fusion_historical_evidence
       * (Masc.Tui_decode.fusion_historical_detail, string) result
+  (* Both carry the launch generation: the answer to a read or a submit the
+     operator already left must not open or close a form they are not in. *)
+  | Fusion_launch_options_loaded of
+      int * (Masc.Tui_decode.fusion_launch_options, string) result
+  | Fusion_launched of int * (string, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
   | Memory_loaded of (Masc.Tui_decode.memory_health_snapshot, string) result
@@ -2295,7 +2300,7 @@ let append_chat_history ?at ?submitted_at ?turn_phase ?operation_seq state
              drawn from its log, and a loaded row's block comes from the
              server ([msg_entry_of_history_row]). *)
           me_tool_block = None;
-          me_skill_activity = None;
+          me_skill_block = [];
           me_timestamp = clock_text_of_unix at;
           me_keeper_name = request.Keeper_chat.keeper_name;
           me_request_id = request.request_id;
@@ -2364,10 +2369,12 @@ let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
 let tui_auto_start_attempted = ref false
 
 (* Whether the credential decision taken at boot is still owed a second look.
-   Set only when that decision came back [Unavailable]: minting needs a
+   Set only when that decision came back [Workspace_pending]: minting needs a
    workspace that already exists, and on a first install this process runs
-   before any server has made one. Cleared once a retry against a reachable
-   server settles it. *)
+   before any server has made one. A mint that failed against a workspace
+   that was already here is not set, because the failure was local file work
+   and a server answering later does not change it. Cleared once a retry
+   against a reachable server settles it. *)
 let tui_credential_retry_pending = ref false
 
 (* Resolve [name] on $PATH — the fallback after the sibling-binary probe.
@@ -5887,6 +5894,54 @@ let launch_fusion_historical_detail_load state ~mailbox ~reference =
              (generation, reference, Error "Eio switch is unavailable"))
   end
 
+(* The two requests behind the launch form. Neither is inflight-guarded by
+   a field of its own: the form's state says which request it waits on, and
+   the generation in the answer says whether it is still that one. *)
+let launch_fusion_launch_options_load state ~mailbox =
+  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+  let generation = state.fusion_launch_generation in
+  state.fusion_launch <- Some (Fusion_launch_reading_presets generation);
+  state.fusion_scroll <- 0;
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_fusion_launch_options ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Fusion_launch_options_loaded (generation, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Fusion_launch_options_loaded (generation, Error "Eio switch is unavailable"))
+
+let launch_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) =
+  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+  let generation = state.fusion_launch_generation in
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.launch_fusion_run ~host ~port ~request with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Fusion_launched (generation, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox (Fusion_launched (generation, Error "Eio switch is unavailable"))
+
 let launch_keeper_lanes_load state ~mailbox =
   if state.keeper_lanes_inflight then ()
   else begin
@@ -7151,7 +7206,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
     | Keeper_chat_history.Fusion_conclusion _ ->
         None
   in
-  let role, turn_phase, text, tool_block, skill_activity =
+  let role, turn_phase, text, tool_block, skill_block =
     match row.Keeper_chat_history.kind with
     | Keeper_chat_history.Addressed_to_keeper { speaker; surface } ->
         (* The label is what the row draws; the speaker is what it is. Both
@@ -7172,13 +7227,13 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
           | Keeper_chat_history.Unresolved _ ->
               Sent_by_other { speaker = name; surface = arrived_by }
         in
-        (Message_user author, Turn_input, row.text, None, None)
+        (Message_user author, Turn_input, row.text, None, [])
     | Keeper_chat_history.Said_by_keeper ->
-        (Message_keeper, Turn_output, row.text, None, None)
+        (Message_keeper, Turn_output, row.text, None, [])
     | Keeper_chat_history.Autonomous_reply ->
         (* The decoder no longer emits a blank autonomous reply, so there is
            nothing here to stand in for. *)
-        (Message_autonomous, Turn_output, row.text, None, None)
+        (Message_autonomous, Turn_output, row.text, None, [])
     | Keeper_chat_history.Delivery_failed { recovered_at; _ } ->
         let text, recovered =
           match
@@ -7191,22 +7246,22 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Turn_output
         , text
         , None
-        , None )
+        , [] )
     | Keeper_chat_history.Tool_calls block ->
         ( Message_tool
         , Turn_tool
         , String.concat "\n" (Keeper_chat_history.tool_rows block)
         , Some block
-        , None )
-    | Keeper_chat_history.Skill_activity activity ->
-        ( Message_skill activity.Keeper_chat_transcript.state
+        , [] )
+    | Keeper_chat_history.Skill_activity activities ->
+        ( Message_skill (Keeper_chat_transcript.skill_block_state activities)
         , Turn_progress
         , String.concat "\n"
-            (Keeper_chat_transcript.skill_rows ~full:false activity)
+            (Keeper_chat_transcript.skill_rows ~full:false activities)
         , None
-        , Some activity )
+        , activities )
     | Keeper_chat_history.Reasoning lines ->
-        (Message_thinking, Turn_progress, String.concat "\n" lines, None, None)
+        (Message_thinking, Turn_progress, String.concat "\n" lines, None, [])
     | Keeper_chat_history.Gate_activity { approval_id = _; phase; tool; summary } ->
         (* Server-owned gate status, drawn from the phase rather than from
            the sentence the store composed. It is not Memory: putting it in
@@ -7216,9 +7271,9 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Turn_progress
         , Masc_tui_gate_text.lifecycle_line ~phase ~tool ~summary
         , None
-        , None )
+        , [] )
     | Keeper_chat_history.Memory_activity _ ->
-        (Message_memory, Turn_progress, row.text, None, None)
+        (Message_memory, Turn_progress, row.text, None, [])
     | Keeper_chat_history.Fusion_conclusion
         { fusion_run_id; fusion_board_post_id } ->
         (* A pointer row, not keeper speech: the conclusion text is the
@@ -7234,7 +7289,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         , Turn_progress
         , Printf.sprintf "Fusion deliberation %s — 상세는 Runs 탭" pointer
         , None
-        , None )
+        , [] )
   in
   let submitted_at =
     match row.Keeper_chat_history.kind, row.Keeper_chat_history.turn_id with
@@ -7333,7 +7388,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
   ; me_gate = gate
   ; me_submitted_at = submitted_at
   ; me_tool_block = tool_block
-  ; me_skill_activity = skill_activity
+  ; me_skill_block = skill_block
   ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
   ; (* Direct rows retain their typed delivery key; autonomous rows retain the
@@ -8316,7 +8371,7 @@ let chat_notice state ~keeper_name ~kind text =
               me_gate = None;
               me_submitted_at = None;
               me_tool_block = None;
-              me_skill_activity = None;
+              me_skill_block = [];
               me_timestamp = current_clock_text ();
               me_keeper_name = keeper;
               me_request_id = "";
@@ -10376,7 +10431,22 @@ let apply_fusion_runs_load state = function
           List.find_index (fun run -> String.equal run.Tui_decode.fur_run_id id) keeper_runs)
         |> Option.value ~default:(max 0 (min state.keeper_run_cursor (List.length keeper_runs - 1)));
       state.fusion_error <- None;
-      state.fusion_cursor <- next_cursor;
+      (* A run the form just started is selected the first time the list
+         carries it, and the wait ends there. *)
+      let started_cursor =
+        match state.fusion_launch with
+        | Some (Fusion_launch_started run_id) ->
+            fusion_snapshot_entries snapshot
+            |> List.find_index (function
+                 | Tui_decode.Fusion_retained_run run -> String.equal run.fur_run_id run_id
+                 | Tui_decode.Fusion_historical_evidence _ -> false)
+        | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) | None -> None
+      in
+      (match started_cursor with
+       | Some cursor ->
+           state.fusion_cursor <- cursor;
+           state.fusion_launch <- None
+       | None -> state.fusion_cursor <- next_cursor);
       (match state.fusion_mode, current_selected_id with
        | Fusion_detail run_id, Some selected
          when String.equal ("run:" ^ run_id) selected
@@ -12604,11 +12674,15 @@ let contact_of_connection_status :
 
 (* A mint and a failure are not the same news. Both were reported as errors,
    which reads a working first start as a broken one -- and on a first
-   install, where the client mints for itself, that is the ordinary path. *)
+   install, where the client mints for itself, that is the ordinary path.
+   Waiting for the workspace is that same ordinary path one step earlier, so
+   it reads as system too; only a workspace that refused a credential is a
+   fault the operator has to act on. *)
 let credential_notice_level = function
-  | Masc_tui_credential.Unavailable _ -> "error"
+  | Masc_tui_credential.Mint_failed _ -> "error"
   | Masc_tui_credential.Held | Masc_tui_credential.Minted
-  | Masc_tui_credential.Not_required -> "system"
+  | Masc_tui_credential.Not_required
+  | Masc_tui_credential.Workspace_pending -> "system"
 
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.
@@ -15391,6 +15465,51 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.fusion_historical_inflight <- None
        | Some _ | None -> ());
       apply_fusion_historical_detail_load state generation reference result
+  | Fusion_launch_options_loaded (generation, result) ->
+      (match state.fusion_launch with
+       | Some (Fusion_launch_reading_presets pending) when pending = generation ->
+           (match result with
+            | Error detail ->
+                state.fusion_launch <- None;
+                state.fusion_error <- Some detail
+            | Ok options ->
+                let keepers = List.map (fun (k : keeper) -> k.k_name) state.keepers in
+                (* The run under the cursor names the Keeper the operator is
+                   looking at; without one, the roster's own cursor does. *)
+                let keeper =
+                  match selected_fusion_entry state with
+                  | Some (Tui_decode.Fusion_retained_run run) -> Some run.fur_keeper
+                  | Some (Tui_decode.Fusion_historical_evidence _) | None ->
+                      Option.map (fun (k : keeper) -> k.k_name) (selected_keeper state)
+                in
+                (match Masc_tui_fusion_launch.open_form ~keepers ~keeper ~options with
+                 | Ok launch ->
+                     state.fusion_launch <- Some (Fusion_launch_open launch);
+                     state.fusion_error <- None
+                 | Error detail ->
+                     state.fusion_launch <- None;
+                     state.fusion_error <- Some detail))
+       | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
+       | None -> ())
+  | Fusion_launched (generation, result) ->
+      (match state.fusion_launch with
+       | Some (Fusion_launch_open launch)
+         when generation = state.fusion_launch_generation
+              && Masc_tui_fusion_launch.submitting launch ->
+           (match result with
+            | Error detail ->
+                state.fusion_launch <-
+                  Some (Fusion_launch_open (Masc_tui_fusion_launch.refused ~detail launch));
+                state.fusion_scroll <- 0
+            | Ok run_id ->
+                (* The list selects the run once it carries it; a list read
+                   already in flight may answer without it. *)
+                state.fusion_launch <- Some (Fusion_launch_started run_id);
+                state.fusion_scroll <- 0;
+                add_event state "system" ("Fusion run " ^ run_id ^ " started");
+                launch_fusion_runs_load state ~mailbox)
+       | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
+       | None -> ())
   | Verification_loaded result ->
       state.verification_inflight <- false;
       (match result with
@@ -17753,7 +17872,22 @@ and is loaded on demand through keeper_skill.
             | Some Text_board_draft ->
                 Buffer.add_string state.board_draft
                   (Keeper_chat.terminal_safe_text ~preserve_newlines:true
-                     paste.Masc_tui_paste.text))
+                     paste.Masc_tui_paste.text)
+            (* A prompt holds many lines, like a board post; the form puts
+               the text into whichever field its cursor is on. *)
+            | Some Text_fusion_launch ->
+                (match state.fusion_launch with
+                 | Some (Fusion_launch_open launch) ->
+                     state.fusion_launch <-
+                       Some
+                         (Fusion_launch_open
+                            (Masc_tui_fusion_launch.paste
+                               ~text:
+                                 (Keeper_chat.terminal_safe_text ~preserve_newlines:true
+                                    paste.Masc_tui_paste.text)
+                               launch));
+                     state.fusion_scroll <- 0
+                 | Some (Fusion_launch_reading_presets _ | Fusion_launch_started _) | None -> ()))
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
        | Some (Pasted _) when state.view = Approvals && Option.is_some state.ask_text_entry ->
@@ -17865,7 +17999,7 @@ and is loaded on demand through keeper_skill.
         match key with
         | Some k ->
             (match text_input_target state ~compact_viewport with
-             | Some Text_browser_url | Some Text_ask_answer -> false
+             | Some Text_browser_url | Some Text_ask_answer | Some Text_fusion_launch -> false
              | _ -> Render_schedule.Input_shortcut.is_quit ~message_mode k)
         | None -> false
       in
@@ -18398,6 +18532,46 @@ and is loaded on demand through keeper_skill.
                        || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                   set (Masc_tui_types.voice_wizard_append session s)
                 | _ -> ()))
+       (* The launch form owns every key while it is up, above the quit key
+          the way the Lane Add-ons form is: a prompt with a q in it is a
+          prompt. Its paste arrives through [Text_fusion_launch], which is
+          claimed under the same viewport condition -- a frame too small to
+          draw the form must not feed it keys either. *)
+       | Some key
+         when state.view = Fusion && not compact_viewport
+              && (match state.fusion_launch with
+                  | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) -> true
+                  | Some (Fusion_launch_started _) | None -> false) ->
+           (match state.fusion_launch with
+            | Some (Fusion_launch_reading_presets _) ->
+                (* Leaving bumps the generation, so the read's answer finds
+                   no form to open. *)
+                if String.equal key "esc" then begin
+                  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+                  state.fusion_launch <- None
+                end
+            | Some (Fusion_launch_open launch) ->
+                (match key with
+                 | "pageup" ->
+                     state.fusion_scroll
+                       <- max 0 (state.fusion_scroll - surface_page_rows state)
+                 | "pagedown" ->
+                     state.fusion_scroll
+                       <- Masc_tui_types.scroll_down_from state.fusion_scroll
+                            ~by:(surface_page_rows state)
+                 | _ ->
+                     (match Masc_tui_fusion_launch.edit ~key launch with
+                      | Masc_tui_fusion_launch.Closed ->
+                          state.fusion_launch <- None;
+                          state.fusion_scroll <- 0
+                      | Masc_tui_fusion_launch.Editing next ->
+                          state.fusion_launch <- Some (Fusion_launch_open next);
+                          state.fusion_scroll <- 0
+                      | Masc_tui_fusion_launch.Submitted (next, request) ->
+                          state.fusion_launch <- Some (Fusion_launch_open next);
+                          state.fusion_scroll <- 0;
+                          launch_fusion_run state ~mailbox:async_messages ~request))
+            | Some (Fusion_launch_started _) | None -> ())
        | Some _
          when quit_key
               && (compact_viewport
@@ -20070,6 +20244,8 @@ and is loaded on demand through keeper_skill.
                 state.fusion_detail <- None;
                 state.fusion_detail_error <- None;
                 launch_fusion_detail_load state ~mailbox:async_messages ~run_id:run.fur_run_id)
+       | Some "a" when state.view = Fusion && state.fusion_mode = Fusion_list ->
+           launch_fusion_launch_options_load state ~mailbox:async_messages
        | Some "K" when state.view = Fusion
            && (match state.fusion_mode, selected_fusion_entry state with
                | Fusion_historical_detail _, _

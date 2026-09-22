@@ -8093,37 +8093,12 @@ def chat_visibility_modes_interaction(
             re.compile(
                 rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
             ),
-            # The skill row names an outcome now, not a chain of receipts.
-            # "DELIVERED · USED" was the evidence path; the label says what
-            # came of it, and the mark above already carries the state.
-            #
-            # The phrase names the model's side of the step now. 받아서 씀
-            # said who received without saying who sent, and an operator
-            # could not read the row from it (#36268). Each Korean piece
-            # is matched on its own so the comma and space the label
-            # carries, or an SGR run between them, does not hide it.
-            re.compile(
-                "전달됨".encode()
-                + rb"[\x1b\x20-\x7e]*?"
-                + "도구".encode()
-                + rb"[\x1b\x20-\x7e]*?"
-                + "씀".encode()
-            ),
-            # The summary line's tail on the same one row the compact skill
-            # row keeps: dim separators, the name (its bold SGR is pinned
-            # below) and the action count. The " · " separators are named
-            # tokens here because the gap class does not cover their bytes.
-            re.compile(
-                "씀".encode()
-                + rb"[\x1b\x20-\x7e]*?"
-                + rb"\xc2\xb7"
-                + rb"[\x1b\x20-\x7e]*?"
-                + rb"ci-red-attribution"
-                + rb"[\x1b\x20-\x7e]*?"
-                + rb"\xc2\xb7"
-                + rb"[\x1b\x20-\x7e]*?"
-                + rb"1 action"
-            ),
+            # The compact skill row is the skill's name: how far one
+            # invocation got, and what followed from it, ride the tool
+            # toggle and are waited for in that world below. A turn that
+            # triggered a skill once says its name alone; a count and a
+            # failed trigger's words are what else the row can carry.
+            b"ci-red-attribution",
         ):
             wait_for_output(
                 process,
@@ -8157,24 +8132,31 @@ def chat_visibility_modes_interaction(
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
         # The lane word went: the skill row leads with its mark and the
-        # summary's first word, with the badge padding and SGR runs between
-        # -- the same token-split shape the tool-lane needles above take,
-        # because a literal "◆ 전달됨" never exists as contiguous bytes.
-        # The rail is a token of its own, the way " · " is above: a needle
-        # anchored on the gutter mark crosses into the body, and Skill rows
-        # are Shade_quoted, so the renderer draws "│" (>= 0x80, outside the
-        # gap class) between badge padding and body. Body-anchored needles
-        # (✗, 씀, proof) never cross it and keep the plain gap.
+        # skill's name, with the badge padding and SGR runs between -- the
+        # same token-split shape the tool-lane needles above take, because
+        # a literal "◆ ci-red-attribution" never exists as contiguous
+        # bytes. The rail is a token of its own, the way " · " is above: a
+        # needle anchored on the gutter mark crosses into the body, and
+        # Skill rows are Shade_quoted, so the renderer draws "│" (>= 0x80,
+        # outside the gap class) between badge padding and body.
+        # Body-anchored needles (✗, 씀, proof) never cross it and keep the
+        # plain gap.
         if re.search(
             "◆".encode()
             + rb"[\x1b\x20-\x7e]*?"
             + "│".encode()
             + rb"[\x1b\x20-\x7e]*?"
-            + "전달됨".encode(),
+            + rb"ci-red-attribution",
             initial,
         ) is None:
             raise AssertionError(
                 f"the exact Skill evidence did not start its turn: {initial!r}"
+            )
+        # How far one invocation got is not on the resting row any more:
+        # the row stands for every trigger of that skill.
+        if "전달됨".encode() in initial:
+            raise AssertionError(
+                f"the compact skill row still spells a lifecycle: {initial!r}"
             )
         if b"\x1b[1mci-red-attribution" not in initial:
             raise AssertionError(f"the Skill name was not bold: {initial!r}")
@@ -8298,6 +8280,26 @@ def chat_visibility_modes_interaction(
                 + rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
             ),
             re.compile(rb"proof[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?turn="),
+            # How far this invocation got, and what followed from it. The
+            # phrase names the model's side of the step: 받아서 씀 said who
+            # received without saying who sent (#36268). Each Korean piece is
+            # matched on its own so the comma and space the label carries, or
+            # an SGR run between them, does not hide it.
+            re.compile(
+                "전달됨".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + "도구".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + "씀".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"\xc2\xb7"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"ci-red-attribution"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"\xc2\xb7"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"1 action"
+            ),
         ):
             wait_for_output(
                 process,
@@ -8829,10 +8831,23 @@ def run_tools_purpose_regression(executable: str) -> None:
         async_payload["summary"].update(active=1, ownership_unknown=1)
         send_and_wait(process, master_fd, output, b"r", b"request-unowned")
         send_and_wait(process, master_fd, output, b"p", b"Skill Use")
-        require("현재 세션에 보존된 Skill 증거", "호출·전달·이후 행동은 별도 증거", "0 receipts", "invoked=0")
-        send_and_wait(process, master_fd, output, b"p", b"bravo 12/12/9")
-        require("현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계", "inv/delivered/actions=호출/전달/이후 행동",
+        require("현재 세션에 보존된 Skill 증거", "호출·전달·이후 행동은 별도 증거", "0 receipts",
+                "instruction triggered 0 · delivered 0 · handed off 0 · actions 0")
+        # One keeper, one row, counts in their own columns. Joined onto one
+        # line, six keepers ran past the pane and the last of them could not
+        # be read at all.
+        send_and_wait(process, master_fd, output, b"p", b"TRIGGERED")
+        require("현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계",
+                "TRIGGERED/DELIVERED/ACTIONS=호출/전달/이후 행동",
                 "1 of 2 catalog Skills observed", "Activation ledgers loaded: 19; unavailable: 0")
+        usage_rows = screen_rows(bytes(output))
+        bravo = [text for text in usage_rows.values() if b"bravo" in text]
+        if not any(re.search(rb"bravo\s+12\s+12\s+9\s+\d{4}-", text) for text in bravo):
+            raise AssertionError(
+                f"the keeper's counts are not in their own columns: {bravo!r}"
+            )
+        if any(b"12/12/9" in text for text in usage_rows.values()):
+            raise AssertionError("the joined per-keeper reading is back")
         send_and_wait(process, master_fd, output, b"p", b"masc_board_post")
         require("MASC 전체 등록 도구 목록", "DIRECT=직접 호출 허용", "surfaces=none은 노출 경로 없음")
         send_and_wait(process, master_fd, output, b"p", b"keeper_status")

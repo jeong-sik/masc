@@ -450,6 +450,22 @@
  (modules masc_tui_lane_addons)
  (libraries masc masc_tui_message_layout masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_theme yojson unix))
 
+;; The Fusion launch form: what it offers, what a submit means, what the
+;; overlay says. Names Fusion_types for the topology sum, so it lists
+;; masc.fusion_core the way masc_tui does.
+(library
+ (name masc_tui_fusion_launch)
+ (wrapped false)
+ (modules masc_tui_fusion_launch)
+ (libraries masc masc.fusion_core masc_tui_schema_form yojson))
+
+;; The seat-routes block of a Fusion run's detail, pure so a test reads it.
+(library
+ (name masc_tui_fusion_seat_routes)
+ (wrapped false)
+ (modules masc_tui_fusion_seat_routes)
+ (libraries masc))
+
 (library
  (name masc_tui_command)
  (wrapped false)
@@ -1149,6 +1165,7 @@
   masc.voice_setup
   masc.masc_tool_blob_store
   masc_tui_lane_addons
+  masc_tui_fusion_launch
   masc_tui_queue_inspection
   masc_tui_lane_declaration
   masc.browser_lane
@@ -1462,6 +1479,8 @@
   masc.voice_config
   masc.workspace_connection
   masc_tui_lane_addons
+  masc_tui_fusion_launch
+  masc_tui_fusion_seat_routes
   masc_tui_lane_installer
   masc_tui_queue_inspection
   masc_tui_fork_guard

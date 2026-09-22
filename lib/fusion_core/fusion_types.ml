@@ -496,6 +496,11 @@ type roster =
 
 let preset_roster = { judge_route = None; panel_routes = None }
 
+let route_name text =
+  let route = String.trim text in
+  if String.equal route "" then None else Some route
+;;
+
 type fusion_request =
   { run_id : string
   ; keeper : string

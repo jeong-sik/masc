@@ -72,15 +72,25 @@ let plan ~env_token ~workspace_token ~workspace_requires_token
       else No_workspace
 
 (* What came of carrying the plan out. Returned rather than logged in place so
-   the surface decides how loudly to say it. *)
+   the surface decides how loudly to say it.
+
+   Two outcomes leave this client without a bearer, and they are not the same
+   news. [Workspace_pending] is the first install: minting is gated on a
+   workspace that already exists, only a server creates one, and on a first
+   install this client runs before the server it is about to start has made
+   the directory. The gate is right to refuse at that moment, and the answer
+   changes by itself once a server answers here. [Mint_failed] is a workspace
+   that is here and still refused to take a credential -- the mint is local
+   file work, so no server answering later changes it, and the operator has
+   to act. One constructor for both gave the first install the second's
+   sentence: an error line handing over a command for a state that clears
+   itself a second or two later. *)
 type outcome =
   | Held
   | Minted
   | Not_required
-  | Unavailable of string
-
-let no_workspace_detail =
-  "this base path holds no workspace to mint into"
+  | Workspace_pending
+  | Mint_failed of string
 
 let outcome_notice = function
   | Held | Not_required -> None
@@ -93,27 +103,23 @@ let outcome_notice = function
             first reads may still be refused."
            agent_name
            (self_mint_expiry_hours / 24))
-  | Unavailable detail ->
-      (* Not the last word, and the sentence must not read like one. On a
-         first install this is the ordinary case -- the workspace is made by
-         the server this client is about to start -- so the operator is told
-         what is missing and that it is taken again, with the manual remedy
-         behind that rather than in front of it. Sending them to masc login
-         for a state that clears itself in the next second or two is what
-         made this line worth rewriting. *)
+  | Workspace_pending ->
+      (* No remedy: none is owed. The operator learns what is missing and
+         that this client takes it again by itself. *)
       Some
         (Printf.sprintf
-           "no operator token, and none could be made yet: %s — this is taken \
-            again when a server answers at this base path; if none does, %s"
-           detail remedy)
+           "no operator token yet: this base path holds no workspace to mint \
+            into. This %s mints one once a server answers here."
+           agent_name)
+  | Mint_failed detail ->
+      Some
+        (Printf.sprintf
+           "no operator token, and minting one failed: %s — %s" detail remedy)
 
-(* A boot that could not obtain a bearer is not the last word. Minting is
-   gated on a workspace that already exists, and only a server creates one --
-   so on a first install this client runs before anything has made the
-   directory its own gate looks for, and the gate is right to refuse: at that
-   moment the base path really does hold no workspace. What was missing is a
-   second look once one is there. Only [Unavailable] is worth retrying; the
-   other three are answers a later workspace would not change. *)
+(* Only a missing workspace is worth a second look, taken when a server
+   answers at this base path. The other four are answers a later workspace
+   would not change: a mint that failed against a workspace that is already
+   here fails the same way after the server is up. *)
 let outcome_needs_retry = function
-  | Unavailable _ -> true
-  | Held | Minted | Not_required -> false
+  | Workspace_pending -> true
+  | Held | Minted | Not_required | Mint_failed _ -> false

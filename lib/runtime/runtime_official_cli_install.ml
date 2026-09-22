@@ -23,9 +23,16 @@ let runnable path =
   | exception Unix.Unix_error _ -> None
 ;;
 
+(* A PATH entry the spawn can use. A shell reads an empty or relative entry
+   against the directory it is in; what is found here is spawned later from a
+   keeper's own working directory, where the same relative entry names
+   somewhere else, so only absolute entries are searched. *)
 let path_directories () =
   match Env_config_core.raw_value_opt "PATH" with
-  | Some path -> List.filter (fun directory -> directory <> "") (String.split_on_char ':' path)
+  | Some path ->
+    List.filter
+      (fun directory -> directory <> "" && not (Filename.is_relative directory))
+      (String.split_on_char ':' path)
   | None -> []
 ;;
 

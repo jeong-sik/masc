@@ -21,7 +21,7 @@ let entry ?summary ?(pass = Masc_tui_message_layout.No_pass) ?(at = 0.) role tex
   ; me_gate = None
   ; me_submitted_at = None
   ; me_tool_block = None
-  ; me_skill_activity = None
+  ; me_skill_block = []
   ; me_timestamp = ""
   ; me_keeper_name = "k"
   ; me_request_id = ""

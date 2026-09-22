@@ -77,6 +77,16 @@ type rotate_class =
           moves the lane to its next declared candidate in the same turn, so
           the route names that rotation instead of calling the failure
           deterministic *)
+  | Provider_reported_failure
+      (** the provider itself reported a structured failure for this attempt
+          ([Llm_provider.Error.ProviderReportedError]: a CLI-adapter turn
+          failure, an RPC error, or a post-activity context-window report).
+          The fact is scoped to this candidate's attempt, matching
+          [Llm_provider.Error.RepeatingGeneration]'s [Generation_repeated]
+          sibling: [Runtime_attempt_fsm.should_try_next] already rotates on
+          every [Http_client.ProviderFailure] kind, so a route that called
+          this terminal disagreed with the walk that already moves on
+          (task-1642) *)
 
 (** What the driver had observed of tool effects when it fenced a provider
     attempt. Only the two dispositions that fence an attempt appear here:

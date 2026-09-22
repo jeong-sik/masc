@@ -148,7 +148,7 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
   let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let receipt_before = Fs_compat.load_file_opt receipt_path in
   let journal_before = Fs_compat.load_file_opt journal_path in
-  let run () = Runtime.run_best_effort ~trigger:Runtime.Queue_changed
+  let run () = Runtime.run_best_effort
       ~write_scope:(if scenario = Context_only then Runtime.Context_only else Runtime.Context_and_memory)
       ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input in
   if scenario = Cancel_absorb || scenario = Cancel_review then (

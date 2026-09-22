@@ -1540,6 +1540,160 @@ let test_an_exact_append_refuses_a_declared_cli_slot () =
            ~lane:Runtime.Board_attention ~slots:[ "catalog.only"; "openai.gpt" ] ()))
 ;;
 
+(* The CLI slots the file declares for an exact lane, read by the same
+   parser as [exact_lane_slots]. *)
+let exact_lane_cli_slots path lane =
+  match Runtime_toml.parse_string (Fs_compat.load_file path) with
+  | Error _ -> Alcotest.failf "the written %s does not parse" path
+  | Ok config ->
+    (match
+       List.find_opt
+         (fun (decl : Runtime_schema.exact_output_lane_decl) -> String.equal decl.id lane)
+         config.Runtime_schema.exact_output_lane_decls
+     with
+     | Some decl -> decl.cli_slot_ids
+     | None -> Alcotest.failf "the file declares no exact lane %s" lane)
+;;
+
+(* Two official-client bindings beside the HTTP ones the base file declares. *)
+let official_client_bindings =
+  {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[models.codex]
+api-name = "gpt-5.6-sol"
+max-context = 400000
+
+[models.mini]
+api-name = "gpt-5.6-sol"
+max-context = 400000
+
+[codex.codex]
+
+[codex.mini]
+|}
+;;
+
+(* The base file, loaded, with the official clients and [lane] written after
+   it, as [test_first_run_fallback_order_and_preservation] extends it: the lane
+   writers read the file and validate the whole text they commit. *)
+let with_official_client_runtime_file ?lane f =
+  with_runtime_file (fun path ->
+    write_file path
+      (String.concat "\n\n"
+         ([ String.trim (read_file path); String.trim official_client_bindings ]
+          @ Option.to_list lane));
+    f path)
+;;
+
+(* An official client answers through its own CLI, so an append that names one
+   lands in cli_slots; an HTTP runtime or a catalog id lands in slots. The
+   operator names the runtime, not the list. A slot order that names one is
+   refused rather than written where the registry cannot walk it. *)
+let test_an_exact_append_places_an_official_client_in_cli_slots () =
+  with_official_client_runtime_file
+    ~lane:"[runtime.exact_output_lanes.board_attention_exact]\nslots = [\"catalog.only\"]"
+    (fun path ->
+       Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"codex.codex" ()
+       |> lane_write_ok "append an official client";
+       Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"openai.gpt" ()
+       |> lane_write_ok "append an HTTP runtime";
+       Alcotest.(check (list string)) "the HTTP runtime joins the slots"
+         [ "catalog.only"; "openai.gpt" ]
+         (exact_lane_slots path "board_attention_exact");
+       Alcotest.(check (list string)) "the official client is a CLI slot"
+         [ "codex.codex" ]
+         (exact_lane_cli_slots path "board_attention_exact");
+       lane_write_refused "set an official client as a slot" ~path
+         ~names:[ "codex.mini is an official client" ]
+         (fun () ->
+            Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+              ~lane:Runtime.Board_attention ~slots:[ "openai.gpt"; "codex.mini" ] ()))
+;;
+
+(* [workspace_curator_exact] walks no CLI tail, and
+   [Server_workspace_memory_curator.execute] refuses a run whose lane declares
+   a CLI slot at all. So an official client has nowhere to go there, and both
+   writers say so rather than writing a list that stops the lane. *)
+let test_an_official_client_is_refused_on_the_curator_lane () =
+  with_official_client_runtime_file
+    ~lane:"[runtime.exact_output_lanes.workspace_curator_exact]\nslots = [\"openai.gpt\"]"
+    (fun path ->
+       lane_write_refused "append an official client to the curator lane" ~path
+         ~names:[ "codex.codex is an official client"; "does not walk a CLI tail" ]
+         (fun () ->
+            Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+              ~lane:Runtime.Workspace_curator ~slot:"codex.codex" ());
+       lane_write_refused "set an official client on the curator lane" ~path
+         ~names:[ "codex.codex is an official client"; "does not walk a CLI tail" ]
+         (fun () ->
+            Runtime.set_exact_output_lane_slots ~runtime_config_path:path
+              ~lane:Runtime.Workspace_curator ~slots:[ "codex.codex" ] ());
+       Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Workspace_curator ~slot:"runpod_mtp.qwen" ()
+       |> lane_write_ok "append an HTTP runtime to the curator lane";
+       Alcotest.(check (list string)) "the curator lane keeps only catalog slots"
+         [ "openai.gpt"; "runpod_mtp.qwen" ]
+         (exact_lane_slots path "workspace_curator_exact"))
+;;
+
+(* A lane an official client's append creates declares [cli_slots] alone. The
+   parser reads an absent [slots] as empty, so there is no empty key to write,
+   and an operator reading the file cannot mistake one for an emptied list. *)
+let test_a_cli_append_to_an_undeclared_lane_writes_only_cli_slots () =
+  with_official_client_runtime_file (fun path ->
+    Runtime.append_exact_output_lane_slot ~runtime_config_path:path
+      ~lane:Runtime.Board_attention ~slot:"codex.codex" ()
+    |> lane_write_ok "append to an undeclared lane";
+    Alcotest.(check (list string)) "the new lane declares no slot"
+      [] (exact_lane_slots path "board_attention_exact");
+    Alcotest.(check (list string)) "and one CLI slot"
+      [ "codex.codex" ] (exact_lane_cli_slots path "board_attention_exact");
+    (* The base file declares no exact lane and no [slots] key of its own, and
+       ["cli_slots = ["] does not match a needle that starts at a line. *)
+    Alcotest.(check bool) "no slots key was written" false
+      (string_contains (read_file path) "\nslots = ["))
+;;
+
+(* [drop] and [move] find a slot in the list that declares it and edit only
+   that list; the floor is one slot across both lists, the parser's own. *)
+let test_an_exact_drop_and_move_edit_the_cli_slots () =
+  with_official_client_runtime_file
+    ~lane:
+      "[runtime.exact_output_lanes.board_attention_exact]\n\
+       slots = [\"openai.gpt\"]\n\
+       cli_slots = [\"codex.codex\", \"codex.mini\"]"
+    (fun path ->
+       Runtime.move_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"codex.mini"
+         ~move:Runtime.Move_slot_up ()
+       |> lane_write_ok "move a CLI slot up";
+       Alcotest.(check (list string)) "the CLI slots swapped"
+         [ "codex.mini"; "codex.codex" ]
+         (exact_lane_cli_slots path "board_attention_exact");
+       Alcotest.(check (list string)) "the slots did not move"
+         [ "openai.gpt" ] (exact_lane_slots path "board_attention_exact");
+       Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"openai.gpt" ()
+       |> lane_write_ok "drop the only HTTP slot while CLI slots remain";
+       Alcotest.(check (list string)) "the lane keeps no HTTP slot"
+         [] (exact_lane_slots path "board_attention_exact");
+       Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+         ~lane:Runtime.Board_attention ~slot:"codex.mini" ()
+       |> lane_write_ok "drop a CLI slot";
+       Alcotest.(check (list string)) "one CLI slot remains"
+         [ "codex.codex" ] (exact_lane_cli_slots path "board_attention_exact");
+       lane_write_refused "drop the lane's last slot" ~path
+         ~names:[ "codex.codex is the last slot of board_attention_exact" ]
+         (fun () ->
+            Runtime.drop_exact_output_lane_slot ~runtime_config_path:path
+              ~lane:Runtime.Board_attention ~slot:"codex.codex" ()))
+;;
+
 (* The editor writes an exact lane as its own table. A lane declared inline has
    no header to write under, and a second table would declare it twice and fail
    the file, so both writers refuse it. *)
@@ -3416,6 +3570,22 @@ let () =
             "an exact append or set refuses a declared CLI slot"
             `Quick
             test_an_exact_append_refuses_a_declared_cli_slot
+        ; Alcotest.test_case
+            "an exact append places an official client in cli_slots"
+            `Quick
+            test_an_exact_append_places_an_official_client_in_cli_slots
+        ; Alcotest.test_case
+            "a CLI append to an undeclared lane writes only cli_slots"
+            `Quick
+            test_a_cli_append_to_an_undeclared_lane_writes_only_cli_slots
+        ; Alcotest.test_case
+            "an exact drop and move edit the CLI slots"
+            `Quick
+            test_an_exact_drop_and_move_edit_the_cli_slots
+        ; Alcotest.test_case
+            "an official client is refused on the curator lane"
+            `Quick
+            test_an_official_client_is_refused_on_the_curator_lane
         ; Alcotest.test_case
             "an inline exact lane is refused"
             `Quick

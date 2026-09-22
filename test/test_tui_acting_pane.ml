@@ -318,6 +318,84 @@ let test_an_open_record_without_a_tool_does_not_claim_a_current_turn () =
   check bool "the fleet row never borrows the phase word" false
     (contains "running" row)
 
+(* ── what the keeper is doing now ────────────────────────────────────── *)
+
+(* The header quotes the record only for a keeper the keepalive vouches
+   for. These use tester's own entries: a Read that returned at 983 and an
+   Execute still out since 990, with now at 1000. *)
+let now_header ?(health = Some Masc.Tui_decode.Health_running) ?(name = "tester") entries_of =
+  let input =
+    { fixture with
+      Pane.keepers = Some [ keeper ~health name ]
+    ; selected = Some name
+    ; approvals = []
+    ; chunks = chunks [ name ] entries_of
+    }
+  in
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  List.nth texts (last_index_of_in texts name)
+
+let test_a_running_keeper_names_the_call_that_is_out () =
+  let header = now_header fixture_entries in
+  check bool "the call that has not returned, aged from its own start" true
+    (contains "running Execute 10.0s" header);
+  check bool "and the row spends no second clock on it" false
+    (contains "last event" header)
+
+let test_a_running_keeper_between_calls_says_the_model_has_the_turn () =
+  let entries_of =
+    entries
+      [ ( 980.
+        , agent_core ~tool:"Read" ~turn:5 ~tool_use_id:"a" ~at:980.
+            ~correlation:"trace-tester" lane )
+      ; ( 983.
+        , agent_core ~kind:Observer.Tool_completed ~tool:"Read" ~turn:5
+            ~tool_use_id:"a" ~at:983. ~correlation:"trace-tester" lane )
+      ; ( 985.
+        , agent_core ~kind:Observer.Turn_started ~turn:6 ~at:985.
+            ~correlation:"trace-tester" lane )
+      ]
+  in
+  let header = now_header entries_of in
+  check bool "the provider call is in flight, aged from its marker" true
+    (contains "waiting on model 15.0s" header);
+  check bool "the returned call is not called running" false (contains "running" header)
+
+(* A lane that sends no turn markers -- a CLI runtime -- leaves the header
+   as it was: the record's state word and the age of its newest event. *)
+let test_a_record_without_markers_keeps_the_older_reading () =
+  let entries_of =
+    entries
+      [ ( 990.
+        , Observer.Keeper_tool_call
+            { Observer.kt_keeper = "tester"
+            ; kt_turn = Some 4
+            ; kt_tool = "Read"
+            ; kt_duration_ms = Some 5.
+            ; kt_disposition = Some (Ok Masc.Tui_decode.Keeper_call_completed)
+            ; kt_at = 990.
+            ; kt_tool_use_id = Some "only"
+            ; kt_schedule = None
+            ; kt_tool_args = None
+            ; kt_tool_result = None
+            ; kt_tool_args_preview = None
+            ; kt_tool_output_preview = None
+            } )
+      ]
+  in
+  let header = now_header entries_of in
+  check bool "the state word stands" true (contains "unsettled" header);
+  check bool "with the age of the newest event" true (contains "last event 10.0s" header);
+  check bool "nothing is claimed about the model" false (contains "waiting on model" header)
+
+let test_an_idle_keepers_settled_record_says_how_long_it_has_been_quiet () =
+  let header =
+    now_header ~health:(Some Masc.Tui_decode.Health_idle) ~name:"prober"
+      (entries [ 900., settled ~at:900. "prober" ])
+  in
+  check bool "quiet since the settle" true (contains "idle 1m40s" header);
+  check bool "and the turn it closed" true (contains "turn 41" header)
+
 let test_a_gone_keepers_focus_header_says_unfinished () =
   let header = last_index_of_in dead_texts "goner" in
   check bool "the focus header says the record is unsettled and why" true
@@ -1803,6 +1881,16 @@ let () =
         ; test_case "narrow budget folds the fleet" `Quick test_narrow_budget_folds_the_fleet
         ; test_case "folded and scrolled views preserve keeper row and focus" `Quick
             test_folded_and_scrolled_views_preserve_keeper_row_and_focus
+        ] )
+    ; ( "what the keeper is doing now"
+      , [ test_case "a running keeper names the call that is out" `Quick
+            test_a_running_keeper_names_the_call_that_is_out
+        ; test_case "a running keeper between calls says the model has the turn" `Quick
+            test_a_running_keeper_between_calls_says_the_model_has_the_turn
+        ; test_case "a record without markers keeps the older reading" `Quick
+            test_a_record_without_markers_keeps_the_older_reading
+        ; test_case "an idle keeper's settled record says how long it has been quiet" `Quick
+            test_an_idle_keepers_settled_record_says_how_long_it_has_been_quiet
         ] )
     ; ( "a gone keeper"
       , [ test_case "a gone keeper's turn is not read as running" `Quick

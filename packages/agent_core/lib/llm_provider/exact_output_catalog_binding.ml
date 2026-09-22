@@ -420,11 +420,27 @@ let catalog_modality_priority fallback = function
   | Some _ -> fallback
 ;;
 
+(* [wire] is the provider wire this binding reaches, when its caller knows
+   one. A provider row can serve more than one ([[providers]] identity_kinds)
+   and name a different capability base per wire, and only the deployment's
+   binding says which of them it speaks; the Keeper path reads the same field
+   the same way ([Capabilities.apply_catalog_entry]). A caller without a
+   binding passes none and gets the row's own base, as every caller did before
+   the argument existed. *)
 let capabilities_of_catalog_binding
+      ?wire
       (provider : Model_catalog.provider_entry)
       (model : Model_catalog.model_entry)
   =
-  let base_label = prefer_overlay model.base_label provider.capabilities_base in
+  let wire_base =
+    Option.bind wire (fun kind ->
+      List.assoc_opt kind provider.Model_catalog.capabilities_base_by_identity_kind)
+  in
+  let base_label =
+    match wire_base with
+    | Some _ -> wire_base
+    | None -> prefer_overlay model.base_label provider.capabilities_base
+  in
   let base =
     match Option.bind base_label Caps.capabilities_for_provider_label with
     | Some capabilities -> capabilities

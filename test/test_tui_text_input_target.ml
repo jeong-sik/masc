@@ -225,7 +225,12 @@ let test_the_fusion_launch_form_claims_while_open () =
   state.Tui_types.view <- Tui_types.Overview;
   check target "the form is the Fusion surface's" None (resolved state);
   state.Tui_types.view <- Tui_types.Fusion;
-  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_started "run-1");
+  state.Tui_types.fusion_launch <-
+    Some
+      (Tui_types.Fusion_launch_started
+         { fls_run_id = "run-1"
+         ; fls_reads_left = Tui_types.fusion_started_list_reads
+         });
   check target "a started run is the list again" None (resolved state)
 ;;
 
@@ -359,6 +364,84 @@ let test_github_token_claims_input_when_active () =
   check target "no input when not editing token" None (resolved state)
 ;;
 
+(* The form outlives nothing. The loop asks this every iteration rather than
+   the places that move the surface: the Activity pane's mouse handler and
+   the async [Task_dispatched] jump both change [view] without passing any
+   teardown this form is named in, and the second one tears down the help
+   sheet, the palette and the row search by hand -- a list this would have
+   been the fourth entry in, and the fifth overlay would be missed again. *)
+let test_the_loop_drops_a_launch_form_left_on_another_surface () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Fusion;
+  let options =
+    { Masc.Tui_decode.flo_enabled = true
+    ; flo_default_preset = "trio"
+    ; flo_presets = [ "trio" ]
+    }
+  in
+  let form () =
+    match Masc_tui_fusion_launch.open_form ~keepers:[ "analyst" ] ~keeper:None ~options with
+    | Ok form -> form
+    | Error detail -> fail detail
+  in
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_open (form ()));
+  let generation = state.Tui_types.fusion_launch_generation in
+  check bool "on Fusion the form stands" false (Tui_types.reconcile_fusion_launch state);
+  check bool "kept" true (Option.is_some state.Tui_types.fusion_launch);
+  check int "and spends no generation" generation
+    state.Tui_types.fusion_launch_generation;
+  (* The surface moved without the form hearing about it, which is every
+     door the form does not own. *)
+  state.Tui_types.view <- Tui_types.Changes;
+  check bool "a form that never submitted reports no request in flight" false
+    (Tui_types.reconcile_fusion_launch state);
+  check bool "the form is gone" true (Option.is_none state.Tui_types.fusion_launch);
+  check target "and takes no more text" None (resolved state);
+  check bool "a late answer cannot reopen it" true
+    (state.Tui_types.fusion_launch_generation > generation);
+  (* A read still in flight is dropped the same way. *)
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_reading_presets 1);
+  check bool "an unfinished preset read reports nothing in flight" false
+    (Tui_types.reconcile_fusion_launch state);
+  check bool "and is dropped" true (Option.is_none state.Tui_types.fusion_launch);
+  check bool "nothing open means nothing to drop" false
+    (Tui_types.reconcile_fusion_launch state);
+  (* The one input that reaches the other answer. Everything above leaves a
+     form that never submitted, so without this the function could return a
+     literal [false] and the suite would still be green -- and that answer is
+     the whole reason the operator is told the run may have started. *)
+  let submitted =
+    let typed =
+      List.fold_left
+        (fun form key ->
+          match Masc_tui_fusion_launch.edit ~key form with
+          | Masc_tui_fusion_launch.Editing form -> form
+          | Masc_tui_fusion_launch.Submitted _ -> fail "typing must not submit"
+          | Masc_tui_fusion_launch.Closed -> fail "typing must not close")
+        (form ())
+        [ "tab"; "tab"; "tab"; "w"; "h"; "y"; "\019" ]
+    in
+    match Masc_tui_fusion_launch.edit ~key:"enter" typed with
+    | Masc_tui_fusion_launch.Submitted (waiting, _) -> waiting
+    | Masc_tui_fusion_launch.Editing form ->
+        fail (String.concat " | " ("review Enter must submit" :: Masc_tui_fusion_launch.lines form))
+    | Masc_tui_fusion_launch.Closed -> fail "review Enter must not close"
+  in
+  check bool "the form is waiting on its answer" true
+    (Masc_tui_fusion_launch.submitting submitted);
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_open submitted);
+  check bool "a submit still out says the run may have started" true
+    (Tui_types.reconcile_fusion_launch state);
+  check bool "and the form is dropped with it" true
+    (Option.is_none state.Tui_types.fusion_launch);
+  (* Esc keeps the operator on Fusion, so the surface rule would not fire.
+     The drop itself is what the Esc site calls, and it answers the same. *)
+  state.Tui_types.view <- Tui_types.Fusion;
+  state.Tui_types.fusion_launch <- Some (Tui_types.Fusion_launch_open submitted);
+  check bool "abandoning while staying on Fusion answers the same" true
+    (Tui_types.abandon_fusion_launch state);
+  check bool "and drops it too" true (Option.is_none state.Tui_types.fusion_launch)
+
 let () =
   Alcotest.run
     "tui text input target"
@@ -399,7 +482,9 @@ let () =
           test_case "a new lane name claims typing on Runtime" `Quick
             test_a_new_lane_name_claims_typing_on_runtime;
           test_case "the Fusion launch form claims while open" `Quick
-            test_the_fusion_launch_form_claims_while_open
+            test_the_fusion_launch_form_claims_while_open;
+          test_case "the loop drops a launch form left on another surface" `Quick
+            test_the_loop_drops_a_launch_form_left_on_another_surface
         ] )
     ]
 ;;

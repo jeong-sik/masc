@@ -40,7 +40,10 @@ val open_form :
 
 val edit : key:string -> t -> event
 (** Every key the overlay receives. While a submit waits for its answer the
-    form takes no key, so a second Enter cannot start a second run. *)
+    form takes no key but [Esc], so a second Enter cannot start a second run
+    and a submit whose answer never arrives can still be left. Leaving does
+    not unsend the request: the caller is the one that can say the run may
+    have started. *)
 
 val paste : text:string -> t -> t
 (** Pasted text goes into the field under the cursor, newlines kept: a prompt

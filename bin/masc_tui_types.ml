@@ -1713,17 +1713,27 @@ type fusion_mode =
   | Fusion_detail of string
   | Fusion_historical_detail of Tui_decode.fusion_historical_evidence
 
+(** How many list reads a started run is waited for. The read that was
+    already in flight when the run started cannot carry it, so one more is
+    the smallest number that lets a fresh read arrive. Past that the wait
+    ends whether or not the registry retained the run: an unbounded wait
+    would move the cursor onto that run at some arbitrary later refresh,
+    wherever the operator had navigated to by then. *)
+let fusion_started_list_reads = 2
+
 (** The launch form over the Fusion list. Reading the presets is a request
     of its own, so the form has a state before it exists; the generation
     tells a late answer from the read the operator is waiting on. Once the
     server accepts a run, the list is asked again and the cursor lands on
-    that run when the list next carries it -- a list already in flight when
-    the run started does not carry it, so the selection waits for one that
-    does. *)
+    that run when a read carries it, within
+    [fusion_started_list_reads] reads. *)
 type fusion_launch =
   | Fusion_launch_reading_presets of int
   | Fusion_launch_open of Masc_tui_fusion_launch.t
-  | Fusion_launch_started of string
+  | Fusion_launch_started of
+      { fls_run_id : string
+      ; fls_reads_left : int
+      }
 
 (** Actor-scoped pending confirmation from the exact operator projection. *)
 type approval_item = Masc_tui_operator_projection.approval_item
@@ -6063,6 +6073,39 @@ let settle_voice_transcript (state : state) ~keeper =
     state.voice_level_db <- None;
     Some disposition
   end
+
+(* Drop the launch form, whatever state it is in. The generation is bumped
+   so the answer to a preset read or a submit still in flight cannot open a
+   form the operator has already left -- one that would be invisible, hold no
+   keys, and carry defaults computed from a cursor that has since moved.
+
+   Answers whether a submit was in flight, because dropping the form does not
+   unsend the request: the caller is the one that can tell the operator the
+   run may have started. *)
+let abandon_fusion_launch (state : state) =
+  match state.fusion_launch with
+  | None -> false
+  | Some launch ->
+      state.fusion_launch_generation <- state.fusion_launch_generation + 1;
+      state.fusion_launch <- None;
+      (match launch with
+       | Fusion_launch_open form -> Masc_tui_fusion_launch.submitting form
+       | Fusion_launch_reading_presets _ | Fusion_launch_started _ -> false)
+
+(* The launch form belongs to the Fusion surface and to nothing else, so the
+   loop drops it whenever the surface under it is no longer Fusion. Asked
+   every iteration rather than at the places that change the surface: there
+   are 44 assignments to [view] in the key and message paths and one
+   [goto_surface] among them, and the overlays that have to be torn down on
+   a jump are named by hand in some of them -- [Task_dispatched] closes the
+   help sheet, the palette and the row search by name, and would have left
+   this form open on a Keeper chat. A rule kept in one place cannot be the
+   one an author forgets.
+
+   Answers whether a submit was still out, which the caller turns into the
+   notice: dropping the form does not unsend the request. *)
+let reconcile_fusion_launch (state : state) =
+  state.view <> Fusion && abandon_fusion_launch state
 
 type text_input_target =
   | Text_browser_url

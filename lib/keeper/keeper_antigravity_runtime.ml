@@ -144,17 +144,33 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
     | None -> Ok carried.Host.messages
     | Some project -> project carried.Host.messages
   in
-  (* The window drops atoms, never a pinned message, so it refuses only when
-     the pinned messages alone -- the hooks' system context, a working state
-     the Librarian front carries, the preamble -- exceed what the fixed
-     sections leave. That refusal is final for every front. Composing once
-     more without the working state would save at most its few kilobytes and
-     hide, for that one band, a request the operator has to make room for:
-     the next turn's pinned messages meet the same ceiling. *)
+  (* The window drops atoms, never a pinned message, so the pinned messages
+     alone -- the hooks' system context, a working state the Librarian front
+     carries, the preamble -- exceeding what the fixed sections leave refuses
+     the request for every front. Composing once more without the working
+     state would save at most its few kilobytes and hide, for that one band,
+     a request the operator has to make room for: the next turn's pinned
+     messages meet the same ceiling.
+
+     A Librarian snapshot front refuses one band earlier: when the working
+     state is pinned and the window still cannot keep the newest atom.
+     [Host.carried_start_range] clamps every range so it carries the turn it
+     is about to answer, and what would go out here instead is the working
+     state with nothing to answer -- a summary of atoms the request no longer
+     holds. Every other front keeps the empty history: that is the ceiling
+     saying it cannot hold one atom of this conversation, and the goal and
+     system prompt still go out, which is what the Claude Code lane's shrink
+     floor composes on purpose. *)
+  let allow_empty_history =
+    match carried.Host.front with
+    | Host.Librarian_snapshot _ -> false
+    | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start
+    | Host.Turn_start_unknown _ | Host.Librarian_progress _ -> true
+  in
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
     match
       Runtime_model_input_tail_window.project_with_drop
-        ~allow_empty_history:true
+        ~allow_empty_history
         ~measure_message_bytes:measure_model_input_message_bytes
         ~capacity_bytes
         ~reserved_bytes
@@ -164,6 +180,9 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
       let carried_atoms =
         carried.Host.projection.atom_count - carried.Host.projection.dropped_atoms
       in
+      (* Still clamped: a front other than the snapshot keeps the empty
+         history, and its drop then counts the preamble and every atom the
+         carried range never held. *)
       let durable_dropped = Int.min projection.dropped_atoms carried_atoms in
       let transmitted_atoms = carried_atoms - durable_dropped in
       Option.iter
@@ -1248,4 +1267,5 @@ module For_testing = struct
     + prompt_section_framing_reserved_bytes ()
   ;;
 
+  let measure_model_input_message_bytes = measure_model_input_message_bytes
 end

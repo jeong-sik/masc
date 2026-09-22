@@ -1569,26 +1569,31 @@ let run_named
             let config = Workspace.default_config base_path in
             let ( let* ) = Result.bind in
             let* saved = Keeper_librarian_continuity.read ~config ~keeper_name in
+            (* The Librarian's durable position, read once: a request starts
+               at it when no snapshot fits, and past a fitting snapshot's end
+               when it lies further on (RFC keeper-context-window-in-tokens
+               §13.6). An unreadable position is no position. *)
+            let progress =
+              match
+                Keeper_librarian_progress.read
+                  ~keepers_dir:(Workspace.keepers_runtime_dir config)
+                  ~keeper_id:keeper_name
+              with
+              | Ok progress -> progress
+              | Error error ->
+                Log.Keeper.warn ~keeper_name
+                  "Librarian progress unreadable; the request does not start at it: %s"
+                  (Keeper_librarian_progress.read_error_to_string error);
+                None
+            in
             (* Where a request without a fitting snapshot starts: the
                Librarian's durable position when it is a place in this history
-               (RFC keeper-context-window-in-tokens §13.6), else this turn's
-               own boundary (§13.4). *)
+               (§13.6), else this turn's own boundary (§13.4). *)
             let absorbed_or_turn_start ~why =
               let absorbed =
-                match
-                  Keeper_librarian_progress.read
-                    ~keepers_dir:(Workspace.keepers_runtime_dir config)
-                    ~keeper_id:keeper_name
-                with
-                | Ok (Some progress) ->
-                  Keeper_turn_driver_try_provider.absorbed_history
-                    ~trace_id ~messages:initial_messages progress
-                | Ok None -> None
-                | Error error ->
-                  Log.Keeper.warn ~keeper_name
-                    "Librarian progress unreadable while no continuity snapshot fits (%s): %s"
-                    why (Keeper_librarian_progress.read_error_to_string error);
-                  None
+                Option.bind progress
+                  (Keeper_turn_driver_try_provider.absorbed_history
+                     ~trace_id ~messages:initial_messages)
               in
               match absorbed with
               | Some (end_atom, continuity) ->
@@ -1609,7 +1614,7 @@ let run_named
                 ~keepers_dir:(Workspace.keepers_runtime_dir config)
                 ~keeper_id:keeper_name in
               match Keeper_turn_driver_try_provider.prepare_continuity ~trace_id ~lines
-                ~messages:initial_messages snapshot with
+                ~messages:initial_messages ~progress snapshot with
               | Ok restored -> Ok (Some restored)
               | Error
                   ((Librarian_continuity_snapshot.Trace_mismatch

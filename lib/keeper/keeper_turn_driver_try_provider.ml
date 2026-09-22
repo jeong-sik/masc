@@ -47,17 +47,27 @@ type checkpoint_progress =
   | Checkpoint_stage_reached
   | Tool_results_saved
 
+(* The Librarian's durable position as a place in this history. A module of
+   its own so its labels do not shadow the other records' in this file. *)
+module Absorbed_position = struct
+  type t =
+    { trace_id : string
+    ; end_atom : int
+    ; last_atom_digest : string
+    }
+end
+
 type continuity =
   | Without_snapshot
   | Summarized of
   { snapshot : Librarian_continuity_snapshot.t
   ; covered_messages : Agent_core.Types.message list
+  ; absorbed_past : Absorbed_position.t option
+      (** The Librarian's position when it fits this history and lies past
+          the snapshot's end. The atoms between are read into memory, so the
+          request carries the working state and starts at the position. *)
   }
-  | Absorbed of
-  { trace_id : string
-  ; end_atom : int
-  ; last_atom_digest : string
-  }
+  | Absorbed of Absorbed_position.t
 
 let without_snapshot = Without_snapshot
 
@@ -68,7 +78,7 @@ let without_snapshot = Without_snapshot
    section 4.4 row 5). A position of another trace, past this history, or
    over a message the history no longer holds at that index is no place here,
    and the caller falls back as it would with no position at all. *)
-let absorbed_history ~trace_id ~messages (progress : Keeper_librarian_progress.t) =
+let absorbed_position ~trace_id ~messages (progress : Keeper_librarian_progress.t) =
   let position = progress.Keeper_librarian_progress.position in
   let end_atom = position.Keeper_librarian_progress.end_atom in
   if not (String.equal position.Keeper_librarian_progress.trace_id trace_id) || end_atom < 1
@@ -77,13 +87,17 @@ let absorbed_history ~trace_id ~messages (progress : Keeper_librarian_progress.t
     match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
     | Some opening when String.equal opening position.Keeper_librarian_progress.last_atom_digest ->
       Some
-        ( end_atom
-        , Absorbed
-            { trace_id
-            ; end_atom
-            ; last_atom_digest = position.Keeper_librarian_progress.last_atom_digest
-            } )
+        { Absorbed_position.trace_id
+        ; end_atom
+        ; last_atom_digest = position.Keeper_librarian_progress.last_atom_digest
+        }
     | Some _ | None -> None)
+;;
+
+let absorbed_history ~trace_id ~messages progress =
+  Option.map
+    (fun (absorbed : Absorbed_position.t) -> absorbed.end_atom, Absorbed absorbed)
+    (absorbed_position ~trace_id ~messages progress)
 ;;
 
 let covered_messages ~end_atom messages =
@@ -127,26 +141,51 @@ let turn_start ~config ~keeper_name ~trace_id ~messages =
        0)
 ;;
 
-let prepare_continuity ~trace_id ~lines ~messages snapshot =
+(* RFC keeper-context-window-in-tokens §13.6: the request starts at the
+   last point the Librarian absorbed, and that is the later of the
+   snapshot's end and its durable position. A snapshot the continuity pass
+   is rewriting from atom 0 fits while it covers a small prefix, and
+   starting at its end would send everything after that prefix again.
+   goo-yang-bong on 2026-09-22 was rewriting from atom 0, narrowing
+   12,756 -> 6,378 -> 3,189 on capacity refusals, with its position at
+   12,719. *)
+let prepare_continuity ~trace_id ~lines ~messages ~progress snapshot =
   Result.map (fun _ ->
-    Summarized { snapshot; covered_messages = covered_messages ~end_atom:snapshot.Librarian_continuity_snapshot.end_atom messages })
+    let snapshot_end = snapshot.Librarian_continuity_snapshot.end_atom in
+    let absorbed_past =
+      match Option.bind progress (absorbed_position ~trace_id ~messages) with
+      | Some (absorbed : Absorbed_position.t) when absorbed.end_atom > snapshot_end ->
+        Some absorbed
+      | Some _ | None -> None
+    in
+    Summarized
+      { snapshot
+      ; covered_messages = covered_messages ~end_atom:snapshot_end messages
+      ; absorbed_past
+      })
     (Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot)
+;;
+
+let validate_absorbed ~messages (absorbed : Absorbed_position.t) =
+  match Runtime_model_input_tail_window.atom_opening_digest messages (absorbed.end_atom - 1) with
+  | Some opening when String.equal opening absorbed.last_atom_digest -> Ok ()
+  | Some _ | None ->
+    Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+      { field = "librarian.progress"; detail = "Absorbed conversation changed during dispatch" }))
 ;;
 
 let validate_continuity ~messages = function
   | Without_snapshot -> Ok ()
-  | Absorbed { end_atom; last_atom_digest; _ } ->
-    (match Runtime_model_input_tail_window.atom_opening_digest messages (end_atom - 1) with
-     | Some opening when String.equal opening last_atom_digest -> Ok ()
-     | Some _ | None ->
-       Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
-         { field = "librarian.progress"; detail = "Absorbed conversation changed during dispatch" })))
+  | Absorbed absorbed -> validate_absorbed ~messages absorbed
   | Summarized continuity ->
   let current = covered_messages ~end_atom:continuity.snapshot.end_atom messages in
-  if List.equal Agent_core.Types.Message_value.equal current continuity.covered_messages
-  then Ok ()
-  else Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+  if not (List.equal Agent_core.Types.Message_value.equal current continuity.covered_messages)
+  then Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
     { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
+  else (
+    match continuity.absorbed_past with
+    | None -> Ok ()
+    | Some absorbed -> validate_absorbed ~messages absorbed)
 ;;
 
 (** Explicit context record for the extracted [try_provider] function.
@@ -840,7 +879,7 @@ let compose_carried_model_input
   in
   let projection, transmitted_bytes, origin =
     match continuity, front with
-    | Some (Summarized { snapshot; _ }), _ ->
+    | Some (Summarized { snapshot; absorbed_past; _ }), _ ->
       let working : Agent_core.Types.message =
         { role = Agent_core.Types.User
         ; content = [ Agent_core.Types.Text
@@ -850,16 +889,28 @@ let compose_carried_model_input
         ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
         }
       in
+      let first_atom, origin =
+        match absorbed_past with
+        | None ->
+          ( snapshot.end_atom
+          , Keeper_carried_front.Librarian_snapshot
+              { end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line } )
+        | Some absorbed ->
+          ( absorbed.end_atom
+          , Keeper_carried_front.Librarian_snapshot_then_progress
+              { snapshot_end_atom = snapshot.end_atom
+              ; boundary_line = snapshot.end_boundary_line
+              ; end_atom = absorbed.end_atom
+              } )
+      in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~allow_empty_history:true
           ~history_already_announced:true ~measure_message_bytes
-          ~first_atom:snapshot.end_atom
+          ~first_atom
           (working :: planned.Keeper_model_input_demotion.messages)
       in
-      projection, transmitted_bytes,
-        Keeper_carried_front.Librarian_snapshot
-          { end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }
+      projection, transmitted_bytes, origin
     | Some (Absorbed { end_atom; _ }), _ ->
       (* No summary stands in for the absorbed atoms; the omission preamble
          says older turns are left out, and an exclusive end at the newest

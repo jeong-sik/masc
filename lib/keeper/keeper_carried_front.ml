@@ -16,6 +16,11 @@ type origin =
   | Carried of source
   | Librarian_snapshot of { end_atom : int; boundary_line : int }
   | Librarian_progress of { end_atom : int }
+  | Librarian_snapshot_then_progress of
+      { snapshot_end_atom : int
+      ; boundary_line : int
+      ; end_atom : int
+      }
   | Turn_start of { end_atom : int }
 
 let of_ledger (ledger : Keeper_model_input_ledger.t) =
@@ -260,6 +265,7 @@ let seed_to_json (seed : seed) =
 let origin_to_string = function
   | Librarian_snapshot _ -> "librarian_snapshot"
   | Librarian_progress _ -> "librarian_progress"
+  | Librarian_snapshot_then_progress _ -> "librarian_snapshot_then_progress"
   | Carried source -> source_to_string source
   | Turn_start _ -> "turn_start"
 ;;
@@ -277,6 +283,10 @@ let origin_to_json = function
     `Assoc [ "kind", `String "evicted_after_refusal"; "retry", `Int retry ]
   | Librarian_progress { end_atom } ->
     `Assoc [ "kind", `String "librarian_progress"; "end_atom", `Int end_atom ]
+  | Librarian_snapshot_then_progress { snapshot_end_atom; boundary_line; end_atom } ->
+    `Assoc [ "kind", `String "librarian_snapshot_then_progress";
+             "snapshot_end_atom", `Int snapshot_end_atom;
+             "boundary_line", `Int boundary_line; "end_atom", `Int end_atom ]
   | Turn_start { end_atom } ->
     `Assoc [ "kind", `String "turn_start"; "end_atom", `Int end_atom ]
 ;;

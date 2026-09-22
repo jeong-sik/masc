@@ -33,7 +33,7 @@ let encode messages = Yojson.Safe.to_string (`List (List.map Agent_core.Checkpoi
 
 let view ?front ?(last_resort = false) snapshot messages =
   let _, lines = capture_source source in
-  let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+  let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages ~progress:None snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   Driver.For_testing.request_view ~continuity ~provider_config
     ~measure_message_bytes:measure ~front
@@ -122,7 +122,7 @@ let test_all_covered_keeps_only_working_and_pinned () =
 let test_each_request_validates_frozen_covered_messages () =
   let covered = [pinned; text T.User "Inspect the patch"] @ tool_pair () in
   let snapshot, lines = capture_source covered in
-  let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages:covered snapshot with
+  let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages:covered ~progress:None snapshot with
     | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
   let accepted messages = match Driver.validate_continuity ~messages continuity with
     | Ok () -> () | Error _ -> fail "unchanged covered prefix was refused" in
@@ -139,7 +139,7 @@ let test_each_request_validates_frozen_covered_messages () =
     {m with content = List.map (function
       | T.ToolResult result -> T.ToolResult {result with content = "Rewritten result"}
       | block -> block) m.content}) covered);
-  (match Driver.prepare_continuity ~trace_id:"another-trace" ~lines ~messages:covered snapshot with
+  (match Driver.prepare_continuity ~trace_id:"another-trace" ~lines ~messages:covered ~progress:None snapshot with
    | Error Snapshot.Trace_mismatch -> () | _ -> fail "dispatch accepted another trace's snapshot")
 ;;
 
@@ -240,6 +240,51 @@ let test_absorbed_history_starts_at_the_librarians_position () =
    | Error _ -> () | Ok () -> fail "a history that changed under the position passed its check")
 ;;
 
+(* A snapshot that fits but ends before the Librarian's durable position:
+   the working state goes out and the range starts at the position, since
+   both are points the Librarian absorbed and nothing before the later one
+   is sent again (RFC keeper-context-window-in-tokens §13.6). A snapshot the
+   continuity pass is rewriting from atom 0 is this shape; starting at its
+   end would send everything the Librarian had already read. *)
+let test_a_snapshot_behind_the_position_starts_at_the_position () =
+  let snapshot, lines = capture_source source in
+  let read_since = text T.User "Read after the snapshot" in
+  let messages = source @ [read_since] @ tool_pair () in
+  let digest_at = Window.atom_opening_digest messages in
+  let at end_atom = progress ~trace_id ~end_atom ~last_atom_digest:(Option.get (digest_at (end_atom - 1))) in
+  let prepared progress = match Driver.prepare_continuity ~trace_id ~lines ~messages ~progress snapshot with
+    | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
+  let past = prepared (Some (at 3)) in
+  let projected = absorbed_view past messages in
+  (match projected.composed.origin with
+   | Front.Librarian_snapshot_then_progress {snapshot_end_atom = 2; boundary_line = 1; end_atom = 3} -> ()
+   | _ -> fail "the request was not attributed to the snapshot and the position past it");
+  let sent = without_working_state (wire projected) in
+  check bool "the atom the Librarian read past the snapshot is not sent again" false
+    (List.mem read_since sent);
+  check bool "the unread tool exchange is sent" true
+    (List.for_all (fun m -> List.mem m sent) (tool_pair ()));
+  (match Driver.validate_continuity ~messages past with
+   | Ok () -> () | Error _ -> fail "the continuity it was built from failed its own check");
+  let changed = List.map (fun (m : T.message) -> if m = read_since then text T.User "Rewritten" else m) messages in
+  (match Driver.validate_continuity ~messages:changed past with
+   | Error _ -> () | Ok () -> fail "a history that changed under the position passed its check");
+  let at_snapshot_end progress label =
+    let projected = absorbed_view (prepared progress) messages in
+    (match projected.composed.origin with
+     | Front.Librarian_snapshot {end_atom = 2; boundary_line = 1} -> ()
+     | _ -> fail (label ^ ": the range did not start at the snapshot's end"));
+    check bool (label ^ ": the atom after the snapshot is sent") true
+      (List.mem read_since (without_working_state (wire projected)))
+  in
+  at_snapshot_end None "no position";
+  at_snapshot_end (Some (at 1)) "a position before the snapshot's end";
+  at_snapshot_end (Some (progress ~trace_id ~end_atom:3 ~last_atom_digest:"not-the-opening-message"))
+    "a position over a message this history does not hold";
+  at_snapshot_end (Some (progress ~trace_id:"another-trace" ~end_atom:3
+    ~last_atom_digest:(Option.get (digest_at 2)))) "another trace's position"
+;;
+
 let exchange id body =
   [message T.Assistant [T.ToolUse {id; name = "read_file"; input = `Assoc []}];
    { (message T.Tool [T.ToolResult {tool_use_id = id; content = body;
@@ -270,7 +315,7 @@ let test_small_externalizes_only_completed_bodies () =
      where a completed body is still on the wire to demote. *)
   let behind =
     let snapshot, lines = capture_source source in
-    match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+    match Driver.prepare_continuity ~trace_id ~lines ~messages ~progress:None snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   let carried = pinned :: (older @ current) in
   let project ?(base_path = base_path) ?(continuity = Some behind) policy =
@@ -308,7 +353,7 @@ let test_small_externalizes_only_completed_bodies () =
   check string "without a snapshot only this turn goes, raw" (encode (pinned :: current))
     (encode (project ~continuity:(Some Driver.without_snapshot) Small));
   let snapshot, lines = capture_source completed in
-  let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+  let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages ~progress:None snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   let summarized = project ~continuity:(Some continuity) Small |> without_working_state in
   check string "covered prefix excluded, unfinished suffix intact" (encode (pinned :: current))
@@ -329,7 +374,7 @@ let test_failed_externalization_keeps_raw_body () =
   let completed_end = snd (Window.annotate completed) in
   let behind =
     let snapshot, lines = capture_source source in
-    match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+    match Driver.prepare_continuity ~trace_id ~lines ~messages ~progress:None snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   let reverted = ref 0 in
   let projected = Driver.For_testing.request_view ~input_policy:Small
@@ -390,4 +435,6 @@ let () = run "continuity request projection"
                test_case "covered prefix validation per request" `Quick test_each_request_validates_frozen_covered_messages;
                test_case "without a snapshot the range starts at the turn start" `Quick test_without_snapshot_starts_at_the_turn_start;
                test_case "absorbed history starts at the Librarian's position" `Quick
-                 test_absorbed_history_starts_at_the_librarians_position]]
+                 test_absorbed_history_starts_at_the_librarians_position;
+               test_case "a snapshot behind the position starts at the position" `Quick
+                 test_a_snapshot_behind_the_position_starts_at_the_position]]

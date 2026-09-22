@@ -288,7 +288,7 @@ let test_prefit_real_continuity ~base_path () =
   let snapshot = P.read ~config ~keeper_name:keeper_id |> get |> some in
   let lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id |> get in
   let module Driver = Keeper_turn_driver_try_provider in
-  let continuity = Driver.prepare_continuity ~trace_id ~lines ~messages:canonical snapshot
+  let continuity = Driver.prepare_continuity ~trace_id ~lines ~messages:canonical ~progress:None snapshot
     |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
   let provider_config = Agent_core.Llm_provider.Provider_config.make
     ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat

@@ -60,6 +60,16 @@ type origin =
           read into memory, and nothing in the request summarizes them. Taken
           when no saved continuity snapshot fits this history and the
           position does (RFC keeper-context-window-in-tokens §13.6). *)
+  | Librarian_snapshot_then_progress of
+      { snapshot_end_atom : int
+      ; boundary_line : int
+      ; end_atom : int
+      }
+      (** A snapshot that fits is carried as the working state, and the range
+          begins at the Librarian's durable position [end_atom], which lies
+          past the snapshot's end: the atoms between are read into memory and
+          summarized by neither. The later of the two is the last point the
+          Librarian absorbed (§13.6). *)
   | Turn_start of { end_atom : int }
       (** No absorbed point and no seed: the range begins where the last
           completed turn on this history ended, so only this turn's own

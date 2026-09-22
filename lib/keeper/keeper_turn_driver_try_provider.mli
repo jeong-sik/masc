@@ -80,8 +80,15 @@ val prepare_continuity :
   trace_id:string ->
   lines:(int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list ->
   messages:Agent_core.Types.message list ->
+  progress:Keeper_librarian_progress.t option ->
   Librarian_continuity_snapshot.t ->
   (continuity, Librarian_continuity_snapshot.error) result
+(** The snapshot as the request's working state, when it fits this history.
+    The range starts at the later of its end and the Librarian's durable
+    position [progress], when that position fits too
+    ({!Keeper_carried_front.Librarian_snapshot_then_progress}): both are
+    points the Librarian absorbed, and nothing before the later one is sent
+    again (RFC keeper-context-window-in-tokens section 13.6). *)
 
 val validate_continuity :
   messages:Agent_core.Types.message list -> continuity -> (unit, Agent_core.Error.t) result

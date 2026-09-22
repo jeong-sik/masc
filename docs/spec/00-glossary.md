@@ -334,6 +334,17 @@ status: reference
   `None`)다. 명단에 적힌 이름은 `route_name` 으로 앞뒤 공백을 떼어 읽는다.
   → [Fusion_types.roster](../../lib/fusion_core/fusion_types.mli)
 
+**Fusion Delivery Obligation (전달 의무)**
+: Fusion 실행 하나가 접수됐다는 사실을 재시작 뒤에도 되살리려고 남기는 durable 기록.
+  요청 수명주기와 종결의 유일한 진실은 여전히 `Keeper_msg_async`이고, 이 기록은 그
+  일반 기록이 알 수 없는 것만 담는다 — 접수한 Fusion 요청과 종결을 되비출 원래
+  continuation 채널. 워커가 시작되기 전에 `prepare` 로 접수를 남기고(같은 요청 id·같은
+  payload 재생은 `Already_present`, 같은 id·다른 payload 는 `Identity_conflict`), 종결
+  되비추기가 성공한 뒤에만 `remove_delivered` 로 그 기록을 지운다. `inventory` 는 깨진
+  기록을 고치거나 버리지 않고 살릴 수 있는 이웃 옆에 보고한다. 되비추는 쪽은
+  `Fusion_delivery_projector`다.
+  → [Fusion_delivery_obligation](../../lib/fusion/fusion_delivery_obligation.mli)
+
 **Gate**
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
   경계. pending 판정은 다른 작업을 막지 않는다.

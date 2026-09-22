@@ -27,12 +27,15 @@
 - The Board read view shows comments in a column beside the post on terminals 120 columns or wider, and keeps the stacked layout on narrower screens (#36821).
 - With wire capture on, each provider request now records how its message list differs from the previous request, so cache misses can be traced to the change that caused them (#36961).
 - The Lanes screen can now remove an exact-lane slot and move it up or down, not only append one; slots the catalog rejected are kept in the file (#37482).
+- Dashboard and TUI fusion-preset editing can now change panel rosters, judges, prompts, timeouts and the default preset as typed values with expected_revision protection, and runtime.toml keeps each entry own lines, comments and unknown keys instead of being reprinted (#37790, #37794).
 
 ### Changed
 - The trailing `· Ctrl-N` hint on summarized journal rows and the voice-key hint on empty input lines are gone; both keys stay documented in the footer and the chat help table (#37786).
 - The operator's own failed actions (for example, pasting when the clipboard holds no image) no longer land in the conversation history; they are reported briefly in the footer of the pane being viewed and logged to the event log (#37796).
 - In chat panes 96 columns wide or more (100-column terminal), lines arriving from other keepers, people, or connectors start at one third of the pane width, keeping the operator column and keeper replies on the left; narrower terminals keep the single-column layout (#37773).
 - metadata:full header rows show only the speaker mark, rule line and clock: the per-turn request id is gone, and the mark no longer leaks its color into the text after it (#37780).
+- A Librarian that fails repeatedly is named once on the chat header instead of drawing a Librarian-failed journal row for every turn (#37798).
+- A served tool input or output expanded under tools:full keeps eight lines and folds the rest; the full result stays on the Keeper Calls screen (#37803).
 - An Execute call expanded under tools:full shows its status, output and stderr; the unreadable context envelope line is gone, and the full result stays on the Keeper Calls screen (#37792).
 
 - Checkpoint purge (dashboard and `masc-checkpoint-purge`) keeps every message, and keeps byte-exact the last atom, the reply each completed turn ended on, and whatever a fitting Librarian working state covers, so the Librarian position, turn-boundary lines, working state and request front all still match the purged checkpoint. The report counts stripped reasoning blocks and cleared tool results; a dashboard apply keeps new Librarian units out until it finishes (#37751).
@@ -52,6 +55,8 @@
 - The librarian now reads official-client turns from those history lines instead of only the turn's final assistant answer (#37527).
 
 ### Fixed
+- Saving runtime.toml from the dashboard refuses a body that would wipe [fusion] — emptying every panel, dropping the judge, misspelling the default preset or raising min_answered above the panel count is rejected, so one bad save cannot break every later Fusion run (#37787).
+- Editing a fusion preset keeps the entry own lines and refuses inline panels or judges arrays in the body, so unlabeled groups and wrapped prompts survive round-trips (#37805).
 - Antigravity panelists and judges in Fusion now receive their system prompt, so perspective instructions reach them instead of being dropped (#37784).
 - A provider runtime failure that is not a timeout (a repeated generation the lane already moved past, a rate limit, a quota, an auth refusal) is shown as its own code and detail. The status used to label it a catch-all and tell the operator to inspect a typed cause the code already named. The boundary's non-timeout classification is now called `No_timeout_observed`, which is all it ever meant.
 

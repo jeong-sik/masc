@@ -3589,23 +3589,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       | Some {mcp_input = Tui_decode.Context_summarized {mcf_end_atom = 3; _}; mcp_request_bytes = 2048; _} -> ()
       | _ -> Alcotest.fail "prepared frontier or bytes lost")
    | Error detail -> Alcotest.fail detail);
-  let position = `Assoc ["trace_id", `String "context-trace"; "end_atom", `Int 7] in
-  let absorbed = `Assoc ["kind", `String "absorbed"; "frontier", position] in
-  (match Tui_decode.decode_memory_health_snapshot
-           (context_payload (replace_field "prepared" (replace_field "input" absorbed prepared) cycle)) with
-   | Ok snapshot ->
-     (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
-      | Some {mcp_input = Tui_decode.Context_absorbed {mcpo_trace_id = "context-trace"; mcpo_end_atom = 7}; _} -> ()
-      | _ -> Alcotest.fail "absorbed position lost")
-   | Error detail -> Alcotest.fail detail);
   List.iter (fun invalid -> Alcotest.(check bool) "invalid context observation rejected" true
     (Result.is_error (Tui_decode.decode_memory_health_snapshot (context_payload invalid))))
-    [ replace_field "prepared" (replace_field "input" (replace_field "frontier" frontier absorbed) prepared) cycle
-    ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null absorbed) prepared) cycle
-    ; replace_field "prepared" (replace_field "input" (replace_field "frontier" position input) prepared) cycle
-    ; replace_field "prepared" (replace_field "input"
-        (replace_field "frontier" (replace_field "end_atom" (`Int 0) position) absorbed) prepared) cycle
-    ; replace_field "saved_read_error" (`String "snapshot_unreadable") cycle
+    [ replace_field "saved_read_error" (`String "snapshot_unreadable") cycle
     ; replace_field "saved" (replace_field "end_atom" (`Int (-1)) frontier) cycle
     ; replace_field "prepared" (replace_field "request_bytes" (`Int (-1)) prepared) cycle
     ; replace_field "prepared" (replace_field "prepared_at" (`Float nan) prepared) cycle

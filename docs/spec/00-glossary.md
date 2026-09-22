@@ -509,14 +509,16 @@ status: reference
 **Fusion Run Failure Code (Fusion 실행 실패 코드)**
 : Fusion 실행 목록의 STATE 칸이 실패한 실행에 그리는 코드. 서버가 실행을 `Failed` 로
   종결할 때 적는 `failure_code` 이고, 두 닫힌 집합 중 하나에서 온다 — 심판 종합이
-  실패하면 `Fusion_types.judge_failure_tag` 의 열 이름(`timeout`·`provider_error`·
-  `empty_response`·`empty_result`·`build_error`·`parse_error`·`panels_unavailable`·
-  `unknown_route`·`route_unavailable`·`internal_error`), 전달이 실패하면
-  `Fusion_sink.delivery_failure_code` 의 여섯 이름(`computation_failed`·`lost`·
+  실패하면 `Fusion_core.Fusion_types.judge_failure_tag` 가 돌려주는 열 이름
+  (`timeout`·`provider_error`·`empty_response`·`empty_result`·`build_error`·`parse_error`·
+  `panels_unavailable`·`unknown_route`·`route_unavailable`·`internal_error`), 전달이
+  실패하면 `Fusion_sink.delivery_failure_code` 가 닫힌 합 `delivery_failure`(생성자 여섯:
+  `Computation_failed`·`Lost`·`Cancelled`·`Persistence_failed`·`Evidence_unavailable`·
+  `Evidence_unreadable`)에서 파생해 돌려주는 문자열 여섯(`computation_failed`·`lost`·
   `cancelled`·`persistence_failed`·`evidence_unavailable`·`evidence_unreadable`)이다.
   코드는 문장이 아니라 tag 이고, 서버가 쓰는 가장 넓은 값이 `evidence_unavailable` 이라
   STATE 칸은 스무 칸이다. 전체 오류 문장은 고른 실행의 줄에 남는다.
-  → [Fusion_types.judge_failure_tag](../../lib/fusion_core/fusion_types.mli),
+  → [Fusion_core.Fusion_types.judge_failure_tag](../../lib/fusion_core/fusion_types.mli),
   [Fusion_sink.delivery_failure_code](../../lib/fusion/fusion_sink.mli)
 
 **Gate**

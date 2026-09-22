@@ -2528,6 +2528,7 @@ type memory_librarian_health = {
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;
+  mlh_continuity_unread_atoms : int option;
   mlh_last_success_at : float option;
   mlh_last_failure_kind : string option;
 }
@@ -2611,6 +2612,8 @@ type memory_health_snapshot = {
   mhs_total_source_snapshot_bytes : int;
   mhs_total_librarian_failures : int;
   mhs_total_librarian_unread_turns : int option;
+  mhs_total_librarian_continuity_unread_atoms : int;
+  mhs_total_librarian_continuity_unmeasured : int;
   mhs_total_vision_ingest_errors : int;
   mhs_total_read_errors : int;
   mhs_total_source_read_errors : int;
@@ -4790,6 +4793,7 @@ let decode_memory_librarian_health keeper_json =
       ; "measured_at"
       ; "unread_atom_turns"
       ; "unread_official_turns"
+      ; "continuity_unread_atoms"
       ; "last_success_at"
       ; "last_failure_kind"
       ]
@@ -4810,6 +4814,12 @@ let decode_memory_librarian_health keeper_json =
   let* mlh_unread_official_turns =
     required_nullable_int_field json "unread_official_turns"
   in
+  (* Read from the continuity snapshot and the read position, not from the
+     durable drain's measurement, so it carries no [measured_at] and is not
+     weighed against one below. *)
+  let* mlh_continuity_unread_atoms =
+    required_nullable_int_field json "continuity_unread_atoms"
+  in
   let* mlh_last_success_at = required_nullable_float_field json "last_success_at" in
   let* mlh_last_failure_kind =
     required_nullable_string_field json "last_failure_kind"
@@ -4817,7 +4827,7 @@ let decode_memory_librarian_health keeper_json =
   let* () =
     if List.for_all
          (fun count -> Option.fold ~none:true ~some:(fun count -> count >= 0) count)
-         [ mlh_unread_atom_turns; mlh_unread_official_turns ]
+         [ mlh_unread_atom_turns; mlh_unread_official_turns; mlh_continuity_unread_atoms ]
     then Ok ()
     else Error "librarian unread turns must be non-negative"
   in
@@ -4836,6 +4846,7 @@ let decode_memory_librarian_health keeper_json =
     ; mlh_measured_at
     ; mlh_unread_atom_turns
     ; mlh_unread_official_turns
+    ; mlh_continuity_unread_atoms
     ; mlh_last_success_at
     ; mlh_last_failure_kind
     }
@@ -5148,6 +5159,8 @@ let decode_memory_health_snapshot json =
       ; "source_invalidations"
       ; "source_snapshot_bytes"
       ; "librarian_unread_turns"
+      ; "librarian_continuity_unread_atoms"
+      ; "librarian_continuity_unmeasured"
       ; "librarian_failures"
       ; "vision_ingest_errors"
       ; "read_errors"
@@ -5191,6 +5204,14 @@ let decode_memory_health_snapshot json =
   let* total_removed = required_int_field totals_json "removed" in
   let* mhs_total_librarian_unread_turns =
     required_nullable_int_field totals_json "librarian_unread_turns"
+  in
+  (* Summed over the keepers this could be taken for; the second says how many
+     it could not, so the first is never read as "the fleet is caught up". *)
+  let* mhs_total_librarian_continuity_unread_atoms =
+    required_int_field totals_json "librarian_continuity_unread_atoms"
+  in
+  let* mhs_total_librarian_continuity_unmeasured =
+    required_int_field totals_json "librarian_continuity_unmeasured"
   in
   let* summary_json = required_member json "alert_summary" in
   let* () =
@@ -5266,6 +5287,21 @@ let decode_memory_health_snapshot json =
   let* () =
     if mhs_total_librarian_unread_turns = expected_unread then Ok ()
     else Error "memory health unread total disagrees with keeper rows"
+  in
+  let expected_continuity_unread, expected_continuity_unmeasured =
+    List.fold_left
+      (fun (total, unmeasured) keeper ->
+         match keeper.mkh_librarian.mlh_continuity_unread_atoms with
+         | Some atoms -> total + atoms, unmeasured
+         | None -> total, unmeasured + 1)
+      (0, 0)
+      mhs_keepers
+  in
+  let* () =
+    if mhs_total_librarian_continuity_unread_atoms = expected_continuity_unread
+       && mhs_total_librarian_continuity_unmeasured = expected_continuity_unmeasured
+    then Ok ()
+    else Error "memory health continuity lag totals disagree with keeper rows"
   in
   let expected_totals =
     [ mhs_total_facts, sum (fun keeper -> keeper.mkh_facts)
@@ -5344,6 +5380,8 @@ let decode_memory_health_snapshot json =
     ; mhs_total_source_snapshot_bytes
     ; mhs_total_librarian_failures
     ; mhs_total_librarian_unread_turns
+    ; mhs_total_librarian_continuity_unread_atoms
+    ; mhs_total_librarian_continuity_unmeasured
     ; mhs_total_vision_ingest_errors
     ; mhs_total_read_errors
     ; mhs_total_source_read_errors

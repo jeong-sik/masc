@@ -117,12 +117,21 @@ let memory_context_lines (k : memory_keeper_health) =
       | Some atoms, Some official -> Printf.sprintf "unread %d" (atoms + official)
       | Some _, None | None, Some _ | None, None -> "unread ?"
     in
+    (* The two rounds fall behind separately, so the continuity lag prints
+       beside the drain's count rather than folded into it. "?" is its own
+       reading: no snapshot, an unreadable one, or one from another trace. *)
+    let continuity =
+      match librarian.mlh_continuity_unread_atoms with
+      | Some atoms -> Printf.sprintf "continuity behind %d" atoms
+      | None -> "continuity behind ?"
+    in
     Printf.sprintf
-      "  Librarian · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
+      "  Librarian · %s · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
       (match librarian.mlh_state with
        | Some state -> state
        | None -> "not measured")
       unread
+      continuity
       (memory_updated_text librarian.mlh_measured_at)
       (memory_updated_text librarian.mlh_last_success_at)
       (Option.value librarian.mlh_last_failure_kind ~default:"-")
@@ -550,10 +559,13 @@ let render_memory_body ~cols ~budget (state : state)
   (match state.memory_health with
    | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
    | Some snapshot ->
-       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %s turns unread · %d failures since server start"
+       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %s turns unread · %d atoms behind in continuity (%d keepers not measured) · %d failures since server start"
          snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
          snapshot.mhs_total_support_invalidations
-         (Option.fold ~none:"?" ~some:string_of_int snapshot.mhs_total_librarian_unread_turns) snapshot.mhs_total_librarian_failures));
+         (Option.fold ~none:"?" ~some:string_of_int snapshot.mhs_total_librarian_unread_turns)
+         snapshot.mhs_total_librarian_continuity_unread_atoms
+         snapshot.mhs_total_librarian_continuity_unmeasured
+         snapshot.mhs_total_librarian_failures));
   push info_bar;
   let search_bar =
     if query <> "" then

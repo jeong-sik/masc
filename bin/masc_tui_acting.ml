@@ -862,6 +862,30 @@ let file_member ~existing ~keeper ~at ~session ~keeper_turn member =
    the flat view does. The ring holds up to [acting_retained_entries] +
    [acting_retained_quiet] entries and this runs on every frame, so chunks live in a per-keeper table:
    attaching costs the keeper's own chunk count, not the whole screen. *)
+(* What a lane container row folds on under [Turns]: the same package ending
+   the same way for the same reason is one row, however many times it
+   happened. Every other event is listed so a new kind has to say which side
+   it is on. *)
+let lane_fold_key (event : Observer.event) =
+  match event with
+  | Observer.Lane_resource r ->
+      Some (r.Observer.lr_package, r.Observer.lr_lifecycle, r.Observer.lr_detail)
+  | Observer.Agent_core _ | Observer.Keeper_heartbeat _
+  | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
+  | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _
+  | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _
+  | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _
+  | Observer.Internal_agent_runs_changed | Observer.Snapshot _
+  | Observer.Other _ ->
+      None
+
+(* The newest occurrence's row, with how many the screen holds in front of
+   the detail -- at the end it would be the first thing a long reason cuts. *)
+let folded_lane_row ~count entry =
+  let row = row_of_entry ~duration_ms:None entry in
+  if count = 1 then row
+  else { row with detail = Printf.sprintf "\xc3\x97%d %s" count row.detail }
+
 let fold_chunks ~traces entries =
   let oldest_first = List.rev entries in
   let observed : (string * int, (int * int) list) Hashtbl.t = Hashtbl.create 64 in
@@ -896,21 +920,35 @@ let fold_chunks ~traces entries =
   in
   let chunks : (string, chunk list) Hashtbl.t = Hashtbl.create 16 in
   let plains = ref [] in
+  (* A lane container that keeps failing the same way fails once a few
+     seconds; one row per failure would bury the turns this scope is for, the
+     way one row per lifecycle event would bury a turn. Folded like a turn:
+     the newest occurrence stands for the rest. *)
+  let lane_folds = Hashtbl.create 4 in
   List.iteri
     (fun position entry ->
       let event = entry.ae_event in
       let at = entry.ae_at in
       match member_of_event event with
-      | None ->
+      | None -> (
           (* A non-member passes through as its own row only if the Turns
              scope shows it at all. Without this test the fold readmitted
              everything [visible Turns] hides -- composite pushes, heartbeats,
              stream frames, waiting-queue changes -- and a live screen showed
              them outnumbering the turn rows it promised (2026-09-01, 128
              rows). *)
-          if visible Turns event then
-            plains :=
-              (entry.ae_at, row_of_entry ~duration_ms:None entry) :: !plains
+          match (visible Turns event, lane_fold_key event) with
+          | false, (Some _ | None) -> ()
+          | true, Some key ->
+              let count =
+                match Hashtbl.find_opt lane_folds key with
+                | Some (_, held) -> held + 1
+                | None -> 1
+              in
+              Hashtbl.replace lane_folds key (entry, count)
+          | true, None ->
+              plains :=
+                (entry.ae_at, row_of_entry ~duration_ms:None entry) :: !plains)
       | Some member ->
           let keeper = keeper_of_event ~traces event in
           let session = session_of_member member in
@@ -931,6 +969,10 @@ let fold_chunks ~traces entries =
           Hashtbl.replace chunks keeper
             (file_member ~existing ~keeper ~at ~session ~keeper_turn member))
     oldest_first;
+  Hashtbl.iter
+    (fun _ (entry, count) ->
+      plains := (entry.ae_at, folded_lane_row ~count entry) :: !plains)
+    lane_folds;
   (chunks, !plains)
 
 (* Every keeper's turns as data, newest activity first. The Activity pane

@@ -2021,14 +2021,20 @@ let check_hit state ~terminal_rows ~row expected =
     (hit_to_string (lanes_overview_hit state ~terminal_rows ~row))
 
 (* The overview frame, row by row: 1 strip, 2 box top, 3 header, 4 divider,
-   5 matrix heading, and 6-9 the four standalone rows. Everything below is
-   note/padding/footer chrome, never a hidden Keeper table. *)
+   5 standalone heading, 6 the Add-ons summary, 7 the table heading, and 8-11
+   the four standalone rows. Everything below is note/padding/footer chrome,
+   never a hidden Keeper table.
+
+   This list is a second hand count of what [render_lanes_overview] draws, and
+   it went on agreeing with the first while both were two rows short. The
+   screen itself answers in the PTY walk "a press selects the lane drawn under
+   it"; this case holds the edges around it. *)
 let test_overview_hit_reads_the_frame_rows () =
   let state = lanes_state () in
-  check_hit state ~terminal_rows:40 ~row:5 "none";
-  check_hit state ~terminal_rows:40 ~row:6 "standalone 0";
-  check_hit state ~terminal_rows:40 ~row:9 "standalone 3";
-  check_hit state ~terminal_rows:40 ~row:10 "none";
+  check_hit state ~terminal_rows:40 ~row:7 "none";
+  check_hit state ~terminal_rows:40 ~row:8 "standalone 0";
+  check_hit state ~terminal_rows:40 ~row:11 "standalone 3";
+  check_hit state ~terminal_rows:40 ~row:12 "none";
   check_hit state ~terminal_rows:40 ~row:12 "none";
   check_hit state ~terminal_rows:40 ~row:13 "none";
   check_hit state ~terminal_rows:40 ~row:14 "none";
@@ -2048,9 +2054,9 @@ let test_overview_hit_waits_for_the_matrix () =
   (* The matrix's single loading note is not a lane row. *)
   let state = lanes_state () in
   state.standalone_lanes <- None;
-  check_hit state ~terminal_rows:40 ~row:6 "none";
-  check_hit state ~terminal_rows:40 ~row:9 "none";
-  check_hit state ~terminal_rows:40 ~row:10 "none"
+  check_hit state ~terminal_rows:40 ~row:8 "none";
+  check_hit state ~terminal_rows:40 ~row:11 "none";
+  check_hit state ~terminal_rows:40 ~row:12 "none"
 
 (* The detail tabs used to draw a hand-written hint string in the renderer,
    a second key list this module did not own. The strip must project the

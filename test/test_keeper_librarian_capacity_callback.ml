@@ -53,10 +53,10 @@ let test_callback ?(cli_errors = []) ~base_path ~registry ~keeper_id ~first_over
   let refused = ref 0 and committed = ref false in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Runtime.run_best_effort ~cli_runner
-    ~on_capacity_refused:(fun _ -> incr refused)
+    ~on_cli_input_limit:(fun _ -> incr refused)
     ~on_memory_committed:(fun () -> committed := true)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None input;
-  Alcotest.(check int) "only final capacity failure requests narrowing" expected !refused;
+  Alcotest.(check int) "only a CLI slot reports an input limit" expected !refused;
   Alcotest.(check (list string)) "CLI candidates ran in order"
     (List.map fst cli_errors) !cli_calls;
   Alcotest.(check int) "terminal provider really received the request" 1 !posts;
@@ -347,7 +347,10 @@ let () =
     ["continuity prefit", [Alcotest.test_case "atom groups commit and produce the next request" `Quick
        (test_prefit_real_continuity ~base_path)];
      "actual HTTP outcomes", [
-      case "capacity-final" false `Request_entity_too_large 1;
+      (* An API slot states its limit in provider prose, which this process
+         cannot read back into a number, so it reports none. The pass no
+         longer needs one: it narrows on any failure. *)
+      case "capacity-final" false `Request_entity_too_large 0;
       case "quota-final" false `Too_many_requests 0;
       case "capacity-then-quota" true `Too_many_requests 0;
       case "capacity-then-auth" true `Unauthorized 0];

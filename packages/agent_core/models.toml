@@ -3466,6 +3466,224 @@ supports_parallel_tool_calls = false
 supports_required_tool_choice = false
 supports_named_tool_choice = false
 
+# Ten more OpenRouter ids, probed 2026-09-22 in the same shape as the rows
+# above: basic, stream, tool_choice required, reasoning shape,
+# reasoning_split, the seven-rung ladder, and the listed output ceiling sent
+# as max_tokens (evidence/task-openrouter-new-models/SUMMARY.md). Window,
+# ceiling, price and parameter support are the gateway's GET /api/v1/models
+# the same day; every id reads image input there, so none lowers a modality.
+# Each answered a plain completion, took reasoning_split, and streamed its
+# usage on the last chunk.
+
+# Anthropic refused tool_choice required and named, with no reasoning field
+# on the request: "tool_choice: type \"tool\" and \"any\" are not supported
+# for this model". Its thinking is always on, which is also why "none" is
+# refused below.
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+# max_output_tokens is the gateway's listed ceiling. Sending it as max_tokens
+# answered 402 "requires more credits, or fewer max_tokens": the gateway
+# reserves max_tokens x price against the key's balance ($1.9 that day), so
+# the ceiling itself was not exercised.
+[[models]]
+id_prefix = "anthropic/claude-fable-5.1"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+
+# At max_tokens 200 and 400 every rung billed 0 reasoning tokens. At 4000,
+# "high" billed 3628 with reasoning.text and "none" billed 0
+# (probe-claude-haiku45-reasoning-budget-*.json), so the disable rung is real;
+# a small max_tokens leaves this model no room to reason.
+[[models]]
+id_prefix = "anthropic/claude-haiku-4.5"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 200000
+max_output_tokens = 64000
+input_per_million = 1.0
+output_per_million = 5.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+# max_output_tokens is the gateway's listed ceiling. Sending it as max_tokens
+# answered 402 "requires more credits, or fewer max_tokens": the gateway
+# reserves max_tokens x price against the key's balance ($1.9 that day), so
+# the ceiling itself was not exercised.
+[[models]]
+id_prefix = "openai/gpt-6-astra"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 10.0
+output_per_million = 50.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# All seven rungs answered 200. Every rung billed 0 reasoning tokens on the
+# ladder prompt, as gpt-5.6-sol did on 2026-09-10; the "think it through"
+# prompt at "high" billed 17 with reasoning.encrypted and reasoning.summary.
+[[models]]
+id_prefix = "openai/gpt-5.6-terra"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 2.0
+output_per_million = 12.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# All seven rungs answered 200 and "none" billed 0 reasoning tokens.
+[[models]]
+id_prefix = "openai/gpt-5.6-luna"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 0.2
+output_per_million = 1.2
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# The stream carried its reasoning only as a delta.reasoning_details item,
+# never as delta.reasoning text, which is what delta_details:reasoning reads.
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+[[models]]
+id_prefix = "google/gemini-3.1-pro-preview"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+input_per_million = 2.0
+output_per_million = 12.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+[[models]]
+id_prefix = "x-ai/grok-4.7"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 500000
+max_output_tokens = 450000
+input_per_million = 1.6
+output_per_million = 4.8
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+# "none" answered 200 but still billed 55 reasoning tokens: accepted, not a
+# disable. The ladder leaves it out, like the rows that refuse it.
+[[models]]
+id_prefix = "minimax/minimax-m3"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 512000
+input_per_million = 0.3
+output_per_million = 1.2
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_parallel_tool_calls = false
+
+# Same Alibaba refusal as qwen3.8-max: HTTP 400 invalid_parameter_error "The
+# tool_choice parameter does not support being set to required or object in
+# thinking mode". Unlike qwen3.8-max, "none" answered 200 with 0 reasoning
+# tokens, so this ladder keeps the disable rung.
+[[models]]
+id_prefix = "qwen/qwen3.8-flash"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+input_per_million = 0.15
+output_per_million = 0.47
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+thinking_control_format = "reasoning_effort"
+supports_seed = true
+supports_min_p = false
+supports_parallel_tool_calls = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+
+# The Z.AI coding plan refuses this id (code 1311); the gateway serves it.
+# "none" answered HTTP 400 "Reasoning is mandatory for this endpoint and
+# cannot be disabled"; every other rung answered 200.
+[[models]]
+id_prefix = "z-ai/glm-5.3-flashx"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 131072
+input_per_million = 0.37
+output_per_million = 1.25
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_min_p = false
+supports_parallel_tool_calls = false
+
 # Z.AI coding plan. Window 1M (docs.z.ai). The 131072 output ceiling is the
 # value the endpoint named when it refused an out-of-range max_tokens with
 # code 1210. Reads images (probe PNG confirmed).

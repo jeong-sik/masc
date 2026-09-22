@@ -1513,3 +1513,98 @@ streaming = true
 reasoning-effort = "high"
 
 [openrouter.openrouter-qwen3-8-max]
+
+# Ten more ids probed live on 2026-09-22 in the same shape as the twelve
+# above (evidence/task-openrouter-new-models/SUMMARY.md). Every one answered a
+# plain completion and took reasoning_effort "high"; the catalog rows carry
+# the rest, including which refuse "none" or tool_choice required.
+
+[models.openrouter-claude-fable-5-1]
+api-name = "anthropic/claude-fable-5.1"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-claude-fable-5-1]
+
+[models.openrouter-claude-haiku-4-5]
+api-name = "anthropic/claude-haiku-4.5"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-claude-haiku-4-5]
+
+[models.openrouter-gpt-6-astra]
+api-name = "openai/gpt-6-astra"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gpt-6-astra]
+
+[models.openrouter-gpt-5-6-terra]
+api-name = "openai/gpt-5.6-terra"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gpt-5-6-terra]
+
+[models.openrouter-gpt-5-6-luna]
+api-name = "openai/gpt-5.6-luna"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gpt-5-6-luna]
+
+[models.openrouter-gemini-3-1-pro]
+api-name = "google/gemini-3.1-pro-preview"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-gemini-3-1-pro]
+
+[models.openrouter-grok-4-7]
+api-name = "x-ai/grok-4.7"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-grok-4-7]
+
+[models.openrouter-minimax-m3]
+api-name = "minimax/minimax-m3"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-minimax-m3]
+
+[models.openrouter-qwen3-8-flash]
+api-name = "qwen/qwen3.8-flash"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-qwen3-8-flash]
+
+[models.openrouter-glm-5-3-flashx]
+api-name = "z-ai/glm-5.3-flashx"
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = "high"
+
+[openrouter.openrouter-glm-5-3-flashx]

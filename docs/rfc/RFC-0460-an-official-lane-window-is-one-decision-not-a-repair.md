@@ -97,9 +97,9 @@ Agent Core:  앞머리/연속성 선택 (상한이 입력이 아님) → demotio
 ## 6. 없어지는 것
 
 - #37821 의 두 번째 패스 전체
-- `preamble_dropped` 보정, 그리고 두 번째 패스에서 preamble 이 두 번 잡히던 것 (`undroppable_bytes` 로 한 번, carried 목록 머리의 기존 preamble 이 atom 0 바이트로 또 한 번)
+- 창이 preamble 을 두 번 매기던 것. `project_with_drop` 은 preamble 을 자기가 붙일 메시지로 먼저 매기는데, 범위가 이미 preamble 을 달고 오면 첫 atom 바이트로 또 매겼다. 들어가던 범위도 잘렸고, 60 atom 을 넘는 범위는 한 번에 60 을 잃었다. `Host.window_carried_range` 가 창에 넘기기 전에 preamble 을 떼고, 아무것도 안 버렸으면 다시 붙인다. 두 레인이 이 창 하나를 쓴다.
 - `allow_empty_history` 를 레인마다 다르게 주는 것 (#37835 포함)
-- Antigravity 창 관측이 떨어뜨린 preamble 을 durable atom 으로 세던 것 (`Int.min projection.dropped_atoms carried_atoms`). 범위가 assistant 턴으로 시작하면 하나 적게 보고하고 front 가 한 atom 늦었다. `Host.durable_atoms_kept` 한 곳이 센다.
+- Antigravity 창 관측이 떨어뜨린 preamble 을 durable atom 으로 세던 것 (`Int.min projection.dropped_atoms carried_atoms`). 범위가 assistant 턴으로 시작하면 하나 적게 보고하고 front 가 한 atom 늦었다. 위 창은 preamble 을 떼고 세므로 따로 보정할 것이 없다.
 - 두 레인이 서로 다른 모양인 것. 같은 함수가 된다
 
 거절이 드물어지고 뜻이 분명해진다. 지금은 요약이 크면 턴이 죽는다. 이 설계에서는 6 번이 흡수하고 턴은 산다.
@@ -125,7 +125,7 @@ Agent Core:  앞머리/연속성 선택 (상한이 입력이 아님) → demotio
 
 B 모양이 연속성을 **지키는** 것은 아니다. 요약이 덮던 `[0, e)` 는 요청에서 빠지고, 그 atom 들은 Keeper 의 기억에만 있다. 지키는 것은 살아 있음이다. 그래서 조용히 버리지 않는다.
 
-- 카운터: `masc_keeper_working_state_not_carried_total{keeper, runtime, reason}`
+- 카운터: `masc_keeper_librarian_working_state_not_carried_total{keeper, runtime, reason}`
 - WARN: `model input working state not carried runtime=… reason=… summary_end=… first_atom=…` 에 요약 쪽과 요약 없는 쪽이 각각 남긴 atom 수를 같이 적는다.
 
 ### 7.2 공식 레인의 demotion

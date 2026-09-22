@@ -492,6 +492,18 @@ status: reference
   그런 판을 잡는다.
   → [masc_tui_keys.mli](../../bin/masc_tui_keys.mli)
 
+**Connector Connection (커넥터 연결)**
+: Channels 판이 한 transport의 연결에 대해 그리는 닫힌 다섯 값
+  (`Masc.Tui_decode.connector_connection`) — `Connector_connected`·
+  `Connector_connected_unavailable`·`Connector_disconnected`·`Connector_offline`·
+  `Connector_stale`. 배지가 철자하는 단어는 `CONNECTED`·`CONNECTED / UNAVAILABLE`·
+  `DISCONNECTED`·`UNAVAILABLE`·`STALE`(`Masc_tui_connector_state.badge_word`). 같은 판이
+  gateway·poll 상태를 따로 그리는데, 그 값이 배지가 이미 철자한 단어와 같으면(대소문자·
+  앞뒤 공백 무시) 그리지 않는다 — Discord 행이 `Connection ● CONNECTED` 위에
+  `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한 번만 그린다.
+  → [Masc_tui_connector_state.mli](../../bin/masc_tui_connector_state.mli),
+  [Tui_decode.connector_connection](../../lib/tui_decode.mli)
+
 ## Collaboration State
 
 **Board**

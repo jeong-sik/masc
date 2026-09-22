@@ -323,8 +323,10 @@ opening ten chats.
 ```
 
 The glyphs are the same vocabulary the Keepers roster uses: `▶` a call
-started, `✓` a call returned, `✗` a failure, `●` a turn boundary, `■` a turn
-that ended, `?` something needing attention, `·` the quiet kinds. A returned
+started, `✓` a call returned, `✗` a failure, `●` a boundary inside a turn
+(a provider call's start or end, an internal agent run's start), `■` done
+(the keeper's turn, or an internal agent run), `?` something needing
+attention, `·` the quiet kinds. A returned
 call shows how long it took when its start is among the events held; a
 call that began before the feed opened shows none.
 

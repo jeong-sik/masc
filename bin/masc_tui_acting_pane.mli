@@ -290,12 +290,15 @@ val keeper_state_text :
   approval:string option ->
   Masc_tui_acting.chunk option ->
   span list
-(** The fleet row's recent observation: approval first, then the record's
-    glyph ([~] open, [!] open with the process gone, the done mark
-    otherwise) and its words: the newest tool and the observed count
-    ([4+ calls], [no calls yet]) before the end event, that event's count
-    ([12 calls]) and the tokens after. Unknown counts stay unknown.
-    No clock: the age of the newest event is on the focus header. *)
+(** The fleet row's recent observation in four fixed columns: the state
+    word ([approval] with the tool, [no events], [open] with the newest
+    tool, [done]), then the call figure ([-] or [2+] observed so far on an
+    open record, [3] or [?] from the end event on a done one) and the token
+    sum on a done one. [no end] would be the word for a gone process, but
+    {!lines} draws no fleet row for an offline keeper, so only a direct
+    caller sees it. No glyph: the row's one-cell mark is the keeper's
+    health, not the record. No clock: the age of the newest event is on the
+    focus header. *)
 
 val tokens_text : int option * int option -> string
 (** Input and output tokens as two parts when both are known

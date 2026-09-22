@@ -394,20 +394,21 @@ let record_state ~health (chunk : Acting.chunk) =
     | Some (Reading.Health_running | Reading.Health_idle | Reading.Health_failing)
     | None -> Record_open
 
-(* The record's state in words, for the focus header and the earlier-turn
-   rows; a fleet row carries only the glyph. "open" is a turn no end event
-   has closed; it does not say the keeper is at work. When the process is
-   gone no end will come, and the long form says so.
+(* The record's state in words, for the fleet row's state column, the
+   focus header and the earlier-turn rows. "open" is a turn no end event has
+   closed; it does not say the keeper is at work, and no row has evidence
+   for that. When the process is gone no end will come, and the long form
+   says so.
 
    These read "settled" and "unsettled" until an operator asked what the
    words meant (2026-09-22). One of them covered two states -- an open record
-   and a gone one parted by tone alone -- while the narrow column below
-   called the second one something else again. The word also names three
-   other facts in this repository: a tool dispatch that returned a result,
-   a ledger row whose outcome is unknown, an owner not yet chosen. And it
-   reads first as "calm", which is why this comment and the one on
-   [state_column_word] both had to deny that the keeper is running. The feed
-   event is [Keeper_turn_complete]; the screen now says the same thing. *)
+   and a gone one parted by tone alone -- while a second copy of this
+   function for the narrow column called the gone one something else again.
+   The word also names three other facts in this repository: a tool dispatch
+   that returned a result, a ledger row whose outcome is unknown, an owner
+   not yet chosen. And it reads first as "calm", which two comments here had
+   to deny. The feed event is [Keeper_turn_complete]; the screen now says
+   the same thing, from one place. *)
 let record_word = function
   | Record_open -> ("open", Dim)
   | Record_unfinished -> ("no end", Warn)
@@ -431,7 +432,8 @@ let record_glyph = function
 
    The four add up to [reading_cells] exactly. Widest members measured:
    "no events" 9 in a 10-cell state column, whose last cell is the gap to
-   the next -- without it the state word and a tool name ran together; "tool_execute" 12; "999+" 4 under a 5-cell "calls" heading;
+   the next -- without it the state word and a tool name ran together;
+   "tool_execute" 12; "999+" 4 under a 5-cell "calls" heading;
    "999.9k" 6 under a 9-cell "tok/turn". Widening one has to narrow another,
    and [test_widest_settled_reading_fits_whole] fails when the sum drifts. *)
 let state_cells = 10
@@ -448,16 +450,6 @@ let pad_right width text =
 let pad_left width text =
   let text = Layout.take_cells text width in
   String.make (max 0 (width - Layout.display_width text)) ' ' ^ text
-
-(* The word in the state column, the same three words [record_word] uses:
-   "open" is a record that has not closed, which is not the same claim as a
-   keeper that is running, and this row has no evidence for the second. The
-   [!] glyph is what says the process is gone; the word says what that did
-   to the record. *)
-let state_column_word = function
-  | Record_open -> ("open", Dim)
-  | Record_unfinished -> ("no end", Warn)
-  | Record_done -> ("done", Dim)
 
 (* The glyph is the record's state; the words are the newest tool and the
    count, or the count and the tokens once settled. No clock here: the age
@@ -482,7 +474,7 @@ let keeper_state_text ~health ~approval (chunk : Acting.chunk option) =
     ]
   | None, Some chunk ->
     let state = record_state ~health chunk in
-    let word, word_tone = state_column_word state in
+    let word, word_tone = record_word state in
     (* Which columns a row fills is the record's shape, not a choice. A turn
        still open names the tool it is in and has no token count; a settled one
        carries the counts and names no tool, because a finished turn is not in

@@ -405,6 +405,37 @@ let test_a_gone_keepers_focus_header_says_unfinished () =
   check bool "an open turn does not borrow the session number" false
     (contains "turn 7" (List.nth dead_texts header))
 
+(* A gone keeper with two turns that never ended: the focus header carries
+   the long form and the earlier turn's own row the short one, each with the
+   [!] mark rather than [~]. Only the header had a test, so the short form
+   could have said anything. *)
+let test_a_gone_keepers_earlier_turn_also_says_no_end () =
+  let input =
+    { fixture with
+      Pane.keepers =
+        Some
+          [ keeper ~mark:"\xc3\x97" ~tone:Pane.Bad
+              ~health:(Some Masc.Tui_decode.Health_offline) "goner" ]
+    ; selected = Some "goner"
+    ; approvals = []
+    ; chunks = chunks [ "goner" ] @@ entries
+        [ 990., agent_core ~kind:Observer.Turn_started ~turn:6 ~at:990.
+            ~correlation:"trace-goner" lane
+        ; 980., agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980.
+            ~correlation:"trace-goner" lane
+        ]
+    }
+  in
+  let texts = List.map text (Pane.lines ~rows ~cols ~scroll:0 input).Pane.rows in
+  let header = List.nth texts (last_index_of_in texts "goner") in
+  check bool "the header carries the long form" true
+    (contains "no end, process gone" header);
+  let prior = List.nth texts (last_index_of_in texts "no end") in
+  check bool "the earlier row is not the header" false (contains "goner" prior);
+  check bool "the earlier row carries the short form behind the gone mark" true
+    (contains "! no end" prior);
+  check bool "and not the open mark" false (contains "~ " prior)
+
 let test_idle_health_does_not_turn_an_open_record_into_current_work () =
   let input =
     { fixture with
@@ -564,6 +595,8 @@ let test_fleet_rows_read_the_state () =
   check bool "waiting names which tool" true (contains "tool_execute" (find_row "polisher"));
   check bool "working names the call out" true (contains "Execute" (find_row "tester"));
   check bool "working counts its calls as at least" true (contains "   2+" (find_row "tester"));
+  check bool "working says open in the state column" true (contains "open" (find_row "tester"));
+  check bool "done says so in the state column" true (contains "done" (find_row "probe"));
   check bool "settled counts its calls" true (contains "    3" (find_row "probe"));
   (* The fleet column carries the sum. The two figures apart are the focus
      block's job: nine cells cannot hold "in 73.9k · out 358". *)
@@ -1870,6 +1903,8 @@ let () =
             test_a_gone_keepers_turn_is_not_read_as_running
         ; test_case "a gone keeper's focus header says no end, process gone" `Quick
             test_a_gone_keepers_focus_header_says_unfinished
+        ; test_case "a gone keeper's earlier turn also says no end" `Quick
+            test_a_gone_keepers_earlier_turn_also_says_no_end
         ; test_case "an open record does not claim a current turn" `Quick
             test_an_open_record_without_a_tool_does_not_claim_a_current_turn
         ; test_case "a settled row counts only what the settle confirmed" `Quick

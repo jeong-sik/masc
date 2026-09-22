@@ -15,6 +15,25 @@ from urllib.error import HTTPError, URLError
 
 BINARY = None
 
+
+def runtime_without_exact_output_lanes(text):
+    kept, skip, removed_lanes = [], False, 0
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith('['):
+            skip = line.lstrip().startswith('[runtime.exact_output_lanes')
+            if skip:
+                removed_lanes += 1
+        if not skip:
+            kept.append(line)
+    if removed_lanes == 0:
+        raise AssertionError(
+            'runtime fixture no longer declares an exact-output lane section; '
+            'update test/test_model_independent_owner.py together with '
+            'scripts/fixtures/release-evidence/runtime.toml.'
+        )
+    return ''.join(kept)
+
+
 class OwnerWithoutModel(unittest.TestCase):
     def test_owner_auth_and_settings_survive_missing_or_invalid_runtime(self):
         for contents, reason in [(None, 'config_missing'), ('[runtime]\ndefault = "missing.model"\n', 'config_invalid'), ('seed_without_lanes', None)]:
@@ -25,12 +44,7 @@ class OwnerWithoutModel(unittest.TestCase):
                 subprocess.run([BINARY, 'init', '--base-path', tmp], env=env, check=True,
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30)
                 runtime = base/'.masc/config/runtime.toml'
-                kept, skip = [], False
-                for line in runtime.read_text().splitlines(keepends=True):
-                    if line.lstrip().startswith('['):
-                        skip = line.lstrip().startswith('[runtime.exact_output_lanes.')
-                    if not skip: kept.append(line)
-                seed_without_lanes = ''.join(kept)
+                seed_without_lanes = runtime_without_exact_output_lanes(runtime.read_text())
                 if contents == 'seed_without_lanes': contents = seed_without_lanes
                 if contents is None: runtime.unlink()
                 else: runtime.write_text(contents)

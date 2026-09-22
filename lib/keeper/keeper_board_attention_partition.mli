@@ -89,6 +89,15 @@ type state =
       ; completed_at : float
       }
   | Settled of { settled_at : float }
+      (** Terminal for [settle]'s own caller, but not for the ledger: [ensure_roots]
+          reopens a [Settled] root straight back to [Ready] (same deterministic
+          identity, next generation) when the matching candidate is still
+          [Resumable_pending] — the Candidate ledger never recorded any judgment
+          for it, so the root settling can only be a desync (e.g. the
+          "candidate permanently absent" path settling a [Blocked] root without
+          ever judging it). A [Resumable_judged] or [Requeued_resumable] match
+          leaves [Settled] alone; those belong to [reconcile_quarantines]'s own
+          bookkeeping instead. No other transition leaves [Settled]. *)
   | Blocked of
       { reason : blocked_reason
       ; blocked_at : float

@@ -45,6 +45,12 @@ let enter_atom_count_exceptions =
   ; (* The second is the history overlay's, which [footer_hints_code] drops
        from the panes that have no commits. *)
     "Workspace / Code", 2
+  ; (* [e / Enter] edits on params and [Enter] uses on themes.
+       [footer_hints_config ~pane] never draws both: this count is of the
+       union the help sheet shows, not of any footer. The per-pane form of
+       this check is [test_every_config_pane_answers_once] below, which is
+       stricter than the one here -- it asks seven screens, not one union. *)
+    "Config", 2
   ]
 
 let test_every_surface_names_one_key_that_acts_on_the_cursor () =
@@ -1025,8 +1031,15 @@ let test_the_config_marks_are_in_the_sheet () =
    direction. Workspace / Code: [Left / Esc] leaves the file, then the
    directory, then the surface, and [B] walks back through definition
    jumps -- unrelated, and both called "back". *)
+(* And one that shares a label because no screen shows both rows. Config
+   draws a footer per pane, so "edit" on [e] (runtime, models, prompts,
+   voice) and on [e / Enter] (params) are the same answer given to readers
+   who never meet each other. Kept apart rather than merged into one row
+   because the panes take different keys: merging would put [Enter] in front
+   of four panes that do not answer it. [test_every_config_pane_answers_once]
+   is where this is checked at the size a reader actually sees. *)
 let shared_label_exceptions =
-  [ ("Board", "pane"); ("Workspace / Code", "back") ]
+  [ ("Board", "pane"); ("Workspace / Code", "back"); ("Config", "edit") ]
 
 let test_no_surface_gives_one_answer_two_rows () =
   let found = ref [] in
@@ -1060,6 +1073,77 @@ let test_no_surface_gives_one_answer_two_rows () =
         (Printf.sprintf "%s still shares %S" (fst entry) label)
         true (count >= 2))
     shared_label_exceptions
+
+(* Both exceptions above name Config because the help sheet shows the union of
+   seven panes. No reader sees that union -- [footer_hints_config] draws one
+   pane -- so the invariants they stepped out of are asked here, of each pane.
+   That is seven checks where the surface form was one.
+
+   Read the raw row, not a fitted one: the fitter drops items at narrow
+   widths, and an item it dropped would pass a uniqueness check by being
+   absent. *)
+let config_panes =
+  [ ("runtime", Config_runtime)
+  ; ("models", Config_models)
+  ; ("params", Config_params)
+  ; ("prompts", Config_prompts)
+  ; ("presets", Config_presets)
+  ; ("themes", Config_themes)
+  ; ("voice", Config_voice)
+  ]
+
+(* [hints_of_bindings] joins items with two spaces, and a key may hold a single
+   one ([e / Enter], [Right / Enter]) -- so split on the pair, not on a space.
+   [footer_has_key] splits on one space, which is why it cannot ask for a
+   pair's whole spelling. *)
+let footer_items row =
+  let length = String.length row in
+  let rec split acc start index =
+    if index + 1 >= length then List.rev (String.sub row start (length - start) :: acc)
+    else if row.[index] = ' ' && row.[index + 1] = ' ' then
+      split (String.sub row start (index - start) :: acc) (index + 2) (index + 2)
+    else split acc start (index + 1)
+  in
+  if length = 0 then []
+  else List.filter (fun item -> not (String.equal item "")) (split [] 0 0)
+
+(* An item is [key:label]; a label may hold a colon of its own, so read the
+   key up to the first one. *)
+let item_key item =
+  match String.index_opt item ':' with
+  | Some at -> String.sub item 0 at
+  | None -> item
+
+let item_label item =
+  match String.index_opt item ':' with
+  | Some at -> String.sub item (at + 1) (String.length item - at - 1)
+  | None -> item
+
+let test_every_config_pane_answers_once () =
+  List.iter
+    (fun (name, pane) ->
+      let items = footer_items (Masc_tui_keys.footer_hints_config ~pane) in
+      let enter =
+        List.filter
+          (fun item ->
+            List.exists (String.equal "Enter") (Masc_tui_keys.key_atoms (item_key item)))
+          items
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "the %s pane names at most one key holding Enter (found: %s)" name
+           (String.concat " | " enter))
+        true
+        (List.length enter <= 1);
+      let sorted = List.sort compare (List.map item_label items) in
+      let rec first_repeat = function
+        | a :: (b :: _ as rest) -> if String.equal a b then Some a else first_repeat rest
+        | [ _ ] | [] -> None
+      in
+      Alcotest.(check (option string))
+        (Printf.sprintf "the %s pane gives each answer once" name)
+        None
+        (first_repeat sorted))
+    config_panes
 
 let test_lanes_is_a_main_destination () =
   Alcotest.(check bool) "Lanes is a top-level ring entry" true
@@ -2683,6 +2767,8 @@ let () =
             test_the_config_marks_are_in_the_sheet
         ; Alcotest.test_case "no surface gives one answer two rows" `Quick
             test_no_surface_gives_one_answer_two_rows
+        ; Alcotest.test_case "every Config pane answers once" `Quick
+            test_every_config_pane_answers_once
         ; Alcotest.test_case "the file marks are in the sheet" `Quick
             test_the_file_marks_are_in_the_sheet
         ; Alcotest.test_case "Lanes is a main destination" `Quick

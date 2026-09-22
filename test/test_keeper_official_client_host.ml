@@ -2355,7 +2355,9 @@ let test_a_fully_absorbed_history_still_carries_its_newest_atom () =
      | Host.Librarian_snapshot { absorbed_through } ->
        absorbed_through = snapshot.Snapshot.end_atom
      | _ -> false);
-  check bool "the turn is on the wire" true
+  check bool "the newest atom is on the wire" true
+    (List.exists (String.equal "The build passed.") (texts carried.Host.messages));
+  check bool "and the absorbed atom before it is not" false
     (List.exists (String.equal "Build the patch.") (texts carried.Host.messages))
 ;;
 

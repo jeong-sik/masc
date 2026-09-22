@@ -1590,15 +1590,44 @@ let run_named
                   ((Librarian_continuity_snapshot.Trace_mismatch
                    | Librarian_continuity_snapshot.History_changed
                    | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
-                (* Three different mismatches used to share one sentence, so
-                   a keeper that fell back to its whole history (goo-yang-bong,
-                   2026-09-22: 12,720 messages, 16.4 MB, 44 cycles in a row)
-                   left no way to tell a new trace from a changed history. *)
-                Log.Keeper.info ~keeper_name
-                  "Librarian continuity does not fit the current history (%s); sending all %d messages in full"
-                  (Librarian_continuity_snapshot.error_to_string mismatch)
-                  (List.length initial_messages);
-                Ok (Some Keeper_turn_driver_try_provider.uncompressed_history)
+                (* The snapshot no longer fits this history. The Librarian's
+                   durable position may still: a purge renumbers the atoms and
+                   moves that position with them (Keeper_checkpoint_purge) but
+                   leaves the snapshot in the old numbering, which is how a
+                   keeper came to send its 12,720 atoms, 16.4 MB, 44 cycles in
+                   a row (goo-yang-bong, 2026-09-22). From the position the
+                   request carries what the Librarian has not read; with no
+                   position it carries everything, as before. *)
+                let mismatch = Librarian_continuity_snapshot.error_to_string mismatch in
+                let message_count = List.length initial_messages in
+                let absorbed =
+                  match
+                    Keeper_librarian_progress.read
+                      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+                      ~keeper_id:keeper_name
+                  with
+                  | Ok (Some progress) ->
+                    Keeper_turn_driver_try_provider.absorbed_history
+                      ~trace_id ~messages:initial_messages progress
+                  | Ok None -> None
+                  | Error error ->
+                    Log.Keeper.warn ~keeper_name
+                      "Librarian progress unreadable while the continuity snapshot does not fit (%s): %s"
+                      mismatch
+                      (Keeper_librarian_progress.read_error_to_string error);
+                    None
+                in
+                (match absorbed with
+                 | Some (end_atom, continuity) ->
+                   Log.Keeper.info ~keeper_name
+                     "Librarian continuity does not fit the current history (%s); starting at the Librarian's position, atom %d, over %d messages"
+                     mismatch end_atom message_count;
+                   Ok (Some continuity)
+                 | None ->
+                   Log.Keeper.info ~keeper_name
+                     "Librarian continuity does not fit the current history (%s); sending all %d messages in full"
+                     mismatch message_count;
+                   Ok (Some Keeper_turn_driver_try_provider.uncompressed_history))
               | Error error -> Error (Librarian_continuity_snapshot.error_to_string error)))
       in
 	  let refused_carried_front = ref None in

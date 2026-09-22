@@ -395,10 +395,10 @@ type carried_start_front =
   | Turn_start_unknown of { reason : string }
       (** No seed, no lane cut, and the turn start could not be read: the
           range opened on the newest atom alone. *)
-  | Librarian_snapshot of { absorbed_through : int }
-      (** The Librarian absorbed the history through [end_atom] and wrote
-          what the keeper was in the middle of; the range starts there and
-          carries that working state instead of the atoms it summarises. *)
+  | Librarian_snapshot of { absorbed_through : int; boundary_line : int }
+      (** The Librarian absorbed the history through [absorbed_through] and
+          wrote what the keeper was in the middle of; the range starts there
+          and carries that working state instead of the atoms it summarises. *)
   | Librarian_progress of { end_atom : int }
       (** The Librarian read the history through [end_atom] and no working
           state fits it; the range starts there, and the atoms before it are
@@ -437,6 +437,26 @@ let carried_start_front_to_string = function
      ([Keeper_carried_front.origin_to_string]), so one search finds both. *)
   | Librarian_snapshot _ -> "librarian_snapshot"
   | Librarian_progress _ -> "librarian_progress"
+;;
+
+let continuity_observation_input ~trace_id ~continuity front =
+  match front, continuity with
+  | Librarian_snapshot { absorbed_through; boundary_line }, _ ->
+    Keeper_continuity_observation.Summarized
+      { trace_id; end_atom = absorbed_through; boundary_line }
+  | Librarian_progress { end_atom }, _ -> Keeper_continuity_observation.Absorbed { trace_id; end_atom }
+  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _), None ->
+    Keeper_continuity_observation.Not_applied
+  | ( (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _)
+    , Some Keeper_turn_driver_try_provider.Without_snapshot ) ->
+    Keeper_continuity_observation.Without_snapshot
+  | ( (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _)
+    , Some
+        ( Keeper_turn_driver_try_provider.Summarized _
+        | Keeper_turn_driver_try_provider.Absorbed _ ) ) ->
+    (* The turn chose a Librarian point and this request did not start
+       there: the seed or the lane's own cut sat past it. *)
+    Keeper_continuity_observation.Not_applied
 ;;
 
 (* Where a start seed begins (RFC keeper-context-window-in-tokens §10.4). The
@@ -478,6 +498,7 @@ type range_plan =
   | Absorbed_through of
       { first_atom : int
       ; absorbed_through : int
+      ; boundary_line : int
       ; working_state : string
       }
 
@@ -599,6 +620,7 @@ let carried_start_range
         { first_atom =
             Keeper_carried_front.clamp ~atom_count:history_atom_count snapshot.end_atom
         ; absorbed_through = snapshot.end_atom
+        ; boundary_line = snapshot.end_boundary_line
         ; working_state = Keeper_turn_driver_try_provider.working_state_text snapshot
         }
     | Keeper_turn_driver_try_provider.Librarian_progress { end_atom }
@@ -619,14 +641,14 @@ let carried_start_range
   in
   let carried_messages, first_atom, front =
     match plan with
-    | Absorbed_through { first_atom; absorbed_through; working_state } ->
+    | Absorbed_through { first_atom; absorbed_through; boundary_line; working_state } ->
       (* The working state stands in front of the range, in the same System
          place this lane puts every other piece of context it composes; see
          [extra_system_context_message] for what that place is on each
          client. *)
       ( extra_system_context_message working_state :: messages
       , first_atom
-      , Librarian_snapshot { absorbed_through } )
+      , Librarian_snapshot { absorbed_through; boundary_line } )
     | Plain (first_atom, front) -> messages, first_atom, front
   in
   (* The cut is the same for every front. The window's omission preamble

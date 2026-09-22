@@ -215,9 +215,10 @@ type carried_start_front =
       (** No seed, no lane cut, and the turn start could not be read
           ({!Keeper_carried_front.Turn_boundary_unknown}): the range opened
           on the newest atom alone. *)
-  | Librarian_snapshot of { absorbed_through : int }
-      (** The Librarian absorbed this history through [absorbed_through] and
-          saved what the keeper was in the middle of. The range starts there
+  | Librarian_snapshot of { absorbed_through : int; boundary_line : int }
+      (** The Librarian absorbed this history through [absorbed_through],
+          the end of the completed turn on boundary-log row [boundary_line],
+          and saved what the keeper was in the middle of. The range starts there
           and carries that working state in place of the atoms it summarises —
           the front the Agent Core lane already takes
           ([Keeper_carried_front.Librarian_snapshot]). [first_atom] is that
@@ -270,6 +271,19 @@ val read_librarian_front
     {!Keeper_turn_driver_try_provider.No_position}. *)
 
 val carried_start_front_to_string : carried_start_front -> string
+
+val continuity_observation_input
+  :  trace_id:string
+  -> continuity:Keeper_turn_driver_try_provider.continuity option
+  -> carried_start_front
+  -> Keeper_continuity_observation.input
+(** What the Memory screen records for a request this lane composed
+    ({!Keeper_continuity_observation}), in the words the Agent Core lane
+    records: [Summarized] when a working state named the front, [Absorbed]
+    when the read position did, [Without_snapshot] when the turn's choice
+    was no absorbed point, and [Not_applied] when the turn made no choice
+    (no trace, or a recovery view) or its choice sat behind the seed or the
+    lane's own cut and so was not applied to this request. *)
 
 val carried_start_range
   :  keeper_name:string

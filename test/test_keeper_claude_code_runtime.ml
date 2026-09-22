@@ -2249,10 +2249,12 @@ let test_a_cold_start_begins_at_the_turn_start () =
    as it refuses an Agent Core request, instead of going out from the seed. *)
 let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
   let messages = start_seed_history () in
+  let seen_front = ref None in
   let project librarian_front =
     Keeper_claude_code_runtime.For_testing.start_seed_projection
       ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
       ~librarian_front
+      ~on_carried_front:(fun front ~transmitted_bytes -> seen_front := Some (front, transmitted_bytes))
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -2264,6 +2266,11 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
      check (list string) "the range starts at the read position"
        (encoded (List.filteri (fun i _ -> i >= 100) messages))
        (encoded carried));
+  (match !seen_front with
+   | Some (Keeper_official_client_host.Librarian_progress { end_atom = 100 }, bytes) ->
+     check bool "the front is reported with the range's bytes" true (bytes > 0)
+   | Some _ -> fail "the reported front is not the read position"
+   | None -> fail "the composition reported no front");
   let working_state = "Fifty asks answered so far." in
   let snapshot =
     let covered = List.filteri (fun i _ -> i < 100) messages in

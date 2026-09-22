@@ -35,6 +35,8 @@ val run :
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?librarian_front:Keeper_official_client_host.librarian_front_reader ->
+  ?on_carried_front:
+    (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit) ->
   turn_start:Keeper_carried_front.turn_start ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
@@ -63,7 +65,11 @@ val run :
     [librarian_front] reads the turn's continuity choice as a position in the
     history a fresh conversation starts from
     ({!Keeper_official_client_host.read_librarian_front}); a reader error
-    refuses the request, as the same check refuses an Agent Core request. *)
+    refuses the request, as the same check refuses an Agent Core request.
+    [on_carried_front] receives the front that history started from and its
+    bytes in the canonical encoding, before the declared window cuts it; the
+    caller records it where the Agent Core lane records its own request
+    ({!Keeper_official_client_host.continuity_observation_input}). *)
 
 module For_testing : sig
   val capacity_bounded_model_input_projection
@@ -74,6 +80,8 @@ module For_testing : sig
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
     -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
+    -> ?on_carried_front:
+         (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit)
     -> turn_start:Keeper_carried_front.turn_start
     -> keeper_name:string
     -> runtime_id:string

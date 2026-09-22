@@ -1617,6 +1617,26 @@ let run_named
 	      Domain_pool_ref.submit_cpu_or_inline (fun () ->
 	        Keeper_turn_driver_try_provider.librarian_position ~messages chosen)
 	  in
+	  (* The same record the Agent Core branch writes before each request
+	     ([pre_dispatch_serialization_observer] in
+	     [Keeper_turn_driver_try_provider]), so the Memory screen shows what an
+	     official-client request started from too. The bytes are the carried
+	     range in the canonical encoding, which is what these lanes measure;
+	     the Agent Core record holds its serialized body. *)
+	  let record_official_client_continuity ~runtime_id front ~transmitted_bytes =
+	    match session_id with
+	    | None -> ()
+	    | Some trace_id ->
+	      Keeper_continuity_observation.record
+	        ~config:(Workspace.default_config base_path) ~keeper_name
+	        { Keeper_continuity_observation.prepared_at = Time_compat.now ()
+	        ; runtime_id
+	        ; input =
+	            Keeper_official_client_host.continuity_observation_input
+	              ~trace_id ~continuity:(Eio.Lazy.force continuity) front
+	        ; request_bytes = transmitted_bytes
+	        }
+	  in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)
   let routing_run_id = Random_id.hex ~bytes:16 in
@@ -2248,6 +2268,7 @@ let run_named
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
             ~librarian_front:official_client_librarian_front
+            ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
             ~turn_start:(Eio.Lazy.force turn_boundary)
             (* Antigravity's CLI assembles the wire, so the shape masc can
                report is the list it handed over. *)
@@ -2368,6 +2389,7 @@ let run_named
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
             ~librarian_front:official_client_librarian_front
+            ~on_carried_front:(record_official_client_continuity ~runtime_id:attempt_runtime_id)
             ~turn_start:(Eio.Lazy.force turn_boundary)
             ~pre_tool_rejects
             ~base_path

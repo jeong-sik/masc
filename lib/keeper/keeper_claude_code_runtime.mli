@@ -37,6 +37,8 @@ module For_testing : sig
     :  capacity_bytes:int
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
     -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
+    -> ?on_carried_front:
+         (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit)
     -> turn_start:Keeper_carried_front.turn_start
     -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
@@ -84,6 +86,8 @@ val run :
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?librarian_front:Keeper_official_client_host.librarian_front_reader ->
+  ?on_carried_front:
+    (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit) ->
   turn_start:Keeper_carried_front.turn_start ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
@@ -127,6 +131,12 @@ val run :
     by the working state, which the declared ceiling has already cut around
     before this lane composes. A reader error refuses the request, as the
     same check refuses an Agent Core request.
+
+    [on_carried_front] receives the front the range started from and the
+    range's bytes in the canonical encoding, once per composition that cut a
+    range (the zero-history floor cuts none). The caller records it where the
+    Agent Core lane records its own request
+    ({!Keeper_official_client_host.continuity_observation_input}).
 
     [on_transmitted_model_input] fires once per attempt, after the capacity
     window has cut the history and before the prompt is built. Required rather

@@ -121,8 +121,8 @@ let prompt_section_framing_reserved_bytes () =
    a source-only atom is transmitted context, but cannot become a front that
    a later checkpoint history is expected to open. *)
 let bounded_history_projection ~capacity_bytes ~reserved_bytes
-    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ~turn_start ~keeper_name
-    ~runtime_id source_projection
+    ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
+    ~turn_start ~keeper_name ~runtime_id source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun history_messages ->
@@ -137,6 +137,9 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
       ~turn_start
       history_messages
   in
+  Option.iter
+    (fun observe -> observe carried.Host.front ~transmitted_bytes:carried.Host.transmitted_bytes)
+    on_carried_front;
   let* projected_messages =
     match source_projection with
     | None -> Ok carried.Host.messages
@@ -186,7 +189,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
     ~system_prompt ~goal ?on_model_input_window_observation ?carried_front_seed
-    ?librarian_front ~turn_start ~keeper_name ~runtime_id source_projection
+    ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id source_projection
   =
   match declared_max_prompt_bytes with
   | None ->
@@ -218,6 +221,7 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
               ?on_model_input_window_observation
               ?carried_front_seed
               ?librarian_front
+              ?on_carried_front
               ~turn_start
               ~keeper_name
               ~runtime_id
@@ -393,6 +397,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
+    ~on_carried_front
     ~turn_start
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
@@ -550,6 +555,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ?on_model_input_window_observation
             ?carried_front_seed
             ?librarian_front
+            ?on_carried_front
             ~turn_start
             ~keeper_name
             ~runtime_id
@@ -1177,6 +1183,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_model_input_window_observation
     ?carried_front_seed
     ?librarian_front
+    ?on_carried_front
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
@@ -1199,6 +1206,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
         ~on_model_input_window_observation
         ~carried_front_seed
         ~librarian_front
+        ~on_carried_front
         ~turn_start
     ~pre_tool_rejects
         ~base_path

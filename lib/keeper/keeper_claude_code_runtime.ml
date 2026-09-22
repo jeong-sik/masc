@@ -82,6 +82,7 @@ let model_input_projection_for_capacity
     ?on_model_input_window_observation
     ?carried_front_seed
     ?librarian_front
+    ?on_carried_front
     ~turn_start
     ~keeper_name
     ~runtime_id
@@ -160,6 +161,10 @@ let model_input_projection_for_capacity
          seed named no front. A list with no atom has no front to report, and
          [Runtime_model_input_tail_window.observe] reports nothing for it. *)
       observe_window carried.Host.projection;
+      Option.iter
+        (fun observe ->
+           observe carried.Host.front ~transmitted_bytes:carried.Host.transmitted_bytes)
+        on_carried_front;
       Ok carried.Host.messages
   in
   let () =
@@ -432,8 +437,8 @@ module For_testing = struct
   let host_stop_turn_identity = host_stop_turn_identity
   let recovery_failure_of_client_error = recovery_failure_of_client_error
 
-  let start_seed_projection ~capacity_bytes ?carried_front_seed ?librarian_front ~turn_start
-        ?on_model_input_window_observation ~keeper_name ~runtime_id messages
+  let start_seed_projection ~capacity_bytes ?carried_front_seed ?librarian_front ?on_carried_front
+        ~turn_start ?on_model_input_window_observation ~keeper_name ~runtime_id messages
     =
     model_input_projection_for_capacity
       ~capacity_bytes
@@ -442,6 +447,7 @@ module For_testing = struct
       ?on_model_input_window_observation
       ?carried_front_seed
       ?librarian_front
+      ?on_carried_front
       ~turn_start
       ~keeper_name
       ~runtime_id
@@ -1256,6 +1262,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?on_model_input_window_observation
     ?carried_front_seed
     ?librarian_front
+    ?on_carried_front
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
@@ -1349,6 +1356,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
                     ?on_model_input_window_observation
                     ?carried_front_seed
                     ?librarian_front
+                    ?on_carried_front
                     ~turn_start
                     ~keeper_name
                     ~runtime_id

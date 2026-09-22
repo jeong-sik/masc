@@ -1067,7 +1067,8 @@ let plain_user_message text : Agent_core.Types.message =
 ;;
 
 let capacity_projection ?on_model_input_window_observation ?carried_front_seed ?librarian_front
-    ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~declared_max_prompt_bytes ~system_prompt ~goal source =
+    ?on_carried_front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
+    ~declared_max_prompt_bytes ~system_prompt ~goal source =
   Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
     ~declared_max_prompt_bytes
     ~system_prompt
@@ -1075,6 +1076,7 @@ let capacity_projection ?on_model_input_window_observation ?carried_front_seed ?
     ?on_model_input_window_observation
     ?carried_front_seed
     ?librarian_front
+    ?on_carried_front
     ~turn_start
     ~keeper_name:"alpha"
     ~runtime_id:"antigravity_subscription.gemini"
@@ -1333,12 +1335,13 @@ let agent_core_range ?(turn_start = Keeper_carried_front.Turn_boundary { end_ato
 ;;
 
 let project_with_capacity ?on_model_input_window_observation ?carried_front_seed ?librarian_front
-    ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~capacity messages =
+    ?on_carried_front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~capacity messages =
   match
     capacity_projection
       ?on_model_input_window_observation
       ?carried_front_seed
       ?librarian_front
+      ?on_carried_front
       ~turn_start
       ~declared_max_prompt_bytes:(Some capacity)
       ~system_prompt:"system"
@@ -1399,16 +1402,23 @@ let test_cold_start_begins_at_the_turn_start () =
    the request, as it refuses an Agent Core request. *)
 let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
   let messages = carried_front_history () in
+  let seen_front = ref None in
   let projected =
     project_with_capacity
       ~librarian_front:(fun _ ->
         Ok (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 53 }))
+      ~on_carried_front:(fun front ~transmitted_bytes -> seen_front := Some (front, transmitted_bytes))
       ~capacity:1_000_000
       messages
   in
   check (list string) "the range starts at the read position"
     (encoded_history (List.filteri (fun index _ -> index >= 53) messages))
     (encoded_history projected);
+  (match !seen_front with
+   | Some (Keeper_official_client_host.Librarian_progress { end_atom = 53 }, bytes) ->
+     check bool "the front is reported with the range's bytes" true (bytes > 0)
+   | Some _ -> fail "the reported front is not the read position"
+   | None -> fail "the composition reported no front");
   let refused _ =
     Error
       (Agent_core.Error.Config

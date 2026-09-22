@@ -1,5 +1,9 @@
-(** Read-only observations of serialized Agent Core requests. These do not
-    authorize history removal or prove a provider accepted the request. *)
+(** Read-only observations of composed requests: what each one started
+    from, recorded before it went out. Agent Core records its serialized
+    request; the official-client lanes record the range they handed the
+    client ([Keeper_official_client_host.continuity_observation_input]).
+    These do not authorize history removal or prove a provider accepted the
+    request. *)
 type frontier = { trace_id : string; end_atom : int; boundary_line : int }
 type input =
   | Summarized of frontier
@@ -7,12 +11,21 @@ type input =
       (** The request started at the Librarian's durable position, with no
           summary of what lies before it. *)
   | Without_snapshot
+      (** The turn chose no absorbed point: the request started at its own
+          boundary. *)
   | Not_applied
+      (** The saved context was not applied to this request: the turn made no
+          choice (no trace, or a recovery view), or, on an official-client
+          lane, the seed or the lane's own cut sat past the point the turn
+          chose. *)
 type t =
   { prepared_at : float
   ; runtime_id : string
   ; input : input
   ; request_bytes : int
+        (** Agent Core: the serialized request body. Official-client lanes:
+            the carried range in the canonical encoding, before the client
+            assembles its own request. *)
   }
 val record : config:Workspace.config -> keeper_name:string -> t -> unit
 val latest : config:Workspace.config -> keeper_name:string -> t option

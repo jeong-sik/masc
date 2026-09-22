@@ -2256,26 +2256,27 @@ let start_seed_messages =
 
 let working_state = "Build passed. Review is open."
 
-let absorbed_snapshot () =
+let absorbed_boundary () : Boundaries.record =
   let position =
     match Boundaries.position_of_messages absorbed_messages with
     | Ok position -> position
     | Error detail -> fail detail
   in
-  let boundary : Boundaries.record =
-    { recorded_at = 1.0
-    ; event =
-        Boundaries.Turn_ended
-          { turn_ref = Ids.Turn_ref.make ~trace_id:start_seed_trace ~absolute_turn:1
-          ; history_at_start = Boundaries.Fresh_history
-          ; position
-          }
-    }
-  in
+  { recorded_at = 1.0
+  ; event =
+      Boundaries.Turn_ended
+        { turn_ref = Ids.Turn_ref.make ~trace_id:start_seed_trace ~absolute_turn:1
+        ; history_at_start = Boundaries.Fresh_history
+        ; position
+        }
+  }
+;;
+
+let absorbed_snapshot () =
   match
     Snapshot.capture
       ~trace_id:start_seed_trace
-      ~lines:[ 1, Ok boundary ]
+      ~lines:[ 1, Ok (absorbed_boundary ()) ]
       ~messages:absorbed_messages
       ~working_state
   with
@@ -2317,7 +2318,7 @@ let test_a_start_seed_begins_at_the_librarian_position () =
     snapshot.Snapshot.end_atom carried.Host.first_atom;
   check bool "the front says so" true
     (match carried.Host.front with
-     | Host.Librarian_snapshot { absorbed_through } ->
+     | Host.Librarian_snapshot { absorbed_through; _ } ->
        absorbed_through = snapshot.Snapshot.end_atom
      | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
      | Host.Librarian_progress _ -> false);
@@ -2361,7 +2362,7 @@ let test_a_fully_absorbed_history_still_carries_its_newest_atom () =
     (snapshot.Snapshot.end_atom - 1) carried.Host.first_atom;
   check bool "and still says the Librarian named the front" true
     (match carried.Host.front with
-     | Host.Librarian_snapshot { absorbed_through } ->
+     | Host.Librarian_snapshot { absorbed_through; _ } ->
        absorbed_through = snapshot.Snapshot.end_atom
      | _ -> false);
   check bool "the newest atom is on the wire" true
@@ -2403,7 +2404,7 @@ let test_a_librarian_position_behind_the_turn_start_still_wins () =
     carried.Host.first_atom;
   check bool "and the front is the Librarian's" true
     (match carried.Host.front with
-     | Host.Librarian_snapshot { absorbed_through } ->
+     | Host.Librarian_snapshot { absorbed_through; _ } ->
        absorbed_through = snapshot.Snapshot.end_atom
      | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
      | Host.Librarian_progress _ -> false)
@@ -2455,6 +2456,46 @@ let test_a_read_position_behind_the_lane_cut_loses () =
      | Host.Lane_cut -> true
      | Host.Carried_seed _ | Host.Turn_start | Host.Turn_start_unknown _
      | Host.Librarian_snapshot _ | Host.Librarian_progress _ -> false)
+;;
+
+(* What the Memory screen records for a request this lane composed, in the
+   Agent Core lane's words. A Librarian front records itself; any other front
+   records the turn's choice, and a choice this request did not start from is
+   [Not_applied], as a turn that made no choice is. *)
+module Observation = Keeper_continuity_observation
+
+let test_the_observation_records_the_front_or_why_the_choice_was_not_applied () =
+  let snapshot = absorbed_snapshot () in
+  let input ?continuity front =
+    Host.continuity_observation_input ~trace_id:start_seed_trace ~continuity front
+  in
+  let chosen_snapshot =
+    match Choice.prepare_continuity ~trace_id:start_seed_trace ~lines:[ 1, Ok (absorbed_boundary ()) ]
+            ~messages:absorbed_messages snapshot with
+    | Ok continuity -> continuity
+    | Error error -> fail (Snapshot.error_to_string error)
+  in
+  (match
+     input (Host.Librarian_snapshot { absorbed_through = snapshot.Snapshot.end_atom; boundary_line = 1 })
+   with
+   | Observation.Summarized { trace_id; end_atom; boundary_line } ->
+     check string "the snapshot's trace" start_seed_trace trace_id;
+     check int "the snapshot's end" snapshot.Snapshot.end_atom end_atom;
+     check int "the boundary row the front names" 1 boundary_line
+   | Observation.Absorbed _ | Observation.Without_snapshot | Observation.Not_applied ->
+     fail "a working-state front was not recorded as summarized");
+  (match input (Host.Librarian_progress { end_atom = 2 }) with
+   | Observation.Absorbed { end_atom = 2; _ } -> ()
+   | _ -> fail "a read-position front was not recorded as absorbed");
+  (match input Host.Turn_start with
+   | Observation.Not_applied -> ()
+   | _ -> fail "a turn with no choice was not recorded as not applied");
+  (match input ~continuity:Choice.without_snapshot Host.Turn_start with
+   | Observation.Without_snapshot -> ()
+   | _ -> fail "a turn whose choice was no absorbed point was not recorded so");
+  match input ~continuity:chosen_snapshot Host.Lane_cut with
+  | Observation.Not_applied -> ()
+  | _ -> fail "a choice the lane cut passed was recorded as applied"
 ;;
 
 let () =
@@ -2706,6 +2747,10 @@ let () =
             "a fully absorbed history still carries its newest atom"
             `Quick
             test_a_fully_absorbed_history_still_carries_its_newest_atom
+        ; test_case
+            "the observation records the front or why the choice was not applied"
+            `Quick
+            test_the_observation_records_the_front_or_why_the_choice_was_not_applied
         ] )
     ]
 ;;

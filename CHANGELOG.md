@@ -28,6 +28,8 @@
 - The Lanes screen can now remove an exact-lane slot and move it up or down, not only append one; slots the catalog rejected are kept in the file (#37482).
 
 ### Changed
+- The trailing `· Ctrl-N` hint on summarized journal rows and the voice-key hint on empty input lines are gone; both keys stay documented in the footer and the chat help table (#37786).
+- The operator's own failed actions (for example, pasting when the clipboard holds no image) no longer land in the conversation history; they are reported briefly in the footer of the pane being viewed and logged to the event log (#37796).
 - In chat panes 96 columns wide or more (100-column terminal), lines arriving from other keepers, people, or connectors start at one third of the pane width, keeping the operator column and keeper replies on the left; narrower terminals keep the single-column layout (#37773).
 - metadata:full header rows show only the speaker mark, rule line and clock: the per-turn request id is gone, and the mark no longer leaks its color into the text after it (#37780).
 - An Execute call expanded under tools:full shows its status, output and stderr; the unreadable context envelope line is gone, and the full result stays on the Keeper Calls screen (#37792).
@@ -49,6 +51,7 @@
 - The librarian now reads official-client turns from those history lines instead of only the turn's final assistant answer (#37527).
 
 ### Fixed
+- Recovery from a corrupted checkpoint now cuts at the last turn end the Librarian counted, so the reading position keeps a turn-boundary line to point at instead of stopping with `Progress_boundary_missing` (#37785).
 - A keeper whose turn-start boundary cannot be read no longer answers 0, which resent the whole history on every request; the start names its reason as unknown and, with no snapshot or seed either, the request carries only the newest atom (#37781).
 - Antigravity panelists and judges in Fusion now receive their system prompt, so perspective instructions reach them instead of being dropped (#37784).
 

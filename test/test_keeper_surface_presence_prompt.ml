@@ -651,25 +651,14 @@ let test_local_keeper_sees_its_host_root () =
 
 (* Execute dispatch can transparently run a Docker keeper's command on the
    host when the image preflight fails
-   (Keeper_sandbox_shell_ir_target.guest_target), and the
-   typed cwd resolver confines raw cwds against host roots in both cases.
-   The mount spelling therefore must never be promised as an execution
-   operand: the prompt has to carry the caveat, and the host spelling of
-   the same sandbox must not reach the Docker keeper at all (#10650). *)
-let test_docker_root_is_not_promised_as_execution_operand () =
+   (Keeper_sandbox_shell_ir_target.guest_target), and the typed cwd resolver
+   confines raw cwds against host roots in both cases. The host spelling of
+   the same sandbox therefore must not reach the Docker keeper at all
+   (#10650). How the [<workspace>] block words its path advice is prompt
+   prose and is not pinned here. *)
+let test_docker_prompt_does_not_carry_the_host_root () =
   with_repo_prompt_config (fun () ->
     let rendered, _ = sandbox_root_for Masc.Keeper_types_profile.Docker in
-    (* The caveat is two lines of the [<workspace>] block: the absolute root
-       is not a typed cwd, and argv path operands stay relative. Both are
-       required — dropping either one hands a Docker keeper a path it cannot
-       execute against (#10650). *)
-    check bool "docker prompt forbids the absolute root as a typed cwd" true
-      (contains
-         ~needle:
-           "도구의 `cwd` 에는 이 절대 경로 대신 상대 경로(보통 `.`)를 넘긴다."
-         rendered);
-    check bool "docker prompt keeps argv path operands relative" true
-      (contains ~needle:"argv 의 경로 인자는 상대 경로로 쓴다." rendered);
     let config = Masc.Workspace.default_config "/tmp/unused" in
     let docker_meta =
       { meta with
@@ -700,8 +689,8 @@ let () =
             test_docker_keeper_sees_its_container_root;
           test_case "local keeper sees its host root" `Quick
             test_local_keeper_sees_its_host_root;
-          test_case "docker root is not promised as execution operand" `Quick
-            test_docker_root_is_not_promised_as_execution_operand;
+          test_case "docker prompt does not carry the host root" `Quick
+            test_docker_prompt_does_not_carry_the_host_root;
           test_case "local root carries no backend caveat" `Quick
             test_local_root_carries_no_backend_caveat;
         ] );

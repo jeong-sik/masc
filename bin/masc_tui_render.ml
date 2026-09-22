@@ -9385,6 +9385,24 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
   let tool_lines =
     fusion_tool_trace_lines ~width evidence.fe_tool_trace
   in
+  (* One line per seat: the route it was given and who answered, each
+     failed candidate under it. A post the sink wrote without routes draws
+     no block and keeps the evidence section at 5; with routes the seats are
+     5 and the evidence is 6. *)
+  let seat_route_lines =
+    match evidence.fe_seat_routes with
+    | None -> []
+    | Some routes ->
+        [ Ansi.dim, ""; Ansi.bold, "  5  SEAT ROUTES" ]
+        @ List.concat_map
+            (fun line ->
+              Message_layout.split_cells ~max_cells:(max 1 (width - 2)) line
+              |> List.map (fun line -> Ansi.reset, "  " ^ line))
+            (Masc_tui_fusion_seat_routes.lines routes)
+  in
+  let evidence_section =
+    match evidence.fe_seat_routes with None -> "5" | Some _ -> "6"
+  in
   [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
   ; Ansi.dim, ""
   ; Ansi.bold, "  1  QUESTION"
@@ -9416,8 +9434,9 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
     ; Ansi.bold, "  4  TOOL EXECUTIONS"
     ]
   @ tool_lines
+  @ seat_route_lines
   @ [ Ansi.dim, ""
-    ; Ansi.bold, "  5  EVIDENCE RECORDED"
+    ; Ansi.bold, "  " ^ evidence_section ^ "  EVIDENCE RECORDED"
     ; ( Ansi.dim
       , "  Board link: "
         ^ Link.reference Board_post
@@ -9648,6 +9667,46 @@ let render_fusion_detail (state : state) run_id =
          (Masc_tui_keys.footer_hints_fusion_detail ~position));
   finish_surface state ~clamped:(Fusion_detail_scroll scroll)
     ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf
+
+(* The launch form over the Fusion list, in the shared overlay chrome. The
+   form is what the operator is looking at, so its refusal line is where
+   the server's answer goes; the list's own error row is under it. The
+   scroll rides [fusion_scroll], idle while the list is up, and the frame
+   reports what it clamped to the way the detail does. *)
+let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t option) =
+  let terminal_rows, cols = get_terminal_size () in
+  let width = framed_inner_width cols in
+  let text, hints =
+    match form with
+    | None -> [ "Reading the Fusion presets from runtime.toml..." ], "Esc:cancel"
+    | Some form -> Masc_tui_fusion_launch.lines form, Masc_tui_fusion_launch.hints
+  in
+  let lines =
+    List.concat_map
+      (fun line ->
+        Message_layout.split_cells ~max_cells:(max 1 (width - 2))
+          (Tui_decode.sanitize_terminal_text line))
+      text
+    |> List.map (fun line -> "  " ^ line)
+  in
+  let content_height =
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows - surface_chrome_rows)
+  in
+  let max_scroll = max 0 (List.length lines - content_height) in
+  let scroll = min max_scroll (max 0 state.fusion_scroll) in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"fusion-launch"
+    ~frame:Chrome_overlay
+    ~clamped:(fun () -> Some (Fusion_detail_scroll scroll))
+    ~title:(screen_title " MASC Fusion - LAUNCH")
+    ~hints
+    ~body:(fun ~budget:_ c ->
+      let window = Rows.of_list ~first:scroll ~height:content_height lines in
+      for i = 0 to content_height - 1 do
+        match Rows.at window (scroll + i) with
+        | None -> c.push_empty ()
+        | Some line -> c.push line
+      done)
 
 (* The repositories a keeper can work in.  The server sends both the stored
    path spelling and the absolute path it actually resolves.  The latter is
@@ -14938,10 +14997,15 @@ let render_surface (state : state) =
   | Verification -> render_verification state
   | Harness -> render_harness state
   | Fusion ->
-      (match state.fusion_mode with
-       | Fusion_list -> render_fusion_list state
-       | Fusion_detail run_id -> render_fusion_detail state run_id
-       | Fusion_historical_detail reference -> render_fusion_detail state reference.fhe_run_id)
+      (match state.fusion_launch, state.fusion_mode with
+       | Some (Fusion_launch_reading_presets _), _ -> render_fusion_launch state ~form:None
+       | Some (Fusion_launch_open form), _ -> render_fusion_launch state ~form:(Some form)
+       | Some (Fusion_launch_started _), Fusion_list | None, Fusion_list ->
+           render_fusion_list state
+       | (Some (Fusion_launch_started _) | None), Fusion_detail run_id ->
+           render_fusion_detail state run_id
+       | (Some (Fusion_launch_started _) | None), Fusion_historical_detail reference ->
+           render_fusion_detail state reference.fhe_run_id)
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
         render_memory_facts state

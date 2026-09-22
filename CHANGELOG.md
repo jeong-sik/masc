@@ -27,6 +27,8 @@
 - The Board read view shows comments in a column beside the post on terminals 120 columns or wider, and keeps the stacked layout on narrower screens (#36821).
 - With wire capture on, each provider request now records how its message list differs from the previous request, so cache misses can be traced to the change that caused them (#36961).
 - The Lanes screen can now remove an exact-lane slot and move it up or down, not only append one; slots the catalog rejected are kept in the file (#37482).
+- The TUI Fusion screen can start a run: `a` opens a form for the Keeper, preset, topology, prompt and web tools, posts it, and selects the new run once the list carries it. A preset the topology cannot run comes back as the server's own sentence.
+- A Fusion run's detail lists its seat routes: the route each panel and judge seat was given, the runtime that answered it, and every candidate that failed before that one. Runs recorded without routes draw no block.
 
 ### Changed
 - The trailing `· Ctrl-N` hint on summarized journal rows and the voice-key hint on empty input lines are gone; both keys stay documented in the footer and the chat help table (#37786).

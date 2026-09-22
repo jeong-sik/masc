@@ -1713,6 +1713,18 @@ type fusion_mode =
   | Fusion_detail of string
   | Fusion_historical_detail of Tui_decode.fusion_historical_evidence
 
+(** The launch form over the Fusion list. Reading the presets is a request
+    of its own, so the form has a state before it exists; the generation
+    tells a late answer from the read the operator is waiting on. Once the
+    server accepts a run, the list is asked again and the cursor lands on
+    that run when the list next carries it -- a list already in flight when
+    the run started does not carry it, so the selection waits for one that
+    does. *)
+type fusion_launch =
+  | Fusion_launch_reading_presets of int
+  | Fusion_launch_open of Masc_tui_fusion_launch.t
+  | Fusion_launch_started of string
+
 (** Actor-scoped pending confirmation from the exact operator projection. *)
 type approval_item = Masc_tui_operator_projection.approval_item
   = {
@@ -5716,6 +5728,11 @@ type state = {
   mutable fusion_detail_inflight: (int * string) option;
   mutable fusion_historical_detail: Tui_decode.fusion_historical_detail option;
   mutable fusion_historical_inflight: (int * Tui_decode.fusion_historical_evidence) option;
+  mutable fusion_launch: fusion_launch option;
+  (* The read or the submit the form is waiting on. A key that closes the
+     form bumps it, so the answer to a read the operator left cannot open
+     the form behind their back. *)
+  mutable fusion_launch_generation: int;
   (* The feature-proof reading. Kept beside its error rather than collapsed
      into an option: a report that failed to load must not draw as a report
      with no features, which reads as "nothing is proven". *)
@@ -6050,6 +6067,7 @@ let settle_voice_transcript (state : state) ~keeper =
 type text_input_target =
   | Text_browser_url
   | Text_ask_answer
+  | Text_fusion_launch
   | Text_preset_name
   | Text_runtime_lane_name
   | Text_runtime_param
@@ -6092,6 +6110,15 @@ let text_input_target (state : state) ~compact_viewport =
      Enter still saved the draft. The other text targets already carry it. *)
   else if Option.is_some state.voice_wizard && not compact_viewport then
     Some Text_voice_wizard
+  (* The launch form takes every key while it is open, above the Fusion
+     list under it; paste follows. Not on a viewport too small to draw it,
+     the rule the voice wizard above keeps. *)
+  else if
+    state.view = Fusion && not compact_viewport
+    && (match state.fusion_launch with
+        | Some (Fusion_launch_open _) -> true
+        | Some (Fusion_launch_reading_presets _ | Fusion_launch_started _) | None -> false)
+  then Some Text_fusion_launch
   else if state.view = Approvals && not compact_viewport
           && not state.context_inspector_open && Option.is_some state.ask_text_entry
   then Some Text_ask_answer
@@ -7491,6 +7518,8 @@ let create_state
   fusion_detail_inflight = None;
   fusion_historical_detail = None;
   fusion_historical_inflight = None;
+  fusion_launch = None;
+  fusion_launch_generation = 0;
   observer = Observer_off;
   mcp_session = None;
   observer_cursor = None;

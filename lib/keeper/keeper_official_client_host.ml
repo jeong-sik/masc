@@ -664,15 +664,19 @@ let carried_start_range
         carried_messages)
   in
   (match plan with
-   | Absorbed_through { first_atom; absorbed_through; _ } when absorbed_through > first_atom ->
-     (* The Librarian read through the turn this request answers. The summary
-        covers it and the atom is sent again, so the request repeats one turn
-        rather than arriving with nothing to answer. *)
+   | Absorbed_through { first_atom; absorbed_through = librarian_end; _ }
+   | Plain (first_atom, Librarian_progress { end_atom = librarian_end })
+     when librarian_end > first_atom ->
+     (* The Librarian read through the turn this request answers, with or
+        without a working state to show for it. The atom is sent again, so
+        the request repeats one turn rather than arriving with nothing to
+        answer; the front keeps the Librarian's own position, so this line
+        is where the clamp is visible. *)
      Log.Keeper.info
        ~keeper_name
-       "model input carried range keeps the newest atom runtime=%s absorbed_through=%d first_atom=%d"
+       "model input carried range keeps the newest atom runtime=%s librarian_end=%d first_atom=%d"
        runtime_id
-       absorbed_through
+       librarian_end
        first_atom
    | Absorbed_through _ | Plain _ -> ());
   Log.Keeper.info

@@ -2243,6 +2243,41 @@ let test_a_cold_start_begins_at_the_turn_start () =
          observation.Runtime_model_input_tail_window.transmitted_atoms)
 ;;
 
+(* A snapshot the Librarian wrote after reading [messages] through
+   [end_atom], on a history whose one completed turn ended there. *)
+let snapshot_through ~messages ~end_atom ~working_state =
+  let covered = List.filteri (fun i _ -> i < end_atom) messages in
+  let position =
+    match Keeper_turn_boundaries.position_of_messages covered with
+    | Ok position -> position
+    | Error detail -> fail detail
+  in
+  let line =
+    ( 1
+    , Ok
+        { Keeper_turn_boundaries.recorded_at = 1.
+        ; event =
+            Keeper_turn_boundaries.Turn_ended
+              { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+              ; history_at_start = Keeper_turn_boundaries.Fresh_history
+              ; position
+              }
+        } )
+  in
+  match
+    Librarian_continuity_snapshot.capture ~trace_id:"trace-1" ~lines:[ line ] ~messages:covered
+      ~working_state
+  with
+  | Ok snapshot -> snapshot
+  | Error error -> fail (Librarian_continuity_snapshot.error_to_string error)
+;;
+
+let text_of (message : Agent_core.Types.message) =
+  match message.content with
+  | [ Agent_core.Types.Text text ] -> text
+  | _ -> ""
+;;
+
 (* The Librarian front reaches the list this lane sends -- a read position
    as the start, a working state carried in place of the atoms before it --
    and a list the turn's choice no longer describes refuses the request,
@@ -2271,32 +2306,8 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
      check bool "the front is reported with the range's bytes" true (bytes > 0)
    | Some _ -> fail "the reported front is not the read position"
    | None -> fail "the composition reported no front");
-  let working_state = "Fifty asks answered so far." in
   let snapshot =
-    let covered = List.filteri (fun i _ -> i < 100) messages in
-    let position =
-      match Keeper_turn_boundaries.position_of_messages covered with
-      | Ok position -> position
-      | Error detail -> fail detail
-    in
-    let line =
-      ( 1
-      , Ok
-          { Keeper_turn_boundaries.recorded_at = 1.
-          ; event =
-              Keeper_turn_boundaries.Turn_ended
-                { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
-                ; history_at_start = Keeper_turn_boundaries.Fresh_history
-                ; position
-                }
-          } )
-    in
-    match
-      Librarian_continuity_snapshot.capture ~trace_id:"trace-1" ~lines:[ line ] ~messages:covered
-        ~working_state
-    with
-    | Ok snapshot -> snapshot
-    | Error error -> fail (Librarian_continuity_snapshot.error_to_string error)
+    snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
   in
   (match project (fun _ -> Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)) with
    | Error error -> fail (Agent_core.Error.to_string error)
@@ -2305,9 +2316,7 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
       | working :: rest ->
         check string "the working state leads the list"
           (Keeper_turn_driver_try_provider.working_state_text snapshot)
-          (match working.Agent_core.Types.content with
-           | [ Agent_core.Types.Text text ] -> text
-           | _ -> "");
+          (text_of working);
         check (list string) "and the atoms it covers are not sent"
           (encoded (List.filteri (fun i _ -> i >= 100) messages))
           (encoded rest)
@@ -2321,6 +2330,84 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
   match project refused with
   | Error _ -> ()
   | Ok _ -> fail "a list the turn's choice no longer describes went out"
+;;
+
+(* The declared ceiling cuts before the working state is known. A range that
+   carries one is windowed again at the ceiling: the atoms in front of the
+   working state go until it fits, the working state stays, and a ceiling
+   the working state and the newest atom do not fit refuses the request. *)
+let test_a_working_state_the_ceiling_did_not_measure_is_windowed_again () =
+  let messages = start_seed_history () in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let bytes lo hi =
+    List.fold_left
+      (fun total message -> total + measure message)
+      0
+      (List.filteri (fun i _ -> i >= lo && i < hi) messages)
+  in
+  (* The omission preamble the window charges on a cut: the floor of a
+     history with no pinned message is that one message. *)
+  let preamble_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        messages
+    with
+    | Some bytes -> bytes
+    | None -> fail "the fixture history has no shrinkable atom"
+  in
+  (* Room for the preamble and the twenty messages from atom 100, nothing
+     more: without a working state the ceiling cuts where the Librarian
+     read to. *)
+  let capacity_bytes = preamble_bytes + bytes 100 120 in
+  let observed = ref None in
+  let project snapshot =
+    observed := None;
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes
+      ~librarian_front:(fun _ ->
+        Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  in
+  let is_atom (message : Agent_core.Types.message) =
+    (not (Runtime_model_input_tail_window.is_synthetic_preamble message))
+    && message.role <> Agent_core.Types.System
+  in
+  let snapshot =
+    snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
+  in
+  (match project snapshot with
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok sent ->
+     let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+     check int "the working state stays, once" 1
+       (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
+     let atoms = List.filter is_atom sent in
+     let carried = List.length atoms in
+     check bool "atoms in front of the working state went, not all of them" true
+       (carried > 0 && carried < 20);
+     check (list string) "and what stays is the newest atoms"
+       (encoded (List.filteri (fun i _ -> i >= 120 - carried) messages))
+       (encoded atoms);
+     check bool "the request is inside the ceiling" true
+       (List.fold_left (fun total m -> total + measure m) 0 sent <= capacity_bytes);
+     (match !observed with
+      | None -> fail "the projection reported no window"
+      | Some (observation : Runtime_model_input_tail_window.window_observation) ->
+        check int "the window reports the atoms that went out" carried
+          observation.transmitted_atoms;
+        check int "of the whole history" 120 observation.total_atoms));
+  match project (snapshot_through ~messages ~end_atom:100 ~working_state:(String.make 4_000 'w')) with
+  | Error _ -> ()
+  | Ok sent ->
+    fail
+      (Printf.sprintf
+         "a working state the ceiling cannot hold beside the newest atom went out (%d messages)"
+         (List.length sent))
 ;;
 
 let () =
@@ -2459,6 +2546,10 @@ let () =
             "the Librarian front reaches the list and its error refuses"
             `Quick
             test_the_librarian_front_reaches_the_list_and_its_error_refuses
+        ; test_case
+            "a working state the ceiling did not measure is windowed again"
+            `Quick
+            test_a_working_state_the_ceiling_did_not_measure_is_windowed_again
         ] )
     ]
 ;;

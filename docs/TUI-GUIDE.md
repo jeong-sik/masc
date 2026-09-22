@@ -1309,6 +1309,25 @@ what `Enter` opens.
   j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: 8935
 ```
 
+`a` starts a run from the list. It reads the presets from
+`GET /api/v1/runtime/config/fusion` and opens the same schema form the Lane
+Add-ons action uses: `keeper`, `preset`, `topology` and `web_tools` are
+Left/Right choices, `prompt` is typed, `Tab` walks the fields, `Ctrl-S` opens
+the review and `Enter` there posts
+`POST /api/v1/keepers/<keeper>/fusion`. `Esc` cancels. The Keeper starts on
+the one that owns the selected run, the preset on the configured
+`default_preset`, and the topology on `simple`; a Keeper outside the roster
+or a preset outside the configuration falls back to the first of each. A
+prompt that is blank after trimming does not leave the form. While the post
+is out the form takes no key, so a second `Enter` cannot start a second run.
+A refusal — a preset that cannot run the chosen topology, for instance —
+returns the server's own sentence above the form with the values intact; the
+form does not restate it. A request that goes unanswered says the run may
+have started anyway, because it may have. On success the list is read again
+and the cursor moves to the new run the first time the list carries it; a
+list read that was already in flight can answer without it, so the move waits
+for one that has it.
+
 The detail is a separate exact read. Lifecycle remains the Registry fact;
 evidence comes only from a Board post whose typed origin is
 `source=fusion` with the same `fusion_run_id`. The header repeats the current
@@ -1333,6 +1352,17 @@ cannot publish this evidence; an official-client panel is shown as
 `official_client_uninstrumented` instead of being misreported as “used no
 tools.” Older Board evidence has `Trace unavailable` rather than a fabricated
 empty ledger.
+
+`SEAT ROUTES` is the walk each seat took through its candidates, from the
+`seat_routes` array the sink writes. One line per seat names the route it was
+given and the runtime that answered — `panel/first · route panel-lane →
+answered by glm-4.6` — with every candidate that failed before that one
+indented under it as `<runtime>: <code> <detail>`. A seat no candidate
+answered says so. Seats are spelled as the tool ledger spells its actors:
+`panel/<panelist>` and `judge/<role>/<identity>`. Evidence recorded before
+seats were written carries no `seat_routes` key and draws no block, and the
+`EVIDENCE RECORDED` section keeps its number; with the block present it
+follows as section 6.
 
 `pending` is legal only while the Registry row is running. `absent` means the
 retained completed/failed run has no current Board projection; it does not
@@ -1705,6 +1735,7 @@ Per surface:
 | Right / `Enter` | Schedules | Open schedule details |
 | Right / `Enter` | Planning | Open goal detail |
 | Right / `Enter` | Fusion | Open exact run evidence detail |
+| `a` | Fusion list | Open the launch form for a new run |
 | `[` / `]` | Changes | Previous / next Keeper |
 | Right / `Enter` | Changes | Open the selected recorded diff |
 | `v` | Changes | View the row's file on the Code surface, in the keeper's workspace |
@@ -1859,6 +1890,8 @@ Config Prompts labels whether the effective text comes from an override or the M
 Fusion lists full start dates. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
 
 Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
+
+`a` on the list starts a run instead of following one, and the detail's `SEAT ROUTES` block names the runtime that answered each seat and the candidates that failed before it.
 
 ### Questions and Gate modes
 

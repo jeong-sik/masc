@@ -5203,6 +5203,18 @@
  (libraries alcotest masc_tui_message_layout masc_tui_table))
 
 (test
+ (name test_tui_config_path)
+ (modules test_tui_config_path)
+ (libraries alcotest masc_tui_render_prim))
+
+(test
+ (name test_tui_lane_table)
+ (modules test_tui_lane_table)
+ ; masc_tui_message_layout so a drawn line is measured in display cells, the
+ ; way the table sizes its columns.
+ (libraries alcotest masc_tui_lane_table masc_tui_message_layout))
+
+(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  ; masc_tui_message_layout so a column offset is asked in display cells rather

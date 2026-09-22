@@ -1501,7 +1501,6 @@ let responses_view ?(cols = cols) ?(order = Pane.Newest_first) ?(expanded = []) 
 let opens = "\xe2\x94\x8c"
 let inside = "\xe2\x94\x82"
 let closes = "\xe2\x94\x94"
-let alone = "\xe2\x94\x80"
 
 (* The border cell a row starts with, and its tone. *)
 let rail (line : Pane.line) =
@@ -1515,6 +1514,8 @@ let no_bracket label view =
            match target with Pane.Target_call _ -> Some row | _ -> None)
   in
   check bool (label ^ ": the calls draw") true (calls <> []);
+  check bool (label ^ ": the heading counts no responses") false
+    (List.exists (fun row -> contains "responses" (text row)) view.Pane.rows);
   List.iteri
     (fun i row ->
       check bool
@@ -1538,6 +1539,9 @@ let test_each_model_response_gets_a_bracket_beside_its_calls () =
             (rail row = (glyph, tone));
           check int (Printf.sprintf "%s: row %d width" label i) cols (width row))
         expected;
+      check bool (label ^ ": the heading counts the responses") true
+        (contains "calls \xc2\xb7 " (text (List.nth view.Pane.rows (first_call_row - 1)))
+         && contains "\xc2\xb7 2 responses" (text (List.nth view.Pane.rows (first_call_row - 1))));
       check bool (label ^ ": the heading keeps the dim edge") true
         (rail (List.nth view.Pane.rows (first_call_row - 1)) = (inside, Pane.Dim)))
     [ ( Pane.Oldest_first
@@ -1545,11 +1549,11 @@ let test_each_model_response_gets_a_bracket_beside_its_calls () =
       , [ (opens, Pane.Plain, "Read")
         ; (inside, Pane.Plain, "Grep")
         ; (closes, Pane.Plain, "Glob")
-        ; (alone, Pane.Dim, "Execute")
+        ; (inside, Pane.Dim, "Execute")
         ] )
     ; ( Pane.Newest_first
       , "newest first"
-      , [ (alone, Pane.Dim, "Execute")
+      , [ (inside, Pane.Dim, "Execute")
         ; (opens, Pane.Plain, "Glob")
         ; (inside, Pane.Plain, "Grep")
         ; (closes, Pane.Plain, "Read")
@@ -1630,10 +1634,14 @@ let test_wire_calls_split_into_responses_too () =
   in
   let view = responses_view ~order:Pane.Oldest_first calls in
   let row i = List.nth view.Pane.rows (first_call_row + i) in
-  check bool "the first response, alone" true
-    (rail (row 0) = (alone, Pane.Dim) && contains "Read" (text (row 0)));
-  check bool "the second, alone" true
-    (rail (row 1) = (alone, Pane.Dim) && contains "Execute" (text (row 1)))
+  (* Two lone calls: no bracket anywhere, so the heading's count is the
+     only thing that tells this record from one response. *)
+  check bool "the heading counts two responses" true
+    (contains "\xc2\xb7 2 responses" (text (List.nth view.Pane.rows (first_call_row - 1))));
+  check bool "the first response, alone on the edge" true
+    (rail (row 0) = (inside, Pane.Dim) && contains "Read" (text (row 0)));
+  check bool "the second, alone on the edge" true
+    (rail (row 1) = (inside, Pane.Dim) && contains "Execute" (text (row 1)))
 
 (* ── the wide pane ──────────────────────────────────────────────────── *)
 
@@ -1660,7 +1668,7 @@ let test_a_wide_bracketed_row_and_its_detail_say_one_age () =
   check bool "Grep's facts row says the same age" true
     (contains "47.0s ago" (text (row 2)));
   check bool "Execute alone, its age at the edge" true
-    (rail (row 6) = (alone, Pane.Dim)
+    (rail (row 6) = (inside, Pane.Dim)
      && String.ends_with ~suffix:"5ms  30.0s" (text (row 6)))
 
 (* The longest name on the live roster: the narrow pane cuts it, the wide

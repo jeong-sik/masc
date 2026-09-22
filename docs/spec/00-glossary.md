@@ -234,6 +234,15 @@ status: reference
 : 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한
   단계. Keeper turn과 동일한 단위가 아니다.
 
+**Agent run ID (Agent run 식별자)**
+: observer event의 `task` 필드가 agent lifecycle 네 kind(`Agent_started`·
+  `Agent_completed`·`Agent_failed`·`Agent_yielded`)에서 나르는 값. MASC task id가 아니라
+  그 run 자신의 wire id(`evt-` 접두, `Event_envelope.fresh_id`)다. 나머지 kind에서는 같은
+  필드가 MASC task id를 나르므로, Activity는 이 네 kind에서만 필드 이름을 "Agent run ID"로
+  적고 그 밖에서는 "Task ID"로 적는다. 한 필드가 두 개념을 나르는 자리라, run의 wire id를
+  task로 읽으면 `evt-…`가 행의 detail로 그대로 찍힌다.
+  → [Observer event](../../bin/masc_tui_observer.mli), [Activity 라벨](../../bin/masc_tui_acting.ml)
+
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
 

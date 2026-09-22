@@ -80,15 +80,17 @@ let is_excluded ~keeper_id = List.mem keeper_id (policy ()).Runtime_schema.exclu
    gate existed. The absorb gate defaults to off: it sends the librarian's
    memories to the vendor, which a deployment that set its key for the Board
    gate did not choose. *)
+(* The declared reasons come first: a gate the operator switched off, or a
+   Keeper the operator excluded, is unavailable by declaration whatever the
+   lane's state. Only a gate that is declared on reports the lane's own
+   unavailability, so a reader can tell "not asked because told not to"
+   from "meant to ask and could not". *)
 let gate_destinations ~keeper_id ~switched_on ~off =
-  match lane_destinations () with
-  | Error reason -> Error reason
-  | Ok destinations ->
-    if not switched_on
-    then Error off
-    else if is_excluded ~keeper_id
-    then Error Keeper_excluded
-    else Ok destinations
+  if not switched_on
+  then Error off
+  else if is_excluded ~keeper_id
+  then Error Keeper_excluded
+  else lane_destinations ()
 ;;
 
 let absorb_gate_destinations ~keeper_id =

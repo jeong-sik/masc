@@ -471,7 +471,9 @@ let test_each_gate_has_its_own_switch () =
 
 (* A keeper named in [excluded_keepers] is never asked about, whichever gate
    asks; every other keeper gets the key. The reason a gate is off is the
-   first of the lane switch, the key, the gate's switch and the exclusion. *)
+   first of the gate's switch, the exclusion, the lane switch and the key:
+   what the operator declared comes before what the lane can do, so a gate
+   that is on and unaskable is told apart from one that was told not to ask. *)
 let test_an_excluded_keeper_keeps_its_content_home () =
   let state = function
     | Error reason -> C.unavailable_reason_to_string reason
@@ -493,11 +495,21 @@ let test_an_excluded_keeper_keeps_its_content_home () =
       Alcotest.(check string) "an exclusion does not turn a gate on" "absorb_gate_disabled"
         (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
     with_policy (policy ~enabled:false ~absorb_gate:true ~excluded_keepers:[ "polisher" ] ()) (fun () ->
-      Alcotest.(check string) "the lane switch is named before the exclusion" "lane_disabled"
+      Alcotest.(check string) "the exclusion is named before the lane switch" "keeper_excluded"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~enabled:false ~absorb_gate:true ()) (fun () ->
+      Alcotest.(check string) "a gate that is on names the lane switch" "lane_disabled"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~enabled:false ~absorb_gate:false ()) (fun () ->
+      Alcotest.(check string) "a gate that is off names its own switch, not the lane's"
+        "absorb_gate_disabled"
         (state (C.absorb_gate_destinations ~keeper_id:"polisher"))));
   with_key None (fun () ->
     with_policy (policy ~absorb_gate:true ~excluded_keepers:[ "polisher" ] ()) (fun () ->
-      Alcotest.(check string) "no key is named before the exclusion" "no_armed_destination"
+      Alcotest.(check string) "the exclusion is named before the missing key" "keeper_excluded"
+        (state (C.absorb_gate_destinations ~keeper_id:"polisher")));
+    with_policy (policy ~absorb_gate:true ()) (fun () ->
+      Alcotest.(check string) "a gate that is on names the missing key" "no_armed_destination"
         (state (C.absorb_gate_destinations ~keeper_id:"polisher"))))
 ;;
 

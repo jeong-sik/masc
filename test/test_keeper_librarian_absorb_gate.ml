@@ -573,7 +573,9 @@ let run_runtime_evidence ?fixture_dir () =
       | None -> Alcotest.fail "current snapshot is missing" in
     let expected_facts = match scenario with
       | Judged_run -> b :: untouched :: selection.new_claims
-      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run -> untouched :: selection.new_claims
+      | Gate_disabled_run | Excluded_run -> untouched :: selection.new_claims
+      (* Declared on and unaskable: nothing is absorbed, the new claims still apply. *)
+      | Lane_disabled_run | Missing_key_run -> seeded.facts @ selection.new_claims
       | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> seeded.facts @ selection.new_claims
       | Memory_write_failure -> seeded.facts in
     Alcotest.(check (list string)) "correct originals remain current"
@@ -585,7 +587,8 @@ let run_runtime_evidence ?fixture_dir () =
       | Error error -> Alcotest.fail (Absorbed.read_error_to_string error)) records in
     let archived = match scenario with
       | Judged_run -> [ a.claim ]
-      | Gate_disabled_run | Excluded_run | Lane_disabled_run | Missing_key_run -> [ a.claim; b.claim ]
+      | Gate_disabled_run | Excluded_run -> [ a.claim; b.claim ]
+      | Lane_disabled_run | Missing_key_run -> []
       | Http_failure | Invalid_json_run | Invalid_response_run | Nonfinite_response_run | Duplicate_response_run | Nonutf8_response_run | Invalid_answer_run -> []
       | Memory_write_failure -> [] in
     Alcotest.(check (list string)) "only applied originals are archived"
@@ -1054,6 +1057,47 @@ let test_an_excluded_keeper_is_applied_as_answered_without_a_request () =
   | Gate.Evaluated _ -> Alcotest.fail "an excluded keeper's memories were sent"
 ;;
 
+(* The operator switched the gate on, so every absorption was meant to be
+   judged; with the lane off none can be, and none is applied. The new claim
+   still goes through: the sources stay beside it rather than under it. *)
+let test_a_gate_declared_on_without_a_lane_keeps_the_sources_current () =
+  let facts = List.map fact sources in
+  let absorbed = absorbed_into merged facts in
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { Runtime_schema.default_typesafeai with
+      lane_enabled = false
+    ; destinations =
+        ( { Runtime_schema.typesafe_destination with endpoint = "http://127.0.0.1:9/never-reached" }
+        , [] )
+    ; absorb_gate = true
+    } @@ fun () ->
+  match Gate.run ~keeper_id:"meant-to-judge" ~facts ~new_claims:[ merged ] ~absorbed () with
+  | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Lane_disabled; absorbed = applied } ->
+    Alcotest.(check int) "no absorption is applied" 0 (List.length applied);
+    Alcotest.(check bool) "there was something to withhold" true (absorbed <> [])
+  | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
+    Alcotest.fail "the run was skipped for a reason other than the lane"
+  | Gate.Evaluated _ -> Alcotest.fail "a lane that is off was asked"
+;;
+
+(* The gate switched off is a declaration, whatever the lane's state: the
+   answer applies as it came, and the reason names the switch, not the lane. *)
+let test_a_gate_declared_off_applies_as_answered_even_without_a_lane () =
+  let facts = List.map fact sources in
+  let absorbed = absorbed_into merged facts in
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" None @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { Runtime_schema.default_typesafeai with lane_enabled = false; absorb_gate = false }
+  @@ fun () ->
+  match Gate.run ~keeper_id:"told-not-to" ~facts ~new_claims:[ merged ] ~absorbed () with
+  | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Absorb_gate_disabled; absorbed = applied } ->
+    Alcotest.(check int) "every absorption is applied" (List.length absorbed) (List.length applied)
+  | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
+    Alcotest.fail "the run was skipped for a reason other than the switch"
+  | Gate.Evaluated _ -> Alcotest.fail "a gate that is off was asked"
+;;
+
 let test_rejected_response_retains_every_typed_answer () =
   with_gate_http_fixture @@ fun ~sw ~net ~clock ->
   let module F = Exact_output_fixture in
@@ -1224,6 +1268,10 @@ let () =
             test_skipped_run_publishes_its_completed_observation
         ; Alcotest.test_case "an excluded keeper is applied as answered without a request" `Quick
             test_an_excluded_keeper_is_applied_as_answered_without_a_request
+        ; Alcotest.test_case "a gate declared on without a lane keeps the sources current" `Quick
+            test_a_gate_declared_on_without_a_lane_keeps_the_sources_current
+        ; Alcotest.test_case "a gate declared off applies as answered even without a lane" `Quick
+            test_a_gate_declared_off_applies_as_answered_even_without_a_lane
         ; Alcotest.test_case "transport diagnostics retain cause without credentials" `Quick
             test_transport_diagnostics_preserve_cause_without_configured_credentials
         ; Alcotest.test_case "failure bodies omit configured credentials" `Quick

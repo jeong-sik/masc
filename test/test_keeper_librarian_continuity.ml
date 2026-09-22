@@ -506,12 +506,161 @@ let test_rewrite_target_is_the_librarian_position () = with_source @@ fun _env c
   let first = commit config (prepare config |> some) "after the first turn" in
   check (option int) "the target is the Librarian's position" (Some 2) first.catch_up_end_atom
 
+
+(* A Keeper whose continuity snapshot no longer fits its history prepares from
+   atom 0, so one pass's source is the whole backlog. These cases pin what a
+   refused pass carries to the next one and which refusals must not move it at
+   all (#37793: one live Keeper walked 12756 -> 6378 -> 3189 ninety-six times
+   in a day and committed nothing, because every pass started over). *)
+let narrowing_fixture ~slot_count ~answer f =
+  let open Masc in
+  let module F = Exact_output_fixture in
+  let module Current = Masc.Keeper_memory_os_current in
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true")
+  @@ fun () ->
+  with_source @@ fun env config save _append boundary ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw
+  @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path = config.Masc.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Fs_compat.mkdir_p keepers_dir;
+  Out_channel.with_open_bin (Filename.concat keepers_dir (keeper_name ^ ".toml")) (fun oc ->
+    Printf.fprintf oc "[keeper]\nname = %S\ninstructions = %S\nsandbox_profile = %S\n"
+      keeper_name "Preserve evidence." "docker");
+  Masc.Keeper_types_profile.invalidate_keeper_profile_defaults_cache keeper_name;
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name", `String keeper_name; "trace_id", `String trace_id]) |> get in
+  Masc.Keeper_meta_store.replace_snapshot config meta |> get;
+  let registry = Exact_lane_run_registry.create
+    ~path:(Filename.concat base_path Exact_lane_run_registry.storage_filename) () in
+  (match Exact_lane_run_registry.install_global registry with
+   | Ok () | Error Exact_lane_run_registry.Already_installed -> ());
+  let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Prompt_defaults.init ();
+  let bodies = ref [] in
+  let server = F.start_server ~sw ~net:env#net ~clock:env#clock
+    (F.Reply_with (fun index body ->
+       bodies := !bodies @ [String.length body];
+       answer index body)) in
+  let slot_ids = List.init slot_count (fun index -> Printf.sprintf "narrowing-slot-%d" index) in
+  ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids
+    (F.resolver_snapshot ~source:"narrowing-fixture"
+       (List.map (fun id -> { F.id; base_url = server.F.base_url }) slot_ids)));
+  (* The rendered prompt carries the same atoms twice -- once as
+     conversation_history and once inside the continuity block -- on top of a
+     17 kB template, so a unit of n atoms sends roughly 2n * atom + 17 kB.
+     These four are sized so four atoms land well over the ceiling and two
+     well under it, with the template unable to decide either comparison. *)
+  let atoms = List.map (fun mark -> message (String.make 8_000 mark)) [ 'a'; 'b'; 'c'; 'd' ] in
+  save atoms;
+  boundary ~fresh:true 1 atoms;
+  ignore (Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1000.
+    ~source:{ kind = Current.Librarian; trace_id } ~absorbed:[] ~new_claims:[] () |> get);
+  (* No forget_measurement between passes: that is what a server restart does,
+     and the width these cases are about lives in the same memory. *)
+  let pass () =
+    Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity ~base_path ~keeper_name () in
+  let coverage () = Option.map (fun (s : S.t) -> s.end_atom) (P.read ~config ~keeper_name |> get) in
+  (* Take the checkpoint away for one pass. prepare then answers with no
+     source without the backlog having been read, which is the outcome the
+     width must survive. *)
+  let hide_source body =
+    let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
+    let hidden = session_dir ^ ".hidden" in
+    Sys.rename session_dir hidden;
+    Fun.protect ~finally:(fun () -> Sys.rename hidden session_dir) body
+  in
+  f ~bodies ~pass ~coverage ~hide_source
+
+let narrowing_ceiling = 65_000
+let accepted_answer =
+  Exact_output_fixture.openai_response
+    (Yojson.Safe.from_string
+       {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|})
+let refused kind = Printf.sprintf {|{"error":{"message":"fixture %s","type":"%s"}}|} kind kind
+
+let test_refused_width_carries_to_the_next_pass () =
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index body ->
+      if String.length body > narrowing_ceiling
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else `OK, accepted_answer)
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
+  pass ();
+  check (option int) "a refused source commits nothing" None (coverage ());
+  check int "the refused pass sends one request and does not retry in place" 1
+    (List.length !bodies);
+  check bool "the first request carried the whole source" true
+    (List.hd !bodies > narrowing_ceiling);
+  pass ();
+  (* Without the carried width this pass prepares the whole source again and
+     refuses again, exactly as the live Keeper did ninety-six times. *)
+  check bool "the next pass sends a request the target accepts" true
+    (List.nth !bodies 1 <= narrowing_ceiling);
+  check (option int) "reading less commits, and the rest follows in the same pass"
+    (Some 4) (coverage ())
+
+let test_a_refusal_that_is_not_about_size_keeps_the_width () =
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index _body -> `Too_many_requests, refused "rate_limit_error")
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
+  pass ();
+  pass ();
+  check int "each pass sends one request" 2 (List.length !bodies);
+  check bool "a quota refusal leaves the source the size it was" true
+    (List.nth !bodies 0 = List.nth !bodies 1);
+  check (option int) "nothing is committed" None (coverage ())
+
+let test_an_unreadable_source_keeps_the_width () =
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index body ->
+      if String.length body > narrowing_ceiling
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else `OK, accepted_answer)
+  @@ fun ~bodies ~pass ~coverage ~hide_source ->
+  pass ();
+  check (option int) "the first pass is refused and commits nothing" None (coverage ());
+  (* prepare answers Ok None both for a drained backlog and for a checkpoint
+     it cannot read. Releasing the width on the second would send the pass
+     after it back at the whole backlog, which is the loop this fixes. *)
+  hide_source (fun () -> pass ());
+  check int "a source it cannot read sends no request" 1 (List.length !bodies);
+  pass ();
+  check bool "the width survived the unreadable pass" true
+    (List.nth !bodies 1 <= narrowing_ceiling);
+  check (option int) "and the source is read to its end" (Some 4) (coverage ())
+
+let test_a_size_refusal_anywhere_in_the_walk_narrows () =
+  narrowing_fixture ~slot_count:2
+    ~answer:(fun index _body ->
+      (* The walk meets the size refusal first and ends on a quota refusal.
+         The verdict has to come from the whole walk: reading only the last
+         cause answered this the other way, and answered the reverse order
+         differently again. *)
+      if index = 0
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else `Too_many_requests, refused "rate_limit_error")
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ->
+  pass ();
+  check int "the walk tried both slots" 2 (List.length !bodies);
+  pass ();
+  check bool "a walk holding one size refusal still reads less next time" true
+    (List.nth !bodies 2 < List.nth !bodies 0);
+  check (option int) "a walk of refusals commits nothing" None (coverage ())
+
 let () = run "production continuity pair"
   ["cycle",[test_case "completed turns are work units" `Quick test_completed_turn_work_units;
     test_case "a rewrite from atom 0 follows its target" `Quick test_rewrite_from_zero_follows_its_target;
     test_case "the rewrite target is the Librarian's position" `Quick test_rewrite_target_is_the_librarian_position;
     test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
     test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
+    test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;
+    test_case "a refusal that is not about size keeps the width" `Quick test_a_refusal_that_is_not_about_size_keeps_the_width;
+    test_case "a size refusal anywhere in the walk narrows" `Quick test_a_size_refusal_anywhere_in_the_walk_narrows;
+    test_case "an unreadable source keeps the width" `Quick test_an_unreadable_source_keeps_the_width;
     test_case "normal witnessed coverage" `Quick test_ordinary_witnessed_coverage;
     test_case "split only an oversized work unit" `Quick test_fit_splits_only_oversized_work_unit;
     test_case "fit preserves exact Memory recovery" `Quick test_fit_keeps_exact_recovery_range;

@@ -406,6 +406,11 @@ val runtime_all_rows :
 val tools_scrolled_for_lines :
   Masc_tui_types.state -> 'a list -> Masc_tui_types.scrolled
 
+val path_from_root : root:string -> string -> string
+(** [path_from_root ~root path] is [path] said from [root] when it is under it,
+    and [path] whole when it is not. A sibling whose name starts with the
+    root's -- [/a/bc] under [/a/b] -- is not under it. *)
+
 val config_pane_strip :
   cols:int -> before:string -> after:string -> Masc_tui_types.state -> string
 

@@ -301,7 +301,28 @@ status: reference
   기록 추가·조회 도구가 있다. Schedule은 이후 외부 효과를 자동 승인하지 않는다.
 
 **Fusion**
-: 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행.
+: 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행. 패널 구성원
+  (panelist)들이 각자 답하고, 심판(judge)이 하나의 종합을 낸다. 실행 단위는 preset이며,
+  검증을 통과한 `Validated_preset`만 게이트와 orchestrator로 흐른다. 패널 정체성은
+  `panelist_id` — 라벨이 있으면 `label (model)`, 없으면 `model`이고, 같은 model이라도
+  라벨이 다르면 다른 패널이다. JOJ(judge-of-judges)는 1차 심판 여럿과 meta 심판을 둔다.
+  → [Fusion_policy](../../lib/fusion_core/fusion_policy.mli)
+
+**Fusion Seat (자리)**
+: Fusion 실행에서 답을 내는 한 자리. panel 한 명과 judge 하나가 각각 한 자리다
+  (`Panel_seat`·`Judge_seat`). 자리마다 경로 이름 하나를 받고, 그 이름을 후보 목록으로
+  풀어 적힌 순서로 시도한다. 실행마다 명단을 바꿀 수 있다.
+  → [Fusion_types.seat](../../lib/fusion_core/fusion_types.ml)
+
+**Fusion Route (경로 이름)**
+: Fusion 자리에 적히는 값. Keeper 배정과 같은 규칙(`Runtime.resolve_assignment`)으로
+  푼다 — `[runtime.lanes.<이름>]`이 있으면 그 lane 의 후보 목록, 없고 런타임 id 이면 그
+  런타임 하나짜리 후보 목록. 한 자리는 후보를 적힌 순서로 시도하고 처음 쓸 수 있는
+  답에서 멈춘다(panel 은 비어 있지 않은 글, judge 는 파싱을 통과한 종합). 못 푼 이름은
+  `Unknown_route`·`Route_unavailable` typed 실패다. 용어집 `Exact-output route`(Librarian
+  같은 단독 모델 작업의 목적별 실행 경로)와 다른 층이다 — 이쪽은 Fusion 자리의 failover
+  후보 순서를 지목한다.
+  → [Fusion_seat](../../lib/fusion/fusion_seat.mli)
 
 **Gate**
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는

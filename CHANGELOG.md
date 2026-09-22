@@ -1,13 +1,14 @@
 # Changelog
 
-## [0.35.22] - 2026-09-23
+## [0.36.0] - 2026-09-23
 
-> Before you upgrade: read the three items under **Upgrade notes** — TypeSafe AI settings moved into `runtime.toml` (#37453), the renamed configuration failure reason (#37457), and the removed tool-call `success` field (#37487).
+> Before you upgrade: read the four items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), TypeSafe AI settings moved into `runtime.toml` (#37453), the renamed configuration failure reason (#37457), and the removed tool-call `success` field (#37487).
 
 *Tag date is provisional and must be updated to the tag commit's UTC date before publishing.*
 
 ### Upgrade notes
 
+- The shared keeper prompt (`keeper`) no longer carries a value system, and the `keeper.instructions.custom` slot is gone: a keeper's `instructions` now sit in `<role>` tags as written, with no heading in front. What a world values goes in the new `keeper.worldview` slot, whose default says no value system is set and each keeper's role decides. An operator override of `keeper` still replaces the whole shared body, so to take the new body, move any worldview text from that override into `keeper.worldview` and clear the `keeper` override. Restart the server right after installing the binary: until it restarts, an old server reads the new prompt files and cannot find `keeper.instructions.custom`, which fails the turns of every keeper that has instructions (#37753).
 - TypeSafe AI settings now live in `runtime.toml` under `[typesafeai]`; the previous `MASC_TYPESAFEAI_*` environment variables are no longer read. Only `TYPESAFEAI_API_KEY` stays in the environment (#37453).
 - Operator-facing failure reasons now separate invalid configuration from provider authorization refusal. Tooling that reads the old `preflight_config_error` reason must read the new reasons instead (#37457).
 - Tool-call log rows no longer carry the top-level `success` boolean. Every new row records `wire_outcome` (`unknown` when nothing was observed); tooling that reads `success` should read the typed disposition or `wire_outcome` instead (#37487).
@@ -27,6 +28,7 @@
 
 ### Changed
 
+- The shared keeper prompt is organized around the situations where a keeper's default goes wrong — a default stance, continuity across turns, where to speak, working with other keepers, finishing, setbacks and boundaries — and names the tools each one uses. The system prompt is assembled as system, worldview, the world's articles, identity, workspace and role. The identity, workspace and constitution blocks are written in Korean, and the English draft the prompt editor loads (`keeper.en`) mirrors the shared body (#37753).
 - A checkpoint purge now removes the keeper's continuity snapshot along with moving the Librarian position, since the rewrite leaves the snapshot in the old atom numbering; the purge result and the CLI say whether one was removed (#37755).
 - A keeper request with no Librarian snapshot that fits the current history starts at the Librarian's read position when that position is a place in the history, and otherwise, with no seed, at the end of the last completed turn, instead of carrying the whole history; official-client lanes without a seed start at that boundary too. The Memory screen and dashboard show the position-only case as `absorbed`. The turn-record and forecast origin `whole_history` is replaced by `turn_start` with its `end_atom`, and the Memory screen's continuity input `uncompressed` by `without_snapshot` (#37734, #37745).
 - The TUI chat header labels a model the stream named without a runtime id as `model:`, and only an announced runtime id as `turn:`; a model name is no longer shown as the runtime.

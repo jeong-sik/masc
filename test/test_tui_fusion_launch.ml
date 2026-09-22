@@ -100,18 +100,35 @@ let test_a_refusal_keeps_the_values_and_reopens_editing () =
   check bool "the form waits on the submit" true (Launch.submitting waiting);
   check bool "the waiting line names the keeper" true
     (holds "Starting the run for analyst" (Launch.lines waiting));
-  (match Launch.edit ~key:"esc" waiting with
+  (match Launch.edit ~key:"tab" waiting with
    | Launch.Editing form ->
-       check bool "keys wait with the submit" true (Launch.submitting form)
-   | Launch.Submitted _ | Launch.Closed -> fail "a waiting form must hold every key");
-  check bool "paste waits with the submit" true
-    (Launch.submitting (Launch.paste ~text:"more" waiting));
+       check bool "an ordinary key waits with the submit" true (Launch.submitting form);
+       check (list string) "and changes nothing on the screen" (Launch.lines waiting)
+         (Launch.lines form)
+   | Launch.Submitted _ | Launch.Closed ->
+       fail "a waiting form must hold every key but the one that leaves");
+  (* The assertion has to be the drawn lines. [submitting] alone is true of
+     the value passed in, so it holds whether or not [paste] is guarded. *)
+  check (list string) "paste changes nothing while the submit is out"
+    (Launch.lines waiting)
+    (Launch.lines (Launch.paste ~text:"more" waiting));
   let refused = Launch.refused ~detail:"HTTP 400: preset trio cannot run judge_of_judges" waiting in
   check bool "the refusal is the server's sentence" true
     (holds "Refused: HTTP 400: preset trio cannot run judge_of_judges" (Launch.lines refused));
   check bool "the form is editable again" false (Launch.submitting refused);
   let _, second = submit refused in
   check bool "the values survived the refusal" true (first = second)
+
+(* Without this the surface holds every key, [q] included, until an answer
+   arrives -- and a cancelled fiber delivers none, so "until" can be the rest
+   of the process. *)
+let test_esc_leaves_a_submit_whose_answer_may_never_come () =
+  let waiting, _ = open_form () |> press to_prompt |> type_text "why" |> submit in
+  check bool "the form is waiting" true (Launch.submitting waiting);
+  match Launch.edit ~key:"esc" waiting with
+  | Launch.Closed -> ()
+  | Launch.Editing _ -> fail "Esc must leave a waiting submit"
+  | Launch.Submitted _ -> fail "Esc must not submit"
 
 let test_esc_closes_and_paste_keeps_its_lines () =
   (match Launch.edit ~key:"esc" (open_form ()) with
@@ -137,6 +154,8 @@ let () =
             test_a_blank_prompt_never_leaves_the_form
         ; test_case "a refusal keeps the values and reopens editing" `Quick
             test_a_refusal_keeps_the_values_and_reopens_editing
+        ; test_case "Esc leaves a submit whose answer may never come" `Quick
+            test_esc_leaves_a_submit_whose_answer_may_never_come
         ; test_case "Esc closes and paste keeps its lines" `Quick
             test_esc_closes_and_paste_keeps_its_lines
         ] )

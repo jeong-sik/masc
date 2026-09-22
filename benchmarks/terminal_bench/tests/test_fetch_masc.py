@@ -8,6 +8,11 @@ from pathlib import Path
 
 
 SOURCE_COMMIT = "a" * 40
+# masc writes this to stderr on every run, whatever subcommand it was given.
+# Without it in the fixture the probes here print a clean value that no real
+# masc ever prints, and a probe that merges the streams passes these tests while
+# refusing every release it downloads.
+MCP_LOG = "[2026-09-22 11:25:48] [INFO] [MCP] Tag registry initialized: 176 tools registered"
 
 
 def executable(path: Path, body: str) -> None:
@@ -20,6 +25,7 @@ def fixture(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     image = tmp_path / "image"
     image.mkdir()
     shutil.copy(source_image / "fetch_masc.sh", image / "fetch_masc.sh")
+    shutil.copy(source_image / "probe.sh", image / "probe.sh")
     shutil.copy(source_image / "min_masc_version", image / "min_masc_version")
 
     commands = tmp_path / "commands"
@@ -88,10 +94,12 @@ if [[ "$last" == "true" ]]; then
   exit 0
 fi
 if [[ "$last" == "--version" ]]; then
+  echo '{MCP_LOG}' >&2
   echo 'masc fixture'
   exit 0
 fi
 if [[ "$last" == "build-commit" ]]; then
+  echo '{MCP_LOG}' >&2
   printf '%s\\n' "${{FAKE_BUILD_COMMIT:-{SOURCE_COMMIT}}}"
   exit 0
 fi

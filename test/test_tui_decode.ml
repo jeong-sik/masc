@@ -4886,13 +4886,18 @@ let fusion_recorded_detail_json ?(source = "fusion")
     ?(origin_run_id = "fusion-recorded-501")
     ?(tool_trace = empty_fusion_tool_trace_json)
     ?seat_routes
+    ?seat_routes_value
     ?(judges = []) () =
   let run_id = "fusion-recorded-501" in
   let tool_trace_fields = [ "tool_trace", tool_trace ] in
   (* A post written without seat routes carries no key at all, which is the
-     shape older runs have. *)
+     shape older runs have. [seat_routes_value] puts an arbitrary JSON value
+     under the key, for the shapes the reader has to refuse. *)
   let seat_route_fields =
-    match seat_routes with None -> [] | Some routes -> [ "seat_routes", `List routes ]
+    match seat_routes_value, seat_routes with
+    | Some value, _ -> [ "seat_routes", value ]
+    | None, Some routes -> [ "seat_routes", `List routes ]
+    | None, None -> []
   in
   (* The sink writes the RFC-0284 array on every post, so the fixture always
      carries the key; a post without it is the shape the decoder rejects. *)
@@ -5622,6 +5627,117 @@ let test_decode_fusion_seat_routes () =
   | Error detail ->
       Alcotest.(check bool) "the reading names the missing role" true
         (String_util.contains_substring detail "fusion judge seat requires judge_role")
+
+(* Every way the seat reader refuses a shape, and the two readings the
+   launch form depends on. Without these the error branches were reachable
+   only from a live server. *)
+let test_decode_fusion_seat_route_refusals () =
+  let refusal seat_routes =
+    match
+      Tui_decode.decode_fusion_detail (fusion_recorded_detail_json ~seat_routes ())
+    with
+    | Ok _ -> Alcotest.fail "a malformed seat route decoded"
+    | Error detail -> detail
+  in
+  let says needle detail =
+    Alcotest.(check bool)
+      (Printf.sprintf "the reading names %S" needle)
+      true
+      (String_util.contains_substring detail needle)
+  in
+  says "fusion panel seat cannot carry judge_role"
+    (refusal
+       [ `Assoc
+           [ "phase", `String "panel"
+           ; "seat", `String "first"
+           ; "judge_role", `String "meta"
+           ; "route", `String "panel-lane"
+           ; "answered_by", `Null
+           ; "failed_attempts", `List []
+           ] ]);
+  says "unknown fusion seat phase \"referee\""
+    (refusal
+       [ `Assoc
+           [ "phase", `String "referee"
+           ; "seat", `String "first"
+           ; "route", `String "panel-lane"
+           ; "answered_by", `Null
+           ; "failed_attempts", `List []
+           ] ]);
+  (* The key is the sink's whole array; an object in its place is a shape
+     this reader does not know, not an array of one. *)
+  match
+    Tui_decode.decode_fusion_detail
+      (fusion_recorded_detail_json
+         ~seat_routes_value:(`Assoc [ "phase", `String "panel" ])
+         ())
+  with
+  | Ok _ -> Alcotest.fail "a seat_routes object decoded"
+  | Error detail ->
+    says "field 'seat_routes' must be an array" detail
+
+let test_decode_fusion_launch_options_and_receipt () =
+  let config ?(enabled = true) ?(presets = [ "trio"; "duo" ]) () =
+    `Assoc
+      [ "generated_at", `String "2026-09-22T00:00:00Z"
+      ; ( "config"
+        , `Assoc
+            [ "enabled", `Bool enabled
+            ; "default_preset", `String "trio"
+            ; ( "presets"
+              , `List
+                  (List.map
+                     (fun name -> `Assoc [ "name", `String name; "judge", `String "opus" ])
+                     presets) )
+            ] )
+      ]
+  in
+  (match Tui_decode.decode_fusion_launch_options (config ()) with
+   | Error detail -> Alcotest.fail detail
+   | Ok options ->
+     Alcotest.(check bool) "enabled" true options.flo_enabled;
+     Alcotest.(check string) "the default the tool applies" "trio"
+       options.flo_default_preset;
+     Alcotest.(check (list string)) "names only, in file order" [ "trio"; "duo" ]
+       options.flo_presets);
+  (match Tui_decode.decode_fusion_launch_options (config ~enabled:false ~presets:[] ()) with
+   | Error detail -> Alcotest.fail detail
+   | Ok options ->
+     Alcotest.(check bool) "a disabled section still reads" false options.flo_enabled;
+     Alcotest.(check (list string)) "with no presets" [] options.flo_presets);
+  (* A preset row without a name is a shape the form cannot offer. *)
+  (match
+     Tui_decode.decode_fusion_launch_options
+       (`Assoc
+         [ ( "config"
+           , `Assoc
+               [ "enabled", `Bool true
+               ; "default_preset", `String "trio"
+               ; "presets", `List [ `Assoc [ "judge", `String "opus" ] ]
+               ] ) ])
+   with
+   | Ok _ -> Alcotest.fail "a nameless preset decoded"
+   | Error detail ->
+     Alcotest.(check bool) "the reading names the missing field" true
+       (String_util.contains_substring detail "name"));
+  (match
+     Tui_decode.decode_fusion_launch_receipt
+       (`Assoc
+         [ "ok", `Bool true
+         ; "status", `String "fusion_started"
+         ; "run_id", `String "kmsg-042"
+         ; "owner_keeper", `String "analyst"
+         ])
+   with
+   | Error detail -> Alcotest.fail detail
+   | Ok run_id -> Alcotest.(check string) "the started run" "kmsg-042" run_id);
+  (* A refusal travels as a 4xx and is reported by the transport, so a 2xx
+     that says otherwise is a shape this reader does not know. *)
+  match Tui_decode.decode_fusion_launch_receipt (`Assoc [ "ok", `Bool false ]) with
+  | Ok _ -> Alcotest.fail "a 2xx ok:false decoded as a started run"
+  | Error detail ->
+    Alcotest.(check bool) "the reading says so" true
+      (String_util.contains_substring detail "ok:false")
 
 (* Harness verdicts. Shape is [Dashboard_harness_health.verdict_item_json]. *)
 let harness_verdict_json ?(fallback = `Null) () =
@@ -9995,6 +10111,10 @@ let () =
           test_decode_fusion_tool_judge_actor;
         Alcotest.test_case "keeps each seat's route and failed attempts" `Quick
           test_decode_fusion_seat_routes;
+        Alcotest.test_case "refuses a seat shape it was not taught" `Quick
+          test_decode_fusion_seat_route_refusals;
+        Alcotest.test_case "reads the launch presets and the started run id" `Quick
+          test_decode_fusion_launch_options_and_receipt;
       ] );
     ( "decode_harness",
       [

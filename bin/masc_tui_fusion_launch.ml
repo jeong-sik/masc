@@ -158,7 +158,13 @@ let request_of_value value =
   Ok { keeper; preset; topology; prompt; web_tools }
 
 let edit ~key launch =
-  if submitting launch then Editing launch
+  (* A submit in flight takes nothing but the key that leaves. Every other
+     key would act on values the operator can no longer change, and [Esc] has
+     to stay available: the answer can fail to arrive at all -- a cancelled
+     fiber never delivers one -- and without this the surface would hold every
+     key, [q] included, for the rest of the process. Leaving does not unsend
+     the request, so the caller says the run may have started. *)
+  if submitting launch then (if String.equal key "esc" then Closed else Editing launch)
   else
     match Form.handle ~key launch.form with
     | Error detail -> Editing { launch with notice = Some (Input_refused detail) }

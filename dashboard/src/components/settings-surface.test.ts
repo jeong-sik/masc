@@ -1660,6 +1660,11 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
     expect(container.querySelector('[data-testid="fusion-readonly-no-writer"]')).toBeNull()
     expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
+    // The `live-backed` badge above is read off the section table, which says
+    // nothing about the panel. Assert a write is actually offered, so the badge
+    // and the screen cannot disagree with this test still green.
+    expect((container.querySelector('[data-testid="fusion-settings-save"]') as HTMLButtonElement).disabled).toBe(false)
+    expect((container.querySelector('[data-testid="fusion-preset-save"]') as HTMLButtonElement).disabled).toBe(false)
     // The editor opens on the default preset with its seats from the resolver.
     expect((container.querySelector('[data-testid="fusion-preset-name"]') as HTMLInputElement).value).toBe('trio')
     expect(container.textContent).not.toContain('per_hour_budget')

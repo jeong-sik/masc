@@ -81,6 +81,23 @@ function jsonResponse(status: number, body: unknown): Response {
   })
 }
 
+// The protocol inventory every runtime.toml write receipt carries. The server
+// builds it from Runtime_toml.editor_protocols, a table compiled into the
+// binary, so it is never empty and every entry carries the same seven keys —
+// which is why the decoder refuses an empty list rather than treating it as
+// "no protocols". Same shape as the settings-surface fixture.
+const providerProtocols = [
+  {
+    protocol: 'openai-compatible-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+    provider_fields: [],
+    required_provider_fields: [],
+  },
+]
+
 // The commit receipt as the server emits it; the decoder insists on a 64-hex
 // source revision and on the skill application naming that same revision.
 function committedBody(): Record<string, unknown> {
@@ -91,7 +108,7 @@ function committedBody(): Record<string, unknown> {
     file_name: 'runtime.toml',
     source_text: '[fusion]\nenabled = true\n',
     source_revision: sourceRevision,
-    provider_protocols: [],
+    provider_protocols: providerProtocols,
     state: 'committed',
     commit: { source_revision: sourceRevision, order: '7', durability: 'durable', warnings: [] },
     application: {
@@ -263,6 +280,9 @@ describe('applyFusionConfigEdit', () => {
     })
     expect(receipt.state).toBe('committed')
     expect(receipt.commit.order).toBe('7')
+    // The receipt is the raw-save receipt whole, protocol inventory included:
+    // a fusion edit commits the same file through the same gate.
+    expect(receipt.provider_protocols.map(entry => entry.protocol)).toEqual(['openai-compatible-http'])
   })
 
   it('rejects a 409 with the typed configuration_changed failure', async () => {

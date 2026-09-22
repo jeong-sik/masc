@@ -258,6 +258,9 @@ let test_the_turn_start_and_refusal_fronts_say_why () =
   Alcotest.(check bool) "the turn start names the boundary" true
     (says "no front to start from: this turn's own atoms; the last completed turn ended at atom 3577"
        turn_start);
+  Alcotest.(check bool) "an unknown turn start" true
+    (says "no front, and where this turn began could not be read: the newest atom alone (boundary read failed: fixture)"
+       (with_origin (Inspector.Carried_turn_start_unknown { reason = "boundary read failed: fixture" })));
   Alcotest.(check bool) "and the range's own first atom stays on the fact line" true
     (says "from atom 3100" turn_start);
   Alcotest.(check bool) "a halved front" true
@@ -312,6 +315,25 @@ let test_a_turn_start_origin_decodes () =
        } -> ()
    | Ok _ -> Alcotest.fail "the turn start origin lost its atom"
    | Error detail -> Alcotest.fail ("the turn start origin decodes: " ^ detail));
+  let unknown =
+    Yojson.Safe.from_string
+      {|{"schema":"masc.keeper.next-request-forecast.v5","checkpoint_messages":1,"wake_line_bytes":1,
+         "walk":{"lane_id":"r","declared":["r"]},
+         "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
+           "parts":{"error":"not measured"},"history_atoms":4,
+           "carried":{"first_atom":3,"kept_atoms":1,"transmitted_bytes":300,"preamble_bytes":null,
+                      "origin":{"kind":"turn_start_unknown","reason":"boundary read failed: fixture"},"counted_tokens":null},
+           "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
+  in
+  (match Inspector.decode_forecast unknown with
+   | Ok
+       { candidates =
+           [ { carried = Some { origin = Inspector.Carried_turn_start_unknown { reason }; _ }; _ } ]
+       ; _
+       }
+     when String.equal reason "boundary read failed: fixture" -> ()
+   | Ok _ -> Alcotest.fail "the unknown turn start origin lost its reason"
+   | Error detail -> Alcotest.fail ("the unknown turn start origin decodes: " ^ detail));
   let without_atom =
     Yojson.Safe.from_string
       {|{"schema":"masc.keeper.next-request-forecast.v5","checkpoint_messages":1,"wake_line_bytes":1,

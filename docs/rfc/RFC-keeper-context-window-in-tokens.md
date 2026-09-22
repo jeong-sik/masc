@@ -572,11 +572,11 @@ let halve ~first_atom ~atom_count =
 
 흡수한 지점은 둘 중 하나다: 맞는 스냅숏(하던 일과 위치, `Librarian_snapshot`), 그것이 없으면 Librarian 의 읽은 위치(`librarian-progress.json`, 위치만, `Librarian_progress`; §13.6). 스냅숏이 이력과 맞지 않아도 읽은 위치는 맞을 수 있어서 두 번째 갈래가 있다(2026-09-22 goo-yang-bong: 스냅숏은 맞지 않고 위치는 맞았다. 16.4 MB → 169 KB). 둘 다 이 이력의 자리가 아니고 씨앗도 없으면 요청은 이 이력에서 마지막으로 끝난 턴의 경계(`Keeper_carried_front.Turn_start`)부터 싣는다. 이번 턴의 원문만 나가고, 그 앞은 Librarian 의 다음 회차가 스냅숏으로 채운다. 끝난 턴이 없는 이력은 그 경계가 0 이라 갖고 있는 전부를 싣는데, 그것은 새 Keeper 의 짧은 이력이다. 공식 클라이언트 레인도 씨앗이 없으면 같은 자리에서 시작한다(`Keeper_official_client_host.carried_start_range` 의 `turn_start`).
 
-"시작할 자리가 없다"를 "전부 보낸다"로 접지 않는다. `software-development.md` §AI 코드 생성 안티패턴 2 가 금지하는 형태다 — unknown 을 편리한 기본값으로 압축하지 않는다. 경계는 고른 숫자가 아니라 일어난 일(턴 끝 기록의 위치)이고, 지금 이력과 digest 로 맞춰 본 값만 쓴다(`Keeper_turn_driver_try_provider.turn_start`).
+"시작할 자리가 없다"를 "전부 보낸다"로 접지 않는다. `software-development.md` §AI 코드 생성 안티패턴 2 가 금지하는 형태다 — unknown 을 편리한 기본값으로 압축하지 않는다. 경계는 고른 숫자가 아니라 일어난 일(턴 끝 기록의 위치)이고, 지금 이력과 digest 로 맞춰 본 값만 쓴다(`Keeper_turn_driver_try_provider.turn_start`). 경계 저장소를 못 읽었거나 어떤 경계도 지금 이력과 맞지 않으면 그 값은 `Turn_boundary_unknown` 이다. 그때 요청은 가장 새 atom 하나만 싣고 `origin` 이 `Turn_start_unknown` 으로 그 이유를 말한다. 모르는 시작을 0 으로 접어 이력 전체를 보내지 않는다.
 
 틀리는 비용도 한쪽으로만 크다. 작게 틀리면 맥락이 조금 모자라고 다음 턴에 보태면 된다. 크게 틀리면 22.7 MB 를 올리고 거절당하고 턴이 죽고 다음 턴에 같은 일이 반복된다(2026-09-22 goo-yang-bong: 스냅숏이 이력과 맞지 않아 16 MB 를 보냈고 44 사이클 연속 실패).
 
-`origin` 은 앞머리가 *어디서 왔는지*만 말한다: `Carried of source`, `Librarian_snapshot`, `Librarian_progress`, `Turn_start`.
+`origin` 은 앞머리가 *어디서 왔는지*만 말한다: `Carried of source`, `Librarian_snapshot`, `Librarian_progress`, `Turn_start`, `Turn_start_unknown`.
 
 ### 13.5 §1.3 은 이미 답을 적어 두었다
 

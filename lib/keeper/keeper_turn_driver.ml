@@ -1553,14 +1553,14 @@ let run_named
          completed turns' tool bodies demote. Read once per turn for every
          input policy and lane. A turn resuming an operation composes from
          its recovery view and names no boundary here, as before. *)
-      let completed_end_atom = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+      let turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id, recovery_view with
         | Some trace_id, None ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
             Keeper_turn_driver_try_provider.turn_start
               ~config:(Workspace.default_config base_path) ~keeper_name ~trace_id
               ~messages:initial_messages)
-        | None, _ | Some _, Some _ -> 0) in
+        | None, _ | Some _, Some _ -> Keeper_carried_front.Turn_boundary { end_atom = 0 }) in
       let continuity = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id, recovery_view with
         | None, _ | _, Some _ -> Ok None
@@ -2277,7 +2277,7 @@ let run_named
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
-            ~turn_start:(Eio.Lazy.force completed_end_atom)
+            ~turn_start:(Eio.Lazy.force turn_boundary)
             (* Antigravity's CLI assembles the wire, so the shape masc can
                report is the list it handed over. *)
             ?on_model_input_window_observation:
@@ -2396,7 +2396,7 @@ let run_named
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~carried_front_seed:official_client_carried_front_seed
-            ~turn_start:(Eio.Lazy.force completed_end_atom)
+            ~turn_start:(Eio.Lazy.force turn_boundary)
             ~pre_tool_rejects
             ~base_path
             ~goal
@@ -2559,7 +2559,7 @@ let run_named
             ; error_runtime_id
             ; context_marks
             ; input_policy
-            ; completed_end_atom = Eio.Lazy.force completed_end_atom
+            ; turn_boundary = Eio.Lazy.force turn_boundary
             ; continuity = (match recovery_view, continuity with
                 | None, Ok snapshot -> snapshot
                 | Some _, _ | None, Error _ -> None)

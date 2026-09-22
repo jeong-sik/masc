@@ -45,6 +45,7 @@
 
 ### Fixed
 
+- A keeper whose turn-boundary store cannot be read, or matches no boundary of its history, no longer sends its whole history as if the last completed turn ended at atom 0. The request opens on the newest atom alone and its origin says `turn_start_unknown` with the reader's reason, in the TUI band and the request forecast as well (#37746).
 - Setup fixture substitutions now fail at the exact changed fixture location instead of silently passing and blaming the wrong field (#37434).
 - The cancel guard now follows complete handler arm lists and recognizes both exception-arm forms, eliminating false positives from comments and distant cancellation arms (#37495).
 - The strict runtime-config check now excludes vendored warning policy from MASC's warning gate without weakening MASC source checks (#37315).

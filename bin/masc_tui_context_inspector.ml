@@ -79,6 +79,7 @@ type forecast_carried_origin =
   | Carried_halved_after_refusal of { retry : int }
   | Carried_evicted_after_refusal of { retry : int }
   | Carried_turn_start of { end_atom : int }
+  | Carried_turn_start_unknown of { reason : string }
 
 type forecast_carried =
   { first_atom : int
@@ -727,6 +728,10 @@ let decode_forecast_origin = function
       let* end_atom_json = field "end_atom" fields in
       let* end_atom = nonnegative_int "origin.end_atom" end_atom_json in
       Ok (Carried_turn_start { end_atom })
+    else if String.equal kind "turn_start_unknown" then
+      let* reason_json = field "reason" fields in
+      let* reason = nonempty_string "origin.reason" reason_json in
+      Ok (Carried_turn_start_unknown { reason })
     else Error ("origin.kind is not a known kind: " ^ kind)
   | _ -> Error "origin is not an object"
 

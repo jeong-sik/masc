@@ -225,6 +225,14 @@ type rendering = {
           fits, so a wheel over a short pane moves nothing *)
 }
 
+val next_target_row : targets:row_target array -> row:int -> step:int -> int option
+(** The row a keyboard cursor rests on next: from [row], stepping [step]
+    (1 down, -1 up) through the frame's [targets], the first row a press
+    would act on -- any target but {!Target_none}. [None] when no such row
+    lies that way, or when [step] is zero. [row = -1] with [step = 1] finds
+    the first; the caller then scrolls the pane, since the rows are the
+    frame's and the next call may be below it. *)
+
 val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
 (** Exactly [rows] lines, each exactly [cols] display cells once its spans
     are joined: a line that would overflow is cut at the right edge, a short

@@ -4765,6 +4765,11 @@ type state = {
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
+  (* The pane's keyboard cursor: the drawn row it rests on while the pane
+     holds the keys (Ctrl-W puts it up, Esc takes it down), [None] when the
+     surface has them. A row of the last frame, the way a press is; the
+     renderer paints that row in reverse video, which NO_COLOR keeps. *)
+  mutable acting_pane_cursor: int option;
   (* Which of the pane's two readings is up. Survives a toggle: a reader
      who put the pane away on Changes gets Changes back. *)
   mutable acting_pane_tab: Masc_tui_acting_pane.tab;
@@ -6784,6 +6789,7 @@ let create_state
   roster_pane_hidden = true;
   acting_pane_layout = Masc_tui_acting_pane.Narrow;
   acting_pane_scroll = 0;
+  acting_pane_cursor = None;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
   acting_pane_call_order = Masc_tui_acting_pane.Newest_first;
   acting_pane_expanded = [];

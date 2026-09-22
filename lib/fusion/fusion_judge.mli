@@ -51,9 +51,17 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
     토큰 [usage]를 반환하고(panel과 대칭, 비용 회계 RFC §10),
     실패 시에도 usage를 동반한다 — 응답을 받은 뒤 실패(빈 응답/파싱 실패)는 소비분을,
     토큰 소비 전 실패(빌드/실행/provider 에러)는 [Fusion_types.zero_usage]를 싣는다. 이로써
-    호출자(refine degrade 경로)가 파싱 실패한 심판의 비용을 0으로 버리지 않는다. *)
+    호출자(refine degrade 경로)가 파싱 실패한 심판의 비용을 0으로 버리지 않는다.
+
+    [judge_model]이 공식 클라이언트 런타임(Claude Code·Codex·Antigravity)이면 Agent 를
+    빌드하지 않고 {!Fusion_official_client.run_panelist}로 한 턴을 돌린다. [base_dir]는
+    그 클라이언트가 spawn 되는 디렉터리다. 출력 계약(프롬프트 지시 + strict 파서)과
+    [timeout_s] 우선순위는 HTTP 심판과 같다. 이 경로는 토큰 회계가 없어 usage 가
+    [Fusion_types.zero_usage]이고, [max_tokens]와 [web_tools]를 실을 곳이 없으며,
+    도구 기록은 [Official_client_uninstrumented] gap 으로 남는다. *)
 val run
-  :  sw:Eio.Switch.t
+  :  base_dir:string
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?max_tokens:int
   -> ?timeout_s:float
@@ -85,7 +93,8 @@ val compose_refine_prompt
     1차 usage와 [Fusion_types.add_usage]로 합산). 실패는 [run]과 동일하게 [Error (msg,
     usage)] — 파싱 실패 시 소비 토큰을 동반하므로 degrade 경로가 비용을 버리지 않는다. *)
 val run_refine
-  :  sw:Eio.Switch.t
+  :  base_dir:string
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?max_tokens:int
   -> ?timeout_s:float
@@ -127,7 +136,8 @@ val compose_meta_prompt
     1차 심판 usage들과 [Fusion_types.add_usage]로 합산). 실패는 [run]/[run_refine]와 동일하게
     [Error (msg, usage)] — meta 심판이 태운 토큰을 degrade 경로가 버리지 않는다. *)
 val run_meta
-  :  sw:Eio.Switch.t
+  :  base_dir:string
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?max_tokens:int
   -> ?timeout_s:float

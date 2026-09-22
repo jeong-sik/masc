@@ -168,10 +168,28 @@ type failure =
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
 
+let failure_detail ~runtime_id = function
+  | Setup_failure failure -> Fusion_agent_core.panel_failure_text failure
+  | Codex_failure error ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_codex_app_server.error_to_string error)
+  | Claude_failure error | Claude_admission_failure error ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_claude_code.error_to_string error)
+  | Antigravity_failure error ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_antigravity.error_to_string error)
+;;
+
+(* 세 어댑터 모두 자기 [Timeout] 갈래를 갖는다. 그것을 문자열로 접으면 Fusion
+   증거에서 "CLI 가 시간 안에 답을 못 냈다" 가 provider 실패와 구분되지 않는다 —
+   HTTP 쪽 [Fusion_panel.outcome_of_result] 가 두 timeout 갈래를 [Timeout] 으로
+   올리는 것과 같은 규칙을 여기에도 적용한다. *)
 let panel_failure ~runtime_id = function
   | Setup_failure failure -> failure
+  | Codex_failure (Runtime_codex_app_server.Timeout _) -> Fusion_types.Timeout
   | Codex_failure error -> provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)
+  | Claude_failure (Runtime_claude_code.Timeout _)
+  | Claude_admission_failure (Runtime_claude_code.Timeout _) -> Fusion_types.Timeout
   | Claude_failure error | Claude_admission_failure error -> provider_error ~runtime_id (Runtime_claude_code.error_to_string error)
+  | Antigravity_failure (Runtime_antigravity.Timeout _) -> Fusion_types.Timeout
   | Antigravity_failure error -> provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
 
 

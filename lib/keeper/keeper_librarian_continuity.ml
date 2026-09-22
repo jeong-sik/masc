@@ -19,6 +19,16 @@ type prepared =
   ; unread : Agent_core.Types.message list
   ; catch_up_target : int option
   }
+
+type no_source =
+  | Drained
+  | Source_unreadable
+  | Empty_range
+
+type source =
+  | Ready of prepared
+  | No_source of no_source
+
 let path_in ~keepers_dir ~keeper_name =
   Filename.concat (Filename.concat keepers_dir keeper_name) "librarian-continuity.json"
 let path ~config ~keeper_name =
@@ -31,17 +41,17 @@ let read_in ~keepers_dir ~keeper_name =
   | Fs_compat.Exact_unknown -> Error "continuity snapshot path cannot be inspected"
 let read ~config ~keeper_name =
   read_in ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
-let prepare ?end_atom ~config ~keeper_name ~trace_id () =
+let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
   let* lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
   let* previous = read ~config ~keeper_name in
   let progress = Option.map (fun (snapshot : S.t) ->
     {Keeper_librarian_progress.position =
       {trace_id=snapshot.trace_id;end_atom=snapshot.end_atom;last_atom_digest=snapshot.last_atom_digest};
      boundary_lines_seen=snapshot.end_boundary_line}) previous in
-  if not (R.may_have_unread ~trace_id ~lines ~progress) then Ok None else
+  if not (R.may_have_unread ~trace_id ~lines ~progress) then Ok (No_source Drained) else
   let session_dir = Filename.concat (Keeper_fs.session_store_path config) trace_id in
   match C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id with
-  | Error C.Ref_not_found -> Ok None
+  | Error C.Ref_not_found -> Ok (No_source Source_unreadable)
   | Error error -> Error (match error with
       | C.Ref_not_found -> "continuity checkpoint absent"
       | C.Ref_read_failed error -> C.checkpoint_load_error_to_string error
@@ -51,7 +61,7 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
   | Ok checkpoint ->
     let messages = C.exact_snapshot_messages checkpoint in
     match S.checkpoint_prefix_range ~trace_id ~lines ~messages with
-    | Error S.Uncovered_history -> Ok None
+    | Error S.Uncovered_history -> Ok (No_source Source_unreadable)
     | Error error -> Error (S.error_to_string error)
     | Ok range ->
       let fitting_previous = match previous with
@@ -112,7 +122,7 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
              | None -> range.end_atom) in
       if end_atom > range.end_atom || end_atom < 1 then
         Error "continuity cut is outside the completed checkpoint prefix"
-      else if end_atom <= start_atom then Ok None
+      else if end_atom <= start_atom then Ok (No_source Empty_range)
       else
         let* covering_cut = match List.find_opt (fun (cut : R.atom_cut) ->
           match recovery_receipt with
@@ -121,8 +131,14 @@ let prepare ?end_atom ~config ~keeper_name ~trace_id () =
           | Some cut -> Ok cut
           | None -> Error "continuity source has no covering completed boundary" in
         let unread = R.slice messages {range with R.start_atom; end_atom} in
-        Ok (Some {trace_id;lines;messages;previous;previous_state;recovery_receipt;range;covering_cut;start_atom;end_atom;unread;
+        Ok (Ready {trace_id;lines;messages;previous;previous_state;recovery_receipt;range;covering_cut;start_atom;end_atom;unread;
                   catch_up_target})
+
+(* The reason an empty source was empty is dropped here: a caller that only
+   asks whether there is work does not distinguish them. *)
+let prepare ?end_atom ~config ~keeper_name ~trace_id () =
+  prepare_source ?end_atom ~config ~keeper_name ~trace_id ()
+  |> Result.map (function Ready prepared -> Some prepared | No_source _ -> None)
 let messages prepared = prepared.unread
 let turn_ref prepared = prepared.covering_cut.cut_turn_ref
 let start_atom prepared = prepared.start_atom

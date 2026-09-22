@@ -16,6 +16,7 @@ module Magnitude = Masc_tui_magnitude
 module Board_comment_thread = Masc_tui_board_comment_thread
 module Message_layout = Masc_tui_message_layout
 module Tool_detail = Masc_tui_tool_detail
+module Lane_table = Masc_tui_lane_table
 module Retained_view = Masc_tui_retained_view
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
@@ -618,8 +619,18 @@ let render_overview (state : state) =
           if run > 1 then Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
           else ""
         in
-        Printf.sprintf "%s[%s]%s %s%s"
+        (* After the clock, so the clock column stays one column down the
+           panel and only the rows that carry a mark give up its two cells. *)
+        let mark =
+          match Masc_tui_types.overview_event_mark e with
+          | None -> ""
+          | Some glyph ->
+              Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph
+                Ansi.reset
+        in
+        Printf.sprintf "%s[%s]%s %s%s%s"
           Ansi.dim e.timestamp Ansi.reset
+          mark
           (Terminal_text.single_line e.content)
           tail
     in
@@ -4345,6 +4356,26 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
     ]
 
 
+(* The conditions that share a phase with another: either health reading
+   makes a keeper failing, and a pending launch is one of the ways it is
+   offline. Each of the other conditions has a phase of its own, which the
+   lifecycle word already says, so naming it again would add nothing. *)
+let keeper_lane_phase_causes (conditions : Tui_decode.keeper_lane_conditions) =
+  List.filter_map
+    (fun (holds, words) -> if holds then Some words else None)
+    [ (not conditions.klc_turn_healthy, "last turn failed")
+    ; (not conditions.klc_heartbeat_healthy, "heartbeat failed")
+    ; (conditions.klc_launch_pending, "launch pending")
+    ]
+
+let keeper_lane_lifecycle_text (lane : Tui_decode.keeper_lane) =
+  let phase =
+    Terminal_text.single_line (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+  in
+  match keeper_lane_phase_causes lane.kl_conditions with
+  | [] -> phase
+  | causes -> Printf.sprintf "%s (%s)" phase (String.concat ", " causes)
+
 let keeper_operations_outcome_text = function
   | None -> "—"
   | Some (outcome : Tui_decode.keeper_lane_last_outcome) ->
@@ -4391,8 +4422,7 @@ let keeper_operations_preview (state : state) =
                   ; "  OPERATIONS"
                   ; Ansi.reset
                   ; "  lifecycle "
-                  ; Terminal_text.single_line
-                      (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+                  ; keeper_lane_lifecycle_text lane
                   ; " · turn "
                   ; Terminal_text.single_line
                       (Tui_decode.keeper_lane_turn_phase_to_string
@@ -4401,9 +4431,6 @@ let keeper_operations_preview (state : state) =
                   ; keeper_lane_idle_text lane.kl_idle_seconds
                   ; " · last "
                   ; keeper_operations_outcome_text lane.kl_last_outcome
-                  ; " · "
-                  ; Terminal_text.single_line_or ~default:"no diagnosis"
-                      lane.kl_diagnosis
                   ; target_note
                   ]
             | None ->
@@ -4488,7 +4515,9 @@ let render_keeper_list (state : state) =
          else (Theme.warn ())
        in
        let blocker =
-         match fleet.fs_blocker with None -> "" | Some b -> "   blocker: " ^ b
+         match Masc_tui_fleet_line.blocker_text fleet with
+         | None -> ""
+         | Some text -> "   " ^ text
        in
        box_line buf cols
          (Printf.sprintf
@@ -4498,20 +4527,8 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
-       (* The phase snapshot partitions failing keepers into recovering,
-          configuration errors and explicit official-client session recovery.
-          Every failing Keeper belongs to exactly one class, so these three
-          counts sum to the displayed failing count. The latter two require
-          action beyond repeating the same turn. *)
        let failing_entry =
-         if fleet.fs_failing_count = 0 then []
-         else
-           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d · session-recovery-required %d)"
-               fleet.fs_failing_count
-               fleet.fs_recovering_count
-               fleet.fs_turn_configuration_error_count
-               fleet.fs_official_client_recovery_required_count
-           ]
+         Option.to_list (Masc_tui_fleet_line.failing_text fleet)
        in
        let counts =
          failing_entry
@@ -4692,50 +4709,15 @@ let standalone_lane_slots_text (lane : Tui_decode.standalone_lane) =
   | [] -> base
   | dropped -> base ^ " (dropped " ^ String.concat "," dropped ^ ")"
 
-(* The lane table's two measured columns. Every other column has a fixed
-   width; the lane's name and its slot list are the two the data sizes, and
-   the name column was a literal 15 that "Workspace Curator" overran, pushing
-   its whole row two cells right of the others. Measured from the rows the
-   way Schedules measures its subject, floored at the header's own word and
-   capped so one long slot list cannot take the row. *)
-let standalone_lane_status_cells = 14
-let standalone_lane_ok_fail_cancel_cells = 14
-let standalone_lane_p50_cells = 6
+(* What one lane contributes to the table's measurement. Fit for a terminal
+   line here, once, so the width a column is measured at is the width the row
+   draws. *)
+let standalone_lane_reading (lane : Tui_decode.standalone_lane) =
+  { Lane_table.label = Terminal_text.single_line lane.sl_label
+  ; slots = Terminal_text.single_line (standalone_lane_slots_text lane)
+  }
 
-let standalone_lane_columns (lanes : Tui_decode.standalone_lane list) =
-  let widest header value_of cap =
-    List.fold_left
-      (fun widest lane ->
-        max widest (Message_layout.display_width (Terminal_text.single_line (value_of lane))))
-      (Message_layout.display_width header) lanes
-    |> min cap
-  in
-  ( widest "LANE" (fun (lane : Tui_decode.standalone_lane) -> lane.sl_label) 24
-  , widest "SLOTS" standalone_lane_slots_text 28 )
-
-(* The header the rows share, so a reader meets each label once instead of
-   on every row: the rows carried "slots", "active", "runs", "ok/fail/cancel",
-   "p50" and "observed" as words of their own, which beside the roster pane
-   cut every row at "runs 12" and left the failure counts off the screen for
-   all five lanes. The mark's cell is blank here.
-
-   The counts come before the slot list. They are what a reader compares
-   down the column, and they are fixed-width; the slot list is the one cell
-   that can run long, and the block under the list prints the selected lane's
-   slots in full, so it is the cell to lose first when the frame is narrow. *)
-let standalone_lane_header ~label_cells ~slots_cells width =
-  fit_width
-    (Printf.sprintf "    %s  %s  %6s  %4s  %s  %s  %s  %s"
-       (fit_width "LANE" label_cells)
-       (fit_width "STATUS" standalone_lane_status_cells)
-       "ACTIVE" "RUNS"
-       (fit_width "OK/FAIL/CANCEL" standalone_lane_ok_fail_cancel_cells)
-       (fit_width "P50" standalone_lane_p50_cells)
-       (fit_width "SLOTS" slots_cells)
-       "OBSERVED")
-    width
-
-let standalone_lane_row ~now ~frame ~label_cells ~slots_cells width
+let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
     (lane : Tui_decode.standalone_lane) =
   let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
   (* A lane that is running says so twice and neither says for how long: the
@@ -4785,19 +4767,25 @@ let standalone_lane_row ~now ~frame ~label_cells ~slots_cells width
   in
   let prefix = standalone_lane_status_style lane.sl_status in
   let line =
-    Printf.sprintf "  %s%s %s  %s%s  %6d  %4d  %s  %s  %s  %s"
+    Printf.sprintf "  %s%s %s  %s%s  %s  %s  %s  %s%s"
       prefix mark
-      (fit_width (Terminal_text.single_line lane.sl_label) label_cells)
-      (fit_width status standalone_lane_status_cells)
+      (fit_width (Terminal_text.single_line lane.sl_label) columns.label_cells)
+      (fit_width status Lane_table.status_cells)
       Ansi.reset
-      lane.sl_running_count lane.sl_retained_run_count
+      (Lane_table.pad_left
+         (string_of_int lane.sl_running_count)
+         Lane_table.active_cells)
+      (Lane_table.pad_left
+         (string_of_int lane.sl_retained_run_count)
+         Lane_table.runs_cells)
       (fit_width
          (Printf.sprintf "%d/%d/%d" lane.sl_succeeded_count lane.sl_failed_count
             lane.sl_cancelled_count)
-         standalone_lane_ok_fail_cancel_cells)
-      (fit_width p50 standalone_lane_p50_cells)
-      (fit_width (Terminal_text.single_line slots) slots_cells)
-      observed_slots
+         Lane_table.ok_fail_cancel_cells)
+      (fit_width p50 Lane_table.p50_cells)
+      (Lane_table.tail columns
+         ~slots:(Terminal_text.single_line slots)
+         ~observed:(Terminal_text.single_line observed_slots))
   in
   fit_width line width
 
@@ -5076,17 +5064,18 @@ let render_lanes_overview (state : state) =
         Message_layout.count_noun count "installed");
   (match state.standalone_lanes with
    | Some snapshot ->
-       let label_cells, slots_cells =
-         standalone_lane_columns snapshot.Tui_decode.sls_lanes
+       let columns =
+         Lane_table.columns ~inner
+           (List.map standalone_lane_reading snapshot.Tui_decode.sls_lanes)
        in
        if snapshot.sls_lanes <> [] then
          box_line_styled buf cols ~style:(Theme.recede ())
-           (standalone_lane_header ~label_cells ~slots_cells inner);
+           (Lane_table.header columns inner);
        List.iteri
          (fun index (lane : Tui_decode.standalone_lane) ->
            let row =
              standalone_lane_row ~now:(Unix.gettimeofday ())
-               ~frame:state.activity_frame ~label_cells ~slots_cells inner lane
+               ~frame:state.activity_frame ~columns inner lane
            in
            if
              index = state.lanes_standalone_cursor
@@ -5225,7 +5214,7 @@ let render_lanes_overview (state : state) =
    | Some picker ->
        box_line_styled buf cols ~style:(Theme.info ())
          (Printf.sprintf
-            "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+            "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
             (Terminal_text.single_line picker.Masc_tui_types.rlp_lane));
        if picker.Masc_tui_types.rlp_choices = [] then
          box_line_styled buf cols ~style:(Theme.recede ())
@@ -6755,7 +6744,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                         | _ -> id)
                      lane.rrl_runtime_ids)
               in
-              add_row "Failover Chain:" hops;
+              add_row "Candidate Chain:" hops;
               (match lane.rrl_runtime_ids with
                | first :: _ -> add_row "Head Candidate:" first
                | [] -> ())
@@ -6828,7 +6817,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
             activity.Keeper_activity.aw_output_tokens);
        add_row "Cost:"
-         (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
+         (match activity.Keeper_activity.aw_cost_usd with
+          | Some cost -> Printf.sprintf "$%.4f" cost
+          | None -> Ansi.dim ^ "not priced by the provider" ^ Ansi.reset);
        add_row "Tool Calls:"
          (string_of_int activity.Keeper_activity.aw_tool_calls);
        add_row "Top Tools:"
@@ -8800,19 +8791,6 @@ let render_harness (state : state) =
        | None -> render_harness_list state)
   | Some _, None | None, _ -> render_harness_list state
 
-let fusion_run_stage_compact = function
-  | Fusion_stage_accepted -> "accepted"
-  | Fusion_stage_panel { frs_expected } ->
-      Printf.sprintf "panel(%d)" frs_expected
-  | Fusion_stage_judge { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "judge(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_computed { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "computed(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_recording_evidence { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "recording(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_completed -> "completed"
-  | Fusion_stage_failed -> "failed"
-
 (* What became of the selected run, in one row under the list. It opened
    with "Flow: Question → Panel → Judge → Evidence" on every run: the four
    stops are the same for every run and say nothing about this one, the
@@ -8982,11 +8960,8 @@ let render_fusion_list (state : state) =
               Ansi.reverse ^ ">" ^ Ansi.reset else " " in
           box_line buf cols (marker ^ " " ^ line)
       | Some (Tui_decode.Fusion_retained_run run) ->
-          let status = fusion_run_status_to_string run.fur_status in
           let state_text =
-            match run.fur_status with
-            | Fusion_running -> fusion_run_stage_compact run.fur_stage
-            | Fusion_completed | Fusion_failed _ -> status
+            fusion_run_state_text ~status:run.fur_status ~stage:run.fur_stage
           in
           let line =
             Render_schedule.fusion_row columns
@@ -9391,7 +9366,10 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
      5 and the evidence is 6. *)
   let seat_route_lines =
     match evidence.fe_seat_routes with
-    | None -> []
+    (* An empty array draws nothing rather than a header with no seat under
+       it. The sink writes the key on every post, so a deliberation that
+       seated nobody reaches here as [Some []]. *)
+    | None | Some [] -> []
     | Some routes ->
         [ Ansi.dim, ""; Ansi.bold, "  5  SEAT ROUTES" ]
         @ List.concat_map
@@ -9400,9 +9378,7 @@ let fusion_evidence_lines ~width (evidence : fusion_evidence) =
               |> List.map (fun line -> Ansi.reset, "  " ^ line))
             (Masc_tui_fusion_seat_routes.lines routes)
   in
-  let evidence_section =
-    match evidence.fe_seat_routes with None -> "5" | Some _ -> "6"
-  in
+  let evidence_section = if seat_route_lines = [] then "5" else "6" in
   [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
   ; Ansi.dim, ""
   ; Ansi.bold, "  1  QUESTION"
@@ -11475,7 +11451,7 @@ let render_runtime (state : state) =
    | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
    | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
        c.push_styled ~style:(Theme.info ())
-         "  [runtime].media_failover — the order the vision fleet is called in";
+         "  [runtime].media_failover — the Runtime Candidate Order for the vision fleet";
        let entries = Masc_tui_types.slot_editor_rows state in
        if entries = [] then
          c.push_styled ~style:(Theme.recede ())
@@ -11501,10 +11477,10 @@ let render_runtime (state : state) =
               Printf.sprintf "  first runtime of new lane %s — j/k move, Enter create, e cancel"
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
-              Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+              Printf.sprintf "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_media_failover ->
-              "  adding to the vision fleet [runtime].media_failover — j/k move, Enter append, e cancel"
+              "  adding to [runtime].media_failover, the Runtime Candidate Order for the vision fleet — j/k move, Enter append, e cancel"
           | Masc_tui_types.Pick_route_default ->
               (* Replaces rather than appends, and the row it replaces is
                  marked "(already a candidate)" in the choices below. *)
@@ -11544,7 +11520,7 @@ let render_runtime (state : state) =
       | Page_unread -> page_unread_note
       | Page_empty ->
           (match state.runtime_mode with
-           | Masc_tui_types.Runtime_lanes -> "  (no runtime lanes configured)"
+           | Masc_tui_types.Runtime_lanes -> "  (no runtime candidate orders configured)"
            | Masc_tui_types.Runtime_all -> "  (no runtimes configured)")
     in
     c.push_styled ~style:(Theme.recede ()) empty;
@@ -11914,8 +11890,12 @@ let render_keeper_calls (state : state) =
     |> List.mapi (fun call_index (call : Masc.Tui_decode.keeper_call) ->
          let open Masc.Tui_decode in
          let glyph, style =
-           if call.kc_success then ("✓", Ansi.reset)
-           else ("✗", (Theme.bad ()))
+           match call.kc_outcome with
+           | Tool_result.Recorded_succeeded -> ("✓", Ansi.reset)
+           | Tool_result.Recorded_failed -> ("✗", (Theme.bad ()))
+           | Tool_result.Recorded_deferred -> ("◌", (Theme.info ()))
+           | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
+             ("?", Ansi.reset)
          in
          let duration =
            match call.kc_duration_ms with
@@ -11944,7 +11924,12 @@ let render_keeper_calls (state : state) =
            | None -> []
            | Some output ->
              labeled_rows ~call_index
-               ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
+               ~style:
+                 (match call.kc_outcome with
+                  | Tool_result.Recorded_failed -> Theme.bad ()
+                  | Tool_result.Recorded_succeeded | Tool_result.Recorded_deferred
+                  | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed ->
+                    Ansi.dim)
                ~label:"output" output
          in
          (call_index, style, summary) :: exact_rows @ output_rows)
@@ -14290,18 +14275,32 @@ let render_themes (state : state) =
 
    Read-only. Editing lands in the runtime.toml pane next door, which already
    has the preview-checked write path. *)
+(* Where the config file being read lives, for the title row beside the strip
+   that already names the file. Said from the server's masc root: the prefix is
+   the same for every screen in the session, the Config pane's identity row
+   names it, and spending it here cut the reading in the middle -- the row read
+   "/Users/d\xe2\x80\xa6onfig/runtime.toml". Until the server has said where
+   its root is, the whole path is the only honest reading. *)
+let config_path_note (state : state) =
+  match state.runtime_config_view with
+  | Some reading ->
+      let path = Terminal_text.single_line reading.rcv_path in
+      let shown =
+        match state.server_identity with
+        | Some identity ->
+            path_from_root ~root:identity.Tui_decode.sid_masc_root path
+        | None -> path
+      in
+      Ansi.dim ^ shown ^ Ansi.reset
+  | None ->
+      Ansi.dim ^ title_missing_reading ~error:state.runtime_config_view_error ^ Ansi.reset
+
 let render_config_models (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
-  let path_note =
-    match state.runtime_config_view with
-    | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
-    | None -> Ansi.dim
-        ^ title_missing_reading ~error:state.runtime_config_view_error
-        ^ Ansi.reset
-  in
+  let path_note = config_path_note state in
   let before = screen_title " MASC Models" ^ tab_strip_gap in
   box_line buf cols
     (config_pane_title ~cols ~before ~note:path_note state);
@@ -14791,13 +14790,7 @@ let render_voice (state : state) =
 let render_config (state : state) =
   if state.runtime_config_status_open then render_runtime_config_status state else
   let terminal_rows, cols = get_terminal_size () in
-  let path_note =
-    match state.runtime_config_view with
-    | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
-    | None -> Ansi.dim
-        ^ title_missing_reading ~error:state.runtime_config_view_error
-        ^ Ansi.reset
-  in
+  let path_note = config_path_note state in
   let before = screen_title " MASC Config" ^ tab_strip_gap in
   let title =
     config_pane_title ~cols ~before ~note:path_note

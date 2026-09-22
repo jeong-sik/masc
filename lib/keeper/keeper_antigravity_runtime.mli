@@ -88,9 +88,11 @@ module For_testing : sig
     -> Agent_core.Agent.model_input_projection option
     -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
   (** Starts from the admitted carried front, runs the source projection, then
-      applies the declared byte window. A Librarian front carries a pinned
-      working state that the window cannot trim; a window it does not fit
-      refuses the request, as for any pinned message. Thus a Gate replay reference is
+      applies the declared byte window. A Librarian front's working state is
+      pinned, so the window cannot trim it; it goes only where it displaces
+      none of the range's atoms
+      ({!Keeper_official_client_host.compose_librarian_range}, RFC-0460), and
+      otherwise the Librarian position goes alone. A Gate replay reference is
       charged to the provider-bound input without becoming a front in the
       durable checkpoint vocabulary. Refuses an undeclared window:
       Antigravity has no typed overflow response from which MASC could derive
@@ -105,4 +107,10 @@ module For_testing : sig
       transmitted prompt byte count. *)
 
   val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
+
+  val measure_model_input_message_bytes : Agent_core.Types.message -> int
+  (** What the window charges one message, framing included. A test that has
+      to place a capacity inside one band -- the working state fits and the
+      newest atom does not -- measures with this rather than restating the
+      framing and drifting from it. *)
 end

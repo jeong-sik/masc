@@ -26,6 +26,11 @@
  (libraries alcotest masc masc_test_deps))
 
 (test
+ (name test_keeper_transcript_tail_recovery)
+ (modules test_keeper_transcript_tail_recovery)
+ (libraries alcotest masc masc_test_deps eio_main unix))
+
+(test
  (name test_typesafeai_destinations)
  (modules test_typesafeai_destinations)
  (libraries alcotest masc masc_test_deps eio_main))
@@ -2149,6 +2154,13 @@
  (modules test_server_auth_warn_log_bound)
  (libraries alcotest masc masc.auth masc_server eio_main))
 
+; A refused request leaves a line naming the endpoint that produced it.
+
+(test
+ (name test_server_auth_refusal_log)
+ (modules test_server_auth_refusal_log)
+ (libraries alcotest masc masc.auth masc.masc_types masc_server masc_log yojson httpun bigstringaf eio_main))
+
 ; Dashboard actor attribution: rejected credentials cannot become anonymous hints.
 
 (test
@@ -4208,6 +4220,11 @@
  (libraries alcotest masc_tui_exit_signals unix))
 
 (test
+ (name test_tui_exit_reason)
+ (modules test_tui_exit_reason)
+ (libraries alcotest masc_tui_exit_reason))
+
+(test
  (name test_tui_terminal_restore)
  (modules test_tui_terminal_restore)
  ; unix for the Unix.error constructors the stubbed setter raises with.
@@ -4349,6 +4366,47 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_keyboard_input-code-memo)))
+
+; #37813 split the boot credential decision so a first install is told its
+; workspace is not there yet instead of being handed a `masc login` command.
+; The unit suite pins the sentence and the level; this lane pins what the
+; operator sees -- the notice on the Overview events pane and no command.
+
+(rule
+ (alias runtest-test_tui_keyboard_input-first-install-credential)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   first-install-credential)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-first-install-credential)))
+
+; The per-PID stderr log held only the boot lines, so a session that ended left
+; no reason behind -- roughly a hundred files a day and none said why. This lane
+; quits the TUI and reads the reason back from the log the process wrote.
+
+(rule
+ (alias runtest-test_tui_keyboard_input-exit-reason)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   exit-reason)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-exit-reason)))
 
 ; RFC-0429 §4 asks a chat PTY scenario to show the mermaid drawing reaching
 ; the screen. test_tui_mermaid pins what the renderer produces; this pins that
@@ -5198,9 +5256,31 @@
  (libraries alcotest masc_tui_message_layout masc_tui_tool_table))
 
 (test
+ (name test_tui_fleet_line)
+ (modules test_tui_fleet_line)
+ (libraries alcotest masc masc_tui_fleet_line))
+
+(test
  (name test_tui_table)
  (modules test_tui_table)
  (libraries alcotest masc_tui_message_layout masc_tui_table))
+
+(test
+ (name test_tui_fusion_state)
+ (modules test_tui_fusion_state)
+ (libraries alcotest masc masc_tui_render_prim masc_tui_types))
+
+(test
+ (name test_tui_config_path)
+ (modules test_tui_config_path)
+ (libraries alcotest masc_tui_render_prim))
+
+(test
+ (name test_tui_lane_table)
+ (modules test_tui_lane_table)
+ ; masc_tui_message_layout so a drawn line is measured in display cells, the
+ ; way the table sizes its columns.
+ (libraries alcotest masc_tui_lane_table masc_tui_message_layout))
 
 (test
  (name test_tui_render_schedule)
@@ -5647,6 +5727,11 @@
  (name test_tui_board_kind_mark)
  (modules test_tui_board_kind_mark)
  (libraries alcotest masc_tui_board_kind_mark masc_tui_types))
+
+(test
+ (name test_tui_overview_event_mark)
+ (modules test_tui_overview_event_mark)
+ (libraries alcotest masc_tui_types))
 
 (test
  (name test_tui_loading_notice)

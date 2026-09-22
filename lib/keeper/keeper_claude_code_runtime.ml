@@ -145,27 +145,60 @@ let model_input_projection_for_capacity
         | None -> 0
       in
       let* librarian_front = Host.read_librarian_front librarian_front messages in
-      let carried =
-        Host.carried_start_range
-          ~keeper_name
-          ~runtime_id
-          ~carried_front_seed
-          ~librarian_front
-          ~own_first_atom
-          ~turn_start
-          messages
+      let carried_front_seed = Host.read_seed_once carried_front_seed in
+      (* Every candidate range starts at or past the ceiling's own cut, so
+         the window over it drops nothing -- except in front of a working
+         state, which the cut above never measured.
+         [Host.compose_librarian_range] decides whether that working state
+         goes (RFC-0460): it is carried only where it displaces no atom, and
+         otherwise the Librarian position goes alone. The window is the
+         declared ceiling once more, as a measurement of each candidate, and
+         the one chosen goes out as it left it. *)
+      let compose librarian_front =
+        let carried =
+          Host.carried_start_range
+            ~keeper_name
+            ~runtime_id
+            ~carried_front_seed
+            ~librarian_front
+            ~own_first_atom
+            ~turn_start
+            messages
+        in
+        match capacity_cut with
+        | None ->
+          Ok
+            { Host.carried
+            ; sent = carried.Host.messages
+            ; atoms_kept = Host.carried_atoms carried
+            }
+        | Some _ ->
+          Host.window_carried_range
+            ~measure_message_bytes:measure_model_input_message_bytes
+            ~capacity_bytes
+            ~reserved_bytes:0
+            carried
+      in
+      let* windowed =
+        Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
       in
       (* No cut is still a reading: what was carried, reported with the atom
          it starts from. Leaving it silent would put the turn record's absent
          window back for any runtime whose declared cap is unbounded and whose
          seed named no front. A list with no atom has no front to report, and
          [Runtime_model_input_tail_window.observe] reports nothing for it. *)
-      observe_window carried.Host.projection;
+      observe_window (Host.windowed_projection windowed);
       Option.iter
         (fun observe ->
-           observe carried.Host.front ~transmitted_bytes:carried.Host.transmitted_bytes)
+           observe
+             windowed.Host.carried.Host.front
+             ~transmitted_bytes:
+               (List.fold_left
+                  (fun total message -> total + measure_model_input_message_bytes message)
+                  0
+                  windowed.Host.sent))
         on_carried_front;
-      Ok carried.Host.messages
+      Ok windowed.Host.sent
   in
   let () =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->

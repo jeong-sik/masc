@@ -16,35 +16,50 @@ import test_tui_keyboard_input as h
 
 
 def _row_success(row: dict[str, Any]) -> bool:
-    """Mirror ``Tui_decode.decode_keeper_call``'s success fallback (#37461,
-    #37650 review).
+    """Whether the call succeeded, read the way
+    ``Tool_result.recorded_call_outcome`` reads a tool-call record:
+    ``disposition`` first, ``wire_outcome`` when the row has none.
 
-    The durable tool-call record stopped always carrying a boolean
-    ``success``: a real row (as ``test_keeper_task_skill_turn_exact``
-    prints below) carries only ``wire_outcome`` and sometimes
-    ``disposition``, never ``success``. Read ``success`` first for any
-    row that does send it explicitly; otherwise fall back to
-    ``disposition`` then ``wire_outcome``, oldest-first, exactly as the
-    OCaml decoder does. ``wire_outcome == "unknown"`` is not a success
-    signal there either: the decoder refuses the row outright (a wire
-    that does not know the outcome is not evidence the call completed),
-    so this raises the same way rather than guessing ``True``.
+    This picks which needles the rendered call must show, so the fixture row
+    must carry a settled outcome. A deferred, unsettled, or unreadable row
+    raises here instead of guessing a needle set.
     """
-    if "success" in row:
-        return cast(bool, row["success"])
-    disposition = row.get("disposition")
-    if disposition in ("completed", "deferred"):
-        return True
-    if disposition == "failed":
-        return False
+    if "disposition" in row:
+        disposition = row["disposition"]
+        if disposition == "completed":
+            return True
+        if disposition == "failed":
+            return False
+        raise ValueError(f"row disposition {disposition!r} is not a settled outcome")
     wire_outcome = row.get("wire_outcome")
     if wire_outcome == "ok":
         return True
     if wire_outcome == "error":
         return False
-    if wire_outcome == "unknown":
-        raise ValueError("row wire_outcome is unknown; the TUI decoder refuses it")
-    raise KeyError("row has no success, disposition, or wire_outcome field")
+    raise ValueError(f"row wire_outcome {wire_outcome!r} is not a settled outcome")
+
+
+def _rendered_output(screen: bytes, call_index: int) -> bytes:
+    """The ``output`` field's value as the exact call view wrapped it.
+
+    ``render_keeper_calls`` draws each wrapped chunk of a field on its own
+    row, repeating the ``#N output `` label on every chunk so a two-row
+    viewport never separates a continuation from its field. A value the wrap
+    cut mid-token therefore reads as two rows with the label between them,
+    and ``screen_text`` (rows joined by a newline) never contains the token:
+    the failed row's ``withheld_activation_failure`` straddles a chunk
+    boundary at 180 columns, so a search over the joined rows timed out on a
+    screen that was already showing it. Strip the repeated label and the row
+    padding, then join the chunks with nothing between them, so a token the
+    wrap cut in half reads whole again.
+    """
+    label = b"#%d output " % (call_index + 1)
+    chunks: list[bytes] = []
+    for line in screen.split(b"\n"):
+        stripped = line.lstrip()
+        if stripped.startswith(label):
+            chunks.append(stripped[len(label) :].rstrip())
+    return b"".join(chunks)
 
 
 def run_case(executable: str, row: dict[str, Any]) -> None:
@@ -92,7 +107,7 @@ def run_case(executable: str, row: dict[str, Any]) -> None:
                 b"withheld_activation_failure",
             ]
         )
-        seen = screen
+        seen = _rendered_output(screen, 0)
         # The exact call view wraps persisted output; walk rows instead of
         # assuming the answer is contained in its old 72-byte timeline digest.
         for _ in range(len(str(row["output"])) + 1):
@@ -101,9 +116,16 @@ def run_case(executable: str, row: dict[str, Any]) -> None:
             h.read_available(fd, output)
             start = len(output)
             os.write(fd, b"j")
-            h.wait_for_output(process, fd, output, h.FRAME_END, start=start, timeout=3)
+            # A j at the last row changes nothing, and Frame_presenter.present
+            # writes nothing at all for an unchanged frame -- not even a frame
+            # terminator -- so waiting for FRAME_END here would time out on a
+            # screen that already shows everything. Stop at the bottom.
+            if not h.poll_for_output(
+                process, fd, output, h.FRAME_END, start=start, timeout=3
+            ):
+                break
             h.drain_until_quiet(process, fd, output)
-            seen += b"\n" + h.screen_text(bytes(output))
+            seen += b"\n" + _rendered_output(h.screen_text(bytes(output)), 0)
         for needle in needles:
             if needle not in seen:
                 raise AssertionError(f"Skill call output did not render {needle!r}")

@@ -31,9 +31,10 @@ function makeEntry(
     added: 2,
     removed: 1,
     snapshot_present: true,
-    context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
+    context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared: null, synthesis: null },
     librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
       unread_atom_turns: 0, unread_official_turns: 0,
+      continuity_unread_atoms: 0,
       last_success_at: null, last_failure_kind: null },
     librarian_failures: 0,
     vision_ingest_errors: 0,
@@ -87,6 +88,8 @@ function makeResponse(
       source_invalidations: 0,
       source_snapshot_bytes: 0,
       librarian_unread_turns: 0,
+      librarian_continuity_unread_atoms: 0,
+      librarian_continuity_unmeasured: 0,
       librarian_failures: 0,
       vision_ingest_errors: 0,
       read_errors: 0,
@@ -238,6 +241,7 @@ describe('KeeperMemoryHealth', () => {
     mockFetch.mockResolvedValue(makeResponse(
       [makeEntry({ librarian: { state: 'not_committed', detail: null,
           measured_at: 1_699_999_950, unread_atom_turns: 3, unread_official_turns: 0,
+          continuity_unread_atoms: 0,
           last_success_at: null, last_failure_kind: null }, alerts: [alert] })],
       { librarian_unread_turns: 3 },
       makeAlertSummary({
@@ -260,12 +264,37 @@ describe('KeeperMemoryHealth', () => {
     mockFetch.mockResolvedValue(makeResponse(
       [makeEntry({ librarian: { state: null, detail: null, measured_at: null,
         unread_atom_turns: null, unread_official_turns: null,
+        continuity_unread_atoms: 0,
         last_success_at: null, last_failure_kind: null } })],
       { librarian_unread_turns: null },
     ))
     const { container } = render(html`<${KeeperMemoryHealth} />`)
     await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
     expect(statValue(container, 'librarian-unread-turns')).toBe('?')
+  })
+
+  it('renders the continuity lag with how many keepers it could not be taken for', async () => {
+    mockFetch.mockResolvedValue(makeResponse(
+      [ makeEntry({ librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
+          unread_atom_turns: 0, unread_official_turns: 0,
+          continuity_unread_atoms: null,
+          last_success_at: null, last_failure_kind: null } }),
+        makeEntry({ keeper_id: 'beta', librarian: { state: 'drained', detail: null,
+          measured_at: 1_699_999_950, unread_atom_turns: 0, unread_official_turns: 0,
+          continuity_unread_atoms: 3,
+          last_success_at: null, last_failure_kind: null } }) ],
+      { librarian_continuity_unread_atoms: 3, librarian_continuity_unmeasured: 1 },
+    ))
+    const { container } = render(html`<${KeeperMemoryHealth} />`)
+    await waitFor(() => expect(screen.getByText('beta')).not.toBeNull())
+    expect(statValue(container, 'librarian-continuity-behind')).toBe('3 (1 못 잼)')
+  })
+
+  it('renders a fully measured continuity lag without an unmeasured count', async () => {
+    mockFetch.mockResolvedValue(makeResponse([makeEntry()], {}))
+    const { container } = render(html`<${KeeperMemoryHealth} />`)
+    await waitFor(() => expect(screen.getByText('alpha')).not.toBeNull())
+    expect(statValue(container, 'librarian-continuity-behind')).toBe('0')
   })
 
   it('renders librarian starvation as an error row, not a warning', async () => {

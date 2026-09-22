@@ -45,7 +45,10 @@ fi
 # gh is uploaded only when the run passes GH_TOKEN, and is absent from debian
 # stable, which many task base images use.
 GH_VERSION="${GH_VERSION:-2.65.0}"
-PROBE_TIMEOUT_SEC="${PROBE_TIMEOUT_SEC:-600}"
+
+# Sourcing defines the probe helpers and their defaults and runs no probe, so it
+# sits above the check on the bound it sets.
+. "${SCRIPT_DIR}/probe.sh"
 if [[ ! "${PROBE_TIMEOUT_SEC}" =~ ^[1-9][0-9]*$ ]]; then
   echo "PROBE_TIMEOUT_SEC must be a positive integer" >&2
   exit 1
@@ -93,25 +96,16 @@ done
 if command -v shasum >/dev/null 2>&1; then sum=(shasum -a 256); else sum=(sha256sum); fi
 ( cd "${STAGE_DIR}" && "${sum[@]}" linux-*/masc linux-*/masc-exec-shim linux-*/gh > SHA256SUMS )
 
-run_bounded() {
-  set +e
-  # TERM gives Docker one second to clean up; KILL makes the bound hold even
-  # when the CLI or daemon path ignores cancellation.
-  PROBE_OUTPUT="$(timeout --kill-after=1 "${PROBE_TIMEOUT_SEC}" "$@" 2>&1)"
-  PROBE_STATUS=$?
-  set -e
-}
-
-probe_timed_out() {
-  [[ ${PROBE_STATUS} -eq 124 || ${PROBE_STATUS} -eq 137 ]]
-}
+# The stderr capture goes in STAGE_DIR, which the EXIT trap removes and the
+# publication step never moves.
+probe_init "${STAGE_DIR}/.probe-stderr"
 
 run_bounded docker info --format '{{.ServerVersion}}'
 if probe_timed_out; then
   echo "Docker daemon probe timed out after ${PROBE_TIMEOUT_SEC}s" >&2
   exit 1
 elif [[ ${PROBE_STATUS} -ne 0 ]]; then
-  echo "Docker daemon probe failed: ${PROBE_OUTPUT}" >&2
+  echo "Docker daemon probe failed: $(probe_diagnostic)" >&2
   exit 1
 fi
 
@@ -132,7 +126,7 @@ for row in "${ARCHES[@]}"; do
     echo "Docker platform probe for ${platform} timed out after ${PROBE_TIMEOUT_SEC}s" >&2
     exit 1
   elif [[ ${PROBE_STATUS} -eq 125 ]]; then
-    echo "Docker platform probe for ${platform} failed: ${PROBE_OUTPUT}" >&2
+    echo "Docker platform probe for ${platform} failed: $(probe_diagnostic)" >&2
     exit 1
   elif [[ ${PROBE_STATUS} -ne 0 ]]; then
     echo "[fetch] ${dir}: this Docker cannot run ${platform} containers; not verified here"
@@ -146,7 +140,7 @@ for row in "${ARCHES[@]}"; do
     echo "masc --version verification for ${platform} timed out after ${PROBE_TIMEOUT_SEC}s" >&2
     exit 1
   elif [[ ${PROBE_STATUS} -ne 0 ]]; then
-    echo "masc --version verification for ${platform} failed: ${PROBE_OUTPUT}" >&2
+    echo "masc --version verification for ${platform} failed: $(probe_diagnostic)" >&2
     exit 1
   fi
   printf '%s\n' "${PROBE_OUTPUT}"
@@ -157,7 +151,7 @@ for row in "${ARCHES[@]}"; do
     echo "masc build-commit verification for ${platform} timed out after ${PROBE_TIMEOUT_SEC}s" >&2
     exit 1
   elif [[ ${PROBE_STATUS} -ne 0 ]]; then
-    echo "masc build-commit verification for ${platform} failed: ${PROBE_OUTPUT}" >&2
+    echo "masc build-commit verification for ${platform} failed: $(probe_diagnostic)" >&2
     exit 1
   elif [[ "${PROBE_OUTPUT}" != "${SOURCE_COMMIT}" ]]; then
     echo "${dir} embeds build commit '${PROBE_OUTPUT}', expected ${SOURCE_COMMIT}" >&2

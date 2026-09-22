@@ -71,6 +71,66 @@ let scrolled_surface state surface =
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
+(* Why this session ended, written once at exit. The per-PID stderr log held
+   only the boot lines, so a session that ended left no reason behind: the
+   operator saw roughly a hundred files a day and none said why. Set at each
+   way out and written by the [at_exit] below, which runs after the terminal
+   is restored. *)
+let exit_reason : Masc_tui_exit_reason.t option ref = ref None
+
+let note_exit_reason reason =
+  match !exit_reason with
+  | Some _ -> ()
+  | None -> exit_reason := Some reason
+;;
+
+(* Written once. [at_exit] stops at the first callback that raises and OCaml
+   may retry the remaining ones while it reports the exception, so a writer
+   with no guard can leave two [exit:] rows for one session -- and a reader
+   counting rows by cause would count that session twice. *)
+let exit_reason_written = ref false
+
+let write_exit_reason () =
+  if not !exit_reason_written then begin
+    exit_reason_written := true;
+    let reason =
+      match !exit_reason with
+      | Some reason -> reason
+      | None -> Masc_tui_exit_reason.Unrecorded
+    in
+    let row = "[masc-tui] " ^ Masc_tui_exit_reason.line reason ^ "\n" in
+    (* Two attempts through different layers, because this row is the whole
+       point of the change: a session that ends without it is unexplained
+       again. [output_string] goes through the buffered channel, which can
+       raise on a channel an earlier [at_exit] callback already closed; the
+       raw write on the descriptor skips that layer, so it fails for
+       different reasons rather than the same one. stderr is the per-PID log
+       file by now ([redirect_stderr_off_terminal]), and neither attempt is
+       queued behind the console mirror's thread, so the row is on disk
+       before the process returns.
+
+       If both fail the failure is dropped on purpose, not by oversight: the
+       descriptor this function would report on is the one that just refused,
+       and raising here would take the remaining [at_exit] callbacks down
+       with it. *)
+    try
+      output_string stderr row;
+      flush stderr
+    with _ -> (
+      (* fire-and-forget: the note above says why this failure is dropped. *)
+      try ignore (Unix.write_substring Unix.stderr row 0 (String.length row))
+      with _ -> ())
+  end
+;;
+
+(* The name of the signal that asked the session to end, for the exit line. *)
+let signal_name signal =
+  if signal = Sys.sigterm then "SIGTERM"
+  else if signal = Sys.sighup then "SIGHUP"
+  else if signal = Sys.sigquit then "SIGQUIT"
+  else Printf.sprintf "signal %d" signal
+;;
+
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
@@ -5921,7 +5981,10 @@ let launch_fusion_launch_options_load state ~mailbox =
       enqueue_async mailbox
         (Fusion_launch_options_loaded (generation, Error "Eio switch is unavailable"))
 
-let launch_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) =
+(* Named apart from [Masc_tui_loader.launch_fusion_run], which it calls: one
+   name for both is a shadow that turns a missing qualifier into unbounded
+   recursion rather than a compile error. *)
+let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) =
   state.fusion_launch_generation <- state.fusion_launch_generation + 1;
   let generation = state.fusion_launch_generation in
   let host = server_peer_host in
@@ -10433,20 +10496,30 @@ let apply_fusion_runs_load state = function
       state.fusion_error <- None;
       (* A run the form just started is selected the first time the list
          carries it, and the wait ends there. *)
-      let started_cursor =
-        match state.fusion_launch with
-        | Some (Fusion_launch_started run_id) ->
-            fusion_snapshot_entries snapshot
-            |> List.find_index (function
-                 | Tui_decode.Fusion_retained_run run -> String.equal run.fur_run_id run_id
-                 | Tui_decode.Fusion_historical_evidence _ -> false)
-        | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) | None -> None
-      in
-      (match started_cursor with
-       | Some cursor ->
-           state.fusion_cursor <- cursor;
-           state.fusion_launch <- None
-       | None -> state.fusion_cursor <- next_cursor);
+      (match state.fusion_launch with
+       | Some (Fusion_launch_started started) -> (
+           match
+             fusion_snapshot_entries snapshot
+             |> List.find_index (function
+                  | Tui_decode.Fusion_retained_run run ->
+                      String.equal run.fur_run_id started.fls_run_id
+                  | Tui_decode.Fusion_historical_evidence _ -> false)
+           with
+           | Some cursor ->
+               state.fusion_cursor <- cursor;
+               state.fusion_launch <- None
+           | None ->
+               state.fusion_cursor <- next_cursor;
+               (* Each read that does not carry it spends one of the waits.
+                  Spent, the wait ends rather than moving the cursor onto
+                  that run at whatever later refresh first carries it. *)
+               let reads_left = started.fls_reads_left - 1 in
+               state.fusion_launch <-
+                 (if reads_left > 0 then
+                    Some (Fusion_launch_started { started with fls_reads_left = reads_left })
+                  else None))
+       | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _) | None ->
+           state.fusion_cursor <- next_cursor);
       (match state.fusion_mode, current_selected_id with
        | Fusion_detail run_id, Some selected
          when String.equal ("run:" ^ run_id) selected
@@ -12672,18 +12745,6 @@ let contact_of_connection_status :
   | Masc_tui_types.Reconnecting ->
       Masc_tui_server_lifecycle.Undecided
 
-(* A mint and a failure are not the same news. Both were reported as errors,
-   which reads a working first start as a broken one -- and on a first
-   install, where the client mints for itself, that is the ordinary path.
-   Waiting for the workspace is that same ordinary path one step earlier, so
-   it reads as system too; only a workspace that refused a credential is a
-   fault the operator has to act on. *)
-let credential_notice_level = function
-  | Masc_tui_credential.Mint_failed _ -> "error"
-  | Masc_tui_credential.Held | Masc_tui_credential.Minted
-  | Masc_tui_credential.Not_required
-  | Masc_tui_credential.Workspace_pending -> "system"
-
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.
 
@@ -12724,7 +12785,7 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
     if not (Masc_tui_credential.outcome_needs_retry outcome) then begin
       tui_credential_retry_pending := false;
       Option.iter
-        (add_event state (credential_notice_level outcome))
+        (add_event state (Masc_tui_credential.outcome_level outcome))
         (Masc_tui_credential.outcome_notice outcome)
     end
   end
@@ -15471,7 +15532,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (match result with
             | Error detail ->
                 state.fusion_launch <- None;
-                state.fusion_error <- Some detail
+                (* [fusion_error] draws the reason now and the event keeps it:
+                   a successful list load clears that line, and the cadence
+                   issues one every two seconds, so the line alone would show
+                   the reason for less time than it takes to read. *)
+                state.fusion_error <- Some detail;
+                add_event state "system" ("Fusion launch: " ^ detail)
             | Ok options ->
                 let keepers = List.map (fun (k : keeper) -> k.k_name) state.keepers in
                 (* The run under the cursor names the Keeper the operator is
@@ -15488,7 +15554,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                      state.fusion_error <- None
                  | Error detail ->
                      state.fusion_launch <- None;
-                     state.fusion_error <- Some detail))
+                     state.fusion_error <- Some detail;
+                     add_event state "system" ("Fusion launch: " ^ detail)))
        | Some (Fusion_launch_reading_presets _ | Fusion_launch_open _ | Fusion_launch_started _)
        | None -> ())
   | Fusion_launched (generation, result) ->
@@ -15500,11 +15567,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             | Error detail ->
                 state.fusion_launch <-
                   Some (Fusion_launch_open (Masc_tui_fusion_launch.refused ~detail launch));
-                state.fusion_scroll <- 0
+                state.fusion_scroll <- 0;
+                add_event state "system" ("Fusion launch refused: " ^ detail)
             | Ok run_id ->
                 (* The list selects the run once it carries it; a list read
                    already in flight may answer without it. *)
-                state.fusion_launch <- Some (Fusion_launch_started run_id);
+                state.fusion_launch <-
+                  Some
+                    (Fusion_launch_started
+                       { fls_run_id = run_id
+                       ; fls_reads_left = Masc_tui_types.fusion_started_list_reads
+                       });
                 state.fusion_scroll <- 0;
                 add_event state "system" ("Fusion run " ^ run_id ^ " started");
                 launch_fusion_runs_load state ~mailbox)
@@ -15800,7 +15873,10 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
   (* [at_exit] runs its callbacks in the reverse of this order. Restore first
      so an error writing the frame summary cannot prevent the first restore
      attempt. An exception interrupts that cleanup pass; OCaml may retry
-     remaining callbacks while reporting an uncaught exception. *)
+     remaining callbacks while reporting an uncaught exception. The exit
+     reason is registered first so it is written last, after the terminal is
+     back. *)
+  at_exit write_exit_reason;
   at_exit Masc_tui_frame_timing.report;
   at_exit cleanup;
   (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
@@ -16017,7 +16093,10 @@ let main
      it runs at the next poll point, inside whatever the loop was doing, an
      Eio wait included. *)
   let exit_signals = Masc_tui_exit_signals.create () in
-  let terminate _ = Masc_tui_exit_signals.request_terminate exit_signals in
+  let terminate signal =
+    Masc_tui_exit_signals.request_terminate exit_signals
+      ~signal:(signal_name signal)
+  in
   (* Ctrl-C used to reach [terminate] and the session ended mid-sentence, with
      whatever was in the composer gone. It is one key away from Ctrl-V and
      Ctrl-X on the same hand, and the footer never listed it, so the first
@@ -16243,7 +16322,7 @@ let main
    tui_credential_retry_pending :=
      Masc_tui_credential.outcome_needs_retry outcome;
    match Masc_tui_credential.outcome_notice outcome with
-   | Some notice -> add_event state (credential_notice_level outcome) notice
+   | Some notice -> add_event state (Masc_tui_credential.outcome_level outcome) notice
    | None -> ());
   start_http_refresh state ~host ~port ~intent:Revalidate
     ~refresh_inflight:http_refresh_inflight
@@ -17447,7 +17526,12 @@ and is loaded on demand through keeper_skill.
          switch release that stops a server this TUI started runs for every
          way out. *)
       (match Masc_tui_exit_signals.poll exit_signals with
-       | Masc_tui_exit_signals.Quit -> raise Break
+       | Masc_tui_exit_signals.Quit ->
+           note_exit_reason
+             (match Masc_tui_exit_signals.terminate_signal exit_signals with
+              | Some signal -> Masc_tui_exit_reason.Terminate signal
+              | None -> Masc_tui_exit_reason.Interrupt);
+           raise Break
        | Masc_tui_exit_signals.Interrupt_armed ->
            state.quit_armed <- false;
            add_event state "system"
@@ -17990,6 +18074,13 @@ and is loaded on demand through keeper_skill.
            (Masc_tui_http.ms_of_ns gap_ns);
        last_loop_at_ns := now_ns);
       ensure_acting_pane_changes state ~mailbox:async_messages;
+      (* The Fusion launch form outlives nothing: whatever moved the surface
+         -- a key, the Activity pane's mouse handler, or an async message
+         that jumps to a Keeper chat -- it is gone before this iteration
+         dispatches anything. *)
+      if Masc_tui_types.reconcile_fusion_launch state then
+        add_event state "system"
+          "Fusion launch left while its answer was out; the run may have started - r refreshes the list";
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
         (not compact_viewport) && state.view = Keepers Keeper_message
@@ -18562,7 +18653,13 @@ and is loaded on demand through keeper_skill.
                  | _ ->
                      (match Masc_tui_fusion_launch.edit ~key launch with
                       | Masc_tui_fusion_launch.Closed ->
-                          state.fusion_launch <- None;
+                          (* The operator stays on Fusion, so this is the
+                             drop itself rather than a surface jump. Its
+                             answer is whether a submit was still out. *)
+                          if Masc_tui_types.abandon_fusion_launch state then
+                            add_event state "system"
+                              "Fusion launch left while its answer was out; the run may have \
+                               started - r refreshes the list";
                           state.fusion_scroll <- 0
                       | Masc_tui_fusion_launch.Editing next ->
                           state.fusion_launch <- Some (Fusion_launch_open next);
@@ -18570,7 +18667,7 @@ and is loaded on demand through keeper_skill.
                       | Masc_tui_fusion_launch.Submitted (next, request) ->
                           state.fusion_launch <- Some (Fusion_launch_open next);
                           state.fusion_scroll <- 0;
-                          launch_fusion_run state ~mailbox:async_messages ~request))
+                          start_fusion_run state ~mailbox:async_messages ~request))
             | Some (Fusion_launch_started _) | None -> ())
        | Some _
          when quit_key
@@ -18579,7 +18676,10 @@ and is loaded on demand through keeper_skill.
                     && not
                          (state.view = Board
                          && state.board_mode = Board_compose))) ->
-           if state.quit_armed then raise Break
+           if state.quit_armed then begin
+             note_exit_reason Masc_tui_exit_reason.Quit_key;
+             raise Break
+           end
            else begin
              state.quit_armed <- true;
              add_event state "system"
@@ -24837,7 +24937,13 @@ let run_with_eio_context f =
             Eio_context.set_clock (Eio.Stdenv.clock env);
             Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
             f ()))
-  with Break -> ()
+  with
+  | Break -> ()
+  | exn ->
+      (* An uncaught exception is the abnormal end the exit line exists to
+         name; the [at_exit] writer still runs while the exception unwinds. *)
+      note_exit_reason (Masc_tui_exit_reason.Exception (Printexc.to_string exn));
+      raise exn
 
 let () =
   (* Informational flags terminate during parsing, before base-path

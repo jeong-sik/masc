@@ -1827,6 +1827,7 @@ def run_terminal_scenario(
     extra_args: tuple[str, ...] = (),
     extra_env: dict[str, str] | None = None,
     conflicting_env_base_path: bool = False,
+    omit_operator_token: bool = False,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
@@ -1895,6 +1896,13 @@ def run_terminal_scenario(
                         "MASC_TOKEN": "masc-tui-keyboard-regression-token",
                     }
                 )
+                if omit_operator_token:
+                    # A first install holds no bearer yet, and the boot decision
+                    # it takes is the one this scenario describes. The harness
+                    # sets MASC_TOKEN above for every other scenario, so the one
+                    # that means "no token" takes it back out here rather than
+                    # leaving the choice to whoever ran the suite.
+                    environment.pop("MASC_TOKEN", None)
                 process = subprocess.Popen(
                     [
                         "/bin/sh",
@@ -2911,6 +2919,84 @@ def ctrl_y_reaches_the_tui_interaction(
     )
     if process.poll() is not None:
         raise AssertionError(f"Ctrl-Y ended the TUI with exit {process.returncode}")
+    os.write(master_fd, b"q")
+
+
+def first_install_waits_for_its_workspace_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A first install's boot line names the missing workspace, not a command.
+
+    The unit suite pins the sentence and the level the boot decision reports;
+    this pins what the operator actually sees. The harness seeds no
+    ``.masc/auth`` and this scenario omits ``MASC_TOKEN``, so the boot decision
+    is the one a fresh install takes -- no workspace to mint into yet. The
+    Overview events pane draws that notice, and the ``masc login`` command the
+    old single-constructor line handed over is not on the screen. The pane
+    trims a long row at the panel width, so the needle is the notice's opening.
+    """
+    wait_for_output(
+        process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+    )
+    drain_until_quiet(process, master_fd, output)
+    screen = screen_text(bytes(output))
+    if b"no operator token yet" not in screen:
+        raise AssertionError(
+            f"a first install did not name the missing workspace: {screen!r}"
+        )
+    if b"masc login" in screen:
+        raise AssertionError(
+            f"a first install was handed the login command: {screen!r}"
+        )
+    # The pending workspace is the ordinary path, so its row carries no error
+    # mark: the clock's bracket is followed straight by the sentence.
+    if b"] no operator token yet" not in screen:
+        raise AssertionError(
+            f"the pending workspace row is marked as an error: {screen!r}"
+        )
+    os.write(master_fd, b"q")
+
+
+def seed_a_workspace_that_refuses_a_credential(base_path: str) -> None:
+    """A workspace that is here and cannot take a credential.
+
+    ``.masc/auth`` exists, so the boot decision is to mint; ``agents`` beside
+    it is a file where the credential store is a directory, so the mint's
+    write fails. A file rather than a read-only directory because a runner
+    that tests as root writes through a mode bit, and would mint.
+    """
+    auth = Path(base_path) / ".masc" / "auth"
+    auth.mkdir(parents=True)
+    (auth / "agents").write_text("not a directory\n", encoding="utf-8")
+
+
+def failed_mint_is_marked_as_an_error_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A mint that failed reads as an error on the Overview events pane.
+
+    Its row carries the chat pane's failure glyph after the clock, which a
+    pending workspace's row does not; the mark is a shape, so it holds under
+    NO_COLOR as well. The pane trims the sentence at its width, so the needle
+    is the mark and the notice's opening.
+    """
+    wait_for_output(
+        process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+    )
+    drain_until_quiet(process, master_fd, output)
+    screen = screen_text(bytes(output))
+    if b"\xe2\x9c\x97 no operator token, and" not in screen:
+        raise AssertionError(
+            f"a failed mint did not read as a marked error: {screen!r}"
+        )
     os.write(master_fd, b"q")
 
 
@@ -6740,6 +6826,9 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                     "context_cycle": {
                         "saved": None,
                         "saved_read_error": None,
+                        "read_position": None,
+                        "read_position_read_error": None,
+                        "rewriting_through": None,
                         "prepared": None,
                         "synthesis": None,
                     },
@@ -6749,6 +6838,7 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                         "measured_at": 1787347900.0,
                         "unread_atom_turns": 0,
                         "unread_official_turns": 0,
+                        "continuity_unread_atoms": 0,
                         "last_success_at": 1700000000.0,
                         "last_failure_kind": None,
                     },
@@ -6777,6 +6867,8 @@ def memory_facts_http_fixtures() -> HttpFixtures:
                 "source_invalidations": 1,
                 "source_snapshot_bytes": 128,
                 "librarian_unread_turns": 0,
+                "librarian_continuity_unread_atoms": 0,
+                "librarian_continuity_unmeasured": 0,
                 "librarian_failures": 0,
                 "vision_ingest_errors": 0,
                 "read_errors": 0,
@@ -8411,7 +8503,6 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
                     "tool": "masc_fusion",
                     "input": {"prompt": "panel-input-exact"},
                     "output": "panel-output-exact",
-                    "success": False,
                     "duration_ms": 1200.0,
                     "execution_id": "exec-fusion-1",
                     "tool_use_id": "call-fusion-1",
@@ -8534,13 +8625,19 @@ def skills_usage_clarity_interaction(
         ]
         expected.extend(f"Unavailable: {reason}".encode() for reason in unavailable)
         if observed:
-            expected.extend((b"work-intake", b"alpha 12/12/9", b"2026-08-28T03:04:05Z"))
+            expected.extend((b"work-intake", b"alpha"))
         for needle in expected:
             if needle not in rendered:
                 raise AssertionError(f"Skill usage did not show {needle!r}: {usage!r}")
+        # One keeper, one row, counts in their own columns (#37830). The time is
+        # the terminal's zone, so only the date's shape is pinned.
+        if observed and not re.search(rb"alpha\s+12\s+12\s+9\s+\d{4}-", rendered):
+            raise AssertionError(
+                f"the keeper's counts are not in their own columns: {usage!r}"
+            )
         if b"never invoked" in rendered:
             raise AssertionError(f"Unknown historical usage was called never invoked: {usage!r}")
-        if not observed and b"alpha 12/12/9" in rendered:
+        if not observed and re.search(rb"alpha\s+12\s+12\s+9", rendered):
             raise AssertionError(f"Unobserved usage inherited a previous count: {usage!r}")
         os.write(master_fd, b"q")
 
@@ -8595,7 +8692,7 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
             if initial_error:
                 if b"unavailable (no catalog reading)" not in rendered:
                     raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
-            elif b"alpha 12/12/9" not in rendered:
+            elif not re.search(rb"alpha\s+12\s+12\s+9\s+\d{4}-", rendered):
                 raise AssertionError(f"Refresh failure lost the previous known counts: {frame!r}")
             os.write(master_fd, b"q")
 
@@ -9561,7 +9658,7 @@ def keeper_calls_fixture() -> HttpResponse:
                     "tool": "Read",
                     "input": '{"file_path": "lib/a.ml"}',
                     "output": "sentinel-digest-31506",
-                    "success": True,
+                    "wire_outcome": "ok",
                     "duration_ms": 28.4,
                     "turn": 2143,
                 },
@@ -9570,7 +9667,7 @@ def keeper_calls_fixture() -> HttpResponse:
                     "keeper": "alpha",
                     "tool": "tool_execute",
                     "input": '{"argv": ["dune", "build"]}',
-                    "success": False,
+                    "wire_outcome": "error",
                     "duration_ms": 14534.0,
                     "turn": 2144,
                 },
@@ -10632,7 +10729,7 @@ def keeper_lane_row(
     idle_seconds: int,
     runtime_state: str | None,
     selected_model: str | None,
-    diagnosis: str | None,
+    turn_healthy: bool = True,
 ) -> dict[str, object]:
     last_outcome: object = None
     if runtime_state is not None:
@@ -10646,7 +10743,13 @@ def keeper_lane_row(
         "turn_phase": turn_phase,
         "idle_seconds": idle_seconds,
         "last_outcome": last_outcome,
-        "phase_diagnosis": {"determining_condition": diagnosis},
+        "phase_diagnosis": {
+            "conditions": {
+                "launch_pending": False,
+                "heartbeat_healthy": True,
+                "turn_healthy": turn_healthy,
+            }
+        },
     }
 
 
@@ -10679,11 +10782,10 @@ def keeper_lanes_ia_interaction(
         keepers_plain = CSI_RE.sub(b"", keepers).decode("utf-8")
         for needle in (
             "OPERATIONS",
-            "lifecycle failing",
+            "lifecycle failing (last turn failed)",
             "turn executing",
             "idle 59m",
             "last done",
-            "failing_unhealthy",
         ):
             if needle not in keepers_plain:
                 raise AssertionError(
@@ -14028,7 +14130,6 @@ def run_keyboard_regression(executable: str) -> None:
                     idle_seconds=75,
                     runtime_state="done",
                     selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
                 ),
                 keeper_lane_row(
                     "beta",
@@ -14037,7 +14138,7 @@ def run_keyboard_regression(executable: str) -> None:
                     idle_seconds=3599,
                     runtime_state="done",
                     selected_model=None,
-                    diagnosis="failing_unhealthy",
+                    turn_healthy=False,
                 ),
             ]
         )
@@ -14733,6 +14834,134 @@ def run_ctrl_y_regression(executable: str) -> None:
         description="Ctrl-Y reaches the TUI instead of the tty's delayed suspend",
         interact=ctrl_y_reaches_the_tui_interaction,
         http_fixtures=overview_event_http_fixtures(),
+    )
+
+
+def exit_reason_log(base_path: str) -> str:
+    """Everything the TUI wrote to its own per-PID stderr log, or "".
+
+    The TUI redirects stderr to ``.masc/logs/masc-tui-<pid>.log`` at boot, so
+    the exit line lands there. The pid is the TUI's, not the launcher shell's,
+    so the file is found by glob rather than by name.
+    """
+    logs = sorted(Path(base_path, ".masc", "logs").glob("masc-tui-*.log"))
+    if not logs:
+        return ""
+    return logs[-1].read_text(encoding="utf-8", errors="replace")
+
+
+def wait_for_exit_reason(base_path: str, needle: str, timeout: float = 10.0) -> str:
+    """The log text once it carries [needle], or an assertion naming what it held.
+
+    The line is written as the process exits, so the read races the write; the
+    poll is what makes the scenario wait for the fact rather than for a sleep.
+    """
+    deadline = time.monotonic() + timeout
+    text = ""
+    while time.monotonic() < deadline:
+        text = exit_reason_log(base_path)
+        if needle in text:
+            return text
+        time.sleep(0.05)
+    raise AssertionError(
+        f"no exit reason {needle!r} in {base_path}/.masc/logs/masc-tui-*.log; "
+        f"the log held:\n{text}"
+    )
+
+
+def quit_writes_its_reason_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    base_path: str,
+) -> None:
+    """Leave with q and read the reason back from the log the TUI wrote.
+
+    The per-PID log held only the boot lines, so a session that ended left no
+    reason behind. The first q arms, the second leaves; the exit line is
+    written as the process returns.
+    """
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+    os.write(master_fd, b"q")
+    # The prefix is part of the contract: the guide tells operators to collect
+    # these rows with `grep '[masc-tui] exit:'`, so the test asks for what that
+    # grep asks for rather than for the bare reason.
+    text = wait_for_exit_reason(base_path, "[masc-tui] exit: normal (quit key)")
+    if "exit: abnormal" in text:
+        raise AssertionError(f"a q quit read as abnormal:\n{text}")
+    # One row per session. at_exit stops at the first callback that raises and
+    # OCaml may retry the rest, so a writer with no guard can leave two -- and
+    # a reader counting a day's ends by cause would count this session twice.
+    rows = text.count("[masc-tui] exit:")
+    if rows != 1:
+        raise AssertionError(
+            f"the session wrote {rows} exit rows, not one:\n{text}"
+        )
+
+
+def sigterm_writes_its_reason_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    slave_fd: int,
+    output: bytearray,
+    base_path: str,
+) -> None:
+    """A terminate signal leaves the same record, naming the signal.
+
+    A service manager's SIGTERM is not the operator's q, and the log has to
+    tell them apart, so the reason carries the signal's name.
+    """
+    terminate_with_sigterm(process, master_fd, slave_fd, output, base_path)
+    wait_for_exit_reason(base_path, "[masc-tui] exit: normal (signal SIGTERM)")
+
+
+def run_exit_reason_regression(executable: str) -> None:
+    # #37813's sibling: the per-PID log held only the boot lines, so a session
+    # that ended left no reason behind. These read the reason back from the log
+    # the process wrote, one per way out.
+    run_terminal_scenario(
+        executable,
+        description="a q quit writes its reason to the session log",
+        interact=quit_writes_its_reason_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="a SIGTERM writes its reason to the session log",
+        interact=sigterm_writes_its_reason_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        confirm_exit=b"",
+    )
+
+
+def run_first_install_credential_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="a first install waits for its workspace instead of the login command",
+        interact=first_install_waits_for_its_workspace_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        omit_operator_token=True,
+    )
+    run_terminal_scenario(
+        executable,
+        description="a mint that failed is marked as an error on the events pane",
+        interact=failed_mint_is_marked_as_an_error_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=seed_a_workspace_that_refuses_a_credential,
+        omit_operator_token=True,
+    )
+    # The mark is a shape, not a colour, so the same row must read the same
+    # with colour off -- the case the task names. The harness clears NO_COLOR
+    # for every other scenario, so this one sets it back.
+    run_terminal_scenario(
+        executable,
+        description="a mint that failed is marked as an error under NO_COLOR",
+        interact=failed_mint_is_marked_as_an_error_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=seed_a_workspace_that_refuses_a_credential,
+        omit_operator_token=True,
+        extra_env={"NO_COLOR": "1"},
     )
 
 
@@ -16602,7 +16831,6 @@ def run_keeper_lanes_regression(executable: str) -> None:
                     idle_seconds=75,
                     runtime_state="done",
                     selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
                 ),
                 keeper_lane_row(
                     "beta",
@@ -16611,7 +16839,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
                     idle_seconds=3599,
                     runtime_state="done",
                     selected_model=None,
-                    diagnosis="failing_unhealthy",
+                    turn_healthy=False,
                 ),
             ]
         )
@@ -17482,6 +17710,16 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ),
     ScenarioFamily("quit-waiting", "quit with waiting messages regression", (run_quit_waiting_regression,)),
     ScenarioFamily("ctrl-y", "Ctrl-Y regression", (run_ctrl_y_regression,)),
+    ScenarioFamily(
+        "first-install-credential",
+        "first install credential regression",
+        (run_first_install_credential_regression,),
+    ),
+    ScenarioFamily(
+        "exit-reason",
+        "exit reason regression",
+        (run_exit_reason_regression,),
+    ),
     ScenarioFamily("planning-review", "Planning Task Review regression", (run_planning_review_regression,)),
     ScenarioFamily("repositories", "Repositories regression", (run_repositories_regression,)),
     ScenarioFamily("project-changes", "project Git changes regression", (run_project_changes_regression,)),

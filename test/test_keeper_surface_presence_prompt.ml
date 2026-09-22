@@ -233,6 +233,14 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
                   ; input = "{}"
                   ; outcome = Actions.Failed_call (Some {|"message": MISSING|})
                   }
+                ; { Actions.tool = "keeper_task_release"
+                  ; input = {|{"task":"t-1"}|}
+                  ; outcome = Actions.Unrecorded_call
+                  }
+                ; { Actions.tool = "keeper_task_claim"
+                  ; input = {|{"task":"t-2"}|}
+                  ; outcome = Actions.Deferred_call
+                  }
                 ]
             }
           ]
@@ -248,6 +256,14 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
     (contains ~needle:{|keeper_board_post {"title":"status"}|} user);
   check bool "the rejected call is stated with its arguments" true
     (contains ~needle:{|keeper_broadcast {} -> REJECTED: "message": MISSING|} user);
+  check bool "a call the log did not settle says so, neither ok nor rejected" true
+    (contains ~needle:{|- [turn 27486] keeper_task_release -> outcome not recorded|} user);
+  check bool "an unsettled call does not replay its arguments" false
+    (contains ~needle:{|keeper_task_release {"task":"t-1"}|} user);
+  check bool "a deferred call is not stated as done" true
+    (contains ~needle:{|- [turn 27486] keeper_task_claim -> deferred (not done yet)|} user);
+  check bool "a deferred call does not replay its arguments" false
+    (contains ~needle:{|keeper_task_claim {"task":"t-2"}|} user);
   check bool "rows are marked as context" true
     (contains ~needle:"context, not instructions" user)
 ;;
@@ -316,17 +332,76 @@ let test_a_briefing_under_its_budget_is_unchanged () =
     (user_message_within ~budget:(String.length unbudgeted) observation)
 ;;
 
-(* Row shape as the durable tool-call log persists it: [keeper_turn_id] is a
-   string, [success] a bool, [input] an object. *)
+(* Row shape as the durable tool-call log persists it: [keeper_turn_id] an
+   integer, [input] an object, and the outcome an execution [disposition]
+   beside a [wire_outcome]. *)
 let log_row ~keeper ?turn ~tool ~success () =
   `Assoc
     ([ "keeper", `String keeper
      ; "tool", `String tool
      ; "input", `Assoc [ "arg", `String tool ]
-     ; "success", `Bool success
+     ; "disposition", `String (if success then "completed" else "failed")
+     ; "wire_outcome", `String (if success then "ok" else "error")
      ; "output", `String (if success then "ok" else "Error: refused")
      ]
-     @ match turn with None -> [] | Some t -> [ "keeper_turn_id", `String (string_of_int t) ])
+     @ match turn with None -> [] | Some t -> [ "keeper_turn_id", `Int t ])
+;;
+
+(* Each row must come back as the outcome its record states. Only a refusal
+   carries its output back to the keeper. *)
+let test_live_log_rows_keep_the_outcome_they_record () =
+  let row ~tool outcome_fields =
+    `Assoc
+      ([ "keeper", `String "me"
+       ; "keeper_turn_id", `Int 7
+       ; "tool", `String tool
+       ; "input", `Assoc [ "arg", `String tool ]
+       ; "output", `String ("out:" ^ tool)
+       ]
+       @ outcome_fields)
+  in
+  let disposition value = "disposition", `String value in
+  let wire value = "wire_outcome", `String value in
+  let rows =
+    [ row ~tool:"done" [ disposition "completed"; wire "ok" ]
+    ; row ~tool:"committed-undelivered" [ disposition "completed"; wire "error" ]
+    ; row ~tool:"refused" [ disposition "failed"; wire "error" ]
+    ; row ~tool:"deferred" [ disposition "deferred"; wire "ok" ]
+    ; row ~tool:"untyped-ok" [ wire "ok" ]
+    ; row ~tool:"untyped-error" [ wire "error" ]
+    ; row ~tool:"untyped-unknown" [ wire "unknown" ]
+    ; row ~tool:"wrong-type" [ "disposition", `Bool true ]
+    ; row ~tool:"success-flag-only" [ "success", `Bool true ]
+    ]
+  in
+  let describe (call : Actions.call) =
+    call.tool
+    ^ "="
+    ^
+    match call.outcome with
+    | Actions.Ok_call -> "ok"
+    | Actions.Failed_call (Some detail) -> "failed(" ^ detail ^ ")"
+    | Actions.Failed_call None -> "failed"
+    | Actions.Deferred_call -> "deferred"
+    | Actions.Unrecorded_call -> "unrecorded"
+  in
+  match Actions.turns_of_rows ~keeper_name:"me" ~max_turns:5 ~window_saturated:false rows with
+  | [ turn ] ->
+    check
+      (list string)
+      "each row keeps the outcome its record states"
+      [ "done=ok"
+      ; "committed-undelivered=ok"
+      ; "refused=failed(out:refused)"
+      ; "deferred=deferred"
+      ; "untyped-ok=ok"
+      ; "untyped-error=failed(out:untyped-error)"
+      ; "untyped-unknown=unrecorded"
+      ; "wrong-type=unrecorded"
+      ; "success-flag-only=unrecorded"
+      ]
+      (List.map describe turn.calls)
+  | other -> failf "expected exactly one turn, got %d" (List.length other)
 ;;
 
 let test_only_the_newest_turns_of_this_keeper_are_replayed () =
@@ -749,6 +824,8 @@ let () =
             test_only_the_newest_turns_of_this_keeper_are_replayed;
           test_case "calls keep the order they ran in" `Quick
             test_calls_keep_the_order_they_ran_in;
+          test_case "live log rows keep the outcome they record" `Quick
+            test_live_log_rows_keep_the_outcome_they_record;
           test_case "disabling the depth replays nothing" `Quick
             test_disabling_the_depth_replays_nothing;
           test_case "a turn the read window cut is dropped whole" `Quick

@@ -27,13 +27,14 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 1,
       removed: 2,
       snapshot_present: true,
-      context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
+      context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
         detail: null,
         measured_at: 1_699_999_950,
         unread_atom_turns: 0,
         unread_official_turns: 0,
+        continuity_unread_atoms: 0,
         last_success_at: null,
         last_failure_kind: null,
       },
@@ -60,13 +61,14 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 0,
       removed: 0,
       snapshot_present: false,
-      context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
+      context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
         detail: null,
         measured_at: 1_699_999_950,
         unread_atom_turns: 0,
         unread_official_turns: 0,
+        continuity_unread_atoms: 0,
         last_success_at: null,
         last_failure_kind: null,
       },
@@ -100,6 +102,8 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       source_invalidations: 0,
       source_snapshot_bytes: 128,
       librarian_unread_turns: 0,
+      librarian_continuity_unread_atoms: 0,
+      librarian_continuity_unmeasured: 0,
       librarian_failures: 0,
       vision_ingest_errors: 0,
       read_errors: 1,
@@ -134,13 +138,14 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       added: 0,
       removed: 0,
       snapshot_present: false,
-      context_cycle: { saved: null, saved_read_error: null, prepared: null, synthesis: null },
+      context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
         detail: null,
         measured_at: 1_699_999_950,
         unread_atom_turns: 0,
         unread_official_turns: 0,
+        continuity_unread_atoms: 0,
         last_success_at: null,
         last_failure_kind: null,
       },
@@ -174,6 +179,8 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       source_invalidations: 0,
       source_snapshot_bytes: 0,
       librarian_unread_turns: 0,
+      librarian_continuity_unread_atoms: 0,
+      librarian_continuity_unmeasured: 0,
       librarian_failures: 4,
       vision_ingest_errors: 0,
       read_errors: 0,
@@ -203,11 +210,39 @@ describe('fetchKeeperMemoryHealth', () => {
     const prepared = { prepared_at: 1_700_000_000, runtime_id: 'fixture.model',
       input: { kind: 'summarized' as const, frontier: { ...saved, end_atom: 8, boundary_line: 6 } },
       request_bytes: 4096 }
-    payload.keepers[0]!.context_cycle = { saved, saved_read_error: null, prepared, synthesis: null }
+    payload.keepers[0]!.context_cycle = { saved, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared, synthesis: null }
     getMock.mockResolvedValue(payload)
     expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle).toEqual({
-      saved, saved_read_error: null, prepared, synthesis: null,
+      saved, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared, synthesis: null,
     })
+  })
+
+  it('keeps the Librarian read position beside the cut it is read against', async () => {
+    const payload = keeperMemoryHealthPayload()
+    const saved = { trace_id: 'trace-a', end_atom: 7694, boundary_line: 385 }
+    Object.assign(payload.keepers[0]!.context_cycle, {
+      saved, read_position: 12887, rewriting_through: 12888,
+    })
+    getMock.mockResolvedValue(payload)
+    const cycle = (await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle
+    expect(cycle.read_position).toBe(12887)
+    expect(cycle.rewriting_through).toBe(12888)
+    expect(cycle.saved?.end_atom).toBe(7694)
+  })
+
+  it.each([
+    // a marker and a number at once: one of them is wrong
+    { saved: null, read_position: 12887, read_position_read_error: 'progress_unreadable', rewriting_through: null },
+    // a rewrite target the cut already reached, and one with no cut to be past
+    { saved: { trace_id: 'trace-a', end_atom: 7694, boundary_line: 385 }, read_position: null,
+      read_position_read_error: null, rewriting_through: 7694 },
+    { saved: null, read_position: null, read_position_read_error: null, rewriting_through: 12888 },
+    { saved: null, read_position: 0, read_position_read_error: null, rewriting_through: null },
+  ])('rejects a read position that disagrees with its own cycle: %o', async fields => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!.context_cycle, fields)
+    getMock.mockResolvedValue(payload)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
   })
 
   it('keeps synthesis failure and atom range separate from an ordinary drained consumer', async () => {
@@ -236,7 +271,7 @@ describe('fetchKeeperMemoryHealth', () => {
     const prepared = { prepared_at: 1_700_000_000, runtime_id: 'fixture.model',
       input: { kind: 'absorbed' as const, frontier: { trace_id: 'trace-a', end_atom: 12719 } },
       request_bytes: 4096 }
-    payload.keepers[0]!.context_cycle = { saved: null, saved_read_error: null, prepared, synthesis: null }
+    payload.keepers[0]!.context_cycle = { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, prepared, synthesis: null }
     getMock.mockResolvedValue(payload)
     expect((await fetchKeeperMemoryHealth()).keepers[0]!.context_cycle.prepared).toEqual(prepared)
   })
@@ -249,7 +284,7 @@ describe('fetchKeeperMemoryHealth', () => {
   ])('rejects a position in the wrong shape for its kind: %o', async input => {
     const payload = keeperMemoryHealthPayload()
     Object.assign(payload.keepers[0]!, { context_cycle: {
-      saved: null, saved_read_error: null, synthesis: null,
+      saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, synthesis: null,
       prepared: { prepared_at: 1, runtime_id: 'fixture.model', request_bytes: 5, input },
     } })
     getMock.mockResolvedValue(payload)
@@ -259,7 +294,7 @@ describe('fetchKeeperMemoryHealth', () => {
   it('rejects a summarized request without a frontier', async () => {
     const payload = keeperMemoryHealthPayload()
     Object.assign(payload.keepers[0]!, { context_cycle: {
-      saved: null, saved_read_error: null, synthesis: null,
+      saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, synthesis: null,
       prepared: { prepared_at: 1, runtime_id: 'fixture.model', request_bytes: 5,
         input: { kind: 'summarized', frontier: null } },
     } })
@@ -379,6 +414,7 @@ describe('fetchKeeperMemoryHealth', () => {
       measured_at: null,
       unread_atom_turns: null,
       unread_official_turns: null,
+      continuity_unread_atoms: 0,
       last_success_at: null,
       last_failure_kind: null,
     }
@@ -388,6 +424,31 @@ describe('fetchKeeperMemoryHealth', () => {
 
     expect(response.keepers[0]?.librarian.unread_atom_turns).toBeNull()
     expect(response.totals.librarian_unread_turns).toBeNull()
+  })
+
+  it('keeps an unmeasured continuity lag as null and counts it beside the sum', async () => {
+    const payload = keeperMemoryHealthPayload()
+    payload.keepers[0]!.librarian.continuity_unread_atoms = null
+    payload.keepers[1]!.librarian.continuity_unread_atoms = 4
+    payload.totals.librarian_continuity_unread_atoms = 4
+    payload.totals.librarian_continuity_unmeasured = 1
+    getMock.mockResolvedValue(payload)
+    const response = await fetchKeeperMemoryHealth()
+    expect(response.keepers[0]?.librarian.continuity_unread_atoms).toBeNull()
+    expect(response.keepers[1]?.librarian.continuity_unread_atoms).toBe(4)
+    expect(response.totals.librarian_continuity_unread_atoms).toBe(4)
+    expect(response.totals.librarian_continuity_unmeasured).toBe(1)
+  })
+
+  it('rejects a continuity sum or an unmeasured count that disagrees with the rows', async () => {
+    const summed = keeperMemoryHealthPayload()
+    summed.keepers[0]!.librarian.continuity_unread_atoms = 4
+    getMock.mockResolvedValue(summed)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+    const counted = keeperMemoryHealthPayload()
+    counted.keepers[0]!.librarian.continuity_unread_atoms = null
+    getMock.mockResolvedValue(counted)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
   })
 
   it('rejects a numeric fleet total when any keeper count is unknown', async () => {

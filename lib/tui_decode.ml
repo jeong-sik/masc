@@ -119,13 +119,19 @@ type keeper_lane_last_outcome = {
   klo_selected_model : string option;
 }
 
+type keeper_lane_conditions = {
+  klc_launch_pending : bool;
+  klc_heartbeat_healthy : bool;
+  klc_turn_healthy : bool;
+}
+
 type keeper_lane = {
   kl_keeper : string;
   kl_phase : keeper_lane_phase;
   kl_turn_phase : keeper_lane_turn_phase;
   kl_idle_seconds : int;
   kl_last_outcome : keeper_lane_last_outcome option;
-  kl_diagnosis : string option;
+  kl_conditions : keeper_lane_conditions;
 }
 
 type keeper_lanes_snapshot = {
@@ -567,9 +573,13 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+type fleet_blocker =
+  | Blocker of Keeper_fleet_blocker.t
+  | Unrecognised_blocker of string
+
 type fleet_safety = {
   fs_status : string;
-  fs_blocker : string option;
+  fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
   fs_running_count : int;
@@ -1054,6 +1064,13 @@ let decode_turn_mode json =
   | Some mode -> Ok mode
   | None -> Error (Printf.sprintf "unknown current turn mode %S" raw)
 
+(* The five token counters are one observation: the producer reads them off
+   one provider sample and writes all five or none
+   ([Keeper_unified_metrics_snapshot], the [usage_resolution.delta] match).
+   The cost is a separate reading on the same row -- the producer writes it
+   only where the sample carried one -- so a row with five counters and no
+   cost is a turn whose provider priced nothing, not a half-written
+   observation. A cost without the counters is a row no producer writes. *)
 let validate_usage_projection ~input_tokens ~output_tokens
     ~cache_creation_tokens ~cache_read_tokens ~total_tokens ~cost_usd
     ~inner_trust ~inner_anomaly ~inner_reasons ~outer_trust ~outer_reasons =
@@ -1063,15 +1080,13 @@ let validate_usage_projection ~input_tokens ~output_tokens
         output_tokens,
         cache_creation_tokens,
         cache_read_tokens,
-        total_tokens,
-        cost_usd )
+        total_tokens )
     with
     | ( Some input_tokens,
         Some output_tokens,
         Some cache_creation_tokens,
         Some cache_read_tokens,
-        Some total_tokens,
-        Some cost_usd ) ->
+        Some total_tokens ) ->
         if total_tokens <> input_tokens + output_tokens then
           Error "usage total_tokens does not equal input_tokens + output_tokens"
         else
@@ -1080,42 +1095,41 @@ let validate_usage_projection ~input_tokens ~output_tokens
               output_tokens;
               cache_creation_input_tokens = cache_creation_tokens;
               cache_read_input_tokens = cache_read_tokens;
-              cost_usd = Some cost_usd;
+              cost_usd;
             }
           in
           Ok (Keeper_usage_trust.classify ~usage_reported:true ~usage)
-    | None, None, None, None, None, None ->
-        let usage : Agent_core.Types.api_usage =
-          { input_tokens = 0;
-            output_tokens = 0;
-            cache_creation_input_tokens = 0;
-            cache_read_input_tokens = 0;
-            cost_usd = None;
-          }
-        in
-        Ok (Keeper_usage_trust.classify ~usage_reported:false ~usage)
+    | None, None, None, None, None ->
+        if Option.is_some cost_usd then
+          Error "usage cost_usd without the counters it would price"
+        else
+          let usage : Agent_core.Types.api_usage =
+            { input_tokens = 0;
+              output_tokens = 0;
+              cache_creation_input_tokens = 0;
+              cache_read_input_tokens = 0;
+              cost_usd = None;
+            }
+          in
+          Ok (Keeper_usage_trust.classify ~usage_reported:false ~usage)
     | _ ->
-        (* Name which of the six are set. The sentence on its own sent a reader
-           to diff the payload against this match by hand, with no way to tell
-           which field the writer left out, and a live keeper's window lands
-           here often enough to matter. Same shape as the field-set refusal in
-           {!require_exact_object_fields}: the groups that decide the verdict
-           are the groups worth printing.
+        (* Name which of the five are set. The sentence on its own sent a
+           reader to diff the payload against this match by hand, with no way
+           to tell which field the writer left out.
 
            The missing names come first because this sentence is read on one
-           cut row, behind the metrics notice and the row number. A writer that
-           fills five of six leaves one name unset and five set, so putting the
-           five first is what pushes the one it skipped off the right edge. How
-           many cells are left here is the frame's measure and not this
-           decoder's: test_tui_metrics_tail draws the notice through the same
-           fit and checks the reason survives. *)
+           cut row, behind the metrics notice and the row number. A writer
+           that fills four of five leaves one name unset and four set, so
+           putting the four first is what pushes the one it skipped off the
+           right edge. How many cells are left here is the frame's measure and
+           not this decoder's: test_tui_metrics_tail draws the notice through
+           the same fit and checks the reason survives. *)
         let named =
           [ ("input_tokens", Option.is_some input_tokens)
           ; ("output_tokens", Option.is_some output_tokens)
           ; ("cache_creation_tokens", Option.is_some cache_creation_tokens)
           ; ("cache_read_tokens", Option.is_some cache_read_tokens)
           ; ("total_tokens", Option.is_some total_tokens)
-          ; ("cost_usd", Option.is_some cost_usd)
           ]
         in
         let names wanted =
@@ -1974,7 +1988,7 @@ type keeper_call = {
   kc_input : string;
   kc_output : string option;
   kc_artifact_refs : Tool_output.artifact_ref list;
-  kc_success : bool;
+  kc_outcome : Tool_result.recorded_call_outcome;
   kc_duration_ms : float option;
   kc_turn : int option;
   kc_task_id : string option;
@@ -2528,6 +2542,7 @@ type memory_librarian_health = {
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;
+  mlh_continuity_unread_atoms : int option;
   mlh_last_success_at : float option;
   mlh_last_failure_kind : string option;
 }
@@ -2556,6 +2571,17 @@ type memory_context_prepared = {
 type memory_context_cycle = {
   mcc_saved : memory_context_frontier option;
   mcc_saved_unreadable : bool;
+  (* Where the Librarian has read to, beside where its snapshot cuts. A
+     snapshot that stopped moving while the position kept going is what a
+     request pays for: it starts at the cut and carries every atom since
+     (#37793). The distance is [mcc_read_position - mcc_saved.mcf_end_atom]
+     and is not carried as a field of its own. *)
+  mcc_read_position : int option;
+  mcc_read_position_unreadable : bool;
+  (* Where a snapshot being rewritten from atom 0 has to reach before a
+     request starts from it. [None] on a snapshot that is not being
+     rewritten. *)
+  mcc_rewriting_through : int option;
   mcc_prepared : memory_context_prepared option;
   mcc_synthesis : Keeper_continuity_observation.synthesis option;
 }
@@ -2600,6 +2626,8 @@ type memory_health_snapshot = {
   mhs_total_source_snapshot_bytes : int;
   mhs_total_librarian_failures : int;
   mhs_total_librarian_unread_turns : int option;
+  mhs_total_librarian_continuity_unread_atoms : int;
+  mhs_total_librarian_continuity_unmeasured : int;
   mhs_total_vision_ingest_errors : int;
   mhs_total_read_errors : int;
   mhs_total_source_read_errors : int;
@@ -4779,6 +4807,7 @@ let decode_memory_librarian_health keeper_json =
       ; "measured_at"
       ; "unread_atom_turns"
       ; "unread_official_turns"
+      ; "continuity_unread_atoms"
       ; "last_success_at"
       ; "last_failure_kind"
       ]
@@ -4799,6 +4828,12 @@ let decode_memory_librarian_health keeper_json =
   let* mlh_unread_official_turns =
     required_nullable_int_field json "unread_official_turns"
   in
+  (* Read from the continuity snapshot and the read position, not from the
+     durable drain's measurement, so it carries no [measured_at] and is not
+     weighed against one below. *)
+  let* mlh_continuity_unread_atoms =
+    required_nullable_int_field json "continuity_unread_atoms"
+  in
   let* mlh_last_success_at = required_nullable_float_field json "last_success_at" in
   let* mlh_last_failure_kind =
     required_nullable_string_field json "last_failure_kind"
@@ -4806,7 +4841,7 @@ let decode_memory_librarian_health keeper_json =
   let* () =
     if List.for_all
          (fun count -> Option.fold ~none:true ~some:(fun count -> count >= 0) count)
-         [ mlh_unread_atom_turns; mlh_unread_official_turns ]
+         [ mlh_unread_atom_turns; mlh_unread_official_turns; mlh_continuity_unread_atoms ]
     then Ok ()
     else Error "librarian unread turns must be non-negative"
   in
@@ -4825,6 +4860,7 @@ let decode_memory_librarian_health keeper_json =
     ; mlh_measured_at
     ; mlh_unread_atom_turns
     ; mlh_unread_official_turns
+    ; mlh_continuity_unread_atoms
     ; mlh_last_success_at
     ; mlh_last_failure_kind
     }
@@ -4852,7 +4888,8 @@ let decode_memory_alert json =
 let decode_memory_context_cycle keeper_json =
   let* json = required_member keeper_json "context_cycle" in
   let* () = require_exact_object_fields "context cycle"
-    ["saved"; "saved_read_error"; "prepared"; "synthesis"] json in
+    ["saved"; "saved_read_error"; "read_position"; "read_position_read_error";
+     "rewriting_through"; "prepared"; "synthesis"] json in
   let nullable decode = function `Null -> Ok None | value -> Result.map Option.some (decode value) in
   let frontier json =
     let* () = require_exact_object_fields "context frontier" ["trace_id"; "end_atom"; "boundary_line"] json in
@@ -4898,11 +4935,29 @@ let decode_memory_context_cycle keeper_json =
     | None, _ -> Ok false
     | Some "snapshot_unreadable", None -> Ok true
     | _ -> Error "context saved frontier disagrees with read error" in
+  let* mcc_read_position = required_nullable_int_field json "read_position" in
+  let* () = match mcc_read_position with
+    | Some end_atom when end_atom < 1 -> Error "invalid context read position"
+    | Some _ | None -> Ok () in
+  let* position_read_error = required_nullable_string_field json "read_position_read_error" in
+  let* mcc_read_position_unreadable = match position_read_error, mcc_read_position with
+    | None, _ -> Ok false
+    | Some "progress_unreadable", None -> Ok true
+    | Some _, _ -> Error "context read position disagrees with read error" in
+  let* mcc_rewriting_through = required_nullable_int_field json "rewriting_through" in
+  (* The writer sets this only past the cut it belongs to, on a snapshot that
+     was read. A value without that snapshot, or at or behind its cut, is not
+     a rewrite this reader can describe. *)
+  let* () = match mcc_rewriting_through, mcc_saved with
+    | None, _ -> Ok ()
+    | Some through, Some saved when through > saved.mcf_end_atom -> Ok ()
+    | Some _, (Some _ | None) -> Error "context rewrite target disagrees with the saved cut" in
   let* value = required_member json "prepared" in
   let* mcc_prepared = nullable prepared value in
   let* value = required_member json "synthesis" in
   let* mcc_synthesis = nullable Keeper_continuity_observation.synthesis_of_json value in
-  Ok {mcc_saved; mcc_saved_unreadable; mcc_prepared; mcc_synthesis}
+  Ok {mcc_saved; mcc_saved_unreadable; mcc_read_position; mcc_read_position_unreadable;
+      mcc_rewriting_through; mcc_prepared; mcc_synthesis}
 
 let decode_memory_keeper_health json =
   let* () =
@@ -5118,6 +5173,8 @@ let decode_memory_health_snapshot json =
       ; "source_invalidations"
       ; "source_snapshot_bytes"
       ; "librarian_unread_turns"
+      ; "librarian_continuity_unread_atoms"
+      ; "librarian_continuity_unmeasured"
       ; "librarian_failures"
       ; "vision_ingest_errors"
       ; "read_errors"
@@ -5161,6 +5218,14 @@ let decode_memory_health_snapshot json =
   let* total_removed = required_int_field totals_json "removed" in
   let* mhs_total_librarian_unread_turns =
     required_nullable_int_field totals_json "librarian_unread_turns"
+  in
+  (* Summed over the keepers this could be taken for; the second says how many
+     it could not, so the first is never read as "the fleet is caught up". *)
+  let* mhs_total_librarian_continuity_unread_atoms =
+    required_int_field totals_json "librarian_continuity_unread_atoms"
+  in
+  let* mhs_total_librarian_continuity_unmeasured =
+    required_int_field totals_json "librarian_continuity_unmeasured"
   in
   let* summary_json = required_member json "alert_summary" in
   let* () =
@@ -5236,6 +5301,21 @@ let decode_memory_health_snapshot json =
   let* () =
     if mhs_total_librarian_unread_turns = expected_unread then Ok ()
     else Error "memory health unread total disagrees with keeper rows"
+  in
+  let expected_continuity_unread, expected_continuity_unmeasured =
+    List.fold_left
+      (fun (total, unmeasured) keeper ->
+         match keeper.mkh_librarian.mlh_continuity_unread_atoms with
+         | Some atoms -> total + atoms, unmeasured
+         | None -> total, unmeasured + 1)
+      (0, 0)
+      mhs_keepers
+  in
+  let* () =
+    if mhs_total_librarian_continuity_unread_atoms = expected_continuity_unread
+       && mhs_total_librarian_continuity_unmeasured = expected_continuity_unmeasured
+    then Ok ()
+    else Error "memory health continuity lag totals disagree with keeper rows"
   in
   let expected_totals =
     [ mhs_total_facts, sum (fun keeper -> keeper.mkh_facts)
@@ -5314,6 +5394,8 @@ let decode_memory_health_snapshot json =
     ; mhs_total_source_snapshot_bytes
     ; mhs_total_librarian_failures
     ; mhs_total_librarian_unread_turns
+    ; mhs_total_librarian_continuity_unread_atoms
+    ; mhs_total_librarian_continuity_unmeasured
     ; mhs_total_vision_ingest_errors
     ; mhs_total_read_errors
     ; mhs_total_source_read_errors
@@ -5584,24 +5666,10 @@ let decode_keeper_call json =
   let* kc_at = require_float_field json "ts" in
   let* kc_tool = required_string_field json "tool" in
   let* keeper = required_string_field json "keeper" in
-  (* The durable record stopped always carrying a boolean [success]:
-     [Keeper_tool_call_log]'s `Assoc construction (the one the server
-     actually serves from) writes [wire_outcome] and an optional
-     [disposition], never a [success] key. A real row and every producer
-     built to match it therefore hit the [`Null] arm below unconditionally,
-     so [decode_keeper_call] always errored and the calls detail view never
-     rendered a single keeper's tool calls (#37461). [success] is still read
-     first for any caller that does send it explicitly. Next, [disposition]
-     is decoded through [keeper_call_disposition_of_string] -- the same
-     parse [kc_disposition] below reuses, and already documented as
-     [Tool_result.string_of_disposition]'s inverse -- instead of matching
-     its three spellings a second time in this function. [wire_outcome]
-     (the untyped wire projection -- explicitly not an outcome SSOT per
-     [Tool_result], but the only field several real rows carry) is tried
-     last, and its own ["unknown"] spelling is not folded into success: a
-     wire that says it does not know the outcome is not evidence that the
-     call completed. A row naming none of the three still errors, as
-     before. *)
+  (* How the call ended is read by the rule every tool-call log reader shares.
+     A row whose outcome fields do not decode is refused: the producer and
+     this reader disagree on the schema. A row with no outcome yet is kept and
+     says so. *)
   let* disposition = optional_string_field json "disposition" in
   let* kc_disposition =
     match disposition with
@@ -5609,20 +5677,12 @@ let decode_keeper_call json =
     | Some raw when String.trim raw = "" -> Ok None
     | Some word -> Result.map Option.some (keeper_call_disposition_of_string word)
   in
-  let* kc_success =
-    match member "success" json with
-    | `Bool value -> Ok value
-    | `Null -> (
-      match kc_disposition with
-      | Some Keeper_call_completed | Some Keeper_call_deferred -> Ok true
-      | Some Keeper_call_failed -> Ok false
-      | None -> (
-        match member "wire_outcome" json with
-        | `String "ok" -> Ok true
-        | `String "error" -> Ok false
-        | `String "unknown" -> Error "keeper call wire_outcome is unknown"
-        | _ -> Error "keeper call has no success, disposition, or wire_outcome field"))
-    | _ -> Error "keeper call success is not a bool"
+  let* kc_outcome =
+    match Tool_result.recorded_call_outcome json with
+    | ( Tool_result.Recorded_succeeded | Tool_result.Recorded_deferred
+      | Tool_result.Recorded_failed | Tool_result.Recorded_unsettled ) as outcome ->
+      Ok outcome
+    | Tool_result.Recorded_malformed -> Error "keeper call outcome is malformed"
   in
   let kc_input =
     match member "input" json with
@@ -5702,7 +5762,7 @@ let decode_keeper_call json =
       ; kc_input
       ; kc_output
       ; kc_artifact_refs
-      ; kc_success
+      ; kc_outcome
       ; kc_duration_ms
       ; kc_turn
       ; kc_task_id = string_opt "task_id"
@@ -6081,8 +6141,14 @@ let decode_keeper_lane json =
     | Some bad -> field_type_error "last_outcome" "an object or null" bad
   in
   let* diagnosis = required_object_field json "phase_diagnosis" in
-  let* kl_diagnosis =
-    required_nullable_string_field diagnosis "determining_condition"
+  let* conditions = required_object_field diagnosis "conditions" in
+  let* klc_launch_pending = required_bool_field conditions "launch_pending" in
+  let* klc_heartbeat_healthy =
+    required_bool_field conditions "heartbeat_healthy"
+  in
+  let* klc_turn_healthy = required_bool_field conditions "turn_healthy" in
+  let kl_conditions =
+    { klc_launch_pending; klc_heartbeat_healthy; klc_turn_healthy }
   in
   Ok
     { kl_keeper
@@ -6090,7 +6156,7 @@ let decode_keeper_lane json =
     ; kl_turn_phase
     ; kl_idle_seconds
     ; kl_last_outcome
-    ; kl_diagnosis
+    ; kl_conditions
     }
 
 let decode_keeper_lanes_snapshot json =
@@ -9056,7 +9122,14 @@ let decode_lane_run_detail json =
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   let* fs_status = required_string_field section "status" in
-  let* fs_blocker = optional_string_field section "blocker" in
+  let* fs_blocker =
+    Result.map
+      (Option.map (fun name ->
+           match Keeper_fleet_blocker.of_wire_name name with
+           | Some blocker -> Blocker blocker
+           | None -> Unrecognised_blocker name))
+      (optional_string_field section "blocker")
+  in
   let* fs_operator_action_required =
     match member "operator_action_required" section with
     | `Bool value -> Ok value

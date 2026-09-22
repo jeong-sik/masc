@@ -12,6 +12,16 @@ type outcome =
       (** The refusal text verbatim, [None] when the tool refused without
           describing why. A successful call carries no output: that it landed
           is the fact, and the returned body is where the bytes are. *)
+  | Deferred_call
+      (** Accepted, but its effect has not happened
+          ({!Tool_result.Recorded_deferred}). Not a success: the keeper must
+          not read the work as done. *)
+  | Unrecorded_call
+      (** The log row does not say how the call ended
+          ({!Tool_result.Recorded_unsettled} or
+          {!Tool_result.Recorded_malformed}). It is neither a success nor a
+          refusal: rendering it as either tells the keeper something the
+          record does not. *)
 
 type call =
   { tool : string

@@ -117,12 +117,21 @@ let memory_context_lines (k : memory_keeper_health) =
       | Some atoms, Some official -> Printf.sprintf "unread %d" (atoms + official)
       | Some _, None | None, Some _ | None, None -> "unread ?"
     in
+    (* The two rounds fall behind separately, so the continuity lag prints
+       beside the drain's count rather than folded into it. "?" is its own
+       reading: no snapshot, an unreadable one, or one from another trace. *)
+    let continuity =
+      match librarian.mlh_continuity_unread_atoms with
+      | Some atoms -> Printf.sprintf "continuity behind %d" atoms
+      | None -> "continuity behind ?"
+    in
     Printf.sprintf
-      "  Librarian · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
+      "  Librarian · %s · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
       (match librarian.mlh_state with
        | Some state -> state
        | None -> "not measured")
       unread
+      continuity
       (memory_updated_text librarian.mlh_measured_at)
       (memory_updated_text librarian.mlh_last_success_at)
       (Option.value librarian.mlh_last_failure_kind ~default:"-")
@@ -132,9 +141,28 @@ let memory_context_lines (k : memory_keeper_health) =
     let cycle = k.mkh_context_cycle in
     let frontier value = Printf.sprintf "atom %d / boundary %d · trace %s"
       value.mcf_end_atom value.mcf_boundary_line (Terminal_text.single_line value.mcf_trace_id) in
-    let saved = match cycle.mcc_saved with
-      | Some value -> frontier value
-      | None -> if cycle.mcc_saved_unreadable then "unreadable" else "absent" in
+    let saved =
+      let cut = match cycle.mcc_saved with
+        | Some value -> frontier value
+        | None -> if cycle.mcc_saved_unreadable then "unreadable" else "absent" in
+      (* Where the Librarian has read to belongs beside the cut, not on a line
+         of its own: a request starts at the cut and carries the atoms up to
+         the position, so the two apart is what the turn pays (#37793). *)
+      let read = match cycle.mcc_read_position, cycle.mcc_saved with
+        | None, _ ->
+          if cycle.mcc_read_position_unreadable
+          then " · read position unreadable"
+          else " · nothing read yet"
+        | Some position, Some value when position > value.mcf_end_atom ->
+          Printf.sprintf " · read to atom %d, %d atoms past the cut"
+            position (position - value.mcf_end_atom)
+        | Some position, Some _ | Some position, None ->
+          Printf.sprintf " · read to atom %d" position in
+      let rewriting = match cycle.mcc_rewriting_through with
+        | None -> ""
+        | Some through ->
+          Printf.sprintf " · rewriting from atom 0, unused until atom %d" through in
+      cut ^ read ^ rewriting in
     let prepared, input = match cycle.mcc_prepared with
       | None -> "not observed since server start", "not observed"
       | Some value ->
@@ -531,10 +559,13 @@ let render_memory_body ~cols ~budget (state : state)
   (match state.memory_health with
    | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
    | Some snapshot ->
-       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %s turns unread · %d failures since server start"
+       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %s turns unread · %d atoms behind in continuity (%d keepers not measured) · %d failures since server start"
          snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
          snapshot.mhs_total_support_invalidations
-         (Option.fold ~none:"?" ~some:string_of_int snapshot.mhs_total_librarian_unread_turns) snapshot.mhs_total_librarian_failures));
+         (Option.fold ~none:"?" ~some:string_of_int snapshot.mhs_total_librarian_unread_turns)
+         snapshot.mhs_total_librarian_continuity_unread_atoms
+         snapshot.mhs_total_librarian_continuity_unmeasured
+         snapshot.mhs_total_librarian_failures));
   push info_bar;
   let search_bar =
     if query <> "" then

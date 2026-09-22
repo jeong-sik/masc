@@ -14,6 +14,15 @@ type librarian_health =
   ; unread_official_turns : int option
       (** [None] when the durable drain could not take the count; [state] says what
           the pass ran into. *)
+  ; continuity_unread_atoms : int option
+      (** How far the continuity snapshot trails the Librarian's read
+          position: the position's [end_atom] less the snapshot's. A
+          different lag from [unread_atom_turns], which counts the durable
+          drain -- the two rounds fall behind separately, so one number does
+          not stand for both (RFC librarian-lifecycle §4.9). [None] when
+          either side is absent or unreadable, when they name different
+          traces, or when the snapshot is ahead: none of those is a caught-up
+          keeper, and a zero would say it was. *)
   ; last_success_at : float option
       (** [updated_at] of the current snapshot when the Librarian is what
           wrote it. An explicit write is not a Librarian success. *)
@@ -26,20 +35,52 @@ type librarian_health =
 type context_cycle =
   { saved : Keeper_continuity_observation.frontier option
   ; saved_read_error : string option
+  ; read_position : int option
+        (** Where the Librarian has read to ({!Keeper_librarian_progress}),
+            next to where its snapshot cuts ([saved]). The two move apart
+            when the durable round commits and the continuity round does not,
+            and a reader cannot tell that from [saved] alone: the snapshot
+            still fits the history, so requests keep starting at its cut and
+            carry every atom the failed rounds left behind (#37793). The
+            distance is the subtraction; neither number is stored as one. *)
+  ; read_position_read_error : string option
+        (** ["progress_unreadable"] when the position file could not be read.
+            [read_position] is then [None] for a reason, not for absence. *)
+  ; rewriting_through : int option
+        (** [catch_up_end_atom] of a snapshot the Librarian is rewriting from
+            atom 0: where a request starts until the rewrite reaches it. Absent
+            on a snapshot that is not being rewritten. *)
   ; prepared : Keeper_continuity_observation.t option
   ; synthesis : Keeper_continuity_observation.synthesis option
   }
 
 let context_cycle ~config ~keeper_name =
-  let saved, saved_read_error =
+  let saved, saved_read_error, rewriting_through =
     match Keeper_librarian_continuity.read ~config ~keeper_name with
-    | Ok None -> None, None
+    | Ok None -> None, None, None
     | Ok (Some snapshot) ->
-      Some { Keeper_continuity_observation.trace_id = snapshot.trace_id;
-        end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }, None
-    | Error _ -> None, Some "snapshot_unreadable"
+      ( Some { Keeper_continuity_observation.trace_id = snapshot.trace_id;
+          end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }
+      , None
+      , snapshot.catch_up_end_atom )
+    | Error _ -> None, Some "snapshot_unreadable", None
   in
-  { saved; saved_read_error;
+  (* The position lives under the runtime keepers dir, next to the snapshot
+     read above, not under the config keepers dir this handler's other
+     stores use. Read from the config dir this was [Ok None] for every
+     keeper and the screen said nothing had been read (#37870 fixed the
+     same read in [continuity_unread_atoms]). *)
+  let read_position, read_position_read_error =
+    match
+      Keeper_librarian_progress.read
+        ~keepers_dir:(Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper_name
+    with
+    | Ok None -> None, None
+    | Ok (Some progress) -> Some progress.position.end_atom, None
+    | Error _ -> None, Some "progress_unreadable"
+  in
+  { saved; saved_read_error; read_position; read_position_read_error; rewriting_through;
     prepared = Keeper_continuity_observation.latest ~config ~keeper_name;
     synthesis = Keeper_continuity_observation.latest_synthesis ~config ~keeper_name }
 ;;
@@ -63,6 +104,10 @@ let context_cycle_to_json cycle =
       "input", `Assoc ["kind", `String kind; "frontier", input_frontier]] in
   `Assoc ["saved", nullable frontier cycle.saved;
     "saved_read_error", nullable (fun value -> `String value) cycle.saved_read_error;
+    "read_position", nullable (fun value -> `Int value) cycle.read_position;
+    "read_position_read_error",
+      nullable (fun value -> `String value) cycle.read_position_read_error;
+    "rewriting_through", nullable (fun value -> `Int value) cycle.rewriting_through;
     "prepared", nullable prepared cycle.prepared;
     "synthesis", nullable Keeper_continuity_observation.synthesis_to_json cycle.synthesis]
 ;;
@@ -133,7 +178,28 @@ let rendered_source_bytes ~facts ~invalidations =
 
 (* The durable drain publishes in this process, so its measurement is read from memory: the
    health request counts nothing itself and moves no position. *)
-let librarian_health ~config ~keepers_dir keeper_id ~snapshot =
+(* Read from the two files rather than from the round that writes them: the
+   continuity round publishes nothing this process can read, and a health
+   request that waited for one would show nothing for a keeper whose round
+   has not run since boot. *)
+(* The read position lives under the runtime keepers dir, one folder per
+   keeper, while the journal and the snapshots this handler otherwise reads
+   are flat files under the config keepers dir. Both parameters were called
+   [keepers_dir], so passing the wrong one read nothing and every lag came
+   back as "cannot say". The name here says which root it is. *)
+let continuity_unread_atoms ~runtime_keepers_dir ~keeper_id saved =
+  match (saved : Keeper_continuity_observation.frontier option) with
+  | None -> None
+  | Some frontier ->
+    (match Keeper_librarian_progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id with
+     | Ok (Some { Keeper_librarian_progress.position = { trace_id; end_atom; _ }; _ })
+       when String.equal trace_id frontier.Keeper_continuity_observation.trace_id
+            && end_atom >= frontier.Keeper_continuity_observation.end_atom ->
+       Some (end_atom - frontier.Keeper_continuity_observation.end_atom)
+     | Ok (Some _) | Ok None | Error _ -> None)
+;;
+
+let librarian_health ~config ~keepers_dir keeper_id ~snapshot ~continuity_saved =
   let measurement = Keeper_librarian_queue_refresh.last_measurement ~config ~keeper_name:keeper_id in
   let last_success_at =
     match (snapshot : Keeper_memory_os_current.t option) with
@@ -159,6 +225,11 @@ let librarian_health ~config ~keepers_dir keeper_id ~snapshot =
   ; unread_official_turns =
       Option.bind measurement (fun (m : Keeper_librarian_queue_refresh.measurement) ->
         Option.map (fun (u : Keeper_librarian_durable_consumer.unread) -> u.official) m.unread)
+  ; continuity_unread_atoms =
+      continuity_unread_atoms
+        ~runtime_keepers_dir:(Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper_id
+        continuity_saved
   ; last_success_at
   ; last_failure_kind
   }
@@ -281,7 +352,10 @@ let source_health ~keepers_dir keeper_id =
 let keeper_health ~config ~keepers_dir keeper_id =
   let source_health = source_health ~keepers_dir keeper_id in
   let context_cycle = context_cycle ~config ~keeper_name:keeper_id in
-  let librarian ~snapshot = librarian_health ~config ~keepers_dir keeper_id ~snapshot in
+  let librarian ~snapshot =
+    librarian_health ~config ~keepers_dir keeper_id ~snapshot
+      ~continuity_saved:context_cycle.saved
+  in
   match
     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
   with
@@ -532,6 +606,10 @@ let keeper_health_entry_to_json (h : keeper_health) =
             , match h.librarian.unread_official_turns with
               | Some count -> `Int count
               | None -> `Null )
+          ; ( "continuity_unread_atoms"
+            , match h.librarian.continuity_unread_atoms with
+              | Some count -> `Int count
+              | None -> `Null )
           ; ( "last_success_at"
             , match h.librarian.last_success_at with
               | Some ts -> `Float ts
@@ -617,6 +695,28 @@ let keeper_memory_health_http_json ~base_path =
                  | _ -> None) (Some 0) entries with
                | Some total -> `Int total
                | None -> `Null) )
+            (* Summed over the keepers whose lag is known, with the rest
+               counted beside it. A total that goes null when one keeper
+               cannot be measured would hide the keepers that can: most
+               keepers carry no continuity snapshot at all. *)
+          ; ( "librarian_continuity_unread_atoms"
+            , `Int
+                (List.fold_left
+                   (fun total entry ->
+                      match entry.librarian.continuity_unread_atoms with
+                      | Some atoms -> total + atoms
+                      | None -> total)
+                   0
+                   entries) )
+          ; ( "librarian_continuity_unmeasured"
+            , `Int
+                (List.fold_left
+                   (fun count entry ->
+                      match entry.librarian.continuity_unread_atoms with
+                      | Some _ -> count
+                      | None -> count + 1)
+                   0
+                   entries) )
           ; ( "librarian_failures"
             , `Int (sum (fun entry -> entry.librarian_failures)) )
           ; ( "vision_ingest_errors"

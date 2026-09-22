@@ -63,7 +63,8 @@ async function loadComponentWithApi(api: {
           value: api.lastEvent.value,
           subscribe: () => () => {},
         }
-  vi.doMock('../api/core', () => ({
+  vi.doMock('../api/core', async importOriginal => ({
+    ...await importOriginal<typeof import('../api/core')>(),
     get: api.get,
   }))
   vi.doMock('../sse', () => ({

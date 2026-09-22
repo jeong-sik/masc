@@ -363,6 +363,18 @@ val system_log_category_text : Masc.Tui_decode.system_log_entry -> string
 val fusion_run_status_color :
   Masc_tui_types.Tui_decode.fusion_run_status -> string
 
+val fusion_run_stage_compact :
+  Masc_tui_types.Tui_decode.fusion_run_stage -> string
+(** A running run's stage, short enough for the table's STATE cell. *)
+
+val fusion_run_state_text :
+  status:Masc_tui_types.Tui_decode.fusion_run_status ->
+  stage:Masc_tui_types.Tui_decode.fusion_run_stage ->
+  string
+(** What the Fusion table's STATE cell says: the stage while the run is
+    running, [completed] once it has, and the server's failure code for a run
+    that failed. *)
+
 val fusion_run_progress_text :
   Masc_tui_types.Tui_decode.fusion_run_stage -> string
 
@@ -405,6 +417,11 @@ val runtime_all_rows :
 
 val tools_scrolled_for_lines :
   Masc_tui_types.state -> 'a list -> Masc_tui_types.scrolled
+
+val path_from_root : root:string -> string -> string
+(** [path_from_root ~root path] is [path] said from [root] when it is under it,
+    and [path] whole when it is not. A sibling whose name starts with the
+    root's -- [/a/bc] under [/a/b] -- is not under it. *)
 
 val config_pane_strip :
   cols:int -> before:string -> after:string -> Masc_tui_types.state -> string

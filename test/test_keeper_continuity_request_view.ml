@@ -49,7 +49,9 @@ let wire (view : Driver.request_view) = match view.wire with
 ;;
 
 let without_working_state messages =
-  let is_working (m : T.message) = m.metadata = T.Extra_system_context_provenance.metadata in
+  let is_working (m : T.message) =
+    m.metadata = Runtime_model_input_tail_window.working_state_metadata
+  in
   let working, rest = List.partition is_working messages in
   (match working with
    | [m] ->
@@ -584,6 +586,67 @@ let test_a_rewriting_snapshot_waits_for_its_target () =
    | _ -> fail "an ordinary snapshot behind the position was not used")
 ;;
 
+(* A runtime that cannot see an image is handed a reading of it in the
+   image's place, for that candidate alone (RFC-0265 media degrade). The
+   atoms do not move and nothing is rewritten, so the choice still stands;
+   only the bytes under the covered atoms differ. Held to the checkpoint's
+   bytes, such a candidate had every request refused (#37812). Held to its
+   own rendering, it composes, and a covered message that really changed
+   still refuses. *)
+let test_a_candidates_own_rendering_is_what_the_check_holds_it_to () =
+  let looked = message T.User [T.Text "Look at this";
+    T.Image {media_type = "image/png"; data = "https://example.invalid/shot.png";
+             source_type = T.Url}] in
+  let read_instead = message T.User [T.Text "Look at this";
+    T.Text "[unread image URL: https://example.invalid/shot.png; this runtime cannot view the image]"] in
+  let history = [pinned; looked; text T.Assistant "The build passed."] in
+  let projected = [pinned; read_instead; text T.Assistant "The build passed."] in
+  let snapshot, lines = capture_source history in
+  let chosen =
+    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:history
+      ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) ~progress:(fun () -> Ok None)
+  in
+  check int "the snapshot covers the atom the image is in" 2 snapshot.Snapshot.end_atom;
+  (match Driver.validate_continuity ~messages:projected chosen with
+   | Error _ -> ()
+   | Ok () -> fail "the fixture does not reproduce the refusal it is about");
+  let for_this_candidate = Driver.continuity_for_attempt ~messages:projected chosen in
+  (match Driver.validate_continuity ~messages:projected for_this_candidate with
+   | Ok () -> ()
+   | Error error ->
+     fail ("a candidate held to its own rendering was still refused: "
+           ^ Agent_core.Error.to_string error));
+  (match Driver.librarian_position ~messages:projected for_this_candidate with
+   | Ok (Driver.Librarian_snapshot _) -> ()
+   | Ok _ -> fail "the official lane did not get the snapshot it composes from"
+   | Error error -> fail (Agent_core.Error.to_string error));
+  let moved_in_flight =
+    [pinned; read_instead; text T.Assistant "Rewritten while the attempt was in flight"] in
+  (match Driver.validate_continuity ~messages:moved_in_flight for_this_candidate with
+   | Error _ -> ()
+   | Ok () -> fail "a covered message that changed in flight was not refused");
+  (* The read position alone is held the same way: its digest is the opening
+     message of the atom before it, which the reading replaced. *)
+  let digest_at = Window.atom_opening_digest history in
+  let absorbed =
+    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:history
+      ~snapshot:(Ok None) ~lines:(fun () -> Ok lines)
+      ~progress:(fun () ->
+        Ok (Some (progress ~trace_id ~end_atom:1 ~last_atom_digest:(Option.get (digest_at 0)))))
+  in
+  (match Driver.validate_continuity ~messages:projected absorbed with
+   | Error _ -> ()
+   | Ok () -> fail "the read-position fixture does not reproduce the refusal");
+  (match
+     Driver.validate_continuity ~messages:projected
+       (Driver.continuity_for_attempt ~messages:projected absorbed)
+   with
+   | Ok () -> ()
+   | Error error ->
+     fail ("a read position held to the candidate's rendering was refused: "
+           ^ Agent_core.Error.to_string error))
+;;
+
 let () = run "continuity request projection"
   ["request", [test_case "completed boundary protects resumed work" `Quick test_completed_boundary_protects_resumed_work;
                test_case "small and wide actual body projection" `Quick test_small_externalizes_only_completed_bodies;
@@ -601,4 +664,6 @@ let () = run "continuity request projection"
                test_case "official lanes take the same choice" `Quick
                  test_official_lanes_take_the_same_choice;
                test_case "a rewriting snapshot waits for its target" `Quick
-                 test_a_rewriting_snapshot_waits_for_its_target]]
+                 test_a_rewriting_snapshot_waits_for_its_target;
+               test_case "a candidate's own rendering is what the check holds it to" `Quick
+                 test_a_candidates_own_rendering_is_what_the_check_holds_it_to]]

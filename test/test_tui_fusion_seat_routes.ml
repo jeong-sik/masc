@@ -47,6 +47,24 @@ let test_a_seat_that_answered_first_has_no_attempts_under_it () =
     (Seat_routes.lines routes);
   check (list string) "no routes, no block" [] (Seat_routes.lines [])
 
+(* The block is where the terminal is made safe: the renderer wraps these
+   lines and draws them without sanitizing again, so a failure detail a
+   provider wrote is the one place an escape sequence could reach the screen. *)
+let test_a_failure_detail_cannot_carry_an_escape_sequence () =
+  let routes =
+    [ { Decode.fsr_seat = Decode.Fusion_panel_seat "first"
+      ; fsr_route = "\027[31mlane"
+      ; fsr_answered_by = None
+      ; fsr_failed_attempts = [ attempt "opus" "refused" "\027[2Jcleared your screen" ]
+      }
+    ]
+  in
+  check (list string) "the escape is spelled out, not obeyed"
+    [ "panel/first \xc2\xb7 route \\x1B[31mlane \xe2\x86\x92 no candidate answered"
+    ; "    opus: refused \\x1B[2Jcleared your screen"
+    ]
+    (Seat_routes.lines routes)
+
 let () =
   run "tui_fusion_seat_routes"
     [ ( "lines"
@@ -54,5 +72,7 @@ let () =
             test_one_line_per_seat_with_its_failed_attempts_under_it
         ; test_case "a seat that answered first has no attempts under it" `Quick
             test_a_seat_that_answered_first_has_no_attempts_under_it
+        ; test_case "a failure detail cannot carry an escape sequence" `Quick
+            test_a_failure_detail_cannot_carry_an_escape_sequence
         ] )
     ]

@@ -244,6 +244,40 @@ only while the pane has room to show. Below 110 columns it reports the width
 requirement and leaves the preference unchanged, so resizing wider cannot
 reveal a hidden toggle that had no visible effect when it was pressed.
 
+### The Activity pane
+
+`Ctrl-L` walks the pane on the right of every surface through narrow, wide
+and hidden. Its `[Recent]` tab is what each keeper is doing now, one row
+each:
+
+```
+ [Recent] Changes · 11 keepers (5 offline)
+                    state     tool          calls   tokens
+ ● ocaml-agent-ic   open      tool_execute    16+
+ ● pr-updater       done                        10   72.3k
+ ● jazz-developer   no events
+```
+
+The mark is the keeper's health, as on the roster. `state` is the record the
+feed has: `open` (no end event yet), `done`, `no end` (the process is gone,
+so no end will come), `approval` (waiting on you), or `no events`. An open
+record names the tool it is in and counts the calls seen *so far*, which is
+what the `+` says: the feed may have started mid-turn. A done record carries
+the turn's calls and its tokens, in and out summed. A name longer than its
+column is cut with `…`; the wide pane has cells for the ones that outgrow
+the narrow one. The header says the feed only when it is not delivering
+(`no feed`, `feed opening`, `feed closed: …`).
+
+Under a rule, the selected keeper's own record: its state and the age of its
+newest event, then its calls, newest first (`o` turns the order). A run of
+the same tool is one row that counts it and says what the calls took
+(`Execute ×5 · 2.7s 274ms 1.4s 2.9s 4.7s`, or their sum where that does not
+fit); the Keeper Calls surface (`t`) reads each call one by one. `Enter` or
+a press on a call opens its facts, input and output; on an earlier turn's
+row it opens that keeper's calls surface.
+
+The `Changes` tab lists the files this keeper's calls wrote, newest first.
+
 ## Surfaces
 
 ### Overview
@@ -271,7 +305,10 @@ completion contract's evidence list, attached files - read from the same
 backlog load the list was projected from. `Esc` closes the detail, a second
 `Esc` returns `j`/`k` to the events. Events are windowed against
 both panel columns, so a long event wraps to the width actually available
-rather than the header width.
+rather than the header width. An error event wears the `✗` the chat pane
+uses for a failure, just after the clock; every other level keeps that cell
+for its text. The mark is a shape rather than a colour alone, so it holds
+under `NO_COLOR`.
 
 The tail of the cluster row is what the server reports about its own delivery
 paths: one entry per path, then the queue's pressure and its drop count. It
@@ -297,7 +334,7 @@ the count stays so a stream that dropped after a thousand events and one that
 never opened do not read alike. The feed is opened after the first refresh
 that reaches the server and reopened on the refresh cadence after it closes;
 both transitions land in Recent Events. Every keeper's tool calls, turn
-boundaries, heartbeats, and turn settlements arrive on it; this build keeps
+boundaries, heartbeats, and turn done rows arrive on it; this build keeps
 the last 1,000 and counts what falls off the end.
 
 Tasks show terminal states in Planning rollups but not in this list. A task
@@ -307,7 +344,7 @@ the full backlog rows, not the active projection.
 ### Activity
 
 Every keeper's actions as the runtime event feed delivers them, newest first:
-tool calls and their returns, turn boundaries and settlements, chat rows
+tool calls and their returns, turn boundaries and turn done rows, chat rows
 landing. This is the surface for watching ten keepers at once without
 opening ten chats.
 
@@ -332,7 +369,7 @@ call that began before the feed opened shows none.
 
 `f` cycles three explicit scopes. `turns` is the default and folds each Keeper
 turn to one row while leaving internal agent runs and approvals separate.
-`actions` shows the flat calls, returns, turn boundaries, settlements, and chat
+`actions` shows the flat calls, returns, turn boundaries, turn done rows, and chat
 events. `everything` additionally shows heartbeats, composite/snapshot pushes,
 chat stream frames, waiting-queue changes, and telemetry. Its quiet gray rows
 carry no mark at all, and are state observations rather than failures;
@@ -425,7 +462,7 @@ restart puts every Keeper back on `auto`.
 
 ### Lanes
 
-The [Glossary](spec/00-glossary.md#core) uses Lane for Runtime candidate order. Runtime execution owns the model/tool loop, exact-output routes select candidates for a work purpose, and memory queues serialize submitted work. These are separate axes; this section's existing UI label `Lanes` shows exact-output routes.
+The [Glossary](spec/00-glossary.md#core) uses Lane for the fixed exact-output execution path — the same thing this section's UI label `Lanes` shows — and Runtime Candidate Order for the order in which a Keeper turn tries runtime candidates. Runtime execution owns the model/tool loop, exact-output routes select candidates for a work purpose, and memory queues serialize submitted work. These are separate axes.
 
 For TOML package installations, open `/addons` from the composer or choose
 `go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
@@ -1009,8 +1046,9 @@ footer. Nothing takes the screen to report a failure.
 
 #### Lines typed during a turn
 
-Enter during a running turn is the explicit **queue next** action. It holds the
-line for a later turn rather than pretending the running model saw it. Pending
+Enter during a running turn is the explicit **queue next** action — the footer
+labels it `Enter:send update`. It holds the line for a later turn rather than
+pretending the running model saw it. Pending
 input is not inserted between the active turn's user, status/tool, and reply
 rows. It has its own `NEXT` lane below the causal transcript, oldest first:
 
@@ -1019,7 +1057,7 @@ rows. It has its own `NEXT` lane below the causal transcript, oldest first:
    NEXT 1 · 10:42:13 · check the CI run too
    NEXT 2 · 10:42:18 · and the rebase
    > _
-  Enter:queue (2 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last  …
+  Enter:send update (2 local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit  …
 ```
 
 A count on its own is not enough - an operator who typed three lines during a
@@ -1275,6 +1313,25 @@ what `Enter` opens.
   j/k:move  Enter:detail  r:refresh  Tab:next  q:quit  | Port: 8935
 ```
 
+`a` starts a run from the list. It reads the presets from
+`GET /api/v1/runtime/config/fusion` and opens the same schema form the Lane
+Add-ons action uses: `keeper`, `preset`, `topology` and `web_tools` are
+Left/Right choices, `prompt` is typed, `Tab` walks the fields, `Ctrl-S` opens
+the review and `Enter` there posts
+`POST /api/v1/keepers/<keeper>/fusion`. `Esc` cancels. The Keeper starts on
+the one that owns the selected run, the preset on the configured
+`default_preset`, and the topology on `simple`; a Keeper outside the roster
+or a preset outside the configuration falls back to the first of each. A
+prompt that is blank after trimming does not leave the form. While the post
+is out the form takes no key, so a second `Enter` cannot start a second run.
+A refusal — a preset that cannot run the chosen topology, for instance —
+returns the server's own sentence above the form with the values intact; the
+form does not restate it. A request that goes unanswered says the run may
+have started anyway, because it may have. On success the list is read again
+and the cursor moves to the new run the first time the list carries it; a
+list read that was already in flight can answer without it, so the move waits
+for one that has it.
+
 The detail is a separate exact read. Lifecycle remains the Registry fact;
 evidence comes only from a Board post whose typed origin is
 `source=fusion` with the same `fusion_run_id`. The header repeats the current
@@ -1299,6 +1356,17 @@ cannot publish this evidence; an official-client panel is shown as
 `official_client_uninstrumented` instead of being misreported as “used no
 tools.” Older Board evidence has `Trace unavailable` rather than a fabricated
 empty ledger.
+
+`SEAT ROUTES` is the walk each seat took through its candidates, from the
+`seat_routes` array the sink writes. One line per seat names the route it was
+given and the runtime that answered — `panel/first · route panel-lane →
+answered by glm-4.6` — with every candidate that failed before that one
+indented under it as `<runtime>: <code> <detail>`. A seat no candidate
+answered says so. Seats are spelled as the tool ledger spells its actors:
+`panel/<panelist>` and `judge/<role>/<identity>`. Evidence recorded before
+seats were written carries no `seat_routes` key and draws no block, and the
+`EVIDENCE RECORDED` section keeps its number; with the block present it
+follows as section 6.
 
 `pending` is legal only while the Registry row is running. `absent` means the
 retained completed/failed run has no current Board projection; it does not
@@ -1522,7 +1590,7 @@ the JSON encoding of the same reference is not drawn beside them.
 
 ### Runtime
 
-Runtime lanes and their ordered candidates, joined to the latest provider
+Runtime candidate orders, joined to the latest provider
 metadata reachability reading by exact `runtime_id`.
 
 ```
@@ -1539,7 +1607,7 @@ provider/model labels. The lane fact on each row says why that candidate is
 the one the lane walks: `head`, `fallback #n`, or `single candidate`.
 `GET /api/v1/dashboard/runtime-probe` supplies only a cached provider
 metadata-endpoint reachability reading. It does not send a completion, execute a CLI
-runtime, or report lane failover history.
+runtime, or report runtime candidate order history.
 
 `CLI not probed` is neutral, and a candidate absent from a stale probe is
 `unobserved`, not unhealthy. Green is limited to the `reachable` token; model,
@@ -1671,6 +1739,7 @@ Per surface:
 | Right / `Enter` | Schedules | Open schedule details |
 | Right / `Enter` | Planning | Open goal detail |
 | Right / `Enter` | Fusion | Open exact run evidence detail |
+| `a` | Fusion list | Open the launch form for a new run |
 | `[` / `]` | Changes | Previous / next Keeper |
 | Right / `Enter` | Changes | Open the selected recorded diff |
 | `v` | Changes | View the row's file on the Code surface, in the keeper's workspace |
@@ -1764,6 +1833,36 @@ Exit signals restore terminal modes and cursor state. Job-control suspension
 (`Ctrl-Z`) restores the shell terminal, and `fg` re-enters raw mode and forces a
 complete repaint.
 
+Every session writes one line saying why it ended to its own stderr log,
+`.masc/logs/masc-tui-<pid>.log`, prefixed so it can be collected on its own:
+
+```
+[masc-tui] exit: normal (quit key)
+[masc-tui] exit: normal (interrupt)
+[masc-tui] exit: normal (signal SIGTERM)
+[masc-tui] exit: abnormal (exception Failure("..."))
+```
+
+A normal end is the operator or the session's owner asking for it — the `q`
+key, a second `Ctrl-C`, or a terminate signal — and an abnormal one is the
+surface leaving without being asked, such as an uncaught exception. A session
+that leaves without naming a cause reads as `abnormal (no cause was
+recorded)`, which is its own wording rather than a made-up exception. A cause
+longer than 200 bytes is cut on a character boundary and the row ends in
+`[+N bytes]`, so a backtrace cannot turn one session's row into a page.
+
+The line is the only record of the end: the log otherwise holds the boot
+lines, so a session that ended used to leave no reason behind. Counting a
+day's ends by cause is one command:
+
+```
+grep -h '\[masc-tui\] exit:' .masc/logs/masc-tui-*.log | sort | uniq -c | sort -rn
+```
+
+A session killed with `SIGKILL`, or one whose machine lost power, writes
+nothing — no handler runs — so the count covers ends the process survived
+long enough to name.
+
 Viewports below the fixed chrome budget render a compact resize gate instead of
 a clipped frame, and message editing is suppressed until the terminal grows.
 
@@ -1825,6 +1924,8 @@ Config Prompts labels whether the effective text comes from an override or the M
 Fusion lists full start dates. Detail shows the original question and Board link near the top, plus duration from the retained completion timestamp. Running duration advances; terminal duration stays fixed. New completion records retain `finished_at` across replay.
 
 Keeper detail → Runs selects with j/k and opens the same Fusion run with Enter. Fusion `K` returns to the calling Keeper and `B` opens its recorded Board evidence. Esc returns to the originating surface. The question, panel, judge and tool records remain separate steps within the same run.
+
+`a` on the list starts a run instead of following one, and the detail's `SEAT ROUTES` block names the runtime that answered each seat and the candidates that failed before it.
 
 ### Questions and Gate modes
 

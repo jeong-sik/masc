@@ -58,6 +58,7 @@ type agent_core_kind =
   | Agent_completed of { elapsed_s : float }
   | Agent_failed of { elapsed_s : float; error_code : string; error : string }
   | Agent_yielded of { elapsed_s : float }
+  | Agent_input_required of { elapsed_s : float; request_id : string; question : string }
   | Tool_approval_completed
   | Telemetry
   | Agent_core_other of string

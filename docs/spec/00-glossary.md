@@ -85,7 +85,7 @@ status: reference
   `Quarantine Quarantined`로 투영되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
   않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 판정은 소유 lane이 그 후보
   판정을 durable하게 적용·소비할 때만 넘어가고, 전달 실패는 마지막 실패 증거를 남길
-  뿐 후보를 소비하지 않는다. 대기 작업에는 벽시계 만료가 없다. **위의 Runtime 항목과
+  뿐 후보를 소비하지 않는다. 대기 작업에는 벽시계 만료가 없다. **`Runtime` 항목과
   다른 뜻이다** — 코드가 `candidate`라는 한 단어를 두 곳에 쓴다. 여기서는 판정 대상
   게시물이고, 런타임 쪽(`Runtime_candidate_backpressure.candidate`)은 lane이 시도할
   실행 후보다.

@@ -39,6 +39,31 @@ status: reference
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
   입구를 가리키며, 각 표면은 독립 상태를 소유하지 않는다.
 
+**Server Push (서버가 밀어 보내는 사건)**
+: 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는
+  상태 변화. Activity 화면은 이런 사건을 `everything` scope 아래 조용한 회색 행으로
+  그리고 `turns`·`actions`에는 세지 않는다. whole-projection 스냅숏(`composite`),
+  `internal_agent_runs_changed`, `Fusion_run_status`, heartbeat, waiting-queue 변화가 그
+  예다. 어느 사건이 어느 slice로 가는지는 `Dashboard_event_slices`의 한 표가 정하고,
+  서버 라우팅과 터미널 분류가 그 표를 함께 읽는다. Keeper가 한 일(`action`)과 반대편이다.
+  → [Dashboard_event_slices](../../lib/dashboard_event_slices.mli),
+  [Activity scope](../../bin/masc_tui_acting.ml), [TUI 안내](../TUI-GUIDE.md)
+
+**Harness (하네스)**
+: 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
+  (1) TUI Harness 화면: 평가자 판정을 읽는 TUI 표면. 코드의 화면 이름은 `Harness`지만
+  키 표가 운영자에게 보이는 이름은 "Planning / Task Verdicts"이고
+  (`bin/masc_tui_keys.ml:1233`), 상세에서 `y`(agree)·`x`(overrule)로 그 판정에 답한다
+  (`render_harness_detail`). (2) Eval Harness: Keeper 에이전트의 시나리오 기반 행동
+  평가(`lib/eval_harness.mli`). scenario·grader·metric 타입과 runner·summary 를
+  정의하고 eval CLI 와 dashboard 가 소비한다. (3) Lab Safety Harness: Dashboard Lab
+  표면의 안전 판독(`#lab?section=harness`,
+  `lib/dashboard/dashboard_harness_health.ml`) — 평가자 보정 통계와 최근 runtime 안전
+  신호를 한 화면에 모은다. (4) Harness First: "측정 없이 AI 에이전트 코드를 진행하지
+  않는다"는 프로젝트 원칙. RFC 들이 이 이름으로 인용한다.
+  → [masc_tui_keys](../../bin/masc_tui_keys.ml), [Eval_harness](../../lib/eval_harness.mli),
+  [Dashboard_harness_health](../../lib/dashboard/dashboard_harness_health.ml)
+
 **Exit Reason (세션 종료 사유)**
 : TUI 세션이 왜 끝났는지 자기 stderr 로그(`.masc/logs/masc-tui-<pid>.log`)에 남기는 한 줄.
   `Masc_tui_exit_reason.t`가 닫힌 어휘를 소유한다 — `Quit_key`(q·Q·Ctrl-Q),
@@ -223,6 +248,15 @@ status: reference
 **agent core Turn**
 : 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한
   단계. Keeper turn과 동일한 단위가 아니다.
+
+**Agent run ID (Agent run 식별자)**
+: observer event의 `task` 필드가 agent lifecycle 네 kind(`Agent_started`·
+  `Agent_completed`·`Agent_failed`·`Agent_yielded`)에서 나르는 값. MASC task id가 아니라
+  그 run 자신의 wire id(`evt-` 접두, `Event_envelope.fresh_id`)다. 나머지 kind에서는 같은
+  필드가 MASC task id를 나르므로, Activity는 이 네 kind에서만 필드 이름을 "Agent run ID"로
+  적고 그 밖에서는 "Task ID"로 적는다. 한 필드가 두 개념을 나르는 자리라, run의 wire id를
+  task로 읽으면 `evt-…`가 행의 detail로 그대로 찍힌다.
+  → [Observer event](../../bin/masc_tui_observer.mli), [Activity 라벨](../../bin/masc_tui_acting.ml)
 
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
@@ -589,8 +623,11 @@ status: reference
   `Computation_failed`·`Lost`·`Cancelled`·`Persistence_failed`·`Evidence_unavailable`·
   `Evidence_unreadable`)에서 파생해 돌려주는 문자열 여섯(`computation_failed`·`lost`·
   `cancelled`·`persistence_failed`·`evidence_unavailable`·`evidence_unreadable`)이다.
-  코드는 문장이 아니라 tag 이고, 서버가 쓰는 가장 넓은 값이 `evidence_unavailable` 이라
-  STATE 칸은 스무 칸이다. 전체 오류 문장은 고른 실행의 줄에 남는다.
+  코드는 문장이 아니라 tag 이고, 그중 가장 넓은 `evidence_unavailable` 이 STATE 칸
+  스무 칸을 정확히 채운다. 칸을 채우는 것은 이 값만이 아니다 — 같은 칸이 그리는 진행
+  단계 `recording(%d/%d)` 도 네 자리 수 둘이면 스무 칸이다. 세 어휘 전부와 칸 폭은
+  `test/test_tui_fusion_state_width.ml` 이 소스에서 읽어 대조하므로, 여유가 얼마인지는
+  그 테스트가 말한다. 전체 오류 문장은 고른 실행의 줄에 남는다.
   → [Fusion_core.Fusion_types.judge_failure_tag](../../lib/fusion_core/fusion_types.mli),
   [Fusion_sink.delivery_failure_code](../../lib/fusion/fusion_sink.mli)
 

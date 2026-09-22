@@ -37,8 +37,6 @@ import {
 } from './fsm-hub-types'
 
 const POLL_INTERVAL_MS = 10_000
-const LONG_IDLE_SECONDS = 10 * 60
-const STALE_RUNTIME_SECONDS = 30 * 60
 
 /**
  * Time-axis window (LT-16c). 30 snapshots × 10s poll = 5-minute
@@ -217,8 +215,8 @@ export function latestRuntimeActivityEpoch(snapshot: KeeperCompositeSnapshot): n
 }
 
 function hasPreviousTurnExecutionReceipt(snapshot: KeeperCompositeSnapshot): boolean {
-  return snapshot.runtime_attention?.stale_execution_receipt === true
-    || snapshot.runtime_attention?.execution_current === false
+  return snapshot.runtime_attention.stale_execution_receipt === true
+    || snapshot.runtime_attention.execution_current === false
 }
 
 function formatAge(seconds: number | null): string {
@@ -258,20 +256,6 @@ function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   return parts
 }
 
-// `execution.outcome` wire format is the TLA-prefix form
-// ('receipt_done' / 'receipt_skipped' / 'receipt_failed' /
-//  'receipt_cancelled') emitted by `outcome_kind_to_tla_receipt`
-// (lib/keeper/keeper_execution_receipt.ml:24-29). Prior short-form
-// compares ('error' / 'ok') were dead in production.
-function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean {
-  const execution = snapshot.execution
-  if (!execution) return false
-  if (hasPreviousTurnExecutionReceipt(snapshot)) return false
-  if (execution.outcome === 'receipt_failed') return true
-  if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') return true
-  return false
-}
-
 function backendRuntimeAttentionLevel(
   state: string,
   blocked: boolean,
@@ -305,21 +289,34 @@ function backendRuntimeAttentionNextStep(
   return '조치 불필요'
 }
 
+// The backend's `composite_runtime_attention` is the only judge of whether a
+// keeper is blocked, stale, or idle. The receipt fields only feed the
+// evidence text.
 function runtimeAttentionFromBackend(
   snapshot: KeeperCompositeSnapshot,
   ageSec: number | null,
   ageText: string,
   evidenceText: string,
-): FleetRuntimeAttention | null {
+): FleetRuntimeAttention {
   const backend = snapshot.runtime_attention
-  if (!backend) return null
   if (
     backend.state === 'ok' &&
     !backend.needs_attention &&
     !backend.blocked &&
     !backend.fiber_stop_requested
   ) {
-    return null
+    const cause = snapshot.is_live
+      ? `live turn 관측 중 · latest ${ageText}`
+      : `live turn 없음 · latest ${ageText}`
+    return {
+      level: 'ok',
+      label: snapshot.is_live ? 'live' : '대기',
+      reason: ageText,
+      cause,
+      nextStep: '조치 불필요',
+      title: `원인: ${cause} · 증거: ${evidenceText}`,
+      ageSec,
+    }
   }
   const reason = backend.reason ?? backend.state
   const level = backendRuntimeAttentionLevel(backend.state, backend.blocked)
@@ -338,71 +335,6 @@ function runtimeAttentionFromBackend(
     title: `원인: ${cause} · 다음: ${nextStep} · 증거: ${evidenceText} · latest activity ${ageText}`,
     ageSec,
   }
-}
-
-function hasHealthyExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean {
-  const execution = snapshot.execution
-  if (!execution || hasBlockingExecutionEvidence(snapshot)) return false
-  if (execution.latest_receipt_present !== true) return false
-  // TLA-prefix wire format — see `hasBlockingExecutionEvidence` comment above.
-  if (execution.outcome === 'receipt_done' || execution.outcome === 'receipt_skipped') return true
-  if (execution.terminal_reason_code === 'completed') return true
-  return false
-}
-
-function blockingCause(snapshot: KeeperCompositeSnapshot): string {
-  const execution = snapshot.execution
-  if (!execution) return 'blocking execution evidence present'
-  const parts: string[] = []
-  if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') {
-    parts.push(`terminal: ${execution.terminal_reason_code}`)
-  }
-  if (execution.error?.kind) {
-    parts.push(`error: ${execution.error.kind}`)
-  }
-  if (execution.outcome === 'receipt_failed' && parts.length === 0) {
-    parts.push('execution outcome: receipt_failed')
-  }
-  return parts.length > 0 ? parts.join(' · ') : 'blocking execution evidence present'
-}
-
-function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
-  const execution = snapshot.execution
-  if (!execution) return 'latest execution receipt 확인'
-  if (execution.terminal_reason_code === 'api_error_invalid_request') {
-    return 'runtime auth/config receipt 확인'
-  }
-  if (execution.terminal_reason_code === 'api_error_timeout') {
-    return 'runtime lane의 provider timeout receipt 확인'
-  }
-  if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') {
-    return `terminal=${execution.terminal_reason_code} receipt 확인`
-  }
-  if (execution.error?.kind) {
-    return `error=${execution.error.kind} 로그와 receipt 확인`
-  }
-  return 'latest execution receipt 확인'
-}
-
-function staleCause(snapshot: KeeperCompositeSnapshot, ageText: string): string {
-  const receiptReason = snapshot.execution?.operator_disposition_reason
-  // `snapshot.phase` wire format is lowercase (phase_to_string in
-  // keeper_state_machine.ml:21-35); the prior PascalCase compare was dead.
-  const base = snapshot.phase === 'running'
-    ? 'KSM=running이지만 live turn 없음'
-    : `live turn 없음 · KSM=${snapshot.phase}`
-  const receipt = receiptReason ? ` · last receipt: ${receiptReason}` : ''
-  return `${base} · latest ${ageText}${receipt}`
-}
-
-function staleNextStep(snapshot: KeeperCompositeSnapshot, latest: number | null): string {
-  if (latest == null) {
-    return 'turn 시작/keepalive 이벤트가 composite로 들어오는지 확인'
-  }
-  if (snapshot.phase === 'running') {
-    return 'keeper keepalive와 turn 시작 이벤트 경로 확인'
-  }
-  return `phase=${snapshot.phase} 전환 또는 재시작 경로 확인`
 }
 
 export function buildRuntimeAssistPrompt(
@@ -516,82 +448,8 @@ export function runtimeAttentionForSnapshot(
   const ageSec = latest == null ? null : Math.max(0, Math.floor(generatedAt - latest))
   const ageText = formatAge(ageSec)
   const evidence = executionEvidence(snapshot)
-  const evidenceText = evidence.length > 0 ? evidence.join(' · ') : 'no blocking evidence'
-  const backendAttention = runtimeAttentionFromBackend(
-    snapshot,
-    ageSec,
-    ageText,
-    evidenceText,
-  )
-  if (backendAttention) return backendAttention
-  const blocked = hasBlockingExecutionEvidence(snapshot)
-  const idleComposite = isIdleComposite(snapshot)
-
-  if (blocked) {
-    const cause = blockingCause(snapshot)
-    const nextStep = blockingNextStep(snapshot)
-    return {
-      level: 'blocked',
-      label: '정체',
-      reason: evidenceText,
-      cause,
-      nextStep,
-      title: `원인: ${cause} · 다음: ${nextStep} · 증거: ${evidenceText} · latest activity ${ageText}`,
-      ageSec,
-    }
-  }
-  if (!snapshot.is_live) {
-    if (hasHealthyExecutionEvidence(snapshot) && ageSec != null && ageSec < STALE_RUNTIME_SECONDS) {
-      const idleLong = idleComposite && ageSec >= LONG_IDLE_SECONDS
-      const cause = `healthy receipt 이후 live turn 없음 · latest ${ageText}`
-      const nextStep = idleLong ? 'backlog, admission, trigger가 없는지 확인' : '조치 불필요'
-      return {
-        level: idleLong ? 'idle' : 'ok',
-        label: idleLong ? '무전환' : '대기',
-        reason: `healthy idle · latest activity ${ageText}`,
-        cause,
-        nextStep,
-        title: `원인: ${cause} · 다음: ${nextStep} · 증거: ${evidenceText}`,
-        ageSec,
-      }
-    }
-    const cause = staleCause(snapshot, ageText)
-    const nextStep = staleNextStep(snapshot, latest)
-    return {
-      level: 'stale',
-      label: 'stale',
-      reason: evidenceText,
-      cause,
-      nextStep,
-      title: `원인: ${cause} · 다음: ${nextStep} · 증거: ${evidenceText}`,
-      ageSec,
-    }
-  }
-  if (idleComposite && ageSec != null && ageSec >= LONG_IDLE_SECONDS) {
-    const cause = `idle composite가 ${ageText} 유지`
-    const nextStep = 'backlog, admission, trigger가 없는지 확인'
-    return {
-      level: 'idle',
-      label: '무전환',
-      reason: `idle composite · latest activity ${ageText}`,
-      cause,
-      nextStep,
-      title: `원인: ${cause} · 다음: ${nextStep} · 증거: ${evidenceText}`,
-      ageSec,
-    }
-  }
-  const cause = snapshot.is_live
-    ? `live turn 관측 중 · latest ${ageText}`
-    : `latest ${ageText}`
-  return {
-    level: 'ok',
-    label: 'live',
-    reason: ageText,
-    cause,
-    nextStep: '조치 불필요',
-    title: `원인: ${cause} · 증거: ${evidenceText}`,
-    ageSec,
-  }
+  const evidenceText = evidence.length > 0 ? evidence.join(' · ') : 'no receipt evidence'
+  return runtimeAttentionFromBackend(snapshot, ageSec, ageText, evidenceText)
 }
 
 export function tallyRuntimeAttention(
@@ -961,7 +819,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 <span
                   data-runtime-truth="blocked"
                   class="rounded-[var(--r-1)] border px-2 py-0.5 text-xs ${runtimeTallies.blocked === 0 ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.blocked}"
-                  title="운영자 disposition, 터미널 에러, 또는 tool contract 위반 evidence 가 있는 row"
+                  title="backend runtime_attention 이 blocked 또는 stop_requested 로 판정한 row"
                 >
                   근거 차단: ${runtimeTallies.blocked}
                 </span>

@@ -6,9 +6,10 @@ import {
 
 // Minimal snapshot carrying every required key of
 // `KeeperCompositeSnapshotSchema`. Optional keys (keeper, collapsed_from,
-// phase_diagnosis, execution, runtime_attention,
-// recommended_actions) are added per-test. Value shapes here mirror what
-// `keeper_composite_observer.ml` `snapshot_to_json` emits: lowercase
+// phase_diagnosis, execution, recommended_actions) are added per-test.
+// Value shapes here mirror what `keeper_composite_observer.ml`
+// `snapshot_to_json` emits plus the `runtime_attention` the composite
+// enrich step always adds: lowercase
 // snake_case phase / turn_phase / decision / runtime (via
 // `Keeper_state_machine.phase_to_string` etc.). Capitalized variants
 // like `"Stable"` are forward-looking — they appear only in schema-
@@ -30,6 +31,16 @@ const VALID_SNAPSHOT = {
   fsm_guard_violations: 0,
   is_live: true,
   last_outcome: null,
+  runtime_attention: {
+    state: 'ok',
+    needs_attention: false,
+    blocked: false,
+    fiber_stop_requested: false,
+    reason: null,
+    raw_phase: 'running',
+    is_live: true,
+    source: 'composite_snapshot',
+  },
 }
 
 describe('parseKeeperCompositeSnapshot', () => {
@@ -422,6 +433,11 @@ describe('parseKeeperCompositeSnapshot', () => {
   it('throws CompositeSchemaDriftError for missing required field', () => {
     const { correlation_id: _, ...noCorr } = VALID_SNAPSHOT
     expect(() => parseKeeperCompositeSnapshot(noCorr)).toThrow(CompositeSchemaDriftError)
+  })
+
+  it('throws CompositeSchemaDriftError when the backend runtime_attention judgment is missing', () => {
+    const { runtime_attention: _, ...noAttention } = VALID_SNAPSHOT
+    expect(() => parseKeeperCompositeSnapshot(noAttention)).toThrow(CompositeSchemaDriftError)
   })
 
   it('throws CompositeSchemaDriftError for non-object input', () => {

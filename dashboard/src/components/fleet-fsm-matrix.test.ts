@@ -41,6 +41,7 @@ import type {
   FleetCompositeSnapshot,
   KeeperCompositeExecution,
   KeeperCompositeSnapshot,
+  KeeperRuntimeAttention,
 } from '../api/keeper'
 
 function snapshot(
@@ -72,9 +73,36 @@ function snapshot(
     fsm_guard_violation_breakdown: [],
     is_live: false,
     last_outcome: null,
+    runtime_attention: attention(),
     recommended_actions: [],
   }
   return { ...base, ...overrides }
+}
+
+function attention(
+  overrides: Partial<KeeperRuntimeAttention> = {},
+): KeeperRuntimeAttention {
+  return {
+    state: 'ok',
+    needs_attention: false,
+    blocked: false,
+    fiber_stop_requested: false,
+    reason: null,
+    raw_phase: 'Running',
+    is_live: false,
+    source: 'composite_snapshot',
+    ...overrides,
+  }
+}
+
+function blockedAttention(): KeeperRuntimeAttention {
+  return attention({
+    state: 'blocked',
+    needs_attention: true,
+    blocked: true,
+    reason: 'provider_runtime_error',
+    source: 'execution_receipt',
+  })
 }
 
 function execution(
@@ -84,7 +112,7 @@ function execution(
     latest_receipt_present: true,
     recorded_at: '2026-04-25T07:30:00Z',
     outcome: 'receipt_done',
-    terminal_reason_code: 'completed',
+    terminal_reason_code: 'success',
     operator_disposition: 'pass',
     operator_disposition_reason: 'healthy',
     model_used: 'auto',
@@ -193,7 +221,7 @@ describe('tallyInvariantViolations', () => {
 describe('runtimeAttentionForSnapshot', () => {
   const generatedAt = Date.parse('2026-04-25T07:40:00Z') / 1000
 
-  it('flags a Running-but-not-live keeper with a failed receipt as blocked', () => {
+  it('shows the receipt as evidence under a backend blocked judgment', () => {
     const snap = snapshot({
       is_live: false,
       execution: execution({
@@ -207,43 +235,54 @@ describe('runtimeAttentionForSnapshot', () => {
           message_truncated: false,
         },
       }),
+      runtime_attention: blockedAttention(),
     })
 
-    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
-    expect(attention.level).toBe('blocked')
-    expect(attention.label).toBe('정체')
-    expect(attention.reason).toContain('is_live=false')
-    expect(attention.reason).toContain('operator=retry_later')
-    expect(attention.reason).toContain('reason=provider_runtime_error')
-    expect(attention.title).toContain('latest activity 10m ago')
+    const result = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(result.level).toBe('blocked')
+    expect(result.label).toBe('정체')
+    expect(result.title).toContain('is_live=false')
+    expect(result.title).toContain('operator=retry_later')
+    expect(result.title).toContain('reason=provider_runtime_error')
+    expect(result.title).toContain('latest activity 10m ago')
   })
 
-  it('prefers backend runtime_attention over narrower frontend fallback inference', () => {
+  it('draws the backend blocked judgment even when the receipt looks healthy', () => {
     const snap = snapshot({
       is_live: false,
       execution: execution({
         outcome: 'receipt_done',
-        terminal_reason_code: 'completed',
+        terminal_reason_code: 'success',
         operator_disposition: 'pass',
         operator_disposition_reason: 'healthy',
       }),
-      runtime_attention: {
-        state: 'blocked',
-        needs_attention: true,
-        blocked: true,
-        fiber_stop_requested: false,
-        reason: 'provider_runtime_error',
-        raw_phase: 'Running',
-        is_live: false,
-        source: 'execution_receipt',
-      },
+      runtime_attention: blockedAttention(),
     })
 
-    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
-    expect(attention.level).toBe('blocked')
-    expect(attention.cause).toContain('execution_receipt')
-    expect(attention.cause).toContain('provider_runtime_error')
-    expect(attention.reason).toContain('backend runtime_attention')
+    const result = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(result.level).toBe('blocked')
+    expect(result.cause).toContain('execution_receipt')
+    expect(result.cause).toContain('provider_runtime_error')
+    expect(result.reason).toContain('backend runtime_attention')
+  })
+
+  it('keeps a backend-ok keeper ok whatever its latest receipt says', () => {
+    const snap = snapshot({
+      is_live: true,
+      execution: execution({
+        outcome: 'receipt_failed',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'retry_later',
+        operator_disposition_reason: 'provider_runtime_error',
+      }),
+      runtime_attention: attention({ is_live: true }),
+    })
+
+    const result = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(result.level).toBe('ok')
+    expect(result.label).toBe('live')
+    expect(result.nextStep).toBe('조치 불필요')
+    expect(result.title).toContain('terminal=api_error')
   })
 
   it('maps backend stop-requested attention to shutdown follow-up', () => {
@@ -270,7 +309,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.nextStep).toContain('shutdown 완료')
   })
 
-  it('keeps recent healthy non-live keepers waiting instead of stale', () => {
+  it('shows a backend-ok non-live keeper as waiting', () => {
     const snap = snapshot({
       is_live: false,
       phase: 'Running',
@@ -293,7 +332,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(snap.phase).toBe('Running')
     expect(attention.level).toBe('ok')
     expect(attention.label).toBe('대기')
-    expect(attention.reason).toContain('healthy idle')
+    expect(attention.cause).toContain('live turn 없음')
   })
 
   it('does not revive a previous terminal receipt while a live turn is running', () => {
@@ -345,30 +384,42 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.title).toContain('previous_terminal=runtime_exhausted')
   })
 
-  it('keeps raw lifecycle separate by flagging stale liveness without changing phase', () => {
+  it('keeps raw lifecycle separate by drawing backend stale liveness without changing phase', () => {
     const snap = snapshot({
       is_live: false,
       phase: 'Running',
+      runtime_attention: attention({
+        state: 'stale',
+        needs_attention: true,
+        reason: 'not_live',
+      }),
     })
 
-    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    const result = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(snap.phase).toBe('Running')
-    expect(attention.level).toBe('stale')
-    expect(attention.reason).toContain('is_live=false')
+    expect(result.level).toBe('stale')
+    expect(result.reason).toContain('not_live')
+    expect(result.title).toContain('is_live=false')
   })
 
-  it('flags a live idle composite after the operator threshold', () => {
+  it('draws backend idle_stale as a live keeper that stopped turning', () => {
     const snap = snapshot({
       is_live: true,
       execution: execution({
         recorded_at: '2026-04-25T07:20:00Z',
       }),
+      runtime_attention: attention({
+        state: 'idle_stale',
+        needs_attention: true,
+        is_live: true,
+        reason: 'idle_composite',
+      }),
     })
 
-    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
-    expect(attention.level).toBe('idle')
-    expect(attention.label).toBe('무전환')
-    expect(attention.reason).toContain('idle composite')
+    const result = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(result.level).toBe('idle')
+    expect(result.label).toBe('무전환')
+    expect(result.reason).toContain('idle_composite')
   })
 
   it('counts live, blocked, stale, and idle runtime truth separately', () => {
@@ -377,6 +428,7 @@ describe('runtimeAttentionForSnapshot', () => {
       is_live: true,
       turn_phase: 'executing',
       execution: execution(),
+      runtime_attention: attention({ is_live: true }),
     })
     const blocked = snapshot({
       name: 'blocked',
@@ -386,15 +438,23 @@ describe('runtimeAttentionForSnapshot', () => {
         terminal_reason_code: 'api_error',
         operator_disposition: 'retry_later',
       }),
+      runtime_attention: blockedAttention(),
     })
     const stale = snapshot({
       name: 'stale',
       is_live: false,
+      runtime_attention: attention({ state: 'stale', needs_attention: true, reason: 'not_live' }),
     })
     const idle = snapshot({
       name: 'idle',
       is_live: true,
       execution: execution({ recorded_at: '2026-04-25T07:20:00Z' }),
+      runtime_attention: attention({
+        state: 'idle_stale',
+        needs_attention: true,
+        is_live: true,
+        reason: 'idle_composite',
+      }),
     })
 
     expect(tallyRuntimeAttention([live, blocked, stale, idle], generatedAt)).toEqual({
@@ -422,24 +482,6 @@ describe('runtimeAttentionForSnapshot', () => {
 
     expect(latestRuntimeActivityEpoch(snap)).toBe(generatedAt - 300)
   })
-
-  it('names missing required keeper tools in blocker cause and next step', () => {
-    const snap = snapshot({
-      is_live: false,
-      execution: execution({
-        outcome: 'receipt_failed',
-        terminal_reason_code: 'api_error_timeout',
-        operator_disposition: 'retry_later',
-        operator_disposition_reason: 'transient_runtime_retry',
-      }),
-    })
-
-    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
-    expect(attention.level).toBe('blocked')
-    expect(attention.cause).toContain('terminal: api_error_timeout')
-    expect(attention.reason).toContain('terminal=api_error_timeout')
-    expect(attention.nextStep).toBe('runtime lane의 provider timeout receipt 확인')
-  })
 })
 
 describe('fleetCellPresentation', () => {
@@ -455,6 +497,7 @@ describe('fleetCellPresentation', () => {
         operator_disposition: 'retry_later',
         operator_disposition_reason: 'provider_runtime_error',
       }),
+      runtime_attention: blockedAttention(),
     })
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     const cell = fleetCellPresentation('phase', snap.phase, attention)
@@ -465,7 +508,7 @@ describe('fleetCellPresentation', () => {
     expect(cell.className).toContain('var(--bad-light)')
     expect(cell.title).toContain('KSM Running')
     expect(cell.title).toContain('runtime 정체')
-    expect(cell.title).toContain('terminal: api_error')
+    expect(cell.title).toContain('execution_receipt: blocked · provider_runtime_error')
   })
 
   it('keeps non-KSM lanes tied to their raw FSM state', () => {
@@ -496,13 +539,14 @@ describe('buildRuntimeAssistPrompt', () => {
         operator_disposition: 'retry_later',
         operator_disposition_reason: 'provider_runtime_error',
       }),
+      runtime_attention: blockedAttention(),
     })
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     const prompt = buildRuntimeAssistPrompt('blocked', snap, attention)
 
     expect(prompt).toContain('감독형 런타임 진단 요청: blocked')
     expect(prompt).toContain('cause=')
-    expect(prompt).toContain('terminal: api_error')
+    expect(prompt).toContain('cause=execution_receipt: blocked · provider_runtime_error')
     expect(prompt).toContain('evidence=')
     expect(prompt).toContain('"terminal_reason_code":"api_error"')
     expect(prompt).toContain('"operator_disposition":"retry_later"')
@@ -680,6 +724,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
             terminal_reason_code: 'api_error',
             operator_disposition: 'retry_later',
           }),
+          runtime_attention: blockedAttention(),
         }),
       ]),
     )
@@ -725,6 +770,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
             operator_disposition: 'retry_later',
             operator_disposition_reason: 'provider_runtime_error',
           }),
+          runtime_attention: blockedAttention(),
         }),
       ]),
     )
@@ -747,7 +793,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
         keeperName: 'blocked',
         attention: expect.objectContaining({
           level: 'blocked',
-          cause: expect.stringContaining('terminal: api_error'),
+          cause: expect.stringContaining('provider_runtime_error'),
         }),
         message: expect.stringContaining('resolve 후보'),
       }),
@@ -771,6 +817,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
             operator_disposition: 'retry_later',
             operator_disposition_reason: 'provider_runtime_error',
           }),
+          runtime_attention: blockedAttention(),
           recommended_actions: [
             {
               action_type: 'keeper_probe',
@@ -829,6 +876,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
             terminal_reason_code: 'api_error',
             operator_disposition: 'unknown',
           }),
+          runtime_attention: blockedAttention(),
           recommended_actions: [
             {
               action_type: 'keeper_recover',

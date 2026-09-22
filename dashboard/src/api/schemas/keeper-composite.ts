@@ -307,7 +307,7 @@ export const KeeperCompositeSnapshotSchema = object({
   idle_seconds: optional(number()),
   last_turn_ts: optional(number()),
   execution: optional(KeeperCompositeExecutionSchema),
-  runtime_attention: optional(KeeperRuntimeAttentionSchema),
+  runtime_attention: KeeperRuntimeAttentionSchema,
   secret_projection: optional(KeeperSecretProjectionSchema),
   recommended_actions: fallback(array(OperatorRecommendedActionSchema), []),
   /** @deprecated kept only for old backend experiments; new payloads use `execution`. */

@@ -388,9 +388,8 @@ export function runtimeOutcomeLabel(value: string | null | undefined): string | 
  *    (`api_error_server:<http_status>` is parameterized).
  *  - `Keeper_agent_run` emits `"completed"` on Runtime_runner.Completed.
  *  Kept separate from `STATE_DISPLAY_NAMES` because generic tokens like
- *  `completed` / `healthy` are also emitted by other axes (same isolation
- *  pattern as TOOL_CONTRACT_LABELS in #16374). Parameterized codes fall
- *  through to a prefix match below before the raw fallback. */
+ *  `completed` / `healthy` are also emitted by other axes. Parameterized
+ *  codes fall through to a prefix match below before the raw fallback. */
 const TERMINAL_REASON_CODE_LABELS: Record<string, string> = {
   // Keeper_turn_terminal_code.to_wire
   healthy: '정상',

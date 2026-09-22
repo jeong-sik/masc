@@ -391,24 +391,6 @@ let all =
       ~category:"metrics"
       "Number of rotated metrics files retained"
   ; setting
-      ~range:(int_range ~min:1 ())
-      ~env_name:"MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"3"
-      ~consumers:[ "Env_config_keeper.KeeperMemoryOs"; "Keeper memory librarian" ]
-      ~category:"memory"
-      "Turns between memory librarian extraction attempts"
-  ; setting
-      ~range:(int_range ~min:1 ())
-      ~env_name:"MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"24"
-      ~consumers:[ "Env_config_keeper.KeeperMemoryOs"; "Keeper memory librarian" ]
-      ~category:"memory"
-      "Recent-message window for memory librarian extraction"
-  ; setting
       ~reload_class:Next_turn
       ~env_name:"MASC_KEEPER_MEMORY_OS_RECALL"
       ~exposure:Env_only

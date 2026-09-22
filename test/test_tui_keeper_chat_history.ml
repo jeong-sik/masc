@@ -1617,7 +1617,6 @@ let test_memory_failure_keeps_kind_and_detail () =
                 ; "kind", `String "exact_execution_failure"
                 ; "detail", `String "provider returned 503"
                 ; "snapshot_present", `Bool true
-                ; "cadence_deferred", `Bool false
                 ]
             ] )
       ]
@@ -1672,7 +1671,6 @@ let memory_failed_entry trace_id =
     ; "kind", `String "exact_execution_failure"
     ; "detail", `String "provider returned 503"
     ; "snapshot_present", `Bool true
-    ; "cadence_deferred", `Bool false
     ]
 ;;
 

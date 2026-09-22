@@ -855,81 +855,6 @@ let test_counterpart_observations_keep_direct_and_attention_fallback () =
        | _ -> fail "expected one ambient observation")
 ;;
 
-let test_prompt_input_and_rendered_prompt_share_the_same_window () =
-  let max_messages = Runtime.prompt_max_messages () in
-  check bool "configured prompt window is positive" true (max_messages > 0);
-  let total = max_messages + 3 in
-  let messages =
-    List.init total (fun index ->
-      Agent_core.Types.make_message
-        ~role:Agent_core.Types.User
-        [ Agent_core.Types.Text (Printf.sprintf "history-%04d" index) ])
-  in
-  let counterpart_observations =
-    List.init total (fun index : Masc.Keeper_counterpart_observation.t ->
-      { origin = Keeper_counterpart_observation.Durable_chat
-      ; channel = "discord"
-      ; workspace_id = Some "guild-window"
-      ; user_id = Some "speaker-window"
-      ; user_name = None
-      ; authority = Keeper_counterpart_observation.External
-      ; content = Printf.sprintf "counterpart-%04d" index
-      })
-  in
-  let original = { (input ()) with messages; counterpart_observations } in
-  let projected = Runtime.prompt_input_for_librarian original in
-  check int
-    "registry/provider input uses configured history window"
-    max_messages
-    (List.length projected.messages);
-  check int
-    "counterpart input uses the same configured window"
-    max_messages
-    (List.length projected.counterpart_observations);
-  let projected_text = user_text_of_messages projected.messages in
-  check bool
-    "discarded head is absent from projected input"
-    false
-    (String_util.contains_substring projected_text "history-0000");
-  check bool
-    "first retained message is present in projected input"
-    true
-    (String_util.contains_substring projected_text "history-0003");
-  let last = Printf.sprintf "history-%04d" (total - 1) in
-  check bool
-    "latest message is present in projected input"
-    true
-    (String_util.contains_substring projected_text last);
-  let projected_counterparts =
-    Masc.Keeper_counterpart_observation.render_for_prompt
-      projected.counterpart_observations
-  in
-  check bool "discarded counterpart head is absent" false
-    (String_util.contains_substring projected_counterparts "counterpart-0000");
-  check bool "first retained counterpart is present" true
-    (String_util.contains_substring projected_counterparts "counterpart-0003");
-  match Runtime.messages_for_librarian original with
-  | Error detail -> failf "librarian render failed: %s" detail
-  | Ok rendered_messages ->
-    let rendered = user_text_of_messages rendered_messages in
-    check bool
-      "rendered prompt omits the same discarded head"
-      false
-      (String_util.contains_substring rendered "history-0000");
-    check bool
-      "rendered prompt carries the same first retained message"
-      true
-      (String_util.contains_substring rendered "history-0003");
-    check bool
-      "rendered prompt carries the latest message"
-      true
-      (String_util.contains_substring rendered last);
-    check bool "rendered prompt omits the same counterpart head" false
-      (String_util.contains_substring rendered "counterpart-0000");
-    check bool "rendered prompt carries the first retained counterpart" true
-      (String_util.contains_substring rendered "counterpart-0003")
-;;
-
 let test_prompt_omits_tool_result_payload_and_has_one_message () =
   let sentinel = "UNTRUSTED_TOOL_RESULT_MUST_NOT_REACH_MEMORY_FINALIZER" in
   let tool_message =
@@ -1135,45 +1060,6 @@ let test_repo_template_carries_counterpart_memory_contract () =
          "이름·선호·책임·약속·관계가 바뀌면 같은 선택에서 옛 claim을 삭제하고")
 ;;
 
-let test_cadence_fresh_then_periodic () =
-  check (pair int bool) "fresh due"
-    (3, true)
-    (Runtime.cadence_step ~cadence:3 ~counter:(-1));
-  check (pair int bool) "mid-cycle"
-    (2, false)
-    (Runtime.cadence_step ~cadence:3 ~counter:1);
-  check (pair int bool) "threshold due"
-    (3, true)
-    (Runtime.cadence_step ~cadence:3 ~counter:2)
-;;
-
-(* The property that makes the failure path's counter reset load-bearing:
-   a due pass stores the cadence value itself, and a counter left there is
-   due again on the very next turn. Before the fix, failure classes outside
-   the old backoff set skipped the reset and re-ran the lane's heaviest
-   prompt every turn for as long as the (typically persistent) condition
-   lasted. *)
-let test_cadence_due_counter_is_due_again_without_reset () =
-  Alcotest.(check (pair int bool))
-    "a counter parked at the cadence value is immediately due again"
-    (3, true)
-    (Runtime.cadence_step ~cadence:3 ~counter:3)
-
-let test_cadence_trace_rollover_is_fresh () =
-  check (pair (pair string int) bool) "same trace advances"
-    (("trace-a", 2), false)
-    (Runtime.cadence_step_keyed
-       ~cadence:3
-       ~current_trace:"trace-a"
-       ~prior:(Some ("trace-a", 1)));
-  check (pair (pair string int) bool) "new trace is due"
-    (("trace-b", 3), true)
-    (Runtime.cadence_step_keyed
-       ~cadence:3
-       ~current_trace:"trace-b"
-       ~prior:(Some ("trace-a", 1)))
-;;
-
 let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
   Eio.Switch.run (fun sw ->
     let previous = Domain_pool_ref.get () in
@@ -1279,8 +1165,7 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
           ~keeper_id
           ~trace_id:"trace-failure-offload"
           ~kind:Current.Exact_execution_failure
-          ~detail:"Testing off-main failure journal write"
-          ~cadence_deferred:false;
+          ~detail:"Testing off-main failure journal write";
 
         let journal_path =
           Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id
@@ -1573,10 +1458,6 @@ let () =
             test_counterpart_observations_keep_direct_and_attention_fallback
         ; test_case "prompt omits tool payload and stays single-message" `Quick
             test_prompt_omits_tool_result_payload_and_has_one_message
-        ; test_case
-            "prompt input and rendered prompt share history window"
-            `Quick
-            test_prompt_input_and_rendered_prompt_share_the_same_window
         ; test_case "repo template renders Keeper instructions" `Quick
             test_repo_template_renders_keeper_instructions
         ; test_case "goal criteria reach the librarian model input" `Quick
@@ -1585,13 +1466,6 @@ let () =
             test_repo_template_carries_counterpart_memory_contract
         ; test_case "constraint category excludes self-imposed scope" `Quick
             test_constraint_category_excludes_self_imposed_scope
-        ] )
-    ; ( "cadence"
-      , [ test_case "fresh then periodic" `Quick test_cadence_fresh_then_periodic;
-        test_case "due counter is due again without reset" `Quick
-          test_cadence_due_counter_is_due_again_without_reset
-        ; test_case "trace rollover is fresh" `Quick
-            test_cadence_trace_rollover_is_fresh
         ] )
     ; ( "domain_offload"
       , [ test_case

@@ -234,7 +234,7 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_core.Error.t) : boo
       false
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
-  (* RFC-0159 Phase A: opaque internal failures. *)
+  (* Opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
@@ -357,8 +357,8 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
        for that constructor answers [Server_error]. The typed value does not
        move the deferred whole-runtime lane, so it answers the same. *)
     | Some (Keeper_turn_driver.Runtime_connection_closed _) -> Some Server_error
-    (* RFC-0159 Phase A: typed [Internal_*] variants are not runtime-rotation
-       reasons; they expose previously-opaque raw exception payloads.  *)
+    (* Typed [Internal_*] variants are not runtime-rotation reasons; they
+       carry the raw exception payload. *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
     | Some (Keeper_turn_driver.Internal_bridge_exception _)
     | Some (Keeper_turn_driver.Internal_contract_rejected _)
@@ -546,9 +546,8 @@ let should_warn_keeper_cycle_failed (err : Agent_core.Error.t) : bool =
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Accept_rejected _)
-  (* RFC-0159 Phase A: opaque internal failures should not trigger the
-     keeper-cycle-failed WARN by themselves; the surrounding handler
-     already logs the exception detail. *)
+  (* Opaque internal failures do not trigger the keeper-cycle-failed WARN by
+     themselves; the surrounding handler already logs the exception detail. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
@@ -609,7 +608,7 @@ let is_runtime_exhausted_error (err : Agent_core.Error.t) : bool =
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
   | Some (Keeper_turn_driver.Capacity_backpressure _)
   | Some (Keeper_turn_driver.Accept_rejected _)
-  (* RFC-0159 Phase A: opaque internal failures are not runtime exhaustion. *)
+  (* Opaque internal failures are not runtime exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)

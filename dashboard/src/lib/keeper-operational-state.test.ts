@@ -49,7 +49,7 @@ function attention(
   overrides: Partial<NonNullable<KeeperCompositeSnapshot['runtime_attention']>> = {},
 ): NonNullable<KeeperCompositeSnapshot['runtime_attention']> {
   return {
-    state: 'active',
+    state: 'ok',
     needs_attention: false,
     blocked: false,
     reason: null,
@@ -280,7 +280,7 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
         turn_phase: 'executing',
         is_live: true,
         runtime_attention: attention({
-          state: 'active',
+          state: 'ok',
           execution_current: false,
           stale_execution_receipt: true,
           blocked: false,

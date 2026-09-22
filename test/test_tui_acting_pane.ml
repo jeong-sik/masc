@@ -1048,9 +1048,9 @@ let test_tokens_and_ages_are_compact () =
 let test_legend_row_fits_whole () =
   check bool "legend is whole" true (contains (Pane.legend ~cols) (nth 1))
 
-(* A three-digit settle with two large parts is the widest settled reading;
+(* An end event with a three-digit count and two large parts is the widest done reading;
    it fits the pane whole now that no clock shares the row. *)
-let test_widest_settled_reading_fits_whole () =
+let test_widest_done_reading_fits_whole () =
   let event =
     match settled ~at:990. "tester" with
     | Observer.Keeper_turn_complete value ->
@@ -2022,8 +2022,8 @@ let () =
             test_reused_chunks_keep_presentation_inputs_live
         ; test_case "tokens and ages are compact" `Quick test_tokens_and_ages_are_compact
         ; test_case "legend row fits whole" `Quick test_legend_row_fits_whole
-        ; test_case "widest settled reading fits whole" `Quick
-            test_widest_settled_reading_fits_whole
+        ; test_case "widest done reading fits whole" `Quick
+            test_widest_done_reading_fits_whole
         ; test_case "earlier turn row carries its parts and cost and no clock" `Quick
             test_earlier_turn_row_carries_its_parts_and_cost_and_no_clock
         ; test_case "earlier turn row gives up its cost before its parts" `Quick

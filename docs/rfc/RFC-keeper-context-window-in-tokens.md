@@ -570,7 +570,7 @@ let halve ~first_atom ~atom_count =
 
 ### 13.4 앞머리가 없으면 이번 턴만 싣는다
 
-흡수한 지점은 둘 중 하나다: 맞는 스냅숏(하던 일과 위치, `Librarian_snapshot`), 그것이 없으면 Librarian 의 읽은 위치(`librarian-progress.json`, 위치만, `Librarian_progress`; §13.6). 스냅숏이 이력과 맞지 않아도 읽은 위치는 맞을 수 있어서 두 번째 갈래가 있다(2026-09-22 goo-yang-bong: 스냅숏은 맞지 않고 위치는 맞았다. 16.4 MB → 169 KB). 둘 다 이 이력의 자리가 아니고 씨앗도 없으면 요청은 이 이력에서 마지막으로 끝난 턴의 경계(`Keeper_carried_front.Turn_start`)부터 싣는다. 이번 턴의 원문만 나가고, 그 앞은 Librarian 의 다음 회차가 스냅숏으로 채운다. 끝난 턴이 없는 이력은 그 경계가 0 이라 갖고 있는 전부를 싣는데, 그것은 새 Keeper 의 짧은 이력이다. 공식 클라이언트 레인도 씨앗이 없으면 같은 자리에서 시작한다(`Keeper_official_client_host.carried_start_range` 의 `turn_start`).
+흡수한 지점은 둘 중 하나다: 맞는 스냅숏(하던 일과 위치, `Librarian_snapshot`), 그것이 없으면 Librarian 의 읽은 위치(`librarian-progress.json`, 위치만, `Librarian_progress`; §13.6). 스냅숏이 이력과 맞지 않아도 읽은 위치는 맞을 수 있어서 두 번째 갈래가 있다(2026-09-22 goo-yang-bong: 스냅숏은 맞지 않고 위치는 맞았다. 16.4 MB → 169 KB). 스냅숏 파일을 못 읽거나, 턴 끝 기록을 못 읽어 확인할 수 없거나, 덮은 구간의 바이트가 바뀐 스냅숏(`Prefix_changed`)도 맞지 않는 스냅숏으로 본다. 스냅숏은 Librarian 이 다시 쓰는 파생 상태라, 그것 때문에 턴을 거절하면 Librarian 회차가 돌지 않아 스냅숏이 영영 바뀌지 않는다(#37762). 거절하는 것은 발송 도중에 덮은 구간이 바뀐 경우 하나다(`validate_continuity`). 둘 다 이 이력의 자리가 아니고 씨앗도 없으면 요청은 이 이력에서 마지막으로 끝난 턴의 경계(`Keeper_carried_front.Turn_start`)부터 싣는다. 이번 턴의 원문만 나가고, 그 앞은 Librarian 의 다음 회차가 스냅숏으로 채운다. 끝난 턴이 없는 이력은 그 경계가 0 이라 갖고 있는 전부를 싣는데, 그것은 새 Keeper 의 짧은 이력이다. 공식 클라이언트 레인도 씨앗이 없으면 같은 자리에서 시작한다(`Keeper_official_client_host.carried_start_range` 의 `turn_start`).
 
 "시작할 자리가 없다"를 "전부 보낸다"로 접지 않는다. `software-development.md` §AI 코드 생성 안티패턴 2 가 금지하는 형태다 — unknown 을 편리한 기본값으로 압축하지 않는다. 경계는 고른 숫자가 아니라 일어난 일(턴 끝 기록의 위치)이고, 지금 이력과 digest 로 맞춰 본 값만 쓴다(`Keeper_turn_driver_try_provider.turn_start`).
 

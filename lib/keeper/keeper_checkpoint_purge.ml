@@ -368,8 +368,8 @@ let purge_messages ~config ~trace_id ~boundary_lines ~continuity messages =
         kept_atoms;
       (* A continuity snapshot that fits this history is the request's front:
          the turn sends its working state in place of the atoms it covers, and
-         it holds a digest of those atoms' bytes. Rewritten, they would refuse
-         every Agent-Core turn with [Prefix_changed] until the Librarian wrote
+         it holds a digest of those atoms' bytes. Rewritten, the snapshot
+         would stop fitting ([Prefix_changed]) and the Librarian would write
          a working state again, from atom 0 and one completed turn per round,
          and each request in between would send the history after the first
          turn in full. So everything ahead of its end stays byte-exact. A

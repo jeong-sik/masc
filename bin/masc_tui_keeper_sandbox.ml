@@ -383,8 +383,14 @@ let container_lines ~width containers =
           ; Option.map (fun value -> "IPv6 " ^ value) container.ipv6_address
           ]
       in
+      (* The state first: it is the answer this block exists to give, and a
+         container name carries the keeper name and two hashes, so behind it
+         the state lands on the second or third drawn row. The name keeps a
+         row of its own, where an operator can read it whole to paste into
+         docker. *)
       wrapped_rows ~width ~label:"State" ~tone
-        (Printf.sprintf "%s · %s · %s" container.name state container.status)
+        (Printf.sprintf "%s · %s" state container.status)
+      @ wrapped_rows ~width ~label:"Name" ~tone:`Muted container.name
       @ (match compute with
          | None -> []
          | Some compute -> wrapped_rows ~width ~label:"Compute" ~tone:`Info compute)

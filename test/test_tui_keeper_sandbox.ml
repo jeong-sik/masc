@@ -149,6 +149,35 @@ let test_live_container_and_errors_are_visible () =
     ; "previous launch failed"
     ]
 
+(* A live container's name carries the keeper name and two hashes, so on the
+   pane's width it wraps over two or three rows. Behind it the state was the
+   last thing drawn, on a row with no label. *)
+let test_the_state_row_leads_with_the_state () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+        "sandbox_live": {
+          "sandbox_profile": "docker",
+          "containers": [{
+            "id": "abc123",
+            "name": "masc-keeper-docker-alpha-none-faea17a4-4bf729e6daa13fa74b6a8f6bfeb419e522c7283f650a65010fe1406735099e71",
+            "image": "masc/sandbox:latest",
+            "status": "Up 2 minutes",
+            "running": true
+          }],
+          "container_error": null
+        }
+      }|}
+  in
+  let rendered = flattened (render json) in
+  Alcotest.(check bool) "the state row answers with the state" true
+    (contains rendered "State running · Up 2 minutes");
+  Alcotest.(check bool) "the name has a row of its own" true
+    (contains rendered
+       "Name masc-keeper-docker-alpha-none-faea17a4-");
+  Alcotest.(check bool) "the state row does not open with the name" false
+    (contains rendered "State masc-keeper-docker")
+
 let test_stopped_instance_is_not_reported_as_not_started () =
   let json =
     Yojson.Safe.from_string
@@ -466,6 +495,8 @@ let () =
             test_idle_status_answers_what_happens_next
         ; Alcotest.test_case "containers and errors" `Quick
             test_live_container_and_errors_are_visible
+        ; Alcotest.test_case "the state row leads with the state" `Quick
+            test_the_state_row_leads_with_the_state
         ; Alcotest.test_case "stopped instance stays distinct" `Quick
             test_stopped_instance_is_not_reported_as_not_started
         ; Alcotest.test_case "an unresolved guest size is shown" `Quick

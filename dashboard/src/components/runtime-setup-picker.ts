@@ -99,7 +99,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
   }
   return html`<section class="runtime-setup-picker" aria-label="모델 연결 선택">
     <h4>모델 연결 선택</h4><p class="set-hint">여러 모델을 선택하세요. 첫 모델을 imp 기본 모델로 사용하며, 다음 모델은 표시 순서대로 대체 연결이 됩니다.</p>
-    <fieldset disabled=${busy}><legend>기존 연결</legend>${inventory.runtimes.map(row => html`<label key=${row.id}><input type="checkbox"
+    <fieldset disabled=${busy}><legend>기존 연결</legend>${inventory.runtimes.map(row => html`<label key=${row.id} class="v2-mobile-operator-target"><input type="checkbox"
       checked=${choices.some(choice => choice.kind === 'existing' && choice.id === row.id)} onChange=${() => toggleExisting(row.id, `${row.display_name} · ${row.model}`)} />${row.display_name} · ${row.model}</label>`)}</fieldset>
     <fieldset disabled=${busy}><legend>새 모델 추가</legend><label>공급자 <select value=${provider} onChange=${(event: Event) => chooseProvider((event.currentTarget as HTMLSelectElement).value)}>
       <option value="">공급자 선택</option>${integrations.map(row => html`<option key=${row.id} value=${row.id} disabled=${row.setup_support === 'unsupported'}>${row.display_name}${row.setup_support === 'unsupported' ? ' · 준비 중' : ''}</option>`)}</select></label>
@@ -109,7 +109,7 @@ export function RuntimeSetupPicker({ inventory, onSaved }: { inventory: Inventor
         : client ? html`<p class="set-hint">${integration?.protocol === 'claude-code' ? 'MASC의 Claude 모델 카탈로그에서 선택합니다.' : '선택한 CLI 계정의 모델 목록을 확인합니다.'} 계정 응답과 도구 사용은 저장할 때 검증합니다.</p><button type="button" class="btn" onClick=${discover}>모델 목록 확인</button>`
         : integration ? html`<p class="set-hint">이 CLI 계정은 터미널의 masc setup에서 로그인하고 모델을 선택하세요. 이미 선언한 연결은 위 목록에서 선택할 수 있습니다.</p>` : null}
       ${integration?.protocol === 'antigravity-cli' ? html`<p class="set-hint">브라우저 계정이 아니라 이 MASC 서버에 로그인된 Antigravity 계정을 사용합니다.</p><button type="button" class="btn" onClick=${importAccount}>서버의 로그인된 Antigravity 계정 사용</button>` : null}
-      ${models.length ? html`<fieldset><legend>추가할 모델 · 여러 개 선택 가능</legend>${models.map(model => html`<div key=${model.id}><label><input type="checkbox"
+      ${models.length ? html`<fieldset><legend>추가할 모델 · 여러 개 선택 가능</legend>${models.map(model => html`<div key=${model.id}><label class="v2-mobile-operator-target"><input type="checkbox"
         disabled=${model.context === null || model.tools === false} checked=${marked.includes(model.id)} onChange=${() => setMarked(current => current.includes(model.id) ? current.filter(id => id !== model.id) : [...current, model.id])} />
         ${model.label}${model.context === null ? ' · 실행 context 확인 필요' : ''}${model.tools === false ? ' · 도구 호출 미지원' : ''}</label>
         ${model.context === null && model.tools !== false ? html`<button type="button" class="btn" onClick=${() => prepare(model)}>이 모델만 준비</button>` : null}</div>`)}

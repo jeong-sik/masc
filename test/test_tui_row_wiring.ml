@@ -622,33 +622,21 @@ let test_a_lane_that_cannot_admit_says_why () =
        ~module_path:render ~binding_name:"standalone_lane_slots_text"
        ~callees:[] ~identifiers:[ "reason" ])
 
-(* The fleet summary above the Keepers table read "2 offline" and named
-   one keeper among them, while that keeper's own row drew a turning mark and a
-   climbing clock. Its turn had started and never been closed; the process
-   behind it had gone. A turn state that outlives its process is the row an
-   operator most needs to read, and it looked like the healthiest kind.
-
-   The elapsed stays -- a turn open two minutes is the fact. The motion does
-   not: it means work is progressing, and for a keeper the health reading calls
-   offline, none is. *)
+(* A turn whose keeper the health reading calls offline was never closed and
+   nothing works it: the row keeps the elapsed time and stops the mark.
+   [Masc_tui_keeper_mark.open_turn] says which reading that is, and
+   test_tui_keeper_mark checks it. What the row has to do is ask it and draw
+   the stopped case it answers. *)
 let test_a_turn_on_a_keeper_that_is_not_running_stops_moving () =
-  (* Counted as an identifier: the reading reaches the match through
-     [Option.map keeper_health_reading health], so it is passed rather than
-     applied and a call count sees nothing. *)
-  Alcotest.(check bool) "the row weighs the health reading against the turn"
-    true
-    (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"keeper_row_content" ~callees:[]
-       ~identifiers:[ "Tui_decode.keeper_health_reading" ]
+  Alcotest.(check bool) "the row asks what its open turn draws" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"keeper_row_content"
+       ~callee:"Masc_tui_keeper_mark.open_turn"
      > 0);
-  (* Named: a match that did not reach it would draw a live mark on a keeper
-     whose keepalive is gone. *)
-  Alcotest.(check bool)
-    "Tui_decode.Health_offline is the reading that stops the mark"
-    true
+  Alcotest.(check bool) "the row draws the turn nothing works" true
     (Ast_grep.count_constructors_in_value_binding ~module_path:render
        ~binding_name:"keeper_row_content"
-       ~constructors:[ "Tui_decode.Health_offline" ]
+       ~constructors:[ "Masc_tui_keeper_mark.Left_open" ]
      > 0)
 
 (* The preview's em dash once appeared as double-encoded UTF-8. Running

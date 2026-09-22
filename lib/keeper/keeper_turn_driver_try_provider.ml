@@ -1012,7 +1012,7 @@ let compose_carried_model_input
         { role = Agent_core.Types.User
         ; content = [ Agent_core.Types.Text (working_state_text snapshot) ]
         ; name = None; tool_call_id = None
-        ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+        ; metadata = Runtime_model_input_tail_window.working_state_metadata
         }
       in
       let projection, transmitted_bytes =
@@ -1449,30 +1449,14 @@ let bounded_model_input_projection
          | None -> "none")
         last_resort;
       (* The cold seed is read only when no ledger answered; when it was, the
-         records it could not decode are part of why the range started where
-         it did. *)
+         records it could not decode and a refused turn-boundary store are
+         part of why the range started where it did. *)
       if Lazy.is_val cold_seed
-      then (
-        let read = Lazy.force cold_seed in
-        (match read.Keeper_carried_front.unreadable with
-        | Some unreadable ->
-          Log.Keeper.warn
-            ~keeper_name:ctx.keeper_name
-            "model input carried range seed read skipped unreadable turn records \
-             runtime=%s unreadable=%d first_reason=%s"
-            ctx.runtime_id
-            unreadable.Keeper_carried_front.count
-            unreadable.Keeper_carried_front.first_reason
-        | None -> ());
-        Option.iter
-          (fun detail ->
-             Log.Keeper.warn
-               ~keeper_name:ctx.keeper_name
-               "model input carried range seed read refused the turn-boundary store runtime=%s detail=%s"
-               ctx.runtime_id
-               detail)
-          read.Keeper_carried_front.boundary_error);
-      );
+      then
+        Keeper_carried_front.warn_seed_read_failures
+          ~keeper_name:ctx.keeper_name
+          ~runtime_id:ctx.runtime_id
+          (Lazy.force cold_seed));
     (match composed.outlived_seed with
      | Some (seed, dropped) when not !outlived_reported ->
        outlived_reported := true;

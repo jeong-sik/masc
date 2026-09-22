@@ -72,28 +72,20 @@ type tool_record_outcome =
   | Malformed_outcome
 
 (* Lifecycle markers are not invocation outcomes and never enter the quality
-   denominator. For invocation rows, read the closed typed disposition first.
-   An absent disposition is valid for runtime-MCP rows, whose wire outcome is
-   the available boundary. [unknown] and an absent wire outcome mean not yet
-   settled; an unrecognized token or wrong JSON type is producer/consumer
-   schema drift and stays malformed. *)
+   denominator. An invocation row's outcome is read by the rule every
+   tool-call log reader shares ({!Tool_result.recorded_call_outcome}). *)
 let tool_outcome_of_record record =
   match record with
   | `Assoc fields ->
     (match List.assoc_opt "record_kind" fields with
      | Some (`String "lifecycle_event") -> Lifecycle_event
      | Some (`String ("tool_call" | "composition_run")) | None ->
-       (match List.assoc_opt "disposition" fields with
-        | Some (`String "completed") -> Settled true
-        | Some (`String "failed") -> Settled false
-        | Some (`String "deferred") -> Deferred
-        | Some _ -> Malformed_outcome
-        | None ->
-          (match List.assoc_opt "wire_outcome" fields with
-           | Some (`String "ok") -> Settled true
-           | Some (`String "error") -> Settled false
-           | Some (`String "unknown") | None -> Unsettled
-           | Some _ -> Malformed_outcome))
+       (match Tool_result.recorded_call_outcome record with
+        | Tool_result.Recorded_succeeded -> Settled true
+        | Tool_result.Recorded_failed -> Settled false
+        | Tool_result.Recorded_deferred -> Deferred
+        | Tool_result.Recorded_unsettled -> Unsettled
+        | Tool_result.Recorded_malformed -> Malformed_outcome)
      | Some _ -> Malformed_outcome)
   | _ -> Malformed_outcome
 

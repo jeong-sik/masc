@@ -463,6 +463,68 @@ let test_disposition_wire_decoder_is_strict () =
   | Ok _ -> Alcotest.fail "legacy success label must not be migrated"
 ;;
 
+let test_wire_outcome_decoder_is_strict () =
+  List.iter
+    (fun outcome ->
+       let label = Tool_result.string_of_tool_call_outcome outcome in
+       match Tool_result.tool_call_outcome_of_string label with
+       | Ok decoded ->
+         Alcotest.(check string) label label (Tool_result.string_of_tool_call_outcome decoded)
+       | Error error -> Alcotest.fail error)
+    [ Tool_result.Ok; Tool_result.Error; Tool_result.Unknown ];
+  match Tool_result.tool_call_outcome_of_string "success" with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unknown wire outcome must not decode"
+;;
+
+(* The disposition decides; the wire outcome speaks only for a record without
+   one. A deferred call is its own case, and a record whose fields do not decode
+   is malformed rather than read as either outcome. *)
+let test_recorded_call_outcome_reads_the_disposition_first () =
+  let name = function
+    | Tool_result.Recorded_succeeded -> "succeeded"
+    | Tool_result.Recorded_deferred -> "deferred"
+    | Tool_result.Recorded_failed -> "failed"
+    | Tool_result.Recorded_unsettled -> "unsettled"
+    | Tool_result.Recorded_malformed -> "malformed"
+  in
+  let expect label fields expected =
+    Alcotest.(check string)
+      label
+      expected
+      (name (Tool_result.recorded_call_outcome (`Assoc fields)))
+  in
+  let disposition value = "disposition", `String value in
+  let wire value = "wire_outcome", `String value in
+  expect "completed" [ disposition "completed" ] "succeeded";
+  expect "a deferred call has not taken effect" [ disposition "deferred" ] "deferred";
+  expect "failed" [ disposition "failed" ] "failed";
+  expect
+    "a committed effect whose result was not delivered"
+    [ disposition "completed"; wire "error" ]
+    "succeeded";
+  expect
+    "the disposition outranks a delivered response"
+    [ disposition "failed"; wire "ok" ]
+    "failed";
+  expect
+    "an undecodable disposition is not read as either outcome"
+    [ disposition "success"; wire "ok" ]
+    "malformed";
+  expect "a disposition of the wrong type" [ "disposition", `Bool true ] "malformed";
+  expect "no disposition: the response speaks" [ wire "ok" ] "succeeded";
+  expect "no disposition: a response error" [ wire "error" ] "failed";
+  expect "no disposition: an unknown response" [ wire "unknown" ] "unsettled";
+  expect "no disposition: an undecodable response" [ wire "maybe" ] "malformed";
+  expect "a response of the wrong type" [ "wire_outcome", `Int 1 ] "malformed";
+  expect "a record naming neither" [] "unsettled";
+  expect "a success flag is not an outcome" [ "success", `Bool true ] "unsettled";
+  Alcotest.(check string)
+    "a record that is not an object"
+    "malformed"
+    (name (Tool_result.recorded_call_outcome (`String "completed")))
+;;
+
 (* A tool that binds the same key twice in its payload used to succeed and
    then fail the turn: the checkpoint encoder refuses the repeat once the
    result is already in the transcript (#31701). The producers resolve it now,
@@ -664,6 +726,14 @@ let () =
             "disposition wire decoder is strict"
             `Quick
             test_disposition_wire_decoder_is_strict
+        ; Alcotest.test_case
+            "wire outcome decoder is strict"
+            `Quick
+            test_wire_outcome_decoder_is_strict
+        ; Alcotest.test_case
+            "recorded call outcome reads the disposition first"
+            `Quick
+            test_recorded_call_outcome_reads_the_disposition_first
         ; Alcotest.test_case
             "Gate causal context preserves deferred"
             `Quick

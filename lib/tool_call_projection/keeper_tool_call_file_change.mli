@@ -81,9 +81,12 @@ type t = {
   location : location;
   kind : kind;
   succeeded : bool;
-      (** Whether the call itself reported success. A failed write is still a
-          change the keeper attempted, and reading the attempt is often the
-          point, so it is projected with this flag rather than filtered out. *)
+      (** Whether the call itself reported success, as
+          {!Tool_result.recorded_call_outcome} reads the row. A failed write is
+          still a change the keeper attempted, and reading the attempt is often
+          the point, so it is projected with this flag rather than filtered
+          out. A deferred write is [false]: the file has not changed yet. A row
+          that does not say how the call ended is {!Unreadable}. *)
 }
 
 type unreadable_reason =

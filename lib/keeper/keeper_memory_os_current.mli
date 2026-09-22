@@ -174,6 +174,17 @@ val journal_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> str
     produced from it. *)
 val durable_range_receipt_path : keepers_dir:string -> keeper_id:string -> string
 
+(** Keeper ids that have a range receipt sidecar in [keepers_dir], sorted. *)
+val list_durable_range_receipt_keeper_ids : keepers_dir:string -> string list
+
+(** Decode the range receipt sidecar with the exact schema the runtime uses,
+    without reading or changing the Memory snapshot. Every Memory write for a
+    keeper reconciles this sidecar before it builds, so a sidecar this build
+    cannot decode stops them all; the deploy preflight runs this to refuse the
+    rollout first. A missing sidecar is [Ok ()]. *)
+val validate_durable_range_receipts :
+  keepers_dir:string -> keeper_id:string -> (unit, string) result
+
 (** Durable recovery evidence for one destructive ordinary-current batch. The
     file exists only between plan preparation and exact journal finalization,
     and is included in whole-Keeper purge. *)

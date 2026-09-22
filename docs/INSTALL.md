@@ -20,7 +20,11 @@ This is the default install location; use your chosen directory if you changed
 "$HOME/.local/bin/masc" setup
 ```
 
-Claude Code and Codex appear when their CLI is on `PATH`. A failed connection
+Claude Code and Codex appear when their CLI is on `PATH` or where its official
+installer puts it (`~/.local/bin`, or `CODEX_INSTALL_DIR` for Codex), so a
+terminal that has not picked up the installer's PATH change still finds them.
+`masc runtime-client-path --client claude-code` prints what setup and the
+runtime will use. A failed connection
 check can offer sign-in without losing the selection. Setup offers installation
 and startup actions for missing sandbox prerequisites. On macOS these open the
 official download or instructions; MASC does not verify the vendor installer's
@@ -323,6 +327,7 @@ answers, but every image build fails. Setup checks this and offers two choices:
 masc setup                     # reopen connection and sandbox selection
 masc doctor                    # read-only preparation report
 masc sandbox-catalog           # inspect host sandbox choices as JSON
+masc runtime-client-path --client claude-code   # where an official client runs from, as JSON
 ```
 
 Preparation uses the selected backend, validates it before saving the selection,

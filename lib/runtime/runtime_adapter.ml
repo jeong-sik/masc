@@ -853,6 +853,16 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          spec)
 ;;
 
+(* The three official-client executions spawn the path
+   {!Runtime_official_cli_install.locate} finds for the configured command:
+   on PATH as the shell finds it, else in the vendor installer's directory
+   when the command is the client's own name. Found here, at materialization,
+   for the seed's [command = "claude"] and the wizard's stored path alike; a
+   client nowhere at that time is spawned as configured and the spawn names
+   it. Before this the runtime spawned the configured name through PATH
+   alone, so a shell without ~/.local/bin on PATH -- the one the installer was
+   run from -- could pick the client in the wizard and then fail to start it
+   (masc #37747). *)
 let codex_app_server_execution (provider : Runtime_schema.provider)
     (spec : Runtime_schema.model_spec) : (Runtime_execution.t, string) result =
   match provider.transport with
@@ -881,7 +891,7 @@ let codex_app_server_execution (provider : Runtime_schema.provider)
      | None ->
        Ok
          (Runtime_execution.Codex_app_server
-            { cli_path = command
+            { cli_path = Runtime_official_cli_install.spawn_path Codex ~command
             ; model = Some spec.api_name
             ; timeout_s = Runtime_codex_app_server.default_timeout_s
             }))
@@ -942,7 +952,7 @@ let antigravity_cli_execution (provider : Runtime_schema.provider)
      | Some (File oauth_source), Some options ->
        Ok
          (Runtime_execution.Antigravity_cli
-            { cli_path = command
+            { cli_path = Runtime_official_cli_install.spawn_path Antigravity ~command
             ; model = spec.api_name
             ; agent = options.agent
             ; effort = Option.map runtime_antigravity_effort options.effort
@@ -983,7 +993,7 @@ let claude_code_execution (provider : Runtime_schema.provider)
      | None ->
        Ok
          (Runtime_execution.Claude_code
-            { cli_path = command
+            { cli_path = Runtime_official_cli_install.spawn_path Claude ~command
             ; model = Some spec.api_name
             ; timeout_s = Runtime_claude_code.default_timeout_s
             }))

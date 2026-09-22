@@ -6592,6 +6592,11 @@
  (modules test_runtime_adapter_credential_requirement)
  (libraries masc_test_deps))
 
+(test
+ (name test_runtime_official_cli_install)
+ (modules test_runtime_official_cli_install)
+ (libraries masc_test_deps))
+
 (include stanzas/test_browser_bidi_peer.inc)
 
 ; An attempt that published its answer must not publish a failure over it:

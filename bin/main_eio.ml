@@ -3424,6 +3424,15 @@ let setup_stop_owner_cmd =
   Cmd.v (Cmd.info "setup-stop-previous-owner" ~doc:"Gracefully stop the authenticated owner selected for workspace upgrade.")
     Term.(const stop $ base_path $ port $ login_agent $ expected_version)
 
+let runtime_client_path_cmd =
+  let client = Arg.(required & opt (some Masc_cli_client_path.client_arg) None & info ["client"]
+    ~docv:"CLIENT" ~doc:"claude-code, codex or antigravity.") in
+  let command = Arg.(value & opt (some string) None & info ["command"]
+    ~docv:"COMMAND" ~doc:"The configured command; defaults to the client's own name.") in
+  Cmd.v (Cmd.info "runtime-client-path"
+    ~doc:"Print where an official client runs from, as the runtime will spawn it.")
+    Term.(const (fun client command -> Masc_cli_client_path.run ~client ~command) $ client $ command)
+
 let sandbox_catalog_cmd =
   let inspect requested =
     (* The setup journey reads this catalog for the workspace doctor offered;
@@ -3697,6 +3706,7 @@ let cmd =
     ; setup_stop_owner_cmd
     ; doctor_cmd
     ; sandbox_catalog_cmd
+    ; runtime_client_path_cmd
     ; token_cmd
     ; build_commit_cmd
     ]

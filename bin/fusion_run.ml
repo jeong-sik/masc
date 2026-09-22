@@ -56,6 +56,8 @@ let string_of_failure (f : Fusion_types.panel_failure) : string =
   | Fusion_types.Invalid_max_output_tokens n ->
     Printf.sprintf "invalid_max_output_tokens: %d" n
   | Fusion_types.Invalid_timeout_s s -> Printf.sprintf "invalid_timeout_s: %g" s
+  | Fusion_types.Unknown_route route -> "unknown_route: " ^ route
+  | Fusion_types.Route_unavailable detail -> "route_unavailable: " ^ detail
 
 let string_of_decision (d : Fusion_types.judge_decision) : string =
   match d with
@@ -224,6 +226,21 @@ let run_deliberation ~sw ~net ~base_path ~policy ~topology ~preset_name ~prompt 
               | Some e -> Printf.sprintf " (after %.1fs)" e
               | None -> ""))
       evidence.judges;
+    Printf.printf "seat routes: %d\n" (List.length evidence.seat_routes);
+    List.iter
+      (fun (route : Fusion_types.seat_route) ->
+         let seat =
+           match route.seat with
+           | Fusion_types.Panel_seat identity -> "panel " ^ identity
+           | Fusion_types.Judge_seat role -> "judge " ^ judge_role_label role
+         in
+         Printf.printf "  %-44s route=%s answered_by=%s tried=[%s]\n" seat route.route
+           (Option.value route.answered_by ~default:"-")
+           (String.concat ", "
+              (List.map
+                 (fun (attempt : Fusion_types.seat_attempt) -> attempt.attempt_runtime)
+                 route.failed_attempts)))
+      evidence.seat_routes;
     (match evidence.judge with
      | Ok synthesis ->
        Printf.printf "\nRESOLVED: %s\n"

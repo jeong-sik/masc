@@ -25,6 +25,16 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
             Stdlib.Mutex.protect tool_trace_mutex (fun () ->
               tool_traces := trace :: !tool_traces)
           in
+          (* 자리 경로 기록. panel 은 선언 순서대로 한 번에 오고, judge 는 자리마다 따로
+             온다(1차 judge 들은 동시에 돌아 도착 순서가 정해져 있지 않다). 증거에 싣는
+             순서는 끝에서 [judge_nodes] 순서로 다시 맞춘다. *)
+          let panel_seat_routes = ref [] in
+          let judge_seat_routes_mutex = Stdlib.Mutex.create () in
+          let judge_seat_routes = ref [] in
+          let record_judge_seat_route route =
+            Stdlib.Mutex.protect judge_seat_routes_mutex (fun () ->
+              judge_seat_routes := route :: !judge_seat_routes)
+          in
           let judge_actor role label =
             let identity =
               Fusion_policy.panelist_id
@@ -53,7 +63,9 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
           let panel =
             Fusion_panel.run ~base_dir ~sw ~net
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt
-              ~on_tool_trace:record_tool_trace ()
+              ~on_tool_trace:record_tool_trace
+              ~on_seat_routes:(fun routes -> panel_seat_routes := routes)
+              ()
           in
           let panel_answered, panel_failed =
             List.fold_left
@@ -81,6 +93,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
               ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools
               ~tool_trace:
                 (judge_actor Fusion_types.Single "single", record_tool_trace)
+              ~seat_route:(Fusion_types.Single, record_judge_seat_route)
               ()
           in
           let refine_over (s1, u1) =
@@ -99,6 +112,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                 ~tool_trace:
                   ( judge_actor Fusion_types.Refine_pass "refine"
                   , record_tool_trace )
+                ~seat_route:(Fusion_types.Refine_pass, record_judge_seat_route)
                 ()
             with
             | Ok (s2, u2) ->
@@ -139,6 +153,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
               ~clock
               ~judge_web_tools
               ~on_tool_trace:record_tool_trace
+              ~on_seat_route:record_judge_seat_route
               judges
           in
           let first_judge_nodes =
@@ -188,6 +203,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                       ~web_tools:judge_web_tools
                       ~tool_trace:
                         (judge_actor Fusion_types.Meta "meta", record_tool_trace)
+                      ~seat_route:(Fusion_types.Meta, record_judge_seat_route)
                       ()
                   with
                   | Ok (meta_s, meta_u) ->
@@ -276,6 +292,8 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                              (Fusion_types.Stage_meta stage_num)
                              stage_id
                          , record_tool_trace )
+                       ~seat_route:
+                         (Fusion_types.Stage_meta stage_num, record_judge_seat_route)
                        ()
                    with
                    | Ok (stage_s, stage_u) ->
@@ -333,6 +351,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
                       ~tool_trace:
                         ( judge_actor Fusion_types.Final_meta "final"
                         , record_tool_trace )
+                      ~seat_route:(Fusion_types.Final_meta, record_judge_seat_route)
                       ()
                   with
                   | Ok (final_s, final_u) ->
@@ -440,6 +459,24 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
             Stdlib.Mutex.protect tool_trace_mutex (fun () ->
               Fusion_types.merge_tool_traces (List.rev !tool_traces))
           in
+          let judge_seat_routes =
+            Stdlib.Mutex.protect judge_seat_routes_mutex (fun () -> !judge_seat_routes)
+          in
+          let judge_route_of_role role =
+            List.find_opt
+              (fun (route : Fusion_types.seat_route) ->
+                 Fusion_types.equal_seat route.seat (Fusion_types.Judge_seat role))
+              judge_seat_routes
+          in
+          let seat_routes =
+            !panel_seat_routes
+            @ List.filter_map
+                (function
+                  | Fusion_types.Synthesized { role; _ } -> judge_route_of_role role
+                  | Fusion_types.Judge_failed { failed_role; _ } ->
+                    judge_route_of_role failed_role)
+                judge_nodes
+          in
           Computed
             { Fusion_types.question = req.prompt
             ; panel
@@ -447,6 +484,7 @@ let compute ~base_dir ~sw ~net ~policy ~topology ~request ?on_progress () :
             ; judges = judge_nodes
             ; judge_usage
             ; tool_trace
+            ; seat_routes
             })
 
 let project
@@ -475,6 +513,7 @@ let project
       ~channel ~question:deliberation.question ~panel:deliberation.panel
       ~judge:deliberation.judge ~judges:deliberation.judges
       ~judge_usage:deliberation.judge_usage ~tool_trace:deliberation.tool_trace
+      ~seat_routes:deliberation.seat_routes
   with
   | Ok () ->
     Fusion_metrics.record_invocation ~topology `Completed;

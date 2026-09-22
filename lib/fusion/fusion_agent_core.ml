@@ -222,6 +222,8 @@ let panel_failure_code (failure : Fusion_types.panel_failure) : string =
   | Fusion_types.Empty_response _ -> "empty_response"
   | Fusion_types.Invalid_max_output_tokens _ -> "invalid_max_output_tokens"
   | Fusion_types.Invalid_timeout_s _ -> "invalid_timeout_s"
+  | Fusion_types.Unknown_route _ -> "unknown_route"
+  | Fusion_types.Route_unavailable _ -> "route_unavailable"
 
 let panel_failure_detail ~runtime_id (failure : Fusion_types.panel_failure) : string =
   match failure with
@@ -233,9 +235,12 @@ let panel_failure_detail ~runtime_id (failure : Fusion_types.panel_failure) : st
   | Fusion_types.Invalid_max_output_tokens n ->
     Printf.sprintf "invalid max_output_tokens %d" n
   | Fusion_types.Invalid_timeout_s s -> Printf.sprintf "invalid timeout_s %g" s
+  | Fusion_types.Unknown_route route ->
+    Printf.sprintf "route %s does not resolve to a loaded lane or runtime" route
+  | Fusion_types.Route_unavailable detail -> detail
 
 (* 이미 attribution된 실패를 재-attribution 없이 렌더한다. Provider_error의 detail은
-   실패 시점(panel outcome_of_result / build_agent)에 provider_error_detail
+   실패 시점(panel attempt_of_result / build_agent)에 provider_error_detail
    ~runtime_id:model(raw)로 정규화돼 있으므로, sink가 다시 runtime_id를 입히면
    panelist(정체성, 예 "skeptic (claude)")가 "Provider '...'" 슬롯에 새거나 중복
    prefix가 붙는다 (RFC-0278). panelist는 panel_answer.model/failed_model에만 두고
@@ -250,6 +255,9 @@ let panel_failure_text (failure : Fusion_types.panel_failure) : string =
   | Fusion_types.Invalid_max_output_tokens n ->
     Printf.sprintf "invalid max_output_tokens %d" n
   | Fusion_types.Invalid_timeout_s s -> Printf.sprintf "invalid timeout_s %g" s
+  | Fusion_types.Unknown_route route ->
+    Printf.sprintf "route %s does not resolve to a loaded lane or runtime" route
+  | Fusion_types.Route_unavailable detail -> detail
 
 (** [Keeper_tool_descriptor]에서 날것의 web tool descriptor를 찾아
     [Agent_core.Tool.t]로 변환한다. 패널/심판이 web_search/web_fetch를

@@ -78,6 +78,12 @@ type panel_failure =
           ({!Fusion_policy.valid_timeout_s}), so reaching this means a direct
           [build_agent] caller supplied one — fail loudly instead of dropping
           the deadline. *)
+  | Unknown_route of string
+      (** 자리에 적힌 경로 이름이 lane 도 런타임도 아니다 ([Runtime.resolve_assignment]
+          가 [`Missing]). payload 는 적힌 이름이다. 후보를 하나도 시도하지 않았다. *)
+  | Route_unavailable of string
+      (** 경로가 가리키는 런타임의 카탈로그 행이 없다 ([`Unavailable]). payload 는
+          [Runtime.missing_catalog_model_to_string] 이다. *)
 [@@deriving to_yojson, show, eq]
 
 val panel_failure_of_yojson : Yojson.Safe.t -> (panel_failure, string) result
@@ -351,6 +357,11 @@ type judge_failure =
           전멸을 "judge failed"로 오귀속했다 — 진단 주체(키퍼)가 judge 메커니즘을
           의심하게 만든 원인. typed로 분리해 failure_code/헤드라인이 패널 실패를
           패널 실패로 말하게 한다. *)
+  | Unknown_route of string
+      (** 심판 자리의 경로 이름이 lane 도 런타임도 아니다. {!panel_failure} 의 같은
+          갈래와 같은 뜻이다. *)
+  | Route_unavailable of string
+      (** 심판 자리의 경로가 가리키는 런타임의 카탈로그 행이 없다. *)
   | Internal_error of string  (** all_fail_error fallback / 미분류 *)
 [@@deriving yojson, show, eq]
 
@@ -391,6 +402,44 @@ type judge_outcome =
   | Judge_failed of judge_error_node
 [@@deriving yojson, show, eq]
 
+(** {1 자리 경로 (RFC fusion-seat-routes)}
+
+    panel 한 명과 judge 하나는 각각 한 자리다. 자리에 적힌 값은 경로 이름이고
+    ([Runtime.resolve_assignment] 로 푼다), 그 경로의 후보를 차례로 시도해 처음 쓸 수
+    있는 답을 낸 후보에서 멈춘다. 이 기록은 그 과정의 사후 관측이다. 자리의 결과
+    자체는 [panel_outcome] / [judge_outcome] 이 그대로 나르고, 이 기록은 누가 답했고
+    누구를 거쳤는지만 더한다. *)
+
+(** 자리 정체성. panel 은 [panelist_id], judge 는 위상 역할이다. 한 심의 안에서
+    유일하다 (panel 정체성 중복은 config 로드가 거절하고, judge 역할은 노드마다 다르다). *)
+type seat =
+  | Panel_seat of string
+  | Judge_seat of judge_role
+[@@deriving yojson, show, eq]
+
+(** 실패한 시도 한 번의 사유. 자리 종류마다 실패 어휘가 달라 둘로 나눈다. *)
+type attempt_failure =
+  | Panel_attempt_failed of panel_failure
+  | Judge_attempt_failed of judge_failure
+[@@deriving yojson, show, eq]
+
+type seat_attempt =
+  { attempt_runtime : string  (** 시도한 후보 런타임 id *)
+  ; attempt_failure : attempt_failure
+  }
+[@@deriving yojson, show, eq]
+
+type seat_route =
+  { seat : seat
+  ; route : string  (** 자리에 적힌 경로 이름 (lane 이름 또는 런타임 id) *)
+  ; answered_by : string option
+      (** 답을 낸 후보 런타임 id. 모든 후보가 실패했거나 경로를 못 풀었으면 [None]. *)
+  ; failed_attempts : seat_attempt list
+      (** 답 전에 실패한 시도, 시도한 순서대로. [answered_by = None] 이면 시도 전부다.
+          경로를 못 풀었으면 빈 목록이다. *)
+  }
+[@@deriving yojson, show, eq]
+
 (** One completed panel+judge computation before any Board/chat/wake
     projection. This is the typed payload stored in the common async request's
     canonical terminal record; projection failures are outside this record. *)
@@ -403,6 +452,9 @@ type deliberation_evidence =
   ; tool_trace : tool_trace
       (** An empty ledger — no events, drops, or gaps — proves that the
           instrumented actors made no tool calls. *)
+  ; seat_routes : seat_route list
+      (** 자리마다 한 줄. panel 자리를 선언 순서대로, 그 뒤에 [judges] 순서대로
+          judge 자리. *)
   }
 [@@deriving yojson, show, eq]
 

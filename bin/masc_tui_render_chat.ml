@@ -2303,7 +2303,18 @@ let render_keeper_message (state : state) =
           | block -> Some block)
       | Some _ | None -> None
     in
-    let blocks = settled_blocks @ Option.to_list live_block in
+    (* Turns running that this pane did not open, drawn from the journal
+       reads that feed their logs ([observed_logs_for_keeper]). Projected
+       the way the live block is -- uncommitted, so the block sits where a
+       running turn's rows go and its rail stays open -- and, like it, never
+       memoised: the log grows with every history load. *)
+    let observed_blocks =
+      Masc_tui_types.observed_logs_for_keeper state keeper_name
+      |> List.map (log_projection ~committed:false)
+      |> List.filter (fun block -> block.lb_entries <> [])
+    in
+    let open_blocks = observed_blocks @ Option.to_list live_block in
+    let blocks = settled_blocks @ open_blocks in
     let committed_tagged =
       List.combine committed_messages committed_layout_entries
       |> List.map (fun (message, entry) -> Tagged_row message, entry)
@@ -2339,8 +2350,10 @@ let render_keeper_message (state : state) =
       let block_requests =
         List.map (fun block -> block.lb_request_id) blocks
       in
-      let live_request_id =
-        Option.map (fun block -> block.lb_request_id) live_block
+      (* Requests whose turn has not closed: the live block's and every
+         observed block's. Their last row continues until the stream ends. *)
+      let open_request_ids =
+        List.map (fun block -> block.lb_request_id) open_blocks
       in
       let request_of = function
         | Tagged_row (message : Masc_tui_types.msg_entry) ->
@@ -2365,7 +2378,7 @@ let render_keeper_message (state : state) =
               let opens = opens_at = index in
               let closes =
                 closes_at = index
-                && not (Option.equal String.equal live_request_id (Some request_id))
+                && not (List.exists (String.equal request_id) open_request_ids)
               in
               let edge : Masc_tui_types.turn_edge =
                 match opens, closes with
@@ -2389,10 +2402,10 @@ let render_keeper_message (state : state) =
         merged
     in
     let tagged_layout_entries =
-      match blocks, live_block with
+      match blocks, open_blocks with
       | [], _ -> committed_tagged
-      | _ :: _, Some _ -> merge_blocks ()
-      | _ :: _, None -> (
+      | _ :: _, _ :: _ -> merge_blocks ()
+      | _ :: _, [] -> (
           match !merged_blocks_memo with
           | Some memo
             when memo.mbm_committed == committed_layout_entries
@@ -2447,16 +2460,17 @@ let render_keeper_message (state : state) =
        taken: the ones on screen when the operator anchored are what they
        anchored to, not rows that arrived since. *)
     let rows_since_pin =
-      match state.msg_scroll_pin, live_block with
+      match state.msg_scroll_pin, open_blocks with
       | None, _ -> 0
-      | Some _, Some _ ->
+      | Some _, _ :: _ ->
           (* A live trail has no durable row identity and may already have
              many wrapped rows when the operator first leaves the bottom.
              Treating that existing height as newly arrived double-counts it
              on the first key press. Structural compensation resumes when the
-             trail settles into a block the pin can account for. *)
+             trail settles into a block the pin can account for. An observed
+             turn's trail is the same kind of thing. *)
           0
-      | Some pin, None ->
+      | Some pin, [] ->
           let arrived_since_pin = function
             | Tagged_row _ -> true
             | Tagged_block log -> not (List.memq log state.msg_scroll_pin_settled)

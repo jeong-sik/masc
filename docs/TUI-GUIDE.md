@@ -669,6 +669,15 @@ Conversation text is preserved verbatim. `/thinking` and
 `/tools` expose the same choices by name. `--reasoning` and `--tool-view` can
 override the initial modes.
 
+A turn this TUI did not open -- one running when the TUI started, or one
+another surface opened -- is drawn from its journal while it runs: each
+history refresh reads the journal from where the last read stopped and the
+pane draws the turn as an open block, the same shape as a turn it streams
+itself. The footer's turn line still says how long the turn has run and
+which tool it last touched; the `Latest output:` tail it used to carry is
+left out while the pane draws that text. A turn whose stream the TUI opened
+and lost is followed the same way.
+
 Memory journal rows open in summary mode, using producer-owned compact text
 instead of reconstructing a summary from rendered prose. The summary itself
 ends in `Ctrl-N: journal detail`; `Ctrl-N` or `/memory`

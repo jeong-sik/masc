@@ -6081,6 +6081,65 @@ let settled_logs_for_keeper state keeper_name =
     | Some _ -> selected) []
 ;;
 
+(* The turns of this keeper the pane can see running but did not open. A TUI
+   started while a turn was running, or a turn another surface opened, has no
+   request of its own to stream from. What it has is the turn's journal
+   (RFC-0412 §3.2): read on every history load from where the last read
+   stopped, folded into a log held beside the settled ones. That log was
+   drawn nowhere -- the pane draws the logs that stand for a finished turn,
+   and a turn still running stands for nothing yet -- so the operator read
+   the turn's text one line at a time off the footer's turn preview while
+   the pane held the whole of it (#36244).
+
+   A log a request of this pane is still feeding is not observed: that is
+   the live block, and [msg_live] draws it. A stream the pane opened and
+   lost -- settled without hearing the end, [msg_live] let go of it
+   ([settle_turn_log]) -- is observed from then on: the journal reads feed
+   that same log in place ([hold_settled_log]), which is how a cut stream's
+   turn is followed to its end. Answered per frame from the same list the
+   settled blocks come from, so a log that comes to hold its turn leaves here
+   the frame it does. *)
+let observed_logs_for_keeper state keeper_name =
+  let in_flight log =
+    List.exists
+      (fun entry ->
+        String.equal entry.sent_request.request_id (turn_log_request_id log))
+      state.msg_inflight
+  in
+  settled_logs_for_keeper state keeper_name
+  |> List.filter (fun log ->
+         (match Masc_tui_keeper_chat_transcript.phase log.tl_transcript with
+          | Masc_tui_keeper_chat_transcript.Working -> true
+          | Masc_tui_keeper_chat_transcript.Waiting
+          | Masc_tui_keeper_chat_transcript.Stream_ended
+          | Masc_tui_keeper_chat_transcript.Stream_failed _ ->
+              false)
+         && not (in_flight log))
+;;
+
+(* Whether the pane draws an observed turn's reply text itself. The footer's
+   turn preview carries the same text's tail from the turns poll; drawn
+   twice, the newest sentence sat in the pane and again under it. Text only:
+   a turn that has so far only reasoned or called tools has nothing in the
+   pane the preview would repeat. *)
+let observed_turn_text_drawn state keeper_name =
+  List.exists
+    (fun log ->
+      List.exists
+        (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
+          match item.drawn with
+          | Masc_tui_keeper_chat_transcript.Drawn_text _
+          | Masc_tui_keeper_chat_transcript.Drawn_reply _ ->
+              true
+          | Masc_tui_keeper_chat_transcript.Drawn_thinking _
+          | Masc_tui_keeper_chat_transcript.Drawn_skill _
+          | Masc_tui_keeper_chat_transcript.Drawn_tools _
+          | Masc_tui_keeper_chat_transcript.Drawn_status _ ->
+              false)
+        (Masc_tui_keeper_chat_transcript.drawn log.tl_transcript))
+    (observed_logs_for_keeper state keeper_name)
+;;
+
 (* The requests a history load for [keeper_name] reads no journal for: every
    settled log that stands for its turn, every request still in flight, and
    every journal already being read. The settled logs are not
@@ -9740,6 +9799,7 @@ let keeper_message_activity_rows (state : state) =
          ^ " · in progress"]
       | None -> Masc_tui_answering.chat_activity
           ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+          ~text_tail_drawn:(observed_turn_text_drawn state keeper_name)
           state.keeper_turns in
     let submitted = match state.msg_live with
       | Some live when String.equal (turn_log_keeper_name live) keeper_name ->

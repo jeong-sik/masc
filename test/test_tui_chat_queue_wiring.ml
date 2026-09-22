@@ -14,6 +14,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Live = Masc_tui_keeper_chat_live
 module Log = Masc_tui_keeper_chat_log
 module Tui_types = Masc_tui_types
+module Tui_decode = Masc.Tui_decode
 module Keeper_selection = Masc_tui_keeper_selection
 
 let position =
@@ -1626,6 +1627,118 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       [None; Some "provider failed"; Some "operator interrupted the turn"])
 ;;
 
+(* A turn this pane did not open -- a TUI restarted mid-turn, a turn another
+   surface opened -- is drawn from its journal while it runs. The journal
+   reads fed a log that was held and drawn nowhere until the turn ended, so
+   the operator read the reply one line at a time off the footer's turn
+   preview (#36244). Now the log is an open block in the pane, the preview's
+   tail is left out of the footer while the pane draws the same text, and
+   the moment the journal says the turn ended the block is a settled one. *)
+let test_an_observed_running_turn_is_drawn_from_its_journal () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    set_size (40, 100);
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some "alpha";
+    state.msg_loaded_keeper <- Some "alpha";
+    state.msg_loaded <-
+      [ chat_entry ~request_id:"op-1"
+          ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
+          ~text:"asked" ~at:100. () ];
+    let running = journal_log ~request_id:"op-1" ~started_at:100. ~finished:false () in
+    Tui_types.hold_settled_log state running;
+    let preview : Tui_decode.keeper_turn_preview =
+      { ktp_status_text = "glm · receiving response"; ktp_updated_at_unix = 130.
+      ; ktp_text_tail = "said"; ktp_last_tool = None }
+    in
+    state.keeper_turns <-
+      [ { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
+        ; ktr_state = Tui_decode.Keeper_turn_running
+            { lane = Tui_decode.Turn_lane_chat_operation; started_at_unix = 100.
+            ; interrupt_token = "t"; preview = Some preview } } ];
+    check (list string) "the running turn's log is observed, not settled"
+      [ "op-1" ]
+      (List.map Tui_types.turn_log_request_id
+         (Tui_types.observed_logs_for_keeper state "alpha"));
+    check bool "the pane draws the turn's text" true
+      (Tui_types.observed_turn_text_drawn state "alpha");
+    let count needle text =
+      Astring.String.cuts ~sep:needle text |> List.length |> fun n -> n - 1
+    in
+    let screen () =
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      String.concat "\n"
+        (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines)
+    in
+    let running_screen = screen () in
+    check int "the question stays" 1 (count "asked" running_screen);
+    check int "the journal's reply text is in the pane once" 1
+      (count "said" running_screen);
+    check int "the footer does not repeat the tail as Latest output" 0
+      (count "Latest output" running_screen);
+    check bool "the footer still says a turn is running" true
+      (Astring.String.is_infix ~affix:"chat_operation turn" running_screen);
+    check int "the turn's rail has not closed" 0
+      (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_closes)
+         running_screen);
+    (* The next journal read brings the end of the turn: the log now stands
+       for it, leaves the observed set, and is drawn as a settled block. *)
+    Tui_types.turn_log_add_journaled running
+      [ line 3 100.15 (journal_reply "said"); line 4 100.2 (E.Run_finished { run_id = "r" }) ];
+    Tui_types.hold_settled_log state running;
+    check (list string) "a finished turn is no longer observed" []
+      (List.map Tui_types.turn_log_request_id
+         (Tui_types.observed_logs_for_keeper state "alpha"));
+    state.keeper_turns <-
+      [ { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"
+        ; ktr_state = Tui_decode.Keeper_turn_idle } ];
+    let settled_screen = screen () in
+    check int "the reply is still drawn once" 1 (count "said" settled_screen);
+    check bool "and the turn's rail closes" true
+      (count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_closes)
+         settled_screen > 0
+       || count (Masc_tui_message_layout.turn_rail_glyph Masc_tui_message_layout.Rail_stands)
+            settled_screen > 0))
+;;
+
+(* The pane's own turn is the live block while its request is in flight, and
+   is not observed beside it. A stream the pane opened and lost settles
+   without hearing the end, [msg_live] lets go of it, and from then on it is
+   observed: the journal reads feed that log in place until the turn ends. *)
+let test_the_panes_own_turn_is_live_in_flight_and_observed_once_cut () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+  in
+  state.msg_target_keeper_name <- Some "alpha";
+  let entry =
+    inflight_with_log ~keeper_name:"alpha" ~started_at:10.
+      [ Live.Run_started; Live.Text "partial" ]
+  in
+  state.msg_live <- Some entry.log;
+  state.msg_inflight <- [ entry ];
+  check (list string) "in flight: the live block, not observed" []
+    (List.map Tui_types.turn_log_request_id
+       (Tui_types.observed_logs_for_keeper state "alpha"));
+  Tui_types.settle_turn_log state entry;
+  state.msg_inflight <- [];
+  check bool "the cut log is held" true (List.memq entry.log state.msg_settled_logs);
+  check bool "the pane let go of it" true (Option.is_none state.msg_live);
+  check (list string) "cut and settled: observed, for the journal reads to feed"
+    [ entry.sent_request.request_id ]
+    (List.map Tui_types.turn_log_request_id
+       (Tui_types.observed_logs_for_keeper state "alpha"))
+;;
+
 (* The renderer knows the wrapped transcript's real maximum only after it has
    laid the rows out. That clamped value must come back into state; otherwise
    PgUp can leave [msg_scroll] above the maximum and Up/Down appear frozen
@@ -2827,6 +2940,10 @@ let () =
             test_the_reload_rebuilds_loaded_turns_from_their_journals
         ; test_case "promoted live output survives settlement and replay" `Quick
             test_promoted_live_output_survives_settlement_and_replay
+        ; test_case "an observed running turn is drawn from its journal" `Quick
+            test_an_observed_running_turn_is_drawn_from_its_journal
+        ; test_case "the pane's own turn is live in flight and observed once cut" `Quick
+            test_the_panes_own_turn_is_live_in_flight_and_observed_once_cut
         ; test_case "promoted queue request owns a typed slot" `Quick
             test_promoted_queue_request_keeps_its_user_in_transcript
         ; test_case "message scroll accepts the rendered clamp" `Quick

@@ -5,21 +5,6 @@
     mutation path. One atomic current-snapshot replacement remains the sole
     mutation authority. *)
 
-val cadence_step : cadence:int -> counter:int -> int * bool
-val cadence_step_keyed
-  :  cadence:int
-  -> current_trace:string
-  -> prior:(string * int) option
-  -> (string * int) * bool
-val cadence_counter_entries : unit -> int
-
-val prompt_max_messages : unit -> int
-
-(** The immutable input projected into the Librarian prompt. The exact-run
-    registry records this value as the actual input, so observability and
-    provider dispatch share the same history window. *)
-val prompt_input_for_librarian : Keeper_librarian.input -> Keeper_librarian.input
-
 val messages_for_librarian
   :  Keeper_librarian.input
   -> (Agent_core.Types.message list, string) result
@@ -52,21 +37,9 @@ val preflight_slots
     accepted. *)
 
 
-(** Which failure kind this error records in the memory journal. The vocabulary
-    is owned by {!Keeper_memory_os_current} because the journal is the only
-    place it reaches disk; this function is the one place the classification
-    happens, so adding an [extraction_error] case fails to compile until it
-    names its journal kind. *)
-type trigger = Conversation_completed | Queue_changed | Durable_range
-
 type write_scope = Context_only | Context_and_memory
 (** The caller names the evidence's purpose. A queue-source organization pass
-    writes only working Context; remembered conversation and durable ranges
-    retain Memory processing regardless of the wake-up trigger. *)
-
-type input_projection =
-  | Recent_window
-  | Already_selected_range
+    writes only working Context; a durable range retains Memory processing. *)
 
 type capacity_refusal =
   | Input_limit_unknown
@@ -81,9 +54,7 @@ val fit_continuity :
     Does not dispatch a provider or change Memory receipts. *)
 
 val run_best_effort
-  :  ?trigger:trigger
-  -> ?input_projection:input_projection
-  -> ?write_scope:write_scope
+  :  ?write_scope:write_scope
   -> ?continuity:Keeper_librarian_continuity.prepared
   -> ?on_memory_committed:(unit -> unit)
        (** Synchronous observation at the snapshot commit. Must only update
@@ -102,10 +73,9 @@ val run_best_effort
   -> expected_revision:int option
   -> Keeper_librarian.input
   -> unit
-(** Execute a Librarian unit already admitted by its producer. The default
-    [Recent_window] preserves the direct official-client path. A durable range
-    consumer passes [Already_selected_range], because applying the retired
-    recent-message window again would drop the front of the selected range.
+(** Execute a Librarian unit already admitted by its producer. The input
+    arrives already selected -- a durable range, official-line fragments, or a
+    Context-only pass with no messages -- and nothing here trims it.
     [on_memory_committed] runs only after the current Memory OS snapshot write
     succeeds. [durable_range_id] and [official_range_id] are committed through the Memory store's WAL
     sidecar, so a durable consumer can recover a later progress-file failure
@@ -142,11 +112,5 @@ module For_testing : sig
     -> trace_id:string
     -> kind:Keeper_memory_os_current.librarian_failure_kind
     -> detail:string
-    -> cadence_deferred:bool
     -> unit
-
-  val input_for_projection
-    :  input_projection
-    -> Keeper_librarian.input
-    -> Keeper_librarian.input
 end

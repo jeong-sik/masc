@@ -79,7 +79,6 @@ type journal_entry =
       ; kind : librarian_failure_kind
       ; detail : string
       ; snapshot_present : bool
-      ; cadence_deferred : bool
       }
   | Journal_quarantined of
       { recorded_at : float
@@ -1187,14 +1186,7 @@ let journal_entry_to_json ~dropped_statements snapshot =
        ])
 ;;
 
-let journal_failure_to_json
-      ~now
-      ~trace_id
-      ~kind
-      ~detail
-      ~snapshot_present
-      ~cadence_deferred
-  =
+let journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present =
   `Assoc
     [ "outcome", `String failed_outcome
     ; "recorded_at", `Float now
@@ -1202,7 +1194,6 @@ let journal_failure_to_json
     ; "kind", `String (librarian_failure_kind_to_string kind)
     ; "detail", `String detail
     ; "snapshot_present", `Bool snapshot_present
-    ; "cadence_deferred", `Bool cadence_deferred
     ]
 ;;
 
@@ -1235,18 +1226,11 @@ let append_librarian_failure
       ~kind
       ~detail
       ~snapshot_present
-      ~cadence_deferred
   =
   append_journal_line
     ~keepers_dir
     ~keeper_id
-    (journal_failure_to_json
-       ~now
-       ~trace_id
-       ~kind
-       ~detail
-       ~snapshot_present
-       ~cadence_deferred)
+    (journal_failure_to_json ~now ~trace_id ~kind ~detail ~snapshot_present)
 ;;
 
 (* A snapshot this build cannot decode is durable state no producer can leave:
@@ -1371,7 +1355,6 @@ let failed_entry_of_fields fields =
          ; "kind"
          ; "detail"
          ; "snapshot_present"
-         ; "cadence_deferred"
          ]
          fields)
   then Error "failed line has unknown, duplicate, or missing fields"
@@ -1381,24 +1364,19 @@ let failed_entry_of_fields fields =
     , List.assoc_opt "trace_id" fields
     , List.assoc_opt "kind" fields
     , List.assoc_opt "detail" fields
-    , List.assoc_opt "snapshot_present" fields
-    , List.assoc_opt "cadence_deferred" fields )
+    , List.assoc_opt "snapshot_present" fields )
   with
   | ( Some (`Float recorded_at)
     , Some (`String trace_id)
     , Some (`String kind)
     , Some (`String detail)
-    , Some (`Bool snapshot_present)
-    , Some (`Bool cadence_deferred) ) ->
+    , Some (`Bool snapshot_present) ) ->
     (match librarian_failure_kind_of_string kind with
      | Some kind ->
-       Ok
-         (Journal_failed
-            { recorded_at; trace_id; kind; detail; snapshot_present; cadence_deferred })
+       Ok (Journal_failed { recorded_at; trace_id; kind; detail; snapshot_present })
      | None -> Error (Printf.sprintf "failed line has an unknown kind %S" kind))
   | _ ->
-    Error
-      "failed line is missing recorded_at/trace_id/kind/detail/snapshot_present/cadence_deferred"
+    Error "failed line is missing recorded_at/trace_id/kind/detail/snapshot_present"
 ;;
 
 let quarantined_entry_of_fields fields =
@@ -2098,8 +2076,7 @@ let decoded_journal_entry_to_json = function
        | None -> []
        | Some statements ->
          [ "dropped", `List (List.map dropped_statement_to_json statements) ])
-  | Journal_failed
-      { recorded_at; trace_id; kind; detail; snapshot_present; cadence_deferred } ->
+  | Journal_failed { recorded_at; trace_id; kind; detail; snapshot_present } ->
     `Assoc
       [ "outcome", `String failed_outcome
       ; "recorded_at", `Float recorded_at
@@ -2107,7 +2084,6 @@ let decoded_journal_entry_to_json = function
       ; "kind", `String (librarian_failure_kind_to_string kind)
       ; "detail", `String detail
       ; "snapshot_present", `Bool snapshot_present
-      ; "cadence_deferred", `Bool cadence_deferred
       ]
   | Journal_quarantined { recorded_at; rejection; rejected_path } ->
     journal_quarantine_to_json ~now:recorded_at ~rejection ~rejected_path

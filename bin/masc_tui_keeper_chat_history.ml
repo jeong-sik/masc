@@ -601,14 +601,13 @@ let memory_committed_structural_id ~at ~revision =
   Printf.sprintf "memory:committed:%d:%s" revision (memory_float_identity at)
 ;;
 
-let memory_failed_structural_id ~at ~trace_id ~kind ~detail ~snapshot_present
-    ~cadence_deferred =
-  Printf.sprintf "memory:failed:%s:%s:%s:%s:%b:%b"
+let memory_failed_structural_id ~at ~trace_id ~kind ~detail ~snapshot_present =
+  Printf.sprintf "memory:failed:%s:%s:%s:%s:%b"
     (memory_float_identity at)
     (identity_text trace_id)
     (identity_text kind)
     (identity_text detail)
-    snapshot_present cadence_deferred
+    snapshot_present
 ;;
 
 let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
@@ -690,40 +689,32 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
     string_field fields "trace_id",
     string_field fields "kind",
     string_field fields "detail",
-    bool_field_opt fields "snapshot_present",
-    bool_field_opt fields "cadence_deferred"
+    bool_field_opt fields "snapshot_present"
   with
-  | ( Some at
-    , Some trace_id
-    , Some kind
-    , Some detail
-    , Some snapshot_present
-    , Some cadence_deferred ) ->
+  | Some at, Some trace_id, Some kind, Some detail, Some snapshot_present ->
       let summary = Printf.sprintf "Librarian failed \xc2\xb7 %s" kind in
       Some
         { at
         ; structural_id =
             Some
               (memory_failed_structural_id ~at ~trace_id ~kind ~detail
-                 ~snapshot_present ~cadence_deferred)
+                 ~snapshot_present)
         ; turn_sequence = None
         ; turn_id = None
         ; operation_id = None
         ; kind = Memory_activity { summary = Some summary }
         ; attachments = []
         ; text =
-            Printf.sprintf "%s\n%s\nsnapshot present: %s \xc2\xb7 cadence deferred: %s"
+            Printf.sprintf "%s\n%s\nsnapshot present: %s"
               summary
               detail
               (if snapshot_present then "yes" else "no")
-              (if cadence_deferred then "yes" else "no")
         }
-  | Some _, Some _, Some _, Some _, Some _, None
-  | Some _, Some _, Some _, Some _, None, _
-  | Some _, Some _, Some _, None, _, _
-  | Some _, Some _, None, _, _, _
-  | Some _, None, _, _, _, _
-  | None, _, _, _, _, _ -> None
+  | Some _, Some _, Some _, Some _, None
+  | Some _, Some _, Some _, None, _
+  | Some _, Some _, None, _, _
+  | Some _, None, _, _, _
+  | None, _, _, _, _ -> None
 
 let memory_row_of_json = function
   | `Assoc fields ->

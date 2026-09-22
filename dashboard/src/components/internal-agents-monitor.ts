@@ -346,7 +346,7 @@ function LibrarianJournal({
                     <code>librarian_failure</code>
                     <strong class="text-[var(--color-danger)]">${entry.kind}</strong>
                     <time dateTime=${new Date(entry.recordedAt * 1000).toISOString()}>${formatDateTimeKo(entry.recordedAt)}</time>
-                    <span class="text-[var(--color-fg-muted)]">스냅샷 ${entry.snapshotPresent ? '있음' : '없음'}${entry.cadenceDeferred ? ' · 주기 연기' : ''}</span>
+                    <span class="text-[var(--color-fg-muted)]">스냅샷 ${entry.snapshotPresent ? '있음' : '없음'}</span>
                   </div>
                   <span class="mt-1 block text-[var(--color-fg-muted)]">${entry.detail}</span>
                 </li>

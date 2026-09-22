@@ -2713,6 +2713,24 @@ let parse_and_validate_config_text ~config_path content =
   prepare_degraded_loaded ~config_path parsed
 ;;
 
+(* [fusion] is checked on the write gates only. Boot reads the file through
+   [parse_and_validate_config_text], and a broken [fusion] must not stop every
+   Keeper turn with it; Fusion reports its own section per call. A write, though,
+   must not put a broken [fusion] on disk: one bad save used to refuse every
+   Fusion run until someone edited the file by hand. *)
+let validate_fusion_text content =
+  match Otoml.Parser.from_string content with
+  | exception Otoml.Parse_error (_, detail) ->
+    Error ("runtime config parse failed: " ^ detail)
+  | toml ->
+    (match Fusion_config.of_toml toml with
+     | Ok _ -> Ok ()
+     | Error errors ->
+       Error
+         ("fusion config invalid: "
+          ^ String.concat "; " (List.map Fusion_config.config_error_message errors)))
+;;
+
 let commit_runtime_config_text
     ?(replace_file = Fs_compat.save_file_atomic_strict_staged)
     ~path
@@ -2722,6 +2740,7 @@ let commit_runtime_config_text
   let* loaded, exact_output_lanes, startup_degradation, declared_media_failover =
     parse_and_validate_config_text ~config_path:path content
   in
+  let* () = validate_fusion_text content in
   match
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
   with
@@ -2835,7 +2854,7 @@ let validate_config_text ?runtime_config_path content =
   let* _loaded, _exact_output_lanes, _degradation, _declared_media_failover =
     parse_and_validate_config_text ~config_path:path content
   in
-  Ok ()
+  validate_fusion_text content
 ;;
 
 module For_testing = struct

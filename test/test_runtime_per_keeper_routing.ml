@@ -1872,6 +1872,53 @@ let test_runtime_config_text_save_rejects_invalid_without_write () =
       (Runtime.get_default_runtime_id ()))
 ;;
 
+(* A write must not put a broken [fusion] on disk: one bad save used to refuse
+   every Fusion run until the file was fixed by hand. The same text with a valid
+   quorum saves, so the rejection is the fusion check and not something else in
+   the fixture. *)
+let fusion_section ~min_answered =
+  Printf.sprintf
+    {|
+[fusion]
+enabled = true
+default_preset = "pair"
+
+[fusion.presets.pair]
+panel = ["openai.gpt", "runpod_mtp.qwen"]
+judge = "openai.gpt"
+panel_system_prompt = "Answer."
+judge_system_prompt = "Judge."
+min_answered = %d
+|}
+    min_answered
+;;
+
+let test_runtime_config_text_save_rejects_invalid_fusion_without_write () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    let broken = runtime_config_openai_default ^ fusion_section ~min_answered:3 in
+    (match Runtime.validate_config_text ~runtime_config_path:path broken with
+     | Ok () -> Alcotest.fail "preview must refuse a quorum above the panel seat count"
+     | Error msg ->
+       Alcotest.(check bool) "preview names min_answered" true
+         (string_contains msg "min_answered"));
+    (match Runtime.save_config_text ~runtime_config_path:path broken with
+     | Ok _receipt -> Alcotest.fail "save must refuse a quorum above the panel seat count"
+     | Error msg ->
+       Alcotest.(check bool) "save names the preset" true (string_contains msg "pair"));
+    Alcotest.(check string)
+      "runtime.toml unchanged after fusion validation failure"
+      before
+      (Fs_compat.load_file path);
+    match
+      Runtime.save_config_text
+        ~runtime_config_path:path
+        (runtime_config_openai_default ^ fusion_section ~min_answered:2)
+    with
+    | Ok _receipt -> ()
+    | Error msg -> Alcotest.failf "a valid fusion section must save: %s" msg)
+;;
+
 let test_undeclared_keeper_falls_to_default () =
   with_config_dir (fun _config_dir ->
     with_runtime_initialized (fun () ->
@@ -3398,6 +3445,10 @@ let () =
             "dashboard raw runtime.toml save rejects invalid source before write"
             `Quick
             test_runtime_config_text_save_rejects_invalid_without_write
+        ; Alcotest.test_case
+            "runtime.toml save rejects an invalid [fusion] before write"
+            `Quick
+            test_runtime_config_text_save_rejects_invalid_fusion_without_write
         ; Alcotest.test_case
             "messages-http provider loads and keeper assignment resolves"
             `Quick

@@ -1277,7 +1277,22 @@ base_url = "https://voice.fixture.invalid/v1"
             config.mkdir(parents=True)
             (config / 'runtime.toml').write_bytes((fixture / 'runtime.toml').read_bytes())
             runtime = config / 'runtime.toml'
-            runtime.write_text(runtime.read_text() + voice)
+            existing = runtime.read_text()
+            if voice:
+                # Match table headers only. An inline table such as
+                # [voice] followed by tts = { ... } is outside this guard.
+                voice_sections = [
+                    line.strip()
+                    for line in existing.splitlines()
+                    if line.strip().startswith(('[voice.tts', '[voice.stt'))
+                ]
+                if voice_sections:
+                    raise AssertionError(
+                        'release-evidence runtime fixture already declares '
+                        f'{voice_sections}; update test/test_install_runtime_setup.py '
+                        'together with scripts/fixtures/release-evidence/runtime.toml.'
+                    )
+            runtime.write_text(existing + voice)
             yield base, runtime
 
     # voice-local-setup looks --voice up in the list say prints before it

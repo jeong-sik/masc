@@ -170,6 +170,41 @@ let test_lookup_misses_stay_misses () =
   | Ok _ -> Alcotest.fail "empty query unexpectedly resolved"
 ;;
 
+(* #37074: ollama.com serves "deepseek-v4.1-flash" under both the bare name
+   and a ":cloud" suffix, but the catalog carried only the bare row while
+   [lookup_for_provider] (and, separately,
+   [Exact_output_catalog_binding.resolve_exact]) compare id_prefix with exact
+   equality, never a prefix -- so a deployment whose runtime binding named
+   the ":cloud" spelling resolved to no catalog row and the target was
+   excluded from every exact-output lane (librarian_exact, hitl_auto_judge,
+   board_attention_exact). models.toml now carries a dedicated ":cloud" row,
+   the same shape as the qwen3.5:cloud/qwen3.5:397b split above it in the
+   file; this pins that both spellings resolve to their own row. *)
+let test_ollama_cloud_deepseek_cloud_suffix_resolves () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"model_identifiers deepseek :cloud suffix (#37074)"
+  in
+  let expect_row ~model_id ~expected_id_prefix =
+    match
+      Model_catalog.lookup_for_provider
+        catalog
+        ~provider_name:"ollama_cloud"
+        ~model_id
+    with
+    | None -> Alcotest.failf "ollama_cloud/%s should resolve" model_id
+    | Some (entry : Model_catalog.model_entry) ->
+      Alcotest.(check string)
+        (model_id ^ " resolves to its own row")
+        expected_id_prefix
+        (Model_identifiers.Id_prefix.to_string entry.id_prefix)
+  in
+  expect_row ~model_id:"deepseek-v4.1-flash" ~expected_id_prefix:"deepseek-v4.1-flash";
+  expect_row
+    ~model_id:"deepseek-v4.1-flash:cloud"
+    ~expected_id_prefix:"deepseek-v4.1-flash:cloud"
+;;
+
 let () =
   Alcotest.run "model_identifiers"
     [ ( "Id_prefix.starts_with"
@@ -181,4 +216,6 @@ let () =
         ; Alcotest.test_case "three_modules_share_one_rule" `Quick test_three_modules_share_one_rule ] )
     ; ( "Model_catalog.lookup case properties"
       , [ Alcotest.test_case "query_case_fold_and_padding_rejection" `Quick test_lookup_folds_case_and_rejects_padding
-        ; Alcotest.test_case "misses_stay_misses" `Quick test_lookup_misses_stay_misses ] ) ]
+        ; Alcotest.test_case "misses_stay_misses" `Quick test_lookup_misses_stay_misses
+        ; Alcotest.test_case "ollama_cloud_deepseek_cloud_suffix_resolves" `Quick
+            test_ollama_cloud_deepseek_cloud_suffix_resolves ] ) ]

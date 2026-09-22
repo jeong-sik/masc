@@ -4757,10 +4757,11 @@ type state = {
      width the terminal forces, so it survives resizing. *)
   mutable roster_pane_hidden: bool;
   (* The Activity pane on the right edge costs a surface
-     [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed. Same
-     contract as the roster: hidden is the reader's choice and survives a
-     resize; the width is the terminal's. *)
-  mutable acting_pane_hidden: bool;
+     [Masc_tui_acting_pane.pane_cols] columns for the fleet's live feed, or
+     [wide_pane_cols] wide. Same contract as the roster: narrow, wide or
+     hidden is the reader's choice and survives a resize; whether the
+     terminal holds it is the terminal's. *)
+  mutable acting_pane_layout: Masc_tui_acting_pane.layout;
   (* Rows scrolled into the pane's full list; zero is the overview. The
      renderer clamps it to what the list holds and a toggle resets it. *)
   mutable acting_pane_scroll: int;
@@ -4768,7 +4769,10 @@ type state = {
      who put the pane away on Changes gets Changes back. *)
   mutable acting_pane_tab: Masc_tui_acting_pane.tab;
   (* The order the focus block lists the record's calls in; the heading
-     over them names it and a press on that heading moves to the next. *)
+     over them names it and a press on that heading moves to the next. It
+     opens newest first: a reader glancing at the pane is looking for what
+     the keeper just did, and oldest first put that below the fold on any
+     turn longer than the pane. *)
   mutable acting_pane_call_order: Masc_tui_acting_pane.call_order;
   (* The calls a press opened, by keeper and call key: an opened call draws
      its receipt age, schedule, disposition and the two previews under its
@@ -5204,6 +5208,12 @@ type state = {
   mutable runtime_params_notice: (bool * string) option;
   mutable keeper_gate_judges: (string * string) list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
+  (* One per background listing that replaces a whole set: the held-call
+     queue and the tool-mode (YOLO) stances. [approval_flow] says whether a
+     press superseded an answer; these say whether a later fetch of the same
+     listing already landed. *)
+  mutable approvals_order: Masc_tui_operator_projection.Listing_order.t;
+  mutable tool_modes_order: Masc_tui_operator_projection.Listing_order.t;
   (* The list draws each ask on one row; this opens the selected one whole.
      Keyed on the cursor rather than a token so an ask that resolves while it
      is open closes with the row instead of stranding a detail for something
@@ -6772,10 +6782,10 @@ let create_state
      cost of being wrong here -- whereas the column was drawn on every frame
      whether or not anyone read it. *)
   roster_pane_hidden = true;
-  acting_pane_hidden = false;
+  acting_pane_layout = Masc_tui_acting_pane.Narrow;
   acting_pane_scroll = 0;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
-  acting_pane_call_order = Masc_tui_acting_pane.Oldest_first;
+  acting_pane_call_order = Masc_tui_acting_pane.Newest_first;
   acting_pane_expanded = [];
   acting_chunk_projection = None;
   acting_pane_changes = Masc_tui_fetched.initial;
@@ -6970,6 +6980,8 @@ let create_state
   keeper_gate_modes = [];
   keeper_gate_judges = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
+  approvals_order = Masc_tui_operator_projection.Listing_order.initial;
+  tool_modes_order = Masc_tui_operator_projection.Listing_order.initial;
   approval_detail_open = false;
   approval_detail_scroll = 0;
   approval_cursor = 0;

@@ -445,6 +445,14 @@ let carried_start_range ~keeper_name ~runtime_id ~carried_front_seed ~own_first_
          unreadable.Keeper_carried_front.count
          unreadable.Keeper_carried_front.first_reason)
     seed_read.Keeper_carried_front.unreadable;
+  Option.iter
+    (fun detail ->
+       Log.Keeper.warn
+         ~keeper_name
+         "model input carried range seed read refused the turn-boundary store runtime=%s detail=%s"
+         runtime_id
+         detail)
+    seed_read.Keeper_carried_front.boundary_error;
   let seeded_first_atom =
     match seed_read.Keeper_carried_front.seed with
     | None -> None

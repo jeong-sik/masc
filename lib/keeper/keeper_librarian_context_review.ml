@@ -58,7 +58,9 @@ let state (input : Context.input) (proposed : Context.pocket list) =
 
 let receipt_json (r : Typesafeai_client.evaluated) =
   `Assoc ["model", `String r.response.model;
-    "destination_uri", `String r.destination_uri;
+    "destination_uri", `String r.destination.destination_uri;
+    "requested_model", `String r.destination.model;
+    "passed_over", `List (List.map Typesafeai_client.attempt_to_yojson r.passed_over);
     "request_body_sha256", `String r.request_body_sha256;
     "answers", `Assoc (List.map (fun (id, answer) -> id, Jev.answer_to_yojson answer) r.response.answers);
     "usage", (match r.response.usage with None -> `Null | Some u ->
@@ -97,7 +99,8 @@ let run ?(observe = fun _ -> ()) ?clock ~keeper_id ~input ~proposed () =
     observe (Checking request);
     let now () = match clock with Some clock -> Eio.Time.now clock | None -> Time_compat.now () in
     let started = now () in
-    let result = match Typesafeai_client.evaluate ?clock ~endpoint ~model ~api_key
+    let destination = { Typesafeai_client.endpoint; model; api_key } in
+    let result = match Typesafeai_client.evaluate ?clock ~destinations:(destination, [])
         ~state:request.state ~questions:[question_id, request.question] () with
       | Error failure -> Failed failure
       | Ok receipt ->

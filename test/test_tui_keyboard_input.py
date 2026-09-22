@@ -5612,6 +5612,18 @@ def image_view_interaction() -> Interaction:
         missing = b"/image /nope.png"
         send_and_wait(process, master_fd, output, missing, composer_showing(missing))
         send_and_wait(process, master_fd, output, b"\r", b"No such file")
+        # The step that did not work is the operator's, not the keeper's: it
+        # reads on the footer for a moment and leaves no row in the
+        # conversation.
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        footer = max(row for row, text in rows.items() if text.strip())
+        saying = [row for row, text in rows.items() if b"No such file" in text]
+        if saying != [footer]:
+            raise AssertionError(
+                f"the failed /image is not the footer alone (rows {saying}, footer {footer}): "
+                f"{screen_text(bytes(output))!r}"
+            )
 
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")

@@ -119,10 +119,19 @@ let test_frontmatter_body_excludes_the_block () =
   check string "body" "line one\nline two" parsed.Frontmatter.body
 
 let test_frontmatter_tags_accept_both_shapes () =
-  let bracketed = Frontmatter.parse "---\ntags: [a, b]\n---\n" in
-  let bare = Frontmatter.parse "---\ntags: a, b\n---\n" in
-  check (list string) "bracketed" [ "a"; "b" ] (Frontmatter.list_field bracketed "tags");
-  check (list string) "bare" [ "a"; "b" ] (Frontmatter.list_field bare "tags")
+  let tags content =
+    let parsed = Frontmatter.parse content in
+    match List.assoc_opt "tags" parsed.Frontmatter.fields with
+    | Some value -> Frontmatter.list_value value
+    | None -> fail "tags field is present in every fixture here"
+  in
+  check (list string) "bracketed" [ "a"; "b" ] (tags "---\ntags: [a, b]\n---\n");
+  check (list string) "bare" [ "a"; "b" ] (tags "---\ntags: a, b\n---\n");
+  (* [tags: []] and [tags:] are both a document with no tags; whether a
+     document with no [tags] line at all is an error is the caller's call,
+     which is why [list_value] takes the value and not the field name. *)
+  check (list string) "empty brackets" [] (tags "---\ntags: []\n---\n");
+  check (list string) "empty value" [] (tags "---\ntags:\n---\n")
 
 (* A block that never closes used to consume the document: every line became
    a field candidate and the body came back empty, so a prompt whose closing

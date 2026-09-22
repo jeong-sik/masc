@@ -104,7 +104,7 @@ let parse_frontmatter content =
     let* created = scalar Created in
     let* tags =
       match lookup Tags with
-      | Some _ -> Ok (Frontmatter.list_field parsed (frontmatter_field_key Tags))
+      | Some value -> Ok (Frontmatter.list_value value)
       | None -> Error (Missing_field Tags)
     in
     Ok { title; source; author; created; tags }

@@ -56,9 +56,14 @@ let parse content =
 
 (* `tags: [a, b, c]` and `tags: a, b, c` both appeared among the readers this
    replaced. Accept either: dropping the unbracketed form would silently lose
-   tags that one of them used to return. *)
-let list_field t name =
-  let raw = String.trim (Option.value ~default:"" (List.assoc_opt name t.fields)) in
+   tags that one of them used to return.
+
+   This takes the value, not the field name. The caller has already looked
+   the field up, and whether a missing field is an error or an empty list is
+   its call; answering [""] for an absent field here was the third silent
+   default this file used to carry. *)
+let list_value value =
+  let raw = String.trim value in
   let len = String.length raw in
   let inner =
     if len >= 2 && Char.equal raw.[0] '[' && Char.equal raw.[len - 1] ']'

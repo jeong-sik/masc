@@ -25,6 +25,8 @@ val parse : string -> t
 (** {!read} for a caller that does not need to tell the cases apart: [Absent]
     and [Unclosed] both answer empty [fields] with the whole input as [body]. *)
 
-val list_field : t -> string -> string list
-(** [name: \[a, b, c\]] and [name: a, b, c] both split and trim to the same
-    list. An absent or empty value answers [[]]. *)
+val list_value : string -> string list
+(** A field value read as a list: [\[a, b, c\]] and [a, b, c] both split and
+    trim to the same list, and [""] and [\[\]] both answer [[]]. It takes the
+    value, not the field name: the caller has already looked the field up
+    in [fields] and decides what an absent field means. *)

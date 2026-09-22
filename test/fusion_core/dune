@@ -6,4 +6,4 @@
  (names test_fusion test_fusion_harness test_fusion_run_registry
    test_fusion_config_json test_fusion_config_writer)
  (deps ../../config/runtime.toml)
- (libraries alcotest otoml yojson masc.fusion_core masc.toml_line_editor))
+ (libraries alcotest otoml yojson masc.fusion_core))

@@ -19,7 +19,11 @@ curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh
 "$HOME/.local/bin/masc" setup
 ```
 
-Claude Code와 Codex는 해당 CLI가 `PATH`에 있으면 목록에 나옵니다. 연결 검사가
+Claude Code와 Codex는 해당 CLI가 `PATH`에 있거나 공식 설치기가 두는 자리
+(`~/.local/bin`, Codex는 `CODEX_INSTALL_DIR`)에 있으면 목록에 나옵니다. 그래서
+설치기가 바꾼 PATH를 아직 반영하지 않은 터미널에서도 찾습니다.
+`masc runtime-client-path --client claude-code`가 setup과 런타임이 쓸 경로를
+보여 줍니다. 연결 검사가
 실패하면 고른 모델을 유지한 채 로그인 화면을 열 수 있습니다. sandbox 준비가
 필요하면 설치·시작 동작을 제안합니다. macOS에서는 공식 다운로드나 안내 페이지를
 열며, MASC가 업체 설치기의 서명이나 체크섬을 검증하는 것은 아닙니다. Linux에서는
@@ -299,6 +303,7 @@ Apple Container는 이미지를 따로 띄운 VM 안에서 빌드합니다. 이 
 masc setup                     # 연결·샌드박스 선택 다시 열기
 masc doctor                    # 읽기 전용 준비 상태 보고
 masc sandbox-catalog           # 호스트 샌드박스 선택지를 JSON으로 확인
+masc runtime-client-path --client claude-code   # 공식 클라이언트를 어디서 실행할지 JSON으로 확인
 ```
 
 준비 단계는 선택한 백엔드를 사용하고, 선택을 저장하기 전에 검증한 뒤 이 작업

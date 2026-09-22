@@ -325,11 +325,13 @@ let handle_in_process ctx descriptor args =
   | Tool_library_search ->
     Some
       (Keeper_tool_in_process_runtime.handle_library_search_with_outcome
+         ~config:ctx.config
          ~meta:ctx.meta
          ~args)
   | Tool_library_read ->
     Some
       (Keeper_tool_in_process_runtime.handle_library_read_with_outcome
+         ~config:ctx.config
          ~meta:ctx.meta
          ~args)
   | Tool_surface_read ->

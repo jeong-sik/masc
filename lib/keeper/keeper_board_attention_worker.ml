@@ -698,9 +698,81 @@ let complete_projection
     |> Result.map (fun step -> Completion_blocked step)
 ;;
 
-let signal_completion = function
+let is_not_relevant_completion partition =
+  match partition.Partition.state with
+  | Partition.Completed { item; _ } ->
+    (match item.judgment.verdict.decision with
+     | Keeper_board_attention_judgment.Not_relevant -> true
+     | Keeper_board_attention_judgment.Relevant -> false)
+  | Partition.Ready
+  | Partition.Running _
+  | Partition.Settled _
+  | Partition.Blocked _ -> false
+;;
+
+(* [Candidate_absent] means the candidate this partition's [Completed] item
+   names is not in the live ledger. A retire moves the whole candidate store
+   aside as one directory (scripts/check-runtime-deployment-preflight.sh); it
+   never leaves a tombstone the live ledger can read back, so this cannot
+   distinguish "retired" from any other cause a candidate is gone -- both
+   mean the same thing for this delivery: it cannot succeed on a retry of the
+   identical request, because the row it would update no longer exists.
+   Settling the partition here without one is the terminal outcome, not a
+   fallback (masc, board attention finalizer, 2026-08-16). *)
+let deliver_and_settle_completed ~base_path ~keeper_name partition =
+  match partition.Partition.state with
+  | Partition.Completed { item; _ } ->
+    let* delivery =
+      Candidate.apply_judgment_and_deliver
+        ~base_path
+        ~keeper_name
+        ~candidate_id:item.candidate_id
+        ~judgment:item.judgment
+    in
+    (match delivery with
+     | Candidate.Candidate_absent ->
+       Log.Keeper.error
+         "Board attention candidate permanently absent from the ledger; settling partition without delivery keeper=%s partition=%s candidate=%s"
+         keeper_name
+         partition.partition_id
+         item.candidate_id
+     | Candidate.Delivered (_ : Candidate.candidate) -> ());
+    let* settled =
+      Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
+    in
+    Ok settled
+  | Partition.Ready
+  | Partition.Running _
+  | Partition.Settled _
+  | Partition.Blocked _ ->
+    Error
+      ("completed partition query returned non-Completed state: "
+       ^ partition.partition_id)
+;;
+
+let signal_completion ~base_path = function
   | Completion_blocked step -> Ok step
   | Completion_projected (completed, owner) ->
+    (* [Not_relevant] carries nothing across the owner lane: no event is
+       enqueued for the owner to consume (keeper_board_attention_candidate.mli:
+       "Relevant judgments cross the owner lane only when the owner durably
+       applies and consumes the exact candidate judgment"). Waiting for the
+       owner's own heartbeat to run [settle_completed_snapshot] orphans the
+       candidate whenever that specific owner is not currently ticking
+       (task-1666's measured 98 live cases); the worker settles it here
+       instead, independent of the owner. *)
+    let* () =
+      if is_not_relevant_completion completed
+      then (
+        let* (_ : Partition.t) =
+          deliver_and_settle_completed
+            ~base_path
+            ~keeper_name:completed.Partition.keeper_name
+            completed
+        in
+        Ok ())
+      else Ok ()
+    in
     let owner_wake =
       Keeper_registry.wakeup_running_exact
         ~intent:Keeper_registry.Attention_result
@@ -966,6 +1038,18 @@ let complete_existing_judgment
         "existing judgment completion"
         transition
     in
+    let* () =
+      if is_not_relevant_completion completed
+      then (
+        let* (_ : Partition.t) =
+          deliver_and_settle_completed
+            ~base_path
+            ~keeper_name:completed.Partition.keeper_name
+            completed
+        in
+        Ok ())
+      else Ok ()
+    in
     let owner_wake =
       exact_owner_wake
         ~base_path
@@ -1064,7 +1148,7 @@ let process_pending
         latest_partition
         judgment
     in
-    signal_completion projection
+    signal_completion ~base_path projection
 ;;
 
 let process_claimed
@@ -1689,45 +1773,7 @@ let settle_completed_snapshot
         "completed owner settlement"
         partition
     in
-    match partition.Partition.state with
-    | Partition.Completed { item; _ } ->
-      let* delivery =
-        Candidate.apply_judgment_and_deliver
-          ~base_path
-          ~keeper_name
-          ~candidate_id:item.candidate_id
-          ~judgment:item.judgment
-      in
-      (* [Candidate_absent] means the candidate this item names is gone from
-         the live ledger for good (a retire moves the whole store aside as one
-         directory and leaves no tombstone to re-check later), so no delivery
-         can ever land for it. Settling the partition here without one is the
-         terminal outcome, not a fallback: the alternative is exactly what
-         this branch exists to stop — a settlement error that propagates and
-         leaves the same [Completed] item to be handed to this function again
-         next cycle, permanently, since the ledger it depends on cannot come
-         back (masc, board attention finalizer, 2026-08-16). Discarded rather
-         than admitting anything: the missing candidate has no delivery
-         obligation that can be fulfilled by retrying this partition. *)
-      (match delivery with
-       | Candidate.Candidate_absent ->
-         Log.Keeper.error
-           "Board attention candidate permanently absent from the ledger; settling partition without delivery keeper=%s partition=%s candidate=%s"
-           keeper_name
-           partition.partition_id
-           item.candidate_id
-       | Candidate.Delivered (_ : Candidate.candidate) -> ());
-      let* settled =
-        Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
-      in
-      Ok settled
-    | Partition.Ready
-    | Partition.Running _
-    | Partition.Settled _
-    | Partition.Blocked _ ->
-      Error
-        ("completed partition query returned non-Completed state: "
-         ^ partition.partition_id)
+    deliver_and_settle_completed ~base_path ~keeper_name partition
   in
   let rec settle_snapshot last_settled = function
     | [] -> Ok last_settled

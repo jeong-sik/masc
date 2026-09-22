@@ -38,6 +38,7 @@ let view ?front ?(last_resort = false) snapshot messages =
     ~measure_message_bytes:measure ~front
     ~history_digest_at:(Window.atom_opening_digest messages)
     ~last_resort ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
+    ~completed_end_atom:snapshot.Snapshot.end_atom
     ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered tool demotion") messages
 ;;
 
@@ -60,6 +61,12 @@ let without_working_state messages =
           ^ working_state)])
    | _ -> fail "working state must occur exactly once");
   rest
+;;
+
+(* A range that opens on an assistant message carries the constant preamble
+   ahead of it; these checks compare the durable messages under it. *)
+let without_preamble messages =
+  List.filter (fun m -> not (Window.is_synthetic_preamble m)) messages
 ;;
 
 let tool_pair () =
@@ -135,23 +142,38 @@ let test_each_request_validates_frozen_covered_messages () =
    | Error Snapshot.Trace_mismatch -> () | _ -> fail "dispatch accepted another trace's snapshot")
 ;;
 
-let test_uncompressed_history_ignores_old_front_and_demotion () =
-  let messages = source @ [text T.User "Fresh unsummarized work"] @ tool_pair () in
+(* Without a snapshot the range starts at the end of the last completed turn
+   (RFC keeper-context-window-in-tokens §13.4). An older eviction front does
+   not move it either way: on a fresh history everything goes, and on a
+   history with completed turns only this turn's own atoms go. *)
+let test_without_snapshot_starts_at_the_turn_start () =
+  let this_turn = [text T.User "Fresh unsummarized work"] @ tool_pair () in
+  let messages = source @ this_turn in
   let front_digest = Window.atom_opening_digest messages 3 |> Option.get in
   let front : Front.seed = {first_atom = 3; front_digest; source = Front.Ledger} in
-  let projected = Driver.For_testing.request_view ~continuity:Driver.uncompressed_history
+  let project ~completed_end_atom = Driver.For_testing.request_view ~continuity:Driver.without_snapshot
     ~provider_config ~measure_message_bytes:measure ~front:(Some front)
     ~history_digest_at:(Window.atom_opening_digest messages) ~last_resort:true
-    ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
+    ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int ~completed_end_atom
     ~materialize:(fun ~pending:_ _ -> fail "fresh history entered demotion") messages in
-  check string "every current-history message reaches the wire" (encode messages)
-    (encode (wire projected));
-  check int "older front cannot discard unsummarized history" 0 projected.composed.projection.dropped_atoms;
-  check int "last resort cannot demote fresh history" 0 projected.composed.demote_before;
-  (match projected.composed.origin with
-   | Front.Whole_history -> () | _ -> fail "uncompressed history attributed to an old front");
-  (match Driver.validate_continuity ~messages:[] Driver.uncompressed_history with
-   | Ok () -> () | Error _ -> fail "uncompressed path borrowed stale prefix obligations")
+  let fresh = project ~completed_end_atom:0 in
+  check string "on a fresh history every message reaches the wire" (encode messages)
+    (encode (wire fresh));
+  check int "an older front cannot discard unsummarized history" 0 fresh.composed.projection.dropped_atoms;
+  check int "last resort cannot demote fresh history" 0 fresh.composed.demote_before;
+  (match fresh.composed.origin with
+   | Front.Turn_start {end_atom = 0} -> () | _ -> fail "a fresh history attributed to an old front");
+  let completed_end = snd (Window.annotate source) in
+  let continued = project ~completed_end_atom:completed_end in
+  check int "with completed turns the range starts where the last one ended" completed_end
+    continued.composed.projection.dropped_atoms;
+  check string "only this turn's own atoms reach the wire, the pinned message in place"
+    (encode (pinned :: this_turn)) (encode (wire continued));
+  (match continued.composed.origin with
+   | Front.Turn_start {end_atom} when end_atom = completed_end -> ()
+   | _ -> fail "the origin does not name the turn start");
+  (match Driver.validate_continuity ~messages:[] Driver.without_snapshot with
+   | Ok () -> () | Error _ -> fail "the snapshot-less path borrowed stale prefix obligations")
 ;;
 
 let exchange id body =
@@ -173,24 +195,36 @@ let test_small_externalizes_only_completed_bodies () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
   let store = Tool_blob_store.create ~base_path in
   let older_body = String.make 8000 'o' and current_body = String.make 8000 'c' in
-  let completed = source @ exchange "older" older_body in
+  let older = exchange "older" older_body in
+  let completed = source @ older in
   let current = [text T.User "Approval is still required."] @ exchange "unfinished" current_body in
   let messages = completed @ current in
   let original = encode messages in
   let completed_end = snd (Window.annotate completed) in
-  let project ?(base_path = base_path) ?(continuity = Some Driver.uncompressed_history) policy =
+  (* The Librarian is one turn behind: its snapshot covers [source], so the
+     request carries the completed "older" exchange and this turn. That is
+     where a completed body is still on the wire to demote. *)
+  let behind =
+    let snapshot, lines = capture_source source in
+    match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+    | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
+  let carried = pinned :: (older @ current) in
+  let project ?(base_path = base_path) ?(continuity = Some behind) policy =
     Driver.For_testing.request_view ~input_policy:policy ?continuity
       ~provider_config ~measure_message_bytes:measure ~front:None
       ~history_digest_at:(Window.atom_opening_digest messages) ~last_resort:true
-      ~base_path ~demote_before:completed_end
+      ~base_path ~demote_before:completed_end ~completed_end_atom:completed_end
       ~materialize:(fun ~pending messages ->
         (Masc.Keeper_model_input_demotion.materialize ~store
           ~addresses:(Masc.Keeper_model_input_demotion.create_address_memo ())
           ~pending messages).messages) messages |> wire in
-  let small = project Small in
+  let small = project Small |> without_working_state in
+  check bool "a range opening on the older exchange's assistant carries the preamble" true
+    (List.exists Window.is_synthetic_preamble small);
+  let small = without_preamble small in
   check string "Small without continuity also protects unfinished work" current_body
     (body_for "unfinished" (project ~continuity:None Small));
-  check int "externalization does not omit messages" (List.length messages) (List.length small);
+  check int "externalization does not omit messages" (List.length carried) (List.length small);
   check string "unfinished tool body remains raw even after refusal" current_body
     (body_for "unfinished" small);
   check bool "non-tool obligations are unchanged" true
@@ -201,9 +235,14 @@ let test_small_externalizes_only_completed_bodies () =
       | Ok (Some bytes) -> check string "reference retrieves exact original" older_body bytes
       | _ -> fail "materialized reference is not readable")
    | _ -> fail "small policy did not externalize completed tool body");
-  check string "wide keeps exact raw source" original (encode (project Wide));
-  check string "disabled store/reader path keeps exact raw source" original
-    (encode (project ~base_path:"" Small));
+  check string "wide keeps exact raw source" (encode carried)
+    (encode (project Wide |> without_working_state |> without_preamble));
+  check string "disabled store/reader path keeps exact raw source" (encode carried)
+    (encode (project ~base_path:"" Small |> without_working_state |> without_preamble));
+  (* No snapshot at all: the range starts at the completed boundary, so this
+     turn goes raw and there is no completed body left to demote. *)
+  check string "without a snapshot only this turn goes, raw" (encode (pinned :: current))
+    (encode (project ~continuity:(Some Driver.without_snapshot) Small));
   let snapshot, lines = capture_source completed in
   let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
@@ -219,19 +258,28 @@ let test_failed_externalization_keeps_raw_body () =
   let base_path = Filename.temp_dir "input-policy-write-failure-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
   let obstacle = open_out (Filename.concat base_path ".masc") in close_out obstacle;
-  let messages = source @ exchange "blocked" (String.make 8000 'b') in
+  let blocked = exchange "blocked" (String.make 8000 'b') in
+  let completed = source @ blocked in
+  let this_turn = [text T.User "Next turn."] in
+  let messages = completed @ this_turn in
+  let completed_end = snd (Window.annotate completed) in
+  let behind =
+    let snapshot, lines = capture_source source in
+    match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+    | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   let reverted = ref 0 in
   let projected = Driver.For_testing.request_view ~input_policy:Small
-    ~continuity:Driver.uncompressed_history ~provider_config ~measure_message_bytes:measure
+    ~continuity:behind ~provider_config ~measure_message_bytes:measure
     ~front:None ~history_digest_at:(Window.atom_opening_digest messages)
-    ~last_resort:false ~base_path ~demote_before:(snd (Window.annotate messages))
+    ~last_resort:false ~base_path ~demote_before:completed_end ~completed_end_atom:completed_end
     ~materialize:(fun ~pending messages ->
       let outcome = Masc.Keeper_model_input_demotion.materialize
         ~store:(Tool_blob_store.create ~base_path)
         ~addresses:(Masc.Keeper_model_input_demotion.create_address_memo ()) ~pending messages in
       reverted := outcome.reverted; outcome.messages) messages in
   check int "failed blob write reverted" 1 !reverted;
-  check string "failed store never leaves a dangling marker" (encode messages) (encode (wire projected))
+  check string "failed store never leaves a dangling marker" (encode (pinned :: (blocked @ this_turn)))
+    (encode (wire projected |> without_working_state |> without_preamble))
 ;;
 
 let test_completed_boundary_protects_resumed_work () =
@@ -276,4 +324,4 @@ let () = run "continuity request projection"
                test_case "old front and last resort" `Quick test_old_front_and_last_resort_do_not_drop_unread;
                test_case "all covered" `Quick test_all_covered_keeps_only_working_and_pinned;
                test_case "covered prefix validation per request" `Quick test_each_request_validates_frozen_covered_messages;
-               test_case "fresh uncompressed history" `Quick test_uncompressed_history_ignores_old_front_and_demotion]]
+               test_case "without a snapshot the range starts at the turn start" `Quick test_without_snapshot_starts_at_the_turn_start]]

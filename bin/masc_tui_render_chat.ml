@@ -1500,13 +1500,10 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                   | _ :: _, Some summary -> summary
                   | [], _ | _ :: _, None -> message.me_text)
               | Memory_summary -> (
-                  (* A summarised row is a cut row, so it says which key
-                     uncuts it. What that key does is the footer's line,
-                     which is on screen whenever this row is: spelling
-                     "journal detail" here again cost twenty-five cells on
-                     every journal row of the pane. *)
+                  (* The key that uncuts a summarised row is the footer's
+                     Ctrl-N:journal, on screen whenever this row is. *)
                   match message.me_memory_summary with
-                  | Some summary -> summary ^ " · Ctrl-N"
+                  | Some summary -> summary
                   | None -> message.me_text))
           (* Only a gated row: a Gate step's text ends in the argument the
              call asked for, while a status row without one is a sentence the
@@ -3156,27 +3153,6 @@ let render_keeper_message (state : state) =
        caret did not. Reading the rows already in the frame, with the same
        [frame_lines] that builds it, cannot disagree with it. *)
     let rows_above_composer = count_frame_lines chat_buf in
-    (* An empty draft names the voice keys, as the composer row does under
-       every other surface. This pane binds them too and is the one an operator
-       speaks from, yet nothing on it said so: the key list in the footer has
-       no room for them. Measured 2026-09-13 at 120 columns, the footer read
-       [Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail]
-       and the draft row was a bare prompt. The hint sits after the caret, so
-       the caret column does not move, and it goes while a capture or
-       continuous mode runs, because the footer's meter says it louder.
-
-       Only where speech-to-text is set up. Without a transcriber the keys it
-       names refuse, and the sentence sat beside every empty draft of every
-       operator who never set voice up. *)
-    let voice_hint =
-      if String.equal input ""
-         && state.voice_stt_set_up
-         && state.keeper_message_focus = Right_pane
-         && Option.is_none state.voice_capture
-         && Option.is_none state.voice_continuous
-      then Ansi.dim ^ "  " ^ Masc_tui_keys.voice_keys_hint ^ Ansi.reset
-      else ""
-    in
     List.iteri
       (fun index line ->
         (* Only the first line carries the prompt; the rest line up under it so
@@ -3186,9 +3162,8 @@ let render_keeper_message (state : state) =
         let prefix =
           if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
         in
-        let hint = if index = 0 then voice_hint else "" in
         box_line chat_buf chat_cols
-          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.reset ^ line ^ hint))
+          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.reset ^ line))
       composer;
 
     let input_row =

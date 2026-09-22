@@ -464,6 +464,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
                     ~trace_id
                     ~boundary_lines
                     ~continuity
+                    ~progress
                     checkpoint
                 with
                 | Error error ->

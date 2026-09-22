@@ -381,8 +381,8 @@ masc voice-verify --base-path "$HOME/masc-workspace" --agent imp --audio utteran
 `voice-verify` synthesizes one sentence and transcribes the audio file, and says
 `answered` or `refused` with the reason for each endpoint.
 
-In the TUI, open imp's chat. An empty draft shows
-`(^Y to speak, ^A to keep listening)`:
+In the TUI, open imp's chat. The voice keys are on the chat's help sheet
+(`…?`):
 
 | Key | What it does |
 |---|---|

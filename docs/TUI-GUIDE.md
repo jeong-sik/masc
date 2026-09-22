@@ -369,6 +369,12 @@ names. A line that starts with `/` is a command for the TUI instead:
   command must not become an instruction the keeper acts on. Text that
   merely contains a slash later in the line is a message.
 
+A command's answer (the command list, a queue snapshot, a preset listing) is
+a row in the chat pane. A step of the operator's that did not work - a
+command missing its argument, `Ctrl-V` on a clipboard with no image, an image
+that would not open - is not part of the conversation: it reads on the
+footer for twelve seconds and stays in the event log.
+
 ### Keepers
 
 Every keeper under `.masc/keepers/`, sorted by name.
@@ -712,8 +718,8 @@ output:` tail it used to carry is left out while the pane draws that text.
 A turn whose stream the TUI opened and lost is followed the same way.
 
 Memory journal rows open in summary mode, using producer-owned compact text
-instead of reconstructing a summary from rendered prose. The summary itself
-ends in `Ctrl-N: journal detail`; `Ctrl-N` or `/memory`
+instead of reconstructing a summary from rendered prose. The footer's
+`Ctrl-N:journal` or `/memory`
 cycles those rows through summary, full, and hidden; the header names the two
 non-default states as `journal:full` and `journal:off`. Neutral system rows that
 share the journal lane have no summary projection and therefore remain whole.
@@ -981,8 +987,8 @@ screen. Inside tmux the escapes are wrapped for passthrough, which also needs
 `allow-passthrough on` in the tmux config - that is the operator's setting and
 the TUI cannot check it.
 
-A path that cannot be read, or a file that is empty, is refused as a line in
-the pane. Nothing takes the screen to report a failure.
+A path that cannot be read, or a file that is empty, is refused on the
+footer. Nothing takes the screen to report a failure.
 
 #### Lines typed during a turn
 

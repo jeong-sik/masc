@@ -217,10 +217,12 @@ let folded_thinking_summary body =
      block is the withheld-step count alone, and Ctrl-R on it redrew the same
      sentence. A block with nothing to fold draws as itself. *)
   | [] | [ _ ] -> body
+  (* A turn that reasons between every call draws this once a round, eight
+     rounds a turn. At 61 cells the sentence was the widest thing in the pane
+     and said the same "or /thinking to expand" each time; the key stays, the
+     footer and /help carry the rest. Two lines or more, so always plural. *)
   | lines ->
-      Printf.sprintf
-        "Reasoning · %d line(s) folded · Ctrl-R or /thinking to expand"
-        (List.length lines)
+      Printf.sprintf "Reasoning · %d lines folded · Ctrl-R" (List.length lines)
 
 
 let tool_projection_mode (state : state) =

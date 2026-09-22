@@ -185,13 +185,6 @@ let roster_toggle_key = "Ctrl-B"
 let context_inspector_key = "\024"
 let context_inspector_label = "Ctrl-X"
 
-(* The two voice keys, named for a reader looking at an empty draft. One
-   spelling for every row that takes a draft, so the composer row and the chat
-   pane cannot come to describe the same keys two ways. *)
-let voice_keys_hint =
-  Printf.sprintf "(%s to speak, %s to keep listening)" voice_speak_key
-    voice_listen_key
-
 
 let keepers_jump =
   b Meta "2" "keepers"

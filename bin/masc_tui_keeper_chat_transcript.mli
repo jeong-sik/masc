@@ -205,6 +205,11 @@ val make_tool_activity :
 (** Build an activity and derive its [subject] through the shared tool-subject
     authority. History and live projection must not derive it independently. *)
 
+val descriptor_of_tool_name : string -> Masc.Keeper_tool_descriptor.t option
+(** The registry's descriptor for a tool name as a trace carries it: the
+    public name first, then an internal alias. [None] for a name no
+    registered tool answers to. *)
+
 val tool_block : ?omitted_steps:int -> tool_activity list -> tool_block
 
 val project_tool_block : tool_projection_mode -> tool_block -> tool_projection

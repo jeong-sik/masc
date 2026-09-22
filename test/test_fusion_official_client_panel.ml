@@ -52,6 +52,13 @@ turn-timeout-s = 0
     claude_cli
 ;;
 
+(* The judge prompt is rendered from the registry, so resolution must point at
+   the repo's own prompt files or the render raises inside the dune sandbox. *)
+let () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  Masc.Prompt_defaults.init ()
+;;
+
 let official_client_runtime = "claude_code.claude-sonnet-5"
 let agent_core_runtime = "stub-http.stub-model"
 
@@ -199,6 +206,290 @@ let test_official_client_panelist_reaches_its_client () =
     | None -> fail "official-client execution did not publish Tool trace coverage")
 ;;
 
+(* A judge seat is routed by the same predicate as a panel seat. Judged by the
+   marker, as above: the stub emits no result event, so the judge fails either
+   way, and what separates the two routes is whether the client ran at all.
+   Remove the official branch from fusion_judge.ml and the marker stops
+   appearing while the failure turns into [Build_error]. *)
+let test_official_client_judge_reaches_its_client () =
+  let base_dir = Filename.temp_dir "fusion-official-client-judge" "" in
+  let marker = Filename.concat base_dir "spawned" in
+  let claude_cli = Filename.concat base_dir "stub-claude" in
+  let observed_trace = ref None in
+  let actor =
+    Fusion_types.Judge_actor
+      { role = Fusion_types.Single; identity = official_client_runtime }
+  in
+  write_file ~path:claude_cli ~perm:0o700 (stub_cli_script ~marker);
+  with_initialized_runtime ~claude_cli (fun () ->
+    let result =
+      Eio_main.run (fun env ->
+        Eio_context.set_env env;
+        Eio.Switch.run (fun sw ->
+          Eio_context.with_test_env
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~mono_clock:(Eio.Stdenv.mono_clock env)
+            ~sw
+            (fun () ->
+               Masc.Fusion_judge.run
+                 ~base_dir
+                 ~sw
+                 ~net:(Eio.Stdenv.net env)
+                 ~judge_system_prompt:"Judge the panel."
+                 ~judge_model:official_client_runtime
+                 ~question:"ping"
+                 ~panel:
+                   [ Fusion_types.Answered
+                       { model = agent_core_runtime
+                       ; answer = "pong"
+                       ; usage = Fusion_types.zero_usage
+                       }
+                   ]
+                 ~web_tools:false
+                 ~tool_trace:(actor, fun trace -> observed_trace := Some trace)
+                 ())))
+    in
+    check bool "the official client was executed" true (Sys.file_exists marker);
+    (match result with
+     | Ok _ -> fail "the stub client emits no result, so no synthesis can come back"
+     | Error (Fusion_types.Build_error detail, _) ->
+       failf "an official-client judge must not reach build_agent: %s" detail
+     | Error (_, usage) ->
+       check bool "an official client reports no token usage" true
+         (Fusion_types.equal_usage usage Fusion_types.zero_usage));
+    match !observed_trace with
+    | Some
+        { Fusion_types.observed_actors = []
+        ; events = []
+        ; dropped_events = 0
+        ; gaps = [ { actor = gap_actor; reason = Fusion_types.Official_client_uninstrumented } ]
+        } ->
+      check bool "the trace gap names the judge actor" true
+        (Fusion_types.equal_tool_trace_actor actor gap_actor)
+    | Some _ -> fail "an official-client judge must publish one explicit trace gap"
+    | None -> fail "an official-client judge did not publish Tool trace coverage")
+;;
+
+(* Antigravity has no system-prompt channel, so the one-shot turn has to carry
+   the instructions in its input. The stub records exactly what it received on
+   stdin and answers with a valid judge synthesis, which also drives the
+   official-client judge through a successful parse. *)
+let agy_runtime = "agy.gemini"
+
+let shell_quote text =
+  "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' text) ^ "'"
+;;
+
+let agy_fixture ~agy_cli ~oauth_source =
+  Printf.sprintf
+    {|
+[runtime]
+default = "stub-http.stub-model"
+
+[providers.stub-http]
+display-name = "Stub HTTP"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.stub-model]
+api-name = "gpt-5.4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[stub-http.stub-model]
+
+[providers.agy]
+protocol = "antigravity-cli"
+command = %S
+is-non-interactive = true
+timeout-s = 10.0
+credentials = { type = "file", path = %S }
+
+[models.gemini]
+api-name = "gemini-fixture"
+max-context = 128000
+
+[agy.gemini]
+|}
+    agy_cli
+    oauth_source
+;;
+
+let judge_synthesis_json ~answer =
+  `Assoc
+    [ Fusion_judge_parse.wire_field_consensus, `List []
+    ; Fusion_judge_parse.wire_field_contradictions, `List []
+    ; Fusion_judge_parse.wire_field_partial_coverage, `List []
+    ; Fusion_judge_parse.wire_field_unique_insights, `List []
+    ; Fusion_judge_parse.wire_field_blind_spots, `List []
+    ; Fusion_judge_parse.wire_field_resolved_answer, `String answer
+    ; ( Fusion_judge_parse.wire_field_decision
+      , `Assoc
+          [ Fusion_judge_parse.wire_field_decision_kind
+          , `String Fusion_judge_parse.wire_decision_answer
+          ; Fusion_judge_parse.wire_field_answer, `String answer
+          ] )
+    ]
+;;
+
+let recording_agy_script ~input_path ~cwd ~response =
+  let init =
+    `Assoc
+      [ "event", `String "init"
+      ; "conversation_id", `String "fusion-agy"
+      ; ( "init"
+        , `Assoc
+            [ "model", `String "gemini-fixture"
+            ; "cwd", `String cwd
+            ; "tools", `List []
+            ; "permission_mode", `String "always-proceed"
+            ] )
+      ]
+  in
+  let result =
+    `Assoc
+      [ "event", `String "result"
+      ; ( "result"
+        , `Assoc
+            [ "conversation_id", `String "fusion-agy"
+            ; "status", `String "SUCCESS"
+            ; "response", `String response
+            ; "num_turns", `Int 1
+            ; ( "usage"
+              , `Assoc
+                  [ "input_tokens", `Int 100
+                  ; "output_tokens", `Int 7
+                  ; "thinking_tokens", `Int 3
+                  ; "cache_read_tokens", `Int 50
+                  ; "total_tokens", `Int 107
+                  ] )
+            ] )
+      ]
+  in
+  Printf.sprintf "#!/bin/sh\nset -eu\ncat > %s\nprintf '%%s\\n' %s\nprintf '%%s\\n' %s\n"
+    (shell_quote input_path)
+    (shell_quote (Yojson.Safe.to_string init))
+    (shell_quote (Yojson.Safe.to_string result))
+;;
+
+let index_of ~needle haystack =
+  let n = String.length needle in
+  let rec scan i =
+    if i + n > String.length haystack
+    then None
+    else if String.equal (String.sub haystack i n) needle
+    then Some i
+    else scan (i + 1)
+  in
+  scan 0
+;;
+
+let test_antigravity_judge_receives_its_system_prompt () =
+  let base_dir = Filename.temp_dir "fusion-agy-judge" "" in
+  let input_path = Filename.concat base_dir "agy-input" in
+  let agy_cli = Filename.concat base_dir "agy" in
+  let oauth_source = Filename.concat base_dir "oauth.json" in
+  let config_path = Filename.concat base_dir "runtime.toml" in
+  let lens = "LENS-MARKER judge through the lens of restart safety" in
+  let question = "QUESTION-MARKER which candidate ships?" in
+  write_file ~path:oauth_source ~perm:0o600 "{}";
+  write_file ~path:agy_cli ~perm:0o700
+    (recording_agy_script ~input_path ~cwd:base_dir
+       ~response:(Yojson.Safe.to_string (judge_synthesis_json ~answer:"ship B")));
+  write_file ~path:config_path ~perm:0o600 (agy_fixture ~agy_cli ~oauth_source);
+  (match Runtime.init_default ~config_path with
+   | Ok () -> ()
+   | Error detail -> failf "antigravity fixture must initialize: %s" detail);
+  let result =
+    Eio_main.run (fun env ->
+      Eio_context.set_env env;
+      Eio.Switch.run (fun sw ->
+        Eio_context.with_test_env
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~mono_clock:(Eio.Stdenv.mono_clock env)
+          ~sw
+          (fun () ->
+             Masc.Fusion_judge.run
+               ~base_dir
+               ~sw
+               ~net:(Eio.Stdenv.net env)
+               ~judge_system_prompt:lens
+               ~judge_model:agy_runtime
+               ~question
+               ~panel:
+                 [ Fusion_types.Answered
+                     { model = agent_core_runtime
+                     ; answer = "B keeps restart evidence"
+                     ; usage = Fusion_types.zero_usage
+                     }
+                 ]
+               ~web_tools:false
+               ())))
+  in
+  (match result with
+   | Ok (synthesis, _usage) ->
+     check string "the client's synthesis is parsed" "ship B"
+       synthesis.Fusion_types.resolved_answer
+   | Error (failure, _usage) ->
+     failf "the Antigravity judge should synthesize, got %s"
+       (Fusion_types.judge_failure_text failure));
+  let input =
+    let channel = open_in_bin input_path in
+    Fun.protect
+      ~finally:(fun () -> close_in channel)
+      (fun () -> really_input_string channel (in_channel_length channel))
+  in
+  match index_of ~needle:"LENS-MARKER" input, index_of ~needle:"QUESTION-MARKER" input with
+  | Some lens_at, Some question_at ->
+    check bool "the system prompt comes before the question" true (lens_at < question_at)
+  | None, _ -> fail "the judge system prompt never reached the Antigravity client"
+  | Some _, None -> fail "the question never reached the Antigravity client"
+;;
+
+(* Each client's own timeout reaches Fusion as [Timeout], and every other
+   client failure stays [Provider_error]. The detail line keeps what the
+   projection folds away. *)
+let test_client_timeouts_project_to_timeout () =
+  let project failure =
+    Masc.Fusion_official_client.panel_failure ~runtime_id:official_client_runtime failure
+  in
+  let is_timeout failure =
+    Fusion_types.equal_panel_failure (project failure) Fusion_types.Timeout
+  in
+  check bool "Claude turn timeout" true
+    (is_timeout (Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Timeout 3.0)));
+  check bool "Claude admission timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Claude_admission_failure (Runtime_claude_code.Timeout 3.0)));
+  check bool "Codex timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Codex_failure
+          (Runtime_codex_app_server.Timeout { seconds = 3.0; turn_accepted = false })));
+  check bool "Antigravity timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Antigravity_failure (Runtime_antigravity.Timeout 3.0)));
+  let turn_failed =
+    Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Turn_failed "boom")
+  in
+  (match project turn_failed with
+   | Fusion_types.Provider_error _ -> ()
+   | other ->
+     failf "a non-timeout client failure must stay Provider_error, got %s"
+       (Fusion_types.show_panel_failure other));
+  let detail =
+    Masc.Fusion_official_client.failure_detail ~runtime_id:official_client_runtime
+      (Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Timeout 3.0))
+  in
+  check bool "the detail line names the runtime" true
+    (String.starts_with ~prefix:(official_client_runtime ^ ": ") detail);
+  (* The adapter renders the idle seconds; the projection has no room for them. *)
+  check bool "the detail line keeps the timeout's seconds" true
+    (Option.is_some (index_of ~needle:"3.000s" detail))
+;;
+
 (* The message has to name which handle is absent. It did not, and that cost a
    build cycle: publishing Eio_context.set_env in bin/fusion_run left the text
    identical, so the clock being the other half was invisible until the code was
@@ -269,6 +560,10 @@ let () =
             "unbounded Claude panel keeps login probe bounded"
             `Quick
             test_unbounded_claude_panel_keeps_login_probe_bounded
+        ; test_case
+            "client timeouts project to Timeout"
+            `Quick
+            test_client_timeouts_project_to_timeout
         ] )
     ; ( "eio context diagnostics"
       , [ test_case
@@ -285,6 +580,14 @@ let () =
             "official-client panelist reaches its client"
             `Quick
             test_official_client_panelist_reaches_its_client
+        ; test_case
+            "official-client judge reaches its client"
+            `Quick
+            test_official_client_judge_reaches_its_client
+        ; test_case
+            "Antigravity judge receives its system prompt"
+            `Quick
+            test_antigravity_judge_receives_its_system_prompt
         ] )
     ]
 ;;

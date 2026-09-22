@@ -2285,7 +2285,7 @@ let absorbed_snapshot () =
 let start_range
       ?(librarian_front = fun _ -> Host.No_position)
       ?(own_first_atom = 0)
-      ?(turn_start = 0)
+      ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       messages
   =
   Host.carried_start_range
@@ -2318,7 +2318,7 @@ let test_a_start_seed_begins_at_the_librarian_position () =
     (match carried.Host.front with
      | Host.Librarian_snapshot { absorbed_through } ->
        absorbed_through = snapshot.Snapshot.end_atom
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start -> false);
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ -> false);
   check string "and the log names it the same word the Agent Core lane logs"
     "librarian_snapshot"
     (Host.carried_start_front_to_string carried.Host.front);
@@ -2343,7 +2343,7 @@ let test_a_seed_without_a_librarian_position_is_unchanged () =
   check bool "the turn start, which is 0 with no completed turn" true
     (match carried.Host.front with
      | Host.Turn_start -> true
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Librarian_snapshot _ -> false)
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start_unknown _ | Host.Librarian_snapshot _ -> false)
 ;;
 
 (* The Librarian read through the last completed turn, so the position names
@@ -2393,7 +2393,7 @@ let test_a_librarian_position_behind_the_turn_start_still_wins () =
   let carried =
     start_range
       ~librarian_front:(fun _ -> Host.Absorbed snapshot)
-      ~turn_start:(snapshot.Snapshot.end_atom + 1)
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = snapshot.Snapshot.end_atom + 1 })
       start_seed_messages
   in
   check int "the range starts where the Librarian read" snapshot.Snapshot.end_atom
@@ -2402,7 +2402,7 @@ let test_a_librarian_position_behind_the_turn_start_still_wins () =
     (match carried.Host.front with
      | Host.Librarian_snapshot { absorbed_through } ->
        absorbed_through = snapshot.Snapshot.end_atom
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start -> false)
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ -> false)
 ;;
 
 let () =

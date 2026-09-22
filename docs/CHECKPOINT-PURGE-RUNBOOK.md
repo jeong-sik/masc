@@ -7,20 +7,34 @@ keeper's canonical agent core checkpoint. No LLM is involved at any step.
 
 ## What the tool does
 
-Three closed rules, applied in this order (the order is a correctness
-property — R2 before R1 is what makes a single pass a fixpoint):
+Two closed rules. Neither removes a message:
 
 | Rule | Action | Never touches |
 |---|---|---|
-| R2 reasoning strip | removes unsigned `Thinking`/`ReasoningDetails` blocks from assistant messages without `ToolUse` | signed thinking, `RedactedThinking` (byte-exact replay contract) |
-| R3 tool-result clear | replaces `ToolResult` content in closed tool cycles with a fixed marker | `tool_use_id` pairing, typed outcome |
-| R1 duplicate collapse | byte-identical text-only messages repeated 3+ times keep first and last occurrence | tool cycles, message order |
+| Reasoning strip | removes unsigned `Thinking`/`ReasoningDetails` blocks from assistant messages; a message the strip would leave empty is kept as it was | signed thinking, `RedactedThinking` (byte-exact replay contract) |
+| Tool-result clear | replaces successful `ToolResult` content in closed tool cycles with a fixed marker | `tool_use_id` pairing, typed outcome, failed results |
 
-The last 20 messages (and the structural protected suffix) pass through
-byte-exact. Input and output both run `Keeper_transcript_unit.validate`;
-a structurally broken checkpoint is refused, never repaired (#25443 owns
-the write boundary). `session_id`/`turn_count` are unchanged, so the save
-lands as an equal-watermark re-save through the locked validated store.
+Every `User` and `Assistant` message opens an atom. The turn-boundary log,
+the Librarian position, the Librarian working state and the request front
+name a place by its atom number and the digest of the message that opens
+that atom, so these pass through byte-exact:
+
+- the last 20 messages, the last atom whole, and the structural protected
+  suffix;
+- the opening message of each atom a `Turn_ended` line of the trace names;
+- everything ahead of the end of a Librarian working state that fits the
+  history. The request sends the working state in place of those atoms, so
+  leaving them costs disk only.
+
+After the rewrite the tool checks the atom count, each kept opening message
+and the working state, and installs nothing if any of them moved. A
+structurally broken checkpoint is recovered: the offending cycle and
+everything after it are dropped, and the report says how many messages that
+cost. With a Librarian position in the trace the recovery goes back further,
+to the last turn end that a boundary line the position has counted states,
+and the position moves there: the Librarian reads from a position only with
+such a line (#37772). `session_id`/`turn_count` are unchanged, so the save lands as an
+equal-watermark re-save through the locked validated store.
 
 ## Procedure
 
@@ -61,12 +75,14 @@ lands as an equal-watermark re-save through the locked validated store.
 
 ## What the tool refuses (and what to do)
 
-`checkpoint failed structural validation` (e.g. `Overlapping_tool_cycle`)
-means the write boundary admitted a broken history (#25443). Do not
-hand-edit the JSON and do not extend the tool to repair it — repair-on-read
-is the workaround class this system rejects. Record the trace and error in
-#25443 and leave the file untouched; such keepers likely cannot save new
-checkpoints under strict validation and need the #25443 fix, not a purge.
+| Refusal | Why | What to do |
+|---|---|---|
+| Keeper still registered | a live keeper's next save overwrites the purge | stop it completely, preview again |
+| the Librarian has read N of M atoms | the rewrite would clear tool output and reasoning the Librarian has not absorbed | let the Librarian catch up, then purge |
+| turn-boundary log or Librarian working state unreadable | which messages must stay byte-exact is unknown | repair or remove the unreadable file first |
+| the Librarian working state fits the history before the purge and not after it | a recovery dropped a tail the working state covers | with the server stopped, remove `<runtime keepers dir>/<keeper>/librarian-continuity.json`, then purge; the Librarian writes it again from atom 0 |
+| recovery drops the history from its structural break on, and none of the N turn-boundary lines the Librarian position has counted names an end ahead of the break | moved to an end no line states, the position would stop the Librarian for good (#37772) | leave the file untouched and record the keeper, the trace and the error in #37772 |
+| structural validation fails even with its break set aside | the write boundary admitted a history recovery cannot cut back to a sound prefix (#25443) | leave the file untouched and record the trace and error in #25443 |
 
 ## Fleet log
 
@@ -113,7 +129,7 @@ stable operation ID; do not brute-force. A `committed` response with
 failure is a separate projection concern and was observed to leave the lane
 cycling normally.
 
-Known open item: user-block base64 images are outside R1–R3 (garnet carries
+Known open item: user-block base64 images are outside both rules (garnet carries
 2.46MB of PNG payload, 77% of its checkpoint — #25542); an image rule needs
 a decision before it is added.
 

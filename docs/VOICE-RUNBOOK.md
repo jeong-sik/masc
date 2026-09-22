@@ -784,20 +784,8 @@ separates them.
 The binding is a control code because every printable key in a focused row is
 draft text.
 
-The chat pane binds the same keys, and an empty draft there names them the way
-the composer row does. Measured 2026-09-13 on imp's chat in a 120-column pty,
-the last rows of the pane, with the footer's build-location notice left out:
-
-```
-    >   (^Y to speak, ^A to keep listening)
-
-  Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail  …?
-```
-
-The hint goes once a character is typed, and while a capture or continuous mode
-runs, when the footer shows the meter instead. The footer's own key list has no
-room for the voice keys; the help sheet for the chat names `Ctrl-Y` and
-`Ctrl-A`.
+The chat pane binds the same keys, and its help sheet (`…?`) lists `Ctrl-Y`
+and `Ctrl-A`.
 
 On macOS the terminal claims Ctrl-Y for itself as the delayed-suspend key
 (`stty -a` shows `dsusp = ^Y`). The TUI turns that off while it owns the

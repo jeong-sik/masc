@@ -204,7 +204,7 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
         | Error (`Source error) -> Error error
         | Error (`Window (_, error)) ->
           Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start ->
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ ->
        Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
 ;;
 

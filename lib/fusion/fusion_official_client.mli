@@ -60,9 +60,15 @@ val run_panelist
     [timeout_s] is the preset group's declared deadline. When present it wins
     over the runtime-inferred turn timeout, because it is this request's
     explicit statement while the runtime value is a default shared by every
-    consumer of that runtime. When absent the adapter resolves its own deadline
-    exactly as before. It does not move [admission_timeout_s], which bounds
-    waiting for admission rather than the answer.
+    consumer of that runtime. When absent the adapter resolves its own turn
+    timeout. It does not move [admission_timeout_s], which bounds waiting for
+    admission rather than the answer.
+
+    On all three clients the turn timeout is the longest silence allowed
+    between stream messages, not a whole-turn limit: a client that keeps
+    streaming outlives it, bounded only by the adapter's wall-clock ceiling
+    (left at its default here). The same preset key on an Agent_core runtime
+    is a whole-call deadline ([body_timeout_s]).
 
     [output_schema] is a JSON Schema the client holds its own answer to. Every
     official client has a channel for one and no two are the same shape:
@@ -102,9 +108,19 @@ type failure =
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
 
+val failure_detail : runtime_id:string -> failure -> string
+(** The adapter's own failure text, prefixed with [runtime_id]. A
+    [Setup_failure] is rendered as its panel failure text, which already names
+    the runtime where one applies. For log and status lines that should keep
+    what {!panel_failure} folds away, such as a timeout's seconds. *)
+
 val panel_failure : runtime_id:string -> failure -> Fusion_types.panel_failure
-(** Legacy panel projection. Keep [failure] intact until transport-specific
-    failover decisions have consumed its admission/effect observations. *)
+(** Project a client failure onto the panel vocabulary. A [Setup_failure]
+    passes through unchanged. Each adapter's own [Timeout] becomes
+    {!Fusion_types.Timeout}; every other adapter failure becomes
+    [Provider_error] carrying the runtime id. Keep [failure] intact until
+    transport-specific failover decisions have consumed its admission/effect
+    observations. *)
 
 val run_with_images
   :  images:image_input list

@@ -211,6 +211,10 @@ type carried_start_front =
       (** No seed held and the lane cut nothing later, so the range starts
           where the last completed turn on this history ended: this turn's
           own atoms (RFC keeper-context-window-in-tokens §13.4). *)
+  | Turn_start_unknown of { reason : string }
+      (** No seed, no lane cut, and the turn start could not be read
+          ({!Keeper_carried_front.Turn_boundary_unknown}): the range opened
+          on the newest atom alone. *)
   | Librarian_snapshot of { absorbed_through : int }
       (** The Librarian absorbed this history through [absorbed_through] and
           saved what the keeper was in the middle of. The range starts there
@@ -263,7 +267,7 @@ val carried_start_range
   -> carried_front_seed:(unit -> Keeper_carried_front.seed_read) option
   -> librarian_front:(Agent_core.Types.message list -> librarian_position)
   -> own_first_atom:int
-  -> turn_start:int
+  -> turn_start:Keeper_carried_front.turn_start
   -> Agent_core.Types.message list
   -> carried_start
 (** Where an official client's start seed begins
@@ -299,11 +303,13 @@ val carried_start_range
     own has to be ready for a composition that does not fit it.
 
     [own_first_atom] is the front the lane already chose for its own reason
-    (Claude Code cuts its seed to the runtime's declared max-prompt-bytes).
-    The range starts at whichever position is later, so neither cut undoes the
-    other; a lane with no cut of its own passes 0. A seed whose index this
-    history does not open with the seed's message is dropped and reported, and
-    the range starts over as with no seed. *)
+    (Claude Code cuts its seed to the runtime's declared max-prompt-bytes). A
+    seed at or past that cut decides, even when it is older than
+    [turn_start]: the range the last answered request carried is this lane's
+    continuity. Without a seed the range starts at the later of the lane's
+    cut and [turn_start]; a lane with no cut of its own passes 0. A seed
+    whose index this history does not open with the seed's message is
+    dropped and reported, and the range starts over as with no seed. *)
 
 val prepare_turn :
   runtime_label:string ->

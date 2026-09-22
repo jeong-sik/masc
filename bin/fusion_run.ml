@@ -109,10 +109,11 @@ let first_some (f : 'a -> 'b option) (xs : 'a list) : 'b option =
    This debug CLI does not account for error-path usage (the orchestrator does),
    so the [Error] usage carried by [Fusion_judge.run] is dropped here, keeping
    the existing [(.. , string) result] contract for the print helpers below. *)
-let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
+let synthesize ~base_path ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
     ~(panel : Fusion_types.panel_outcome list)
   : (Fusion_types.judge_synthesis * Fusion_types.usage, string) result =
   Masc.Fusion_judge.run
+    ~base_dir:base_path
     ~sw
     ~net
     ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -329,7 +330,7 @@ let run_harness ~sw ~net ~(base_path : string) ~(policy : Fusion_policy.t)
   let self_moa_answer, self_moa_judge_in, self_moa_judge_out =
     match
       print_judge_arm ~tag:"self-moa"
-        (synthesize ~sw ~net ~preset ~prompt ~panel:sc_panel)
+        (synthesize ~base_path ~sw ~net ~preset ~prompt ~panel:sc_panel)
     with
     | Ok values -> values
     | Error msg ->
@@ -348,7 +349,7 @@ let run_harness ~sw ~net ~(base_path : string) ~(policy : Fusion_policy.t)
   let fusion_answer, fusion_judge_in, fusion_judge_out =
     match
       print_judge_arm ~tag:"fusion"
-        (synthesize ~sw ~net ~preset ~prompt ~panel:fusion_panel)
+        (synthesize ~base_path ~sw ~net ~preset ~prompt ~panel:fusion_panel)
     with
     | Ok values -> values
     | Error msg ->

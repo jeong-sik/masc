@@ -27,7 +27,7 @@
 
 ### Changed
 
-- A checkpoint purge now removes the keeper's continuity snapshot along with moving the Librarian position, since the rewrite leaves the snapshot in the old atom numbering; the purge result and the CLI say whether one was removed (#37755).
+- Checkpoint purge (dashboard and `masc-checkpoint-purge`) keeps every message, and keeps byte-exact the last atom, the reply each completed turn ended on, and whatever a fitting Librarian working state covers, so the Librarian position, turn-boundary lines, working state and request front all still match the purged checkpoint. The report counts stripped reasoning blocks and cleared tool results; a dashboard apply keeps new Librarian units out until it finishes (#37751).
 - A keeper request with no Librarian snapshot that fits the current history starts at the Librarian's read position when that position is a place in the history, and otherwise, with no seed, at the end of the last completed turn, instead of carrying the whole history; official-client lanes without a seed start at that boundary too. The Memory screen and dashboard show the position-only case as `absorbed`. The turn-record and forecast origin `whole_history` is replaced by `turn_start` with its `end_atom`, and the Memory screen's continuity input `uncompressed` by `without_snapshot` (#37734, #37745).
 - The TUI chat header labels a model the stream named without a runtime id as `model:`, and only an announced runtime id as `turn:`; a model name is no longer shown as the runtime.
 - The next-request band names the wake line in the same estimated tokens as its other figures instead of bytes.
@@ -45,6 +45,8 @@
 
 ### Fixed
 
+- A keeper whose turn-boundary store cannot be read, or matches no boundary of its history, no longer sends its whole history as if the last completed turn ended at atom 0. The request opens on the newest atom alone and its origin says `turn_start_unknown` with the reader's reason, in the TUI band and the request forecast as well (#37746).
+- A Librarian working state that cannot be read, cannot be checked against the turn-boundary log, or covers conversation bytes that changed no longer refuses every Agent-Core turn. The request starts at the Librarian's read position, or at the turn's own boundary, as it does when the working state no longer fits, and the reason is logged as a warning. A refused turn also ran no Librarian round, so a working state whose covered bytes changed was never written again; a working-state file or boundary log that cannot be read now leaves turns running and names the file to fix (#37762).
 - Setup fixture substitutions now fail at the exact changed fixture location instead of silently passing and blaming the wrong field (#37434).
 - The cancel guard now follows complete handler arm lists and recognizes both exception-arm forms, eliminating false positives from comments and distant cancellation arms (#37495).
 - The strict runtime-config check now excludes vendored warning policy from MASC's warning gate without weakening MASC source checks (#37315).
@@ -53,6 +55,7 @@
 - Keepers waiting for explicit session recovery are no longer counted as automatic retries; the Dashboard and TUI show them separately and fleet health reports them as needing operator action (#37236).
 - Remote Keepers now use one resolved workspace for the request boundary, command working directory, and file tools, so the three can no longer disagree (#37325).
 - A turn's decision record now states the degraded-retry result exactly as the execution receipt does, instead of inferring it from a runtime change (#37446).
+- Checkpoint purge recovery of a structurally broken checkpoint no longer leaves the Librarian stopped. The recovery drops the history from the break on and moved the Librarian's read position to the new end, which is inside a turn when the break is, so no turn-boundary line stated it and every later pass stopped with "read position has no matching turn boundary". With a Librarian position in the trace, the recovery now ends the history at the last turn end a boundary line the position has counted states, and is refused when there is none. The durable consumer and the purge answer "does a line state this position" with one lookup, `Keeper_turn_boundaries.witness_line` (#37772).
 
 ### Internal
 

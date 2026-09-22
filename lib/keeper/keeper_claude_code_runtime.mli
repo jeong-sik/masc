@@ -39,7 +39,7 @@ module For_testing : sig
     -> ?librarian_front:
          (Agent_core.Types.message list
           -> Keeper_official_client_host.librarian_position)
-    -> turn_start:int
+    -> turn_start:Keeper_carried_front.turn_start
     -> ?on_model_input_window_observation:
          (Runtime_model_input_tail_window.window_observation -> unit)
     -> keeper_name:string
@@ -87,7 +87,7 @@ val run :
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
   ?librarian_front:
     (Agent_core.Types.message list -> Keeper_official_client_host.librarian_position) ->
-  turn_start:int ->
+  turn_start:Keeper_carried_front.turn_start ->
   ?on_official_client_tool_boundary:
     (unit -> (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result) ->
   ?on_official_client_result_handoff:
@@ -113,7 +113,8 @@ val run :
     whichever of the two positions is later, so a turn seeded from a narrow
     range does not widen it and the ceiling does not undo the seed.
     [turn_start] is where the range starts when no seed names a front: the
-    end of the last completed turn on this history, 0 when it has none (RFC
+    end of the last completed turn on this history, 0 when it has none, and
+    the newest atom alone when that boundary is unknown (RFC
     keeper-context-window-in-tokens §13.4). A caller that passes no seed
     starts there, inside the ceiling.
 

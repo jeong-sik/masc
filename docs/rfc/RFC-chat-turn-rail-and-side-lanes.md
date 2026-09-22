@@ -3,7 +3,7 @@ rfc: "chat-turn-rail-and-side-lanes"
 title: "턴은 본선, 밖에서 온 것은 측선 — 채팅 화면의 위계를 레일로 그린다"
 status: Draft
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-22
 author: claude
 supersedes: []
 superseded_by: null
@@ -203,7 +203,35 @@ type tool_projection_mode = Compact | Full
 - 마우스: 채팅 패널이 SGR 리포트를 받아 `⌄` 히트 영역에서 접힘을 토글한다.
   Ctrl-T 로 마우스를 놓으면 키보드 경로가 그대로 남는다.
 
-### 4.6 Web Dashboard
+### 4.6 남이 보낸 줄은 막대 뒤에
+
+증분 2 는 남이 보낸 줄을 왼쪽 측선(`───┤`)으로 합류시켰다. 합류는 보이지만
+그 줄은 여전히 내 대화와 같은 칼럼, 같은 x 에서 시작한다. 운영자가
+2026-09-22 에 "내 대화와 채팅 대상을 분리" 하되 살짝 들여쓰고 막대를
+세우는 모양을 골랐다.
+
+- 대상은 `Inbound` 행이다 — 다른 keeper, 다른 사람, connector 로 들어온
+  남의 말. journal 은 이 keeper 자신의 기억이라 제자리에 있다.
+- 블록은 2칸 들여쓴다(`inbound_indent_cells`). 폭과 상관없이 같다 — 긴
+  메시지가 주변보다 좁게 접히지 않을 만큼만 떨어뜨린다.
+- 본문 앞 두 칸(journal 은 여기에 점선 `┊` 을 그린다)에 보낸 사람 색의
+  실선 막대 `▎` 를 그린다. 측선의 질감 규칙 — journal 은 점선, 도착은
+  실선 — 을 그대로 쓴다.
+- `metadata:full` 제목 줄과 이어지는 시계 줄도 같은 막대 뒤에서 시작한다.
+- 합류 표시 `───┤` 는 대화 줄에 그대로 둔다.
+- 들여쓰기는 레이아웃 한 곳(`rows_of_entry`)이 정한다. 측정과 그리기가
+  같은 행을 쓴다.
+
+```
+  ● ───────────────────────────────────────────────── 18:24:40
+    09:32Z 순찰 wake에서 후속 등기로 이어붙인다.
+     ▎◀ codex-mcp-client ──────────────────────────── 18:25:58
+     ▎fixing: #37772 — checkpoint purge recovery cuts back to a
+     ▎turn end the Librarian's counted lines witness …
+  ▶ YOU ───────────────────────────────────────────── 18:33:23
+```
+
+### 4.7 Web Dashboard
 
 같은 위계를 두 surface가 쓴다. 화면 문법(레일·레인·접힘 상태)은 TUI가
 정의하고, Dashboard 는 같은 typed projection 을 읽어 자기 방식으로 그린다.
@@ -222,6 +250,7 @@ projection 을 각자 다시 만들면 두 화면이 서로 다른 이야기를 
 | 5 | 도구 계열을 등록부에서 읽는다 | 위임이 `Delegate` 로 따로 세어짐 | 이름 철자가 아니라 descriptor 가 계열을 정함 | |
 | 6 | 병렬 그룹 | `stream_scope` 동석을 `┬`/`┴` 로 | 한 scope 3호출 → 분기 1개 | occurrence 전달에 의존 |
 | 7 | Dashboard 정렬 | 같은 projection | 두 화면이 같은 턴에 같은 위계 | |
+| 8 | 남이 보낸 줄을 막대 뒤에 (§4.6) | `Inbound` 블록이 2칸 들여 보낸 사람 색 막대 뒤에서 시작 | 모든 폭, 측정과 그리기가 같은 행 | |
 
 ### 순서를 정한 두 의존
 

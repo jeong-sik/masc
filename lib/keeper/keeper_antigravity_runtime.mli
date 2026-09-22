@@ -105,4 +105,10 @@ module For_testing : sig
       transmitted prompt byte count. *)
 
   val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
+
+  val measure_model_input_message_bytes : Agent_core.Types.message -> int
+  (** What the window charges one message, framing included. A test that has
+      to place a capacity inside one band -- the working state fits and the
+      newest atom does not -- measures with this rather than restating the
+      framing and drifting from it. *)
 end

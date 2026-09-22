@@ -1491,6 +1491,99 @@ let test_a_working_state_the_window_cannot_fit_refuses () =
             (List.length sent)))
 ;;
 
+(* One band narrower than the refusal above: the working state fits inside
+   the ceiling and the newest atom no longer does. The range is clamped to
+   carry the turn it answers, so an empty history here would send the working
+   state with nothing to answer -- a summary of atoms the request no longer
+   holds. Every other front keeps the empty history, because there the
+   ceiling is only saying it cannot hold one atom of this conversation. *)
+let test_a_snapshot_front_refuses_the_band_that_keeps_no_atom () =
+  let messages = carried_front_history () in
+  let measure = Keeper_antigravity_runtime.For_testing.measure_model_input_message_bytes in
+  let snapshot =
+    let covered = List.filteri (fun index _ -> index < 53) messages in
+    let position =
+      match Keeper_turn_boundaries.position_of_messages covered with
+      | Ok position -> position
+      | Error detail -> fail detail
+    in
+    let line =
+      ( 1
+      , Ok
+          { Keeper_turn_boundaries.recorded_at = 1.
+          ; event =
+              Keeper_turn_boundaries.Turn_ended
+                { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+                ; history_at_start = Keeper_turn_boundaries.Fresh_history
+                ; position
+                }
+          } )
+    in
+    match
+      Librarian_continuity_snapshot.capture ~trace_id:"trace-1" ~lines:[ line ]
+        ~messages:covered ~working_state:(String.make 4_000 'w')
+    with
+    | Ok snapshot -> snapshot
+    | Error error -> fail (Librarian_continuity_snapshot.error_to_string error)
+  in
+  (* The message the lane pins for this snapshot, rebuilt here so the floor
+     below is measured over the list the composition actually windows. *)
+  let pinned_working_state : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text (Keeper_turn_driver_try_provider.working_state_text snapshot) ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  let pinned_floor =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        (pinned_working_state :: messages)
+    with
+    | Some bytes -> bytes
+    | None -> fail "the fixture history has no shrinkable atom"
+  in
+  (* Room for the fixed sections, the pinned working state and the omission
+     preamble, and one byte less than the atom the range has to carry. *)
+  let capacity =
+    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes ~system_prompt:"system"
+      ~goal:"goal"
+    + pinned_floor
+    + measure (List.nth messages 59)
+    - 1
+  in
+  let project ?librarian_front () =
+    match
+      capacity_projection ?librarian_front ~declared_max_prompt_bytes:(Some capacity)
+        ~system_prompt:"system" ~goal:"goal" None
+    with
+    | Error error -> fail (Agent_core.Error.to_string error)
+    | Ok None -> fail "declared capacity produced no projection"
+    | Ok (Some project) -> project messages
+  in
+  (match
+     project
+       ~librarian_front:(fun _ ->
+         Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+       ()
+   with
+   | Error _ -> ()
+   | Ok sent ->
+     fail
+       (Printf.sprintf "a working state went out with no atom to answer (%d messages)"
+          (List.length sent)));
+  (* The refusal belongs to the snapshot front. The same ceiling with nothing
+     pinned in front of the range is a smaller request and still composes. *)
+  match project () with
+  | Error error ->
+    fail
+      (Printf.sprintf "a front with no working state stopped composing: %s"
+         (Agent_core.Error.to_string error))
+  | Ok _ -> ()
+;;
+
 let test_a_front_from_another_history_is_dropped () =
   let messages = carried_front_history () in
   let other =
@@ -1587,6 +1680,10 @@ let () =
               "a working state the window cannot fit refuses"
               `Quick
               test_a_working_state_the_window_cannot_fit_refuses
+        ; test_case
+            "a snapshot front refuses the band that keeps no atom"
+            `Quick
+            test_a_snapshot_front_refuses_the_band_that_keeps_no_atom
           ; test_case
               "a front from another history is dropped"
               `Quick

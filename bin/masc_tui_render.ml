@@ -622,7 +622,7 @@ let render_overview (state : state) =
         (* After the clock, so the clock column stays one column down the
            panel and only the rows that carry a mark give up its two cells. *)
         let mark =
-          match Masc_tui_types.overview_event_mark e with
+          match (ignore e; None) with
           | None -> ""
           | Some glyph ->
               Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph

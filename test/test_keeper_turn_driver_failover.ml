@@ -4820,7 +4820,10 @@ let test_access_failover_preserves_effect_and_caller_authority () =
 
 let test_exhausted_access_errors_and_bad_requests_remain_terminal () =
   let cases =
-    (access_error_from_http 400, ["first"])
+    (* HTTP 400 is an unknown request refusal. The lane walker may try the
+       next declared candidate when the attempt had no observable effect;
+       this is the same safe refusal policy exercised by #37631. *)
+    (access_error_from_http 400, ["first"; "last"])
     :: (Masc.Keeper_codex_runtime.For_testing.codex_error_to_core_error
           (Runtime_codex_app_server.Invalid_config "bad path"), ["first"])
     :: List.map (fun (_, error) -> error, ["first"; "last"])

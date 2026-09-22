@@ -78,6 +78,10 @@ type Ready = Extract<PanelState, { phase: 'ready' }>
 const NO_NOTICE: Notice = { kind: 'none' }
 const REVISION_PREVIEW_LENGTH = 12
 
+// Both reads or neither. A preset seat can only be picked from a route the
+// resolver reports, so an editor that opened without them would offer empty
+// dropdowns on a screen that otherwise looks healthy, and the operator would
+// learn the routes were missing from a `No_panel_models` refusal on save.
 async function loadAll(): Promise<Loaded> {
   const [config, resolved] = await Promise.all([fetchFusionConfig(), fetchRuntimeResolved()])
   return { config, routes: routeOptionsFromResolved(resolved) }
@@ -130,14 +134,21 @@ function NoticeView({
   onReload: () => void
 }) {
   if (notice.kind === 'none' || notice.site !== site) return null
+  // `data-site` names which write the notice is about. The two sites render the
+  // same testids, so without it a reader — a test as much as an operator —
+  // cannot tell a settings refusal from a preset refusal, and a notice drawn in
+  // both places reads exactly like one drawn in the right place.
   if (notice.kind === 'saved') {
-    return html`<div class="set-line"><span class="set-ok" data-testid="fusion-settings-saved">${notice.text}</span></div>`
+    return html`<div class="set-line">
+      <span class="set-ok" data-testid="fusion-settings-saved" data-site=${site}>${notice.text}</span>
+    </div>`
   }
   return html`
     <div class="set-line">
-      <span class="set-err" data-testid="fusion-settings-error">${notice.text}</span>
+      <span class="set-err" data-testid="fusion-settings-error" data-site=${site}>${notice.text}</span>
       ${notice.reloadable
-        ? html`<button type="button" data-testid="fusion-settings-reload" disabled=${busy} onClick=${onReload}>
+        ? html`<button type="button" data-testid="fusion-settings-reload" data-site=${site}
+            disabled=${busy} onClick=${onReload}>
             다시 불러오기
           </button>`
         : null}
@@ -169,7 +180,10 @@ export function FusionSettingsPanel() {
     return html`<div class="set-hint" data-testid="fusion-settings-loading">설정을 불러오는 중…</div>`
   }
   if (state.phase === 'failed') {
-    return html`<div class="set-err" data-testid="fusion-settings-error">${state.error}</div>`
+    // Its own testid: this is "the panel never opened", not "a write was
+    // refused". The two used to be one selector, and a reader could not tell
+    // which had happened.
+    return html`<div class="set-err" data-testid="fusion-settings-load-error">${state.error}</div>`
   }
 
   const ready: Ready = state

@@ -1390,10 +1390,10 @@ let test_runtime_footer_is_the_tables () =
   List.iter
     (fun piece ->
       Alcotest.(check bool) ("keeper lanes name " ^ piece) true (has lanes piece))
-    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add failover"; "r:refresh"
+    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add candidate"; "r:refresh"
     ; "a:new lane"; "x:drop candidate"; "J/K:move candidate"; "D:remove lane" ];
   Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
-  Alcotest.(check bool) "and offer no failover to append" false (has all "e:add failover");
+  Alcotest.(check bool) "and offer no failover to append" false (has all "e:add candidate");
   List.iter
     (fun piece ->
       Alcotest.(check bool) ("all runtimes offer no lane edit " ^ piece) false (has all piece))
@@ -1408,7 +1408,7 @@ let test_runtime_footer_is_the_tables () =
   in
   Alcotest.(check (list string)) "the sheet names the p walk once"
     [ "keeper lanes / all runtimes / service lanes" ] (labels "p");
-  Alcotest.(check (list string)) "and lists failover" [ "add failover" ] (labels "e")
+  Alcotest.(check (list string)) "and lists failover" [ "add candidate" ] (labels "e")
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* The newest/oldest ends and f still belong to Acting. Logs owns the server

@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- The runtime failover concept is now named the **Runtime Candidate Order** in
+  the TUI: the lane key help and status strings say "candidate order" where
+  they said "failover" — the `e` key help and its label on the lane sheet
+  (`masc_tui_keys.ml`), the picker's status line on the chat pane and in the
+  route editor (`masc_tui_render.ml`), and the in-row status of a keeper whose
+  turn moved to its next runtime candidate
+  (`masc_tui_keeper_chat_transcript.ml`). The `(no runtime lanes configured)`
+  empty state and the `pick a runtime lane` help now say "runtime candidate
+  order", matching the glossary's Lane definition; the shipped
+  `config/runtime.toml` section comment says "Runtime candidate orders" (#37918).
+  The `[runtime].media_failover` key, which orders the vision fleet and is a
+  different mechanism, is unchanged — its screen strings keep the key name,
+  and the glossary now carries a `media_failover` entry fencing it from the
+  renamed concept.
+
 ## [0.36.0] - 2026-09-22
 
 > Before you upgrade: read the five items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), the removed `--dup-threshold` purge option (#37751), the new Fusion `deliberation_evidence` shape that earlier run records do not read as (#37783), the required `--keeper` argument of `masc-checkpoint-purge` (#37802), and the continuity-lag keys the keeper memory health payload now carries, which a TUI or dashboard from the other side of that change refuses (#37856).

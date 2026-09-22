@@ -263,11 +263,14 @@ status: reference
   "vision read fleet"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
   Keeper turn은 여기로 파견하지 않고, turn의 이미지 재라우팅은 자기 lane 안에 머문다.
   이름의 "failover"는 런타임 후보 순서를 가리키던 옛 단어의 잔재이고, 이 키는 그와
-  다른 메커니즘이다 — 키 이름에 옛 단어가 남는 유일한 곳이다.
-  → [Runtime.media_failover](../../lib/runtime/runtime.mli)
+  다른 메커니즘이다 — 키 이름에 옛 단어가 남는 유일한 곳이며, 운영자 설정 파일 호환을
+  위해 동결되었다.
+  → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다.
+: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다. 이
+  개념의 화면 이름은 **Runtime Candidate Order**다 — TUI help와 상태 줄은
+  "lane" 대신 이 이름으로 읽힌다.
   → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
 
 **Standalone Lane**

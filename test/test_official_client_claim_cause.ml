@@ -38,7 +38,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
     let config : Runtime_execution.claude_code =
       { cli_path; model = None; timeout_s = 1. } in
     let outcome = Keeper_claude_code_runtime.run
-        ~accepts_image_input:false ~runtime_id ~keeper_name
+        ~turn_start:0 ~accepts_image_input:false ~runtime_id ~keeper_name
         ~pre_tool_rejects:(ref []) ~base_path ~goal:"synthetic claim probe"
         ~goal_blocks:None ~system_prompt:"Synthetic claim probe."
         ~tools:[] ~initial_messages:[] ~model_input_projection:None
@@ -52,7 +52,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
       ; oauth_source = Filename.concat base_path "absent-synthetic-oauth"
       ; timeout_s = 1.; add_dirs = [] } in
     let outcome = Keeper_antigravity_runtime.run
-        ~accepts_image_input:false ~runtime_id ~keeper_name
+        ~turn_start:0 ~accepts_image_input:false ~runtime_id ~keeper_name
         ~pre_tool_rejects:(ref []) ~base_path ~goal:"synthetic claim probe"
         ~goal_blocks:None ~system_prompt:"Synthetic claim probe."
         ~tools:[] ~initial_messages:[] ~model_input_projection:None

@@ -18,6 +18,7 @@ let entry ?(turn_rail = Layout.Rail_none) ?(style = Layout.Keeper)
   ; timestamp = "01:41:00"
   ; timeline_bucket = None
   ; span_clock = None
+  ; speaker = role
   ; role_label = Layout.align_role_label ~style role
   ; role_label_mark_cells = Layout.role_label_mark_cells ~style ()
   ; request_label = ""

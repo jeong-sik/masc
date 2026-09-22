@@ -606,13 +606,19 @@ when chat opened from detail.
 
 ```
  Message to: sangsu  ● active · running anthropic.claude-opus-5  (port 8935)
-   [14:35:01] From [you             ] tui-019...
+   ► YOU · tui-019... ──────────────────────────────────────── 14:35:01
      hello, how are you?
-   [14:35:03] From [sangsu          ] tui-019...
+   ● sangsu · tui-019... ───────────────────────────────────── 14:35:03
      ...reply text...
    > type here_
   Enter:send  Ctrl-G:next Keeper  Esc:list  Ctrl-U:clear
 ```
+
+That is the `metadata:full` heading (`Ctrl-F`): the speaker whole at the
+left, the request id after it, the clock at the right edge and a rule
+between. A later row from the same speaker draws only the rule and its
+clock. A row without a trustworthy time draws no clock and the rule runs to
+the edge.
 
 The header joins the selected Keeper's published status with its typed runtime
 phase and producer-owned canonical `runtime_id`, using the same roster reading
@@ -633,7 +639,7 @@ switched away or left and returned is discarded instead of replacing the
 newer transcript. The shortcut is withdrawn while a turn is in flight or the
 roster cannot be read.
 
-`From` is a fixed-width reverse-video badge for conversation sources: operator
+The speaker is a reverse-video badge for conversation sources: operator
 sources are cyan, Keepers blue, status yellow, and errors red. Tool and
 reasoning stretches are subordinate activity, so they use a quiet gray section
 label instead of competing with the people speaking. Ordinary operator and

@@ -1588,7 +1588,12 @@ let test_terminal_root_does_not_strand_ready_sibling () =
          then Error (E.Providers_exhausted { attempts = []; detail = "provider exhausted" })
          else (
            ok "bind sibling" (before_dispatch sibling_exact);
-           Ok (judgment sibling_exact J.Not_relevant))))
+           (* Relevant, not Not_relevant: this test's subject is the drain
+              continuing past a terminal root, and its final assertion reads
+              the sibling as Completed — the pre-task-1666 resting state.
+              A Not_relevant verdict now settles inside the worker fiber, so
+              the sibling would be past Completed before this test looks. *)
+           Ok (judgment sibling_exact J.Relevant))))
      : W.drain_outcome);
   Alcotest.(check (list string))
     "terminal root and sibling were each visited once"

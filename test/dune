@@ -3453,6 +3453,7 @@
   masc_tui_ansi
   masc_tui_theme
   masc_tui_types
+  unix
   yojson)
  (deps
   (source_tree ../bin)))

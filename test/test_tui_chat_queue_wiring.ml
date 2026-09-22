@@ -1627,6 +1627,77 @@ let test_promoted_live_output_survives_settlement_and_replay () =
       [None; Some "provider failed"; Some "operator interrupted the turn"])
 ;;
 
+(* The origin heading under Ctrl-F's metadata:full. The clock led the row
+   ("[14:08:44]  ● e-m…-leader"), so the first cells of every heading were
+   time-chrome and the name beside them was cut to the gutter's column on a
+   row that had the whole pane. Now: the name whole at the left, the clock at
+   the right edge, a rule between, and a continuation of the same speaker at
+   a later second is the rule and the clock alone. *)
+let test_origin_row_heading_spells_the_name_and_ends_on_the_clock () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let set_size size =
+    match Masc_tui_render_schedule.Terminal_size_cache.refresh cache
+            ~probe:(fun () -> Some size) with
+    | Changed _ | Unchanged _ -> ()
+  in
+  Fun.protect ~finally:(fun () -> set_size previous_size) (fun () ->
+    let rows, cols = 40, 100 in
+    set_size (rows, cols);
+    let keeper = "e-masc-the-leader-of-this-workspace" in
+    let state =
+      Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. ()
+    in
+    state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+    state.roster_pane_hidden <- true;
+    state.msg_target_keeper_name <- Some keeper;
+    state.msg_origin_display <- Masc_tui_message_layout.Origin_row;
+    let at = 1_790_053_724. in
+    let clock_of at =
+      let t = Unix.localtime at in
+      Printf.sprintf "%02d:%02d:%02d" t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
+    in
+    let keeper_row ~at text =
+      { (chat_entry ~request_id:"tui-01a0c788-43a7" ~role:Tui_types.Message_keeper
+           ~text ~at ())
+        with Tui_types.me_keeper_name = keeper }
+    in
+    state.msg_history <- [ keeper_row ~at "FIRST_PART"; keeper_row ~at:(at +. 7.) "SECOND_PART" ];
+    let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+    let plain = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+    let inner = Masc_tui_ansi.framed_inner_width cols in
+    (* The breadcrumb above the pane names the keeper too; the heading is
+       the row that names it and ends on the clock. *)
+    let trimmed =
+      match
+        List.find_opt
+          (fun line ->
+            Astring.String.is_infix ~affix:keeper line
+            && Astring.String.is_suffix ~affix:(clock_of at) (String.trim line))
+          plain
+      with
+      | Some line -> String.trim line
+      | None -> fail ("no heading spells the keeper's name whole: " ^ String.concat "\n" plain)
+    in
+    check bool "the heading does not open on the clock" false
+      (String.starts_with ~prefix:"[" trimmed);
+    check int "the rule fills the row to the clock" inner
+      (Masc_tui_message_layout.display_width trimmed);
+    check bool "the name and the clock are joined by a rule" true
+      (Astring.String.is_infix ~affix:(Masc_tui_theme.Box.h ^ " " ^ clock_of at) trimmed);
+    let continued = clock_of (at +. 7.) in
+    let continuation =
+      match List.find_opt (fun line -> Astring.String.is_suffix ~affix:continued (String.trim line)) plain with
+      | Some line -> String.trim line
+      | None -> fail ("no row says when the same speaker went on: " ^ String.concat "\n" plain)
+    in
+    check bool "a continuation is the rule and the clock alone" true
+      (String.starts_with ~prefix:Masc_tui_theme.Box.h continuation
+       && not (Astring.String.is_infix ~affix:keeper continuation));
+    check int "a continuation also fills the row" inner
+      (Masc_tui_message_layout.display_width continuation))
+;;
+
 (* A turn this pane did not open -- a TUI restarted mid-turn, a turn another
    surface opened -- is drawn from its journal while it runs. The journal
    reads fed a log that was held and drawn nowhere until the turn ended, so
@@ -2940,6 +3011,8 @@ let () =
             test_the_reload_rebuilds_loaded_turns_from_their_journals
         ; test_case "promoted live output survives settlement and replay" `Quick
             test_promoted_live_output_survives_settlement_and_replay
+        ; test_case "the origin heading spells the name and ends on the clock" `Quick
+            test_origin_row_heading_spells_the_name_and_ends_on_the_clock
         ; test_case "an observed running turn is drawn from its journal" `Quick
             test_an_observed_running_turn_is_drawn_from_its_journal
         ; test_case "the pane's own turn is live in flight and observed once cut" `Quick

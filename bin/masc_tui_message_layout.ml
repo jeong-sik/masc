@@ -102,6 +102,10 @@ type entry = {
           consumes body budget like any other word and no row exceeds the
           block's wrap width. [None] on every other row; nothing shifts when
           a turn has no span to say. *)
+  speaker : string;
+      (** The label {!role_label} was aligned from, whole. The gutter cuts a
+          long name to its column; the origin heading under {!Origin_row}
+          has the pane's width and draws this instead. *)
   role_label : string;
   role_label_mark_cells : int;
   request_label : string;
@@ -117,11 +121,12 @@ type entry = {
 type metadata =
   | Timeline_break of timeline_bucket
   | Origin of {
-      timestamp : string;
+      clock : string option;
+      speaker : string;
       role_label : string;
       request_label : string;
     }
-  | Continued_at of { timestamp : string }
+  | Continued_at of { clock : string }
 
 type row_kind =
   | Metadata of metadata
@@ -971,36 +976,6 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
     fit_middle column label
   else mark ^ " " ^ fit_middle inner label
 
-(* The inverse of {!align_role_label}: the mark, the name, and the trailing
-   column padding. Written here because this is where the three are joined, and a
-   renderer taking them apart by measuring again is how the two drift.
-
-   The renderer draws the name in reverse video. Reversing the aligned label
-   whole painted the alignment as though it were the badge, so "AUTO" -- four
-   letters -- arrived as an eighteen-cell inverted block with a dozen cells of
-   highlighted nothing between the glyph and the name.
-
-   Tolerant of a label that carries no mark: {!align_role_label} drops it on a
-   column too narrow to hold both, and that label is all name. *)
-let split_aligned_role_label ~style label =
-  let mark = speaker_mark style in
-  let prefix = mark ^ " " in
-  let after_mark =
-    if String.starts_with ~prefix label then
-      String.sub label (String.length prefix)
-        (String.length label - String.length prefix)
-    else label
-  in
-  let mark = if String.equal after_mark label then "" else prefix in
-  let rec walk index =
-    if index > 0 && Char.equal after_mark.[index - 1] ' ' then walk (index - 1)
-    else index
-  in
-  let boundary = walk (String.length after_mark) in
-  ( mark
-  , String.sub after_mark 0 boundary
-  , String.sub after_mark boundary (String.length after_mark - boundary) )
-
 (* #32984: the width gate below is derived from a chat row's fixed chrome,
    not chosen. Before its body, a row pays the frame's border and padding
    (4 cells -- [Masc_tui_frame.inner_width] is [cols - 4], pinned in the
@@ -1131,24 +1106,37 @@ let continues_previous ~(previous : entry option) (entry : entry) =
           else true)
 
 
+(* The heading's clock is the entry's timestamp where the entry has a
+   trustworthy time, and absent where it does not: [timeline_bucket] is
+   [None] exactly on those rows, and the placeholder they carry as
+   [timestamp] is display text, not a time. A heading without a clock draws
+   nothing in the clock's place; a continuation that cannot say when it
+   moved has no row to draw. *)
 let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
+  let clock =
+    match entry.timeline_bucket with
+    | Some _ -> Some entry.timestamp
+    | None -> None
+  in
   let metadata =
     if not (continues_previous ~previous entry) then
       Some
         ( Origin
-            { timestamp = entry.timestamp;
+            { clock;
+              speaker = entry.speaker;
               role_label = entry.role_label;
               request_label = entry.request_label;
             }
         , Printf.sprintf "[%s] From [%s] %s" entry.timestamp entry.role_label
             entry.request_label )
     else
-      match previous with
-      | Some previous when String.equal previous.timestamp entry.timestamp -> None
-      | Some _ | None ->
-          Some
-            ( Continued_at { timestamp = entry.timestamp }
-            , Printf.sprintf "[%s]" entry.timestamp )
+      match clock, previous with
+      | None, _ -> None
+      | Some _, Some previous
+        when String.equal previous.timestamp entry.timestamp ->
+          None
+      | Some clock, (Some _ | None) ->
+          Some (Continued_at { clock }, Printf.sprintf "[%s]" clock)
   in
   match metadata with
   | None -> None

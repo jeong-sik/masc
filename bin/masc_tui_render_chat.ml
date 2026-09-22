@@ -388,6 +388,54 @@ let dress_tool_summary (line : string) : string =
 
 ;;
 
+(* The origin heading under [Origin_row]: who and which request at the
+   left, when at the right edge, a rule between.
+
+   The clock led the row before -- "[14:08:44]  ● e-m…-leader" -- so the
+   first thing the eye met on every heading was time-chrome, and the name
+   beside it was cut to the gutter's column on a row that had the whole
+   pane. The clock is still drawn: metadata:full is the mode that shows
+   seconds. It recedes to the right edge, where a chat client's timestamps
+   sit, and the rule between the name and it says where a turn's rows begin
+   without spending a colour on the heading.
+
+   [plain] is the lead measured, [styled] the same cells dressed; the two
+   are kept together by the one caller so the rule is measured against what
+   is drawn. A lead wider than the room left of the clock is cut, plain,
+   rather than pushing the clock off the row. Cells add up to the frame's
+   inner width exactly: the lead, one space and the rule fill the room the
+   clock leaves, and the clock takes its cell count plus the space before
+   it. *)
+let origin_heading buf cols ~plain ~styled ~clock =
+  let inner = framed_inner_width cols in
+  let recede = Theme.recede () in
+  let clock_cells =
+    match clock with
+    | None -> 0
+    | Some clock -> Message_layout.display_width clock + 1
+  in
+  let room = max 0 (inner - clock_cells) in
+  let lead_cells = Message_layout.display_width plain in
+  let lead, lead_cells =
+    if lead_cells <= room then styled, lead_cells else fit_width plain room, room
+  in
+  let rule_cells = room - lead_cells - 1 in
+  let rule =
+    if rule_cells >= 1 then
+      Printf.sprintf "%s%s%s%s"
+        (if String.equal lead "" then "" else " ")
+        recede
+        (draw_hline (if String.equal lead "" then rule_cells + 1 else rule_cells))
+        Ansi.reset
+    else ""
+  in
+  let tail =
+    match clock with
+    | None -> ""
+    | Some clock -> Printf.sprintf " %s%s%s" recede clock Ansi.reset
+  in
+  box_line buf cols (lead ^ rule ^ tail)
+
 let render_chat_row ~theme buf cols (row : Message_layout.row) =
   match row.kind with
   | Message_layout.Viewport_gap { hidden_rows = _ } ->
@@ -522,40 +570,38 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
       (* The hour rail is a scrollbar landmark, not content: it stays, but
          recedes instead of holding the pane's brightest slot. *)
       box_line_styled buf cols ~style:(Theme.recede ()) row.text
-  | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
-      box_line_styled buf cols ~style:(Theme.recede ())
-        (Printf.sprintf "[%s]" timestamp)
+  | Message_layout.Metadata (Message_layout.Continued_at { clock }) ->
+      (* The same speaker, later. Nothing changed at the left, so the row is
+         the heading's tail alone: the rule to the clock. *)
+      origin_heading buf cols ~plain:"" ~styled:"" ~clock:(Some clock)
   | Message_layout.Metadata
-      (Message_layout.Origin { timestamp; role_label; request_label }) ->
-      (match row.style with
-       | Message_layout.Tool | Message_layout.Thinking ->
-           box_line_styled buf cols ~style:(Theme.recede ())
-             (Printf.sprintf "[%s]  %s  %s" timestamp
-                (String.trim role_label) request_label)
-       | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
-       | Message_layout.Status | Message_layout.Local | Message_layout.Journal
-       | Message_layout.Error | Message_layout.Skill _ ->
-           (* [role_label] arrives in a fixed fourteen-to-eighteen cell column
-              so the request column stays put down the pane. The label sits
-              beside its mark and the remaining padding follows the badge;
-              the reverse span covers only the name.
-
-              "From" went with it. It was five cells that named no field and
-              said nothing the badge does not: the row already reads
-              [clock] [who] [request]. *)
-           let mark, name, alignment =
-             Message_layout.split_aligned_role_label ~style:row.style role_label
-           in
-           (* The mark keeps its colour and stays out of the badge, the way the
-              inline gutter already draws it, so the two origin modes agree
-              about what a speaker mark looks like. *)
-           let badge =
-             Printf.sprintf "%s%s%s%s%s %s %s" (Chat_theme.origin row.style)
-               mark Ansi.reverse name Ansi.reset alignment Ansi.reset
-           in
-           box_line buf cols
-             (Printf.sprintf "%s[%s]%s  %s %s%s%s" Ansi.dim timestamp Ansi.reset
-                badge Ansi.dim request_label Ansi.reset))
+      (Message_layout.Origin { clock; speaker; role_label = _; request_label })
+    ->
+      (* [speaker], not [role_label]: the label was aligned to the gutter's
+         column for the inline modes, and this row has the pane. A name the
+         gutter cut to "e-m…-leader" is spelled whole here. *)
+      let mark = Message_layout.speaker_mark row.style in
+      let request =
+        if String.equal request_label "" then ""
+        else " \xc2\xb7 " ^ request_label
+      in
+      let plain = mark ^ " " ^ speaker ^ request in
+      let styled =
+        match row.style with
+        | Message_layout.Tool | Message_layout.Thinking ->
+            Printf.sprintf "%s%s%s" (Theme.recede ()) plain Ansi.reset
+        | Message_layout.User | Message_layout.Inbound | Message_layout.Keeper
+        | Message_layout.Status | Message_layout.Local | Message_layout.Journal
+        | Message_layout.Error | Message_layout.Skill _ ->
+            (* The mark keeps its colour and stays out of the badge, the way
+               the inline gutter already draws it, so the two origin modes
+               agree about what a speaker mark looks like. The reverse span
+               covers only the name. *)
+            Printf.sprintf "%s%s%s %s%s%s%s%s%s" (Chat_theme.origin row.style)
+              Ansi.bold mark Ansi.reverse speaker Ansi.reset Ansi.dim request
+              Ansi.reset
+      in
+      origin_heading buf cols ~plain ~styled ~clock
 
 
 (* What a tool block's row says about state.
@@ -1278,12 +1324,12 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
               Message_layout.Skill (skill_tone_of_state state)
           | Message_thinking -> Message_layout.Thinking
         in
-        let role_label = grouped_role_label in
+        let speaker = grouped_role_label in
         (* One column for every speaker so the [timestamp] speaker request
            rows line up down the pane, whatever name each row carries. *)
         let role_label =
           Message_layout.align_role_label ~column:role_label_column ~style
-            role_label
+            speaker
         in
         let body =
           match message.me_role with
@@ -1349,6 +1395,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
                Option.map keeper_message_timeline_bucket
                  timeline_at;
              span_clock = None;
+             speaker;
              role_label;
              role_label_mark_cells =
                Message_layout.role_label_mark_cells
@@ -1460,6 +1507,7 @@ let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
      ; timestamp = keeper_message_clock at
      ; timeline_bucket = Some (keeper_message_timeline_bucket at)
      ; span_clock = None
+     ; speaker = label
      ; role_label =
          Message_layout.align_role_label ~column:role_label_column ~style label
      ; role_label_mark_cells =
@@ -2188,6 +2236,7 @@ let render_keeper_message (state : state) =
                        timestamp = keeper_message_clock started_at;
                        timeline_bucket;
                        span_clock;
+                       speaker = role_label;
                        role_label =
                          Message_layout.align_role_label
                            ~column:role_label_column

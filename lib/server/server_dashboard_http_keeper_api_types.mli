@@ -41,6 +41,9 @@ val keeper_suffix_fusion : string
 val keeper_suffix_operator_note : string
 
 val keeper_suffix_file_changes : string
+val keeper_suffix_working_context : string
+(** [GET /api/v1/keepers/<name>/working-context] — the exact derived context
+    snapshot and its stored-byte SHA-256 for Admin cleanup planning. *)
 (** [GET /api/v1/keepers/<name>/file-changes] — the files this keeper wrote,
     read back out of the tool-call log. *)
 (** {1 Dashboard cache keys} *)

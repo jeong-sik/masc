@@ -55,9 +55,15 @@ type backend_state =
   | Uninitialized
   | Active of board_backend * flusher_handle
 
+type board_comment_identity =
+  { comment_id : Board.Comment_id.t
+  ; parent_id : Board.Comment_id.t option
+  }
+
 type board_signal_kind =
   | Board_post_created
-  | Board_comment_added
+  | Board_post_updated of { content_updated_at : float }
+  | Board_comment_added of board_comment_identity
   | Board_reaction_changed of board_reaction_change
   | Board_vote_cast of board_vote_change
 
@@ -422,8 +428,28 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
 let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with
   | Jsonl store ->
-      Board.update_post_with_outcome store ~post_id ~editor ~content ?title
-        ?body ?new_author ()
+      match Board.update_post_with_outcome store ~post_id ~editor ~content ?title
+        ?body ?new_author () with
+      | Error _ as error -> error
+      | Ok (post, false) -> Ok post
+      | Ok (post, true) ->
+        match Board.audience_for_post ~visibility:post.visibility
+            ~title:post.title ~content:post.body with
+        | Error error -> Error error
+        | Ok audience ->
+          emit_board_signal
+            { signal =
+                { kind = Board_post_updated { content_updated_at = post.content_updated_at }
+                ; post_id = Board.Post_id.to_string post.id
+                ; author = Board.Agent_id.to_string post.author
+                ; title = post.title
+                ; content = post.body
+                ; hearth = post.hearth
+                ; updated_at = Some post.updated_at
+                }
+            ; audience
+            };
+          Ok post
 
 let get_post ~post_id =
   match backend () with
@@ -563,7 +589,9 @@ let add_comment ~post_id ~author ~content ?parent_id
           | Ok post ->
               emit_board_signal
                 { signal =
-                    { kind = Board_comment_added
+                    { kind =
+                        Board_comment_added
+                          { comment_id = comment.id; parent_id = comment.parent_id }
                     ; post_id
                     ; author = auth
                     ; title = post.title

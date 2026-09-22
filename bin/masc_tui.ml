@@ -9499,7 +9499,32 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Acting_pane_tab_unknown word ->
       Buffer.clear state.msg_input;
       notice ~role:Message_error
-        (Printf.sprintf "/activity takes fleet or changes, not %s" word)
+        (Printf.sprintf "/activity takes fleet, changes or order, not %s" word)
+  | Masc_tui_command.Set_acting_pane_call_order which ->
+      Buffer.clear state.msg_input;
+      (* The calls are drawn on the fleet tab, so the order is set with that
+         tab up: turning an order the reader cannot see would surprise them
+         after the next switch, the rule [show_acting_pane_tab] keeps for
+         the tab itself. *)
+      (match show_acting_pane_tab state Masc_tui_acting_pane.Tab_fleet with
+       | Ok () ->
+           let order =
+             match which with
+             | `Next -> Masc_tui_acting_pane.next_call_order state.acting_pane_call_order
+             | `Newest -> Masc_tui_acting_pane.Newest_first
+             | `Oldest -> Masc_tui_acting_pane.Oldest_first
+             | `Longest -> Masc_tui_acting_pane.Longest_first
+             | `By_tool -> Masc_tui_acting_pane.By_tool
+           in
+           state.acting_pane_call_order <- order;
+           notice ~role:Message_local
+             ("Activity calls " ^ Masc_tui_acting_pane.call_order_label order)
+       | Error reason -> notice ~role:Message_error reason)
+  | Masc_tui_command.Acting_pane_call_order_unknown word ->
+      Buffer.clear state.msg_input;
+      notice ~role:Message_error
+        (Printf.sprintf
+           "/activity order takes newest, oldest, longest or tool, not %s" word)
   | Masc_tui_command.Lane_addons input ->
       Buffer.clear state.msg_input;
       (match Masc_tui_lane_addons.parse_request input with
@@ -12234,6 +12259,8 @@ let handle_composer_key state ~base_path ~mailbox key =
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
          | Masc_tui_command.Acting_pane_tab_unknown _
+         | Masc_tui_command.Set_acting_pane_call_order _
+         | Masc_tui_command.Acting_pane_call_order_unknown _
          | Masc_tui_command.Lane_addons _
          | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
          | Masc_tui_command.Open_link_preview _

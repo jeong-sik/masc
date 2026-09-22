@@ -14,7 +14,6 @@ side derives memory from a model-authored state envelope.
 |---|---|---|
 | agent core checkpoint/context | agent core | active transcript and restartable agent context |
 | Memory OS current snapshot | MASC | supported current claims from librarian updates and explicit writes, minus exact retractions |
-| Procedural memory | MASC | verified reusable procedures |
 | Tool/history logs | MASC | observable evidence and recall source |
 
 Memory OS snapshot path:
@@ -115,6 +114,26 @@ It returns exact fact identities and derivation support. The
 plus a non-empty reason, atomically removes it, and records every derived fact
 invalidated by the resulting support fixed point. Source-bound facts remain a
 separate exact-bytes store and are not accepted by this retraction surface.
+
+The Admin batch cleanup boundary additionally requires the exact current
+revision and snapshot SHA-256. It writes a prepared plan receipt binding the
+prior/target snapshot identities to every exact retraction reason before
+replacing the snapshot. HTTP success means the matching journal entry is
+durable and the receipt has been cleared. If interruption
+or an I/O failure occurs after replacement, the response identifies the
+committed revision and hash with `snapshot_committed=true`; the next locked
+writer reconciles the exact entry without duplication before another snapshot
+change. Whole-Keeper purge removes an unfinished plan receipt with the other
+Memory OS sidecars. A successful cleanup returns the newly written revision and
+snapshot SHA-256, so a following reviewed plan does not need another inventory
+read.
+
+The exact-byte hash has different jobs in the two current stores. Ordinary
+Memory has no generation; after a rejected snapshot is quarantined, revision 1
+can exist again, so the hash prevents an old revision-1 plan from matching new
+bytes. Working Context already changes generation on rebuild; its hash binds an
+Admin plan to the exact bytes that were reviewed rather than adding another
+lifecycle identity.
 
 Search with `source="absorbed"` reads facts a Librarian combined into another
 claim from `<keeper_name>.memory-absorbed.jsonl`. These results carry

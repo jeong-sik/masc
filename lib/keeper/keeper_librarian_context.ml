@@ -3,6 +3,20 @@ type completeness = Current | Needs_reconsideration
 type pocket = { id : string; merge_contexts : string list; sources : string list; context : string; next_steps : string list; completeness : completeness }
 type snapshot = { generation : string; revision : int; execution_basis : string option; sources : source list; pockets : pocket list }
 type version = string * int
+type retract_sources_error =
+  | Retract_sources_empty
+  | Retract_source_reference_empty of { index : int }
+  | Retract_source_reference_duplicate of string
+  | Retract_snapshot_not_found
+  | Retract_snapshot_sha256_invalid
+  | Retract_snapshot_conflict of
+      { expected_version : version
+      ; observed_version : version option
+      ; expected_snapshot_sha256 : string
+      ; observed_snapshot_sha256 : string option
+      }
+  | Retract_source_not_found of string
+  | Retract_sources_persistence_failed of string
 type input = { sources : source list; previous : snapshot option; unavailable : string list; execution_basis : string option }
 let version (s : snapshot) = s.generation, s.revision
 let current_references (snapshot : snapshot) =
@@ -30,6 +44,8 @@ let source_json (s : source) = `Assoc ["reference", `String s.reference; "conten
 let snapshot_json (s : snapshot) = `Assoc
   ["generation", `String s.generation; "revision", `Int s.revision; "execution_basis", nullable_string s.execution_basis;
    "sources", `List (List.map source_json s.sources); "pockets", stored_pockets_json s.pockets]
+let snapshot_bytes snapshot = Yojson.Safe.to_string (snapshot_json snapshot) ^ "\n"
+let snapshot_sha256 snapshot = digest (snapshot_bytes snapshot)
 let object_fields keys = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare keys -> Ok fields
   | _ -> Error "working context object fields mismatch"
@@ -113,11 +129,11 @@ let decode json =
   let* pockets = validate_partition ~sources pockets in
   Ok {generation; revision; execution_basis; sources; pockets}
 type load_error = Unavailable of string | Invalid of {hash : string; detail : string}
-let load file =
+let load_with_content file =
   try
     let bytes = In_channel.with_open_bin file In_channel.input_all in
     let decoded = try decode (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
-    match decoded with Ok snapshot -> Ok (Some snapshot)
+    match decoded with Ok snapshot -> Ok (Some (snapshot, bytes))
       | Error detail -> Error (Invalid {hash = digest bytes; detail})
   with
   | Sys_error detail ->
@@ -125,8 +141,16 @@ let load file =
        | _ -> Error (Unavailable detail)
        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
      with Unix.Unix_error (error, operation, _) -> Error (Unavailable (operation ^ ": " ^ Unix.error_message error)))
+let load file = load_with_content file |> Result.map (Option.map fst)
+let load_with_snapshot_sha256 file =
+  load_with_content file
+  |> Result.map
+       (Option.map (fun (snapshot, bytes) -> snapshot, digest bytes))
 let describe_error = function Unavailable detail -> detail | Invalid {detail; _} -> "invalid working context: " ^ detail
 let read ~keepers_dir ~keeper_id = load (path ~keepers_dir ~keeper_id) |> Result.map_error describe_error
+let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
+  load_with_snapshot_sha256 (path ~keepers_dir ~keeper_id)
+  |> Result.map_error describe_error
 let read_for_update ~keepers_dir ~keeper_id =
   let file = path ~keepers_dir ~keeper_id in
   File_lock_eio.with_lock file (fun () ->
@@ -139,6 +163,23 @@ let read_for_update ~keepers_dir ~keeper_id =
          Log.Keeper.warn ~keeper_name:keeper_id "invalid derived context quarantined; rebuilding from original inputs: %s" detail;
          Ok None
        with Unix.Unix_error (error, operation, _) -> Error (operation ^ ": " ^ Unix.error_message error)))
+
+let retain_untouched_pockets ~excluded_ids ~same_progress ~retain_reference pockets =
+  List.filter_map (fun (p : pocket) ->
+    if List.mem p.id excluded_ids then None else
+    let remaining = List.filter retain_reference p.sources in
+    match remaining with
+    | [] -> None
+    | _ :: _ when remaining = p.sources ->
+      Some (if same_progress then p else {p with next_steps = []})
+    | _ :: _ ->
+      Some
+        { p with
+          sources = remaining
+        ; next_steps = []
+        ; completeness = Needs_reconsideration
+        }) pockets
+
 let commit ?observed_sources ?execution_basis ~keepers_dir ~keeper_id ~expected_version ~sources pockets =
   let file = path ~keepers_dir ~keeper_id in
   File_lock_eio.with_lock file (fun () ->
@@ -163,14 +204,14 @@ let commit ?observed_sources ?execution_basis ~keepers_dir ~keeper_id ~expected_
       let same_progress = match current, execution_basis with
         | Some old, Some basis -> old.execution_basis = Some basis
         | None, _ | Some _, None -> false in
-      let untouched = List.filter_map (fun (p : pocket) ->
-        if List.mem p.id targets then None else
-        let remaining = List.filter (fun r -> not (List.mem r selected_refs) && live r) p.sources in
-        match remaining with
-        | [] -> None
-        | _ :: _ when remaining = p.sources ->
-          Some (if same_progress then p else {p with next_steps = []})
-        | _ :: _ -> Some {p with sources = remaining; next_steps = []; completeness = Needs_reconsideration}) previous in
+      let untouched =
+        retain_untouched_pockets
+          ~excluded_ids:targets
+          ~same_progress
+          ~retain_reference:(fun reference ->
+            not (List.mem reference selected_refs) && live reference)
+          previous
+      in
       let pockets = merged @ untouched in
       let all_refs = List.concat_map (fun (p : pocket) -> p.sources) pockets in
       let inherited_sources = match current with None -> [] | Some old ->
@@ -181,7 +222,105 @@ let commit ?observed_sources ?execution_basis ~keepers_dir ~keeper_id ~expected_
         | None -> Random_id.uuid_v7 (), 1
         | Some old -> old.generation, old.revision + 1 in
       let snapshot = {generation; revision; execution_basis; sources; pockets} in
-      let* () = Fs_compat.save_file_atomic file (Yojson.Safe.to_string (snapshot_json snapshot) ^ "\n") in Ok snapshot)
+      let* () = Fs_compat.save_file_atomic file (snapshot_bytes snapshot) in Ok snapshot)
+
+let retract_sources
+      ~keepers_dir
+      ~keeper_id
+      ~expected_version
+      ~expected_snapshot_sha256
+      ~source_references
+  =
+  let rec validate index seen = function
+    | [] -> Ok seen
+    | reference :: rest ->
+      if String.equal reference "" || not (String.equal reference (String.trim reference))
+      then Error (Retract_source_reference_empty { index })
+      else if Set_util.StringSet.mem reference seen
+      then Error (Retract_source_reference_duplicate reference)
+      else
+        validate
+          (index + 1)
+          (Set_util.StringSet.add reference seen)
+          rest
+  in
+  if not (String_util.is_lowercase_sha256_hex expected_snapshot_sha256)
+  then Error Retract_snapshot_sha256_invalid
+  else match source_references with
+  | [] -> Error Retract_sources_empty
+  | _ :: _ ->
+    let* removed = validate 0 Set_util.StringSet.empty source_references in
+    let file = path ~keepers_dir ~keeper_id in
+    File_lock_eio.with_lock file (fun () ->
+      let* current =
+        load_with_snapshot_sha256 file
+        |> Result.map_error (fun detail ->
+             Retract_sources_persistence_failed (describe_error detail))
+      in
+      match current with
+      | None -> Error Retract_snapshot_not_found
+      | Some (snapshot, observed_snapshot_sha256)
+        when
+          version snapshot <> expected_version
+          || not
+               (String.equal
+                  observed_snapshot_sha256
+                  expected_snapshot_sha256) ->
+        Error
+          (Retract_snapshot_conflict
+             { expected_version
+             ; observed_version = Some (version snapshot)
+             ; expected_snapshot_sha256
+             ; observed_snapshot_sha256 = Some observed_snapshot_sha256
+             })
+      | Some (snapshot, _) ->
+        let* () =
+          match
+            List.find_opt
+              (fun reference ->
+                 not
+                   (List.exists
+                      (fun (source : source) ->
+                         String.equal source.reference reference)
+                      snapshot.sources))
+              source_references
+          with
+          | None -> Ok ()
+          | Some reference -> Error (Retract_source_not_found reference)
+        in
+        let sources =
+          List.filter
+            (fun (source : source) ->
+               not (Set_util.StringSet.mem source.reference removed))
+            snapshot.sources
+        in
+        let pockets =
+          retain_untouched_pockets
+            ~excluded_ids:[]
+            ~same_progress:true
+            ~retain_reference:(fun reference ->
+              not (Set_util.StringSet.mem reference removed))
+            snapshot.pockets
+        in
+        let* pockets =
+          validate_partition ~sources pockets
+          |> Result.map_error (fun detail ->
+               Retract_sources_persistence_failed detail)
+        in
+        let next =
+          { snapshot with
+            revision = snapshot.revision + 1
+          ; sources
+          ; pockets
+          }
+        in
+        let* () =
+          Fs_compat.save_file_atomic file (snapshot_bytes next)
+          |> Result.map_error (fun detail ->
+               Retract_sources_persistence_failed detail)
+        in
+        Ok next)
+
 let render (input : input) =
   match input.previous with
   | None -> None

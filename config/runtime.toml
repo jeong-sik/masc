@@ -74,13 +74,14 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # When enabled, MASC POSTs the TYPESAFEAI_API_KEY as an Authorization bearer
 # credential to the configured TypeSafe AI endpoint. The JSON body's top-level
 # fields are model, state, and questions. state.items[0] contains candidate_id
-# and only the current signal: kind, post_id, author, title, content, hearth,
-# updated_at,
+# and only the current signal: kind, post_id, typed comment_id/parent_id,
+# author, title, content, hearth, updated_at,
 # reaction (target_type, target_id, user_id, emoji, reacted) and optional vote
 # (target_kind, target_id, target_author, voter, direction). The persisted post
-# and comment snapshot is not sent. state.keeper_role sends only the Keeper's
-# name and instructions; record/runtime/task identity and mention lists are not
-# sent. questions.relevance sends type=choice, the Keeper-naming instructions,
+# and comment snapshot is not persisted or sent. state.keeper_role sends only
+# the Keeper's name and normalized board_interests; instructions,
+# record/runtime/task identity, and mention lists are not
+# sent. questions.relevance sends type=choice, question text naming the Keeper,
 # and relevant/not_relevant criteria descriptions. The current signal must
 # itself address or specifically require the Keeper's role; general topic or
 # capability overlap is not relevant.

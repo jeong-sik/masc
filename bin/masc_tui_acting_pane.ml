@@ -355,11 +355,14 @@ type detail_part =
    response, a response holds 1.38 calls on average, 80.7% hold one. A line
    of its own over each response would have been close to half the list.
 
-   The lone call's mark is drawn although it is most of the marks (58.7% of
-   the call rows): 45.2% of those records are all lone calls, and without
-   the mark such a record would look like one whose responses are unknown
-   or single -- a CLI lane, a sort, an unnumbered call. It is drawn dim, as
-   quiet as the edge, and only the brackets that bind calls are plain. *)
+   A lone call carries no mark. A dim tick beside each one put a glyph on
+   58.7% of the call rows, and on the live screen the fleet read as a wall
+   of hooks (operator, 2026-09-22). What the tick said -- this record is
+   split, and this call stood alone -- the heading says once instead: it
+   counts the responses whenever the record splits. 45.2% of split records
+   are all lone calls; they draw no bracket, and the count is what tells
+   them from a record that is one response or whose responses are unknown
+   (a CLI lane, a sort, an unnumbered call). *)
 type response_place =
   | Ungrouped
   | Alone
@@ -371,7 +374,7 @@ type logical_row =
   | Fleet_row of keeper * Acting.chunk option
   | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
   | Approval_row of string
-  | Calls_heading
+  | Calls_heading of int option
   | Tool_row of Acting.chunk * Acting.chunk_tool * record_state * response_place
   | Call_detail of Acting.chunk * Acting.chunk_tool * detail_part
   | Earlier_turn of Acting.chunk * Reading.keeper_health_reading option
@@ -697,12 +700,10 @@ let dispatch_marks (tool : Acting.chunk_tool) =
   [ batch; deferred; { text = String.make gap_cells ' '; tone = Plain } ]
 
 (* The border cell of a call row. Out of a bracket it is the pane's edge
-   like every other row; in one it is the bracket, drawn plain so it reads
-   over the dim edge, the calls between included. A lone call's mark stays
-   dim: it says the boundary is known, not that anything binds. *)
+   like every other row, a lone call's included; in one it is the bracket,
+   drawn plain so it reads over the dim edge, the calls between included. *)
 let rail_span = function
-  | Ungrouped -> border
-  | Alone -> { text = rule_glyph; tone = Dim }
+  | Ungrouped | Alone -> border
   | Opens -> { text = "\xe2\x94\x8c"; tone = Plain }
   | Inside -> { border with tone = Plain }
   | Closes -> { text = "\xe2\x94\x94"; tone = Plain }
@@ -760,14 +761,21 @@ let tool_line ~cols ~now ~state ~place (chunk : Acting.chunk) (tool : Acting.chu
        ]
      @ age)
 
-(* The heading over the calls: which order they are in. Beside it the
+(* The heading over the calls: which order they are in, and how many
+   model responses the record splits into when it splits. Beside it the
    order is a press away, so the heading is the control as well as the
-   label. *)
-let calls_heading_line ~cols order =
+   label. No count is a record that is one response or whose responses the
+   pane cannot tell apart; the count never says "1". *)
+let calls_heading_line ~cols order responses =
+  let count =
+    match responses with
+    | Some n -> middle_dot ^ string_of_int n ^ " responses"
+    | None -> ""
+  in
   fit_line ~cols
     (with_border
        [ { text = String.make mark_cells ' '; tone = Plain }
-       ; { text = "calls" ^ middle_dot ^ call_order_label order; tone = Dim }
+       ; { text = "calls" ^ middle_dot ^ call_order_label order ^ count; tone = Dim }
        ])
 
 (* Text cut to [room] cells, the cut shown: a preview that ends mid-word
@@ -1024,8 +1032,9 @@ let focus_rows input chunks name =
                [ Detail_facts; Detail_input; Detail_output ]
            else [])
         in
+        let groups = responses input.call_order ordered in
         let placed =
-          match responses input.call_order ordered with
+          match groups with
           | Some groups ->
               List.concat_map
                 (fun group ->
@@ -1045,7 +1054,11 @@ let focus_rows input chunks name =
         (* A call-less record draws no body row: the header already states
            the observation state and its receipt age. The heading names the
            order only when there are calls in it. *)
-        let heading = match calls with [] -> [] | _ :: _ -> [ Calls_heading ] in
+        let heading =
+          match calls with
+          | [] -> []
+          | _ :: _ -> [ Calls_heading (Option.map List.length groups) ]
+        in
         heading @ calls @ List.map (fun chunk -> Earlier_turn (chunk, health)) earlier
   in
   Focus_header (name, current, health) :: approval @ body
@@ -1194,7 +1207,7 @@ let fleet_lines ~below ~scroll (body, overview) =
    reader. Naming four columns over one sentence spends a row saying nothing. *)
 let row_uses_the_columns = function
   | Fleet_row _ | Tool_row _ | Earlier_turn _ -> true
-  | Focus_header _ | Approval_row _ | Calls_heading | Call_detail _ | Rule | More _
+  | Focus_header _ | Approval_row _ | Calls_heading _ | Call_detail _ | Rule | More _
   | Indicator _ | File_row _ | Formatted_status _ -> false
 
 (* ── Changes tab ───────────────────────────────────────────────────────── *)
@@ -1299,7 +1312,8 @@ let materialize_row ~cols input = function
   | Focus_header (name, current, health) ->
       focus_header_line ~cols ~now:input.now ~health name current, Target_none
   | Approval_row tool -> approval_line ~cols tool, Target_none
-  | Calls_heading -> calls_heading_line ~cols input.call_order, Target_call_order
+  | Calls_heading responses ->
+      calls_heading_line ~cols input.call_order responses, Target_call_order
   | Tool_row (chunk, tool, state, place) ->
       ( tool_line ~cols ~now:input.now ~state ~place chunk tool
       , Target_call (chunk.Acting.ck_keeper, Acting.call_key tool) )

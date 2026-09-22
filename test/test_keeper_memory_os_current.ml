@@ -414,7 +414,250 @@ let test_support_retraction_cascades_to_fixed_point () =
      |> member "change"
      |> member "invalidated"
      |> to_list
-     |> List.length)
+    |> List.length)
+;;
+
+let test_batch_retraction_is_exact_atomic_and_cas_guarded () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let first = fact ~claim:"first direct target" () in
+  let second = fact ~claim:"second direct target" () in
+  let retained = fact ~claim:"unaffected current fact" () in
+  let dependent =
+    derived_fact
+      ~claim:"depends on the second target"
+      [ { rule_id = "batch_dependency"
+        ; premise_ids = [ Types.memory_id second ]
+        }
+      ]
+  in
+  let seeded =
+    replace ~keepers_dir ~facts:[ first; second; retained; dependent ] ()
+    |> require_ok
+  in
+  let seeded_snapshot_sha256 =
+    match Current.read_with_snapshot_sha256 ~keepers_dir ~keeper_id:"keeper" with
+    | Ok (Some (snapshot, snapshot_sha256)) ->
+      check int "hash observation matches seed revision"
+        seeded.revision snapshot.revision;
+      snapshot_sha256
+    | Ok None | Error _ -> fail "seeded snapshot hash is unavailable"
+  in
+  let direct : Current.retraction list =
+    [ { memory_id = Types.memory_id first; reason = "operator plan: obsolete" }
+    ; { memory_id = Types.memory_id second; reason = "operator plan: contradicted" }
+    ]
+  in
+  let committed =
+    match
+      Current.retract_facts
+        ~keepers_dir
+        ~keeper_id:"keeper"
+        ~expected_revision:seeded.revision
+        ~expected_snapshot_sha256:seeded_snapshot_sha256
+        ~now:300.0
+        ~source:
+          { Current.kind = Current.Explicit_retract
+          ; trace_id = "cleanup-plan-1"
+          }
+        direct
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "valid exact batch was rejected"
+  in
+  check int "one batch advances one revision" 2 committed.revision;
+  check (list string) "only the unaffected fact remains"
+    [ Types.memory_id retained ]
+    (fact_ids committed.facts);
+  check (list string) "both direct targets and support cascade are removed"
+    (fact_ids [ first; second; dependent ])
+    (fact_ids committed.change.removed);
+  check (list string) "only the derived row is a support invalidation"
+    [ Types.memory_id dependent ]
+    (List.map
+       (fun (row : Current.support_invalidation) -> Types.memory_id row.fact)
+       committed.change.invalidated);
+  let journal = read_journal_lines ~keepers_dir in
+  let open Yojson.Safe.Util in
+  check int "seed plus one batch produce two commits" 2 (List.length journal);
+  check (list string) "direct reasons share the batch journal commit"
+    [ "operator plan: obsolete"; "operator plan: contradicted" ]
+    (List.nth journal 1
+     |> member "dropped"
+     |> to_list
+     |> List.map (fun row -> row |> member "reason" |> to_string));
+  let unchanged_revision () =
+    Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok
+    |> require_some
+    |> fun snapshot -> snapshot.Current.revision
+  in
+  let committed_snapshot_sha256 =
+    match Current.read_with_snapshot_sha256 ~keepers_dir ~keeper_id:"keeper" with
+    | Ok (Some (snapshot, snapshot_sha256)) ->
+      check int "hash observation matches batch revision"
+        committed.revision snapshot.revision;
+      snapshot_sha256
+    | Ok None | Error _ -> fail "committed snapshot hash is unavailable"
+  in
+  check string "commit receipt hash matches exact stored bytes"
+    committed_snapshot_sha256
+    (Current.snapshot_sha256 committed);
+  (match
+     Current.retract_facts
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~expected_revision:seeded.revision
+       ~expected_snapshot_sha256:seeded_snapshot_sha256
+       ~now:400.0
+       ~source:
+         { Current.kind = Current.Explicit_retract
+         ; trace_id = "stale-plan"
+         }
+       [ { memory_id = Types.memory_id retained; reason = "stale" } ]
+   with
+   | Error (Current.Retract_batch_snapshot_conflict _) -> ()
+   | Error _ | Ok _ -> fail "stale batch did not report a revision conflict");
+  check int "stale batch changes nothing" committed.revision (unchanged_revision ());
+  (match
+     Current.retract_facts
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~expected_revision:committed.revision
+       ~expected_snapshot_sha256:(String.make 64 '0')
+       ~now:450.0
+       ~source:
+         { Current.kind = Current.Explicit_retract
+         ; trace_id = "wrong-hash-plan"
+         }
+       [ { memory_id = Types.memory_id retained; reason = "wrong hash" } ]
+   with
+   | Error
+       (Current.Retract_batch_snapshot_conflict
+          { observed_snapshot_sha256 = Some observed; _ }) ->
+     check string "conflict reports the locked snapshot hash"
+       committed_snapshot_sha256 observed
+   | Error _ | Ok _ -> fail "wrong snapshot hash did not fail closed");
+  check int "wrong hash changes nothing" committed.revision (unchanged_revision ());
+  (match
+     Current.retract_facts
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~expected_revision:committed.revision
+       ~expected_snapshot_sha256:committed_snapshot_sha256
+       ~now:500.0
+       ~source:
+         { Current.kind = Current.Explicit_retract
+         ; trace_id = "missing-plan"
+         }
+       [ { memory_id = missing_memory_id 'f'; reason = "not present" } ]
+   with
+   | Error (Current.Retract_batch_fact_not_found _) -> ()
+   | Error _ | Ok _ -> fail "missing target did not fail the whole batch");
+  check int "missing target changes nothing" committed.revision (unchanged_revision ());
+  (match
+     Current.retract_facts
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~expected_revision:committed.revision
+       ~expected_snapshot_sha256:committed_snapshot_sha256
+       ~now:600.0
+       ~source:
+         { Current.kind = Current.Explicit_retract
+         ; trace_id = "duplicate-plan"
+         }
+       [ { memory_id = Types.memory_id retained; reason = "first" }
+       ; { memory_id = Types.memory_id retained; reason = "second" }
+       ]
+   with
+   | Error (Current.Retract_batch_duplicate_memory_id _) -> ()
+   | Error _ | Ok _ -> fail "duplicate target did not fail the whole batch");
+  check int "duplicate target changes nothing" committed.revision (unchanged_revision ());
+  check int "failed batches append no journal commit" 2
+    (List.length (read_journal_lines ~keepers_dir))
+;;
+
+let test_batch_retraction_recovers_exact_reason_evidence () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let target = fact ~claim:"reason must survive interrupted finalize" () in
+  let seeded = replace ~keepers_dir ~facts:[ target ] () |> require_ok in
+  let seeded_hash =
+    match Current.read_with_snapshot_sha256 ~keepers_dir ~keeper_id:"keeper" with
+    | Ok (Some (_, hash)) -> hash
+    | Ok None | Error _ -> fail "seeded snapshot hash is unavailable"
+  in
+  let journal_path =
+    Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+  in
+  Fs_compat.invalidate_cached_writer journal_path;
+  Sys.remove journal_path;
+  Unix.mkdir journal_path 0o700;
+  let plan_id = "cleanup-plan-interrupted-finalize" in
+  let reason = "operator verified this exact claim is obsolete" in
+  let request () =
+    Current.retract_facts
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~expected_revision:seeded.revision
+      ~expected_snapshot_sha256:seeded_hash
+      ~now:300.0
+      ~source:{ Current.kind = Current.Explicit_retract; trace_id = plan_id }
+      [ { Current.memory_id = Types.memory_id target; reason } ]
+  in
+  (match request () with
+   | Error
+       (Current.Retract_batch_plan_evidence_pending
+          { plan_id = observed_plan
+          ; snapshot_revision
+          ; snapshot_sha256
+          ; detail = _
+          }) ->
+     check string "pending evidence names the exact plan" plan_id observed_plan;
+     check int "pending evidence names the committed revision" 2 snapshot_revision;
+     check bool "pending evidence carries the committed snapshot hash" true
+       (String_util.is_lowercase_sha256_hex snapshot_sha256)
+   | Error _ | Ok _ -> fail "journal failure did not report a committed pending plan");
+  let receipt_path =
+    Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper"
+  in
+  check bool "prepared exact plan remains durable" true
+    (Sys.file_exists receipt_path);
+  let open Yojson.Safe.Util in
+  let prepared = Yojson.Safe.from_file receipt_path in
+  check string "receipt exposes prepared state" "prepared"
+    (prepared |> member "state" |> to_string);
+  check string "receipt exposes the exact plan identity" plan_id
+    (prepared |> member "plan_id" |> to_string);
+  check string "receipt preserves the exact reason before reconciliation" reason
+    (prepared |> member "dropped" |> to_list |> List.hd
+     |> member "reason" |> to_string);
+  let committed =
+    Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+    |> require_ok
+    |> require_some
+  in
+  check int "snapshot replacement committed before finalize failed" 2
+    committed.revision;
+  check (list string) "target is absent from committed snapshot" []
+    (fact_ids committed.facts);
+  Unix.rmdir journal_path;
+  (match request () with
+   | Error (Current.Retract_batch_snapshot_conflict _) -> ()
+   | Error _ | Ok _ -> fail "restart reconciliation did not precede stale CAS");
+  check bool "reconciled plan receipt is cleared" false
+    (Sys.file_exists receipt_path);
+  let journal = read_journal_lines ~keepers_dir in
+  check int "exact reason entry is appended once" 1 (List.length journal);
+  let recovered = List.hd journal in
+  check string "recovered journal entry retains plan identity" plan_id
+    (recovered |> member "source" |> member "trace_id" |> to_string);
+  check string "recovered journal entry retains exact reason" reason
+    (recovered |> member "dropped" |> to_list |> List.hd
+     |> member "reason" |> to_string);
+  (match request () with
+   | Error (Current.Retract_batch_snapshot_conflict _) -> ()
+   | Error _ | Ok _ -> fail "second stale retry did not remain a conflict");
+  check int "repeated retry does not duplicate recovered evidence" 1
+    (List.length (read_journal_lines ~keepers_dir))
 ;;
 
 let test_alternate_support_path_keeps_derived_fact_current () =
@@ -1128,6 +1371,8 @@ let test_purge_plan_removes_memory_sidecars () =
   let contains artifact = List.exists (fun entry -> entry = artifact) plan in
   check bool "plan removes the fact snapshot" true
     (contains Shutdown.Keeper_memory_current_artifact);
+  check bool "plan removes an interrupted retraction plan" true
+    (contains Shutdown.Keeper_memory_retraction_plan_artifact);
   check bool "plan removes the source-bound snapshot" true
     (contains Shutdown.Keeper_memory_source_current_artifact);
   check bool "plan removes the working context recall index" true
@@ -2411,6 +2656,14 @@ let () =
             "support retraction cascades to fixed point"
             `Quick
             test_support_retraction_cascades_to_fixed_point
+        ; test_case
+            "batch retraction is exact atomic and CAS guarded"
+            `Quick
+            test_batch_retraction_is_exact_atomic_and_cas_guarded
+        ; test_case
+            "batch retraction recovers exact reason evidence"
+            `Quick
+            test_batch_retraction_recovers_exact_reason_evidence
         ; test_case
             "reverse-ordered support chain reaches fixed point"
             `Quick

@@ -47,42 +47,9 @@ let signal post_id : Masc.Board_dispatch.board_signal =
 
 let context name =
   `Assoc
-    [ "instructions", `String ("continue " ^ name)
-    ; "runtime", `Assoc [ "lane", `String "configured-judge" ]
+    [ "lane_keeper_name", `String "alpha"
+    ; "board_interests", `List [ `String name ]
     ]
-;;
-
-let post_id_exn value =
-  match Masc.Board.Post_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board post id fixture: " ^ value)
-;;
-
-let agent_id_exn value =
-  match Masc.Board.Agent_id.of_string value with
-  | Ok value -> value
-  | Error _ -> Alcotest.fail ("invalid Board agent id fixture: " ^ value)
-;;
-
-let post_of_signal (signal : Masc.Board_dispatch.board_signal) : Masc.Board.post =
-  { id = post_id_exn signal.post_id
-  ; author = agent_id_exn signal.author
-  ; title = signal.title
-  ; body = signal.content
-  ; post_kind = Masc.Board.Human_post
-  ; meta_json = None
-  ; visibility = Masc.Board.Public
-  ; created_at = 1.0
-  ; updated_at = Option.value signal.updated_at ~default:1.0
-  ; expires_at = 3601.0
-  ; votes_up = 0
-  ; votes_down = 0
-  ; reply_count = 0
-  ; pinned = false
-  ; hearth = signal.hearth
-  ; thread_id = None
-  ; origin = None
-  }
 ;;
 
 let candidate ?(keeper_name = "alpha") ?(context = context "primary") ~id ~recorded_at () :
@@ -94,11 +61,7 @@ let candidate ?(keeper_name = "alpha") ?(context = context "primary") ~id ~recor
   ; signal
   ; keeper_context = context
   ; recorded_at
-  ; status =
-      A.Pending
-        { last_delivery_failure = None
-        ; material = { post = post_of_signal signal; comments = [] }
-        }
+  ; status = A.Pending { last_delivery_failure = None }
   }
 ;;
 
@@ -268,9 +231,23 @@ let test_a_reconstructed_candidate_reuses_its_settled_root () =
        "settle reconstructed candidate"
        (P.settle ~now:4.0 ~base_path ~partition:confirmed)
      : P.t);
-  let replayed = { original with recorded_at = 99.0 } in
+  (* A ledger reconstruction of an event that is genuinely already delivered
+     carries [Consumed], not [Pending]: production flips the Candidate
+     ledger's own status ([Candidate.normalize_requeued_consumed], called
+     right before the happy-path [Partition.settle]) before the root ever
+     reaches [Settled]. That is what this replay must model — see
+     [test_a_still_pending_candidate_reopens_its_settled_root] below for the
+     [Pending]-status replay, which is a different, live shape (task-1660)
+     and must reopen instead of staying put. *)
+  let replayed =
+    { original with
+      recorded_at = 99.0
+    ; status =
+        A.Consumed { judgment = judgment proof; delivery = A.Not_relevant; consumed_at = 5.0 }
+    }
+  in
   Alcotest.(check int)
-    "the same typed event at a later observation time creates no second root"
+    "an already-consumed typed event at a later observation time creates no second root"
     0
     (ok
        "reuse settled root"
@@ -279,6 +256,69 @@ let test_a_reconstructed_candidate_reuses_its_settled_root () =
   | [ { P.state = P.Settled _; created_at; _ } ] ->
     Alcotest.(check (float 0.0)) "original creation time is retained" 1.0 created_at
   | _ -> Alcotest.fail "reconstructed candidate replaced its settled root"
+;;
+
+let test_a_still_pending_candidate_reopens_its_settled_root () =
+  with_temp_base "board-attention-partition-pending-reopen" @@ fun base_path ->
+  let original = candidate ~id:"candidate-still-pending" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ original ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:2.0 in
+  let proof = provenance () in
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:claimed
+      ~provenance:proof
+    |> ok "bind still-pending candidate"
+    |> fsynced "bind still-pending candidate"
+  in
+  let item : P.completed_item =
+    { candidate_id = original.candidate_id; judgment = judgment proof }
+  in
+  let completed =
+    P.complete ~now:3.0 ~worker_epoch:owner ~base_path ~partition:bound ~item
+    |> ok "complete still-pending candidate"
+    |> fsynced "complete still-pending candidate"
+  in
+  let confirmed =
+    P.confirm_completed ~base_path ~partition:completed
+    |> ok "confirm still-pending candidate"
+    |> fsynced "confirm still-pending candidate"
+  in
+  let settled =
+    ok
+      "settle still-pending candidate"
+      (P.settle ~now:4.0 ~base_path ~partition:confirmed)
+  in
+  (* Unlike the reconstructed-candidate test above, this replay's own
+     [status] never advances past [Pending] — task-1660's live shape: the
+     Candidate ledger never recorded a judgment for this occurrence even
+     though its only durable root settled (e.g. the worker's "candidate
+     permanently absent" path settles a [Blocked] root without ever judging
+     it, [keeper_board_attention_worker.ml]'s [reconcile_quarantines]).
+     [ensure_roots] must reopen the same deterministic identity rather than
+     leaving it Pending forever. *)
+  let replayed = { original with recorded_at = 99.0 } in
+  Alcotest.(check int)
+    "a still-pending candidate reopens its settled root"
+    1
+    (ok
+       "reopen settled root"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" [ replayed ]));
+  match ok "load reopened root" (P.load ~base_path ~keeper_name:"alpha") with
+  | [ { P.state = P.Ready; generation; partition_id; created_at; _ } ] ->
+    Alcotest.(check bool)
+      "reopened root keeps its original deterministic identity"
+      true
+      (String.equal partition_id settled.P.partition_id);
+    Alcotest.(check (float 0.0)) "original creation time is retained" 1.0 created_at;
+    Alcotest.(check bool)
+      "reopened root advances to the next generation"
+      false
+      (P.Generation.equal generation settled.P.generation)
+  | _ -> Alcotest.fail "still-pending candidate did not reopen its settled root"
 ;;
 
 let test_exact_claim_never_claims_a_ready_sibling () =
@@ -1207,6 +1247,10 @@ let () =
             "reconstructed candidate reuses its settled root"
             `Quick
             test_a_reconstructed_candidate_reuses_its_settled_root
+        ; Alcotest.test_case
+            "still-pending candidate reopens its settled root"
+            `Quick
+            test_a_still_pending_candidate_reopens_its_settled_root
         ; Alcotest.test_case
             "generation advances only for state transitions"
             `Quick

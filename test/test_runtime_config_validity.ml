@@ -3971,6 +3971,91 @@ streaming = false
         check (float 0.000001) "actual provider sees the candidate temperature" 0.25
           Yojson.Safe.Util.(body |> member "temperature" |> to_float)))
 
+(* task-1649: a lane whose every candidate is missing from the catalog is
+   dropped whole at load. Read [degrade_loaded_for_missing_catalog]
+   (runtime.ml) end to end before trusting the ticket's premise here: its
+   [Ok] branch -- the only place a [startup_degradation] value is ever
+   built -- is reached only when [has_routing_references] is false, and
+   that flag covers [dropped_lanes] together with [dropped_lane_candidates]
+   / [dropped_routes] / [dropped_media_failover]. A fully-dropped lane
+   always makes [has_routing_references] true, so a live, returned
+   [Initialized_degraded] can never carry a non-empty [dropped_lanes] --
+   [init_default_degraded_report] refuses the boot instead
+   ([Runtime_config_error]), and [server_runtime_bootstrap.ml] answers that
+   by entering [Setup_required], not by serving keeper turns. There is no
+   path from a fully-dropped lane to [Runtime.resolve_assignment] returning
+   [`Missing] for it at keeper-turn time -- confirmed against every writer
+   of runtime state, including the hot-reload save path
+   ([Runtime.save_config_text] / [validate_config_text]), which rejects the
+   same config for the same reason before it is ever applied live.
+   The earlier form of this test asserted the unreachable branch
+   ([Ok (Initialized_degraded ...)] with [orphaned-lane] inside
+   [dropped_lanes]) and failed in CI exactly where this comment says it
+   must: [degrade_loaded_for_missing_catalog] returned [Error]. What *is*
+   reachable, and was still only pinned for a partially-dropped lane
+   (`test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes`,
+   whose lane keeps one live candidate), is that a *fully*-dropped lane
+   also refuses to boot and the refusal names the lane under
+   "[runtime.lanes].dropped.<lane>", not just
+   "[runtime.lanes].candidates.<lane>". That is what this pins. *)
+let test_fully_dropped_lane_refuses_degraded_boot_and_names_the_lane () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"good\"\n\
+     provider_name = \"fixture\"\n\
+     base = \"openai_chat\"\n\
+     max_context_tokens = 8192\n\
+     max_output_tokens = 1024\n\
+     supports_tools = true\n\
+     supports_native_streaming = false\n" in
+  let runtime_toml = {|[runtime]
+default = "fixture.good"
+[runtime.assignments]
+affected = "orphaned-lane"
+[runtime.lanes.orphaned-lane]
+candidates = [ "fixture.missing-one", "fixture.missing-two" ]
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.good]
+api-name = "good"
+max-context = 8192
+streaming = false
+[models.missing-one]
+api-name = "missing-one"
+max-context = 8192
+streaming = false
+[models.missing-two]
+api-name = "missing-two"
+max-context = 8192
+streaming = false
+[fixture.good]
+[fixture.missing-one]
+[fixture.missing-two]
+|} in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () -> with_model_catalog_content catalog @@ fun () ->
+      with_temp_runtime_toml runtime_toml @@ fun path ->
+      match Runtime.init_default_degraded_report ~config_path:path with
+      | Ok Runtime.Initialized ->
+        fail "a lane with every candidate missing must not boot as fully catalog-known"
+      | Ok (Runtime.Initialized_degraded _) ->
+        fail "a fully-dropped lane must refuse degraded boot, not silently continue with it gone"
+      | Error (Runtime.Missing_catalog_models report) ->
+        failf
+          "expected a routing-reference config error, got a bare missing-catalog report: %s"
+          (Runtime.strict_init_error_to_string (Runtime.Missing_catalog_models report))
+      | Error (Runtime.Runtime_config_error msg) ->
+        check bool "diagnostic names the fully-dropped lane, not just its candidates" true
+          (String_util.contains_substring msg "[runtime.lanes].dropped.orphaned-lane");
+        check bool "diagnostic lists both missing candidates" true
+          (String_util.contains_substring msg "fixture.missing-one"
+           && String_util.contains_substring msg "fixture.missing-two");
+        check bool "diagnostic still refuses to erase the assignment into the default" true
+          (String_util.contains_substring msg "default fallback"))
+
 let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
   let catalog =
     "[[models]]\n\
@@ -5410,6 +5495,8 @@ let () =
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
           test_case "assignment-only catalog gap isolates requests and recovers" `Quick
             test_degraded_assignment_isolation_preserves_routing_and_recovers;
+          test_case "a fully-dropped lane refuses degraded boot and names the lane" `Quick
+            test_fully_dropped_lane_refuses_degraded_boot_and_names_the_lane;
           test_case
             "server degraded init still rejects unavailable lane and media routes"
             `Quick test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes;

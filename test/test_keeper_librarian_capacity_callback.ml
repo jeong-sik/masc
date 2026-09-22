@@ -293,14 +293,16 @@ let test_prefit_real_continuity ~base_path () =
   let provider_config = Agent_core.Llm_provider.Provider_config.make
     ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
     ~model_id:"continuity-cycle-fixture" ~base_url:"https://provider.example" () in
+  let completed_end =
+    Driver.completed_history_end ~trace_id ~lines ~messages:canonical
+    |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
   let view = Driver.For_testing.request_view
     ~input_policy:Keeper_input_policy.Small ~continuity ~provider_config
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
     ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
     ~last_resort:false ~base_path
-    ~demote_before:(Driver.completed_history_end ~trace_id ~lines ~messages:canonical
-      |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get)
+    ~demote_before:completed_end ~completed_end_atom:completed_end
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in
   let wire = view.wire
     |> Result.map_error Agent_core.Llm_provider.Reasoning_history_projection.error_to_string |> get in

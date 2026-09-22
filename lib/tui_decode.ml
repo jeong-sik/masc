@@ -2736,6 +2736,7 @@ type verification_request = {
   vr_task_id : string;
   vr_task_title : string;
   vr_submitted_by : string;
+  vr_intent : Masc_domain.verification_intent option;
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
@@ -5590,6 +5591,17 @@ let decode_verification_request json =
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
+  (* [null] is the history view, which has no backlog join. A name outside
+     the pair is refused rather than read as either intent. *)
+  let* vr_intent =
+    let* raw = optional_string_field json "intent" in
+    match raw with
+    | None -> Ok None
+    | Some raw ->
+      (match Masc_domain.verification_intent_of_string raw with
+       | Ok intent -> Ok (Some intent)
+       | Error detail -> Error detail)
+  in
   let* vr_created_at = required_string_field json "created_at" in
   let* vr_required_artifacts =
     decode_string_name_list json "required_artifacts"
@@ -5605,6 +5617,7 @@ let decode_verification_request json =
     ; vr_task_id
     ; vr_task_title
     ; vr_submitted_by
+    ; vr_intent
     ; vr_created_at
     ; vr_required_artifacts
     ; vr_submitted_evidence

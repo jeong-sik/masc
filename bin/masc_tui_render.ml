@@ -8017,6 +8017,11 @@ let render_verification_list (state : state) =
             ^ Render_schedule.verification_row ~submitter_width ~title_width
                 { Render_schedule.vrow_task =
                     Terminal_text.single_line r.vr_task_id
+                ; vrow_verdict =
+                    (match r.vr_intent with
+                     | Some intent ->
+                         Masc_domain.verification_intent_to_string intent
+                     | None -> "")
                 ; vrow_submitted_by =
                     Terminal_text.single_line r.vr_submitted_by
                 ; vrow_evidence = evidence
@@ -8151,6 +8156,12 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
+  ; field "Waits on"
+      (match request.vr_intent with
+       | Some Masc_domain.Cancel_task ->
+           "cancel -- only an operator's verdict clears it"
+       | Some Masc_domain.Complete_task -> "complete"
+       | None -> "not joined (history view)")
     (* In the terminal's zone, like every other Created on a detail. This
        one printed the server's RFC 3339 text, offset and all, under a header
        clock in local time. *)

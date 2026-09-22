@@ -59,6 +59,11 @@ let owner_scan_text (fleet : Tui_decode.fleet_safety) =
   else if unread = 0 then
     Some (Printf.sprintf "task owner without fiber %d" owners)
   else
+    (* [+] because the number is a lower bound, not a total: the unread
+       sources held whatever they held. The Changes pane spells an open
+       record's call count the same way for the same reason. Without it a
+       scan that read nothing said "0", which reads as "there are none"
+       while the row's own parenthesis says nobody looked. *)
     Some
-      (Printf.sprintf "task owner without fiber %d (%s unread)" owners
+      (Printf.sprintf "task owner without fiber %d+ (%s unread)" owners
          (Masc_tui_message_layout.count_noun unread "source"))

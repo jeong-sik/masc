@@ -4813,8 +4813,20 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         # iTerm reports Ctrl-W as CSI-u after the TUI enables keyboard
         # disambiguation. It must reach the same pane binding as legacy 0x17.
         send_and_wait(process, master_fd, output, b"z", b"h/l:pane")
-        # Focus is a caret on the pane title now, not a key list (keys live in
-        # the footer): the same press must move focus, observed by the caret.
+        # The Board cycle has three stops since #37691: list, detail, and the
+        # Activity pane when the frame draws it (it does at 180 columns). From
+        # the detail pane the press puts the pane's cursor on its first row,
+        # painted in reverse video over the whole row; the row it lands on is
+        # the pane's "[Recent]" header. Focus is a caret on the pane title,
+        # not a key list (keys live in the footer), so the next press is
+        # observed by the caret coming back to the list.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[119;5u",
+            re.compile(rb"\x1b\[7m(?:\x1b\[[0-9;]*m)*\[Recent\]"),
+        )
         send_and_wait(process, master_fd, output, b"\x1b[119;5u", "\u25b8 Board (3)".encode())
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")

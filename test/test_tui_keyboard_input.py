@@ -14874,9 +14874,20 @@ def quit_writes_its_reason_interaction(
     """
     send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
     os.write(master_fd, b"q")
-    text = wait_for_exit_reason(base_path, "exit: normal (quit key)")
+    # The prefix is part of the contract: the guide tells operators to collect
+    # these rows with `grep '[masc-tui] exit:'`, so the test asks for what that
+    # grep asks for rather than for the bare reason.
+    text = wait_for_exit_reason(base_path, "[masc-tui] exit: normal (quit key)")
     if "exit: abnormal" in text:
         raise AssertionError(f"a q quit read as abnormal:\n{text}")
+    # One row per session. at_exit stops at the first callback that raises and
+    # OCaml may retry the rest, so a writer with no guard can leave two -- and
+    # a reader counting a day's ends by cause would count this session twice.
+    rows = text.count("[masc-tui] exit:")
+    if rows != 1:
+        raise AssertionError(
+            f"the session wrote {rows} exit rows, not one:\n{text}"
+        )
 
 
 def sigterm_writes_its_reason_interaction(
@@ -14892,7 +14903,7 @@ def sigterm_writes_its_reason_interaction(
     tell them apart, so the reason carries the signal's name.
     """
     terminate_with_sigterm(process, master_fd, slave_fd, output, base_path)
-    wait_for_exit_reason(base_path, "exit: normal (signal SIGTERM)")
+    wait_for_exit_reason(base_path, "[masc-tui] exit: normal (signal SIGTERM)")
 
 
 def run_exit_reason_regression(executable: str) -> None:

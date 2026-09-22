@@ -46,7 +46,7 @@ TUI 경로를 커밋 단위로 다시 읽었다.
 | 신호 | 건수 | 판정 |
 |---|---|---|
 | 문자열/부분 문자열 분류(`String.starts_with` 등) | 14 | 전부 경로·파일명 접두어, Memory 검색의 부분 일치, JSON `kind` 태그 해독. 공급자 오류 문장을 읽는 곳은 없다 |
-| 새 `| _ ->` 갈래 | 236 (핵심 경로 79) | 대부분 JSON 해독기의 `Error "invalid …"` 와 화면 키 분기. 눈에 띄는 것 하나: `lib/keeper/hitl_summary_worker.ml:1520,1530` 이 typed `cause` 위에서 `_` 로 나머지를 `handle_flow_error` 에 보낸다. 주석이 "두 생성자만 온다" 고 말하지만 컴파일러가 아니라 주석이 지키는 불변식이다 |
+| 새 `| _ ->` 갈래 | 236 (핵심 경로 79) | 대부분 JSON 해독기의 `Error "invalid …"` 와 화면 키 분기. 눈에 띄는 것 하나: `lib/keeper/hitl_summary_worker.ml:1520,1530` 이 typed `cause` 위에서 `_` 로 나머지를 `handle_flow_error` 에 보낸다. 주석이 "두 생성자만 온다" 고 말하지만 컴파일러가 아니라 주석이 지키는 불변식이다 → [#37917](https://github.com/jeong-sik/masc/issues/37917) |
 | stub·`failwith "unimplemented"`·`assert false` | 0 | — |
 | `max_int` 류 감시값 | 8 | 넘침 보호·해시·화면 끝 스크롤. 한 곳은 위 넘침 절의 Codex 시작 용량 |
 | 근거 주석 없는 세 자리 이상 상수 | 64 후보, 실제 2 | `keeper_next_request_forecast.ml:340` `recent_records_read = 200`(진단 표본, 실측 없음), `keeper_projection_change.ml:134` memo 128 |

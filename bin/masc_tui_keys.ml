@@ -623,14 +623,23 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
       ; b Navigate "v" "next Planning tab" ~help:"back round to Goals"
       ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Right / Enter" "verdict" ~help:"open the full evaluator verdict"
+      ; b Act "Right / Enter" "verdict" ~detail:List_only
+          ~help:"open the full evaluator verdict"
       ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "y" "agree" ~help:"record the machine's verdict as yours"
-        (* [x], not [n]: this surface answers the row search, and [n] / [N]
-           step it. Spelled the way Verification spells its own rejection. *)
-      ; b Act "x" "overrule" ~help:"record the opposite verdict; $EDITOR takes the reason"
+        (* One item, spelled the way Verification spells its own pair. Apart,
+           the fitter gives them up one at a time, and the screen that loses
+           them first is the verdict pane -- the one place an operator reads a
+           ruling in full before answering it. [Masc_tui_footer.never_dropped_keys]
+           pins the pair whole; pinning [y] or [x] alone would pin the [y] of
+           every [y / n] and the [x] that deletes a keeper.
+
+           [x], not [n]: this surface answers the row search, and [n] / [N]
+           step it. *)
+      ; b Act "y / x" "agree / overrule"
+          ~help:"y records the machine's verdict as yours; x records the \
+                 opposite, with $EDITOR taking the reason"
       ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
       ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
       ; b Search "n / N" "next / previous match"

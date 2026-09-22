@@ -3444,7 +3444,7 @@
 (test
  (name test_tui_footer_detail_state)
  (modules test_tui_footer_detail_state)
- (libraries alcotest ast_grep masc_tui_keys masc_tui_types)
+ (libraries alcotest ast_grep masc_tui_keys masc_tui_types masc_tui_footer)
  (deps (source_tree ../bin)))
 
 (test

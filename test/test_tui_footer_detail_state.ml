@@ -18,6 +18,7 @@ let detail_surfaces =
   [ ("Planning", Masc_tui_types.Planning)
   ; ("Schedules", Masc_tui_types.Schedules)
   ; ("Verification", Masc_tui_types.Verification)
+  ; ("Harness", Masc_tui_types.Harness)
   ]
 
 let contains haystack needle =
@@ -109,7 +110,28 @@ let renderers =
   ; "render_schedule_detail"
   ; "render_verification_list"
   ; "render_verification_detail"
+  ; "render_harness_list"
+  ; "render_harness_detail"
   ]
+
+(* Harness came to this through a different door: its verdict pane already had
+   a footer of its own, written out in the renderer rather than read from the
+   table. What a hand-written row leaves out is invisible -- and this one left
+   out both [[ / ]], which the dispatcher answers there and only there, and
+   the pair that answers a ruling, on the one screen that exists for reading a
+   ruling in full. *)
+let test_the_verdict_pane_names_the_keys_that_answer () =
+  let hints = Keys.footer_hints ~detail_open:true Masc_tui_types.Harness in
+  check bool "the verdict pane names the pair that answers a ruling" true
+    (contains hints "y / x");
+  check bool "and the stepping key the dispatcher answers there" true
+    (contains hints "[ / ]");
+  (* Naming it is not enough: the fitter drops from the right, and this pane
+     is where the answer keys would go first. The pair is pinned whole, the
+     way Verification pins its own -- [y] and [x] apart are ordinary keys
+     elsewhere. *)
+  check bool "the fitter reads the pair as pinned" true
+    (Masc_tui_footer.item_is_pinned "y / x:agree / overrule")
 
 let test_every_renderer_says_which_state_it_draws () =
   List.iter
@@ -139,5 +161,7 @@ let () =
     ; ( "renderers",
         [ test_case "every renderer says which state it draws" `Quick
             test_every_renderer_says_which_state_it_draws
+        ; test_case "the verdict pane names the keys that answer" `Quick
+            test_the_verdict_pane_names_the_keys_that_answer
         ] )
     ]

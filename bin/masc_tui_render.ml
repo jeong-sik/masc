@@ -8588,7 +8588,8 @@ let render_harness_list (state : state) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view ^ link_hint));
+       ~hints:
+         (Masc_tui_keys.footer_hints ~detail_open:false state.view ^ link_hint));
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
 (* Which goals the judged task serves, and what those goals are aiming at.
@@ -8774,10 +8775,14 @@ let render_harness_detail (state : state) verdict =
     end
   in
   Buffer.add_string buf
+    (* The key table, not a literal. This row was written out here, and what
+       it left out was the pair that answers a ruling -- [y / x] -- on the one
+       screen that exists for reading a ruling in full. It also left out
+       [[ / ]], which the dispatcher answers here and only here. *)
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf
-            "j/k:scroll  PgUp/PgDn:page  Left / Esc:list  Y:copy task  r:refresh  %s"
+         (Printf.sprintf "%s  %s"
+            (Masc_tui_keys.footer_hints ~detail_open:true Masc_tui_types.Harness)
             position));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf

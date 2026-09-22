@@ -95,6 +95,15 @@ status: reference
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
+**Turn**
+: "turn"이 가리키는 단위는 넷이고 서로 다르다. 문맥 없이 쓰지 않는다.
+  - **Keeper Turn** — MASC가 하나의 Keeper 작업을 시도하는 단위. (아래 항목)
+  - **agent core Turn** — 하나의 agent core Agent run 내부의 한 단계. Keeper turn과
+    동일한 단위가 아니다. (아래 항목)
+  - **Turn Boundary** — 끝난 Keeper turn이 History에 남기는 한 줄. (아래 항목)
+  - **Turn Configuration Error** — Keeper turn이 typed Agent Core 구성 오류로 끝난
+    latch된 실패 원인. (아래 항목)
+
 **Keeper Turn**
 : MASC가 하나의 Keeper 작업을 시도하는 단위. 선택한 runtime에 따라 AGENT_CORE
   Agent run 또는 공식 클라이언트의 모델·도구 실행을 사용한다
@@ -233,19 +242,33 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli)
 
 **Lane**
-: Keeper turn이 Runtime 후보를 시도할 순서. Runtime Lane도 같은 뜻이다.
-  Lane은 또한 `Browser Lane`·`MSX Lane`·`DOS Lane`·`Slack Lane`처럼 Keeper가
-  공유 머신·세션을 관찰·조작하는 관측·조작 대상이며, Runtime Lane과 다른 축이다.
-  → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli),
-  [Browser_lane](../../lib/browser_lane/browser_lane.ml),
-  [Msx_lane](../../lib/msx_lane/msx_lane.mli)
+: 제품에서 "Lane"의 일차 정의는 **작업종류 실행 경로**다 — 특정 종류의 일을 수행하는
+  실행 경로(`docs/KEEPER-FULL-FEATURE-GOAL.md` §1). 제품 SSOT도 librarian·judgment·
+  board-attention을 "sub-lanes"라 부른다(`docs/product/KEEPER-FULL-LIFECYCLE-BEHAVIOR.md`
+  §4). 같은 단어가 다른 실행 개념에도 쓰이므로 문맥 없이 "Lane"만 쓰지 않는다.
+  - **작업종류 Lane** — 위 일차 정의. `librarian`·`verification`·`judge`·`fusion panel`·
+    `meta judge`는 Runtime의 고정 role이 아니라 이 Lane의 이름이다. durable 기록은
+    `Exact_lane_run_registry.lane`(`Librarian`·`Hitl_auto_judge`·`Board_attention`·
+    `Workspace_curator`)이고, verifier exact lane이 다섯째다.
+    → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
+  - **Runtime slot order** — Keeper turn이 Runtime 후보를 시도할 순서. 제품 SSOT는 이
+    개념을 "Runtime slot"·"frozen declared order"라 부르고 "lane"이라 부르지 않는다
+    (§2·§3·§5). 코드 타입 이름만 `Runtime_lane.t`이다.
+    → [Runtime_lane.t](../../lib/runtime/runtime_lane.mli)
+  - **관측·조작 Lane** — `Browser Lane`·`MSX Lane`·`DOS Lane`·`Slack Lane`처럼 Keeper가
+    공유 머신·세션을 관찰·조작하는 대상.
+    → [Browser_lane](../../lib/browser_lane/browser_lane.ml),
+    [Msx_lane](../../lib/msx_lane/msx_lane.mli)
+  - **Official Client Lane** — 공식 클라이언트가 자기 프로세스에서 provider 요청을
+    보내고 MASC가 조율·관찰하는 실행 경로. (아래 항목)
+  - **Standalone Lane** — 작업종류 Lane의 읽기 전용 투영. (아래 항목)
+  - **Lane Add-on** — 관측·조작 Lane 위에 붙는 선택적 관측·관계 레이어. (아래 항목)
 
 **Standalone Lane**
 : TUI의 `MASC Lanes · Standalone` 표가 그리는 읽기 전용 LLM lane 관찰. 기존
-  admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane
-  (Runtime Lane)과 다른 것이다 — Runtime Lane은 Keeper turn이 Runtime 후보를
-  시도할 순서이고, Standalone Lane은 그 lane이 무엇을 실행할 수 있고 무엇을
-  실행했는지의 투영이다. 두 축을 함께 갖는다:
+  admission·run registry를 서술할 뿐 제어 동작을 싣지 않는다. 위의 Lane 패밀리에서
+  Runtime slot order가 아니라 **작업종류 Lane**의 투영이다 — 작업종류 Lane이 무엇을 실행할
+  수 있고 무엇을 실행했는지의 투영이다. 두 축을 함께 갖는다:
   - `sl_status`(상태): `Standalone_running`·`Standalone_idle`·
     `Standalone_degraded`·`Standalone_no_retained_observation`·
     `Standalone_unavailable`.
@@ -588,6 +611,8 @@ status: reference
   [공식 클라이언트 세션 저장소](../../lib/keeper/keeper_official_client_session_store.mli)에
   기록한다.
   → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
+  이 저장점은 **Checkpoint Load**(위 Core 항목)가 읽고, **Checkpoint Purge**(아래
+  항목)가 LLM 없이 재작성한다.
 
 **Checkpoint Purge (체크포인트 청소)**
 : 멈춘 Keeper의 canonical AGENT_CORE checkpoint를 LLM 없이 세 닫힌 규칙으로 줄이는

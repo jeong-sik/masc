@@ -1599,79 +1599,32 @@ let run_named
 	       | Some read -> read ()
 	       | None -> Keeper_carried_front.no_seed_read)
 	  in
-	  (* The Librarian's own position, for the official-client branches. The
-	     Agent Core branch takes it through [continuity] above; these lanes cut
-	     their start seed themselves, so they are handed a reading they apply to
-	     the exact list they are about to cut.
-
-	     Read once per turn: the snapshot file and the boundary log are both
-	     taken at the first composition and not re-read, so a Librarian round
-	     that lands mid-turn is seen by the next turn, not this one. What is
-	     checked on every call is the list against that one snapshot, because a
-	     lane composes more than once in a turn and the list grows between
-	     compositions. *)
-	  let librarian_front_source =
-	    Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
-	      match session_id, recovery_view with
-	      | None, _ | _, Some _ -> None
-	      | Some trace_id, None ->
-	        Domain_pool_ref.submit_io_or_inline (fun () ->
-	          let config = Workspace.default_config base_path in
-	          match Keeper_librarian_continuity.read ~config ~keeper_name with
-	          | Error detail ->
-	            (* Not the same as [Ok None]: the file may hold a position this
-	               turn cannot see. The seed still stands — it is validated
-	               against this history on its own — so the turn goes on without
-	               a Librarian front, and the failure is said out loud rather
-	               than reported as "nothing absorbed". *)
-	            Log.Keeper.warn
-	              ~keeper_name
-	              "official client start seed cannot read the librarian position: %s"
-	              detail;
-	            None
-	          | Ok None -> None
-	          | Ok (Some snapshot) ->
-	            (match
-	               Keeper_turn_boundaries.read
-	                 ~keepers_dir:(Workspace.keepers_runtime_dir config)
-	                 ~keeper_id:keeper_name
-	             with
-	             | Error detail ->
-	               Log.Keeper.warn
-	                 ~keeper_name
-	                 "official client start seed cannot read the turn boundaries: %s"
-	                 detail;
-	               None
-	             | Ok lines -> Some (trace_id, lines, snapshot))))
-	  in
-	  let official_client_librarian_front messages
-	    : Keeper_official_client_host.librarian_position
-	    =
-	    match Eio.Lazy.force librarian_front_source with
-	    | None -> Keeper_official_client_host.No_position
-	    | Some (trace_id, lines, snapshot) ->
-	      (* [restore] hashes the whole covered prefix, so it runs on the CPU
-	         pool rather than on the fiber that is composing the request. *)
+	  (* The official-client branches take the continuity the Agent Core branch
+	     takes ([continuity] above): one choice per turn for every lane, so the
+	     order -- a fitting working state, else the Librarian's read position,
+	     else the turn start -- is the same on both. These lanes cut their start
+	     seed themselves, so the choice is handed over as a position in the
+	     exact list each composition cuts, and checked against that list on
+	     every call, because a lane composes more than once in a turn and the
+	     list grows between compositions. A list that no longer holds what the
+	     choice covered drops only the Librarian front: the seed carries its
+	     own digest of the atom it names and is checked against this history
+	     separately. *)
+	  let official_client_librarian_front messages =
+	    match Eio.Lazy.force continuity with
+	    | None -> Keeper_turn_driver_try_provider.No_position
+	    | Some chosen ->
 	      (match
 	         Domain_pool_ref.submit_cpu_or_inline (fun () ->
-	           Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot)
+	           Keeper_turn_driver_try_provider.librarian_position ~messages chosen)
 	       with
-	       | Ok (_ : Librarian_continuity_snapshot.restored) ->
-	         Keeper_official_client_host.Absorbed snapshot
-	       | Error error ->
-	         (* A position was saved and it does not describe this list: the
-	            history was rewritten, restarted, or the list is not the one it
-	            covered. Only the Librarian front is dropped — the seed carries
-	            its own digest of the atom it names and is checked against this
-	            history separately, so a stale position says nothing about it.
-	            The Agent Core lane goes on to the Librarian's read position when
-	            that is a place in this history; this lane does not read it, and
-	            falls back to the seed or the turn start. *)
+	       | Ok position -> position
+	       | Error detail ->
 	         Log.Keeper.warn
 	           ~keeper_name
-	           "official client start seed drops the saved librarian position: %s"
-	           (Librarian_continuity_snapshot.error_to_string error);
-	         Keeper_official_client_host.No_position)
+	           "official client start seed drops the librarian position: %s"
+	           detail;
+	         Keeper_turn_driver_try_provider.No_position)
 	  in
 	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
 	     pass values that would be silently ignored. *)

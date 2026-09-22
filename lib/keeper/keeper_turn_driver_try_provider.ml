@@ -149,6 +149,27 @@ let validate_continuity ~messages = function
     { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
 ;;
 
+type librarian_position =
+  | No_position
+  | Librarian_snapshot of Librarian_continuity_snapshot.t
+  | Librarian_progress of { end_atom : int }
+
+(* The one continuity this turn chose, as a position in the exact list a
+   lane is about to cut. An official client composes its own request from
+   that list more than once in a turn, and the list grows between
+   compositions, so each call checks it against the choice the way the Agent
+   Core branch checks each request ([validate_continuity]). *)
+let librarian_position ~messages continuity =
+  match validate_continuity ~messages continuity with
+  | Error error -> Error (Agent_core.Error.to_string error)
+  | Ok () ->
+    Ok
+      (match continuity with
+       | Summarized { snapshot; _ } -> Librarian_snapshot snapshot
+       | Absorbed { end_atom; _ } -> Librarian_progress { end_atom }
+       | Without_snapshot -> No_position)
+;;
+
 (* Where a request starts, from what the keeper's files say (RFC
    keeper-context-window-in-tokens §13.4, §13.6): a snapshot that fits this
    history, else the Librarian's durable position when it is a place in this

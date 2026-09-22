@@ -2237,6 +2237,7 @@ let test_persist_skips_when_no_checkpoint_exists () =
 
 module Snapshot = Librarian_continuity_snapshot
 module Boundaries = Keeper_turn_boundaries
+module Choice = Keeper_turn_driver_try_provider
 
 let msg role text = Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 
@@ -2283,7 +2284,7 @@ let absorbed_snapshot () =
 ;;
 
 let start_range
-      ?(librarian_front = fun _ -> Host.No_position)
+      ?(librarian_front = fun _ -> Choice.No_position)
       ?(own_first_atom = 0)
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       messages
@@ -2311,14 +2312,15 @@ let texts messages =
    after them and carries the working state in their place. *)
 let test_a_start_seed_begins_at_the_librarian_position () =
   let snapshot = absorbed_snapshot () in
-  let carried = start_range ~librarian_front:(fun _ -> Host.Absorbed snapshot) start_seed_messages in
+  let carried = start_range ~librarian_front:(fun _ -> Choice.Librarian_snapshot snapshot) start_seed_messages in
   check int "the first atom is the one the Librarian did not read"
     snapshot.Snapshot.end_atom carried.Host.first_atom;
   check bool "the front says so" true
     (match carried.Host.front with
      | Host.Librarian_snapshot { absorbed_through } ->
        absorbed_through = snapshot.Snapshot.end_atom
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ -> false);
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Librarian_progress _ -> false);
   check string "and the log names it the same word the Agent Core lane logs"
     "librarian_snapshot"
     (Host.carried_start_front_to_string carried.Host.front);
@@ -2343,7 +2345,8 @@ let test_a_seed_without_a_librarian_position_is_unchanged () =
   check bool "the turn start, which is 0 with no completed turn" true
     (match carried.Host.front with
      | Host.Turn_start -> true
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start_unknown _ | Host.Librarian_snapshot _ -> false)
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start_unknown _ | Host.Librarian_snapshot _
+     | Host.Librarian_progress _ -> false)
 ;;
 
 (* The Librarian read through the last completed turn, so the position names
@@ -2353,7 +2356,7 @@ let test_a_seed_without_a_librarian_position_is_unchanged () =
    provider refuses. *)
 let test_a_fully_absorbed_history_still_carries_its_newest_atom () =
   let snapshot = absorbed_snapshot () in
-  let carried = start_range ~librarian_front:(fun _ -> Host.Absorbed snapshot) absorbed_messages in
+  let carried = start_range ~librarian_front:(fun _ -> Choice.Librarian_snapshot snapshot) absorbed_messages in
   check int "the range starts one atom before the position"
     (snapshot.Snapshot.end_atom - 1) carried.Host.first_atom;
   check bool "and still says the Librarian named the front" true
@@ -2373,7 +2376,7 @@ let test_a_later_lane_cut_wins () =
   let snapshot = absorbed_snapshot () in
   let carried =
     start_range
-      ~librarian_front:(fun _ -> Host.Absorbed snapshot)
+      ~librarian_front:(fun _ -> Choice.Librarian_snapshot snapshot)
       ~own_first_atom:(snapshot.Snapshot.end_atom + 1)
       start_seed_messages
   in
@@ -2392,7 +2395,7 @@ let test_a_librarian_position_behind_the_turn_start_still_wins () =
   let snapshot = absorbed_snapshot () in
   let carried =
     start_range
-      ~librarian_front:(fun _ -> Host.Absorbed snapshot)
+      ~librarian_front:(fun _ -> Choice.Librarian_snapshot snapshot)
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = snapshot.Snapshot.end_atom + 1 })
       start_seed_messages
   in
@@ -2402,7 +2405,56 @@ let test_a_librarian_position_behind_the_turn_start_still_wins () =
     (match carried.Host.front with
      | Host.Librarian_snapshot { absorbed_through } ->
        absorbed_through = snapshot.Snapshot.end_atom
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ -> false)
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Librarian_progress _ -> false)
+;;
+
+(* The turn chose the Librarian's read position with no working state that
+   fits (a purge, or a snapshot of another history): the range starts there
+   and carries nothing for the atoms before it, which are in the keeper's
+   memory -- the start the Agent Core lane takes for the same choice. *)
+let test_a_read_position_alone_starts_the_range_without_a_working_state () =
+  let end_atom = 2 in
+  let carried =
+    start_range
+      ~librarian_front:(fun _ -> Choice.Librarian_progress { end_atom })
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      start_seed_messages
+  in
+  check int "the range starts at the read position" end_atom carried.Host.first_atom;
+  check bool "the front says so" true
+    (match carried.Host.front with
+     | Host.Librarian_progress { end_atom = at } -> at = end_atom
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Librarian_snapshot _ -> false);
+  check string "and logs the Agent Core lane's word for it" "librarian_progress"
+    (Host.carried_start_front_to_string carried.Host.front);
+  let carried_texts = texts carried.Host.messages in
+  check bool "the read atoms are not sent" false
+    (List.exists (String.equal "The build passed.") carried_texts);
+  check bool "the atom after the position is" true
+    (List.exists (String.equal "Now review it.") carried_texts);
+  check bool "no working state is invented" false
+    (List.exists
+       (String.starts_with ~prefix:"[Librarian working state:")
+       carried_texts)
+;;
+
+(* A read position the lane's own cut has passed loses to the cut, like a
+   snapshot's. *)
+let test_a_read_position_behind_the_lane_cut_loses () =
+  let carried =
+    start_range
+      ~librarian_front:(fun _ -> Choice.Librarian_progress { end_atom = 1 })
+      ~own_first_atom:2
+      start_seed_messages
+  in
+  check int "the cut stands" 2 carried.Host.first_atom;
+  check bool "and the front is the lane's" true
+    (match carried.Host.front with
+     | Host.Lane_cut -> true
+     | Host.Carried_seed _ | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Librarian_snapshot _ | Host.Librarian_progress _ -> false)
 ;;
 
 let () =
@@ -2642,6 +2694,14 @@ let () =
             "a Librarian position behind the turn start still wins"
             `Quick
             test_a_librarian_position_behind_the_turn_start_still_wins
+        ; test_case
+            "a read position alone starts the range without a working state"
+            `Quick
+            test_a_read_position_alone_starts_the_range_without_a_working_state
+        ; test_case
+            "a read position behind the lane cut loses"
+            `Quick
+            test_a_read_position_behind_the_lane_cut_loses
         ; test_case
             "a fully absorbed history still carries its newest atom"
             `Quick

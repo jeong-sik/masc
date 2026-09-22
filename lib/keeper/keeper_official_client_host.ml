@@ -387,6 +387,10 @@ type carried_start_front =
       (** The Librarian absorbed the history through [end_atom] and wrote
           what the keeper was in the middle of; the range starts there and
           carries that working state instead of the atoms it summarises. *)
+  | Librarian_progress of { end_atom : int }
+      (** The Librarian read the history through [end_atom] and no working
+          state fits it; the range starts there, and the atoms before it are
+          in the keeper's memory. *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -397,15 +401,13 @@ type carried_start =
   ; front : carried_start_front
   }
 
-type librarian_position =
-  | No_position
-  | Absorbed of Librarian_continuity_snapshot.t
+type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
 (* Every official lane takes the reading as an optional argument and hands it
    on; this turns "the caller named none" into "there is no position for these
    messages" once, here, rather than in each lane. *)
 let librarian_front_or_absent = function
-  | None -> fun (_ : Agent_core.Types.message list) -> No_position
+  | None -> fun (_ : Agent_core.Types.message list) -> Keeper_turn_driver_try_provider.No_position
   | Some read -> read
 ;;
 
@@ -418,6 +420,7 @@ let carried_start_front_to_string = function
   (* The same word the Agent Core lane logs for this front
      ([Keeper_carried_front.origin_to_string]), so one search finds both. *)
   | Librarian_snapshot _ -> "librarian_snapshot"
+  | Librarian_progress _ -> "librarian_progress"
 ;;
 
 (* Where a start seed begins (RFC keeper-context-window-in-tokens §10.4). The
@@ -571,7 +574,8 @@ let carried_start_range
      stands for them. *)
   let plan =
     match absorbed with
-    | Absorbed (snapshot : Librarian_continuity_snapshot.t)
+    | Keeper_turn_driver_try_provider.Librarian_snapshot
+        (snapshot : Librarian_continuity_snapshot.t)
       when snapshot.end_atom >= librarian_must_reach ->
       (* Clamped like every other front: a range always carries the turn it is
          about to answer. Without this, a Librarian that read through the last
@@ -583,7 +587,19 @@ let carried_start_range
         ; absorbed_through = snapshot.end_atom
         ; working_state = snapshot.working_state
         }
-    | Absorbed _ | No_position ->
+    | Keeper_turn_driver_try_provider.Librarian_progress { end_atom }
+      when end_atom >= librarian_must_reach ->
+      (* The Librarian read through [end_atom] and no working state fits: the
+         atoms before it are in the keeper's memory and nothing stands in for
+         them, as on the Agent Core lane
+         ([Keeper_carried_front.Librarian_progress]). Clamped like every
+         other front, so the range carries the turn it answers. *)
+      Plain
+        ( Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom
+        , Librarian_progress { end_atom } )
+    | Keeper_turn_driver_try_provider.Librarian_snapshot _
+    | Keeper_turn_driver_try_provider.Librarian_progress _
+    | Keeper_turn_driver_try_provider.No_position ->
       let first_atom, front = seed_or_lane in
       Plain (first_atom, front)
   in

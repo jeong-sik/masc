@@ -199,12 +199,16 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
           fit the declared window: %s"
          runtime_id
          (Runtime_model_input_tail_window.budget_error_to_string error);
-       (match attempt ~librarian_front:(fun _ -> Host.No_position) with
+       (match attempt ~librarian_front:(fun _ -> Keeper_turn_driver_try_provider.No_position) with
         | Ok result -> observed result
         | Error (`Source error) -> Error error
         | Error (`Window (_, error)) ->
           Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ ->
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Librarian_progress _ ->
+       (* No working state rides on these fronts. Composing again without
+          the Librarian would leave the others as they are, or, for a read
+          position, start the range earlier and charge the window more. *)
        Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
 ;;
 

@@ -224,6 +224,12 @@ type carried_start_front =
           position clamped to the newest atom, so a range that the Librarian
           read to the end still carries the turn it answers; the two differ
           only then. *)
+  | Librarian_progress of { end_atom : int }
+      (** No working state fits, and the Librarian read this history through
+          [end_atom]: the range starts there and nothing is carried for the
+          atoms before it, which are in the keeper's memory
+          ([Keeper_carried_front.Librarian_progress] on the Agent Core lane).
+          [first_atom] is that position clamped to the newest atom. *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -237,27 +243,23 @@ type carried_start =
   ; front : carried_start_front
   }
 
-(** What the Librarian's saved position says about the messages a lane is
-    about to send. *)
-type librarian_position =
-  | No_position
-      (** Nothing was absorbed on this history, the lane named no reading, or
-          a saved position does not describe these messages. The caller owns
-          that reading, so it is the caller that says which of those it was.
-          Either way the seed and the lane's own cut stand: a seed is checked
-          against this history on its own
-          ([Keeper_carried_front.for_history]), so a Librarian position that
-          went stale says nothing about it. *)
-  | Absorbed of Librarian_continuity_snapshot.t
-      (** The saved position describes these messages: the atoms before it
-          are in the keeper's memory and the working state stands for them. *)
+(** Where the turn's one continuity choice puts the range, as a position in
+    the messages a lane is about to send
+    ({!Keeper_turn_driver_try_provider.librarian_position}). The choice is
+    made once per turn for every lane
+    ({!Keeper_turn_driver_try_provider.continuity_for_request}); this lane
+    only applies it. A seed is checked against this history on its own
+    ([Keeper_carried_front.for_history]), so a Librarian position that does
+    not fit says nothing about it. *)
+type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
 val librarian_front_or_absent
   :  (Agent_core.Types.message list -> librarian_position) option
   -> Agent_core.Types.message list
   -> librarian_position
 (** A lane's optional reading as the total function {!carried_start_range}
-    takes: [None] becomes {!No_position}. *)
+    takes: [None] becomes
+    {!Keeper_turn_driver_try_provider.No_position}. *)
 
 val carried_start_front_to_string : carried_start_front -> string
 
@@ -286,17 +288,19 @@ val carried_start_range
     keeper-context-window-in-tokens §13.4); a history with no completed turn
     has [turn_start] 0.
 
-    [librarian_front] answers with the Librarian's saved position for exactly
-    the messages it is handed; the caller owns that reading and its
-    validation. That position wins when it is at or past the seed that
+    [librarian_front] answers with the turn's continuity choice as a
+    position in exactly the messages it is handed: a fitting working state
+    ([Librarian_snapshot]), the Librarian's read position alone
+    ([Librarian_progress]), or none. That position wins when it is at or past the seed that
     holds, or the lane's own cut when no seed holds, so a Librarian that read
     less than the last request carried never moves the range back.
     [turn_start] is not weighed against it: it is where a request with no
     absorbed point begins, so a Librarian position behind it still names
-    atoms nothing else carries, and they go out. The working state goes in
+    atoms nothing else carries, and they go out. A read position alone
+    carries nothing for the atoms before it. The working state goes in
     front of the range, as
-    extra system context, exactly when that Librarian position is the one
-    that wins: a position the seed or the lane cut already passed stands for
+    extra system context, exactly when a [Librarian_snapshot] position is the
+    one that wins: a position the seed or the lane cut already passed stands for
     atoms the range is carrying anyway, and summarising those would say twice
     what the request already says. When it does win, the request grows by
     those bytes, and they are pinned, so a lane with a byte ceiling of its

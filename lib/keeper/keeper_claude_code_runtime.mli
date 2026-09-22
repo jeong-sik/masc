@@ -118,9 +118,11 @@ val run :
     keeper-context-window-in-tokens §13.4). A caller that passes no seed
     starts there, inside the ceiling.
 
-    [librarian_front] names the Librarian's own position for the messages it
-    is handed: the atoms before it are in the keeper's memory, and its saved
-    working state is carried in their place. It wins when it is at or past
+    [librarian_front] hands over the turn's continuity choice as a position
+    in the messages it is handed
+    ({!Keeper_turn_driver_try_provider.librarian_position}): a fitting working
+    state, carried in place of the atoms before it, or the Librarian's read
+    position alone, with nothing carried for the atoms before it. It wins when it is at or past
     the seed that holds, or the ceiling's cut when no seed holds, so the range
     never moves back behind either; [turn_start] is not weighed against it,
     since it is where a range with no absorbed point begins. The request can

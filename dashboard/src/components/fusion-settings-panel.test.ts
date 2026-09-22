@@ -289,6 +289,26 @@ describe('FusionSettingsPanel', () => {
     expect(q('[data-testid="fusion-settings-reload"]')).toBeNull()
   })
 
+  it('shows a settings write the writer could not address verbatim', async () => {
+    // set_settings answers edit_refused when [fusion] is written as dotted keys
+    // or an inline table, which the line-surgical writer cannot edit. The
+    // sentence names the table and says where to go instead, so it is shown as
+    // it arrives; nothing about it is a conflict, so no reload is offered and
+    // the config is not refetched.
+    const refusal = 'fusion is not written as a [fusion] table with its keys right below the header; '
+      + 'edit it in the raw runtime.toml'
+    applyMock.mockRejectedValue(new FusionConfigEditError({ code: 'edit_refused', message: refusal }, 400))
+    await mount()
+    button('[data-testid="fusion-settings-save"]').click()
+
+    await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
+    expect(q('[data-testid="fusion-settings-error"]')?.textContent).toBe(refusal)
+    expect(q('[data-testid="fusion-settings-reload"]')).toBeNull()
+    expect(q('[data-testid="fusion-settings-saved"]')).toBeNull()
+    expect(fusionConfigMock).toHaveBeenCalledTimes(1)
+    expect(runtimeRefreshMock).not.toHaveBeenCalled()
+  })
+
   it('creates a new preset by copying the draft under the typed name', async () => {
     fusionConfigMock
       .mockResolvedValueOnce(snapshot())

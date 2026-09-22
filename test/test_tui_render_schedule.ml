@@ -802,6 +802,22 @@ let test_memory_columns_never_exceed_their_width () =
       (used <= max inner_width memory_minimum_row_width)
   done
 
+(* The Δ column carries a pair, and a cell past its width is cut in the
+   middle: at six cells the fleet's own [+12 -23] drew as [+… -23] and the
+   added count was gone. Two digits each is the daily shape (the widest pair
+   on the live fleet was +11 -16); three each is what a large revision
+   needs. *)
+let test_the_memory_delta_column_holds_a_pair_of_counts () =
+  let columns = Schedule.allocate_memory_columns ~inner_width:240 in
+  List.iter
+    (fun delta ->
+      let row = Schedule.memory_row columns { memory_probe with mrow_delta = delta } in
+      check bool
+        (Printf.sprintf "%s is drawn whole: %s" delta row)
+        true
+        (Option.is_some (index_of row delta)))
+    [ "+12 -23"; "+999 -999" ]
+
 (* The defect this pair replaces: a header naming a column the row drew
    somewhere else. Every visible column is checked at every width. *)
 let test_memory_header_and_row_share_their_offsets () =
@@ -1922,6 +1938,8 @@ let () =
             test_keeper_columns_grow_identifiers_first
         ; test_case "memory columns never exceed their width" `Quick
             test_memory_columns_never_exceed_their_width
+        ; test_case "the memory delta column holds a pair of counts" `Quick
+            test_the_memory_delta_column_holds_a_pair_of_counts
         ; test_case "memory header and row share their offsets" `Quick
             test_memory_header_and_row_share_their_offsets
         ; test_case "memory row width ignores its readings" `Quick

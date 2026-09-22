@@ -472,6 +472,27 @@ NAMEDFILES
   named_file_suites=$( { printf '%s\n' "${named_file_suites}" \
     | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
+  # exactpath candidates: a suite that spells the changed file's exact path,
+  # in either quote style. The file rule above skips a shared basename and
+  # the quoted-literal mapping matches only double quotes; #37396's incident
+  # 4 changed scripts/fixtures/release-evidence/runtime.toml -- a basename
+  # shared with transport-harness -- while test_setup_cli.py opens it with
+  # single quotes, and neither rule reached the suite. An exact path is the
+  # claim the file rule waits for, whatever the basename or the quote.
+  exactpath_candidates=$(printf '%s\n' "${referenced}" | sed -n 's/^exactpath //p')
+  exactpath_suites=""
+  while IFS= read -r candidate; do
+    [ -n "${candidate}" ] || continue
+    case "${candidate}" in
+      *.py) python_suite_is_runnable "${candidate}" || continue ;;
+    esac
+    exactpath_suites=$(printf '%s\n%s\n' "${exactpath_suites}" "${candidate}")
+  done <<EXACTPATHS
+${exactpath_candidates}
+EXACTPATHS
+  exactpath_suites=$( { printf '%s\n' "${exactpath_suites}" \
+    | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
+
   # [themes_changed] stands beside [assets] here: the tool and prompt triggers
   # ride that variable, which matches config/(prompts|tools|mcp), and a theme
   # is none of those. Left out, a theme-only pull request returned here before
@@ -479,7 +500,7 @@ NAMEDFILES
   if [ -z "${sources}" ] && [ -z "${assets}" ] && [ -z "${themes_changed}" ] \
     && [ -z "${module_suites}" ] && [ -z "${library_suites}" ] \
     && [ -z "${declared_suites}" ] && [ -z "${referencing_suites}" ] \
-    && [ -z "${named_file_suites}" ]; then
+    && [ -z "${named_file_suites}" ] && [ -z "${exactpath_suites}" ]; then
     echo "no test source, config asset or named suite in this pull request"
       return 1
   fi
@@ -548,6 +569,13 @@ NAMEDFILES
     echo "suites that name a file this pull request edits:"
     printf '%s\n' "${named_file_suites}" | sed 's/^/  /'
     sources=$(printf '%s\n%s\n' "${sources}" "${named_file_suites}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
+  if [ -n "${exactpath_suites}" ]; then
+    echo "suites that open a file this pull request edits by exact path:"
+    printf '%s\n' "${exactpath_suites}" | sed 's/^/  /'
+    sources=$(printf '%s\n%s\n' "${sources}" "${exactpath_suites}" \
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 

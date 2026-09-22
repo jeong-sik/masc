@@ -2526,7 +2526,8 @@ let production_keeper_meta ~base_path ~trace_id =
   | Error detail -> fail ("production Keeper meta fixture failed: " ^ detail)
 ;;
 
-let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace_id
+let run_production_keeper_turn_with_projection ~dynamic_context_for_tools
+    ~http_requests ~base_path ~trace_id
     ~user_message ~cli_path ~model ~turn_instructions =
   Masc_test_deps.declare_fixture_keeper
     ~base_path ~sandbox_profile:None "codex-production-fixture";
@@ -2618,6 +2619,7 @@ candidates = ["projection.http", "codex.codex"]
                                 ~build_turn_prompt:
                                   (fun ~base_system_prompt ~messages:_ ->
                                     { Keeper_agent_run.system_prompt = base_system_prompt
+                                    ; dynamic_context_for_tools
                                     ; dynamic_context =
                                         (match turn_instructions with
                                          | None -> ""
@@ -2632,6 +2634,12 @@ candidates = ["projection.http", "codex.codex"]
                                 ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
                                 ~runtime_id
                                 ()).Keeper_agent_run.result))))))
+;;
+
+let run_production_keeper_turn_with_predecessor ~http_requests ~base_path ~trace_id
+    ~user_message ~cli_path ~model ~turn_instructions =
+  run_production_keeper_turn_with_projection ~dynamic_context_for_tools:None
+    ~http_requests ~base_path ~trace_id ~user_message ~cli_path ~model ~turn_instructions
 ;;
 
 let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~model
@@ -4430,7 +4438,7 @@ let test_production_keeper_resumes_across_trace_rotation () =
             fail "production Codex state did not settle"))
 ;;
 
-let test_production_dynamic_context_reaches_codex_instruction_wire () =
+let test_production_dynamic_context_reaches_codex_instruction_wire ~project () =
   let base_path = temp_workspace "masc-codex-production-context-" in
   let capture = Filename.temp_file "masc-codex-production-context-" ".jsonl" in
   (* #28169: enter through [build_turn_prompt] — the production assembly that
@@ -4439,8 +4447,15 @@ let test_production_dynamic_context_reaches_codex_instruction_wire () =
      prompt assembly and the official-client instruction wire, which is the
      layer the hook-injected sibling test above cannot see. *)
   let turn_instructions = "PRODUCTION_TURN_INSTRUCTIONS\nsecond line" in
+  let projection_calls = ref 0 in
+  let projected = "PROJECTED_DYNAMIC_CONTEXT" in
+  let dynamic_context_for_tools =
+    if project then Some (fun _tools -> incr projection_calls; projected)
+    else None
+  in
   let expected_dynamic_context =
-    "--- Turn-specific instructions ---\n" ^ turn_instructions
+    if project then projected
+    else "--- Turn-specific instructions ---\n" ^ turn_instructions
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path; Sys.remove capture)
@@ -4456,7 +4471,8 @@ let test_production_dynamic_context_reaches_codex_instruction_wire () =
          ]
          (fun cli_path ->
             match
-              run_production_keeper_turn
+              run_production_keeper_turn_with_projection
+                ~dynamic_context_for_tools ~http_requests:None
                 ~turn_instructions:(Some turn_instructions)
                 ~base_path
                 ~trace_id:"codex-production-context-1"
@@ -4467,6 +4483,8 @@ let test_production_dynamic_context_reaches_codex_instruction_wire () =
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result -> assert_production_keeper_result result);
+       check int "late projection runs once at the request boundary"
+         (if project then 1 else 0) !projection_calls;
        let context_envelope =
          In_channel.with_open_bin capture (fun input ->
            let open Yojson.Safe.Util in
@@ -5360,7 +5378,9 @@ let () =
         ; test_case
             "production dynamic context reaches Codex instruction wire"
             `Quick
-            test_production_dynamic_context_reaches_codex_instruction_wire
+            (test_production_dynamic_context_reaches_codex_instruction_wire ~project:false)
+        ; test_case "production late context projection reaches Codex wire" `Quick
+            (test_production_dynamic_context_reaches_codex_instruction_wire ~project:true)
         ; test_case
             "Keeper projects typed tools and hooks"
             `Quick

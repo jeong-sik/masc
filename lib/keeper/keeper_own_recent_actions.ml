@@ -176,3 +176,36 @@ let collect ~keeper_name ~max_turns =
       (Keeper_tool_call_log.read_recent ~keeper_name ~n ())
   end
 ;;
+
+let externalize_failures ~base_path ~keeper_name ~policy ~tools turns =
+  match policy with
+  | Keeper_input_policy.Wide -> turns
+  | Small when Result.is_error (Keeper_recovery_transmission.require_reader tools) -> turns
+  | Small ->
+    let store = Tool_blob_store.create ~base_path in
+    let externalize text =
+      match Tool_output.decode_from_agent_core text with
+      | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> text
+      | Tool_output.Not_marker ->
+        let stored = Tool_blob_store.put store ~bytes:text ~mime:"text/plain" in
+        let marker = Tool_output.encode_for_agent_core stored in
+        (* The briefing is transmitted inside a JSON string. A reference must
+           reduce those exact encoded bytes, not just the unescaped body. *)
+        let encoded_bytes text = String.length (Yojson.Safe.to_string (`String text)) in
+        if encoded_bytes marker < encoded_bytes text then marker else text in
+    let failed = ref 0 in
+    let turns = List.map (fun (turn : turn) ->
+      let calls = List.map (fun (call : call) ->
+        match call.outcome with
+        | Ok_call -> call
+        | Failed_call detail ->
+          (try
+             let input = externalize call.input in
+             let detail = Option.map externalize detail in
+             {call with input; outcome=Failed_call detail}
+           with Sys_error _ -> incr failed; call)) turn.calls in
+      {turn with calls}) turns in
+    if !failed > 0 then Log.Keeper.warn ~keeper_name
+      "small action briefing retained original failed-call payloads: storage failed for %d calls" !failed;
+    turns
+;;

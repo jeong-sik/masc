@@ -3458,6 +3458,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("measured_at", `Float 1_775_000_000.0)
             ; ("unread_atom_turns", `Int 0)
             ; ("unread_official_turns", `Int 0)
+            ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
             ] )
@@ -3516,6 +3517,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("source_invalidations", `Int 1)
             ; ("source_snapshot_bytes", `Int 1024)
             ; ("librarian_unread_turns", `Int 0)
+            ; ("librarian_continuity_unread_atoms", `Int 0)
+            ; ("librarian_continuity_unmeasured", `Int 0)
             ; ("librarian_failures", `Int 4)
             ; ("vision_ingest_errors", `Int 3)
             ; ("read_errors", `Int 0)
@@ -3628,6 +3631,47 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    | Ok snapshot -> Alcotest.(check (option int)) "unknown fleet total retained" None
        snapshot.mhs_total_librarian_unread_turns
    | Error detail -> Alcotest.fail detail);
+  (* The continuity lag is a second, separate lag (RFC librarian-lifecycle
+     §4.9). A row the server could not take is [null] and the fleet has to
+     count it as unmeasured; a row it took is its number and the fleet has to
+     sum it. Neither total may be quietly zero. *)
+  let with_continuity value =
+    map_keeper 0 (fun keeper -> match keeper with
+      | `Assoc fields -> `Assoc (List.map (fun (key, current) -> key,
+          if key = "librarian" then replace_field "continuity_unread_atoms" value current else current) fields)
+      | _ -> keeper) json in
+  let with_continuity_totals ~behind ~unmeasured = function
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key,
+        if key = "totals"
+        then replace_field "librarian_continuity_unmeasured" (`Int unmeasured)
+               (replace_field "librarian_continuity_unread_atoms" (`Int behind) value)
+        else value) fields)
+    | json -> json in
+  Alcotest.(check bool) "an unmeasured continuity lag cannot leave the fleet count at zero" true
+    (Result.is_error (Tui_decode.decode_memory_health_snapshot (with_continuity `Null)));
+  (match Tui_decode.decode_memory_health_snapshot
+           (with_continuity_totals ~behind:0 ~unmeasured:1 (with_continuity `Null)) with
+   | Ok snapshot ->
+     Alcotest.(check (option int)) "an unmeasured continuity lag stays unknown" None
+       (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_continuity_unread_atoms;
+     Alcotest.(check int) "the fleet counts the keeper it could not measure" 1
+       snapshot.mhs_total_librarian_continuity_unmeasured;
+     Alcotest.(check int) "and sums nothing for it" 0
+       snapshot.mhs_total_librarian_continuity_unread_atoms
+   | Error detail -> Alcotest.fail detail);
+  (match Tui_decode.decode_memory_health_snapshot
+           (with_continuity_totals ~behind:4 ~unmeasured:0 (with_continuity (`Int 4))) with
+   | Ok snapshot ->
+     Alcotest.(check (option int)) "a measured continuity lag is the row's number" (Some 4)
+       (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_continuity_unread_atoms;
+     Alcotest.(check int) "and the fleet sums it" 4
+       snapshot.mhs_total_librarian_continuity_unread_atoms
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool) "a continuity sum that disagrees with the rows is refused" true
+    (Result.is_error (Tui_decode.decode_memory_health_snapshot (with_continuity (`Int 4))));
+  Alcotest.(check bool) "a negative continuity lag is refused" true
+    (Result.is_error (Tui_decode.decode_memory_health_snapshot
+       (with_continuity_totals ~behind:(-1) ~unmeasured:0 (with_continuity (`Int (-1))))));
   let mismatched_totals =
     match json with
     | `Assoc fields ->
@@ -3651,6 +3695,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("measured_at", `Float 1_775_000_000.0)
             ; ("unread_atom_turns", `Int (-1))
             ; ("unread_official_turns", `Int 0)
+            ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
             ]))
@@ -3667,6 +3712,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
             ; ("measured_at", `Float 1_775_000_000.0)
             ; ("unread_atom_turns", `Int 0)
             ; ("unread_official_turns", `Int 0)
+            ; ("continuity_unread_atoms", `Int 0)
             ; ("last_success_at", `Null)
             ; ("last_failure_kind", `Null)
             ]))
@@ -3835,6 +3881,7 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
                     ; ("measured_at", `Float 1_775_000_000.0)
                     ; ("unread_atom_turns", `Int 0)
                     ; ("unread_official_turns", `Int 0)
+                    ; ("continuity_unread_atoms", `Int 0)
                     ; ("last_success_at", `Null)
                     ; ("last_failure_kind", `Null)
                     ] )
@@ -3874,6 +3921,8 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
           ; ("source_invalidations", `Int 0)
           ; ("source_snapshot_bytes", `Int 0)
           ; ("librarian_unread_turns", `Int 0)
+          ; ("librarian_continuity_unread_atoms", `Int 0)
+          ; ("librarian_continuity_unmeasured", `Int 0)
           ; ("librarian_failures", `Int 4)
           ; ("vision_ingest_errors", `Int 0)
           ; ("read_errors", `Int 0)

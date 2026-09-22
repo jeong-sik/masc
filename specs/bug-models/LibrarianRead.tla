@@ -81,6 +81,13 @@ IsCut(l, ck) == l.kind = "TE" /\ l.end <= Len(ck)
 CutsOf(lines, ck) ==
     { lines[i].end : i \in { j \in 1..Len(lines) : IsCut(lines[j], ck) } }
 
+\* Keeper_turn_boundaries.witness_line: a line among the first [seen] that
+\* ends a turn at [end]. A position is read only with such a line, and a
+\* recovery moves one only to an end that has one. Every digest collides
+\* here, so that is the end alone.
+StatesPosition(lines, seen, end) ==
+    \E i \in 1..Min({seen, Len(lines)}) : lines[i].kind = "TE" /\ lines[i].end = end
+
 \* Row 2c. The first line the decoder refuses, or 0.
 FirstRefused(lines) ==
     LET refused == { i \in 1..Len(lines) : lines[i].kind = "BAD" }
@@ -302,10 +309,17 @@ Apply(refusedMode, restartFirst) ==
     /\ snap >= 0
     /\ LET lines == SubSeq(log, 1, Min({snap, Len(log)}))
            sel == Choose(lines, hist, progress, refusedMode, restartFirst)
-           read == IF sel.kind = "read"
+           \* keeper_librarian_durable_consumer reads from a position only
+           \* with the line that states it, among the lines the position
+           \* counted, whatever the round starts from. Without one the pass
+           \* stops (Progress_boundary_missing) and moves nothing.
+           stalled == /\ sel.kind = "read"
+                      /\ progress # NoProgress
+                      /\ ~StatesPosition(lines, progress.seen, progress.end)
+           read == IF sel.kind = "read" /\ ~stalled
                    THEN { hist[i] : i \in (sel.start + 1)..sel.end }
                    ELSE {}
-           moves == sel.kind \in {"read", "baseline"}
+           moves == sel.kind \in {"read", "baseline"} /\ ~stalled
        IN /\ readIds' = readIds \cup read
           /\ progress' = IF moves THEN [end |-> sel.end, seen |-> snap] ELSE progress
     /\ snap' = -1
@@ -353,26 +367,26 @@ NextBuggy ==
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
 
-\* A purge removes messages from anywhere in the history, not only from its
-\* front, and every atom after the one it took is renumbered. Taking one atom
-\* from an arbitrary place covers that: whether the shift starts at the front
-\* or in the middle, a position counted against the old numbering names a
-\* different atom afterwards.
-WithoutAtom(h, j) == SubSeq(h, 1, j - 1) \o SubSeq(h, j + 1, Len(h))
+\* A purge keeps every atom and the digest of every message a line or the
+\* position names (Keeper_checkpoint_purge), so to this model, whose history is
+\* atom ids and whose rounds compare only those digests, it changes nothing.
+\* What moves a position is recovery from a broken transcript: it drops the
+\* history from the break on. The break may be anywhere, so the model cuts
+\* after any atom.
+TrimTo(k) == hist' = SubSeq(hist, 1, k)
 
-\* Bug witness 4: an offline purge rewrites the history shorter and writes no
-\* line (RFC-0351 S1; RFC librarian-lifecycle 10, the second open decision).
-\* Dropping the oldest atom renumbers every atom after it, so the position's
-\* end_atom names a different atom than the one it was taken from, and a digest
-\* carries no index to tell them apart. The recommendation on that decision is
-\* to refuse a purge while any turn is unread; this measures what the refusal
-\* is worth rather than leaving it as advice.
-PurgeTrimKeepingProgress ==
+PurgeTrimGuard ==
     /\ turn = NoTurn
     /\ ~clearHalf
     /\ snap = -1
     /\ Len(hist) > 1
-    /\ \E j \in 1..Len(hist) : hist' = WithoutAtom(hist, j)
+
+\* Bug witness 4: the recovery drops the tail and leaves the read position
+\* where it was, past the new end. The next turn saves atoms at numbers the
+\* position has already passed, and the round after it reads from beyond them.
+PurgeTrimKeepingProgress ==
+    /\ PurgeTrimGuard
+    /\ \E k \in 1..(Len(hist) - 1) : TrimTo(k)
     /\ UNCHANGED << ckTurns, log, turn, progress, readIds, nextId, budget,
                     clearHalf, snap >>
 
@@ -382,22 +396,19 @@ NextPurgeTrim ==
 
 SpecPurgeTrim == Init /\ [][NextPurgeTrim]_vars
 
-\* Bug witness 5: the same purge under the guard RFC librarian-lifecycle 10
-\* recommends for its second open decision -- refuse while a turn is unread,
-\* and otherwise make the end of the rewritten history the new baseline. It
-\* still loses atoms, in ten steps, because the guard asks about turns while
-\* the thing at risk is atoms: a turn that saved and then died leaves atoms
-\* that no line ever names, so "no turn is unread" is true while an atom is
-\* not. The purge then moves the position over it.
+\* Bug witness 5: the recovery under the guard RFC librarian-lifecycle 10
+\* first recommended -- refuse while a turn is unread, and otherwise make the
+\* new end the position. It loses atoms because the guard asks about turns
+\* while atoms are at risk: a turn that saved and then died leaves atoms that
+\* no line names, so "no turn is unread" is true while an atom is not, and the
+\* position is moved over it.
 PurgeTrimGuardedByTurns ==
-    /\ turn = NoTurn
-    /\ ~clearHalf
-    /\ snap = -1
-    /\ Len(hist) > 1
+    /\ PurgeTrimGuard
     /\ progress # NoProgress
     /\ \A c \in CutsOf(log, hist) : c <= progress.end
-    /\ \E j \in 1..Len(hist) : hist' = WithoutAtom(hist, j)
-    /\ progress' = [end |-> Len(hist) - 1, seen |-> Len(log)]
+    /\ \E k \in 1..(Len(hist) - 1) :
+         /\ TrimTo(k)
+         /\ progress' = [end |-> k, seen |-> Len(log)]
     /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
 
 NextPurgeTrimGuardedByTurns ==
@@ -406,23 +417,20 @@ NextPurgeTrimGuardedByTurns ==
 
 SpecPurgeTrimGuardedByTurns == Init /\ [][NextPurgeTrimGuardedByTurns]_vars
 
-\* Bug witness 6: the guard stated over atoms -- refuse unless the read
-\* position is the end of the history -- with the position rewritten the way
-\* the recommendation puts it, counting every line the log now holds. It still
-\* loses atoms. The guard is not what fails here: raising the counted lines to
-\* the end of the log swallows a restart line no round has taken in, and that
-\* line was the one thing that would have sent the next round back to atom
-\* zero. A purge may move where a round reads; it may not decide what a round
-\* has already seen.
+\* Bug witness 6: the recovery the code runs, except that it counts every line
+\* the log now holds instead of leaving the count alone. The count is what
+\* makes a restart line beyond it new; raising it swallows a restart no round
+\* has taken in, and that line was what would have sent the next round back
+\* to atom zero. A recovery may move where a round reads; it may not decide
+\* what a round has already seen.
 PurgeTrimAtEndCountingLines ==
-    /\ turn = NoTurn
-    /\ ~clearHalf
-    /\ snap = -1
-    /\ Len(hist) > 1
+    /\ PurgeTrimGuard
     /\ progress # NoProgress
     /\ progress.end = Len(hist)
-    /\ \E j \in 1..Len(hist) : hist' = WithoutAtom(hist, j)
-    /\ progress' = [end |-> Len(hist) - 1, seen |-> Len(log)]
+    /\ \E k \in 1..(Len(hist) - 1) :
+         /\ StatesPosition(log, progress.seen, k)
+         /\ TrimTo(k)
+         /\ progress' = [end |-> k, seen |-> Len(log)]
     /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
 
 NextPurgeTrimAtEndCountingLines ==
@@ -432,28 +440,55 @@ NextPurgeTrimAtEndCountingLines ==
 SpecPurgeTrimAtEndCountingLines ==
     Init /\ [][NextPurgeTrimAtEndCountingLines]_vars
 
-\* The guard that does hold: refuse unless the read position is the end of the
-\* history being rewritten, and leave the counted lines alone. Then no atom
-\* lies beyond the position, the clean rules already say it passed none, and a
-\* restart line the position has not counted still sends the next round back to
-\* zero -- which re-reads the rewritten history, losing nothing.
-\* SpecPurgeTrimAtEnd must NOT violate.
+\* The recovery the code runs (Keeper_checkpoint_purge.purge_messages and
+\* librarian_rebase). With a position, it is refused unless the position is
+\* the history's end, and it ends the history at an end a counted line states
+\* ahead of the break; the position moves there and the counted lines stay as
+\* they are. Without a position it ends at the break.
+\* SpecPurgeTrimAtEnd and SpecPurgeTrimAtEndLive must NOT violate.
 PurgeTrimAtEnd ==
-    /\ turn = NoTurn
-    /\ ~clearHalf
-    /\ snap = -1
-    /\ Len(hist) > 1
+    /\ PurgeTrimGuard
     /\ progress # NoProgress
     /\ progress.end = Len(hist)
-    /\ \E j \in 1..Len(hist) : hist' = WithoutAtom(hist, j)
-    /\ progress' = [end |-> Len(hist) - 1, seen |-> progress.seen]
+    /\ \E k \in 1..(Len(hist) - 1) :
+         /\ StatesPosition(log, progress.seen, k)
+         /\ TrimTo(k)
+         /\ progress' = [end |-> k, seen |-> progress.seen]
     /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
+
+PurgeTrimWithoutProgress ==
+    /\ PurgeTrimGuard
+    /\ progress = NoProgress
+    /\ \E k \in 1..(Len(hist) - 1) : TrimTo(k)
+    /\ UNCHANGED << ckTurns, log, turn, progress, readIds, nextId, budget,
+                    clearHalf, snap >>
 
 NextPurgeTrimAtEnd ==
     \/ Next
     \/ PurgeTrimAtEnd
+    \/ PurgeTrimWithoutProgress
 
 SpecPurgeTrimAtEnd == Init /\ [][NextPurgeTrimAtEnd]_vars
+
+\* Bug witness 8: the same recovery with the position moved to wherever the
+\* break left the end (masc #37772). It passes nothing over unread, so
+\* NoAtomPassedUnread holds, but the end may be one no line states. A round
+\* reads from a position only with its line, and the count of lines moves
+\* only with the position, so once the next turn ends every round stops
+\* there. LibrarianRead-purge-trim-anywhere-live-buggy.cfg shows it.
+PurgeTrimAtEndAnywhere ==
+    /\ PurgeTrimGuard
+    /\ progress # NoProgress
+    /\ progress.end = Len(hist)
+    /\ \E k \in 1..(Len(hist) - 1) :
+         /\ TrimTo(k)
+         /\ progress' = [end |-> k, seen |-> progress.seen]
+    /\ UNCHANGED << ckTurns, log, turn, readIds, nextId, budget, clearHalf, snap >>
+
+NextPurgeTrimAtEndAnywhere ==
+    \/ Next
+    \/ PurgeTrimAtEndAnywhere
+    \/ PurgeTrimWithoutProgress
 
 \* Bug witness 3: the turn-boundary file is deleted while the read position that
 \* counted its lines is kept. Line numbers start at one again, so a restart line
@@ -526,18 +561,18 @@ SpecLive ==
     /\ WF_vars(RoundSnap)
     /\ SF_vars(RoundApply)
 
-\* The same question asked of an offline purge, which is the second open
-\* decision in the RFC. With MaxBad = 0 no line is ever unreadable, so the stop
-\* above cannot happen and a violation here belongs to the purge alone.
-SpecPurgeTrimLive ==
-    /\ Init
-    /\ [][NextPurgeTrim]_vars
-    /\ WF_vars(RoundSnap)
-    /\ SF_vars(RoundApply)
-
+\* The same question asked of a recovery that moves the position. With
+\* MaxBad = 0 no line is ever unreadable, so the stop above cannot happen and
+\* a violation here belongs to the recovery alone.
 SpecPurgeTrimAtEndLive ==
     /\ Init
     /\ [][NextPurgeTrimAtEnd]_vars
+    /\ WF_vars(RoundSnap)
+    /\ SF_vars(RoundApply)
+
+SpecPurgeTrimAtEndAnywhereLive ==
+    /\ Init
+    /\ [][NextPurgeTrimAtEndAnywhere]_vars
     /\ WF_vars(RoundSnap)
     /\ SF_vars(RoundApply)
 

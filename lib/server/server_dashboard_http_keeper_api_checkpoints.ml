@@ -200,9 +200,7 @@ type purge_report =
   ; messages_after : int
   ; bytes_before : int
   ; bytes_after : int
-  ; duplicates_dropped : int
   ; reasoning_blocks_stripped : int
-  ; reasoning_messages_dropped : int
   ; tool_results_cleared : int
   }
 
@@ -223,6 +221,8 @@ type purge_error =
   | Purge_checkpoint_unavailable of string
   | Purge_checkpoint_invalid of string
   | Purge_librarian_position_unreadable of string
+  | Purge_boundaries_unreadable of string
+  | Purge_continuity_unreadable of string
   | Purge_librarian_rebase_refused of Keeper_checkpoint_purge.refusal
   | Purge_librarian_cancel_failed of string
   | Purge_librarian_position_not_written of string
@@ -245,6 +245,10 @@ let purge_error_to_string = function
     "checkpoint purge refused: " ^ detail
   | Purge_librarian_position_unreadable detail ->
     "checkpoint purge refused: Librarian position unreadable: " ^ detail
+  | Purge_boundaries_unreadable detail ->
+    "checkpoint purge refused: turn-boundary log unreadable: " ^ detail
+  | Purge_continuity_unreadable detail ->
+    "checkpoint purge refused: Librarian working state unreadable: " ^ detail
   | Purge_librarian_rebase_refused refusal ->
     "checkpoint purge refused: " ^ Keeper_checkpoint_purge.refusal_to_string refusal
   | Purge_librarian_cancel_failed detail ->
@@ -343,9 +347,7 @@ let purge_report_json report =
     ; "bytes_before", `Int report.bytes_before
     ; "bytes_after", `Int report.bytes_after
     ; "bytes_removed", `Int (report.bytes_before - report.bytes_after)
-    ; "duplicates_dropped", `Int report.duplicates_dropped
     ; "reasoning_blocks_stripped", `Int report.reasoning_blocks_stripped
-    ; "reasoning_messages_dropped", `Int report.reasoning_messages_dropped
     ; "tool_results_cleared", `Int report.tool_results_cleared
     ]
 ;;
@@ -407,15 +409,6 @@ let ensure_exact_backup ~config ~trace_id ~source_ref source_bytes =
         | Error detail -> Error ("backup read-back failed: " ^ detail)))
 ;;
 
-let checkpoint_purge_error_to_string = function
-  | Keeper_checkpoint_purge.Invalid_config detail -> "invalid config: " ^ detail
-  | Invalid_input_structure structural ->
-    Keeper_transcript_unit.show_structural_error structural
-  | Invalid_output_structure structural ->
-    "purge produced invalid structure: "
-    ^ Keeper_transcript_unit.show_structural_error structural
-;;
-
 let purge_current_unlocked config ~keeper_name ~apply =
   match Keeper_meta_store.read_meta_resolved config keeper_name with
   | Error detail -> Error (Purge_checkpoint_unavailable detail)
@@ -434,19 +427,25 @@ let purge_current_unlocked config ~keeper_name ~apply =
          ( Keeper_librarian_progress.read
              ~keepers_dir:runtime_keepers_dir
              ~keeper_id:keeper_name
+         , Keeper_turn_boundaries.read
+             ~keepers_dir:runtime_keepers_dir
+             ~keeper_id:keeper_name
+         , Keeper_librarian_continuity.read ~config ~keeper_name
          , Keeper_checkpoint_store.load_agent_core_exact_snapshot
              ~session_dir
              ~session_id:trace_id )
        with
-       | Error error, _ ->
+       | Error error, _, _, _ ->
          Error
            (Purge_librarian_position_unreadable
               (Keeper_librarian_progress.read_error_to_string error))
-       | Ok _, Error error ->
+       | Ok _, Error detail, _, _ -> Error (Purge_boundaries_unreadable detail)
+       | Ok _, Ok _, Error detail, _ -> Error (Purge_continuity_unreadable detail)
+       | Ok _, Ok _, Ok _, Error error ->
          Error
            (Purge_checkpoint_unavailable
               (checkpoint_ref_load_error_to_string error))
-       | Ok progress, Ok snapshot ->
+       | Ok progress, Ok boundary_lines, Ok continuity, Ok snapshot ->
          let source_ref = Keeper_checkpoint_store.exact_snapshot_reference snapshot in
          let source_bytes =
            Keeper_checkpoint_store.exact_snapshot_canonical_bytes snapshot
@@ -462,12 +461,16 @@ let purge_current_unlocked config ~keeper_name ~apply =
                (match
                   Keeper_checkpoint_purge.purge
                     ~config:Keeper_checkpoint_purge.default_config
+                    ~trace_id
+                    ~boundary_lines
+                    ~continuity
+                    ~progress
                     checkpoint
                 with
                 | Error error ->
                   Error
                     (Purge_checkpoint_invalid
-                       (checkpoint_purge_error_to_string error))
+                       (Keeper_checkpoint_purge.purge_error_to_string error))
                 | Ok (purged, purge_report) ->
                   let purged_bytes = Agent_core.Checkpoint.to_string purged in
                   let rebase =
@@ -487,9 +490,7 @@ let purge_current_unlocked config ~keeper_name ~apply =
               ; messages_after = raw_report.messages_after
               ; bytes_before = String.length source_bytes
               ; bytes_after = String.length purged_bytes
-              ; duplicates_dropped = raw_report.duplicates_dropped
               ; reasoning_blocks_stripped = raw_report.reasoning_blocks_stripped
-              ; reasoning_messages_dropped = raw_report.reasoning_messages_dropped
               ; tool_results_cleared = raw_report.tool_results_cleared
               }
             in
@@ -557,10 +558,13 @@ let purge_current_unlocked config ~keeper_name ~apply =
                              (checkpoint_cas_error_to_string cause))
                       | Installed installed ->
                         (* The checkpoint is on disk; the position follows it
-                           (RFC librarian-lifecycle §10-2). Between the two
-                           writes a crash leaves the old position against the new
-                           numbering, which the next round stops on; the error
-                           text says how that is resolved. *)
+                           (RFC librarian-lifecycle §10-2). A sound purge keeps
+                           the history's end, so this writes back the position
+                           it had. A recovery drops the broken tail and the
+                           position moves to the new end; a crash between the
+                           two writes leaves it past that end, which the next
+                           round stops on, and the error text says how that is
+                           resolved. *)
                         let position_written =
                           match rebase with
                           | Keeper_checkpoint_purge.No_progress -> Ok ()
@@ -576,6 +580,21 @@ let purge_current_unlocked config ~keeper_name ~apply =
                              (Purge_librarian_position_not_written
                                 (Keeper_librarian_progress.write_error_to_string error))
                          | Ok () ->
+                           Log.Keeper.info
+                             ~keeper_name
+                             "checkpoint purge applied trace=%s messages=%d->%d \
+                              bytes=%d->%d reasoning_blocks_stripped=%d \
+                              tool_results_cleared=%d \
+                              messages_dropped_at_structural_break=%d backup=%s"
+                             trace_id
+                             report.messages_before
+                             report.messages_after
+                             report.bytes_before
+                             report.bytes_after
+                             report.reasoning_blocks_stripped
+                             report.tool_results_cleared
+                             raw_report.messages_dropped_at_structural_break
+                             backup_path;
                            Ok
                              { keeper = keeper_name
                              ; trace_id
@@ -606,21 +625,26 @@ let purge_current config ~keeper_name ~apply =
              keeper_name
          then Error (Purge_keeper_active keeper_name)
          else
-           (* The Librarian lane is server-owned and may outlive this Keeper.
-              Stop any current or pending unit before either persisted value is
-              replaced; the absent Keeper cannot submit another post-turn unit
-              while this lifecycle lock excludes same-Keeper boot registration. *)
+           (* The Librarian lane is server-owned and outlives this Keeper: a
+              durable enqueue for the stopped Keeper still signals it, and the
+              queue refresh prepares a working state from the checkpoint
+              before it checks for an owner. A unit that read the old bytes
+              and committed after the install would save a working state
+              hashed against them, refusing every Agent-Core turn. So new
+              units are kept out, and running ones cancelled and awaited, for
+              the whole read-rewrite-install. *)
            match
              Eio_context.run_on_owner_domain (fun () ->
-               Keeper_memory_lane.cancel_and_await_librarian
+               Keeper_memory_lane.with_librarian_purge
                  ~base_path:config.Workspace.base_path
-                 ~keeper_name)
+                 ~keeper_name
+                 (fun () -> purge_current_unlocked config ~keeper_name ~apply:true))
            with
            | Error error ->
              Error
                (Purge_librarian_cancel_failed
                   (Keeper_memory_lane.purge_cancel_error_to_string error))
-           | Ok () -> purge_current_unlocked config ~keeper_name ~apply:true)
+           | Ok result -> result)
   else purge_current_unlocked config ~keeper_name ~apply:false
 ;;
 

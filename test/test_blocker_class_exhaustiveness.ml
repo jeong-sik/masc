@@ -280,6 +280,25 @@ let test_reason_none_provider_error_falls_through () =
     surface.KSB.blocker_class
 ;;
 
+(* A typed provider code that is not a timeout: the summary carries the
+   record's own code and detail and nothing else. It used to call the record
+   a catch-all and send the operator to find a typed cause the code already
+   named (msx-retro-mania, 2026-09-22: a repeated-generation stop the lane
+   had already moved past). *)
+let test_typed_provider_code_summary_is_the_record () =
+  let code = "provider_error_repeating_generation:repeated_reasoning_cycle" in
+  let detail =
+    "Provider 'ollama_cloud' model repeated itself (repeated_reasoning_cycle: one \
+     270-byte unit 4 times); the stream was ended and the next candidate must be a \
+     different model"
+  in
+  let surface = provider_runtime_surface_exn ~reason:None ~code ~detail () in
+  check string "class" "provider_runtime_error" surface.KSB.blocker_class;
+  check string "the summary is the record's code and detail"
+    (Printf.sprintf "Provider runtime error (%s): %s" code detail)
+    surface.KSB.summary
+;;
+
 let test_provider_timeout_catch_all_stays_provider_runtime_error () =
   let surface =
     provider_runtime_surface_exn
@@ -358,6 +377,8 @@ let () =
             test_typed_provider_reason_reaches_runtime_exhausted
         ; test_case "reason=None provider error falls through" `Quick
             test_reason_none_provider_error_falls_through
+        ; test_case "a typed provider code is summarised as its own record" `Quick
+            test_typed_provider_code_summary_is_the_record
         ; test_case "provider timeout catch-all stays provider runtime" `Quick
             test_provider_timeout_catch_all_stays_provider_runtime_error
         ; test_case

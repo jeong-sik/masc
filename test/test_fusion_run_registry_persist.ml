@@ -51,7 +51,7 @@ let float_ j k =
 let test_persist_register_complete () =
   let path = fresh_path ".jsonl" in
   let t = R.create ~path () in
-  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed t ~run_id:"r1" ~outcome:R.Succeeded;
   let before_replay = Option.get (R.get t ~run_id:"r1") in
   let after_replay = Option.get (R.get (R.replay path) ~run_id:"r1") in
@@ -77,7 +77,7 @@ let test_persist_register_complete () =
 let test_persist_failure_detail () =
   let path = fresh_path "-failure.jsonl" in
   let t = R.create ~path () in
-  R.register_running t ~run_id:"r-fail" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.register_running t ~run_id:"r-fail" ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed t ~run_id:"r-fail"
     ~outcome:(R.Failed { reason = "judge failed: bad json"; code = "parse_error" });
   let content = Fs_compat.load_file path in
@@ -133,7 +133,7 @@ let test_persist_success_summary () =
   let path = fresh_path "-summary.jsonl" in
   let t = R.create ~path () in
   R.register_running t ~run_id:"r-summary" ~keeper:"k" ~preset:"p"
-    ~topology:Fusion_types.Simple ~started_at:1.0;
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed t ~run_id:"r-summary"
     ~outcome:
       (R.Succeeded_with_summary
@@ -170,13 +170,13 @@ let test_replay_prunes_completed () =
       t
       ~run_id:("r" ^ string_of_int i)
       ~keeper:"k"
-      ~preset:"p" ~topology:Fusion_types.Simple
+      ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
       ~started_at:(float_of_int i);
     R.mark_completed t ~run_id:("r" ^ string_of_int i) ~outcome:R.Succeeded
   done;
   (* Leave one run in [Running] state; replay must drop it because the worker
      fiber died with the old process. *)
-  R.register_running t ~run_id:"r-running" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:71.0;
+  R.register_running t ~run_id:"r-running" ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:71.0;
   let t2 = R.replay path in
   let runs = R.list_runs t2 in
   check int "pruned completed only" R.max_completed_retained (List.length runs);
@@ -189,11 +189,70 @@ let test_replay_prunes_completed () =
   check bool "oldest completed pruned" true (Option.is_none (R.get t2 ~run_id:"r1"))
 ;;
 
+(* 실행별 명단: 저장 줄에는 바꾼 칸만 적히고, 되읽으면 같은 명단이다. 바꾸지 않은 run
+   의 줄에는 명단 키가 없다. dashboard 와 TUI 가 읽는 run_to_yojson 은 명단을 늘
+   [roster] 로 싣는다. *)
+let test_roster_survives_replay () =
+  let path = fresh_path "-roster.jsonl" in
+  let t = R.create ~path () in
+  let swapped : Fusion_types.roster =
+    { judge_route = Some "fusion-judge"
+    ; panel_routes = Some [ "stub-http.stub-model"; "claude_code.claude-sonnet-5" ]
+    }
+  in
+  let judge_only : Fusion_types.roster = { judge_route = Some "fusion-judge"; panel_routes = None } in
+  R.register_running t ~run_id:"r-swapped" ~keeper:"k" ~preset:"p" ~roster:swapped
+    ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.register_running t ~run_id:"r-judge" ~keeper:"k" ~preset:"p" ~roster:judge_only
+    ~topology:Fusion_types.Simple ~started_at:2.0;
+  R.register_running t ~run_id:"r-preset" ~keeper:"k" ~preset:"p"
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:3.0;
+  (* Replay drops Running entries, so each run is completed before the log is
+     read back. *)
+  List.iter
+    (fun run_id -> R.mark_completed t ~run_id ~outcome:R.Succeeded)
+    [ "r-swapped"; "r-judge"; "r-preset" ];
+  let replayed = R.replay path in
+  let roster_t = testable Fusion_types.pp_roster Fusion_types.equal_roster in
+  let replayed_roster run_id =
+    match R.get replayed ~run_id with
+    | Some run -> run.R.roster
+    | None -> failwith (Printf.sprintf "run %s did not survive replay" run_id)
+  in
+  check roster_t "swapped roster survives replay" swapped (replayed_roster "r-swapped");
+  check roster_t "judge-only roster survives replay" judge_only (replayed_roster "r-judge");
+  check roster_t "preset roster survives replay" Fusion_types.preset_roster
+    (replayed_roster "r-preset");
+  let registration run_id =
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal (String.trim line) ""))
+    |> List.map parse
+    |> List.find_opt (fun event ->
+      String.equal (str event "event") "register" && String.equal (str event "id") run_id)
+    |> function
+    | Some event -> object_ event "registration"
+    | None -> failwith (Printf.sprintf "no register line for %s" run_id)
+  in
+  let preset_line = registration "r-preset" in
+  check bool "a preset run writes no judge_route" true
+    (Option.is_none (field preset_line "judge_route"));
+  check bool "a preset run writes no panel_routes" true
+    (Option.is_none (field preset_line "panel_routes"));
+  check bool "a judge-only run writes no panel_routes" true
+    (Option.is_none (field (registration "r-judge") "panel_routes"));
+  match R.get replayed ~run_id:"r-swapped" with
+  | Some run ->
+    check bool "run_to_yojson carries the roster" true
+      (field (R.run_to_yojson run) "roster" = Some (Fusion_types.roster_to_yojson swapped))
+  | None -> fail "swapped run missing after replay"
+;;
+
 (* (3) A fresh registry without a backing path does not write files. *)
 let test_no_path_is_in_memory_only () =
   let path = fresh_path "-no-path.jsonl" in
   let t = R.create () in
-  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed t ~run_id:"r1" ~outcome:R.Succeeded;
   check bool "no file created" false (Sys.file_exists path)
 ;;
@@ -219,6 +278,33 @@ let test_replay_skips_malformed_lines () =
    | None -> fail "expected valid replay events around malformed line to load");
   check bool "malformed evidence is preserved" true
     (String_util.contains_substring (Fs_compat.load_file path) "not-json")
+;;
+
+(* 명단 키의 모양은 replay 가 검사한다. 문자열이 아닌 원소가 섞인 줄은 그 실행만
+   버리고, 옆의 온전한 줄은 그대로 읽는다. *)
+let test_replay_rejects_a_non_string_panel_route () =
+  let path = fresh_path "-bad-roster.jsonl" in
+  Fs_compat.save_file
+    path
+    (String.concat
+       "\n"
+       [ {|{"event":"register","id":"bad","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple","panel_routes":["a",7]}}|}
+       ; {|{"event":"complete","id":"bad","completion":{"result":{"outcome":"succeeded"},"finished_at":2.0}}|}
+       ; {|{"event":"register","id":"good","started_at":3.0,"registration":{"keeper":"k","preset":"p","topology":"simple","panel_routes":["a"]}}|}
+       ; {|{"event":"complete","id":"good","completion":{"result":{"outcome":"succeeded"},"finished_at":4.0}}|}
+       ; ""
+       ]);
+  let t = R.replay path in
+  check bool "a non-string panel route drops that run" true
+    (Option.is_none (R.get t ~run_id:"bad"));
+  match R.get t ~run_id:"good" with
+  | Some run ->
+    check
+      (testable Fusion_types.pp_roster Fusion_types.equal_roster)
+      "the neighbouring run still reads its roster"
+      ({ judge_route = None; panel_routes = Some [ "a" ] } : Fusion_types.roster)
+      run.R.roster
+  | None -> fail "a valid roster line must survive its malformed neighbour"
 ;;
 
 (* (5) Replay streams raw JSONL lines and compacts the retained state. *)
@@ -251,10 +337,10 @@ let test_replay_streams_and_compacts () =
 let test_append_after_replay_compaction_targets_live_path () =
   let path = fresh_path "-append-after-replay.jsonl" in
   let original = R.create ~path () in
-  R.register_running original ~run_id:"before" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.register_running original ~run_id:"before" ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed original ~run_id:"before" ~outcome:R.Succeeded;
   let replayed = R.replay path in
-  R.register_running replayed ~run_id:"after" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:2.0;
+  R.register_running replayed ~run_id:"after" ~keeper:"k" ~preset:"p" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:2.0;
   R.mark_completed replayed ~run_id:"after" ~outcome:R.Succeeded;
   let replayed_again = R.replay path in
   check
@@ -298,7 +384,7 @@ let test_startup_replay_diagnostics () =
     (R.replay_status (R.replay path) = Run_registry_core.Log_absent);
   let initial = R.create ~path () in
   R.register_running initial ~run_id:"complete" ~keeper:"k" ~preset:"p"
-    ~topology:Fusion_types.Simple ~started_at:1.;
+    ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.;
   R.mark_completed initial ~run_id:"complete" ~outcome:R.Succeeded;
   (match R.replay_status (R.replay path) with
    | Run_registry_core.Replayed { lines_read = 2; malformed_lines = 0;
@@ -320,6 +406,9 @@ let () =
     [ ( "rfc-0266-phase-d"
       , [ test_case "startup replay diagnostics" `Quick test_startup_replay_diagnostics
         ; test_case "register+complete append JSONL" `Quick test_persist_register_complete
+        ; test_case "roster survives replay" `Quick test_roster_survives_replay
+        ; test_case "replay rejects a non-string panel route" `Quick
+            test_replay_rejects_a_non_string_panel_route
         ; test_case "failure detail survives replay" `Quick test_persist_failure_detail
         ; test_case "reprojection preserves first completion after restart" `Quick
             test_reprojection_preserves_first_completion_after_restart

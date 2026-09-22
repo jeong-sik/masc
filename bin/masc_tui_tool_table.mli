@@ -31,7 +31,22 @@ val catalog_tool_line :
 
 val skill_usage_name_indent : string
 (** Skill usage stacks rather than columns: a skill's keepers do not fit beside
-    its name, so they are on the line below at {!skill_usage_keeper_indent}.
-    The header names each reading where the reading stands. *)
+    its name, so they are on the lines below at {!skill_usage_keeper_indent},
+    one keeper each. The header names each reading where the reading stands. *)
 
 val skill_usage_keeper_indent : string
+
+val skill_usage_keeper_header : string
+(** The column names over the keeper rows below one skill. *)
+
+val skill_usage_keeper_line :
+  keeper:string ->
+  invocations:int ->
+  deliveries:int ->
+  actions:int ->
+  last_used:string ->
+  string
+(** One keeper's use of one skill: who, how many times it was triggered, how
+    many of those were delivered, what the model did after, and when it last
+    ran. The counts are right-aligned so one keeper and six read down the same
+    columns. *)

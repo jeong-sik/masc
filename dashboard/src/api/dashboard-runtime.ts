@@ -2000,7 +2000,7 @@ function decodeCommittedRuntimeConfigApplication(
   return { operation, routing, keeper_overlay: keeperOverlay, skills }
 }
 
-function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntimeTomlConfig {
+export function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntimeTomlConfig {
   if (
     !isRecord(raw)
     || raw.state !== 'committed'

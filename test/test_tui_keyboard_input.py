@@ -3010,7 +3010,7 @@ def send_on_stop_from_the_composer_row_interaction(requests: HttpRequests) -> In
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"i", b"Ctrl-Y to speak")
+        send_and_wait(process, master_fd, output, b"i", COMPOSER_FOCUSED)
         os.write(master_fd, b"\x19")
         wait_for_spoken_send(process, master_fd, output, requests)
         # A sent message brings the chat pane forward, as Enter on the row does.
@@ -3031,9 +3031,6 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
     the composer row is never focused there. A transcript that was handed to
     the row's send key from this pane stayed in the draft and nothing was
     sent -- measured 2026-09-13 against a live keeper with send_on_stop on.
-
-    The empty draft names the key first, as the composer row does: this pane
-    bound Ctrl-Y and Ctrl-A and nothing on it said so.
     """
 
     def interact(
@@ -3048,14 +3045,8 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
         )
-        read_available(master_fd, output)
-        chat_opened_at = len(output)
         send_and_wait(
             process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
-        )
-        wait_for_output(
-            process, master_fd, output, b"(Ctrl-Y to speak, Ctrl-A to keep listening)",
-            start=chat_opened_at, timeout=3.0,
         )
         os.write(master_fd, b"\x19")
         wait_for_spoken_send(process, master_fd, output, requests)
@@ -5621,6 +5612,18 @@ def image_view_interaction() -> Interaction:
         missing = b"/image /nope.png"
         send_and_wait(process, master_fd, output, missing, composer_showing(missing))
         send_and_wait(process, master_fd, output, b"\r", b"No such file")
+        # The step that did not work is the operator's, not the keeper's: it
+        # reads on the footer for a moment and leaves no row in the
+        # conversation.
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        footer = max(row for row, text in rows.items() if text.strip())
+        saying = [row for row, text in rows.items() if b"No such file" in text]
+        if saying != [footer]:
+            raise AssertionError(
+                f"the failed /image is not the footer alone (rows {saying}, footer {footer}): "
+                f"{screen_text(bytes(output))!r}"
+            )
 
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
@@ -6996,6 +6999,27 @@ def memory_journal_backfill_fixture() -> HttpResponse:
     return status, payload
 
 
+def memory_journal_failing_fixture() -> HttpResponse:
+    """The fixture's journal with a pass that failed after its last commit."""
+    status, payload = memory_journal_fixture()
+    entries = payload["entries"]
+    if not isinstance(entries, list):
+        raise AssertionError("memory journal fixture entries are not a list")
+    entries.append(
+        {
+            "ok": True,
+            "outcome": "failed",
+            "recorded_at": 1788273300.0,
+            "trace_id": "trace-failing-pass",
+            "kind": "exact_execution_failure",
+            "detail": "provider returned 503",
+            "snapshot_present": True,
+        },
+    )
+    payload["returned"] = len(entries)
+    return status, payload
+
+
 MEMORY_JOURNAL_REQUEST_TS = 1788273291.814646
 
 # The scenario runs a 30-row terminal and the chat pane is shorter than that,
@@ -7189,7 +7213,7 @@ def memory_journal_timeline_interaction(
         ordered = (
             hour,
             b"direct turn before Librarian",
-            b"Librarian committed current memory revision 9",
+            b"Librarian \xc2\xb7 revision 9",
             b"direct turn after Librarian",
         )
         positions = [screen_row_of(rows, needle) for needle in ordered]
@@ -7202,15 +7226,18 @@ def memory_journal_timeline_interaction(
             )
         for pattern, label in (
             (re.compile("▶\\s+YOU".encode()), "direct turn start"),
-            (re.compile("●\\s+alpha".encode()), "post-Journal continuation"),
+            # The reply resumes after the Journal row under a heading of its
+            # own: the keeper's mark and the rule. No name -- the breadcrumb
+            # already says whose chat this is -- and no request id.
+            (re.compile("●\\s+─".encode()), "post-Journal continuation"),
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {plain!r}")
         # Speaker labels are dim-styled, not reverse-video, in the current
-        # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2malpha"). The colored
-        # bold arrow/circle glyph checked above is what actually marks the
-        # causal role; this only confirms the label itself still renders.
-        for label in (b"YOU", b"alpha"):
+        # renderer (observed: b"\\x1b[2mYOU"). The colored bold arrow/circle
+        # glyph checked above is what actually marks the causal role; this
+        # only confirms the label itself still renders.
+        for label in (b"YOU",):
             if b"\x1b[2m" + label not in drawn:
                 raise AssertionError(
                     f"Direct causal label lost its dim-styled badge {label!r}: "
@@ -7252,13 +7279,13 @@ def memory_journal_timeline_interaction(
             process,
             master_fd,
             output,
-            b"Librarian committed current memory revision 9",
+            b"Librarian \xc2\xb7 revision 9",
             start=start,
             timeout=5.0,
         )
         last_row_end = output.find(
-            b"Librarian committed current memory revision 9", start
-        ) + len(b"Librarian committed current memory revision 9")
+            b"Librarian \xc2\xb7 revision 9", start
+        ) + len(b"Librarian \xc2\xb7 revision 9")
         wait_for_output(
             process,
             master_fd,
@@ -7270,13 +7297,20 @@ def memory_journal_timeline_interaction(
         frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
         resting = frame_containing(
             bytes(output[start:frame_end]),
-            b"Librarian committed current memory revision 9",
+            b"Librarian \xc2\xb7 revision 9",
         )
         plain_resting = CSI_RE.sub(b"", resting)
         assert_monotonic_direct_turn(bytes(output))
-        if b"\xc2\xb7 Ctrl-N" not in plain_resting:
+        # The key that opens the summary is the footer's Ctrl-N:journal; the
+        # row itself names no key.
+        summary_rows = [
+            text
+            for text in screen_rows(bytes(output)).values()
+            if b"Librarian \xc2\xb7 revision 9" in text
+        ]
+        if not summary_rows or any(b"Ctrl-N" in row for row in summary_rows):
             raise AssertionError(
-                f"Journal summary did not expose its detail key: {resting!r}"
+                f"Journal summary row named a key the footer names: {summary_rows!r}"
             )
         # What the key does is the footer's line, which is on screen with
         # this row; saying it again per row is what the row stopped doing.
@@ -7344,31 +7378,33 @@ def memory_journal_timeline_interaction(
             raise AssertionError(
                 f"Memory timeline did not draw its parallel dotted rail: {visible!r}"
             )
-        # The kind tag carries its own colour, so SGR lands between the
-        # bracket, the word inside it, and the text after it. A flat byte
-        # needle spanning that boundary cannot match a coloured tag -- the two
-        # below were written while the tag was drawn in the body's colour.
+        # Each fact is its sign, its category in a column padded to the
+        # revision's widest, and the claim. The sign and the category carry
+        # their own colours, so SGR lands between the pieces; a flat byte
+        # needle spanning a boundary cannot match a coloured one.
         tag = rb"(?:\x1b\[[0-9;]*m)*"
         for needle in (
             re.compile(
-                rb"\[" + tag + rb"fact" + tag + rb"\]" + tag
-                + rb" the Runtime probe shares"
+                rb"\+" + tag + rb" " + tag + rb"fact" + tag + rb" +" + tag
+                + rb"the Runtime probe shares"
             ),
             b"one provider endpoint",
-            re.compile(rb"\[" + tag + rb"constraint" + tag + rb"\]" + tag + rb" probe"),
+            re.compile(
+                "\u2212".encode() + tag + rb" " + tag + rb"constraint" + tag
+                + rb" +" + tag + rb"probe"
+            ),
             b"every model separately",
-            b"drop memory-old-probe-rule",
+            re.compile(rb"drop" + tag + rb" +" + tag + rb"memory-old-probe-rule"),
             b"superseded by provider grouping",
         ):
             if find_needle(visible, needle) < 0:
                 raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
 
-        # The changed facts ride a ```diff fence, which is what colours the two
-        # directions and keeps a leading + out of markdown's list grammar. The
-        # renderer used to escape that + instead, and nothing consumed the
-        # escape, so every changed fact reached the pane behind a literal
-        # backslash. Asserted on the drawn bytes because that is where it
-        # showed: the decoder was honest the whole time.
+        # The changed facts are drawn from typed lines, never through
+        # markdown, so a leading + cannot be read as a list item. The renderer
+        # once escaped that + instead, and nothing consumed the escape, so
+        # every changed fact reached the pane behind a literal backslash.
+        # Asserted on the drawn bytes because that is where it showed.
         for escaped in (b"\\+ ", b"\\- "):
             if escaped in visible:
                 raise AssertionError(
@@ -7407,7 +7443,7 @@ def memory_journal_timeline_interaction(
             process, master_fd, output, b"\x1b[<64;5;5M", reading_back
         )
         scrolled_frame = frame_containing(scrolled, reading_back)
-        anchor = b"Librarian committed current memory revision 9"
+        anchor = b"Librarian \xc2\xb7 revision 9"
         if anchor not in CSI_RE.sub(b"", scrolled_frame):
             raise AssertionError(
                 f"Scroll setup did not keep the intended Journal anchor: {scrolled_frame!r}"
@@ -7456,7 +7492,7 @@ def memory_journal_timeline_interaction(
             send_and_wait(process, master_fd, output, b"\x0e", b"journal:off"),
             b"journal:off",
         )
-        if b"Librarian committed current memory revision 9" in hidden:
+        if b"Librarian \xc2\xb7 revision 9" in hidden:
             raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
 
         # ... and hidden -> summary, the resting default.
@@ -7466,9 +7502,9 @@ def memory_journal_timeline_interaction(
                 master_fd,
                 output,
                 b"\x0e",
-                b"Librarian committed current memory revision 9",
+                b"Librarian \xc2\xb7 revision 9",
             ),
-            b"Librarian committed current memory revision 9",
+            b"Librarian \xc2\xb7 revision 9",
         )
         if b"journal:off" in restored:
             raise AssertionError(f"Restored Memory timeline stayed off: {restored!r}")
@@ -7536,6 +7572,39 @@ def memory_journal_timeline_interaction(
             raise AssertionError(
                 "A display toggle pressed on the narrow-pane notice screen "
                 f"was swallowed by the composer gate: {widened!r}"
+            )
+
+        # A pass that failed after the last commit is a state of the keeper's
+        # memory: the header names the run, from the producer's typed outcome
+        # through to the pane, and summary mode draws no row for it.
+        memory.responses.append(memory_journal_failing_fixture())
+        served_before_failure = memory.served
+        failing_from = len(output)
+        wait_for_fixture_served(
+            process,
+            master_fd,
+            output,
+            memory,
+            after=served_before_failure,
+            description="Journal with a failed pass",
+            timeout=5.0,
+        )
+        failing_header = b"Librarian failing \xc3\x971 since"
+        wait_for_output(
+            process, master_fd, output, failing_header, start=failing_from, timeout=5.0
+        )
+        # journal:full -> off -> summary.
+        send_and_wait(process, master_fd, output, b"\x0e", b"journal:off")
+        send_and_wait(process, master_fd, output, b"\x0e", b"Librarian \xc2\xb7 revision 9")
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        naming = [row for row, text in rows.items() if failing_header in text]
+        failed_rows = [row for row, text in rows.items() if b"Librarian failed" in text]
+        if len(naming) != 1 or failed_rows:
+            raise AssertionError(
+                "A failing Librarian is the header item alone in summary mode "
+                f"(header rows {naming}, failure rows {failed_rows}): "
+                + screen_text(bytes(output)).decode("utf8", "replace")
             )
         escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
         os.write(master_fd, b"q")
@@ -8024,37 +8093,12 @@ def chat_visibility_modes_interaction(
             re.compile(
                 rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
             ),
-            # The skill row names an outcome now, not a chain of receipts.
-            # "DELIVERED · USED" was the evidence path; the label says what
-            # came of it, and the mark above already carries the state.
-            #
-            # The phrase names the model's side of the step now. 받아서 씀
-            # said who received without saying who sent, and an operator
-            # could not read the row from it (#36268). Each Korean piece
-            # is matched on its own so the comma and space the label
-            # carries, or an SGR run between them, does not hide it.
-            re.compile(
-                "전달됨".encode()
-                + rb"[\x1b\x20-\x7e]*?"
-                + "도구".encode()
-                + rb"[\x1b\x20-\x7e]*?"
-                + "씀".encode()
-            ),
-            # The summary line's tail on the same one row the compact skill
-            # row keeps: dim separators, the name (its bold SGR is pinned
-            # below) and the action count. The " · " separators are named
-            # tokens here because the gap class does not cover their bytes.
-            re.compile(
-                "씀".encode()
-                + rb"[\x1b\x20-\x7e]*?"
-                + rb"\xc2\xb7"
-                + rb"[\x1b\x20-\x7e]*?"
-                + rb"ci-red-attribution"
-                + rb"[\x1b\x20-\x7e]*?"
-                + rb"\xc2\xb7"
-                + rb"[\x1b\x20-\x7e]*?"
-                + rb"1 action"
-            ),
+            # The compact skill row is the skill's name: how far one
+            # invocation got, and what followed from it, ride the tool
+            # toggle and are waited for in that world below. A turn that
+            # triggered a skill once says its name alone; a count and a
+            # failed trigger's words are what else the row can carry.
+            b"ci-red-attribution",
         ):
             wait_for_output(
                 process,
@@ -8088,24 +8132,31 @@ def chat_visibility_modes_interaction(
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
         # The lane word went: the skill row leads with its mark and the
-        # summary's first word, with the badge padding and SGR runs between
-        # -- the same token-split shape the tool-lane needles above take,
-        # because a literal "◆ 전달됨" never exists as contiguous bytes.
-        # The rail is a token of its own, the way " · " is above: a needle
-        # anchored on the gutter mark crosses into the body, and Skill rows
-        # are Shade_quoted, so the renderer draws "│" (>= 0x80, outside the
-        # gap class) between badge padding and body. Body-anchored needles
-        # (✗, 씀, proof) never cross it and keep the plain gap.
+        # skill's name, with the badge padding and SGR runs between -- the
+        # same token-split shape the tool-lane needles above take, because
+        # a literal "◆ ci-red-attribution" never exists as contiguous
+        # bytes. The rail is a token of its own, the way " · " is above: a
+        # needle anchored on the gutter mark crosses into the body, and
+        # Skill rows are Shade_quoted, so the renderer draws "│" (>= 0x80,
+        # outside the gap class) between badge padding and body.
+        # Body-anchored needles (✗, 씀, proof) never cross it and keep the
+        # plain gap.
         if re.search(
             "◆".encode()
             + rb"[\x1b\x20-\x7e]*?"
             + "│".encode()
             + rb"[\x1b\x20-\x7e]*?"
-            + "전달됨".encode(),
+            + rb"ci-red-attribution",
             initial,
         ) is None:
             raise AssertionError(
                 f"the exact Skill evidence did not start its turn: {initial!r}"
+            )
+        # How far one invocation got is not on the resting row any more:
+        # the row stands for every trigger of that skill.
+        if "전달됨".encode() in initial:
+            raise AssertionError(
+                f"the compact skill row still spells a lifecycle: {initial!r}"
             )
         if b"\x1b[1mci-red-attribution" not in initial:
             raise AssertionError(f"the Skill name was not bold: {initial!r}")
@@ -8229,6 +8280,26 @@ def chat_visibility_modes_interaction(
                 + rb"masc_fusion[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?observed"
             ),
             re.compile(rb"proof[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?turn="),
+            # How far this invocation got, and what followed from it. The
+            # phrase names the model's side of the step: 받아서 씀 said who
+            # received without saying who sent (#36268). Each Korean piece is
+            # matched on its own so the comma and space the label carries, or
+            # an SGR run between them, does not hide it.
+            re.compile(
+                "전달됨".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + "도구".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + "씀".encode()
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"\xc2\xb7"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"ci-red-attribution"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"\xc2\xb7"
+                + rb"[\x1b\x20-\x7e]*?"
+                + rb"1 action"
+            ),
         ):
             wait_for_output(
                 process,
@@ -8760,10 +8831,23 @@ def run_tools_purpose_regression(executable: str) -> None:
         async_payload["summary"].update(active=1, ownership_unknown=1)
         send_and_wait(process, master_fd, output, b"r", b"request-unowned")
         send_and_wait(process, master_fd, output, b"p", b"Skill Use")
-        require("현재 세션에 보존된 Skill 증거", "호출·전달·이후 행동은 별도 증거", "0 receipts", "invoked=0")
-        send_and_wait(process, master_fd, output, b"p", b"bravo 12/12/9")
-        require("현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계", "inv/delivered/actions=호출/전달/이후 행동",
+        require("현재 세션에 보존된 Skill 증거", "호출·전달·이후 행동은 별도 증거", "0 receipts",
+                "instruction triggered 0 · delivered 0 · handed off 0 · actions 0")
+        # One keeper, one row, counts in their own columns. Joined onto one
+        # line, six keepers ran past the pane and the last of them could not
+        # be read at all.
+        send_and_wait(process, master_fd, output, b"p", b"TRIGGERED")
+        require("현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계",
+                "TRIGGERED/DELIVERED/ACTIONS=호출/전달/이후 행동",
                 "1 of 2 catalog Skills observed", "Activation ledgers loaded: 19; unavailable: 0")
+        usage_rows = screen_rows(bytes(output))
+        bravo = [text for text in usage_rows.values() if b"bravo" in text]
+        if not any(re.search(rb"bravo\s+12\s+12\s+9\s+\d{4}-", text) for text in bravo):
+            raise AssertionError(
+                f"the keeper's counts are not in their own columns: {bravo!r}"
+            )
+        if any(b"12/12/9" in text for text in usage_rows.values()):
+            raise AssertionError("the joined per-keeper reading is back")
         send_and_wait(process, master_fd, output, b"p", b"masc_board_post")
         require("MASC 전체 등록 도구 목록", "DIRECT=직접 호출 허용", "surfaces=none은 노출 경로 없음")
         send_and_wait(process, master_fd, output, b"p", b"keeper_status")
@@ -9021,9 +9105,13 @@ def message_origin_badge_interaction(
     # waited on by the short clock instead -- the one thing neither other stop
     # draws.
     full_row = send_and_wait(process, master_fd, output, b"\x06", b"metadata:full")
+    # The pane's own keeper is not named on its full heading -- the
+    # breadcrumb says whose chat this is -- so its row opens on the mark and
+    # goes straight into the rule.
+    keeper_full_heading = "● ─".encode()
     for badge, body, description in (
         (operator_badge, operator_body, "operator"),
-        (keeper_badge, keeper_body, "Keeper"),
+        (keeper_full_heading, keeper_body, "Keeper"),
     ):
         row, gap = origin_screen_shape(output, badge, body)
         if gap != 1:
@@ -9038,12 +9126,16 @@ def message_origin_badge_interaction(
             raise AssertionError(
                 f"the full {description} origin row did not end on its clock: {row!r}"
             )
-    for name in (b"vincent", b"alpha"):
-        if b"\x1b[7m" + name not in full_row:
-            raise AssertionError(
-                f"chat origin did not keep its reverse-video badge for {name!r}: "
-                f"{full_row!r}"
-            )
+    if b"\x1b[7mvincent" not in full_row:
+        raise AssertionError(
+            f"chat origin did not keep its reverse-video badge for vincent: "
+            f"{full_row!r}"
+        )
+    keeper_heading, _ = origin_screen_shape(output, keeper_full_heading, keeper_body)
+    if b"alpha" in keeper_heading:
+        raise AssertionError(
+            f"the full heading named the pane's own keeper: {keeper_heading!r}"
+        )
     assert_bodies_unwashed(full_row, "the full origin row")
 
     bare = send_and_wait(process, master_fd, output, b"\x06", b"metadata:off")

@@ -25,6 +25,13 @@ module Json : sig
     :  string
     -> (string * Yojson.Safe.t) list
     -> (string option, string) result
+
+  val optional_string_list_field
+    :  string
+    -> (string * Yojson.Safe.t) list
+    -> (string list option, string) result
+  (** An absent key is [None]. A present key must hold a list whose every
+      element is a string; anything else is an [Error], never [None]. *)
 end
 
 module type Payload = sig

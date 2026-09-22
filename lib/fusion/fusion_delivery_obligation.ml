@@ -7,6 +7,7 @@ type accepted_payload =
   ; source_context : Fusion_request_context.t option
   ; preset : string
   ; web_tools : bool
+  ; roster : Fusion_types.roster
   ; topology : Fusion_types.fusion_topology
   ; channel : Keeper_continuation_channel.t
   }
@@ -101,6 +102,26 @@ let validate_nonblank field value =
   else Ok ()
 ;;
 
+(* 명단은 도구가 받을 때 이미 검사했다. 여기서는 기록에 적힌 모양만 본다: 적힌 경로는
+   빈 이름이 아니고, panel 명단은 비어 있지 않다. *)
+let validate_roster (roster : Fusion_types.roster) =
+  let* () =
+    match roster.judge_route with
+    | None -> Ok ()
+    | Some route -> validate_nonblank "roster.judge_route" route
+  in
+  match roster.panel_routes with
+  | None -> Ok ()
+  | Some [] -> Error (Invalid_payload "roster.panel_routes must not be empty")
+  | Some routes ->
+    List.fold_left
+      (fun acc route ->
+         let* () = acc in
+         validate_nonblank "roster.panel_routes" route)
+      (Ok ())
+      routes
+;;
+
 let validate_payload (payload : accepted_payload) =
   let* _keeper =
     Keeper_id.Keeper_name.of_string payload.keeper_name
@@ -114,6 +135,7 @@ let validate_payload (payload : accepted_payload) =
         && Fusion_request_context.render context = payload.prompt -> Ok ()
     | Some _ -> Error (Invalid_payload "request context does not bind Keeper and actual prompt") in
   let* () = validate_utf8 "preset" payload.preset in
+  let* () = validate_roster payload.roster in
   Keeper_continuation_channel.to_yojson payload.channel
   |> Keeper_continuation_channel.of_yojson
   |> Result.map (fun _ -> ())
@@ -168,6 +190,20 @@ let topology_to_yojson topology =
   `String (Fusion_types.fusion_topology_to_string topology)
 ;;
 
+(* 두 칸 모두 늘 적는다. [null] 은 preset 의 그 칸을 그대로 썼다는 뜻이다. *)
+let roster_to_yojson (roster : Fusion_types.roster) =
+  `Assoc
+    [ ( "judge_route"
+      , match roster.judge_route with
+        | None -> `Null
+        | Some route -> `String route )
+    ; ( "panel_routes"
+      , match roster.panel_routes with
+        | None -> `Null
+        | Some routes -> `List (List.map (fun route -> `String route) routes) )
+    ]
+;;
+
 let payload_to_yojson (payload : accepted_payload) =
   `Assoc
     ([ "keeper_name", `String payload.keeper_name
@@ -175,6 +211,7 @@ let payload_to_yojson (payload : accepted_payload) =
     ; "prompt", `String payload.prompt
     ; "preset", `String payload.preset
     ; "web_tools", `Bool payload.web_tools
+    ; "roster", roster_to_yojson payload.roster
     ; "topology", topology_to_yojson payload.topology
     ; "channel", Keeper_continuation_channel.to_yojson payload.channel
     ] @ (match payload.source_context with None -> [] | Some context -> ["source_context", Fusion_request_context.to_yojson context]))
@@ -240,6 +277,42 @@ let float_field name fields =
   | _ -> Error (Decode_failed (Printf.sprintf "field %S must be numeric" name))
 ;;
 
+let roster_of_yojson = function
+  | `Assoc fields ->
+    let* () =
+      validate_fields
+        ~context:"Fusion delivery roster"
+        ~expected:[ "judge_route"; "panel_routes" ]
+        fields
+    in
+    let* judge_json = field "judge_route" fields in
+    let* judge_route =
+      match judge_json with
+      | `Null -> Ok None
+      | `String route -> Ok (Some route)
+      | _ -> Error (Decode_failed "field \"judge_route\" must be a string or null")
+    in
+    let* panel_json = field "panel_routes" fields in
+    let* panel_routes =
+      match panel_json with
+      | `Null -> Ok None
+      | `List items ->
+        List.fold_right
+          (fun item acc ->
+             let* routes = acc in
+             match item with
+             | `String route -> Ok (route :: routes)
+             | _ ->
+               Error (Decode_failed "field \"panel_routes\" must hold only strings"))
+          items
+          (Ok [])
+        |> Result.map Option.some
+      | _ -> Error (Decode_failed "field \"panel_routes\" must be a list or null")
+    in
+    Ok { Fusion_types.judge_route; panel_routes }
+  | _ -> Error (Decode_failed "Fusion delivery roster must be an object")
+;;
+
 let payload_of_yojson = function
   | `Assoc fields ->
     let* () =
@@ -251,6 +324,7 @@ let payload_of_yojson = function
           ; "prompt"
           ; "preset"
           ; "web_tools"
+          ; "roster"
           ; "topology"
           ; "channel"
           ] @ (if List.mem_assoc "source_context" fields then ["source_context"] else []))
@@ -261,6 +335,8 @@ let payload_of_yojson = function
     let* prompt = string_field "prompt" fields in
     let* preset = string_field "preset" fields in
     let* web_tools = bool_field "web_tools" fields in
+    let* roster_json = field "roster" fields in
+    let* roster = roster_of_yojson roster_json in
     let* topology_wire = string_field "topology" fields in
     let* topology =
       match Fusion_types.fusion_topology_of_string topology_wire with
@@ -283,6 +359,7 @@ let payload_of_yojson = function
       ; source_context
       ; preset
       ; web_tools
+      ; roster
       ; topology
       ; channel
       }

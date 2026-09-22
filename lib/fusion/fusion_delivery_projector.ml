@@ -5,7 +5,6 @@ type projection_error =
   | Non_durable_settlement
   | Ambiguous_settlement
   | Nonterminal_status of Keeper_msg_async.request_status
-  | Evidence_invalid of string
   | Projection_failed of string
   | Obligation_removal_failed of Fusion_delivery_obligation.error
 
@@ -21,7 +20,6 @@ let projection_error_to_string = function
     "Fusion settlement disagrees with canonical request truth"
   | Nonterminal_status status ->
     "Fusion request is not terminal: " ^ Keeper_msg_async.status_to_string status
-  | Evidence_invalid detail -> "invalid Fusion deliberation evidence: " ^ detail
   | Projection_failed detail -> "Fusion terminal projection failed: " ^ detail
 ;;
 
@@ -57,7 +55,8 @@ let ensure_registry_entry ~registry obligation =
   | None ->
     Fusion_run_registry.register_running registry ~run_id
       ~keeper:obligation.payload.keeper_name ~preset:obligation.payload.preset
-      ~topology:obligation.payload.topology ~started_at:obligation.accepted_at;
+      ~roster:obligation.payload.roster ~topology:obligation.payload.topology
+      ~started_at:obligation.accepted_at;
     Fusion_sink.broadcast_run_status ~registry ~run_id
 ;;
 
@@ -94,6 +93,7 @@ let project_entry ~registry ~base_path (entry : Keeper_msg_async.entry) =
     ; prompt = payload.prompt
     ; preset = payload.preset
     ; web_tools = payload.web_tools
+    ; roster = payload.roster
     ; depth = Fusion_types.Fusion_depth.Top
     ; trigger = Fusion_types.Explicit_tool_call
     }
@@ -101,16 +101,26 @@ let project_entry ~registry ~base_path (entry : Keeper_msg_async.entry) =
   let* () =
     match entry.status with
     | Keeper_msg_async.Done { ok = true; data = Some data; _ } ->
-      let* evidence =
-        Fusion_types.deliberation_evidence_of_yojson data
-        |> Result.map_error (fun detail -> Evidence_invalid detail)
-      in
-      if not (String.equal evidence.question payload.prompt)
-      then Error (Identity_mismatch "evidence question differs from accepted prompt")
-      else
-        Fusion_orchestrator.project ?source_context:payload.source_context ~registry ~base_dir:base_path
-          ~topology:payload.topology ~channel:payload.channel ~request evidence
-        |> Result.map_error (fun detail -> Projection_failed detail)
+      (match Fusion_types.deliberation_evidence_of_yojson data with
+       | Error detail ->
+         (* The settlement is terminal and immutable, so evidence that does not
+            decode now never will — the record was written by an earlier
+            evidence shape (no compatibility reader, constitution
+            legacy_residue). Retaining the obligation would retry on every
+            startup and never wake the Keeper. Deliver the typed failure and
+            clear it, as for a Done without evidence. The record stays on disk. *)
+         Fusion_sink.emit_failure ~registry ~base_dir:base_path
+           ~keeper:payload.keeper_name ~run_id:entry.request_id ~channel:payload.channel
+           ~failure:(Fusion_sink.Evidence_unreadable detail)
+         |> Result.map_error (fun detail -> Projection_failed detail)
+       | Ok evidence ->
+         if not (String.equal evidence.question payload.prompt)
+         then Error (Identity_mismatch "evidence question differs from accepted prompt")
+         else
+           Fusion_orchestrator.project ?source_context:payload.source_context ~registry
+             ~base_dir:base_path ~topology:payload.topology ~channel:payload.channel ~request
+             evidence
+           |> Result.map_error (fun detail -> Projection_failed detail))
     | Keeper_msg_async.Done { ok = true; data = None; _ } ->
       (* A durably canonical [Done] without deliberation evidence can never
          become projectable — the settlement is terminal and immutable, so

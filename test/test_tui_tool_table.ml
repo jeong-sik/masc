@@ -74,6 +74,44 @@ let test_a_long_name_does_not_move_the_columns () =
   check int "ORIGIN is still under its header" (starts "ORIGIN" effective_header)
     (starts "O" effective)
 
+(* One keeper's use of one skill, in columns under the same header. The
+   counts were joined into "keeper 12/12/9 · <time>" and every keeper of one
+   skill onto one line, so six of them ran past the pane. *)
+let test_skill_usage_header_and_rows_share_their_offsets () =
+  let header = Tool_table.skill_usage_keeper_header in
+  let row =
+    Tool_table.skill_usage_keeper_line ~keeper:"K" ~invocations:12
+      ~deliveries:12 ~actions:9 ~last_used:"2026-09-17 19:10:17"
+  in
+  check_column "KEEPER" "K" ~header ~row;
+  check_column "LAST USED" "2026-09-17 19:10:17" ~header ~row;
+  (* Right-aligned, so the counts end where their headers end rather than
+     starting where they start. *)
+  List.iter
+    (fun (label, reading) ->
+      check int
+        (Printf.sprintf "%s ends where its column does" label)
+        (starts label header + width label)
+        (starts reading row + width reading))
+    [ "TRIGGERED", "12"; "ACTIONS", "9" ]
+
+(* A keeper name past its column is folded, like a tool name: the counts stay
+   where the header put them. *)
+let test_a_long_keeper_name_does_not_move_the_counts () =
+  let header = Tool_table.skill_usage_keeper_header in
+  let ordinary =
+    Tool_table.skill_usage_keeper_line ~keeper:"alpha" ~invocations:1
+      ~deliveries:1 ~actions:1 ~last_used:"T"
+  in
+  let overlong =
+    Tool_table.skill_usage_keeper_line
+      ~keeper:"e-masc-the-leader-of-this-workspace" ~invocations:1
+      ~deliveries:1 ~actions:1 ~last_used:"T"
+  in
+  check int "LAST USED does not move" (starts "T" ordinary) (starts "T" overlong);
+  check int "and it is still under its header" (starts "LAST USED" header)
+    (starts "T" overlong)
+
 (* The dress belongs to the two columns that answer about the tool, not to the
    name being answered about: a tool on no surface is unreachable, and the
    warning starts where that is said. *)
@@ -123,5 +161,9 @@ let () =
             test_a_dressed_row_is_as_wide_as_a_plain_one
         ; test_case "skill usage indents differ by the nesting" `Quick
             test_skill_usage_indents_differ_by_the_nesting
+        ; test_case "skill usage header and rows share their offsets" `Quick
+            test_skill_usage_header_and_rows_share_their_offsets
+        ; test_case "a long keeper name does not move the counts" `Quick
+            test_a_long_keeper_name_does_not_move_the_counts
         ] )
     ]

@@ -7,7 +7,7 @@ updated: 2026-07-17
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0283", "0298", "0300"]
+related: ["0283", "0300"]
 ---
 
 # RFC-0306 — Typed, comment-preserving fusion settings editor

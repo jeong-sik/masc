@@ -75,16 +75,49 @@ let channel =
   | Error detail -> fail detail
 ;;
 
-let payload ?(prompt = "compare implementations") () : Obligation.accepted_payload =
+let payload ?(prompt = "compare implementations") ?(roster = Fusion_types.preset_roster) ()
+  : Obligation.accepted_payload
+  =
   { keeper_name = "delta"
   ; submitted_by = "delta"
   ; prompt
   ; source_context = None
   ; preset = "council"
   ; web_tools = false
+  ; roster
   ; topology = Fusion_types.Judge_of_judges
   ; channel
   }
+;;
+
+let swapped_roster : Fusion_types.roster =
+  { judge_route = Some "fusion-judge"
+  ; panel_routes = Some [ "stub-http.stub-model"; "claude_code.claude-sonnet-5" ]
+  }
+;;
+
+let roster_t = testable Fusion_types.pp_roster Fusion_types.equal_roster
+
+(* 명단은 전달 약속에 그대로 적혀 되읽히고, 요청 정체성의 일부다: 같은 request id 에
+   명단만 다른 약속은 충돌이다. *)
+let test_roster_roundtrips_and_is_part_of_identity () =
+  with_temp_base (fun base_path _registry ->
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      let request_id = request_id "kmsg-fusion-roster" in
+      ignore
+        (Obligation.prepare ~base_path ~request_id
+           ~payload:(payload ~roster:swapped_roster ()) ~accepted_at:4.0
+         |> expect_ok);
+      let loaded = Obligation.load ~base_path ~request_id |> expect_ok in
+      check roster_t "roster survives the durable record" swapped_roster
+        loaded.payload.roster;
+      match
+        Obligation.prepare ~base_path ~request_id ~payload:(payload ()) ~accepted_at:4.0
+      with
+      | Error (Obligation.Identity_conflict _) -> ()
+      | Error error -> fail (Obligation.error_to_string error)
+      | Ok _ -> fail "a different roster under the same request id was accepted"))
 ;;
 
 let test_exact_prepare_load_inventory_remove () =
@@ -166,6 +199,7 @@ let test_startup_recovery_projects_canonical_terminal () =
           ; judges = []
           ; judge_usage = Fusion_types.zero_usage
           ; tool_trace = Fusion_types.empty_tool_trace
+          ; seat_routes = []
           }
         in
         let on_accepted request_id =
@@ -174,7 +208,7 @@ let test_startup_recovery_projects_canonical_terminal () =
           | Ok request_id ->
             (match
                Obligation.prepare ~base_path ~request_id
-                 ~payload:(payload ~prompt ()) ~accepted_at:3.0
+                 ~payload:(payload ~prompt ~roster:swapped_roster ()) ~accepted_at:3.0
              with
              | Ok (Obligation.Prepared _ | Obligation.Already_present _) -> Ok ()
              | Error error -> Error (Obligation.error_to_string error))
@@ -225,6 +259,12 @@ let test_startup_recovery_projects_canonical_terminal () =
                         error.detail)
                 |> String.concat " | "));
         check int "nothing retained" 0 report.pending;
+        (* 재시작 복원은 실행 기록을 전달 약속의 명단으로 다시 연다. *)
+        (match Fusion_run_registry.get registry ~run_id:request_id_wire with
+         | Some run ->
+           check roster_t "restart recovery registers the run with its roster"
+             swapped_roster run.roster
+         | None -> fail "startup projection did not register the run");
         let request_id = request_id request_id_wire in
         (match Obligation.load ~base_path ~request_id with
          | Error (Obligation.Not_found _) -> ()
@@ -269,16 +309,16 @@ let test_startup_cleanup_observes_atomic_orphans () =
         (List.length report.staging_cleanup.failures)))
 ;;
 
-let test_startup_recovery_remediates_missing_evidence () =
-  (* P1 remediation: a durably canonical [Done{ok=true; data=None}] can never
-     become projectable, so recovery must deliver a typed failure and clear
-     the obligation instead of retrying it on every startup. *)
+(* A durably canonical terminal that can never become projectable must be
+   delivered as a typed failure and cleared, not retried on every startup:
+   [Done{ok=true; data=None}] has no evidence, and evidence written in an
+   earlier shape never decodes because the settlement does not change. *)
+let startup_recovery_remediates ~prompt ~worker_result ~failure_code () =
   with_temp_base (fun base_path registry ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run (fun background_sw ->
         let settled, resolve_settled = Eio.Promise.create () in
-        let prompt = "recover this evidence-less fusion result" in
         let on_accepted request_id =
           match Obligation.Request_id.of_string request_id with
           | Error detail -> Error detail
@@ -295,9 +335,7 @@ let test_startup_recovery_remediates_missing_evidence () =
             ~on_worker_settled:(fun settlement ->
               Eio.Promise.resolve resolve_settled settlement)
             ~background_sw ~base_path ~caller:"delta" ~keeper_name:"delta"
-            ~f:(fun ~request_id:_ _request_sw ->
-              (* A plain string body settles [Done{ok=true; data=None}]. *)
-              Keeper_types_profile.tool_result_ok "done without evidence")
+            ~f:(fun ~request_id:_ _request_sw -> worker_result ())
             ()
         in
         let request_id_wire =
@@ -347,8 +385,8 @@ let test_startup_recovery_remediates_missing_evidence () =
             completion.Keeper_event_queue.run_id;
           (match completion.Keeper_event_queue.terminal with
            | Keeper_event_queue.Fusion_failed detail ->
-             check bool "typed evidence_unavailable failure" true
-               (let needle = "evidence_unavailable" in
+             check bool ("typed " ^ failure_code ^ " failure") true
+               (let needle = failure_code in
                 let nl = String.length needle and hl = String.length detail in
                 let rec go i =
                   i + nl <= hl
@@ -364,6 +402,27 @@ let test_startup_recovery_remediates_missing_evidence () =
                    | Keeper_event_queue.Fusion_cancelled -> "Fusion_cancelled")))
         | Some _ -> fail "startup remediation queued the wrong stimulus"
         | None -> fail "startup remediation did not durably queue a failure")))
+;;
+
+let test_startup_recovery_remediates_missing_evidence () =
+  startup_recovery_remediates
+    ~prompt:"recover this evidence-less fusion result"
+    ~worker_result:(fun () ->
+      (* A plain string body settles [Done{ok=true; data=None}]. *)
+      Keeper_types_profile.tool_result_ok "done without evidence")
+    ~failure_code:"evidence_unavailable"
+    ()
+;;
+
+let test_startup_recovery_remediates_unreadable_evidence () =
+  let prompt = "recover this fusion result written in an older evidence shape" in
+  startup_recovery_remediates
+    ~prompt
+    ~worker_result:(fun () ->
+      (* Data that is JSON but not this version's deliberation_evidence. *)
+      Keeper_types_profile.tool_result_ok_data (`Assoc [ "question", `String prompt ]))
+    ~failure_code:"evidence_unreadable"
+    ()
 ;;
 
 let test_evidence_unavailable_typed_failure_code () =
@@ -385,7 +444,9 @@ let () =
   run
     "fusion delivery obligation"
     [ ( "store"
-      , [ test_case "exact prepare/load/inventory/remove" `Quick
+      , [ test_case "roster roundtrips and is part of the identity" `Quick
+            test_roster_roundtrips_and_is_part_of_identity
+        ; test_case "exact prepare/load/inventory/remove" `Quick
             test_exact_prepare_load_inventory_remove
         ; test_case "corrupt peer is quarantined locally" `Quick
             test_corrupt_peer_is_quarantined_locally
@@ -393,6 +454,8 @@ let () =
             test_startup_recovery_projects_canonical_terminal
         ; test_case "startup recovery remediates missing evidence" `Quick
             test_startup_recovery_remediates_missing_evidence
+        ; test_case "startup recovery remediates unreadable evidence" `Quick
+            test_startup_recovery_remediates_unreadable_evidence
         ; test_case "evidence_unavailable failure code is typed" `Quick
             test_evidence_unavailable_typed_failure_code
         ; test_case "startup cleanup observes atomic orphans" `Quick

@@ -48,12 +48,33 @@ streaming = true
 turn-timeout-s = 0
 
 [claude_code."claude-sonnet-5"]
+
+[models."claude-opus-5"]
+api-name = "claude-opus-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+turn-timeout-s = 0
+
+[claude_code."claude-opus-5"]
+
+[runtime.lanes.fusion-judge]
+candidates = ["claude_code.claude-opus-5", "claude_code.claude-sonnet-5"]
 |}
     claude_cli
 ;;
 
+(* The judge prompt is rendered from the registry, so resolution must point at
+   the repo's own prompt files or the render raises inside the dune sandbox. *)
+let () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  Masc.Prompt_defaults.init ()
+;;
+
 let official_client_runtime = "claude_code.claude-sonnet-5"
 let agent_core_runtime = "stub-http.stub-model"
+let judge_lane = "fusion-judge"
+let judge_lane_first = "claude_code.claude-opus-5"
 
 let write_file ~path ~perm contents =
   let channel = open_out_gen [ Open_creat; Open_trunc; Open_wronly ] perm path in
@@ -199,6 +220,519 @@ let test_official_client_panelist_reaches_its_client () =
     | None -> fail "official-client execution did not publish Tool trace coverage")
 ;;
 
+(* A judge seat is routed by the same predicate as a panel seat. Judged by the
+   marker, as above: the stub emits no result event, so the judge fails either
+   way, and what separates the two routes is whether the client ran at all.
+   Remove the official branch from fusion_judge.ml and the marker stops
+   appearing while the failure turns into [Build_error]. *)
+let test_official_client_judge_reaches_its_client () =
+  let base_dir = Filename.temp_dir "fusion-official-client-judge" "" in
+  let marker = Filename.concat base_dir "spawned" in
+  let claude_cli = Filename.concat base_dir "stub-claude" in
+  let observed_trace = ref None in
+  let actor =
+    Fusion_types.Judge_actor
+      { role = Fusion_types.Single; identity = official_client_runtime }
+  in
+  write_file ~path:claude_cli ~perm:0o700 (stub_cli_script ~marker);
+  with_initialized_runtime ~claude_cli (fun () ->
+    let result =
+      Eio_main.run (fun env ->
+        Eio_context.set_env env;
+        Eio.Switch.run (fun sw ->
+          Eio_context.with_test_env
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            ~mono_clock:(Eio.Stdenv.mono_clock env)
+            ~sw
+            (fun () ->
+               Masc.Fusion_judge.run
+                 ~base_dir
+                 ~sw
+                 ~net:(Eio.Stdenv.net env)
+                 ~judge_system_prompt:"Judge the panel."
+                 ~judge_model:official_client_runtime
+                 ~question:"ping"
+                 ~panel:
+                   [ Fusion_types.Answered
+                       { model = agent_core_runtime
+                       ; answer = "pong"
+                       ; usage = Fusion_types.zero_usage
+                       }
+                   ]
+                 ~web_tools:false
+                 ~tool_trace:(actor, fun trace -> observed_trace := Some trace)
+                 ())))
+    in
+    check bool "the official client was executed" true (Sys.file_exists marker);
+    (match result with
+     | Ok _ -> fail "the stub client emits no result, so no synthesis can come back"
+     | Error (Fusion_types.Build_error detail, _) ->
+       failf "an official-client judge must not reach build_agent: %s" detail
+     | Error (_, usage) ->
+       check bool "an official client reports no token usage" true
+         (Fusion_types.equal_usage usage Fusion_types.zero_usage));
+    match !observed_trace with
+    | Some
+        { Fusion_types.observed_actors = []
+        ; events = []
+        ; dropped_events = 0
+        ; gaps = [ { actor = gap_actor; reason = Fusion_types.Official_client_uninstrumented } ]
+        } ->
+      check bool "the trace gap names the judge actor" true
+        (Fusion_types.equal_tool_trace_actor actor gap_actor)
+    | Some _ -> fail "an official-client judge must publish one explicit trace gap"
+    | None -> fail "an official-client judge did not publish Tool trace coverage")
+;;
+
+(* Antigravity has no system-prompt channel, so the one-shot turn has to carry
+   the instructions in its input. The stub records exactly what it received on
+   stdin and answers with a valid judge synthesis, which also drives the
+   official-client judge through a successful parse. *)
+let agy_runtime = "agy.gemini"
+
+let shell_quote text =
+  "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' text) ^ "'"
+;;
+
+let agy_fixture ~agy_cli ~oauth_source =
+  Printf.sprintf
+    {|
+[runtime]
+default = "stub-http.stub-model"
+
+[providers.stub-http]
+display-name = "Stub HTTP"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.stub-model]
+api-name = "gpt-5.4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[stub-http.stub-model]
+
+[providers.agy]
+protocol = "antigravity-cli"
+command = %S
+is-non-interactive = true
+timeout-s = 10.0
+credentials = { type = "file", path = %S }
+
+[models.gemini]
+api-name = "gemini-fixture"
+max-context = 128000
+
+[agy.gemini]
+|}
+    agy_cli
+    oauth_source
+;;
+
+let judge_synthesis_json ~answer =
+  `Assoc
+    [ Fusion_judge_parse.wire_field_consensus, `List []
+    ; Fusion_judge_parse.wire_field_contradictions, `List []
+    ; Fusion_judge_parse.wire_field_partial_coverage, `List []
+    ; Fusion_judge_parse.wire_field_unique_insights, `List []
+    ; Fusion_judge_parse.wire_field_blind_spots, `List []
+    ; Fusion_judge_parse.wire_field_resolved_answer, `String answer
+    ; ( Fusion_judge_parse.wire_field_decision
+      , `Assoc
+          [ Fusion_judge_parse.wire_field_decision_kind
+          , `String Fusion_judge_parse.wire_decision_answer
+          ; Fusion_judge_parse.wire_field_answer, `String answer
+          ] )
+    ]
+;;
+
+let recording_agy_script ~input_path ~cwd ~response =
+  let init =
+    `Assoc
+      [ "event", `String "init"
+      ; "conversation_id", `String "fusion-agy"
+      ; ( "init"
+        , `Assoc
+            [ "model", `String "gemini-fixture"
+            ; "cwd", `String cwd
+            ; "tools", `List []
+            ; "permission_mode", `String "always-proceed"
+            ] )
+      ]
+  in
+  let result =
+    `Assoc
+      [ "event", `String "result"
+      ; ( "result"
+        , `Assoc
+            [ "conversation_id", `String "fusion-agy"
+            ; "status", `String "SUCCESS"
+            ; "response", `String response
+            ; "num_turns", `Int 1
+            ; ( "usage"
+              , `Assoc
+                  [ "input_tokens", `Int 100
+                  ; "output_tokens", `Int 7
+                  ; "thinking_tokens", `Int 3
+                  ; "cache_read_tokens", `Int 50
+                  ; "total_tokens", `Int 107
+                  ] )
+            ] )
+      ]
+  in
+  Printf.sprintf "#!/bin/sh\nset -eu\ncat > %s\nprintf '%%s\\n' %s\nprintf '%%s\\n' %s\n"
+    (shell_quote input_path)
+    (shell_quote (Yojson.Safe.to_string init))
+    (shell_quote (Yojson.Safe.to_string result))
+;;
+
+let index_of ~needle haystack =
+  let n = String.length needle in
+  let rec scan i =
+    if i + n > String.length haystack
+    then None
+    else if String.equal (String.sub haystack i n) needle
+    then Some i
+    else scan (i + 1)
+  in
+  scan 0
+;;
+
+(* [lstat], not [Sys.is_directory]: a symlink the client leaves behind is
+   removed as a link, never followed out of the temporary directory. *)
+let rec remove_tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+    Sys.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+    Sys.remove path
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+;;
+
+let frame_label = function
+  | Ok label -> String.trim label
+  | Error detail -> failf "the Antigravity frame label must load: %s" detail
+;;
+
+let test_antigravity_judge_receives_its_system_prompt () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let base_dir = Filename.temp_dir "fusion-agy-judge" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      remove_tree base_dir)
+  @@ fun () ->
+  let input_path = Filename.concat base_dir "agy-input" in
+  let agy_cli = Filename.concat base_dir "agy" in
+  let oauth_source = Filename.concat base_dir "oauth.json" in
+  let config_path = Filename.concat base_dir "runtime.toml" in
+  let lens = "LENS-MARKER judge through the lens of restart safety" in
+  let question = "QUESTION-MARKER which candidate ships?" in
+  write_file ~path:oauth_source ~perm:0o600 "{}";
+  write_file ~path:agy_cli ~perm:0o700
+    (recording_agy_script ~input_path ~cwd:base_dir
+       ~response:(Yojson.Safe.to_string (judge_synthesis_json ~answer:"ship B")));
+  write_file ~path:config_path ~perm:0o600 (agy_fixture ~agy_cli ~oauth_source);
+  (match Runtime.init_default ~config_path with
+   | Ok () -> ()
+   | Error detail -> failf "antigravity fixture must initialize: %s" detail);
+  let result =
+    Eio_main.run (fun env ->
+      Eio_context.set_env env;
+      Eio.Switch.run (fun sw ->
+        Eio_context.with_test_env
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~mono_clock:(Eio.Stdenv.mono_clock env)
+          ~sw
+          (fun () ->
+             Masc.Fusion_judge.run
+               ~base_dir
+               ~sw
+               ~net:(Eio.Stdenv.net env)
+               ~judge_system_prompt:lens
+               ~judge_model:agy_runtime
+               ~question
+               ~panel:
+                 [ Fusion_types.Answered
+                     { model = agent_core_runtime
+                     ; answer = "B keeps restart evidence"
+                     ; usage = Fusion_types.zero_usage
+                     }
+                 ]
+               ~web_tools:false
+               ())))
+  in
+  (match result with
+   | Ok (synthesis, _usage) ->
+     check string "the client's synthesis is parsed" "ship B"
+       synthesis.Fusion_types.resolved_answer
+   | Error (failure, _usage) ->
+     failf "the Antigravity judge should synthesize, got %s"
+       (Fusion_types.judge_failure_text failure));
+  let input =
+    let channel = open_in_bin input_path in
+    Fun.protect
+      ~finally:(fun () -> close_in channel)
+      (fun () -> really_input_string channel (in_channel_length channel))
+  in
+  let system_label = frame_label (Masc.Antigravity_input_frame.system_instructions_label ()) in
+  let goal_label = frame_label (Masc.Antigravity_input_frame.current_goal_label ()) in
+  let position label needle =
+    match index_of ~needle input with
+    | Some at -> at
+    | None -> failf "%s never reached the Antigravity client" label
+  in
+  let order =
+    [ position "the instructions label" system_label
+    ; position "the judge system prompt" "LENS-MARKER"
+    ; position "the goal label" goal_label
+    ; position "the question" "QUESTION-MARKER"
+    ]
+  in
+  check (list int) "instructions label, lens, goal label, question, in that order"
+    (List.sort Int.compare order) order
+;;
+
+(* Each client's own timeout reaches Fusion as [Timeout], and every other
+   client failure stays [Provider_error]. The detail line keeps what the
+   projection folds away. *)
+let test_client_timeouts_project_to_timeout () =
+  let project failure =
+    Masc.Fusion_official_client.panel_failure ~runtime_id:official_client_runtime failure
+  in
+  let is_timeout failure =
+    Fusion_types.equal_panel_failure (project failure) Fusion_types.Timeout
+  in
+  check bool "Claude turn timeout" true
+    (is_timeout (Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Timeout 3.0)));
+  check bool "Claude admission timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Claude_admission_failure (Runtime_claude_code.Timeout 3.0)));
+  check bool "Codex timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Codex_failure
+          (Runtime_codex_app_server.Timeout { seconds = 3.0; turn_accepted = false })));
+  check bool "Antigravity timeout" true
+    (is_timeout
+       (Masc.Fusion_official_client.Antigravity_failure (Runtime_antigravity.Timeout 3.0)));
+  let turn_failed =
+    Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Turn_failed "boom")
+  in
+  (match project turn_failed with
+   | Fusion_types.Provider_error _ -> ()
+   | other ->
+     failf "a non-timeout client failure must stay Provider_error, got %s"
+       (Fusion_types.show_panel_failure other));
+  let detail =
+    Masc.Fusion_official_client.failure_detail ~runtime_id:official_client_runtime
+      (Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Timeout 3.0))
+  in
+  check bool "the detail line names the runtime" true
+    (String.starts_with ~prefix:(official_client_runtime ^ ": ") detail);
+  (* The adapter renders the idle seconds; the projection has no room for them. *)
+  check bool "the detail line keeps the timeout's seconds" true
+    (Option.is_some (index_of ~needle:"3.000s" detail))
+;;
+
+(* A stand-in that appends one line per execution, so a test can count how
+   many times the client ran across several candidates. *)
+let appending_cli_script ~log = Printf.sprintf "#!/bin/sh\necho spawned >> '%s'\nexit 0\n" log
+
+let count_lines path =
+  if not (Sys.file_exists path)
+  then 0
+  else (
+    let channel = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in channel)
+      (fun () ->
+         let rec count n =
+           match input_line channel with
+           | _ -> count (n + 1)
+           | exception End_of_file -> n
+         in
+         count 0))
+;;
+
+let with_eio f =
+  Eio_main.run (fun env ->
+    Eio_context.set_env env;
+    Eio.Switch.run (fun sw ->
+      Eio_context.with_test_env
+        ~net:(Eio.Stdenv.net env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~mono_clock:(Eio.Stdenv.mono_clock env)
+        ~sw
+        (fun () -> f ~sw ~net:(Eio.Stdenv.net env))))
+;;
+
+let sample_panel =
+  [ Fusion_types.Answered
+      { model = agent_core_runtime; answer = "pong"; usage = Fusion_types.zero_usage }
+  ]
+;;
+
+let run_single_judge ~base_dir ~route ~on_route =
+  with_eio (fun ~sw ~net ->
+    Masc.Fusion_judge.run
+      ~base_dir
+      ~sw
+      ~net
+      ~judge_system_prompt:"Judge the panel."
+      ~judge_model:route
+      ~question:"ping"
+      ~panel:sample_panel
+      ~web_tools:false
+      ~seat_route:(Fusion_types.Single, on_route)
+      ())
+;;
+
+(* A judge seat naming a lane tries every candidate, in the lane's order, when
+   each one fails. The spawn count is compared with a baseline measured on a
+   one-candidate seat in the same test rather than with an assumed number of
+   processes per candidate. *)
+let test_judge_lane_walks_candidates_in_order () =
+  let base_dir = Filename.temp_dir "fusion-judge-lane" "" in
+  let log = Filename.concat base_dir "spawns" in
+  let claude_cli = Filename.concat base_dir "stub-claude" in
+  write_file ~path:claude_cli ~perm:0o700 (appending_cli_script ~log);
+  with_initialized_runtime ~claude_cli (fun () ->
+    let _baseline = run_single_judge ~base_dir ~route:official_client_runtime ~on_route:ignore in
+    let per_candidate = count_lines log in
+    check bool "a one-candidate seat runs its client" true (per_candidate > 0);
+    let recorded = ref None in
+    let result =
+      run_single_judge ~base_dir ~route:judge_lane ~on_route:(fun route -> recorded := Some route)
+    in
+    check int "both lane candidates ran their client" (3 * per_candidate) (count_lines log);
+    (match result with
+     | Ok _ -> fail "the stub clients emit no result, so no synthesis can come back"
+     | Error _ -> ());
+    match !recorded with
+    | Some
+        { Fusion_types.seat = Fusion_types.Judge_seat Fusion_types.Single
+        ; route
+        ; answered_by = None
+        ; failed_attempts
+        } ->
+      check string "the seat route is the lane name" judge_lane route;
+      check
+        (list string)
+        "candidates are tried in lane order"
+        [ judge_lane_first; official_client_runtime ]
+        (List.map
+           (fun (attempt : Fusion_types.seat_attempt) -> attempt.attempt_runtime)
+           failed_attempts)
+    | Some other -> failf "unexpected seat route %s" (Fusion_types.show_seat_route other)
+    | None -> fail "the judge seat did not report its route")
+;;
+
+(* The same walk on a panel seat. Without it a panel that tried only the first
+   candidate would pass every other test. *)
+let test_panel_lane_walks_candidates_in_order () =
+  let base_dir = Filename.temp_dir "fusion-panel-lane" "" in
+  let log = Filename.concat base_dir "spawns" in
+  let claude_cli = Filename.concat base_dir "stub-claude" in
+  write_file ~path:claude_cli ~perm:0o700 (appending_cli_script ~log);
+  with_initialized_runtime ~claude_cli (fun () ->
+    let run_panel route on_routes =
+      with_eio (fun ~sw ~net ->
+        Masc.Fusion_panel.run
+          ~base_dir
+          ~sw
+          ~net
+          ~groups:[ panel_group [ route ] ]
+          ~prompt:"ping"
+          ~on_seat_routes:on_routes
+          ())
+    in
+    let _baseline = run_panel official_client_runtime ignore in
+    let per_candidate = count_lines log in
+    check bool "a one-candidate seat runs its client" true (per_candidate > 0);
+    let routes = ref [] in
+    let outcomes = run_panel judge_lane (fun seat_routes -> routes := seat_routes) in
+    check int "both lane candidates ran their client" (3 * per_candidate) (count_lines log);
+    (match outcomes with
+     | [ Fusion_types.Failed { failed_model; _ } ] ->
+       check string "the seat identity is the lane name" judge_lane failed_model
+     | other ->
+       failf "expected one failed seat, got [%s]"
+         (String.concat "; " (List.map Fusion_types.show_panel_outcome other)));
+    match !routes with
+    | [ { Fusion_types.seat = Fusion_types.Panel_seat seat; answered_by = None; failed_attempts; _ } ]
+      ->
+      check string "the route names the seat" judge_lane seat;
+      check
+        (list string)
+        "candidates are tried in lane order"
+        [ judge_lane_first; official_client_runtime ]
+        (List.map
+           (fun (attempt : Fusion_types.seat_attempt) -> attempt.attempt_runtime)
+           failed_attempts)
+    | other ->
+      failf "expected one seat route, got [%s]"
+        (String.concat "; " (List.map Fusion_types.show_seat_route other)))
+;;
+
+(* A route that names neither a lane nor a runtime fails the seat without an
+   attempt, and says so in the typed reason rather than as a build error. *)
+let test_unknown_route_fails_without_an_attempt () =
+  with_classification_runtime (fun () ->
+    let routes = ref [] in
+    let outcomes =
+      with_eio (fun ~sw ~net ->
+        Masc.Fusion_panel.run
+          ~base_dir:(Filename.get_temp_dir_name ())
+          ~sw
+          ~net
+          ~groups:[ panel_group [ "nope.not-configured" ] ]
+          ~prompt:"ping"
+          ~on_seat_routes:(fun seat_routes -> routes := seat_routes)
+          ())
+    in
+    (match outcomes with
+     | [ Fusion_types.Failed { reason = Fusion_types.Unknown_route "nope.not-configured"; _ } ]
+       -> ()
+     | other ->
+       failf "expected one Unknown_route failure, got [%s]"
+         (String.concat "; " (List.map Fusion_types.show_panel_outcome other)));
+    match !routes with
+    | [ { Fusion_types.route = "nope.not-configured"; answered_by = None; failed_attempts = []; _ } ]
+      -> ()
+    | other ->
+      failf "expected one unattempted seat route, got [%s]"
+        (String.concat "; " (List.map Fusion_types.show_seat_route other)))
+;;
+
+(* The walk stops at the first answer and never calls a later candidate. *)
+let test_walk_stops_at_the_first_answer () =
+  let tried = ref [] in
+  let attempt runtime =
+    tried := runtime :: !tried;
+    if String.equal runtime "b" then Ok "answer" else Error ("failed " ^ runtime)
+  in
+  (match Masc.Fusion_seat.walk { Masc.Fusion_seat.first = "a"; rest = [ "b"; "c" ] } ~attempt with
+   | Masc.Fusion_seat.Answered { answer; runtime; failed } ->
+     check string "the answer is the answering candidate's" "answer" answer;
+     check string "the answering candidate is named" "b" runtime;
+     check (list (pair string string)) "earlier failures are kept" [ "a", "failed a" ] failed
+   | Masc.Fusion_seat.Exhausted _ -> fail "candidate b answers");
+  check (list string) "a later candidate is never tried" [ "a"; "b" ] (List.rev !tried);
+  match
+    Masc.Fusion_seat.walk
+      { Masc.Fusion_seat.first = "a"; rest = [ "b" ] }
+      ~attempt:(fun runtime -> Error runtime)
+  with
+  | Masc.Fusion_seat.Exhausted { last; failed } ->
+    check string "the last failure is the last candidate's" "b" last;
+    check (list (pair string string)) "every attempt is kept in order" [ "a", "a"; "b", "b" ] failed
+  | Masc.Fusion_seat.Answered _ -> fail "no candidate answers"
+;;
+
 (* The message has to name which handle is absent. It did not, and that cost a
    build cycle: publishing Eio_context.set_env in bin/fusion_run left the text
    identical, so the clock being the other half was invisible until the code was
@@ -269,6 +803,10 @@ let () =
             "unbounded Claude panel keeps login probe bounded"
             `Quick
             test_unbounded_claude_panel_keeps_login_probe_bounded
+        ; test_case
+            "client timeouts project to Timeout"
+            `Quick
+            test_client_timeouts_project_to_timeout
         ] )
     ; ( "eio context diagnostics"
       , [ test_case
@@ -285,6 +823,32 @@ let () =
             "official-client panelist reaches its client"
             `Quick
             test_official_client_panelist_reaches_its_client
+        ; test_case
+            "official-client judge reaches its client"
+            `Quick
+            test_official_client_judge_reaches_its_client
+        ; test_case
+            "Antigravity judge receives its system prompt"
+            `Quick
+            test_antigravity_judge_receives_its_system_prompt
+        ] )
+    ; ( "seat routes"
+      , [ test_case
+            "judge lane walks candidates in order"
+            `Quick
+            test_judge_lane_walks_candidates_in_order
+        ; test_case
+            "panel lane walks candidates in order"
+            `Quick
+            test_panel_lane_walks_candidates_in_order
+        ; test_case
+            "unknown route fails without an attempt"
+            `Quick
+            test_unknown_route_fails_without_an_attempt
+        ; test_case
+            "walk stops at the first answer"
+            `Quick
+            test_walk_stops_at_the_first_answer
         ] )
     ]
 ;;

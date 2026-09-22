@@ -61,6 +61,7 @@ let first_judge_timeout_s ~(preset : Fusion_policy.preset) (j : Fusion_policy.ju
 ;;
 
 let run_first_judge
+      ~base_dir
       ~sw
       ~net
       ~preset
@@ -69,6 +70,7 @@ let run_first_judge
       ~clock
       ~judge_web_tools
       ~on_tool_trace
+      ~on_seat_route
       (j : Fusion_policy.judge_spec)
   : judge_run
   =
@@ -78,6 +80,7 @@ let run_first_judge
   in
   let result =
     Fusion_judge.run
+      ~base_dir
       ~sw
       ~net
       ?max_tokens:(first_judge_max_tokens ~preset j)
@@ -88,6 +91,7 @@ let run_first_judge
       ~panel
       ~web_tools:(first_judge_web_tools ~judge_web_tools j)
       ~tool_trace:(tool_actor, on_tool_trace)
+      ~seat_route:(Fusion_types.First id, on_seat_route)
       ()
   in
   let elapsed_s = elapsed_since_t0 clock in
@@ -95,6 +99,7 @@ let run_first_judge
 ;;
 
 let run_first_judges
+      ~base_dir
       ~sw
       ~net
       ~preset
@@ -103,10 +108,12 @@ let run_first_judges
       ~clock
       ~judge_web_tools
       ~on_tool_trace
+      ~on_seat_route
       judges
   =
   let run_first_judge =
     run_first_judge
+      ~base_dir
       ~sw
       ~net
       ~preset
@@ -115,6 +122,7 @@ let run_first_judges
       ~clock
       ~judge_web_tools
       ~on_tool_trace
+      ~on_seat_route
   in
   Eio.Fiber.List.map run_first_judge judges
 ;;

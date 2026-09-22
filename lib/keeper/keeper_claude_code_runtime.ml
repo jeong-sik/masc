@@ -81,6 +81,8 @@ let model_input_projection_for_capacity
     ~observed_floor_capacity_bytes
     ?on_model_input_window_observation
     ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
     ~turn_start
     ~keeper_name
     ~runtime_id
@@ -125,7 +127,7 @@ let model_input_projection_for_capacity
             (Runtime_model_input_tail_window.budget_error_to_core_error error))
   in
   let* capacity_cut = capacity_cut in
-  let windowed =
+  let* windowed =
     match capacity_cut with
     | Some projection
       when projection.Runtime_model_input_tail_window.dropped_atoms
@@ -135,18 +137,20 @@ let model_input_projection_for_capacity
          newest atom, so seeding this one would put an atom back into the view
          the provider just refused. The floor stands. *)
       observe_window projection;
-      projection.Runtime_model_input_tail_window.messages
+      Ok projection.Runtime_model_input_tail_window.messages
     | Some _ | None ->
       let own_first_atom =
         match capacity_cut with
         | Some projection -> projection.Runtime_model_input_tail_window.dropped_atoms
         | None -> 0
       in
+      let* librarian_front = Host.read_librarian_front librarian_front messages in
       let carried =
         Host.carried_start_range
           ~keeper_name
           ~runtime_id
           ~carried_front_seed
+          ~librarian_front
           ~own_first_atom
           ~turn_start
           messages
@@ -157,7 +161,11 @@ let model_input_projection_for_capacity
          seed named no front. A list with no atom has no front to report, and
          [Runtime_model_input_tail_window.observe] reports nothing for it. *)
       observe_window carried.Host.projection;
-      carried.Host.messages
+      Option.iter
+        (fun observe ->
+           observe carried.Host.front ~transmitted_bytes:carried.Host.transmitted_bytes)
+        on_carried_front;
+      Ok carried.Host.messages
   in
   let () =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->
@@ -429,8 +437,8 @@ module For_testing = struct
   let host_stop_turn_identity = host_stop_turn_identity
   let recovery_failure_of_client_error = recovery_failure_of_client_error
 
-  let start_seed_projection ~capacity_bytes ?carried_front_seed ~turn_start
-        ?on_model_input_window_observation ~keeper_name ~runtime_id messages
+  let start_seed_projection ~capacity_bytes ?carried_front_seed ?librarian_front ?on_carried_front
+        ~turn_start ?on_model_input_window_observation ~keeper_name ~runtime_id messages
     =
     model_input_projection_for_capacity
       ~capacity_bytes
@@ -438,6 +446,8 @@ module For_testing = struct
       ~observed_floor_capacity_bytes:(ref None)
       ?on_model_input_window_observation
       ?carried_front_seed
+      ?librarian_front
+      ?on_carried_front
       ~turn_start
       ~keeper_name
       ~runtime_id
@@ -1251,6 +1261,8 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
     ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
     ~turn_start
     ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
@@ -1343,6 +1355,8 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
                     ~observed_floor_capacity_bytes
                     ?on_model_input_window_observation
                     ?carried_front_seed
+                    ?librarian_front
+                    ?on_carried_front
                     ~turn_start
                     ~keeper_name
                     ~runtime_id

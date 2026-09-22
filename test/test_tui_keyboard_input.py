@@ -7203,17 +7203,17 @@ def memory_journal_timeline_interaction(
         for pattern, label in (
             (re.compile("▶\\s+YOU".encode()), "direct turn start"),
             # The reply resumes after the Journal row under a heading of its
-            # own. It carries the turn's request, not the keeper's name: the
-            # breadcrumb already says whose chat this is.
-            (re.compile("●\\s+tui-di".encode()), "post-Journal continuation"),
+            # own: the keeper's mark and the rule. No name -- the breadcrumb
+            # already says whose chat this is -- and no request id.
+            (re.compile("●\\s+─".encode()), "post-Journal continuation"),
         ):
             if find_needle(plain, pattern) < 0:
                 raise AssertionError(f"Missing {label} label: {plain!r}")
         # Speaker labels are dim-styled, not reverse-video, in the current
-        # renderer (observed: b"\\x1b[2mYOU" / b"\\x1b[2mtui-di.."). The colored
-        # bold arrow/circle glyph checked above is what actually marks the
-        # causal role; this only confirms the label itself still renders.
-        for label in (b"YOU", b"tui-di"):
+        # renderer (observed: b"\\x1b[2mYOU"). The colored bold arrow/circle
+        # glyph checked above is what actually marks the causal role; this
+        # only confirms the label itself still renders.
+        for label in (b"YOU",):
             if b"\x1b[2m" + label not in drawn:
                 raise AssertionError(
                     f"Direct causal label lost its dim-styled badge {label!r}: "

@@ -49,8 +49,9 @@
     - everything ahead of the end of a Librarian working state
       ({!Librarian_continuity_snapshot}) that fits the history. The turn
       sends that working state in place of the atoms it covers, and the
-      snapshot holds a digest of their bytes; rewritten, it would refuse
-      every Agent-Core turn with [Prefix_changed]. Those atoms do not go out
+      snapshot holds a digest of their bytes; rewritten, the snapshot would
+      stop fitting ([Prefix_changed]) and the Librarian would write it again
+      from atom 0, one completed turn per round. Those atoms do not go out
       in a request, so leaving them only costs disk.
     {!purge_messages} checks all three against the history it returns — the
     atom count, each kept opener's digest, and the working state through

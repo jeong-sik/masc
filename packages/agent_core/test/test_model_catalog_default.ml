@@ -36,6 +36,7 @@ let subscription_model_rows =
   ; "gpt-5.6-sol", "gpt-5.6-sol"
   ; "gpt-5.6-terra", "gpt-5.6-terra"
   ; "gpt-5.6-luna", "gpt-5.6"
+  ; "gpt-5.5", "gpt-5.5"
   ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
   ; "gemini-3.7-flash-high", "gemini-3.7-flash"
   ; "gemini-3.7-flash-medium", "gemini-3.7-flash"
@@ -83,6 +84,14 @@ let subscription_model_efforts =
   ; Some "openai-responses", "gpt-5.6-terra", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; Some "openai-responses", "gpt-5.6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-5.3-codex-spark", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh" ]
+    (* The codex lane clamps a binding's effort to the bare row
+       (Keeper_official_client_host.clamp_reasoning_effort_to_catalog). Without
+       "max" here a codex max binding went out as xhigh, and gpt-5.5 fell to the
+       "gpt-5" row, which sent xhigh as high. The codex CLI lists low..max for
+       sol and terra and low..xhigh for gpt-5.5 (models_cache.json, 2026-09-22). *)
+  ; None, "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-5.6-terra", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-5.5", [ "low"; "medium"; "high"; "xhigh" ]
   ; None, "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
   ; None, "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
   ]

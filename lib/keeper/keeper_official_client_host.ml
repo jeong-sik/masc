@@ -380,6 +380,9 @@ type carried_start_front =
       (** No seed held and the lane cut nothing later: the range starts
           where the last completed turn on this history ended, this turn's
           own atoms (RFC keeper-context-window-in-tokens §13.4). *)
+  | Turn_start_unknown of { reason : string }
+      (** No seed, no lane cut, and the turn start could not be read: the
+          range opened on the newest atom alone. *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -395,6 +398,7 @@ let carried_start_front_to_string = function
     Printf.sprintf "carried:%s" (Keeper_carried_front.source_to_string source)
   | Lane_cut -> "lane_cut"
   | Turn_start -> "turn_start"
+  | Turn_start_unknown _ -> "turn_start_unknown"
 ;;
 
 (* Where a start seed begins (RFC keeper-context-window-in-tokens §10.4). The
@@ -491,11 +495,19 @@ let carried_start_range ~keeper_name ~runtime_id ~carried_front_seed ~own_first_
     | Some (first_atom, source) when first_atom >= own_first_atom ->
       first_atom, Carried_seed source
     | Some _ | None ->
-      let turn_start =
-        Keeper_carried_front.clamp ~atom_count:history_atom_count turn_start
-      in
-      if own_first_atom > turn_start then own_first_atom, Lane_cut
-      else turn_start, Turn_start
+      (match turn_start with
+       | Keeper_carried_front.Turn_boundary { end_atom } ->
+         let turn_start = Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom in
+         if own_first_atom > turn_start then own_first_atom, Lane_cut
+         else turn_start, Turn_start
+       | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+         (* The lane's own cut is a position this lane reached; without one
+            the range opens on the newest atom alone, not on the whole
+            history under a boundary that was never read. *)
+         if own_first_atom > 0 then own_first_atom, Lane_cut
+         else
+           ( Keeper_carried_front.newest_atom ~atom_count:history_atom_count
+           , Turn_start_unknown { reason } ))
   in
   let projection, transmitted_bytes =
     Domain_pool_ref.submit_cpu_or_inline (fun () ->

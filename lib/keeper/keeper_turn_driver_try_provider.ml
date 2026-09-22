@@ -103,28 +103,28 @@ let completed_history_end ~trace_id ~lines ~messages =
    absorbed point starts. The end of the last completed turn on this
    history, verified against it; 0 when the history has no completed turn.
    A boundary store this process cannot read, or a boundary the history in
-   hand does not match, leaves the start at the oldest atom and says so:
-   the turn goes out rather than not at all, and under the small input
-   policy no completed-turn boundary demotes tool bodies either. *)
+   hand does not match, is [Turn_boundary_unknown]: the range then opens on
+   the newest atom alone and the origin says so, rather than on the whole
+   history under a boundary that was never read (§13.4 does not fold an
+   unknown start into 0). Under the small input policy no completed-turn
+   boundary demotes tool bodies either. *)
 let turn_start ~config ~keeper_name ~trace_id ~messages =
+  let unknown reason =
+    Log.Keeper.warn ~keeper_name
+      "turn start unknown, the range opens on the newest atom alone: %s" reason;
+    Keeper_carried_front.Turn_boundary_unknown { reason }
+  in
   match
     Keeper_turn_boundaries.read
       ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
   with
-  | Error detail ->
-    Log.Keeper.warn ~keeper_name
-      "turn start unknown, the range starts at the oldest atom: boundary read failed: %s"
-      detail;
-    0
+  | Error detail -> unknown ("boundary read failed: " ^ detail)
   | Ok lines ->
     (match completed_history_end ~trace_id ~lines ~messages with
-     | Ok end_atom -> end_atom
-     | Error Librarian_continuity_snapshot.Uncovered_history -> 0
-     | Error error ->
-       Log.Keeper.warn ~keeper_name
-         "turn start unknown, the range starts at the oldest atom: %s"
-         (Librarian_continuity_snapshot.error_to_string error);
-       0)
+     | Ok end_atom -> Keeper_carried_front.Turn_boundary { end_atom }
+     | Error Librarian_continuity_snapshot.Uncovered_history ->
+       Keeper_carried_front.Turn_boundary { end_atom = 0 }
+     | Error error -> unknown (Librarian_continuity_snapshot.error_to_string error))
 ;;
 
 let prepare_continuity ~trace_id ~lines ~messages snapshot =
@@ -149,6 +149,81 @@ let validate_continuity ~messages = function
     { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
 ;;
 
+(* Where a request starts, from what the keeper's files say (RFC
+   keeper-context-window-in-tokens §13.4, §13.6): a snapshot that fits this
+   history, else the Librarian's durable position when it is a place in this
+   history, else this turn's own boundary.
+
+   A turn needs no snapshot to go out: the position and the turn boundary
+   still say where it starts. So a snapshot that cannot be read, cannot be
+   checked against the boundary log, or covers bytes that have changed is one
+   that does not fit, never a reason to refuse the turn (#37762). A refused
+   turn also ran no Librarian round, so a snapshot whose covered bytes changed
+   was never written again. A snapshot file or a boundary log that cannot be
+   read stops the Librarian's continuity pass as well, so those stay until the
+   file is fixed; they are warnings because each names a file to fix rather
+   than a history that moved on. A covered prefix or a read position that
+   changes while the request is in flight is still refused, by
+   [validate_continuity].
+
+   [lines] is read only when a snapshot is saved. *)
+let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~progress =
+  let absorbed_or_turn_start ~why =
+    let absorbed =
+      match progress () with
+      | Ok (Some progress) -> absorbed_history ~trace_id ~messages progress
+      | Ok None -> None
+      | Error detail ->
+        Log.Keeper.warn ~keeper_name
+          "Librarian progress unreadable while no continuity snapshot fits (%s): %s"
+          why detail;
+        None
+    in
+    match absorbed with
+    | Some (end_atom, continuity) ->
+      Log.Keeper.info ~keeper_name
+        "no Librarian continuity snapshot fits the current history (%s); starting at the Librarian's position, atom %d"
+        why end_atom;
+      continuity
+    | None ->
+      Log.Keeper.info ~keeper_name
+        "no Librarian continuity snapshot fits the current history (%s); the request starts at this turn's own boundary"
+        why;
+      Without_snapshot
+  in
+  let unusable ~why =
+    Log.Keeper.warn ~keeper_name
+      "Librarian continuity snapshot cannot be used (%s); the request starts without it"
+      why;
+    absorbed_or_turn_start ~why
+  in
+  match snapshot with
+  | Error detail -> unusable ~why:("snapshot unreadable: " ^ detail)
+  | Ok None -> absorbed_or_turn_start ~why:"no continuity snapshot is saved"
+  | Ok (Some snapshot) ->
+    (match lines () with
+     | Error detail -> unusable ~why:("turn boundaries unreadable: " ^ detail)
+     | Ok lines ->
+       (match prepare_continuity ~trace_id ~lines ~messages snapshot with
+        | Ok restored -> restored
+        | Error
+            ((Librarian_continuity_snapshot.Trace_mismatch
+             | Librarian_continuity_snapshot.History_changed
+             | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
+          (* The history moved on from the snapshot. The Librarian's durable
+             position may still fit: goo-yang-bong's did on 2026-09-22 while
+             its snapshot did not, and the keeper sent its 12,720 atoms,
+             16.4 MB, 44 cycles in a row until the position was used. *)
+          absorbed_or_turn_start ~why:(Librarian_continuity_snapshot.error_to_string mismatch)
+        | Error
+            ((Librarian_continuity_snapshot.Prefix_changed
+             | Librarian_continuity_snapshot.Invalid_snapshot _
+             | Librarian_continuity_snapshot.Range_stopped _
+             | Librarian_continuity_snapshot.Read_failed _
+             | Librarian_continuity_snapshot.Write_failed _) as error) ->
+          unusable ~why:(Librarian_continuity_snapshot.error_to_string error)))
+;;
+
 (** Explicit context record for the extracted [try_provider] function.
 
     Each field corresponds to a variable captured by the original closure.
@@ -170,7 +245,7 @@ type try_provider_ctx =
     carried_front_seed : unit -> Keeper_carried_front.seed_read
   ; continuity : continuity option
   ; input_policy : Keeper_input_policy.t
-  ; completed_end_atom : int
+  ; turn_boundary : Keeper_carried_front.turn_start
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
   ; (* Where a front moved after a refusal is kept for the rest of the
        turn. The position is a fact about the history, not about the
@@ -813,7 +888,7 @@ let compose_carried_model_input
       ~last_resort
       ~base_path
       ~demote_before
-      ~completed_end_atom
+      ~turn_boundary
       messages
   =
   let _labelled, history_atom_count = Runtime_model_input_tail_window.annotate messages in
@@ -895,9 +970,17 @@ let compose_carried_model_input
          history ended, clamped so the newest atom always goes. The atoms
          before it wait for the Librarian's next pass. A history with no
          completed turn starts at 0, which is everything it has. The origin
-         names the boundary itself, not the atom the clamp opened on. *)
-      let first_atom =
-        Keeper_carried_front.clamp ~atom_count:history_atom_count completed_end_atom
+         names the boundary itself, not the atom the clamp opened on. A
+         boundary that could not be read opens on the newest atom alone,
+         and the origin says so. *)
+      let first_atom, origin =
+        match turn_boundary with
+        | Keeper_carried_front.Turn_boundary { end_atom } ->
+          ( Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom
+          , Keeper_carried_front.Turn_start { end_atom } )
+        | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+          ( Keeper_carried_front.newest_atom ~atom_count:history_atom_count
+          , Keeper_carried_front.Turn_start_unknown { reason } )
       in
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
@@ -905,8 +988,7 @@ let compose_carried_model_input
           ~first_atom
           planned.Keeper_model_input_demotion.messages
       in
-      projection, transmitted_bytes,
-        Keeper_carried_front.Turn_start { end_atom = completed_end_atom }
+      projection, transmitted_bytes, origin
   in
   { planned
   ; projection
@@ -950,7 +1032,7 @@ let request_view
       ~last_resort
       ~base_path
       ~demote_before
-      ~completed_end_atom
+      ~turn_boundary
       ~materialize
       messages
   =
@@ -964,7 +1046,7 @@ let request_view
         ~last_resort
         ~base_path
         ~demote_before
-        ~completed_end_atom
+        ~turn_boundary
         messages)
   in
   let carried =
@@ -1096,13 +1178,17 @@ let bounded_model_input_projection
   let store_failure_reported = ref false in
   let reader_available = Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools) in
   let references_enabled = match ctx.input_policy, ctx.recovery_view with
-    | Keeper_input_policy.Small, None -> reader_available && ctx.completed_end_atom > 0
+    | Keeper_input_policy.Small, None ->
+      reader_available
+      && (match ctx.turn_boundary with
+          | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom > 0
+          | Keeper_carried_front.Turn_boundary_unknown _ -> false)
     | _ -> false in
   let demotion_base_path = if references_enabled then ctx.base_path else "" in
   Log.Keeper.info ~keeper_name:ctx.keeper_name
-    "input policy runtime=%s selected=%s context_owner=agent_core completed_end_atom=%d blob_reader_available=%b body_externalization_enabled=%b"
+    "input policy runtime=%s selected=%s context_owner=agent_core turn_boundary=%s blob_reader_available=%b body_externalization_enabled=%b"
     ctx.runtime_id (Keeper_input_policy.to_string ctx.input_policy)
-    ctx.completed_end_atom reader_available references_enabled;
+    (Keeper_carried_front.turn_start_to_string ctx.turn_boundary) reader_available references_enabled;
 
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
@@ -1176,7 +1262,11 @@ let bounded_model_input_projection
     state.last_resort_armed := false;
     (* Completed-turn evidence, not attempt seed length, protects unfinished
        resumed tool work. Capacity refusal does not move this boundary. *)
-    let demote_before = ctx.completed_end_atom in
+    let demote_before =
+      match ctx.turn_boundary with
+      | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom
+      | Keeper_carried_front.Turn_boundary_unknown _ -> 0
+    in
     state.last_resort_probe :=
       (match ctx.input_policy, ctx.continuity with
        | Keeper_input_policy.Small, _ | _, Some _ -> None
@@ -1192,7 +1282,7 @@ let bounded_model_input_projection
         ~last_resort
         ~base_path:demotion_base_path
         ~demote_before
-        ~completed_end_atom:ctx.completed_end_atom
+        ~turn_boundary:ctx.turn_boundary
         ~materialize:(fun ~pending messages ->
           (* Blob materialization writes files, so it stays on the owning Eio
              fiber rather than in the CPU domain pool. The store skips writing

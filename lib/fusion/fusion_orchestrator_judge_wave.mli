@@ -54,7 +54,8 @@ val first_judge_timeout_s
     Output budget per judge is the judge's own [jmax_output_tokens] when set,
     otherwise the preset's [judge_max_output_tokens]. *)
 val run_first_judges
-  :  sw:Eio.Switch.t
+  :  base_dir:string
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> preset:Fusion_policy.preset
   -> panel:Fusion_types.panel_outcome list

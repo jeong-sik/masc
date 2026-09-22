@@ -119,13 +119,19 @@ type keeper_lane_last_outcome = {
   klo_selected_model : string option;
 }
 
+type keeper_lane_conditions = {
+  klc_launch_pending : bool;
+  klc_heartbeat_healthy : bool;
+  klc_turn_healthy : bool;
+}
+
 type keeper_lane = {
   kl_keeper : string;
   kl_phase : keeper_lane_phase;
   kl_turn_phase : keeper_lane_turn_phase;
   kl_idle_seconds : int;
   kl_last_outcome : keeper_lane_last_outcome option;
-  kl_diagnosis : string option;
+  kl_conditions : keeper_lane_conditions;
 }
 
 type keeper_lanes_snapshot = {
@@ -6127,8 +6133,14 @@ let decode_keeper_lane json =
     | Some bad -> field_type_error "last_outcome" "an object or null" bad
   in
   let* diagnosis = required_object_field json "phase_diagnosis" in
-  let* kl_diagnosis =
-    required_nullable_string_field diagnosis "determining_condition"
+  let* conditions = required_object_field diagnosis "conditions" in
+  let* klc_launch_pending = required_bool_field conditions "launch_pending" in
+  let* klc_heartbeat_healthy =
+    required_bool_field conditions "heartbeat_healthy"
+  in
+  let* klc_turn_healthy = required_bool_field conditions "turn_healthy" in
+  let kl_conditions =
+    { klc_launch_pending; klc_heartbeat_healthy; klc_turn_healthy }
   in
   Ok
     { kl_keeper
@@ -6136,7 +6148,7 @@ let decode_keeper_lane json =
     ; kl_turn_phase
     ; kl_idle_seconds
     ; kl_last_outcome
-    ; kl_diagnosis
+    ; kl_conditions
     }
 
 let decode_keeper_lanes_snapshot json =

@@ -1808,7 +1808,11 @@ let keeper_lane name : Tui_decode.keeper_lane =
   ; kl_turn_phase = Tui_decode.Lane_turn_idle
   ; kl_idle_seconds = 0
   ; kl_last_outcome = None
-  ; kl_diagnosis = None
+  ; kl_conditions =
+      { Tui_decode.klc_launch_pending = false
+      ; klc_heartbeat_healthy = true
+      ; klc_turn_healthy = true
+      }
   }
 
 let keeper_snapshot lanes : Tui_decode.keeper_lanes_snapshot =

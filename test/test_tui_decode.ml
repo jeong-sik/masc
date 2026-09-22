@@ -4432,17 +4432,24 @@ let test_decode_project_changes_keeps_project_scope () =
 
 (* Keeper lane rows. Shape is the light projection the TUI reads from
    [GET /api/v1/keepers/composite]. *)
+let lane_conditions_json ?(launch_pending = false) ?(heartbeat_healthy = true)
+    ?(turn_healthy = true) () =
+  `Assoc
+    [ "launch_pending", `Bool launch_pending
+    ; "heartbeat_healthy", `Bool heartbeat_healthy
+    ; "turn_healthy", `Bool turn_healthy
+    ]
+
 let keeper_lane_json ?(phase = "running") ?(turn_phase = "executing")
     ?(idle_seconds = 75) ?(last_outcome = `Null)
-    ?(diagnosis = `String "running_fiber_alive") keeper =
+    ?(conditions = lane_conditions_json ()) keeper =
   `Assoc
     [ "keeper", `String keeper
     ; "phase", `String phase
     ; "turn_phase", `String turn_phase
     ; "idle_seconds", `Int idle_seconds
     ; "last_outcome", last_outcome
-    ; ( "phase_diagnosis"
-      , `Assoc [ "determining_condition", diagnosis ] )
+    ; "phase_diagnosis", `Assoc [ "conditions", conditions ]
     ]
 
 let keeper_lanes_json lanes =
@@ -4520,7 +4527,7 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
       (keeper_lanes_json
          [ keeper_lane_json ~last_outcome "alpha"
          ; keeper_lane_json ~phase:"future_phase" ~turn_phase:"future_turn"
-             ~diagnosis:`Null "beta"
+             ~conditions:(lane_conditions_json ~turn_healthy:false ()) "beta"
          ])
   with
   | Error err -> Alcotest.failf "decode failed: %s" err
@@ -4549,8 +4556,12 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
             | Tui_decode.Lane_turn_unknown raw ->
                 Alcotest.(check string) "unknown turn" "future_turn" raw
             | _ -> Alcotest.fail "future turn was folded into a known turn");
-           Alcotest.(check (option string)) "no determining condition" None
-             beta.kl_diagnosis
+           Alcotest.(check bool) "alpha's last turn is healthy" true
+             alpha.kl_conditions.Tui_decode.klc_turn_healthy;
+           Alcotest.(check bool) "beta's last turn failed" false
+             beta.kl_conditions.Tui_decode.klc_turn_healthy;
+           Alcotest.(check bool) "beta's heartbeat is healthy" true
+             beta.kl_conditions.Tui_decode.klc_heartbeat_healthy
        | lanes ->
            Alcotest.failf "expected two lane rows, got %d" (List.length lanes))
 
@@ -4561,7 +4572,7 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
       ; "phase", `String "running"
       ; "turn_phase", `String "idle"
       ; "last_outcome", `Null
-      ; "phase_diagnosis", `Assoc [ "determining_condition", `Null ]
+      ; "phase_diagnosis", `Assoc [ "conditions", lane_conditions_json () ]
       ]
   in
   match
@@ -4571,6 +4582,29 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
   | Error detail ->
       Alcotest.(check bool) "error names the missing field" true
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
+
+(* A reading of no conditions is not a healthy keeper. Each of the three
+   decides what the operations line says about the phase, so a lane without
+   one is refused rather than drawn as if the keeper were fine. *)
+let test_decode_keeper_lanes_requires_the_phase_conditions () =
+  List.iter
+    (fun field ->
+      let conditions =
+        match lane_conditions_json () with
+        | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+        | json -> json
+      in
+      match
+        Tui_decode.decode_keeper_lanes_snapshot
+          (keeper_lanes_json [ keeper_lane_json ~conditions "alpha" ])
+      with
+      | Ok _ -> Alcotest.failf "a lane without %s decoded" field
+      | Error detail ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%S names %s" detail field)
+            true
+            (Astring.String.is_infix ~affix:field detail))
+    [ "launch_pending"; "heartbeat_healthy"; "turn_healthy" ]
 
 let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
@@ -10233,6 +10267,8 @@ let () =
           test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
         Alcotest.test_case "requires the table fields" `Quick
           test_decode_keeper_lanes_requires_the_table_fields;
+        Alcotest.test_case "a lane without its phase conditions is refused" `Quick
+          test_decode_keeper_lanes_requires_the_phase_conditions;
         Alcotest.test_case "every known phase decodes to its own constructor"
           `Quick
           test_every_known_phase_decodes_to_its_own_constructor;

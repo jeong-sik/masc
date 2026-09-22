@@ -1835,6 +1835,20 @@ let bracketed ~max_cells text =
   in
   "[" ^ text ^ "]"
 
+(* How many posts the Board list is holding, and how many the board holds.
+
+   The listing is one server page of fifty. A board with a hundred and seven
+   posts drew "(50)" beside its name with no second number anywhere near it,
+   so the page size read as the board's size and the fifty-seven posts the
+   page does not carry were invisible. The census counts the whole board, or
+   the narrowed hearth when one is being read, so the difference is a fact
+   this row can state. Equal counts say it once: a page that carries
+   everything has no difference to report. *)
+let board_list_count_text ~loaded ~holding =
+  match holding with
+  | Some holding when holding > loaded -> Printf.sprintf "(%d of %d)" loaded holding
+  | Some _ | None -> Printf.sprintf "(%d)" loaded
+
 (* The Board reader's title row: the screen, which post, its hearth, its score
    and its replies. The id is folded at the list's ID column. Replies read "💬3"
    and then "c0" at zero -- a second spelling for the same count -- and are one

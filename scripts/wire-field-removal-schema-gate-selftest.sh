@@ -9,6 +9,11 @@
 #   E. removal + 'schema-compat:' commit note    -> OK
 #   F. wrong ROOT (non-masc tree)                -> exit 2, loud failure
 #   H. removal + vNN MENTION only, no real bump  -> exit 1
+#   I. registry marker row deleted in keeper_event_queue_schema.ml -> exit 1
+#      (#35308 moved the markers into that module on 2026-09-12 while the
+#      gate kept guarding only the five old addresses — silent pass then)
+#   J. in-place quoted-marker bump (no -vNN.json token) credits a removal
+#   K. non-field_* let-string row deleted in a legacy protected module -> 1
 # The F case exists because the ROOT formula was once observed to land on
 # the keeper playground root, where the gate would silently report
 # "no protected module changed" while scanning nothing.
@@ -28,6 +33,12 @@ let field_source = "source"
 let field_facts = "facts"
 let field_change = "change"
 let exact_object_fields required fields = required
+EOF
+cat >"$TMP/lib/keeper_runtime/keeper_event_queue_schema.ml" <<'EOF'
+(* generation registry: single source of truth (#35308) *)
+let state = "keeper.event_queue.state.v19"
+let transition_wal = "masc.keeper_event_queue.transition.v9"
+let snapshot_filename = "event-queue-v19.json"
 EOF
 cat >"$TMP/lib/keeper_runtime/keeper_event_queue_persistence.ml" <<'EOF'
 let snapshot_filename = "event-queue-v19.json"
@@ -105,6 +116,37 @@ commit "remove change row
 schema-compat: rg -c 'field_change' on live memory snapshots == 0 (swept)"
 rc="$(run_gate HEAD~1)"
 [ "$rc" = "0" ] || { echo "self-test FAILED: schema-compat note must pass, got $rc" >&2; cat /tmp/wg-st.out >&2; exit 1; }
+
+# I) registry marker row deleted in keeper_event_queue_schema.ml -> FAIL.
+#    #35308 moved the generation markers into this module on 2026-09-12;
+#    while the gate kept guarding only the five old addresses, this diff
+#    exited 0 silently (task-853).
+sed -i.bak '/^let state = /d' lib/keeper_runtime/keeper_event_queue_schema.ml
+rm -f lib/keeper_runtime/keeper_event_queue_schema.ml.bak
+commit "remove state marker row"
+rc="$(run_gate HEAD~1)"
+[ "$rc" = "1" ] || { echo "self-test FAILED: registry marker removal must exit 1, got $rc" >&2; cat /tmp/wg-st.out >&2; exit 1; }
+
+# J) in-place quoted-marker generation move must CREDIT the removal: the
+#    transition.v9 row leaves and transition.v10 arrives on a `+` line. No
+#    -vNN.json token moves, so the filename path of version_bump sees
+#    nothing; the quoted-marker family rule carries the OK (task-853).
+sed -i.bak 's/transition\.v9/transition.v10/' lib/keeper_runtime/keeper_event_queue_schema.ml
+rm -f lib/keeper_runtime/keeper_event_queue_schema.ml.bak
+commit "bump transition marker v9->v10 in place"
+rc="$(run_gate HEAD~1)"
+[ "$rc" = "0" ] || { echo "self-test FAILED: quoted-marker bump must pass, got $rc" >&2; cat /tmp/wg-st.out >&2; exit 1; }
+
+# K) a deleted let-string row whose name is neither field_* nor a paren
+#    label row must still fire in a legacy protected module: the let TARGET
+#    NAME is not the signal (task-853).
+printf 'let marker_cache = "memory-os.v3"\n' >>lib/keeper/keeper_memory_os_current.ml
+commit "add marker_cache row"
+sed -i.bak '/^let marker_cache = /d' lib/keeper/keeper_memory_os_current.ml
+rm -f lib/keeper/keeper_memory_os_current.ml.bak
+commit "remove marker_cache row, no story"
+rc="$(run_gate HEAD~1)"
+[ "$rc" = "1" ] || { echo "self-test FAILED: non-field_* let-row removal must exit 1, got $rc" >&2; cat /tmp/wg-st.out >&2; exit 1; }
 
 # G) the default ROOT formula itself: invoked WITHOUT WIRE_GATE_ROOT from the
 #    standard layout (script at <root>/scripts/), the gate must resolve the

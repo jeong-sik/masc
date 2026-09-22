@@ -181,9 +181,12 @@ Keeper pangyo-preachers). Continuity 절(426~703행)에서 찾은 것:
   (`lib/runtime/runtime_observation.mli:12-24`, `error : string option`), Keeper meta 의
   `last_runtime_attempt`(`lib/keeper/keeper_meta_contract.mli:167`, `outcome : [Success | Failure of string]`).
   `attempts` 는 한 runtime_id 의 것이라 failover 뒤에는 이긴 쪽만 남는다(`keeper_agent_run_receipt.ml:180-185` 주석).
-- 남지 않는 것: 어느 후보를 어떤 typed 이유로 지났는지. 판정 시점의 `Exact_output` 증거(advances·final)는
-  Librarian 폭 판정(#37875)만 읽고, Keeper 턴 기록에는 수와 문자열로 접힌다. 그 사이는 WARN 텍스트
-  (`pipeline stage failed stage=route …`, `RFC-0265 modality reroute …`)뿐이다.
+- 남지 않는 것: 어느 후보를 어떤 typed 이유로 지났는지. 후보별 typed 오류는 `lib/keeper/keeper_unified_turn_types.ml:15-18`
+  의 `runtime_attempt_error` 에 프로세스 메모리로만 쌓이고, 읽는 곳은 `lib/keeper/keeper_unified_turn.ml:1330` 의 WARN 한 줄뿐이다.
+  마지막 실패 하나의 route 만 `keeper_unified_turn.ml:1425-1434` 의 카운터 라벨과 `Keeper_registry.set_failure_reason`
+  (`lib/keeper/keeper_unified_turn_failure.ml:33-34`, 한 칸 덮어쓰기)에 남는다. `lib/types/turn_record.ml` 에는 lane·fallback·
+  attempt·reject 필드가 없다(별도 탐색 에이전트, 코드로 확인). 판정 시점의 `Exact_output` 증거(advances·final)는
+  Librarian 폭 판정(#37875)만 읽는다.
   제안: 걸음의 typed 증거를 turn-record 에 그대로 싣는다. 이 주에 `Completion_failed` 로 접히던 429 가
   `Rate_limited` 로 분류된 것과 같은 방향이다. 코드 변경은 하지 않았다(#37875 영역).
 

@@ -84,7 +84,8 @@ let purge_error_text = function
       (structural_error_text structural)
   | ( Purge.Atom_count_changed _
     | Purge.Kept_atom_rewritten _
-    | Purge.Continuity_no_longer_fits _ ) as purge_error ->
+    | Purge.Continuity_no_longer_fits _
+    | Purge.Recovery_end_unwitnessed _ ) as purge_error ->
     Purge.purge_error_to_string purge_error
 
 let load_error_text = function
@@ -194,20 +195,26 @@ let () =
       | Ok continuity -> continuity
       | Error detail -> error ("Librarian working state unreadable: " ^ detail)
     in
+    (* One read of the position serves both: a recovery ends the history where
+       a line it counted states it, and the rebase moves it there. *)
+    let progress =
+      match Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:checkpoint.agent_name with
+      | Ok progress -> progress
+      | Error read_error ->
+        error ("Librarian position unreadable: " ^ Progress.read_error_to_string read_error)
+    in
     (match
-       Purge.purge ~config:!config ~trace_id:trace ~boundary_lines ~continuity checkpoint
+       Purge.purge
+         ~config:!config
+         ~trace_id:trace
+         ~boundary_lines
+         ~continuity
+         ~progress
+         checkpoint
      with
      | Error purge_error -> error (purge_error_text purge_error)
      | Ok (purged, report) ->
        let rebase =
-         let progress =
-           match
-             Progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:checkpoint.agent_name
-           with
-           | Ok progress -> progress
-           | Error read_error ->
-             error ("Librarian position unreadable: " ^ Progress.read_error_to_string read_error)
-         in
          Purge.librarian_rebase
            ~progress
            ~trace_id:trace

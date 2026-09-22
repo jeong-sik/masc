@@ -755,7 +755,7 @@
  (name masc_tui_execute_result)
  (wrapped false)
  (modules masc_tui_execute_result)
- (libraries masc unix yojson))
+ (libraries masc masc_tool_blob_store unix yojson))
 
 (library
  (name masc_tui_keeper_chat_diff)

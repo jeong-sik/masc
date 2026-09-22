@@ -63,6 +63,7 @@ val run_first_judges
   -> clock:clock
   -> judge_web_tools:bool
   -> on_tool_trace:(Fusion_types.tool_trace -> unit)
+  -> on_seat_route:(Fusion_types.seat_route -> unit)
   -> Fusion_policy.judge_spec list
   -> judge_run list
 

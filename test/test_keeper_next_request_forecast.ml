@@ -31,7 +31,7 @@ let seed ~messages first_atom : Keeper_carried_front.seed =
   | Some front_digest -> { first_atom; front_digest; source = Keeper_carried_front.Ledger }
   | None -> Alcotest.fail "the seed's own history has the atom"
 
-let carry ?front ?(turn_start = 0) ?counted_tokens messages =
+let carry ?front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ?counted_tokens messages =
   Keeper_next_request_forecast.carry
     ~measure:(Keeper_context_core.message_measurer ())
     ~front
@@ -113,20 +113,34 @@ let test_without_a_front_a_fresh_history_goes_whole () =
    not at the oldest atom. *)
 let test_without_a_front_the_range_starts_at_the_turn_start () =
   let messages = history ~exchanges:5 ~text_bytes:100 in
-  let c = carried (carry ~turn_start:6 messages) in
+  let c = carried (carry ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 6 }) messages) in
   Alcotest.(check int) "from the turn start" 6 c.first_atom;
   Alcotest.(check int) "this turn's four atoms" 4 c.kept_atoms;
   Alcotest.(check bool) "the origin names the boundary" true
     (c.origin = Keeper_carried_front.Turn_start { end_atom = 6 });
   let long = history ~exchanges:1_600 ~text_bytes:1 in
-  let dropped = carried (carry ~front:(seed ~messages:long 3_100) ~turn_start:6 messages) in
+  let dropped = carried (carry ~front:(seed ~messages:long 3_100) ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 6 }) messages) in
   Alcotest.(check int) "a dropped front starts over at the turn start, not at 0" 6
     dropped.first_atom;
-  let past_the_end = carried (carry ~turn_start:40 messages) in
+  let past_the_end = carried (carry ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 40 }) messages) in
   Alcotest.(check int) "a boundary past the newest atom still carries that atom" 9
     past_the_end.first_atom;
   Alcotest.(check bool) "and the origin names the boundary, not the atom it opened on" true
     (past_the_end.origin = Keeper_carried_front.Turn_start { end_atom = 40 })
+
+(* An unknown turn start opens on the newest atom alone, and the origin
+   says so with the reader's reason (RFC keeper-context-window-in-tokens
+   §13.4: an unknown start is not folded into the whole history). *)
+let test_an_unknown_turn_start_opens_on_the_newest_atom () =
+  let messages = history ~exchanges:5 ~text_bytes:100 in
+  let reason = "boundary read failed: fixture" in
+  let c =
+    carried (carry ~turn_start:(Keeper_carried_front.Turn_boundary_unknown { reason }) messages)
+  in
+  Alcotest.(check int) "the newest atom" 9 c.first_atom;
+  Alcotest.(check int) "one atom" 1 c.kept_atoms;
+  Alcotest.(check bool) "the origin names the unknown start" true
+    (c.origin = Keeper_carried_front.Turn_start_unknown { reason })
 
 (* The real forecast entrypoint reads a persisted meta, checkpoint and turn
    store. A recent-row limit for byte-composition readings must not also
@@ -847,6 +861,8 @@ let () =
             test_without_a_front_a_fresh_history_goes_whole
         ; Alcotest.test_case "without a front the range starts at the turn start" `Quick
             test_without_a_front_the_range_starts_at_the_turn_start
+        ; Alcotest.test_case "an unknown turn start opens on the newest atom" `Quick
+            test_an_unknown_turn_start_opens_on_the_newest_atom
         ] )
     ; ( "assembly"
       , [ Alcotest.test_case "the assembly travels prompt, tools, history, wake, then context"

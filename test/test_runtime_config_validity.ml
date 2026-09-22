@@ -589,7 +589,6 @@ let openrouter_seed_runtimes =
   ; "openrouter.openrouter-gpt-5-6-luna", "openai/gpt-5.6-luna"
   ; "openrouter.openrouter-gemini-3-1-pro", "google/gemini-3.1-pro-preview"
   ; "openrouter.openrouter-grok-4-7", "x-ai/grok-4.7"
-  ; "openrouter.openrouter-minimax-m3", "minimax/minimax-m3"
   ; "openrouter.openrouter-qwen3-8-flash", "qwen/qwen3.8-flash"
   ; "openrouter.openrouter-glm-5-3-flashx", "z-ai/glm-5.3-flashx"
   ]

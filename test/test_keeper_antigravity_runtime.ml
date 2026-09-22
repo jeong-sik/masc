@@ -873,7 +873,7 @@ let test_spawn_failure_is_pre_dispatch () =
                   in
                   let oversized_attempt =
                     Keeper_antigravity_runtime.run
-                      ~turn_start:0
+                      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                       ~accepts_image_input:
                         (Runtime_agent.runtime_accepts_image_input
                            ~runtime:
@@ -912,7 +912,7 @@ let test_spawn_failure_is_pre_dispatch () =
                    | Ok _ -> fail "oversized system prompt override reached the CLI");
                   let attempt =
                     Keeper_antigravity_runtime.run
-                    ~turn_start:0
+                    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get))
                       ~pre_tool_rejects:(ref [])
@@ -1012,7 +1012,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
                   let reports = ref [] in
                   let attempt =
                     Keeper_antigravity_runtime.run
-                    ~turn_start:0
+                    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
                     ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
                       ~runtime:(Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get))
                       ~pre_tool_rejects:(ref [])
@@ -1067,7 +1067,7 @@ let plain_user_message text : Agent_core.Types.message =
 ;;
 
 let capacity_projection ?on_model_input_window_observation ?carried_front_seed
-    ?(turn_start = 0) ~declared_max_prompt_bytes ~system_prompt ~goal source =
+    ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~declared_max_prompt_bytes ~system_prompt ~goal source =
   Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
     ~declared_max_prompt_bytes
     ~system_prompt
@@ -1317,7 +1317,7 @@ let encoded_history messages =
   List.map Keeper_official_client_host.encode_history_message messages
 ;;
 
-let agent_core_range ?(turn_start = 0) ~front messages =
+let agent_core_range ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~front messages =
   (Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
      ~measure_message_bytes:(Keeper_context_core.message_measurer ())
      ~front
@@ -1325,14 +1325,14 @@ let agent_core_range ?(turn_start = 0) ~front messages =
      ~last_resort:false
      ~base_path:""
      ~demote_before:0
-     ~completed_end_atom:turn_start
+     ~turn_boundary:turn_start
      messages)
     .Keeper_turn_driver_try_provider.projection
     .Runtime_model_input_tail_window.messages
 ;;
 
 let project_with_capacity ?on_model_input_window_observation ?carried_front_seed
-    ?(turn_start = 0) ~capacity messages =
+    ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~capacity messages =
   match
     capacity_projection
       ?on_model_input_window_observation
@@ -1385,9 +1385,9 @@ let test_cold_start_with_no_completed_turn_carries_everything () =
    that turn start (RFC keeper-context-window-in-tokens §13.4). *)
 let test_cold_start_begins_at_the_turn_start () =
   let messages = carried_front_history () in
-  let projected = project_with_capacity ~turn_start:53 ~capacity:1_000_000 messages in
+  let projected = project_with_capacity ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 53 }) ~capacity:1_000_000 messages in
   check (list string) "without a seed the range starts at the turn start"
-    (encoded_history (agent_core_range ~turn_start:53 ~front:None messages))
+    (encoded_history (agent_core_range ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 53 }) ~front:None messages))
     (encoded_history projected);
   check int "seven atoms of sixty went" 7 (List.length projected)
 ;;

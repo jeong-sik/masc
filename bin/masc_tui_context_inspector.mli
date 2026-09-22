@@ -136,6 +136,9 @@ type forecast_carried_origin =
   | Carried_turn_start of { end_atom : int }
       (** No front to start from: this turn's own atoms, from the end of the
           last completed turn. *)
+  | Carried_turn_start_unknown of { reason : string }
+      (** No front, and the turn start could not be read: the newest atom
+          alone. [reason] is what the boundary reader said. *)
 
 type forecast_carried =
   { first_atom : int

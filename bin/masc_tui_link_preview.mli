@@ -32,6 +32,9 @@ val has_informative_preview : og_preview -> bool
     Respects the silence contract: returns [false] for arbitrary web links where
     nothing meaningful can be inferred from the URL alone. *)
 
+(** Changes when cached preview metadata changes, for layout invalidation. *)
+val cache_generation : unit -> int
+
 val cache_lookup : string -> og_preview option
 val cache_store : og_preview -> unit
 val get_preview : string -> og_preview

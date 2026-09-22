@@ -1,5 +1,12 @@
 (** H2 gateway response helpers. *)
 
+(** [h2_close_after_flush writer] closes [writer] once every byte written to it
+    so far has been handed to the connection, not right away. Close a body
+    that may still hold unsent bytes with this, never with
+    [H2.Body.Writer.close]: h2 0.13.0 cuts such a body at the client's
+    flow-control window (anmonteiro/ocaml-h2#278). *)
+val h2_close_after_flush : H2.Body.Writer.t -> unit
+
 val h2_respond_json :
   ?status:H2.Status.t ->
   ?extra_headers:(string * string) list ->

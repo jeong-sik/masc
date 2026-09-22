@@ -5,6 +5,20 @@ let maybe_compress ?(compress = true) h2_reqd body =
     ~accept_encoding:(H2.Headers.get req.headers "accept-encoding")
     body
 
+(* WORKAROUND: h2 0.13.0 ends the stream when a closed body still has bytes
+   pending and the window is 0 (anmonteiro/ocaml-h2#278). Root fix: upstream
+   condition in reqd.ml/respd.ml. Remove when masc requires an h2 release with
+   the fix.
+
+   Closing right after the last write sent the first window's worth of bytes,
+   then END_STREAM, and the client saw a 200 with a short body. The close here
+   runs once every byte written so far has left the body, so END_STREAM only
+   goes out when nothing is pending. [`Closed] means the connection is gone;
+   the writer is closed then too, as it was before. *)
+let h2_close_after_flush writer =
+  H2.Body.Writer.flush writer (function
+    | `Written | `Closed -> H2.Body.Writer.close writer)
+
 let h2_respond_body
     ?(status = `OK)
     ?(extra_headers = [])
@@ -20,7 +34,7 @@ let h2_respond_body
   let response = H2.Response.create ~headers status in
   let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
   H2.Body.Writer.write_string writer final_body;
-  H2.Body.Writer.close writer
+  h2_close_after_flush writer
 
 let h2_respond_json_string ?status ?extra_headers ?(compress = true) h2_reqd body =
   h2_respond_body

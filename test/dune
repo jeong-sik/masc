@@ -6275,6 +6275,8 @@
 
 (include stanzas/test_h2_json_worker.inc)
 
+(include stanzas/test_h2_response_window.inc)
+
 (rule
  (alias runtest-test_tui_keyboard_input-msx-background-poll)
  (deps test_tui_keyboard_input.py ../bin/masc_tui.exe)

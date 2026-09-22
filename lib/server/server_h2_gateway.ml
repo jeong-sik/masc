@@ -24,7 +24,7 @@ let make_error_handler () =
     let headers = H2.Headers.of_list [("content-type", "text/plain")] in
     let body = respond headers in
     H2.Body.Writer.write_string body message;
-    H2.Body.Writer.close body
+    h2_close_after_flush body
   in
 
 
@@ -133,7 +133,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     stop_once ();
     (* Cancellation travels as an exception in Eio, so a wildcard that ate it
        here would report a clean exit from a fiber the switch had cancelled. *)
-    (try H2.Body.Writer.close writer with
+    (try h2_close_after_flush writer with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | _ -> ())
   in
@@ -1469,7 +1469,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      H2.Body.Writer.flush writer (fun _ -> ())
                    in
                    Fun.protect
-                     ~finally:(fun () -> H2.Body.Writer.close writer)
+                     ~finally:(fun () -> h2_close_after_flush writer)
                      (fun () ->
                         match
                           Keeper_github_identity.stream_login
@@ -1708,22 +1708,4 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         ~message:"MASC does not support authority-free OPTIONS *"
         h2_reqd
   in
-  (* H2 error handler *)
-  let _h2_error_handler _client_addr ?request:_ error respond =
-    let msg = match error with
-      | `Exn exn -> Printexc.to_string exn
-      | `Bad_request -> "Bad request"
-      | `Bad_gateway -> "Bad gateway"
-      | `Internal_server_error -> "Internal server error"
-    in
-    let headers = H2.Headers.of_list [
-      ("content-type", "text/plain");
-      ("content-length", string_of_int (String.length msg));
-    ] in
-    let body = respond headers in
-    H2.Body.Writer.write_string body msg;
-    H2.Body.Writer.close body
-  in
-
-
   h2_request_handler

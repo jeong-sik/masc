@@ -759,8 +759,10 @@ call whose result reads as the output schema its descriptor declares draws
 command's `output`, and any `stderr`. Output too large to ride inline is named
 by the artifact that holds it (`artifact sha256:9f3a12c4d5e6… · 48213 bytes`).
 Where the command ran and the sandbox around it are not drawn; a result that
-does not read is drawn as it arrived. The Keeper Calls view (`t`) keeps the
-stored result whole. A held tool call
+does not read is drawn as it arrived. A served `input` or `output` longer
+than eight lines keeps its first eight and closes on `… +N lines · Keeper
+Calls (t)`; one line over is drawn rather than folded. The Keeper Calls view
+(`t`) keeps the stored result whole. A held tool call
 uses decision vocabulary independently of execution: `approval approved`,
 `approval denied`, `approval timed out`, or `approval displaced`. Its later
 tool row still reports whether execution returned or failed.

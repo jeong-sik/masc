@@ -117,6 +117,28 @@ type seed_read =
 
 let no_seed_read = { seed = None; unreadable = None; boundary_error = None }
 
+let warn_seed_read_failures ~keeper_name ~runtime_id (read : seed_read) =
+  Option.iter
+    (fun (unreadable : unreadable_records) ->
+       Log.Keeper.warn
+         ~keeper_name
+         "model input carried range seed read skipped unreadable turn records \
+          runtime=%s unreadable=%d first_reason=%s"
+         runtime_id
+         unreadable.count
+         unreadable.first_reason)
+    read.unreadable;
+  Option.iter
+    (fun detail ->
+       Log.Keeper.warn
+         ~keeper_name
+         "model input carried range seed read refused the turn-boundary store \
+          runtime=%s detail=%s"
+         runtime_id
+         detail)
+    read.boundary_error
+;;
+
 (* A JSON row that does not decode as a turn record gives no seed, and it is
    counted: "no record" and "records that could not be decoded" are different
    answers to why a turn started without a front. A line that is not JSON at

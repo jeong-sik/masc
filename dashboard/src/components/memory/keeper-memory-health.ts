@@ -275,6 +275,12 @@ export function KeeperMemoryHealth() {
               ${data.totals.librarian_unread_turns ?? '?'}
             </span>
           </div>
+          <div class="kmh-stat" data-stat-key="librarian-continuity-behind">
+            <span class="kmh-stat-label">연속성 밀림 (atom)</span>
+            <span class=${`kmh-stat-value${data.totals.librarian_continuity_unread_atoms > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${data.totals.librarian_continuity_unread_atoms}${data.totals.librarian_continuity_unmeasured > 0 ? ` (${data.totals.librarian_continuity_unmeasured} 못 잼)` : ''}
+            </span>
+          </div>
           <div class="kmh-stat" data-stat-key="librarian-stopped-keepers">
             <span class="kmh-stat-label">멈춘 Librarian</span>
             <span class=${`kmh-stat-value${librarianStoppedKeepers > 0 ? ' kmh-stat-value--warn' : ''}`}>

@@ -71,6 +71,14 @@ export interface KeeperMemoryHealthLibrarian {
   measured_at: number | null
   unread_atom_turns: number | null
   unread_official_turns: number | null
+  /**
+   * How far the continuity snapshot trails the Librarian's read position.
+   * A different lag from `unread_atom_turns`, which counts the durable
+   * drain: the two rounds fall behind separately. `null` means it could not
+   * be taken (no snapshot, an unreadable one, or one from another trace),
+   * which is not the same as being caught up.
+   */
+  continuity_unread_atoms: number | null
   last_success_at: number | null
   last_failure_kind: string | null
 }
@@ -151,6 +159,8 @@ export interface KeeperMemoryHealthResponse {
     source_invalidations: number
     source_snapshot_bytes: number
     librarian_unread_turns: number | null
+    librarian_continuity_unread_atoms: number
+    librarian_continuity_unmeasured: number
     librarian_failures: number
     vision_ingest_errors: number
     read_errors: number
@@ -255,6 +265,7 @@ function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibr
     'measured_at',
     'unread_atom_turns',
     'unread_official_turns',
+    'continuity_unread_atoms',
     'last_success_at',
     'last_failure_kind',
   ])) return null
@@ -274,6 +285,12 @@ function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibr
     ? null
     : nonNegativeInteger(raw.unread_official_turns)
   if (raw.unread_official_turns !== null && unread_official_turns === null) return null
+  // Read from the snapshot and the read position, not from the drain's
+  // measurement, so it is not weighed against measured_at below.
+  const continuity_unread_atoms = raw.continuity_unread_atoms === null
+    ? null
+    : nonNegativeInteger(raw.continuity_unread_atoms)
+  if (raw.continuity_unread_atoms !== null && continuity_unread_atoms === null) return null
   const last_success_at = raw.last_success_at === null
     ? null
     : finiteNumber(raw.last_success_at)
@@ -294,6 +311,7 @@ function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibr
     measured_at,
     unread_atom_turns,
     unread_official_turns,
+    continuity_unread_atoms,
     last_success_at,
     last_failure_kind,
   }
@@ -539,6 +557,8 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     'source_invalidations',
     'source_snapshot_bytes',
     'librarian_unread_turns',
+    'librarian_continuity_unread_atoms',
+    'librarian_continuity_unmeasured',
     'librarian_failures',
     'vision_ingest_errors',
     'read_errors',
@@ -560,6 +580,13 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
       return total === null || atoms === null || official === null
         ? null : total + atoms + official
     }, 0),
+    // Summed over the keepers it could be taken for, with the rest counted
+    // beside it: a total that went null on one unmeasured keeper would hide
+    // every keeper that can be measured, and most carry no snapshot at all.
+    librarian_continuity_unread_atoms: entries.reduce(
+      (total, entry) => total + (entry.librarian.continuity_unread_atoms ?? 0), 0),
+    librarian_continuity_unmeasured: entries.reduce(
+      (count, entry) => count + (entry.librarian.continuity_unread_atoms === null ? 1 : 0), 0),
     librarian_failures: sum(entry => entry.librarian_failures),
     vision_ingest_errors: sum(entry => entry.vision_ingest_errors),
     read_errors: sum(entry => entry.read_error === null ? 0 : 1),

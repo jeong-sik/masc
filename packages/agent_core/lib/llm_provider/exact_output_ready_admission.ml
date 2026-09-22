@@ -90,8 +90,19 @@ type wire_admission_error =
   | Measured_serving_constraint_rejected of token_capacity_rejection
   | Token_measurement_failed
   | Unsupported_target_model of { model_id : string }
-  | Target_request_rejected
-  | Request_serialization_rejected
+  | Target_request_rejected of Http_client.http_error
+      (** What the provider config or its credentials refused, kept as the
+          transport said it. Dropping it left the operator with the bare kind
+          name for a refusal whose cause is the only actionable part: the
+          Librarian's ollama_cloud slot read
+          "wire_admission_rejected:target_request_rejected" on every run for
+          three days while the refusal itself named the model and the control
+          it could not send (#37674). *)
+  | Request_serialization_rejected of Http_client.http_error
+      (** What the serializer refused, kept as it said it. *)
+  | Measured_request_mismatch
+      (** The measured request is not the one the plan froze. No transport
+          refused anything here, so there is no refusal to carry. *)
 
 type admission_error =
   | Provider_schema_unavailable
@@ -307,8 +318,8 @@ let wire_admission_error = function
   | Plan.Unsupported_document_input -> Unsupported_document_input
   | Plan.Unsupported_audio_input -> Unsupported_audio_input
   | Plan.Unsupported_system_prompt -> Unsupported_system_prompt
-  | Plan.Provider_request_rejected _ -> Target_request_rejected
-  | Plan.Request_serialization_rejected _ -> Request_serialization_rejected
+  | Plan.Provider_request_rejected refusal -> Target_request_rejected refusal
+  | Plan.Request_serialization_rejected refusal -> Request_serialization_rejected refusal
 ;;
 
 let token_capacity_observation (constraint_ : Serving_constraint.t) =
@@ -427,8 +438,7 @@ let admit ~target ~messages requirement =
       | Plan.Token_measurement_required constraint_ ->
         Wire_admission_rejected
           (Token_measurement_required (token_capacity_observation constraint_))
-      | Plan.Measured_request_mismatch ->
-        Wire_admission_rejected Request_serialization_rejected)
+      | Plan.Measured_request_mismatch -> Wire_admission_rejected Measured_request_mismatch)
   in
   Ok
     (ready_plan
@@ -527,7 +537,7 @@ let admit_candidate_request
         (match error with
          | Plan.Token_measurement_required constraint_ ->
            Token_measurement_required (token_capacity_observation constraint_)
-         | Plan.Measured_request_mismatch -> Request_serialization_rejected)
+         | Plan.Measured_request_mismatch -> Measured_request_mismatch)
     in
     Error (Flow_request_admission_failed (Wire_admission_rejected error, measurement))
   | Flow_admission.Measurement_operation_start_failed detail ->

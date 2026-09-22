@@ -679,8 +679,9 @@ let wire_admission_error_disposition = function
     Input_capacity (Token_capacity_rejected reason)
   | Output_reservation_unavailable
   | Token_measurement_failed
-  | Target_request_rejected
-  | Request_serialization_rejected -> Request_preparation_failed
+  | Target_request_rejected _
+  | Request_serialization_rejected _
+  | Measured_request_mismatch -> Request_preparation_failed
 ;;
 
 let admission_error_disposition = function
@@ -834,6 +835,27 @@ let input_capacity_evidence_json = function
       ]
 ;;
 
+(* A refusal the transport or the provider config produced, said once for both
+   the evidence record and the operator-facing line: the sentence inside the
+   typed error, and only that. The provider-error rendering was tried first
+   and opened every line with "Provider '' ..." -- this renderer has no
+   provider name, and the slot id already stands beside the reason in the
+   line that carries it. Exhaustive on purpose: a new transport error must
+   say here what its sentence is. *)
+let refusal_reason = function
+  | Http_client.AcceptRejected { reason } -> reason
+  | Http_client.HttpError { code; body; retry_after_header = _ } ->
+    Printf.sprintf "http %d: %s" code (Http_client.refusal_body_text body)
+  | Http_client.NetworkError { message; kind = _ } -> message
+  | Http_client.TimeoutError { message; phase } ->
+    Printf.sprintf "%s timeout: %s" (Http_client.timeout_phase_to_label phase) message
+  | Http_client.ProviderTerminal { kind = Http_client.Session_conflict; message } ->
+    "session conflict: " ^ message
+  | Http_client.ProviderTerminal { kind = Http_client.Other reason; message } ->
+    reason ^ ": " ^ message
+  | Http_client.ProviderFailure { kind; message } ->
+    Http_client.provider_failure_to_string ~kind ~message
+
 let wire_admission_error_evidence_json = function
   | Capability_snapshot_missing ->
     `Assoc [ "kind", `String "capability_snapshot_missing" ]
@@ -880,9 +902,17 @@ let wire_admission_error_evidence_json = function
   | Token_measurement_failed -> `Assoc [ "kind", `String "token_measurement_failed" ]
   | Unsupported_target_model { model_id } ->
     `Assoc [ "kind", `String "unsupported_target_model"; "model_id", `String model_id ]
-  | Target_request_rejected -> `Assoc [ "kind", `String "target_request_rejected" ]
-  | Request_serialization_rejected ->
-    `Assoc [ "kind", `String "request_serialization_rejected" ]
+  | Target_request_rejected refusal ->
+    `Assoc
+      [ "kind", `String "target_request_rejected"
+      ; "detail", `String (refusal_reason refusal)
+      ]
+  | Request_serialization_rejected refusal ->
+    `Assoc
+      [ "kind", `String "request_serialization_rejected"
+      ; "detail", `String (refusal_reason refusal)
+      ]
+  | Measured_request_mismatch -> `Assoc [ "kind", `String "measured_request_mismatch" ]
 ;;
 
 let admission_error_evidence_json = function
@@ -933,8 +963,13 @@ let wire_admission_error_reason = function
   | Token_measurement_failed -> "token_measurement_failed"
   | Unsupported_target_model { model_id } ->
     Printf.sprintf "unsupported_target_model(%s)" (quoted_dynamic model_id)
-  | Target_request_rejected -> "target_request_rejected"
-  | Request_serialization_rejected -> "request_serialization_rejected"
+  | Target_request_rejected refusal ->
+    Printf.sprintf "target_request_rejected(%s)" (quoted_dynamic (refusal_reason refusal))
+  | Request_serialization_rejected refusal ->
+    Printf.sprintf
+      "request_serialization_rejected(%s)"
+      (quoted_dynamic (refusal_reason refusal))
+  | Measured_request_mismatch -> "measured_request_mismatch"
 ;;
 
 let admission_error_reason = function

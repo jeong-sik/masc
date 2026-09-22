@@ -651,6 +651,26 @@ status: reference
   기록한다.
   → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
 
+**Transcript Tail Recovery (전사 꼬리 복구)**
+: 프로세스가 죽어 열린 채 남은 tool cycle을 부팅 때 닫는 일
+  (`Keeper_transcript_tail_recovery.recover_open_tails`). `Recovering_requests` 부팅
+  단계에서 Keeper loop가 시작되기 전에 돈다. checkpoint 저장이 진행 중이던 tool
+  cycle을 일부러 남겨 두므로(어느 호출이 dispatch됐는지 복구가 알 수 있게), 아무도
+  닫지 않으면 provider가 매 reload마다 history를 거절해 lane이 영영 resume되지
+  못한다. Keeper마다 독립이라 하나가 실패해도 나머지 sweep을 멈추지 않는다.
+  Keeper별 결과는 닫힌 여섯이다(`keeper_outcome`): `Already_dispatchable`(캐리어
+  없음 — 실을 metadata도, 아직 canonical checkpoint도, 열린 꼬리도 없음),
+  `Closed`(캐리어 `{tool_use_ids : string list}` — 닫은 호출 id), `Unparseable`
+  (캐리어 `Keeper_transcript_unit.structural_error` — 진짜 손상, 열린 꼬리만 복구
+  가능), `Meta_unavailable`(캐리어 `string`), `Checkpoint_unavailable`(캐리어
+  `Keeper_checkpoint_store.checkpoint_ref_load_error`), `Commit_rejected`(캐리어
+  `Keeper_checkpoint_store.checkpoint_cas_error`).
+  **경계**: `Checkpoint_unavailable`은 이름이 "checkpoint 없음"으로 읽히지만 실제로는
+  checkpoint ref를 **못 읽은** 것이다(load error). checkpoint가 아직 없는 정상 상태는
+  `Already_dispatchable`이다 — checkpoint가 없는 것은 실패가 아니다. `Unparseable`도
+  실패로 세지 않는다(정당한 거절). `failed`는 metadata·load·commit 실패만 센다.
+  → [Keeper_transcript_tail_recovery](../../lib/keeper/keeper_transcript_tail_recovery.mli)
+
 **받은 일 정리**
 : 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
   checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다. 정리 하나가

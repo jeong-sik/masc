@@ -104,6 +104,7 @@ type state =
       ; completed_at : float
       }
   | Settled of { settled_at : float }
+  | Abandoned of { abandoned_at : float }
   | Blocked of
       { reason : blocked_reason
       ; blocked_at : float
@@ -135,13 +136,14 @@ type requeue_blocked_outcome =
   | Generation_conflict of string
 
 let ( let* ) = Result.bind
-let schema_version = 6
+let schema_version = 7
 
 let state_to_string = function
   | Ready -> "ready"
   | Running _ -> "running"
   | Completed _ -> "completed"
   | Settled _ -> "settled"
+  | Abandoned _ -> "abandoned"
   | Blocked _ -> "blocked"
 ;;
 
@@ -263,6 +265,8 @@ let state_to_yojson = function
       ]
   | Settled { settled_at } ->
     `Assoc [ "kind", `String "settled"; "settled_at", `Float settled_at ]
+  | Abandoned { abandoned_at } ->
+    `Assoc [ "kind", `String "abandoned"; "abandoned_at", `Float abandoned_at ]
   | Blocked { reason; blocked_at } ->
     `Assoc
       [ "kind", `String "blocked"
@@ -563,6 +567,13 @@ let state_of_yojson json =
     let* settled_json = field ~context "settled_at" fields in
     let* settled_at = float_json ~context:(context ^ ".settled_at") settled_json in
     Ok (Settled { settled_at })
+  | "abandoned" ->
+    let* () = exact_fields ~context [ "kind"; "abandoned_at" ] fields in
+    let* abandoned_json = field ~context "abandoned_at" fields in
+    let* abandoned_at =
+      float_json ~context:(context ^ ".abandoned_at") abandoned_json
+    in
+    Ok (Abandoned { abandoned_at })
   | "blocked" ->
     let* () = exact_fields ~context [ "kind"; "reason"; "blocked_at" ] fields in
     let* reason_json = field ~context "reason" fields in
@@ -619,7 +630,7 @@ let of_yojson json =
     match state with
     | Completed { item; _ } when String.equal item.candidate_id candidate_id -> Ok ()
     | Completed _ -> Error "completed item identity differs from partition candidate"
-    | Ready | Running _ | Settled _ | Blocked _ -> Ok ()
+    | Ready | Running _ | Settled _ | Abandoned _ | Blocked _ -> Ok ()
   in
   Ok
     { partition_id
@@ -718,7 +729,7 @@ let empty_view cursor =
 
 let is_live = function
   | Ready | Running _ | Completed _ | Blocked _ -> true
-  | Settled _ -> false
+  | Settled _ | Abandoned _ -> false
 ;;
 
 let compare_partition left right =
@@ -735,12 +746,12 @@ let remove_partition_indexes view partition =
   let ready =
     match partition.state with
     | Ready -> Ready_set.remove (ready_order partition) view.ready
-    | Running _ | Completed _ | Settled _ | Blocked _ -> view.ready
+    | Running _ | Completed _ | Settled _ | Abandoned _ | Blocked _ -> view.ready
   in
   let completed =
     match partition.state with
     | Completed _ -> Id_set.remove partition.partition_id view.completed
-    | Ready | Running _ | Settled _ | Blocked _ -> view.completed
+    | Ready | Running _ | Settled _ | Abandoned _ | Blocked _ -> view.completed
   in
   let live_candidate_owner =
     if is_live partition.state
@@ -773,12 +784,12 @@ let add_partition_indexes view partition =
   let ready =
     match partition.state with
     | Ready -> Ready_set.add (ready_order partition) view.ready
-    | Running _ | Completed _ | Settled _ | Blocked _ -> view.ready
+    | Running _ | Completed _ | Settled _ | Abandoned _ | Blocked _ -> view.ready
   in
   let completed =
     match partition.state with
     | Completed _ -> Id_set.add partition.partition_id view.completed
-    | Ready | Running _ | Settled _ | Blocked _ -> view.completed
+    | Ready | Running _ | Settled _ | Abandoned _ | Blocked _ -> view.completed
   in
   Ok
     { view with
@@ -812,11 +823,13 @@ let legal_transition previous next =
   | Running _, Blocked _ -> true
   | Blocked _, Ready -> true
   | (Completed _ | Blocked _), Settled _ -> true
-  | Settled _, Ready -> true
+  | Blocked _, Abandoned _ -> true
+  | Abandoned _, Ready -> true
   | Ready, _
   | Running _, _
   | Completed _, _
   | Settled _, _
+  | Abandoned _, _
   | Blocked _, _ -> false
 ;;
 
@@ -1263,7 +1276,7 @@ let ensure_roots ~base_path ~keeper_name candidates =
               then Error "candidate Keeper differs from partition ledger Keeper"
               else
                 let* () = valid_time "candidate recorded_at" candidate.recorded_at in
-                let resolve_root ~reopen_settled () =
+                let resolve_root ~reopen_abandoned () =
                   let* context_key = Candidate.Context_key.of_candidate candidate in
                   match Id_map.find_opt candidate.candidate_id view.live_candidate_owner with
                   | Some owner_id ->
@@ -1306,24 +1319,30 @@ let ensure_roots ~base_path ~keeper_name candidates =
                           the deterministic root into a collision with itself and
                           stopped the whole Keeper's attention worker. *)
                        (match historical.state with
-                        | Settled _ when reopen_settled ->
-                          (* [Settled] is otherwise terminal ([legal_transition]
-                             refuses every other exit). [reopen_settled] is true only
-                             for a candidate still [Resumable_pending]: the Candidate
-                             ledger never recorded any judgment for it, so its root
-                             settling can only be the desync task-1660 measured (21
-                             live candidates, 360-378h) — e.g. the "candidate
-                             permanently absent" Blocked->Settled path in
-                             [reconcile_quarantines], which settles the root without
-                             ever writing a judgment. A [Resumable_judged] or
-                             [Requeued_resumable] historical match keeps the old
-                             no-op: those already carry (or are mid-quarantine
-                             toward) a judgment, and reopening them here would race
-                             the dedicated quarantine-generation bookkeeping in
-                             [reconcile_quarantines] instead of going through it. *)
+                        | Abandoned _ when reopen_abandoned ->
+                          (* [reopen_abandoned] is true only for a candidate
+                             still [Resumable_pending]: the Candidate ledger
+                             never recorded any judgment for it, so an
+                             [Abandoned] root can only be the "candidate
+                             permanently absent" give-up in
+                             [reconcile_quarantines], which never writes a
+                             judgment. A [Resumable_judged] or
+                             [Requeued_resumable] historical match keeps the
+                             no-op: those already carry (or are
+                             mid-quarantine toward) a judgment, and reopening
+                             them here would race the dedicated
+                             quarantine-generation bookkeeping in
+                             [reconcile_quarantines] instead of going through
+                             it. [Settled] never reopens: it records a
+                             judgment. *)
                           let* reopened = advance_state historical Ready in
                           Ok (reopened :: roots)
-                        | Ready | Running _ | Completed _ | Blocked _ | Settled _ -> Ok roots)
+                        | Ready
+                        | Running _
+                        | Completed _
+                        | Blocked _
+                        | Settled _
+                        | Abandoned _ -> Ok roots)
                      | Some _ -> Error ("partition identity collision: " ^ partition_id))
                 in
                 match Candidate.status_view candidate.status with
@@ -1332,13 +1351,13 @@ let ensure_roots ~base_path ~keeper_name candidates =
                 | Candidate.Requeued_resumable
                     { resumable = Candidate.Resumable_consumed _; _ } -> Ok roots
                 | Candidate.Direct_resumable (Candidate.Resumable_pending _) ->
-                  resolve_root ~reopen_settled:true ()
+                  resolve_root ~reopen_abandoned:true ()
                 | Candidate.Direct_resumable (Candidate.Resumable_judged _)
                 | Candidate.Requeued_resumable
                     { resumable =
                         (Candidate.Resumable_pending _ | Candidate.Resumable_judged _)
                     ; _
-                    } -> resolve_root ~reopen_settled:false ())
+                    } -> resolve_root ~reopen_abandoned:false ())
            (Ok [])
       |> Result.map List.rev
     in
@@ -1389,7 +1408,7 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
                            })
                     in
                     Ok (recovered + 1, blocked :: latest)
-                  | Ready | Completed _ | Settled _ | Blocked _ ->
+                  | Ready | Completed _ | Settled _ | Abandoned _ | Blocked _ ->
                     Ok (recovered, partition :: latest))
                (Ok (0, []))
         in
@@ -1455,7 +1474,7 @@ let claim_ready_exact
               let* cursor = cursor_result ~ledger_path append_result in
               Atomic.set entry.cached (Some { updated with cursor });
               Ok (Some claimed))
-         | Running _ | Completed _ | Settled _ | Blocked _ -> Ok None)
+         | Running _ | Completed _ | Settled _ | Abandoned _ | Blocked _ -> Ok None)
       | Some _ -> Ok None))
 ;;
 
@@ -1476,7 +1495,7 @@ let transition_running_exact ~base_path ~partition ~worker_epoch decide =
                 "partition %s is owned by worker %s"
                 partition.partition_id
                 (Worker_epoch.to_string running.worker_epoch))
-         | Ready | Completed _ | Settled _ | Blocked _ ->
+         | Ready | Completed _ | Settled _ | Abandoned _ | Blocked _ ->
            Error ("partition is not Running: " ^ partition.partition_id)))
   in
   Ok { partition; changed; write_outcome }
@@ -1647,7 +1666,7 @@ let confirm_completed ~base_path ~(partition : t) =
           Error ("partition is not Completed: " ^ partition.partition_id))
     in
     Ok { partition = confirmed; changed; write_outcome }
-  | Ready | Running _ | Settled _ | Blocked _ ->
+  | Ready | Running _ | Settled _ | Abandoned _ | Blocked _ ->
     Error ("partition is not Completed: " ^ partition.partition_id)
 ;;
 
@@ -1682,7 +1701,7 @@ let confirm_blocked ~base_path ~(partition : t) =
           Error ("partition is not Blocked: " ^ partition.partition_id))
     in
     Ok { partition = confirmed; changed; write_outcome }
-  | Ready | Running _ | Completed _ | Settled _ ->
+  | Ready | Running _ | Completed _ | Settled _ | Abandoned _ ->
     Error ("partition is not Blocked: " ^ partition.partition_id)
 ;;
 
@@ -1747,7 +1766,8 @@ let requeue_blocked ~base_path ~(partition : t) =
                (Observe_generation_conflict
                   ("blocked partition generation changed before manual requeue: "
                    ^ partition.partition_id)))
-        | Some { state = Ready | Running _ | Completed _ | Settled _; _ } ->
+        | Some { state = Ready | Running _ | Completed _ | Settled _
+               | Abandoned _; _ } ->
           Ok
             (`Observe
                (Observe_generation_conflict
@@ -1769,7 +1789,7 @@ let requeue_blocked ~base_path ~(partition : t) =
      | `Written ((Observe_cursor_conflict _ | Observe_generation_conflict _), _)
      | `Observed (Append_ready _) ->
        Error "invalid exact requeue decision")
-  | Ready | Running _ | Completed _ | Settled _ ->
+  | Ready | Running _ | Completed _ | Settled _ | Abandoned _ ->
     Error ("partition is not Blocked: " ^ partition.partition_id)
 ;;
 
@@ -1787,13 +1807,14 @@ let confirm_ready ~base_path ~(partition : t) =
           Error
             ("ready partition identity changed before fsync confirmation: "
              ^ partition.partition_id)
-        | Some { state = Blocked _ | Running _ | Completed _ | Settled _; _ } ->
+        | Some { state = Blocked _ | Running _ | Completed _ | Settled _
+               | Abandoned _; _ } ->
           Error
             ("partition advanced before Ready fsync confirmation: "
              ^ partition.partition_id))
     in
     Ok { partition = confirmed; changed; write_outcome }
-  | Blocked _ | Running _ | Completed _ | Settled _ ->
+  | Blocked _ | Running _ | Completed _ | Settled _ | Abandoned _ ->
     Error ("partition is not Ready: " ^ partition.partition_id)
 ;;
 
@@ -1822,6 +1843,19 @@ let settle ~now ~base_path ~partition =
       Ok ([ settled ], settled)
     | Some current ->
       Error ("only Completed or Blocked partition can settle: " ^ current.partition_id))
+;;
+
+let abandon ~now ~base_path ~partition =
+  let* () = valid_time "partition abandonment time" now in
+  update ~base_path ~keeper_name:partition.keeper_name (fun view ->
+    match Id_map.find_opt partition.partition_id view.by_id with
+    | None -> Error ("partition abandonment target not found: " ^ partition.partition_id)
+    | Some ({ state = Abandoned _; _ } as current) -> Ok ([], current)
+    | Some ({ state = Blocked _; _ } as current) ->
+      let* abandoned = advance_state current (Abandoned { abandoned_at = now }) in
+      Ok ([ abandoned ], abandoned)
+    | Some current ->
+      Error ("only a Blocked partition can be abandoned: " ^ current.partition_id))
 ;;
 
 module For_testing = struct

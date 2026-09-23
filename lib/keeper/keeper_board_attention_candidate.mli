@@ -130,8 +130,17 @@ type quarantine =
 
 type quarantine_phase =
   | Quarantined
-  | Requeue_requested of { requested_at : float }
-  | Requeued of { requeued_at : float }
+  | Requeue_requested of
+      { requested_at : float
+      ; requested_by : string
+        (** The authenticated principal that asked for the requeue. *)
+      }
+  | Requeued of
+      { requeued_at : float
+      ; requested_by : string
+        (** Carried from [Requeue_requested]: finishing the requeue does not
+            change who asked for it. *)
+      }
 
 type quarantine_state =
   { quarantine : quarantine
@@ -331,6 +340,7 @@ val request_quarantine_requeue :
   partition_id:string ->
   expected_quarantine_id:string ->
   requested_at:float ->
+  requested_by:string ->
   (candidate, string) result
 
 val finish_quarantine_requeue :

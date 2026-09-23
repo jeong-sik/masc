@@ -87,7 +87,10 @@ let test_cancel ?(observer_checks = true) ~base_path ~registry stage () =
     [ { Fixture.id = "cancel-librarian-fixture"; base_url = librarian.base_url } ] in
   (match Runtime_exact_output_registry.publish
       ~lanes:[ { Runtime_schema.id = "librarian_exact"
-               ; slot_ids = [ "cancel-librarian-fixture" ]; cli_slot_ids = [] } ] resolver with
+               ; slot_ids = [ "cancel-librarian-fixture" ]
+               ; cli_slot_ids = []
+               ; max_output_tokens = Some 4_096
+               } ] resolver with
    | Ok _ -> ()
    | Error error -> Alcotest.fail
        (Runtime_exact_output_registry.publication_error_to_string error));

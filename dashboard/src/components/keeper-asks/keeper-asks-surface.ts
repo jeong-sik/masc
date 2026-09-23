@@ -139,7 +139,7 @@ function AskCard({ row }: { row: AskRow }) {
                 type="button"
                 class="ka-submit"
                 disabled=${askSubmitting.value || state.state !== 'ready'}
-                onClick=${() => void submitAnswer(row, null)}
+                onClick=${() => void submitAnswer(row)}
               >
                 ${askSubmitting.value ? '보내는 중…' : '답 보내기'}
               </button>

@@ -724,6 +724,7 @@ let test_claim_generation_change_discards_without_sibling_selection () =
             | P.Running _
             | P.Completed _
             | P.Settled _
+            | P.Abandoned _
             | P.Blocked _ -> running, ready)
          (0, 0)
   in
@@ -827,6 +828,7 @@ let test_exact_claim_retry_exhaustion_has_no_self_wake () =
             | P.Running _
             | P.Completed _
             | P.Settled _
+            | P.Abandoned _
             | P.Blocked _ -> count)
          0
   in
@@ -2011,7 +2013,8 @@ let test_requested_blocked_recovery_and_sequential_cas_converge () =
          ~candidate:quarantined
          ~partition_id:partition.partition_id
          ~expected_quarantine_id:quarantine.quarantine_id
-         ~requested_at:20.0)
+         ~requested_at:20.0
+         ~requested_by:"operator-test")
   in
   (match requested.status with
    | A.Quarantine { phase = A.Requeue_requested _; _ } -> ()
@@ -2027,6 +2030,7 @@ let test_requested_blocked_recovery_and_sequential_cas_converge () =
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2086,7 +2090,8 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
          ~candidate:quarantined
          ~partition_id:blocked.partition_id
          ~expected_quarantine_id:quarantine.quarantine_id
-         ~requested_at:30.0)
+         ~requested_at:30.0
+         ~requested_by:"operator-test")
   in
   let execute_calls = ref 0 in
   let execute_before_authorization ~before_dispatch:_ ~before_advance:_ _candidate =
@@ -2186,6 +2191,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2274,7 +2280,8 @@ let test_ready_requested_recovery_fails_closed () =
           ~candidate:quarantined
           ~partition_id:blocked.partition_id
           ~expected_quarantine_id:quarantine.quarantine_id
-          ~requested_at:40.0)
+          ~requested_at:40.0
+          ~requested_by:"operator-test")
      : A.candidate);
   let ready =
     match
@@ -2303,6 +2310,7 @@ let test_ready_requested_recovery_fails_closed () =
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2350,6 +2358,7 @@ let test_stale_quarantine_generation_is_rejected () =
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2370,6 +2379,68 @@ let test_stale_quarantine_generation_is_rejected () =
     when String.equal current.quarantine_id quarantine.quarantine_id ->
     ()
   | _ -> Alcotest.fail "stale generation rejection mutated durable state"
+;;
+
+(* #38060: the requeue row names who asked for it. The command carries the
+   authenticated principal onto [Requeue_requested], finishing the requeue
+   keeps it on [Requeued], the row survives its own codec, and the operator
+   inventory shows it. *)
+let test_requeue_records_requesting_principal () =
+  with_temp_base "board-attention-worker-requeue-principal" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  (match
+     ok
+       "create durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture candidate was not Quarantined"
+  in
+  let request : Q.request =
+    { candidate_id = quarantined.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-requeuer"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "manual command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:60.0 ~base_path command with
+   | Ok _ -> ()
+   | Error error -> Alcotest.failf "requeue failed: %s" (Q.execution_error_label error));
+  let requeued = load_one_candidate ~base_path in
+  (match requeued.status with
+   | A.Quarantine { phase = A.Requeued { requested_by; _ }; _ } ->
+     Alcotest.(check string) "Requeued names the requester"
+       "operator-requeuer" requested_by
+   | _ -> Alcotest.fail "candidate did not reach Requeued");
+  Alcotest.(check bool) "requested_by survives the candidate codec" true
+    (ok "decode requeued candidate" (A.candidate_of_json (A.candidate_to_json requeued))
+     = requeued);
+  let inventory = Q.inventory ~base_path ~keeper_names:[ "alpha" ] in
+  match inventory.items with
+  | [ item ] ->
+    Alcotest.(check (option string)) "inventory shows the requester"
+      (Some "operator-requeuer") item.requested_by
+  | items -> Alcotest.failf "expected one inventory item, got %d" (List.length items)
 ;;
 
 let test_same_quarantine_command_cas_loser_converges () =
@@ -2403,6 +2474,7 @@ let test_same_quarantine_command_cas_loser_converges () =
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2472,6 +2544,7 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2771,9 +2844,9 @@ let test_undrained_outcomes_are_not_routine () =
    a later re-check. The partition never advanced past Completed, so the
    identical error repeated on every heartbeat forever (alpha 170x one day,
    beta 13x/25min the next, before both were data-cut by hand). This pins
-   that the finalizer now settles such a partition once, terminally, and
-   never revisits it. *)
-let test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_retired
+   that the finalizer now abandons such a partition once and never
+   revisits it. *)
+let test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_retired
   ()
   =
   with_temp_base "board-attention-worker-quarantine-retired" @@ fun base_path ->
@@ -2804,14 +2877,17 @@ let test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_r
   in
   Sys.remove ledger_path;
   (* Before the fix this returned Error "partition candidate is absent during
-     quarantine reconciliation: ..." and fataled the worker at process start. *)
+     quarantine reconciliation: ..." and fataled the worker at process start.
+     Since task-1676 the give-up is [Abandoned]: no judgment is on record, so
+     a still-[Resumable_pending] candidate can still reopen the root later. *)
   ok
-    "reconcile settles the orphaned quarantine instead of failing"
+    "reconcile abandons the orphaned quarantine instead of failing"
     (W.For_testing.reconcile_quarantines ~now:10.0 ~base_path ~keeper_name:"alpha");
   (match (load_one_partition ~base_path).state with
-   | P.Settled _ -> ()
-   | _ ->
-     Alcotest.fail "blocked partition with a retired candidate did not reach Settled");
+   | P.Abandoned { abandoned_at } ->
+     Alcotest.(check (float 0.0)) "give-up time recorded" 10.0 abandoned_at
+   | P.Settled _ -> Alcotest.fail "give-up recorded as a judgment (Settled)"
+   | _ -> Alcotest.fail "blocked partition with a retired candidate did not get abandoned");
   ok
     "second reconciliation pass stays a no-op"
     (W.For_testing.reconcile_quarantines ~now:11.0 ~base_path ~keeper_name:"alpha")
@@ -3022,6 +3098,10 @@ let () =
             `Quick
             test_same_quarantine_command_cas_loser_converges
         ; Alcotest.test_case
+            "requeue records the requesting principal"
+            `Quick
+            test_requeue_records_requesting_principal
+        ; Alcotest.test_case
             "same-timestamp newer Blocked generation is rejected"
             `Quick
             test_stale_blocked_snapshot_cannot_requeue_new_generation
@@ -3063,9 +3143,9 @@ let () =
             `Quick
             test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired
         ; Alcotest.test_case
-            "reconcile_quarantines settles a blocked partition whose candidate was retired"
+            "reconcile_quarantines abandons a blocked partition whose candidate was retired"
             `Quick
-            test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_retired
+            test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_retired
         ] )
     ]
 ;;

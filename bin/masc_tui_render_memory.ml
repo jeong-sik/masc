@@ -7,6 +7,7 @@ module Message_layout = Masc_tui_message_layout
 module Terminal_text = Masc_tui_ansi.Terminal_text
 module Theme = Masc_tui_ansi.Theme
 module Rows = Masc_tui_rows
+module Memory_category = Masc.Keeper_memory_os_types
 
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
@@ -184,8 +185,9 @@ let memory_context_lines (k : memory_keeper_health) =
           then " · read position unreadable"
           else " · nothing read yet"
         | Some position, Some value when position > value.mcf_end_atom ->
-          Printf.sprintf " · read to atom %d, %d atoms past the cut"
-            position (position - value.mcf_end_atom)
+          Printf.sprintf " · read to atom %d, %s past the cut" position
+            (Masc_tui_message_layout.count_noun
+               (position - value.mcf_end_atom) "atom")
         | Some position, Some _ | Some position, None ->
           Printf.sprintf " · read to atom %d" position in
       let rewriting = match cycle.mcc_rewriting_through with
@@ -203,9 +205,11 @@ let memory_context_lines (k : memory_keeper_health) =
               value.mcpo_end_atom (Terminal_text.single_line value.mcpo_trace_id)
           | Context_without_snapshot -> "no snapshot: this turn only"
           | Context_not_applied -> "saved context not applied" in
-        Printf.sprintf "%s · %d request bytes · %s"
+        Printf.sprintf "%s · %s · %s"
           (memory_updated_text (Some value.mcp_prepared_at))
-          value.mcp_request_bytes (Terminal_text.single_line value.mcp_runtime_id), input in
+          (Masc_tui_message_layout.count_noun value.mcp_request_bytes
+             "request byte")
+          (Terminal_text.single_line value.mcp_runtime_id), input in
     let synthesis = match cycle.mcc_synthesis with
       | None -> "not observed since server start"
       | Some value ->
@@ -332,18 +336,47 @@ let memory_row_line columns (k : memory_keeper_health) =
       ; mrow_delta = delta
       }
 
-let format_cat_badge cat =
-  let raw_cat = Terminal_text.single_line (String.trim cat) in
+(* What a row wears in its first cell. The category is the librarian
+   taxonomy, a closed sum the producer writes and the model's schema enum is
+   built from ([Keeper_memory_os_types.category]); the other two are this
+   pane's own words for rows that are not ordinary facts, and the call sites
+   know which they are drawing, so they say so rather than handing over a
+   string to be recognised. *)
+type memory_row_badge =
+  | Badge_category of Memory_category.category
+  | Badge_source
+  | Badge_dropped
+
+(* The word comes from [category_to_string], the one place that spells the
+   taxonomy, so the badge, the category strip and the detail all read one
+   value. A table used to answer both the word and its colour by matching the
+   string: across the fleet's 1768 facts it recognised 749 and let 1019 fall
+   through a catch-all, nine of its eleven spellings matched nothing any
+   keeper writes, and [preference] was renamed to PREF on the row while the
+   detail under it read "preference".
+
+   Only [Blocker] is dressed, because it is the one category whose name is an
+   alarm; the table used to draw it in the same receded style as every word it
+   did not know. The rest share one style: which of them matters is the
+   reader's question, not this cell's. *)
+let format_row_badge badge =
   let cat_style, label =
-    match String.lowercase_ascii raw_cat with
-    | "rule" | "rules" -> (Theme.warn (), "RULE")
-    | "persona" | "identity" -> (Theme.info (), "IDENTITY")
-    | "preference" | "user" -> (Theme.ok (), "PREF")
-    | "architecture" | "system" -> (Theme.info (), "ARCH")
-    | "lesson" -> (Theme.ok (), "LESSON")
-    | "source" -> (Theme.info (), "SOURCE")
-    | "dropped" -> (Theme.bad (), "DROPPED")
-    | other -> (Theme.recede (), String.uppercase_ascii other)
+    match badge with
+    | Badge_source -> (Theme.info (), "SOURCE")
+    | Badge_dropped -> (Theme.bad (), "DROPPED")
+    | Badge_category category ->
+        let style =
+          match category with
+          | Memory_category.Blocker -> Theme.warn ()
+          | Memory_category.Code_change | Memory_category.Fact
+          | Memory_category.Preference | Memory_category.Goal
+          | Memory_category.Constraint | Memory_category.Validated_approach
+          | Memory_category.Lesson ->
+              Theme.recede ()
+        in
+        ( style
+        , String.uppercase_ascii
+            (Memory_category.category_to_string category) )
   in
   let cat_str =
     if Message_layout.display_width label > 10 then
@@ -385,7 +418,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
   let keeper_cells = if is_fleet then 11 else 0 in
   match row with
   | Memory_row_fact fact ->
-      let cat_badge = format_cat_badge fact.mf_category in
+      let cat_badge = format_row_badge (Badge_category fact.mf_category) in
       let age = memory_fact_age_label fact.mf_last_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let prefix = Printf.sprintf "  %s%s %s " keeper_prefix cat_badge age_badge in
@@ -401,7 +434,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
       in
       prefix ^ claim_display
   | Memory_row_source_fact fact ->
-      let cat_badge = format_cat_badge "source" in
+      let cat_badge = format_row_badge Badge_source in
       let age = memory_fact_age_label fact.msf_first_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let raw_path =
@@ -433,7 +466,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
       in
       prefix ^ claim_display
   | Memory_row_invalidation row ->
-      let cat_badge = format_cat_badge "dropped" in
+      let cat_badge = format_row_badge Badge_dropped in
       let age = memory_fact_age_label row.mi_invalidated_at in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let raw_path =
@@ -518,29 +551,41 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
       in
       [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
-      @ [ detail_field "Category:" fact.mf_category
-        ; detail_field "Origin:"
-            (Printf.sprintf "%-15s %sTimeline:%s   First: %s · Last: %s"
-               fact.mf_origin (Theme.recede ()) Ansi.reset
+      @ [ (* The word comes from [Keeper_memory_os_types.category], a closed
+             set this build spells itself, so it is printed rather than
+             escaped: there is no wire text left in it to escape. *)
+          detail_field "Category:"
+            (Memory_category.category_to_string fact.mf_category)
+          (* Two labelled readings used to share this row, the first in a
+             hand-sized slot of fifteen cells. Every other field in this pane
+             owns a row, and the slot was a guess: in the fleet reading the
+             origin carries its keeper, and the shortest keeper name in the
+             fleet already makes it seventeen bytes, so "Timeline:" lost the
+             space before it on every row. Printf's width counts bytes as
+             well, which the middle dot in that reading is three of. *)
+        ; detail_field "Origin:" (Terminal_text.single_line fact.mf_origin)
+        ; detail_field "Timeline:"
+            (Printf.sprintf "First: %s \xc2\xb7 Last: %s"
                (memory_fact_age_label fact.mf_first_seen)
                (memory_fact_age_label fact.mf_last_seen))
         ]
       @ history_lines
-      @ [ detail_field "Memory ID:" fact.mf_memory_id ]
+      @ [ detail_field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id) ]
   | Memory_row_source_fact fact ->
       let claim_lines = detail_claim_lines ~inner_width fact.msf_claim in
       [ Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
-      @ [ detail_field "Bound Path:" fact.msf_path
+      @ [ detail_field "Bound Path:" (Terminal_text.single_line fact.msf_path)
         ; detail_field "File SHA:"
-            (Printf.sprintf "%s · %sFirst Seen:%s %s" fact.msf_sha256
+            (Printf.sprintf "%s · %sFirst Seen:%s %s" 
+               (Terminal_text.single_line fact.msf_sha256)
                (Theme.recede ()) Ansi.reset
                (memory_fact_age_label fact.msf_first_seen))
         ]
   | Memory_row_invalidation row ->
       [ Printf.sprintf "  %s%sDropped / Invalidated Fact%s" Ansi.bold (Theme.bad ()) Ansi.reset
-      ; detail_field "Reason:" row.mi_reason
-      ; detail_field "Source Path:" row.mi_source_path
+      ; detail_field "Reason:" (Terminal_text.single_line row.mi_reason)
+      ; detail_field "Source Path:" (Terminal_text.single_line row.mi_source_path)
       ; detail_field "Dropped At:"
           (memory_fact_age_label row.mi_invalidated_at ^ " ago")
       ]
@@ -589,19 +634,40 @@ let render_memory_body ~cols ~budget (state : state)
   (match state.memory_health with
    | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
    | Some snapshot ->
-       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %s turns unread · %d atoms behind in continuity (%d keepers not measured) · %d failures since server start"
+       (* Every count spells its own noun: each of these reads 1 on an
+          ordinary day, and the line said "1 keepers", "1 atoms",
+          "1 failures". The unread turns keep "?" when nothing measured
+          them, which is not a count and cannot take a noun from one. *)
+       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %s · Librarian: %s unread · %s behind in continuity (%s not measured) · %s since server start"
          snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
-         snapshot.mhs_total_support_invalidations
-         (Option.fold ~none:"?" ~some:string_of_int snapshot.mhs_total_librarian_unread_turns)
-         snapshot.mhs_total_librarian_continuity_unread_atoms
-         snapshot.mhs_total_librarian_continuity_unmeasured
-         snapshot.mhs_total_librarian_failures));
+         (Masc_tui_message_layout.count_noun
+            snapshot.mhs_total_support_invalidations "support invalidation")
+         (match snapshot.mhs_total_librarian_unread_turns with
+          | None -> "? turns"
+          | Some turns -> Masc_tui_message_layout.count_noun turns "turn")
+         (Masc_tui_message_layout.count_noun
+            snapshot.mhs_total_librarian_continuity_unread_atoms "atom")
+         (Masc_tui_message_layout.count_noun
+            snapshot.mhs_total_librarian_continuity_unmeasured "keeper")
+         (Masc_tui_message_layout.count_noun
+            snapshot.mhs_total_librarian_failures "failure")));
   push info_bar;
   let search_bar =
+    (* The one value the list was filtered by. [visible_memory_keepers] narrows
+       on [memory_overview_query], which is the text being typed while a search
+       is open and the applied one otherwise; the bar decided whether to draw
+       from that and then quoted [search_last] instead. Typing the first filter
+       drew the count for what was typed beside an empty pair of quotes, so the
+       line named a filter that matched everything and a number that did not.
+
+       And the noun follows the count: filtering by a Keeper's name usually
+       leaves exactly one, which read "1 matching keepers". The stats line four
+       rows up already counts through the helper that declines the plural. *)
     if query <> "" then
-      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%d matching keepers)  %s[Esc to clear]%s"
-        Ansi.bold Ansi.reset (Terminal_text.single_line state.search_last)
-        shown (Theme.recede ()) Ansi.reset
+      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
+        Ansi.bold Ansi.reset (Terminal_text.single_line query)
+        (Masc_tui_message_layout.count_noun shown "matching keeper")
+        (Theme.recede ()) Ansi.reset
     else ""
   in
   if search_bar <> "" then push search_bar;
@@ -663,7 +729,7 @@ let render_memory_body ~cols ~budget (state : state)
       | Page_unread -> page_unread_note
       | Page_empty when query <> "" ->
         Printf.sprintf "  (no keepers matching \"%s\" \xe2\x80\x94 Esc clears filter)"
-          state.search_last
+          (Terminal_text.single_line query)
       | Page_empty -> "  (no keepers with a memory config or snapshot)"
     in
     push_styled ~style:(Theme.recede ()) note
@@ -716,11 +782,12 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   (* Stats, optional categories/search, two dividers and the column header.
      These are the rows rendered above the list below; detail owns its own
      divider. Input asks for the target cursor because wrapped details can
-     change the height on every movement. *)
+     change the height on every movement. The search row is counted from
+     [memory_search_query], the same value the renderer draws it from. *)
   let fixed_rows =
     4
     + (if Option.is_some state.memory_facts then 1 else 0)
-    + (if String.trim state.search_last <> "" then 1 else 0)
+    + (if String.trim (memory_search_query state) <> "" then 1 else 0)
     + detail_rows + store_error_rows
     + (if Option.is_some state.memory_facts_error then 2 else 0)
   in
@@ -821,9 +888,16 @@ let render_memory_facts_body ~cols ~budget (state : state)
   push stats_line;
   if pills_line <> "" then push pills_line;
   let search_banner =
-    if String.length (String.trim state.search_last) > 0 then
-      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%d matching facts)  %s[Esc to clear]%s"
-        Ansi.bold Ansi.reset (Terminal_text.single_line state.search_last) total
+    (* [memory_search_query], the value [memory_fact_rows] filtered by, for
+       all three of the decision, the quotation and the count. It used to
+       decide and quote from [search_last] while the rows were already
+       narrowed by the text being typed, so a second filter typed over an
+       applied one drew the old word above rows the new one had left. *)
+    let filter = memory_search_query state in
+    if String.trim filter <> "" then
+      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
+        Ansi.bold Ansi.reset (Terminal_text.single_line filter)
+        (Masc_tui_message_layout.count_noun total "matching fact")
         (Theme.recede ()) Ansi.reset
     else ""
   in
@@ -873,9 +947,13 @@ let render_memory_facts_body ~cols ~budget (state : state)
        | Page_failed, _ -> page_failed_note
        | Page_unread, _ -> page_unread_note
        | Page_empty, Category_all ->
-           if state.search_last <> "" then
+           (* [total] counts rows filtered by [memory_search_query], so the
+              note reads the same value; the store is not empty just because
+              a filter being typed matched nothing. *)
+           let filter = memory_search_query state in
+           if String.trim filter <> "" then
              Printf.sprintf "  (no facts matching \"%s\" \xe2\x80\x94 Esc clears filter)"
-               state.search_last
+               (Terminal_text.single_line filter)
            else if is_fleet then
              "  (no facts across any keeper in the fleet)"
            else "  (no facts in either store)"

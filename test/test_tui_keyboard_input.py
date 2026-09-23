@@ -1148,6 +1148,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
                 "attention_queue": [],
                 "attention_items": [],
                 "agent_briefs": [],
+                "keepers_unread": [],
             },
         ),
         "/api/v1/board?sort_by=hot": (200, {"posts": [post]}),
@@ -1170,6 +1171,7 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
         "attention_queue": [],
         "attention_items": [],
         "agent_briefs": [],
+        "keepers_unread": [],
     }
 
 
@@ -14010,8 +14012,68 @@ def duplicated_attention_briefing() -> HttpResponse:
             "attention_items": [],
             "agent_briefs": [],
             "keeper_briefs": [],
+            "keepers_unread": [],
         },
     )
+
+
+def unread_keeper_briefing() -> HttpResponse:
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-23T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [],
+            # The server listed this Keeper but could not build its row
+            # (#38090). It has no brief, and the Overview still counts it.
+            "keepers_unread": [
+                {
+                    "name": "k-unread",
+                    "reason": "row_raised",
+                    "detail": "Failure(\"default runtime not initialized\")",
+                }
+            ],
+        },
+    )
+
+
+def unread_keeper_counted_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Keepers: 1 (1 unreadable)",
+            start=0,
+            timeout=10.0,
+        )
+        # The Team block names the same Keeper, with why its row was unread.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"k-unread",
+            start=0,
+            timeout=10.0,
+        )
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
 
 
 def attention_drawn_once_interaction() -> Interaction:
@@ -14588,6 +14650,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=attention_drawn_once_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Unread keeper counted",
+        interact=unread_keeper_counted_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": unread_keeper_briefing(),
         },
     )
     composer_requests: HttpRequests = []
@@ -16483,10 +16553,14 @@ def run_schedule_source_status_regression(executable: str) -> None:
                     "pty": base64.b64encode(zlib.compress(captured[start:end])).decode(),
                 }), flush=True)
 
+            # Wait on "HTTP 503", the error the Schedules pane draws, not a bare
+            # "503": the palette footer prints the fixture server's random port,
+            # and RC run 35815189729 drew "Port: 35039", so the bare needle matched
+            # the palette frame before Schedules ever rendered.
             palette_go(process, master_fd, output, b"go schedules",
-                       b"503" if initial_error else b"status:running")
+                       b"HTTP 503" if initial_error else b"status:running")
             if initial_error:
-                screen = require("data unreliable:", "schedule load failed:", "503")
+                screen = require("data unreliable:", "schedule load failed:", "HTTP 503")
                 for absent in (b"Requests: 0", b"no scheduled automation", b"schedule-proof-701"):
                     if absent in screen:
                         raise AssertionError(f"Failed initial source invented data: {screen!r}")
@@ -16503,23 +16577,23 @@ def run_schedule_source_status_regression(executable: str) -> None:
                         f"the schedule count and its next wake split rows: {summary_row!r}"
                     )
                 fail_reads.set()
-                send_and_wait(process, master_fd, output, b"r", b"503")
-                require("이전 조회 유지 ·", "503", "schedule-proof-701",
+                send_and_wait(process, master_fd, output, b"r", b"HTTP 503")
+                require("이전 조회 유지 ·", "HTTP 503", "schedule-proof-701",
                         "status:running", "Requests: 1")
                 evidence("retained-list-refresh-failed")
                 send_and_wait(process, master_fd, output, b"\x1b[C", b"instance-proof-701")
-                require("이전 조회 유지 ·", "503", "instance-proof-701")
+                require("이전 조회 유지 ·", "HTTP 503", "instance-proof-701")
                 # The warning belongs to the source, so it remains visible
                 # while the retained detail body is scrolled.
                 send_and_wait(process, master_fd, output, b"\x1b[6~", b"DELIVERY EVIDENCE")
-                require("이전 조회 유지 ·", "503")
+                require("이전 조회 유지 ·", "HTTP 503")
                 send_and_wait(process, master_fd, output, b"\x1b[D", b"status:running")
 
             recovered_reads.set()
             fail_reads.clear()
             send_and_wait(process, master_fd, output, b"r", b"recovered-keeper")
             screen = require("status:scheduled", "Requests: 1", "schedule-proof-701")
-            for absent in ("조회 실패:", "갱신 실패:", "503", "status:running"):
+            for absent in ("조회 실패:", "갱신 실패:", "HTTP 503", "status:running"):
                 if absent.encode() in screen:
                     raise AssertionError(f"Recovered source retained old status: {screen!r}")
             evidence("source-recovered")

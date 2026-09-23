@@ -827,7 +827,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 10
+             [ "version", `Int 11
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `List []
@@ -1419,8 +1419,9 @@ let test_an_observation_survives_the_row_round_trip () =
        ignore (install_exn ~base_path);
        ensure_keeper_exists ~base_path ~keeper_name;
        let refusal : Rule_types.observed_refusal =
-         { observed_status = Rule_types.Observed_exit 2
-         ; observed_stderr = "sh: 1: cannot create w: Permission denied"
+         { observed_refusal_kind = Rule_types.Setup_failed
+         ; observed_status = Rule_types.Observed_exit 127
+         ; observed_stderr = "masc-exec-shim: Unix.Unix_error(Unix.ENOENT, \"chdir\", \"/w\")"
          ; observed_stderr_omitted_bytes = 0
          }
        in
@@ -2271,7 +2272,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v10 snapshot" 10 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v11 snapshot" 11 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -3868,7 +3869,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 10
+            [ "version", `Int 11
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `String "malformed-pending-array"
@@ -3905,7 +3906,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 10
+               [ "version", `Int 11
                ; "generation", `Int 1
                ; "next_sequence", `Int 1
                ; "pending", `String "malformed-pending-array"
@@ -4014,7 +4015,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 8 is unsupported (current 10); reset \
+                  "gate_pending.version 8 is unsupported (current 11); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -4028,6 +4029,163 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
          (Sys.file_exists store_path);
        let preserved = read_pending_snapshot_bytes ~base_path in
        Alcotest.(check string) "content preserved byte-for-byte" original preserved)
+;;
+
+(* The durable snapshot of a store holding one pending entry with an
+   observation, as the current code writes it, and that entry's JSON. A v10
+   store is this shape with [version] 10 and no [refusal_kind]. *)
+let snapshot_with_one_observed_entry ~base_path =
+  ignore (install_exn ~base_path);
+  ensure_keeper_exists ~base_path ~keeper_name:"queue-v10";
+  let refusal : Rule_types.observed_refusal =
+    { observed_refusal_kind = Rule_types.Setup_failed
+    ; observed_status = Rule_types.Observed_exit 127
+    ; observed_stderr = ""
+    ; observed_stderr_omitted_bytes = 0
+    }
+  in
+  (match
+     AQ.submit_pending
+       ~keeper_name:"queue-v10"
+       ~tool_name:"external-effect"
+       ~call_summary:None
+       ~input:(`Assoc [ "argv", `List [ `String "touch"; `String "w" ] ])
+       ~base_path
+       ~observation:refusal
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (AQ.storage_error_to_string error));
+  let snapshot = read_pending_snapshot ~base_path in
+  let entry =
+    match Yojson.Safe.Util.member "pending" snapshot with
+    | `List [ entry ] -> entry
+    | _ -> Alcotest.fail "expected exactly one pending entry"
+  in
+  AQ.For_testing.reset_runtime_state ();
+  snapshot, entry
+;;
+
+let map_fields f = function
+  | `Assoc fields -> `Assoc (f fields)
+  | json -> Alcotest.failf "expected an object, got %s" (Yojson.Safe.to_string json)
+;;
+
+(* The entry as a store written before [refusal_kind] existed holds it. *)
+let without_refusal_kind entry =
+  map_fields
+    (List.map (fun (key, value) ->
+       if String.equal key "observation"
+       then key, map_fields (List.remove_assoc "refusal_kind") value
+       else key, value))
+    entry
+;;
+
+let write_log_row ~base_path row =
+  Out_channel.with_open_text (AQ.For_testing.pending_log_path ~base_path) (fun channel ->
+    output_string channel (Yojson.Safe.to_string row ^ "\n"))
+;;
+
+(* A v10 store is refused by its version before any row is decoded. Its
+   observations carry no refusal_kind, and its log rows would otherwise be
+   decoded one by one and fail the whole load on the first such row; the
+   version check names the reset instead. *)
+let test_v10_store_requires_runtime_reset_before_rows_are_read () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let snapshot, entry = snapshot_with_one_observed_entry ~base_path in
+       let v10_entry = without_refusal_kind entry in
+       let generation = Yojson.Safe.Util.(member "generation" snapshot |> to_int) in
+       let next_sequence = Yojson.Safe.Util.(member "next_sequence" snapshot |> to_int) in
+       write_pending_snapshot
+         ~base_path
+         (map_fields
+            (List.map (fun (key, value) ->
+               match key with
+               | "version" -> key, `Int 10
+               | "pending" -> key, `List [ v10_entry ]
+               | _ -> key, value))
+            snapshot);
+       write_log_row
+         ~base_path
+         (`Assoc
+            [ "kind", `String "pending_upsert"
+            ; "generation", `Int generation
+            ; "next_sequence", `Int next_sequence
+            ; "entry", v10_entry
+            ]);
+       match AQ.install_persistence ~base_path with
+       | Ok _ -> Alcotest.fail "a v10 store must fail install"
+       | Error
+           (AQ.Install_storage_failed
+             { reason =
+                 "gate_pending.version 10 is unsupported (current 11); reset \
+                  runtime state before restarting MASC"
+             ; _
+             }) ->
+         Alcotest.(check bool) "the log is left for the operator reset" true
+           (Sys.file_exists (AQ.For_testing.pending_log_path ~base_path))
+       | Error error ->
+         Alcotest.failf
+           "a v10 store returned the wrong error: %s"
+           (AQ.install_error_to_string error))
+;;
+
+(* At the current version, an observation without refusal_kind is refused
+   rather than read with a guessed kind: the snapshot validation names the
+   field, and a log row carrying it fails the load. *)
+let test_a_current_row_without_refusal_kind_is_refused () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let snapshot, entry = snapshot_with_one_observed_entry ~base_path in
+       let stripped = without_refusal_kind entry in
+       let with_stripped_entry =
+         map_fields
+           (List.map (fun (key, value) ->
+              match key with
+              | "pending" -> key, `List [ stripped ]
+              | _ -> key, value))
+           snapshot
+       in
+       (match AQ.validate_pending_snapshot ~base_path with_stripped_entry with
+        | Ok () -> Alcotest.fail "a current entry without refusal_kind was accepted"
+        | Error reason ->
+          Alcotest.(check bool) "the refusal names the field" true
+            (String_util.contains_substring reason "refusal_kind"));
+       (match AQ.validate_pending_snapshot ~base_path snapshot with
+        | Ok () -> ()
+        | Error reason -> Alcotest.failf "the untouched snapshot was refused: %s" reason);
+       let generation = Yojson.Safe.Util.(member "generation" snapshot |> to_int) in
+       let next_sequence = Yojson.Safe.Util.(member "next_sequence" snapshot |> to_int) in
+       write_pending_snapshot
+         ~base_path
+         (map_fields
+            (List.map (fun (key, value) ->
+               match key with
+               | "pending" -> key, `List []
+               | _ -> key, value))
+            snapshot);
+       write_log_row
+         ~base_path
+         (`Assoc
+            [ "kind", `String "pending_upsert"
+            ; "generation", `Int generation
+            ; "next_sequence", `Int next_sequence
+            ; "entry", stripped
+            ]);
+       match AQ.install_persistence ~base_path with
+       | Ok _ -> Alcotest.fail "a log row without refusal_kind was installed"
+       | Error _ -> ())
 ;;
 
 let test_unreadable_snapshot_fails_closed_and_is_preserved () =
@@ -4425,7 +4583,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 10
+             [ "version", `Int 11
             ; "generation", `Int 1
             ; "next_sequence", `Int 2
             ; "pending", `List []
@@ -4747,7 +4905,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 10
+             [ "version", `Int 11
             ; "generation", `Int 1
             ; "next_sequence", `Int 4
             ; "pending", `List []
@@ -5531,6 +5689,7 @@ let test_http_success_exposes_failed_resolution_and_rule_delete_audit () =
          match
            Server_dashboard_http.dashboard_gate_rule_delete_http_json
              ~base_path
+             ~deleted_by:"http-test-operator"
              ~args:(`Assoc [ "id", `String rule_id ])
          with
          | Ok json -> json
@@ -5546,6 +5705,80 @@ let test_http_success_exposes_failed_resolution_and_rule_delete_audit () =
          (delete_receipt |> member "recorded" |> to_bool);
        Alcotest.(check string) "delete receipt carries exact append stage" "append"
          (delete_receipt |> member "stage" |> to_string))
+;;
+
+(* #38060: a rule's audit rows name who made it and who removed it. The
+   creator is the principal whose remembered approval produced the rule; the
+   deleter is the principal the delete route authenticated, a different
+   person than the rule's author. *)
+let test_rule_audit_rows_name_creator_and_deleter () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-rule-audit-actor" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       ignore (install_exn ~base_path);
+       let approval_id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "rule-actor" ])
+       in
+       let open Yojson.Safe.Util in
+       let rule_id =
+         match
+           Server_dashboard_http.dashboard_gate_resolve_http_json
+             ~base_path
+             ~created_by:"rule-author"
+             ~args:
+               (`Assoc
+                  [ "id", `String approval_id
+                  ; "decision", `String "approve"
+                  ; "remember_rule", `Bool true
+                  ])
+         with
+         | Ok json -> json |> member "rule_id" |> to_string
+         | Error error ->
+           Alcotest.fail
+             (Server_dashboard_http.approval_resolve_http_error_to_string error)
+       in
+       (match
+          Server_dashboard_http.dashboard_gate_rule_delete_http_json
+            ~base_path
+            ~deleted_by:"rule-remover"
+            ~args:(`Assoc [ "id", `String rule_id ])
+        with
+        | Ok json ->
+          Alcotest.(check bool) "rule delete succeeded" true
+            (json |> member "ok" |> to_bool)
+        | Error error -> Alcotest.fail error);
+       let rows =
+         match Keeper_approval.Audit.read_recent ~base_path ~n:50 () with
+         | Ok rows -> rows
+         | Error _ -> Alcotest.fail "audit rows unreadable"
+       in
+       let actor_of event =
+         match
+           List.find_opt
+             (fun row ->
+                String.equal (row |> member "event" |> to_string) event
+                && String.equal (row |> member "id" |> to_string) rule_id)
+             rows
+         with
+         | Some row -> row |> member "actor"
+         | None -> Alcotest.fail ("no audit row for " ^ event)
+       in
+       Alcotest.(check yojson) "rule_created names the rule author"
+         (`String "rule-author")
+         (actor_of "rule_created");
+       Alcotest.(check yojson) "rule_deleted names the authenticated deleter"
+         (`String "rule-remover")
+         (actor_of "rule_deleted"))
 ;;
 
 (* #26126: resolution writes the judge evidence the entry carried onto the
@@ -5912,6 +6145,14 @@ let () =
             `Quick
             test_unsupported_version_snapshot_requires_runtime_reset
         ; Alcotest.test_case
+            "v10 store requires runtime reset before rows are read"
+            `Quick
+            test_v10_store_requires_runtime_reset_before_rows_are_read
+        ; Alcotest.test_case
+            "a current row without refusal_kind is refused"
+            `Quick
+            test_a_current_row_without_refusal_kind_is_refused
+        ; Alcotest.test_case
             "unreadable current snapshot is preserved"
             `Quick
             test_unreadable_snapshot_fails_closed_and_is_preserved
@@ -5995,6 +6236,10 @@ let () =
             "HTTP success exposes failed resolution and rule audit"
             `Quick
             test_http_success_exposes_failed_resolution_and_rule_delete_audit
+        ; Alcotest.test_case
+            "rule audit rows name creator and deleter"
+            `Quick
+            test_rule_audit_rows_name_creator_and_deleter
         ; Alcotest.test_case
             "delivery wire shape drops the request context"
             `Quick

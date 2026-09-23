@@ -1,4 +1,5 @@
 open Alcotest
+module Cat = Masc.Keeper_memory_os_types
 module Types = Masc_tui_types
 module Decode = Masc.Tui_decode
 module Layout = Masc_tui_message_layout
@@ -35,7 +36,7 @@ let test_age_label () =
 let test_fact_row_line () =
   let fact : Decode.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
-    ; mf_category = "persona"
+    ; mf_category = Cat.Preference
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -79,7 +80,7 @@ let test_invalidation_row_line () =
 let test_detail_names_the_use_record () =
   let fact : Decode.memory_fact =
     { mf_claim = "the deploy needs assets"
-    ; mf_category = "lesson"
+    ; mf_category = Cat.Lesson
     ; mf_origin = "authored"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -109,7 +110,7 @@ let test_detail_names_the_use_record () =
 let test_detail_lines () =
   let fact : Decode.memory_fact =
     { mf_claim = "Constitution requires evidence for claims"
-    ; mf_category = "rule"
+    ; mf_category = Cat.Constraint
     ; mf_origin = "docs/constitution.xml"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -178,7 +179,7 @@ let check_claim_rows ~what lines =
 let test_detail_keeps_the_claim_line_breaks () =
   let fact : Decode.memory_fact =
     { mf_claim = multi_line_claim
-    ; mf_category = "rule"
+    ; mf_category = Cat.Constraint
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -239,7 +240,7 @@ let test_detail_lines_source_and_invalidation () =
 let test_every_detail_block_starts_its_values_in_one_column () =
   let fact : Decode.memory_fact =
     { mf_claim = "the deploy needs assets"
-    ; mf_category = "lesson"
+    ; mf_category = Cat.Lesson
     ; mf_origin = "authored"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -287,7 +288,10 @@ let test_every_detail_block_starts_its_values_in_one_column () =
     |> List.filter_map (fun line ->
            Option.map (fun column -> (line, column)) (value_column line))
   in
-  check int "nine labelled rows across the three blocks" 9 (List.length columns);
+  (* Ten since Timeline took a row of its own. It used to ride in the Origin
+     row behind a fifteen-cell slot, so its label was the one label on this
+     pane that did not start where the others do. *)
+  check int "ten labelled rows across the three blocks" 10 (List.length columns);
   match columns with
   | [] -> fail "no labelled detail rows"
   | (_, first) :: _ ->
@@ -379,6 +383,84 @@ let test_an_empty_memory_page_uses_the_shared_notes () =
   check bool "the body leaves the fleet key to the footer" false
     (contains "Fleet Memory Search" (lines unread))
 ;;
+
+(* The filter bar names the filter its number is over.
+
+   [visible_memory_keepers] narrows on [memory_overview_query] -- the text
+   being typed while a search is open, the applied one otherwise. The bar
+   decided whether to draw from that value and then quoted [search_last]
+   instead, so typing the first filter drew the live count beside an empty
+   pair of quotes: a filter that matches everything, and a number that says
+   one keeper.
+
+   The noun follows the number too. Filtering by a Keeper's name usually
+   leaves exactly one, which read "1 matching keepers". *)
+let test_the_memory_filter_bar_names_the_query_it_counted () =
+  let bar ~typing query =
+    let state = make_state () in
+    state.Types.memory_health <-
+      Some
+        (let keeper = make_keeper_health ~keeper_id:"alpha" ~facts:10
+            ~snapshot_bytes:1024 in
+         let other = make_keeper_health ~keeper_id:"beta" ~facts:4
+             ~snapshot_bytes:512 in
+         { Decode.mhs_generated_at = 1000.0
+         ; mhs_keepers = [ keeper; other ]
+         ; mhs_total_facts = 14
+         ; mhs_total_observed_facts = 14
+         ; mhs_total_derived_facts = 0
+         ; mhs_total_support_invalidations = 0
+         ; mhs_total_snapshot_bytes = 1536
+         ; mhs_total_source_facts = 0
+         ; mhs_total_source_invalidations = 0
+         ; mhs_total_source_snapshot_bytes = 0
+         ; mhs_total_librarian_failures = 0
+         ; mhs_total_librarian_unread_turns = Some 0
+         ; mhs_total_librarian_continuity_unread_atoms = 0
+         ; mhs_total_librarian_continuity_unmeasured = 0
+         ; mhs_total_read_errors = 0
+         ; mhs_total_source_read_errors = 0
+         ; mhs_warn_alerts = 0
+         ; mhs_error_alerts = 0
+         ; mhs_starving_keepers = 0
+         ; mhs_refused_keepers = []
+         ; mhs_total_vision_ingest_errors = 0
+         });
+    state.Types.search <- (if typing then Some query else None);
+    state.Types.search_last <- (if typing then "" else query);
+    let drawn = ref [] in
+    let add line = drawn := line :: !drawn in
+    Render_memory.render_memory_body ~cols:110 ~budget:24 state ~push:add
+      ~push_styled:(fun ~style:_ line -> add line)
+      ~push_selected:add
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !drawn)
+  in
+  List.iter
+    (fun typing ->
+      let drawn = bar ~typing "alpha" in
+      check bool
+        (Printf.sprintf "typing=%b: the bar quotes the filter it counted" typing)
+        true
+        (contains "\"alpha\"" drawn);
+      check bool
+        (Printf.sprintf "typing=%b: and never an empty one" typing)
+        false
+        (contains "Filter [/]:\027[0m \"\"" drawn);
+      check bool
+        (Printf.sprintf "typing=%b: one match takes the singular" typing)
+        true
+        (contains "(1 matching keeper)" drawn))
+    [ true; false ];
+  (* Two matches keep the plural, so the case is about the number and not
+     about dropping an "s". *)
+  check bool "two matches keep the plural" true
+    (contains "(2 matching keepers)" (bar ~typing:true "a"));
+  (* A filter being typed that matches no keeper is the one the empty note
+     quotes, not the applied one (empty here). *)
+  check bool "the empty note quotes the filter being typed" true
+    (contains "(no keepers matching \"zzz\"" (bar ~typing:true "zzz"))
 
 let test_render_memory_body_with_keepers () =
   let state = make_state () in
@@ -504,7 +586,13 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
     (contains "continuity behind ?" both);
   check bool "a measured lag prints its number" true (contains "continuity behind 3" both);
   check bool "the header sums the measured keepers and counts the rest" true
-    (contains "3 atoms behind in continuity (1 keepers not measured)" both)
+    (contains "3 atoms behind in continuity (1 keeper not measured)" both);
+  (* One is the count these reach on an ordinary day, and the line used to
+     spell every noun plural whatever the number in front of it was. *)
+  check bool "a count of one takes the singular" true
+    (contains "1 keeper not measured" both);
+  check bool "and a count that is not one keeps the plural" true
+    (contains "3 atoms behind" both)
 ;;
 
 (* How the last pass ended and what the journal last failed with are drawn
@@ -630,11 +718,203 @@ let test_render_memory_body_cursor_clamping () =
   check bool "selected row was clamped and called" true !selected_called
 ;;
 
+(* The twin of [test_the_memory_filter_bar_names_the_query_it_counted], on the
+   fact browser's own bar. Its rows are narrowed by the text being typed while
+   a search is open, and the bar decided and quoted from the applied filter
+   instead: with one already applied, a second one typed over it drew the old
+   word above rows the new one had left. The empty-quotes shape the keeper
+   table showed never appeared here, because the old word was still there to
+   draw -- which is why this one needs a filter applied first. *)
+let test_the_fact_filter_bar_names_the_query_it_counted () =
+  let claim_fact claim id : Decode.memory_fact =
+    { mf_claim = claim
+    ; mf_category = Cat.Fact
+    ; mf_origin = "manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = id
+    ; mf_events = Decode.no_memory_fact_events
+    }
+  in
+  let state_of ~applied ~typing =
+    let state = make_state () in
+    let store : Decode.memory_ordinary_store =
+      { mos_revision = 1
+      ; mos_updated_at = 1000.0
+      ; mos_facts =
+          [ claim_fact "alpha keeps the deploy assets" "mem-alpha"
+          ; claim_fact "beta claims the port" "mem-beta"
+          ]
+      }
+    in
+    state.memory_facts <-
+      Some
+        { Decode.mfs_keeper = "alpha"
+        ; mfs_ordinary = Decode.Memory_store_present store
+        ; mfs_source = Decode.Memory_store_absent
+        ; mfs_events_read_error = None
+        };
+    state.memory_facts_cursor <- 0;
+    state.Types.search_last <- applied;
+    state.Types.search <- typing;
+    state
+  in
+  let bar ~applied ~typing =
+    let state = state_of ~applied ~typing in
+    let drawn = ref [] in
+    let add line = drawn := line :: !drawn in
+    Render_memory.render_memory_facts_body ~cols:110 ~budget:24 state ~push:add
+      ~push_styled:(fun ~style:_ line -> add line)
+      ~push_selected:add
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !drawn)
+  in
+  let applied_only = bar ~applied:"alpha" ~typing:None in
+  check bool "the applied filter is the one quoted" true
+    (contains "\"alpha\"" applied_only);
+  check bool "and its one match takes the singular" true
+    (contains "(1 matching fact)" applied_only);
+  let typed_over = bar ~applied:"alpha" ~typing:(Some "beta") in
+  check bool "the filter being typed is the one quoted" true
+    (contains "\"beta\"" typed_over);
+  check bool "and the filter it replaced is not" false
+    (contains "\"alpha\"" typed_over);
+  check bool "its one match takes the singular too" true
+    (contains "(1 matching fact)" typed_over);
+  (* The empty note reads the same filter the rows were counted by. With no
+     applied filter it said the store was empty; over an applied one it
+     quoted the old word. *)
+  check bool "a first filter matching nothing is quoted, not an empty store" true
+    (contains "(no facts matching \"zzz\"" (bar ~applied:"" ~typing:(Some "zzz")));
+  let typed_over_nothing = bar ~applied:"alpha" ~typing:(Some "zzz") in
+  check bool "a filter typed over an applied one is the one quoted" true
+    (contains "(no facts matching \"zzz\"" typed_over_nothing);
+  check bool "and the applied one is not" false
+    (contains "\"alpha\"" typed_over_nothing);
+  (* The list height leaves a row for the filter bar exactly when the bar is
+     drawn, whether the filter is being typed or applied. *)
+  let height ~applied ~typing =
+    Render_memory.memory_facts_content_height ~cols:110 ~budget:24 ~cursor:0
+      (state_of ~applied ~typing)
+  in
+  check int "a typed filter takes the same row as the applied one"
+    (height ~applied:"alpha" ~typing:None)
+    (height ~applied:"" ~typing:(Some "alpha"));
+  check int "an empty search box over an applied filter draws no bar and keeps no row"
+    (height ~applied:"" ~typing:None)
+    (height ~applied:"alpha" ~typing:(Some ""))
+;;
+
+(* The first cell of a memory row. It used to answer both the word and its
+   colour from the word itself, through a hand-written table of eleven
+   spellings. Nine of them matched nothing any keeper writes, and across the
+   fleet's 1768 facts 1019 fell through the catch-all -- [blocker] among them,
+   receded like every word the table did not know, while [lesson] drew in the
+   colour of something going right. These pin that the cell now says what the
+   store says. *)
+let test_the_row_badge_says_what_the_store_says () =
+  let fact_row (category : Cat.category) : Types.memory_fact_row =
+    Types.Memory_row_fact
+      { Decode.mf_claim = "a claim of a fixed length"
+      ; mf_category = category
+      ; mf_origin = "authored"
+      ; mf_first_seen = 100.0
+      ; mf_last_seen = 200.0
+      ; mf_memory_id = "mem-1"
+      ; mf_events = Decode.no_memory_fact_events
+      }
+  in
+  let line row = Render_memory.memory_fact_row_line ~cols:120 row in
+  check bool "a category the old table never named is spelled whole" true
+    (contains "[BLOCKER   ]" (line (fact_row Cat.Blocker)));
+  (* The one value the table renamed: the row read PREF while the detail under
+     it and the category strip above it both read "preference". *)
+  check bool "the renamed one is spelled as it is stored" true
+    (contains "[PREFERENCE]" (line (fact_row Cat.Preference)));
+  check bool "and not by the old short name" false
+    (contains "[PREF " (line (fact_row Cat.Preference)));
+  (* A word wider than the cell keeps the cell's width and says it was cut. *)
+  check bool "a long one is cut with its mark" true
+    (contains "[VALIDATED\xe2\x80\xa6]" (line (fact_row Cat.Validated_approach)))
+;;
+
+(* Only [Blocker] is dressed. It is the one category whose name is an alarm,
+   and the table this replaced drew it in the same receded style as every
+   word it did not know, while [lesson] drew in the colour of something going
+   right. The rest share one style: two rows that differ only in a category
+   the reader has no reason to be steered toward differ only in that word. *)
+let test_only_the_alarm_category_is_dressed () =
+  let fact_row (category : Cat.category) : Types.memory_fact_row =
+    Types.Memory_row_fact
+      { Decode.mf_claim = "a claim of a fixed length"
+      ; mf_category = category
+      ; mf_origin = "authored"
+      ; mf_first_seen = 100.0
+      ; mf_last_seen = 200.0
+      ; mf_memory_id = "mem-1"
+      ; mf_events = Decode.no_memory_fact_events
+      }
+  in
+  let blank word line =
+    let n = String.length word and h = String.length line in
+    let rec go i =
+      if i + n > h then line
+      else if String.equal (String.sub line i n) word then
+        String.sub line 0 i ^ String.make n '.'
+        ^ String.sub line (i + n) (h - i - n)
+      else go (i + 1)
+    in
+    go 0
+  in
+  let dress category word =
+    blank word (Render_memory.memory_fact_row_line ~cols:120 (fact_row category))
+  in
+  (* Both are ten cells, so neither is padded and only the letters differ. *)
+  check string "preference wears what constraint wears"
+    (dress Cat.Constraint "CONSTRAINT")
+    (dress Cat.Preference "PREFERENCE");
+  check bool "blocker does not" true
+    (not
+       (String.equal
+          (blank "BLOCKER" (Render_memory.memory_fact_row_line ~cols:120
+                              (fact_row Cat.Blocker)))
+          (blank "GOAL" (Render_memory.memory_fact_row_line ~cols:120
+                           (fact_row Cat.Goal)))))
+;;
+
+(* The two words that are this pane's own, not the producer's: a row from the
+   source-bound store and a row the store dropped. They keep their colour,
+   because the pane knows which kind of row it is drawing. *)
+let test_the_panes_own_two_words_survive () =
+  let source_row : Types.memory_fact_row =
+    Types.Memory_row_source_fact
+      { Decode.msf_claim = "the config floor is masc.core"
+      ; msf_first_seen = 100.0
+      ; msf_path = "docs/config.md"
+      ; msf_sha256 = "cafe0123beef4567cafe0123beef4567"
+      }
+  in
+  let dropped_row : Types.memory_fact_row =
+    Types.Memory_row_invalidation
+      { Decode.mi_source_path = "docs/config.md"
+      ; mi_invalidated_at = 200.0
+      ; mi_reason = "the file moved"
+      }
+  in
+  check bool "the source-bound row" true
+    (contains "[SOURCE    ]"
+       (Render_memory.memory_fact_row_line ~cols:120 source_row));
+  check bool "the dropped row" true
+    (contains "[DROPPED   ]"
+       (Render_memory.memory_fact_row_line ~cols:120 dropped_row))
+;;
+
 let test_render_memory_facts_body () =
   let state = make_state () in
   let fact : Decode.memory_fact =
     { mf_claim = "Architecture uses modular TUI components"
-    ; mf_category = "architecture"
+    ; mf_category = Cat.Fact
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -682,7 +962,7 @@ let test_rows_and_header_share_one_grid () =
   let cols = 120 in
   let fact : Decode.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
-    ; mf_category = "persona"
+    ; mf_category = Cat.Preference
     ; mf_origin = "manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -776,8 +1056,8 @@ let three_kinds_state ?(keeper = "alpha") () =
     { mos_revision = 1
     ; mos_updated_at = 1000.0
     ; mos_facts =
-        [ fact "architecture" "The renderer draws the board"
-        ; fact "persona" "Roger reads for the tester"
+        [ fact Cat.Fact "The renderer draws the board"
+        ; fact Cat.Preference "Roger reads for the tester"
         ]
     }
   in
@@ -842,7 +1122,7 @@ let test_memory_search_uses_the_filter_text_and_query () =
     | Decode.Memory_store_present store -> store
     | _ -> fail "fixture ordinary store missing" in
   let original = List.hd ordinary.mos_facts in
-  let fact = { original with mf_claim = "deploy"; mf_category = "note";
+  let fact = { original with mf_claim = "deploy"; mf_category = Cat.Fact;
                             mf_origin = "authored" } in
   state.memory_facts <- Some { snapshot with mfs_ordinary =
     Decode.Memory_store_present { ordinary with mos_facts = [fact] } };
@@ -860,7 +1140,10 @@ let test_memory_search_uses_the_filter_text_and_query () =
   in
   List.iter (fun typing ->
     List.iter (fun query -> verify ~typing query 1)
-      ["deploy note"; "  deploy note  "; "authored";
+      (* The category is part of a fact's search text, and it is the
+         taxonomy's word now: this read "deploy note" while the fixture's
+         category was the invented "note". *)
+      ["deploy fact"; "  deploy fact  "; "authored";
        "runtime.toml config/rt.toml"; "superseded legacy_docs.md"];
     verify ~typing "not-present" 0) [true; false];
   state.search <- Some "   ";
@@ -868,8 +1151,8 @@ let test_memory_search_uses_the_filter_text_and_query () =
     (List.length (Types.memory_fact_rows state));
   check (option int) "blank query has no matches to jump" (Some 0)
     (Types.surface_search_count state Types.Memory ~query:"   ");
-  check string "other surfaces retain literal whitespace" "  deploy note  "
-    (Types.surface_search_query Types.Board "  deploy note  ")
+  check string "other surfaces retain literal whitespace" "  deploy fact  "
+    (Types.surface_search_query Types.Board "  deploy fact  ")
 ;;
 
 (* What the facts title actually has to spend. A terminal is not a surface: the
@@ -979,7 +1262,7 @@ let test_the_narrowest_body_spends_its_row_on_the_sort () =
 let test_fleet_fact_row_line () =
   let fact : Decode.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
-    ; mf_category = "persona"
+    ; mf_category = Cat.Preference
     ; mf_origin = "tester · manual"
     ; mf_first_seen = 100.0
     ; mf_last_seen = 200.0
@@ -992,7 +1275,11 @@ let test_fleet_fact_row_line () =
   check bool "fleet fact row line bounded" true (Layout.display_width line <= 120);
   let stripped = Masc_tui_theme.strip_sgr line in
   check bool "fleet fact row has tester tag" true (contains "tester" stripped);
-  check bool "fleet fact row has IDENTITY badge" true (contains "IDENTITY" stripped)
+  (* The badge spells the category the store holds. It used to answer
+     "IDENTITY" here, from a table that renamed four words and recognised
+     none of the eight the fleet writes except "lesson" and this one. *)
+  check bool "fleet fact row spells its category" true
+    (contains "PREFERENCE" stripped)
 ;;
 
 let test_render_memory_body_sorting () =
@@ -1149,7 +1436,7 @@ let test_facts_selection_follows_the_rendered_viewport () =
     List.init 24 (fun index ->
       { Decode.mf_claim = Printf.sprintf "fact-%02d %s" index
           (if index mod 2 = 0 then "short" else String.make 180 'x')
-      ; mf_category = "general"
+      ; mf_category = Cat.Fact
       ; mf_origin = "manual"
       ; mf_first_seen = 100.0
       ; mf_last_seen = 200.0
@@ -1249,6 +1536,10 @@ let () =
     ; ( "render_body"
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
+        ; test_case "the filter bar names the query it counted" `Quick
+            test_the_memory_filter_bar_names_the_query_it_counted
+        ; test_case "the fact filter bar names the query it counted" `Quick
+            test_the_fact_filter_bar_names_the_query_it_counted
         ; test_case "the librarian line says when the continuity lag is unknown" `Quick
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
         ; test_case "the librarian line speaks the pass ending and its cause" `Quick
@@ -1281,6 +1572,12 @@ let () =
             test_the_category_row_is_the_shared_strip
         ; test_case "the narrowest body spends its row on the sort" `Quick
             test_the_narrowest_body_spends_its_row_on_the_sort
+        ; test_case "the row badge says what the store says" `Quick
+            test_the_row_badge_says_what_the_store_says
+        ; test_case "only the alarm category is dressed" `Quick
+            test_only_the_alarm_category_is_dressed
+        ; test_case "the pane's own two words survive" `Quick
+            test_the_panes_own_two_words_survive
         ] )
     ]
 ;;

@@ -9,9 +9,18 @@
     module executes discovery and inspection on the endpoint in a single
     bounded pass. *)
 
+(** What the endpoint probe learned about a checkout's [origin] remote. *)
+type remote_origin =
+  | Origin_url of string
+  | Origin_not_configured
+      (** [git remote get-url origin] exited 2: the repository has no
+          [origin] remote. *)
+  | Origin_unread
+      (** The lookup timed out, git was missing, or it failed otherwise. *)
+
 type inspected_checkout =
   { checkout : Keeper_playground_checkouts.checkout
-  ; origin_url : string option
+  ; origin : remote_origin
   ; branch : (string, string) result
   ; head : (string, string) result
   ; dirty : (bool * int, string) result
@@ -31,6 +40,11 @@ val parse_probe_json :
     script. Every field is read by shape: a row, a limit or a [git_link] value
     that does not decode is an [Error] naming the field, never a default.
     Exposed for unit testing. *)
+
+module For_testing : sig
+  val probe_script : string
+  (** The Python the endpoint runs, so a test can run it on a real tree. *)
+end
 
 val discover_and_inspect :
   timeout_sec:float ->

@@ -17,6 +17,13 @@ function authLabel(authenticated: boolean, login: string | null): string {
   return login ? `@${login}` : '연결됨'
 }
 
+// What the token may do, as GitHub listed it. null means GitHub listed no
+// scopes (a fine-grained PAT or an App token), which is not the same as "none".
+function scopesLabel(scopes: string[] | null): string {
+  if (scopes === null) return 'GitHub 이 권한 목록을 알려주지 않는 토큰이에요 (fine-grained PAT 등)'
+  return scopes.length === 0 ? '(없음)' : scopes.join(', ')
+}
+
 function extractUrls(text: string): string[] {
   return Array.from(new Set(text.match(/https?:\/\/[^\s<>"']+/g) ?? []))
 }
@@ -145,6 +152,7 @@ export function KeeperGithubIdentityPanel({
             <div class="kcf-fact">
               <span class="kcf-fact-k">Keeper 저장소</span>
               <span class="kcf-fact-v mono">${authLabel(observation.stored.authenticated, observation.stored.login)}</span>
+              ${observation.stored.authenticated && html`<span class="text-3xs text-[var(--color-fg-muted)]">권한: <span class="mono">${scopesLabel(observation.stored.scopes)}</span></span>`}
               ${observation.stored.error && html`<span class="text-3xs text-[var(--color-status-err)]">확인 실패: ${observation.stored.error}</span>`}
             </div>
             <div class="kcf-fact">

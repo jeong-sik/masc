@@ -3755,7 +3755,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=16,
+        rows=15,
         columns=100,
         needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
@@ -3763,25 +3763,25 @@ def assert_overview_event_rows(
     )
     for expected in (b"Manual refresh", b"task-1", b"q:quit"):
         if expected not in overview:
-            raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
-    total = event_total(overview, "14-row Overview")
+            raise AssertionError(f"13-row Overview omitted {expected!r}: {overview!r}")
+    total = event_total(overview, "13-row Overview")
     if newest_window(2, total) not in overview:
-        raise AssertionError(f"14-row Overview omitted its event range: {overview!r}")
-    span = event_range_span(overview, "14-row Overview")
+        raise AssertionError(f"13-row Overview omitted its event range: {overview!r}")
+    span = event_range_span(overview, "13-row Overview")
     if span != 2:
         raise AssertionError(
-            f"14-row Overview drew {span} event rows, not the two it has room "
+            f"13-row Overview drew {span} event rows, not the two it has room "
             f"for: {overview!r}"
         )
     if b"TUI started" in overview or b"task-2" in overview:
-        raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
+        raise AssertionError(f"13-row Overview exceeded its row budget: {overview!r}")
 
     scroll_to_oldest(total)
     oldest = resize_and_wait(
         process,
         master_fd,
         output,
-        rows=16,
+        rows=15,
         columns=99,
         needle=oldest_window(2, total),
         controls=(FULL_REDRAW,),
@@ -3821,7 +3821,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=16,
+        rows=15,
         columns=100,
         needle=oldest_window(2, total),
         controls=(FULL_REDRAW,),
@@ -3849,7 +3849,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=16,
+        rows=15,
         columns=100,
         needle=clamped_window(2, max(0, total - OVERVIEW_PANEL_ROW_CAP), total),
         controls=(FULL_REDRAW,),
@@ -3876,7 +3876,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=16,
+        rows=15,
         columns=99,
         needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
@@ -3914,7 +3914,7 @@ def assert_overview_event_rows(
         process,
         master_fd,
         output,
-        rows=16,
+        rows=15,
         columns=100,
         needle=event_range(after_r_total - 2, after_r_total - 1, after_r_total),
         controls=(FULL_REDRAW,),

@@ -286,6 +286,11 @@ type absorbed_statement =
   ; into : string
   }
 
+type revision =
+  { superseded : string
+  ; superseded_by : string
+  }
+
 let dropped_statement_to_json (d : dropped_statement) =
   if not (is_memory_id d.memory_id) || not (non_empty_string d.reason)
   then invalid_arg "dropped statement must name a memory identity and non-empty reason";

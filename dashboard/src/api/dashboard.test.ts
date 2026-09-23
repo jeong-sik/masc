@@ -4845,6 +4845,16 @@ describe('fetchKeeperCostMetrics', () => {
     ))
   }
 
+  // Token fields of a keeper whose every sample reported usage.
+  const reportedTokens = {
+    total_input_tokens: 10,
+    total_output_tokens: 5,
+    total_tokens: 15,
+    tokens_reported_samples: 1,
+    tokens_unreported_samples: 0,
+    tokens_unread_samples: 0,
+  }
+
   it('keeps an unreported total cost as null instead of $0', async () => {
     stubKeeperCosts([
       {
@@ -4852,9 +4862,8 @@ describe('fetchKeeperCostMetrics', () => {
         total_cost_usd: null,
         cost_reported_samples: 0,
         cost_unreported_samples: 3,
-        total_input_tokens: 10,
-        total_output_tokens: 5,
-        total_tokens: 15,
+        cost_unread_samples: 0,
+        ...reportedTokens,
         p50_latency_ms: 100,
         p95_latency_ms: 100,
         sample_count: 3,
@@ -4874,6 +4883,8 @@ describe('fetchKeeperCostMetrics', () => {
         total_cost_usd: 0.25,
         cost_reported_samples: 1,
         cost_unreported_samples: 2,
+        cost_unread_samples: 0,
+        ...reportedTokens,
         sample_count: 3,
       },
     ])
@@ -4887,10 +4898,52 @@ describe('fetchKeeperCostMetrics', () => {
 
   it('drops a keeper row whose total cost disagrees with its reported count', async () => {
     stubKeeperCosts([
-      { keeper_name: 'reported-but-no-total', cost_reported_samples: 2, cost_unreported_samples: 0, sample_count: 2 },
-      { keeper_name: 'reported-but-null-total', total_cost_usd: null, cost_reported_samples: 1, cost_unreported_samples: 0, sample_count: 1 },
-      { keeper_name: 'total-but-none-reported', total_cost_usd: 0.5, cost_reported_samples: 0, cost_unreported_samples: 2, sample_count: 2 },
-      { keeper_name: 'consistent', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 2, sample_count: 2 },
+      { keeper_name: 'reported-but-no-total', cost_reported_samples: 2, cost_unreported_samples: 0, cost_unread_samples: 0, ...reportedTokens, sample_count: 2 },
+      { keeper_name: 'reported-but-null-total', total_cost_usd: null, cost_reported_samples: 1, cost_unreported_samples: 0, cost_unread_samples: 0, ...reportedTokens, sample_count: 1 },
+      { keeper_name: 'total-but-none-reported', total_cost_usd: 0.5, cost_reported_samples: 0, cost_unreported_samples: 2, cost_unread_samples: 0, ...reportedTokens, sample_count: 2 },
+      { keeper_name: 'consistent', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 2, cost_unread_samples: 0, ...reportedTokens, sample_count: 2 },
+    ])
+
+    const result = await fetchKeeperCostMetrics(60)
+
+    expect(result.keepers.map(k => k.keeper_name)).toEqual(['consistent'])
+  })
+
+  it('keeps unreported token totals as null and the unread counts apart', async () => {
+    stubKeeperCosts([
+      {
+        keeper_name: 'no-usage-keeper',
+        total_cost_usd: null,
+        cost_reported_samples: 0,
+        cost_unreported_samples: 2,
+        cost_unread_samples: 1,
+        total_input_tokens: null,
+        total_output_tokens: null,
+        total_tokens: null,
+        tokens_reported_samples: 0,
+        tokens_unreported_samples: 2,
+        tokens_unread_samples: 1,
+        sample_count: 3,
+      },
+    ])
+
+    const result = await fetchKeeperCostMetrics(60)
+
+    expect(result.keepers[0]?.total_input_tokens).toBeNull()
+    expect(result.keepers[0]?.total_output_tokens).toBeNull()
+    expect(result.keepers[0]?.total_tokens).toBeNull()
+    expect(result.keepers[0]?.tokens_unreported_samples).toBe(2)
+    expect(result.keepers[0]?.tokens_unread_samples).toBe(1)
+    expect(result.keepers[0]?.cost_unread_samples).toBe(1)
+  })
+
+  it('drops a keeper row whose token totals disagree with its reported count', async () => {
+    const costFields = { total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 1, cost_unread_samples: 0, sample_count: 1 }
+    stubKeeperCosts([
+      { keeper_name: 'reported-but-null-tokens', ...costFields, ...reportedTokens, total_tokens: null },
+      { keeper_name: 'tokens-but-none-reported', ...costFields, ...reportedTokens, tokens_reported_samples: 0, tokens_unreported_samples: 1 },
+      { keeper_name: 'no-unread-count', ...costFields, ...reportedTokens, tokens_unread_samples: undefined },
+      { keeper_name: 'consistent', ...costFields, ...reportedTokens },
     ])
 
     const result = await fetchKeeperCostMetrics(60)

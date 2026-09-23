@@ -120,6 +120,53 @@ let test_a_wide_frame_draws_both_lists () =
   check bool "the header names SLOTS" true (contains "SLOTS" header);
   check bool "the header names OBSERVED" true (contains "OBSERVED" header)
 
+(* The SLOTS cell says what the lane admitted, and nothing else.
+
+   A lane that cannot admit has a reason, and the cell used to draw it: at the
+   width the live table gives this column the reader got the first few words
+   of a sentence under a header promising slot names. The detail pane has
+   drawn the same sentence whole under "Admission error:" since #32194, and
+   STATUS beside the cell already says [unavailable]. *)
+let test_a_lane_that_could_not_admit_draws_no_sentence () =
+  let cell =
+    Lane_table.slots_text ~admitted:[] ~cli:[] ~dropped:[]
+      ~admission_failed:true
+  in
+  check string "the cell is the table's own no-value mark" "\xe2\x80\x94" cell
+
+(* A lane that admitted slots keeps them, and a failure beside them is still
+   the detail pane's to tell. The row is not silent about it: the projection
+   reads such a lane as [degraded], which is the STATUS cell two columns to
+   the left (test_server_standalone_lane_projection pins that). *)
+let test_admitted_slots_draw_without_the_reason () =
+  let cell =
+    Lane_table.slots_text ~admitted:[ "a.one"; "b.two" ] ~cli:[] ~dropped:[]
+      ~admission_failed:true
+  in
+  check string "the slots are what the cell holds" "a.one,b.two" cell
+
+(* The two shapes that are facts about the lane's slot configuration, not
+   about a failure, are unchanged: an empty catalog list with no cli suffix
+   is a lane with nothing to run on, and with one it is a cli-only lane. *)
+let test_a_lane_with_no_slots_still_says_so () =
+  check string "no cli suffix" "no admitted slot"
+    (Lane_table.slots_text ~admitted:[] ~cli:[] ~dropped:[]
+       ~admission_failed:false);
+  check string "with a cli suffix" "cli-only +cli:codex.one"
+    (Lane_table.slots_text ~admitted:[] ~cli:[ "codex.one" ] ~dropped:[]
+       ~admission_failed:false)
+
+(* What a lane declared and could not publish rides along whichever shape the
+   cell took. *)
+let test_dropped_slots_ride_along () =
+  check string "beside an admitted slot" "a.one (dropped b.two)"
+    (Lane_table.slots_text ~admitted:[ "a.one" ] ~cli:[]
+       ~dropped:[ "b.two" ] ~admission_failed:false);
+  check string "beside a failed admission" "\xe2\x80\x94 (dropped b.two)"
+    (Lane_table.slots_text ~admitted:[] ~cli:[] ~dropped:[ "b.two" ]
+       ~admission_failed:true)
+
+
 (* The name column is measured from the names, floored at its own header and
    capped, so one long name cannot take the row. *)
 let test_the_name_column_is_measured_from_the_names () =
@@ -147,5 +194,13 @@ let () =
             test_a_wide_frame_draws_both_lists
         ; test_case "the name column is measured from the names" `Quick
             test_the_name_column_is_measured_from_the_names
+        ; test_case "a lane that could not admit draws no sentence" `Quick
+            test_a_lane_that_could_not_admit_draws_no_sentence
+        ; test_case "admitted slots draw without the reason" `Quick
+            test_admitted_slots_draw_without_the_reason
+        ; test_case "a lane with no slots still says so" `Quick
+            test_a_lane_with_no_slots_still_says_so
+        ; test_case "dropped slots ride along" `Quick
+            test_dropped_slots_ride_along
         ] )
     ]

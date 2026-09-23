@@ -1,28 +1,83 @@
 open Dashboard_http_keeper_types
 
-(* A turn row's [cost_usd] is [null] when the runtime reported no cost
-   (subscription runtimes; the row's [usage_resolution] then says
-   [exact_cost_unavailable]). That is a different fact from "cost 0", so the
-   reading keeps the two apart. *)
-type cost_reading =
-  | Cost_reported of float
-  | Cost_unreported
+(* What one turn row says about a value the runtime may or may not report.
+   [Unreported] is the row's explicit [null]: the runtime gave no value
+   (subscription runtimes give no cost; some give no usage). [Unread] is a
+   row whose field is missing or has a shape the writer never produces. The
+   three stay apart so an unknown value never reads as 0. *)
+type 'a reading =
+  | Reported of 'a
+  | Unreported
+  | Unread
+
+type token_counts =
+  { input : int
+  ; output : int
+  ; total : int
+  }
 
 let cost_reading_of_row json =
   match Json_util.assoc_member_opt "cost_usd" json with
-  | Some (`Float value) when Float.is_finite value && value >= 0.0 ->
-      Some (Cost_reported value)
-  | Some `Null -> Some Cost_unreported
+  | Some (`Float value) when Float.is_finite value && value >= 0.0 -> Reported value
+  | Some (`Int value) when value >= 0 -> Reported (float_of_int value)
+  | Some `Null -> Unreported
   | Some _
-  | None -> None
+  | None -> Unread
+
+(* The writer ([Keeper_unified_metrics_snapshot]) puts either three integers
+   or three [null]s in [usage]; any other shape is unread. *)
+let token_reading_of_row json =
+  match Json_util.assoc_member_opt "usage" json with
+  | Some (`Assoc _ as usage) ->
+      (match
+         Json_util.assoc_member_opt "input_tokens" usage,
+         Json_util.assoc_member_opt "output_tokens" usage,
+         Json_util.assoc_member_opt "total_tokens" usage
+       with
+       | Some (`Int input), Some (`Int output), Some (`Int total)
+         when input >= 0 && output >= 0 && total >= 0 ->
+           Reported { input; output; total }
+       | Some `Null, Some `Null, Some `Null -> Unreported
+       | _ -> Unread)
+  | Some _
+  | None -> Unread
+
+type 'a tally =
+  { mutable reported : 'a
+  ; mutable reported_samples : int
+  ; mutable unreported_samples : int
+  ; mutable unread_samples : int
+  }
+
+let empty_tally zero =
+  { reported = zero; reported_samples = 0; unreported_samples = 0; unread_samples = 0 }
+
+let add_reading tally ~add reading =
+  match reading with
+  | Reported value ->
+      tally.reported <- add tally.reported value;
+      tally.reported_samples <- tally.reported_samples + 1
+  | Unreported -> tally.unreported_samples <- tally.unreported_samples + 1
+  | Unread -> tally.unread_samples <- tally.unread_samples + 1
+
+(* A sum is known only when some sample reported a value. *)
+let reported_sum_json tally to_json =
+  if tally.reported_samples = 0 then `Null else to_json tally.reported
+
+let tally_count_fields prefix tally =
+  [ prefix ^ "_reported_samples", `Int tally.reported_samples
+  ; prefix ^ "_unreported_samples", `Int tally.unreported_samples
+  ; prefix ^ "_unread_samples", `Int tally.unread_samples
+  ]
 
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.
 
-    Reads each keeper's metrics JSONL and returns per-keeper token totals,
-    p50/p95 latency, and cost. Cost is summed only over samples whose runtime
-    reported one; [cost_reported_samples] and [cost_unreported_samples] say
-    how many samples each side holds, and [total_cost_usd] is [null] when no
-    sample in the window reported a cost. *)
+    Reads each keeper's metrics JSONL and returns, over the turn rows in the
+    window, p50/p95 latency and the cost and token sums. Cost and tokens are
+    summed only over samples that reported them; [cost_*_samples] and
+    [tokens_*_samples] say how many samples reported the value, gave [null],
+    or could not be read. A sum is [null] when no sample in the window
+    reported it. *)
 let keeper_cost_aggregates_json
     ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
@@ -36,20 +91,10 @@ let keeper_cost_aggregates_json
       (fun (m : Keeper_meta_contract.keeper_meta) ->
         let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
         let all_metrics_lines = Dated_jsonl.read_recent_lines metrics_store 500 in
-        let reported_cost_sum = ref 0.0 in
-        let cost_reported_samples = ref 0 in
-        let cost_unreported_samples = ref 0 in
+        let cost = empty_tally 0.0 in
+        let tokens = empty_tally { input = 0; output = 0; total = 0 } in
+        let sample_count = ref 0 in
         let latencies_rev = ref [] in
-        let input_tokens = ref 0 in
-        let output_tokens = ref 0 in
-        let total_tokens = ref 0 in
-        let nullable_nonnegative_int key json =
-          match Json_util.assoc_member_opt key json with
-          | Some (`Int value) when value >= 0 -> Some value
-          | Some `Null -> Some 0
-          | Some _
-          | None -> None
-        in
         List.iter
           (fun line ->
             try
@@ -58,51 +103,26 @@ let keeper_cost_aggregates_json
               then
                 match
                   Json_util.assoc_member_opt "ts_unix" j,
-                  Json_util.assoc_member_opt "latency_ms" j,
-                  Json_util.assoc_member_opt "usage" j,
-                  cost_reading_of_row j
+                  Json_util.assoc_member_opt "latency_ms" j
                 with
-                | ( Some (`Float ts_unix)
-                  , Some (`Int latency_ms)
-                  , Some (`Assoc _ as usage)
-                  , Some cost )
+                | Some (`Float ts_unix), Some (`Int latency_ms)
                   when Float.is_finite ts_unix
                        && latency_ms >= 0
                        && ts_unix >= start_ts ->
-                    let carries_signal =
-                      latency_ms > 0
-                      ||
-                      (match cost with
-                       | Cost_reported value -> value > 0.0
-                       | Cost_unreported -> false)
-                    in
-                    (match
-                       nullable_nonnegative_int "input_tokens" usage,
-                       nullable_nonnegative_int "output_tokens" usage,
-                       nullable_nonnegative_int "total_tokens" usage
-                     with
-                     | Some input_t, Some output_t, Some total_t
-                       when carries_signal ->
-                         (match cost with
-                          | Cost_reported value ->
-                              reported_cost_sum := !reported_cost_sum +. value;
-                              incr cost_reported_samples
-                          | Cost_unreported -> incr cost_unreported_samples);
-                         latencies_rev := float_of_int latency_ms :: !latencies_rev;
-                         input_tokens := !input_tokens + input_t;
-                         output_tokens := !output_tokens + output_t;
-                         total_tokens := !total_tokens + total_t
-                     | Some _, Some _, Some _
-                     | _ -> ())
+                    incr sample_count;
+                    latencies_rev := float_of_int latency_ms :: !latencies_rev;
+                    add_reading cost ~add:( +. ) (cost_reading_of_row j);
+                    add_reading tokens
+                      ~add:(fun sum counts ->
+                        { input = sum.input + counts.input
+                        ; output = sum.output + counts.output
+                        ; total = sum.total + counts.total
+                        })
+                      (token_reading_of_row j)
                 | _ -> ()
             with
             | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
           all_metrics_lines;
-        let total_cost_json =
-          if !cost_reported_samples = 0
-          then `Null
-          else `Float !reported_cost_sum
-        in
         let latency_arr =
           let arr = Array.of_list !latencies_rev in
           Array.sort Float.compare arr;
@@ -119,17 +139,19 @@ let keeper_cost_aggregates_json
           else Some (percentile_sorted_float latency_arr 95.0)
         in
         `Assoc
-          [ "keeper_name", `String m.name
-          ; "total_cost_usd", total_cost_json
-          ; "cost_reported_samples", `Int !cost_reported_samples
-          ; "cost_unreported_samples", `Int !cost_unreported_samples
-          ; "total_input_tokens", `Int !input_tokens
-          ; "total_output_tokens", `Int !output_tokens
-          ; "total_tokens", `Int !total_tokens
-          ; "p50_latency_ms", Json_util.float_opt_to_json p50_latency
-          ; "p95_latency_ms", Json_util.float_opt_to_json p95_latency
-          ; "sample_count", `Int (!cost_reported_samples + !cost_unreported_samples)
-          ])
+          ([ "keeper_name", `String m.name
+           ; "total_cost_usd", reported_sum_json cost (fun sum -> `Float sum)
+           ]
+           @ tally_count_fields "cost" cost
+           @ [ "total_input_tokens", reported_sum_json tokens (fun sum -> `Int sum.input)
+             ; "total_output_tokens", reported_sum_json tokens (fun sum -> `Int sum.output)
+             ; "total_tokens", reported_sum_json tokens (fun sum -> `Int sum.total)
+             ]
+           @ tally_count_fields "tokens" tokens
+           @ [ "p50_latency_ms", Json_util.float_opt_to_json p50_latency
+             ; "p95_latency_ms", Json_util.float_opt_to_json p95_latency
+             ; "sample_count", `Int !sample_count
+             ]))
       keepers
   in
   `Assoc

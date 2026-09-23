@@ -705,35 +705,30 @@ let test_a_lane_mark_says_what_its_colour_says () =
     ; ("\xc2\xb7", "nothing retained")
     ]
 
-(* A lane that cannot admit work said so and not why. The cell read "no
-   admitted slot", which restates the status word beside it, while the
-   projection carried the reason -- and an unconfigured lane and a lane whose
-   registry could not be read are different problems.
+(* Why a lane cannot admit belongs to one place, and it is not the table.
 
-   [sl_admission_error] is a [required_nullable_string_field]: the server
-   sends it on every lane, so a decoder that reads it and a screen that does
-   not is the whole of the gap.
+   The cell used to draw it. It is a sentence, and SLOTS is a column of slot
+   names measured by the widest of them, so at the live width a reader got
+   the first few words of it under a header promising slot names -- and that
+   string set every other row's slot column too. It was drawn there because
+   when that was written (#31395) nothing else drew it; the detail pane has
+   drawn it whole since #32194, and STATUS beside the cell says [unavailable]
+   or [degraded] -- the projection reads a lane that could not admit as
+   degraded, whatever its slot list holds.
 
-   The cell's text is [standalone_lane_slots_text], its own binding since the
-   Lanes table measures the column from it before drawing a row. *)
-let test_a_lane_that_cannot_admit_says_why () =
-  Alcotest.(check bool) "the row reads the reason the projection carries" true
-    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"standalone_lane_slots_text"
-       ~callees:[] ~fields:[ "sl_admission_error" ]
-     > 0);
-  (* Reading the field is not drawing it: an arm that matches [Some _] and
-     then prints the old sentence passes a read count. What the cell must not
-     say any more is the sentence that only restated the status word, and it
-     is kept for the case that really has no reason to give -- so the arm that
-     has one is asserted by the [reason] it binds reaching the cell. *)
-  (* Twice: the lane with no admitted slot reads as its reason, and the lane
-     that has slots and a reason reads as both. An arm that matched [Some _]
-     and printed the old sentence would pass the read count above. *)
-  Alcotest.(check int) "the reason is what the cell becomes, on both arms" 2
+   So the table's cell binds no reason, and the detail pane reads the field.
+   What the cell draws instead is checked in test_tui_lane_table, where the
+   text itself now lives. *)
+let test_why_a_lane_cannot_admit_is_the_detail_panes_to_say () =
+  Alcotest.(check int) "the table's cell binds no reason" 0
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:render ~binding_name:"standalone_lane_slots_text"
-       ~callees:[] ~identifiers:[ "reason" ])
+       ~callees:[] ~identifiers:[ "reason" ]);
+  Alcotest.(check bool) "the detail pane reads the projection's reason" true
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render ~binding_name:"standalone_lane_detail_lines"
+       ~callees:[] ~fields:[ "sl_admission_error" ]
+     > 0)
 
 (* A turn whose keeper the health reading calls offline was never closed and
    nothing works it: the row keeps the elapsed time and stops the mark.
@@ -1117,8 +1112,8 @@ let () =
             test_project_changes_use_the_requested_workspace_root
         ; Alcotest.test_case "a turn on a keeper that is not running stops"
             `Quick test_a_turn_on_a_keeper_that_is_not_running_stops_moving
-        ; Alcotest.test_case "a lane that cannot admit says why" `Quick
-            test_a_lane_that_cannot_admit_says_why
+        ; Alcotest.test_case "why a lane cannot admit is the detail pane's"
+            `Quick test_why_a_lane_cannot_admit_is_the_detail_panes_to_say
         ; Alcotest.test_case "visible navigation glyphs are not mojibake"
             `Quick test_visible_navigation_glyphs_are_not_mojibake
         ; Alcotest.test_case "the attention badge cannot cut its own level"

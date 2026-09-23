@@ -858,7 +858,8 @@ let assemble_hooks
                         persisted current fact in stored order. Source-bound
                         facts are revalidated here; a changed source atomically
                         replaces its fact with an invalidation before the block
-                        is rendered. Opt-in via MASC_KEEPER_MEMORY_OS_RECALL.
+                        is rendered. On by default; MASC_KEEPER_MEMORY_OS_RECALL=0
+                        turns it off.
                         The work is skipped, not just filtered, on post-tool
                         rounds: the block would be dropped at assembly anyway. *)
                      (* Off-main: ordinary recall and source revalidation use

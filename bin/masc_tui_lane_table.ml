@@ -13,6 +13,36 @@ type columns = {
   observed_cells : int;
 }
 
+(* The SLOTS cell. It is a column of slot names, measured by the widest of
+   them, so a sentence in one row sets the width of every other row's slot
+   list.
+
+   The reason a lane could not admit used to be drawn here, because when that
+   was written (#31395) nothing else drew it. The detail pane has drawn it
+   whole under "Admission error:" since #32194, and the STATUS cell beside
+   this one says [unavailable] or [degraded] -- a lane that could not admit
+   reads degraded even while it runs -- so what reached the reader here was a
+   cut sentence under a header promising slot names: live, the cell drew the
+   first twenty-two characters of it and stopped mid-word. A lane that could
+   not admit has no slot list, and that is what the dash says. *)
+let slots_text ~admitted ~cli ~dropped ~admission_failed =
+  let base =
+    match admitted with
+    | [] ->
+        if cli <> [] then "cli-only"
+        else if admission_failed then "\xe2\x80\x94"
+        else "no admitted slot"
+    | admitted -> String.concat "," admitted
+  in
+  let base =
+    match cli with [] -> base | cli -> base ^ " +cli:" ^ String.concat "," cli
+  in
+  (* A declared slot publication could not admit is the difference between
+     "configured single" and "configured double, one silently dropped". *)
+  match dropped with
+  | [] -> base
+  | dropped -> base ^ " (dropped " ^ String.concat "," dropped ^ ")"
+
 let status_cells = 14
 let ok_fail_cancel_cells = 14
 let p50_cells = 6

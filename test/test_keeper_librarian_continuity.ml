@@ -357,7 +357,8 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
     |> fun (d : Current.disposition) -> d.snapshot in
   let half = prepare config |> some |> P.narrow |> some in
   let input : K.input =
-    {turn_ref=P.turn_ref half; goal_context=K.No_task; keeper_instructions=instructions;
+    {turn_ref=P.turn_ref half; goal_context=K.No_task;
+     keeper_id=Masc_test_deps.keeper_id_fixture keeper_name; keeper_instructions=instructions;
      current=Some {K.facts=current.facts};
      working_context=Masc.Keeper_librarian_context.empty;
      messages=P.messages half; tool_observations=[];counterpart_observations=[]} in

@@ -102,6 +102,18 @@ let schedule_write_schema tool =
   | None -> Error (Schedule_schema_not_registered tool)
 ;;
 
+(* Who a schedule route is acting for. [with_tool_actor_auth] admits a
+   request and names it, but a same-origin request with no bearer and a
+   keeper holding the internal token are admitted too, and neither is the
+   operator. Only an operator credential makes the operator. *)
+let schedule_caller ~state ~agent_name request =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  match Server_auth.request_credential_standing ~base_path request with
+  | Server_auth.Operator_credential -> Tool_schedule.Operator_caller agent_name
+  | Server_auth.Agent_credential -> Tool_schedule.Named_caller agent_name
+  | Server_auth.No_credential -> Tool_schedule.Unnamed_caller
+;;
+
 let handle_schedule_write_request
       ~update
       ~state
@@ -139,7 +151,7 @@ let handle_schedule_write_request
     let config = (Mcp_server.workspace_scope state).Mcp_server.config in
     let context : Tool_schedule.context =
       { config
-      ; caller = Tool_schedule.Named_caller agent_name
+      ; caller = schedule_caller ~state ~agent_name request
       ; stamp_keeper_wake_result_delivery =
           (fun ~payload ->
              Schedule_payload_projection.set_keeper_wake_result_delivery
@@ -1476,10 +1488,10 @@ let add_routes ~sw ~clock router =
                  ~request reqd))
          request reqd)
   (* Schedule cancel from the terminal (#29684). The workspace tool owns the
-     argument contract ([Tool_schedule.handle_cancel]: schedule_id,
-     cancelled_by_*, reason) and the store transition. The tool also owns the
-     canceller: it records the caller actor auth resolved and refuses a
-     client-supplied id that names someone else. *)
+     argument contract ([Tool_schedule.handle_cancel]: schedule_id, reason)
+     and the store transition. The HTTP trust boundary owns the canceller:
+     [schedule_caller] decides from the credential whether the caller is the
+     operator, who may cancel any schedule. *)
   |> Http.Router.post "/api/v1/tools/masc_schedule_cancel" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_schedule_cancel"
          (fun state agent_name _req reqd ->
@@ -1497,12 +1509,20 @@ let add_routes ~sw ~clock router =
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
              let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+             let context : Tool_schedule.context =
+               { config
+               ; caller = schedule_caller ~state ~agent_name request
+               ; stamp_keeper_wake_result_delivery =
+                   (fun ~payload ->
+                      Schedule_payload_projection.set_keeper_wake_result_delivery
+                        ~payload ~channel:None)
+               ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+               }
+             in
              let start_time = Unix.gettimeofday () in
              let result =
                Tool_schedule.handle_cancel
-                 ~tool_name:"masc_schedule_cancel" ~start_time
-                 ~caller:(Tool_schedule.Named_caller agent_name)
-                 config args
+                 ~tool_name:"masc_schedule_cancel" ~start_time context args
              in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in

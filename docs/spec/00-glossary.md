@@ -321,6 +321,14 @@ status: reference
   `official_client_recovery_required_keeper_count/names`로 표시한다. 이는 운영자
   조치가 필요한 fleet health 저하 사유이며, 다른 차단 사유가 없으면 `degraded`로
   표시한다. 실행 fiber의 생존·실행 가능 여부를 바꾸거나 세션 복구를 승인하지 않는다.
+  경계: `vendor_session_full_no_activity`·`vendor_session_full_after_activity`는 이
+  상태가 아니다. Gate 이어가기가 원래 세션을 resume 했는데 세션이 가득 찼다고 거절된
+  기록이고, 뒤쪽은 거절 전에 응답이나 도구 실행이 관측된 경우다. 그 Gate는 다른
+  세션에서 이어갈 수 없어서 operation이 `Gate_session_full` 원인으로 실패하고, 다음
+  일반 턴은 이 기록을 넘기고 새 세션을 연다. `Retry_previous`는 같은 세션에 다시
+  보내게 되므로 쓸 수 없다. Codex는 도구 실행 뒤 넘친 경우에만 이 기록을 쓴다.
+  도구 실행 전이면 같은 thread에서 줄여 다시 보내는 재시도가 아직 가능하다.
+  → [Keeper_direct_gate_continuation.session_full](../../lib/keeper/keeper_direct_gate_continuation.mli)
 
 **Usage Scope**
 : Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
@@ -629,7 +637,9 @@ status: reference
   `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
   `Verifying`으로 들어가고, verifier가 증명을 통과시킨 뒤 사람이 확인해야
   `Completed`가 된다(`lib/goal/goal_phase.mli`). `Verifying` 중에도 연결된
-  Task는 계속 진행할 수 있다. 완료 verdict는 verifier가 기록하고, 사람의
+  Task는 계속 진행할 수 있다. verifier가 답하지 않으면 운영자가 `Verifying`에서
+  `drop`으로 `Dropped`로, `reopen`으로 `Executing`으로 옮길 수 있다. 그 뒤에
+  도착한 verdict는 거절된다. 완료 verdict는 verifier가 기록하고, 사람의
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
   `admits_self_directed_progress`가 이 경계를 정의한다.
 
@@ -715,6 +725,18 @@ status: reference
 **Gate**
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
   경계. pending 판정은 다른 작업을 막지 않는다.
+
+**HITL Delivery Occasion (HITL 전달 계기)**
+: 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
+  (`Keeper_approval_queue.delivery_occasion`). `First_commit` 은 운영자가 결정을 처음
+  커밋한 경우, `Boot_replay` 는 아직 소비되지 않은 전달을 부팅 때 다시 하는 경우,
+  `Same_request_resubmitted` 는 운영자가 같은 요청을 다시 낸 경우다.
+  승인 원장의 `Resolved` 행과 SSE `resolved` 는 계기와 상관없이 결정이 저널에 적힐 때
+  한 번 나간다. 전달보다 먼저라서 첫 전달이 실패해도 결정은 원장에 있다.
+  계기는 전달만 가른다. `Boot_replay` 와 `Same_request_resubmitted` 는 wake 를 다시 보내고
+  `hitl resolution redelivered approval=… occasion=…` 로그를 남길 뿐 행을 적지 않는다.
+  채팅의 결정 행은 wake 가 살아 있는 Keeper 에게 닿을 때 한 번만 적힌다.
+  → [Keeper_approval_queue.delivery_occasion](../../lib/keeper/keeper_approval_queue.ml)
 
 ## Task Lifecycle
 

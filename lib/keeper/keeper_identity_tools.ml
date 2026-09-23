@@ -222,17 +222,20 @@ let projected_env_value ~base_path ~keeper_name ~name =
 (* One place decides where a provider's bearer comes from. The two call paths
    below -- cataloguing tools and running one -- would otherwise each carry
    the decision, and the day a third source appears they drift. *)
-let access_token_for ~base_path ~keeper_name ~(provider : Provider.t) =
+let access_token_for ~(config : Workspace.config) ~keeper_name ~(provider : Provider.t) =
   match provider.Provider.credential_source with
   | Provider.Oauth_exchange ->
-    projected_env_value ~base_path ~keeper_name
+    projected_env_value ~base_path:config.Workspace.base_path ~keeper_name
       ~name:provider.Provider.access_token_env
   | Provider.Github_cli { hostname } ->
-    Keeper_github_identity.stored_token ~base_path ~keeper_name ~hostname
+    Keeper_github_login_lane.stored_token ~config ~keeper_name ~hostname
+    |> Result.map_error Keeper_github_login_lane.stored_token_error_to_string
 ;;
 
-let refresh ~mcp_post ~base_path ~keeper_name ~(provider : Provider.t) ~now () =
-  let* access_token = access_token_for ~base_path ~keeper_name ~provider in
+let refresh ~mcp_post ~(config : Workspace.config) ~keeper_name ~(provider : Provider.t)
+      ~now () =
+  let base_path = config.Workspace.base_path in
+  let* access_token = access_token_for ~config ~keeper_name ~provider in
   let* client =
     Result.map_error Mcp_client.error_to_string
       (Mcp_client.connect ~post:mcp_post ~url:provider.Provider.mcp_url ~access_token ())
@@ -574,10 +577,11 @@ let renew_if_needed ~token_post ~discover ~base_path ~keeper_name
     else force_refresh ~token_post ~discover ~base_path ~keeper_name ~provider ~now ()
 ;;
 
-let run_call_once ~transports ~base_path ~keeper_name
+let run_call_once ~transports ~(config : Workspace.config) ~keeper_name
       ~(provider : Provider.t) ~remote_name ~arguments () =
+  let base_path = config.Workspace.base_path in
   let { mcp_post; token_post; discover } = transports in
-  match access_token_for ~base_path ~keeper_name ~provider with
+  match access_token_for ~config ~keeper_name ~provider with
   | Error message -> Error (Precondition message)
   | Ok stored_token -> (
     match
@@ -675,10 +679,11 @@ let run_call_once ~transports ~base_path ~keeper_name
    and retry once. [force_refresh] stores the new token, so the retry reads it
    back through [access_token_for]; any refresh failure keeps the original 401,
    so the operator still learns to re-attach and there is no second retry. *)
-let run_call ~transports ~base_path ~keeper_name
+let run_call ~transports ~(config : Workspace.config) ~keeper_name
       ~(provider : Provider.t) ~remote_name ~arguments () =
+  let base_path = config.Workspace.base_path in
   match
-    run_call_once ~transports ~base_path ~keeper_name ~provider
+    run_call_once ~transports ~config ~keeper_name ~provider
       ~remote_name ~arguments ()
   with
   | Error (Mcp { error = Mcp_client.Unauthorized _; _ }) as unauthorized -> (
@@ -693,7 +698,7 @@ let run_call ~transports ~base_path ~keeper_name
       with
       | Error _ -> unauthorized
       | Ok _ ->
-        run_call_once ~transports ~base_path ~keeper_name ~provider
+        run_call_once ~transports ~config ~keeper_name ~provider
           ~remote_name ~arguments ()))
   | other -> other
 ;;

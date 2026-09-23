@@ -2980,7 +2980,7 @@ let planning_next_step (goal : planning_goal) =
     , "work the linked tasks, then [c] to submit it for verification" )
   | Goal_phase.Verifying, _ ->
     ( (Theme.warn ())
-    , "with the completion judge - nothing to press; [c] re-arms the request" )
+    , "with the completion judge - [c] re-arms the request; [o] takes it back, [x] drops it" )
   | Goal_phase.Awaiting_confirmation, _ ->
     (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
@@ -3460,9 +3460,8 @@ let planning_detail_pane (state : state)
   box_line buf cols
     (Printf.sprintf "  Target:  %s   Due: %s   Priority: %sP%d%s"
        metric_text due_text prio_color goal.pg_priority Ansi.reset);
-  (* Lit only where the key moves the goal. All three were drawn in colour on
-     every phase, so a verifying goal offered [x] and [o] that the server
-     refuses. A dim key is still pressable: [Already] is accepted -- [c] on a
+  (* Lit only where the key moves the goal, as the transition matrix answers
+     it for this phase. A dim key is still pressable: [Already] is accepted -- [c] on a
      verifying goal re-arms the judge, as its Next line says -- it just does
      not change the stage. *)
   let action_item action =

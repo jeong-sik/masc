@@ -1168,9 +1168,8 @@ let test_planning_phase_uses_goal_ssot () =
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"
        ~needle:"unknown planning goal phase");
-  (* The goal detail lit all three lifecycle keys on every phase, so a
-     verifying goal offered two the server refuses. Which key is lit is the
-     transition matrix's answer, asked in the binding that draws the row. *)
+  (* Which lifecycle key the goal detail lights is the transition matrix's
+     answer, asked in the binding that draws the row. *)
   check bool "goal detail lights its keys from the transition matrix" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"planning_detail_pane"

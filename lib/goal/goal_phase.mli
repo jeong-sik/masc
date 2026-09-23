@@ -6,8 +6,10 @@
     transition logic out of caller code.
 
     RFC-0387 stage 2: [Verifying] sits between [Executing] and
-    [Completed] — [Request_complete] enters it, and only the verifier's
-    [Record_proof_proven] leaves it for [Awaiting_confirmation]. *)
+    [Completed] — [Request_complete] enters it, and the verifier's
+    [Record_proof_proven] leaves it for [Awaiting_confirmation]. The
+    operator can leave it without a verdict: [Drop] to [Dropped], [Reopen]
+    to [Executing]. *)
 
 (** Goal lifecycle phases. *)
 type t =

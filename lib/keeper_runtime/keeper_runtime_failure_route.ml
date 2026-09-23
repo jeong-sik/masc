@@ -22,6 +22,9 @@ type rotate_class =
   | Generation_repeated
   | Attempt_rejected
   | Provider_reported_failure
+  | Request_refused
+  | Provider_wire_defect
+  | Server_error_not_transient
 
 type fence_disposition =
   | Fenced_effect_attempted
@@ -140,6 +143,14 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      this arrived as an untyped [Internal] string and landed on exactly this
      route. *)
   | Keeper_internal_error.Host_stopped_turn _ -> exhaust_failure Internal_opaque
+  (* A person queued behind this autonomous turn before its provider produced
+     anything (RFC-0441). The abandoned candidate did not fail, so the route
+     notes no rest or demotion against it (Exhausted_visible_alive notes
+     none). The walk itself stops in [Keeper_turn_driver], which ends the lane
+     on this error ahead of any overflow; the keeper settles the turn as
+     skipped, not failed (#38094). *)
+  | Keeper_internal_error.Preempted_before_first_token _ ->
+    exhaust_failure Internal_opaque
   (* The runtime's transport closed. This used to reach agent-core as
      [ProviderUnavailable], and [route_of_provider_error] answers
      [observe_retry Server_error] for that; the typed value must not change
@@ -211,8 +222,7 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
      reasoning-effort ladder or an explicit disable, folded through
      [Http_client.AcceptRejected]); the driver rotates on it, and a route
      that called it deterministic labelled a rotating failure as terminal
-     (#33057). The provider-side reasons stay terminal: a body the provider
-     itself refused does not change on the next candidate. *)
+     (#33057). *)
   | Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; _ } ->
     rotate Attempt_rejected
   (* The provider refused and the body that would have named the cause did
@@ -222,13 +232,22 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
   | Llm_provider.Retry.InvalidRequest
       { reason = Llm_provider.Retry.Refusal_body_not_received; _ } ->
     rotate Refusal_body_not_received
+  (* The provider refused this body, with no machine-readable reason or
+     with a size status. Another declared candidate may accept the same
+     semantic input (a larger window, a different vendor's schema), and
+     [attempt_rejected_should_try_next] moves the lane there in the same
+     turn (#37631), so the route names that rotation. The same body to the
+     same path is refused again, which [route_resumes_on_same_path] says. *)
   | Llm_provider.Retry.InvalidRequest
       { reason =
-          ( Llm_provider.Retry.Json_parse_error
-          | Llm_provider.Retry.Request_body_refused_by_provider _
+          ( Llm_provider.Retry.Request_body_refused_by_provider _
           | Llm_provider.Retry.Unknown_invalid_request )
       ; _
       } ->
+    rotate Request_refused
+  (* No walk predicate moves on a JSON parse failure, so the route keeps it
+     terminal too. *)
+  | Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Json_parse_error; _ } ->
     exhaust_failure Deterministic_request
   | Llm_provider.Retry.ContextOverflow _ -> exhaust_failure Context_overflow
   | Llm_provider.Retry.InputCapacity _ -> exhaust_failure Deterministic_request
@@ -245,8 +264,16 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
     observe_retry (Empty_completion { stop_reason })
   | Llm_provider.Error.ServerError { transient = true; _ } ->
     observe_retry Server_error
-  | Llm_provider.Error.ServerError { transient = false; _ } ->
-    exhaust_failure Provider_integration
+  (* The provider said this 5xx is not transient, so the same path answers
+     the same way; a different candidate is a different server. The walk
+     ([Runtime_attempt_fsm.should_try_next]) and this route both read the
+     server-failure class from [Retry.server_status_class_of_code]. A code
+     outside it is not a server failure the walk moves on. *)
+  | Llm_provider.Error.ServerError { transient = false; code; _ } ->
+    (match Llm_provider.Retry.server_status_class_of_code code with
+     | Some (Llm_provider.Retry.Overloaded_status | Llm_provider.Retry.Server_error_status)
+       -> rotate Server_error_not_transient
+     | None -> exhaust_failure Provider_integration)
   | Llm_provider.Error.NetworkError _ -> observe_retry Network_transient
   | Llm_provider.Error.Timeout _ -> observe_retry Provider_timeout
   | Llm_provider.Error.AuthError _
@@ -276,18 +303,26 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   (* The stream ended before the completion contract's stop reason. The
      provider accepted the request and the bytes that would have said why the
      generation stopped never arrived, which is what a dropped transport looks
-     like; the other wire kinds are defects in what did arrive, and the same
-     bytes arrive again on the next call. *)
+     like. *)
   | Llm_provider.Error.ProviderWireError
       { kind = Llm_provider.Http_client.Incomplete_stream; _ } ->
     observe_retry Network_transient
+  (* The bytes that did arrive broke this provider's declared wire format.
+     The same path sends the same bytes again, but the next candidate is a
+     different provider attempt with its own stream, and the walk already
+     rotates on every [Http_client.ProviderFailure] kind. *)
   | Llm_provider.Error.ProviderWireError
       { kind =
           ( Llm_provider.Http_client.Malformed_payload
           | Llm_provider.Http_client.Unknown_event
           | Llm_provider.Http_client.Oversized_payload )
       ; _
-      }
+      } ->
+    rotate Provider_wire_defect
+  (* [ParseError] and [UnknownVariant] are our own reading of the reply,
+     which every candidate reaches; [ProviderTerminal] is a condition the
+     provider ended its stream on (a session conflict among them). The walk
+     carries all three as [Http_client.ProviderTerminal] and stops. *)
   | Llm_provider.Error.ParseError _
   | Llm_provider.Error.UnknownVariant _
   | Llm_provider.Error.ProviderTerminal _ ->
@@ -344,11 +379,11 @@ let retry_after_of_route = function
   | Rotate_now _ -> None
   | Exhausted_visible_alive _ -> None
 
-(* A provider's retry hint that names a wait: present, a number, above zero. *)
+(* A provider's retry hint that names a wait: present, finite, above zero. *)
 let usable_retry_after = function
   | None -> None
-  | Some hint when Float.is_nan hint || hint <= 0.0 -> None
-  | Some _ as hint -> hint
+  | Some hint when Float.is_finite hint && hint > 0.0 -> Some hint
+  | Some _ -> None
 ;;
 
 (* How long a path rests after a provider refused it (RFC-provider-path-rest).
@@ -358,7 +393,7 @@ let usable_retry_after = function
 
    A usable hint rests that long. A positive fractional hint still rests at
    least one second so the chat lane cannot re-fire in a tight loop (#35246).
-   Without a usable hint (absent, zero, negative, NaN) the class decides: a
+   Without a usable hint (absent, zero, negative, infinite, NaN) the class decides: a
    throttle rests the named floor, and an account exhaustion rests the cap,
    because a quota that said nothing about its end is not known to come back
    within a minute. Every result is clamped to [cap_sec] so a misread header
@@ -412,6 +447,9 @@ let rotate_class_label = function
   | Refusal_body_not_received -> "refusal_body_not_received"
   | Generation_repeated -> "generation_repeated"
   | Provider_reported_failure -> "provider_reported_failure"
+  | Request_refused -> "request_refused"
+  | Provider_wire_defect -> "provider_wire_defect"
+  | Server_error_not_transient -> "server_error_not_transient"
 
 let terminal_class_label = function
   | Deterministic_request -> "deterministic_request"
@@ -487,6 +525,13 @@ let response_observed = function
      (* the provider reported its own structured failure for this attempt;
         unlike [Generation_repeated] below, nothing here says the model
         produced content the turn's input carried into. *)
+     | Request_refused
+     (* the provider refused the body before any generation. *)
+     | Provider_wire_defect
+     (* the bytes that arrived broke the wire format: no usable answer is on
+        record. *)
+     | Server_error_not_transient
+     (* a 5xx: nothing the model said is on record. *)
      | Runtime_exhausted ->
        (* a whole-runtime exhaustion wrapper: it carries no answer. *)
        false
@@ -616,9 +661,13 @@ let route_resumes_on_same_path = function
      | Refusal_body_not_received
      | Generation_repeated
      | Attempt_rejected
-     | Provider_reported_failure ->
-       (* the credential, the model, the client session or the model's own
-          answer: the same path answers the same way after any wait. *)
+     | Provider_reported_failure
+     | Request_refused
+     | Provider_wire_defect
+     | Server_error_not_transient ->
+       (* the credential, the model, the client session, the request body,
+          the provider's wire or its own non-transient answer: the same path
+          answers the same way after any wait. *)
        false)
   | Exhausted_visible_alive { terminal; provenance = _; detail = _ } ->
     (match terminal with

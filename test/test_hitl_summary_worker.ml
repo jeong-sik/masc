@@ -1052,7 +1052,9 @@ let test_predispatch_failure_advances_only_to_agent_core_successor () =
              check bool
                "advance retains the typed transport failure"
                true
-               (cause = EO.Completion_failed)
+               (match cause with
+                | EO.Completion_failed _ -> true
+                | _ -> false)
            | EO.Flow_advance_candidate_rejected _ ->
              fail "transport failure was recorded as a candidate rejection")
         | _ -> fail "exactly one typed AGENT_CORE advance should be retained");

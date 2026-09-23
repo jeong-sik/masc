@@ -25,7 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from render_configs import (  # noqa: E402
     ARMS,
     PROVIDERS,
-    effective_runtime_id,
+    candidate_runtime_ids,
+    keeper_route,
     render_arm,
 )
 from masc_dist import (  # noqa: E402
@@ -49,9 +50,17 @@ REMOTE = "/opt/masc-bench"
 RESULT_RECOVERY_TIMEOUT_SEC = 600
 
 
+def _runtime_id_of_model(model: str) -> str:
+    """`provider/model` as harbor names it -> `provider.model`."""
+    provider, sep, name = model.strip().partition("/")
+    if not sep or not provider or not name:
+        raise ValueError(f"fallback model must be 'provider/model', got {model!r}")
+    return f"{provider}.{name}"
+
+
 class MascAgent(BaseInstalledAgent):
     def __init__(self, logs_dir, model_name=None, arm="b",
-                 runtime_id=None, effort="high", **kwargs):
+                 runtime_id=None, effort="high", fallback_models="", **kwargs):
         super().__init__(logs_dir=logs_dir, model_name=model_name, **kwargs)
         if arm not in ARMS:
             raise ValueError(f"unknown arm {arm!r}; expected one of {sorted(ARMS)}")
@@ -64,6 +73,12 @@ class MascAgent(BaseInstalledAgent):
             self.runtime_id = f"{provider}.{model}"
         else:
             raise ValueError("model_name 'provider/model' 또는 runtime_id kwarg 필요")
+        # `--ak fallback_models=p/m1,p/m2` (run_matrix.sh BENCH_FALLBACK_MODELS):
+        # the models after --model in the failover arm's candidate order. Checked
+        # here so a bad list fails at agent construction, not after install.
+        self.fallback_runtime_ids = tuple(
+            _runtime_id_of_model(m) for m in fallback_models.split(",") if m.strip())
+        candidate_runtime_ids(self.arm, self.runtime_id, self.fallback_runtime_ids)
         self._dist_identity: DistIdentity | None = None
 
     @staticmethod
@@ -90,7 +105,10 @@ class MascAgent(BaseInstalledAgent):
             # masc resolves `<provider>.<binding id>`, and the binding id is a
             # slug when the wire model carries a slash (OpenRouter). Rendering
             # takes the wire form; keeper_up takes this one.
-            "BENCH_RUNTIME_ID": effective_runtime_id(self.runtime_id),
+            # On a failover arm this is the lane (keeper_route): keeper_up
+            # writes it as the keeper's assignment.
+            "BENCH_RUNTIME_ID": keeper_route(
+                self.arm, self.runtime_id, self.fallback_runtime_ids),
             "KEEPER_COUNT": str(ARMS[self.arm]["keepers"]),
         }
         # Optional. A keeper gets a GitHub login only when this is set:
@@ -118,7 +136,8 @@ class MascAgent(BaseInstalledAgent):
                 # harbor installs every trial in one event loop.
                 config_dir = await asyncio.to_thread(
                     render_arm, self.arm, self.runtime_id, self.effort,
-                    task_skills_dir=task_skills_dir)
+                    task_skills_dir=task_skills_dir,
+                    fallback_runtime_ids=self.fallback_runtime_ids)
                 await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
                 for binary in distribution.binaries:
                     await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
@@ -279,5 +298,6 @@ class MascAgent(BaseInstalledAgent):
             "endpoint_env_left_out": data.get("endpoint_env_left_out"),
             "arm": self.arm,
             "runtime_id": self.runtime_id,
+            "fallback_runtime_ids": list(self.fallback_runtime_ids),
             **identity_metadata(self._dist_identity),
         }

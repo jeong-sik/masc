@@ -2,7 +2,9 @@
 //
 // Backend: lib/server/server_routes_http_routes_verification.ml
 // Route:   POST /api/v1/verification/verdict
-// Body:    { task_id, verdict: "approve" | "reject", reason?, notes? }
+// Body:    { task_id, verification_id, verdict: "approve" | "reject", reason?, notes? }
+//   - verification_id names the submission the operator was shown; the route
+//     answers 409 when the Task has since moved on to another submission.
 //   - reject requires a non-empty reason; notes is optional free text.
 // Response: { ok: true, message, noop } — noop=true when the task had already
 //   left awaiting_verification before the verdict landed.
@@ -15,6 +17,8 @@ export type VerificationVerdictDecision = 'approve' | 'reject'
 
 export interface SubmitVerificationVerdictRequest {
   taskId: string
+  /** The submission (request_id) whose evidence the operator judged. */
+  verificationId: string
   decision: VerificationVerdictDecision
   /** Required for reject; ignored for approve. */
   reason?: string
@@ -52,6 +56,7 @@ export async function submitVerificationVerdict(
 ): Promise<SubmitVerificationVerdictResponse> {
   const body: Record<string, unknown> = {
     task_id: request.taskId,
+    verification_id: request.verificationId,
     verdict: request.decision,
   }
   if (request.decision === 'reject') body.reason = request.reason ?? ''

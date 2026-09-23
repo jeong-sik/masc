@@ -1238,7 +1238,7 @@ to wake up". Open it through the `go Schedules` palette entry. The selected
 Keeper also exposes its automation in the Automation detail tab.
 
 ```
- MASC Schedules  10:44:57  HTTP [connected]
+ MASC Keepers / Schedules  10:44:57  HTTP [connected]
  ─────────────────────────────────────────────────────────────────────────────
    Requests: 34  (page shows first 20)  ·  Next due: 2026-08-24 09:57:00
  ─────────────────────────────────────────────────────────────────────────────
@@ -1880,7 +1880,13 @@ out the two commands.
 own binary. `start-masc.sh` builds and restarts the server (`bin/main_eio.exe`)
 and does not touch it, so a server restart leaves the TUI on the binary it
 started with. Rebuild with `dune build bin/masc_tui.exe`, then quit and reopen
-the TUI.
+the TUI. `scripts/tui-graceful-restart.sh --build` does that hand quit for you:
+it builds first (a failed build leaves the running session untouched), sends
+the running surface `SIGTERM`, and only starts the fresh binary after the old
+session's per-PID log carries a graceful row (`exit: normal (signal SIGTERM)`,
+the vocabulary above). A session that does not end within `--timeout` is left
+alone — the script never escalates to `SIGKILL` and never starts a second
+surface on top of a live one.
 
 **Header shows `[disconnected]`.** The server is not answering on
 `127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,

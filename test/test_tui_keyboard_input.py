@@ -14004,6 +14004,8 @@ def unread_keeper_counted_interaction() -> Interaction:
             start=0,
             timeout=10.0,
         )
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
 
     return interact
 

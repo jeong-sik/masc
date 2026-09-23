@@ -275,11 +275,18 @@ open Alcotest
    than the preset's min_answered (RFC fusion-seat-routes §2.4). The tool
    declares defer_loading = true, so these bytes reach the wire only on a turn
    that names it. No headroom. *)
-(* 2026-09-23: +998 bytes, measured locally by this test at the
-   keeper_skill_publish branch (122,898 bytes / 138 tools). The new
+(* 2026-09-23: 122,494 across 137 tools (+594), measured by this suite built
+   locally at the change. keeper_memory_write takes supersedes: a Keeper replaces its own
+   earlier progress snapshot in one commit instead of adding another copy.
+   One Keeper wrote about 285 near-identical position snapshots in nine hours,
+   and every one of them rode in every later turn's recall. The parameter says
+   where the id comes from, because recall does not show it. No headroom. *)
+(* 2026-09-23: 122,228 across 138 tools, measured locally by this suite at
+   the keeper_skill_publish branch merged with main. The new
    keeper_skill_publish tool lets a Keeper publish a Skill package it wrote
-   (RFC keeper-self-authored-skills). No headroom. *)
-let ceiling_bytes = 122_898
+   (RFC keeper-self-authored-skills); main's surface had shrunk below the
+   entry above, so the total still falls. No headroom. *)
+let ceiling_bytes = 122_228
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

@@ -364,6 +364,13 @@ let goal_verification_pending_fn
            "goal verification request committed without an installed goal verifier lane goal_id=%s"
            goal_id)
 
+(* Called after an operator Drop or Reopen moved a Goal. The goal verifier
+   lane cancels that Goal's in-flight review and releases its claim. With no
+   lane installed there is no review to cancel, so the default does nothing. *)
+let goal_verification_abandoned_fn
+  : (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
+  = Atomic.make (fun _config ~goal_id:_ -> ())
+
 let verification_notify_verdict_fn
   : (Workspace_utils_backend_setup.config ->
      task_id:string ->

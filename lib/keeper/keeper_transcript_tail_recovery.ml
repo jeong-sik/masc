@@ -104,10 +104,13 @@ let log_outcome name outcome =
       "transcript_tail_recovery: keeper=%s durable metadata unavailable: %s"
       name
       detail
-  | Checkpoint_unavailable _ ->
+  | Checkpoint_unavailable error ->
+    (* The cause decides the remedy: a superseded version is a hard-cut
+       checkpoint the operator purges, a lock failure is transient. *)
     Log.Keeper.error
-      "transcript_tail_recovery: keeper=%s canonical checkpoint unavailable"
+      "transcript_tail_recovery: keeper=%s canonical checkpoint unavailable: %s"
       name
+      (Store.checkpoint_ref_load_error_to_string error)
   | Commit_rejected _ ->
     Log.Keeper.error
       "transcript_tail_recovery: keeper=%s closed tail was not installed"

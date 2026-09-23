@@ -2079,6 +2079,23 @@ def navigate_with_arrows_and_quit(
     # then move to Overview where system events are visible.
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+    # The same claim for the command palette, which is the other place a
+    # printable key is text rather than a command. The quit key used to name
+    # three fields and let the rest through, so a typed "q" armed the exit and
+    # the next one ended the process -- from inside a field showing a cursor.
+    send_and_wait(process, master_fd, output, b":", b"MASC Command palette")
+    palette = send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"qqq",
+        # The prompt is styled, then a plain space, then the query, so the
+        # colon and what was typed are not adjacent bytes.
+        re.compile(rb":(?:" + CSI_RE.pattern + rb")* qqq"),
+    )
+    if b"press again to quit" in CSI_RE.sub(b"", palette):
+        raise AssertionError("a q typed into the palette armed the exit")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
     send_and_wait(
         process,
         master_fd,
@@ -4129,6 +4146,20 @@ def gate_mode_picker_interaction(requests: HttpRequests) -> Interaction:
         expected.append(("/api/v1/dashboard/gate/external-mode", {"mode": "manual"}))
         if mode_requests() != expected:
             raise AssertionError(f"Outside services choice used the wrong lane or mode: {requests!r}")
+        # [ and ] walk the ask cursor on this surface, and the walk used to
+        # take them from the command palette drawn over it: a query with a
+        # bracket in it, a task title like [#31874], arrived with the brackets
+        # gone and the cursor moved behind the overlay.
+        send_and_wait(process, master_fd, output, b":", b"MASC Command palette")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"a[b]c",
+            # The prompt is styled, then a plain space, then the query.
+            re.compile(rb":(?:" + CSI_RE.pattern + rb")* a\[b\]c"),
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Approvals")
         os.write(master_fd, b"q")
 
     return interact
@@ -12191,7 +12222,7 @@ def runtime_resolved_runtime(
     }
 
 
-def runtime_resolved_response() -> HttpResponse:
+def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpResponse:
     runtime_a = runtime_resolved_runtime("runtime-a", "Resolved A", "model-a")
     return (
         200,
@@ -12220,7 +12251,24 @@ def runtime_resolved_response() -> HttpResponse:
                 },
                 {
                     "id": "degraded",
-                    "runtime_ids": ["runtime-c"],
+                    # Off by default. With it on, runtime-a is here as well as
+                    # in "primary", which is what gives the two doors into the
+                    # runtime detail -- a lane's candidate row and the catalog
+                    # row -- something to disagree about. It adds a row to the
+                    # lane listing, and other scripts walk that listing by row:
+                    # test_tui_runtime_lane_editor.py and
+                    # test_tui_selection_visibility.py both call this function
+                    # and count on its shape. The only caller that turns it on
+                    # is runtime_http_fixtures, which feeds nothing but
+                    # runtime_surface_interaction -- the interaction that makes
+                    # the comparison. Two runners register that interaction,
+                    # run_keyboard_regression and run_runtime_regression, and
+                    # both want the extra lane.
+                    "runtime_ids": (
+                        ["runtime-c", "runtime-a"]
+                        if runtime_a_in_two_lanes
+                        else ["runtime-c"]
+                    ),
                     "declared": True,
                 },
                 {
@@ -12255,7 +12303,9 @@ def runtime_http_fixtures() -> tuple[
     )
     fixtures[RUNTIME_PROBE_PATH] = initial_probe
     fixtures[RUNTIME_PROBE_FORCE_PATH] = force_probe
-    fixtures[RUNTIME_RESOLVED_PATH] = runtime_resolved_response()
+    fixtures[RUNTIME_RESOLVED_PATH] = runtime_resolved_response(
+        runtime_a_in_two_lanes=True
+    )
     return fixtures, initial_probe, force_probe
 
 
@@ -12418,8 +12468,8 @@ def runtime_surface_interaction(
                 b"Context source: capability",
                 b"Max output: 8192 tokens",
                 b"Local runtime: no",
-                b"Used by lanes: primary",
-                b"Lane position: 1 of 2",
+                b"Used by lanes: primary, degraded",
+                b"Lane position: 1 of 2 in primary",
                 b"Probe status: reachable",
                 b"Probe transport: http",
                 # The terminal's clock, not the wire's: the scenario runs
@@ -12468,7 +12518,7 @@ def runtime_surface_interaction(
             all_list = screen_text(bytes(output))
             if b"runtime-a" not in all_list:
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
-            if b"Lanes (3 lanes, 4 slots)" not in all_list:
+            if b"Lanes (3 lanes, 5 slots)" not in all_list:
                 raise AssertionError("Runtime catalog counted runtimes as lane slots")
             if b"ready / reachable" not in all_list:
                 raise AssertionError("Runtime catalog omitted independent probe status")
@@ -12484,7 +12534,7 @@ def runtime_surface_interaction(
                 b"Runtime ID: runtime-a",
                 b"Provider: Resolved A",
                 b"Model: model-a",
-                b"Used by lanes: primary",
+                b"Used by lanes: primary, degraded",
                 b"Probe status: reachable",
             ):
                 if needle not in catalog_detail_plain:
@@ -12502,7 +12552,7 @@ def runtime_surface_interaction(
             # /api/v1/dashboard/standalone-lanes body. Walk the full circuit
             # so the return leg is what gets asserted.
             send_and_wait(process, master_fd, output, b"p", b"MASC Lanes")
-            send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 4 slots)")
+            send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 5 slots)")
 
             # The overflow scroll hint is unreachable with this fixture: it
             # renders only when candidates exceed the listing height, but the

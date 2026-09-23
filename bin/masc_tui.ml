@@ -4266,6 +4266,9 @@ let start_code_lsp_question state ~mailbox ~(question : string)
 let launch_github_login state ~mailbox keeper_name =
   let host = server_peer_host in
   let port = state.port in
+  (* Read once, at the key press: ticking another scope while the device flow
+     waits on the browser must not change what this login asked for. *)
+  let scopes = state.github_login_scopes in
   let run () =
     match Eio_context.get_clock_opt () with
     | None ->
@@ -4317,7 +4320,7 @@ let launch_github_login state ~mailbox keeper_name =
         let result =
           try
             Masc_tui_http.post_keeper_github_login_streaming ~clock ~host
-              ~port ~keeper_name
+              ~port ~keeper_name ~scopes
               ~on_chunk:(fun chunk ->
                 Buffer.add_string pending chunk;
                 flush_lines ())
@@ -18108,9 +18111,13 @@ and is loaded on demand through keeper_skill.
       let quit_key =
         match key with
         | Some k ->
-            (match text_input_target state ~compact_viewport with
-             | Some Text_browser_url | Some Text_ask_answer | Some Text_fusion_launch -> false
-             | _ -> Render_schedule.Input_shortcut.is_quit ~message_mode k)
+            (* On a viewport too small to draw them, no field is taking keys:
+               the compact fallback further down owns every remaining one, so
+               yielding there would leave the operator on a terminal they
+               cannot read with no way out but Ctrl-C. *)
+            (compact_viewport
+            || quit_key_allowed_for (text_input_target state ~compact_viewport))
+            && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
@@ -18688,13 +18695,12 @@ and is loaded on demand through keeper_skill.
                           state.fusion_scroll <- 0;
                           start_fusion_run state ~mailbox:async_messages ~request))
             | Some (Fusion_launch_started _) | None -> ())
-       | Some _
-         when quit_key
-              && (compact_viewport
-                 || (Option.is_none state.search
-                    && not
-                         (state.view = Board
-                         && state.board_mode = Board_compose))) ->
+       (* [quit_key] is already false while anything is taking typed text, the
+          row search and the Board draft among them, so this asks nothing more
+          than that. It used to restate those two by hand and let a compact
+          viewport override them, which is how a [q] typed into a narrow
+          screen's row search armed the exit. *)
+       | Some _ when quit_key ->
            if state.quit_armed then begin
              note_exit_reason Masc_tui_exit_reason.Quit_key;
              raise Break
@@ -18859,8 +18865,14 @@ and is loaded on demand through keeper_skill.
           move at all -- [a] opened whichever ask the cursor had been left on,
           and with more than one waiting there was no way to reach the rest
           without answering the first. *)
+       (* The text check is the one the Activity pane above already makes.
+          Without it these two keys were taken from the command palette while
+          it was open over this surface, so a query with a bracket in it --
+          a task title, [#31874] -- arrived with the brackets missing and the
+          ask cursor moved behind the overlay. *)
        | Some ("[" | "]" as k)
          when state.view = Approvals
+              && Option.is_none (text_input_target state ~compact_viewport)
               && (match state.ask_answer_mode with
                   | Ask_browsing -> true
                   | Ask_answering _ -> false)
@@ -20661,10 +20673,42 @@ and is loaded on demand through keeper_skill.
               && state.detail_tab = Detail_github ->
            (match selected_keeper state with
             | Some keeper ->
+                let asked =
+                  match state.github_login_scopes with
+                  | [] -> "gh's default scopes"
+                  | scopes ->
+                      "+"
+                      ^ String.concat ", +"
+                          (List.map
+                             Masc.Keeper_github_identity.login_scope_to_string
+                             scopes)
+                in
                 state.github_identity_view <-
-                  Some (keeper.k_name, [ "# github login"; "(starting gh device flow\xe2\x80\xa6)" ]);
+                  Some
+                    ( keeper.k_name,
+                      [ "# github login";
+                        "(starting gh device flow with " ^ asked ^ "\xe2\x80\xa6)" ] );
                 launch_github_login state ~mailbox:async_messages keeper.k_name
             | None -> ())
+       | Some digit
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_github
+              && String.length digit = 1
+              && digit.[0] >= '1'
+              && digit.[0] <= '9' -> (
+           (* The digit the tab printed beside the scope. Both sides index
+              [all_login_scopes], so what the screen numbered and what this
+              ticks are the same list. *)
+           match
+             List.nth_opt Masc.Keeper_github_identity.all_login_scopes
+               (Char.code digit.[0] - Char.code '1')
+           with
+           | Some scope ->
+               state.github_login_scopes <-
+                 (if List.mem scope state.github_login_scopes then
+                    List.filter (fun s -> s <> scope) state.github_login_scopes
+                  else scope :: state.github_login_scopes)
+           | None -> ())
        | Some ("P" | "p")
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->

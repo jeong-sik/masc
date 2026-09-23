@@ -26,4 +26,4 @@ type = "array"
 required = true
 items = { type = "string" }
 min_items = 1
-description = "Where this procedure worked: Memory fact ids, turn references, or tool call references. Recorded, not judged."
+description = "Where this procedure worked: Memory fact ids, turn references, or tool call references. Recorded for operators to review later."

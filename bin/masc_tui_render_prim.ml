@@ -2825,17 +2825,24 @@ let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
         ^ Ansi.reset )
 
 
+(* Which lanes list this runtime among their candidates, in the order the
+   resolved projection holds them. The runtime detail asks the same question
+   from two doors -- the catalog row and a lane's candidate row -- and a
+   runtime that several lanes fall back to must answer both doors the same,
+   so the answer is computed here rather than at either door. *)
+let runtime_lanes_using (snapshot : Masc.Tui_decode.runtime_surface_snapshot)
+    ~runtime_id =
+  let open Masc.Tui_decode in
+  snapshot.rss_resolved.rrs_lanes
+  |> List.filter (fun (lane : runtime_resolved_lane) ->
+         List.exists (String.equal runtime_id) lane.rrl_runtime_ids)
+  |> List.map (fun (lane : runtime_resolved_lane) -> lane.rrl_id)
+
 let runtime_all_rows (snapshot : Masc.Tui_decode.runtime_surface_snapshot) =
   let open Masc.Tui_decode in
   List.map
     (fun (runtime : runtime_option) ->
-       let lanes =
-         snapshot.rss_resolved.rrs_lanes
-         |> List.filter (fun (lane : runtime_resolved_lane) ->
-                List.exists (String.equal runtime.ro_id) lane.rrl_runtime_ids)
-         |> List.map (fun (lane : runtime_resolved_lane) -> lane.rrl_id)
-       in
-       runtime, lanes)
+       runtime, runtime_lanes_using snapshot ~runtime_id:runtime.ro_id)
     snapshot.rss_resolved.rrs_runtimes
 
 

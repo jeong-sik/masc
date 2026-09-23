@@ -18556,8 +18556,13 @@ and is loaded on demand through keeper_skill.
         | None -> false
       in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
-         a mouse report, or any other key means the operator stayed. *)
-      if Option.is_some input && not quit_key then state.quit_armed <- false;
+         a mouse report, or any other key means the operator stayed. The
+         footer's "press again to quit" goes with the arm, so it does not
+         promise an exit the next press no longer makes. *)
+      if Option.is_some input && not quit_key && state.quit_armed then begin
+        state.quit_armed <- false;
+        state.last_action <- None
+      end;
       (* An armed shutdown expires on the next unrelated input. Otherwise it
          waits indefinitely and a later press of the same key -- after the
          cursor has moved, after a refresh -- submits work the operator armed

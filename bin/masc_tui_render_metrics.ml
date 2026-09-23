@@ -336,9 +336,9 @@ let render_section_fleet ~cols (state : state) =
   in
   (* This TUI's own log: what it did and what it was told, oldest first so the
      newest line sits last. The log holds eleven lines ([add_event]); a run of
-     the same line folds into one row with a ×N tail. First in the section so
-     the newest line is on screen without scrolling past the engine
-     readings. *)
+     the same line folds into one row with a ×N tail. First in the section,
+     so the block starts on screen; on a short terminal its newest lines are
+     reached with j. *)
   let session_lines =
     match state.events with
     | [] -> [ "    (no events yet)" ]

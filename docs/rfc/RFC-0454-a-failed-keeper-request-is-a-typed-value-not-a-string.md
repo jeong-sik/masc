@@ -256,9 +256,9 @@ end
 
 이 RFC 는 표시와 기록만 다룬다고 했지만(§7), P1a 는 한 경로에서 동작도 바꿨다. 기록해 둔다.
 
-턴은 성공했는데 닫는 도구의 terminal effect 가 실패한 채 남은 경우(`keeper_agent_run.ml`), 전에는 타입 없는 `Internal` 에러를 돌려줬다. 그래서 `Internal_opaque` 로 라우팅되고 receipt 는 `Reason_internal_error` / `Disp_fail_open_next_runtime` 로 읽었다 — 다음 런타임으로 넘어가는 처리다. 지금은 typed `Terminal_effect_failed` carrier 를 돌려주므로 `Terminal_effect_<class>` 로 라우팅되고 receipt 는 `Reason_terminal_effect_failed` / `Disp_unknown` 이다 (`keeper_execution_receipt.ml` 186-194, `keeper_runtime_failure_route.ml` 137-175·452-480).
+턴은 성공했는데 닫는 도구의 terminal effect 가 실패한 채 남은 경우(`keeper_agent_run.ml`), 전에는 타입 없는 `Internal` 에러를 돌려줬다. 그래서 `Internal_opaque` 로 라우팅되고 receipt 는 `Reason_internal_error` / `Disp_fail_open_next_runtime` 로 읽었다 — 다음 런타임으로 넘어가는 처리다. 지금은 typed `Terminal_effect_failed` carrier 를 돌려주므로 `Terminal_effect_<class>` 로 라우팅되고 receipt 는 `Reason_terminal_effect_failed` / `Disp_effect_review_required` 이다 (`keeper_execution_receipt.ml` 의 `operator_disposition`, `keeper_runtime_failure_route.ml`).
 
-결과로 그 턴은 `needs_operator_broadcast` 가 참이 되고(`Disp_unknown`), 이어질 HITL continuation 을 다시 보내지 않고 정리한다(`keeper_heartbeat_loop.ml` 479). 닫는 도구가 바깥에 이미 뭔가 했을 수 있으니 자동으로 다시 돌리지 않고 사람이 판단하게 두는 쪽이 맞다.
+결과로 그 턴은 `needs_operator_broadcast` 가 참이 되고(`Disp_effect_review_required`), 이어질 HITL continuation 을 다시 보내지 않고 정리한다(`keeper_heartbeat_loop.ml` 479). 닫는 도구가 바깥에 이미 뭔가 했을 수 있으니 자동으로 다시 돌리지 않고 사람이 판단하게 두는 쪽이 맞다.
 
 ### P2 첫 조각이 한 일 — 런타임 정지 원인의 typed 화
 

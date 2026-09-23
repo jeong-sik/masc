@@ -314,9 +314,11 @@ default = "deepseek.smoke"
 
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["deepseek.smoke"]
+max_output_tokens = 4096
 
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["deepseek.smoke"]
+max_output_tokens = 4096
 
 [providers.deepseek]
 display-name = "SSE Storm Smoke"

@@ -427,6 +427,13 @@ let keeper_artifact_path config keeper_name artifact =
            (Config_dir_resolver.keepers_dir_for_base_path
               ~base_path:config.Workspace.base_path)
          ~keeper_id:keeper_name)
+  | Keeper_memory_events_artifact ->
+    Some
+      (Keeper_memory_os_events.path_for_keepers_dir
+         ~keepers_dir:
+           (Config_dir_resolver.keepers_dir_for_base_path
+              ~base_path:config.Workspace.base_path)
+         ~keeper_id:keeper_name)
   | Keeper_turn_boundaries_artifact ->
     Some
       (Keeper_turn_boundaries.path_for_keepers_dir
@@ -569,11 +576,11 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
               Keeper_status_metrics.invalidate_tool_audit_cache
                 config
                 ~keeper_name:keeper_name
-            | Keeper_memory_journal_artifact ->
-              (* The journal is written through a memoized appender; unlinking
-                 without dropping that writer would leave a same-process
-                 successor keeper appending to the deleted inode, so no new
-                 journal file would ever appear. *)
+            | Keeper_memory_journal_artifact | Keeper_memory_events_artifact ->
+              (* The journal and the events sidecar are written through a
+                 memoized appender; unlinking without dropping that writer
+                 would leave a same-process successor keeper appending to the
+                 deleted inode, so no new file would ever appear. *)
               Fs_compat.invalidate_cached_writer path
             | Keeper_root_logs_artifact
             | Keeper_runtime_directory_artifact
@@ -614,6 +621,7 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
                | Keeper_working_context_artifact
                | Keeper_memory_journal_artifact
                | Keeper_memory_absorbed_artifact
+               | Keeper_memory_events_artifact
                | Keeper_turn_boundaries_artifact
                | Keeper_librarian_progress_artifact
                | Keeper_librarian_official_progress_artifact

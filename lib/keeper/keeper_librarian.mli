@@ -178,17 +178,6 @@ type parse_error =
 
 val parse_error_to_string : parse_error -> string
 
-(** The facts to hand {!Keeper_memory_os_current.apply_disposition} as
-    [new_claims]: [selection.new_claims], and each [selection.restated] memory
-    that an applied absorption in [absorbed] goes into. The store skips an id
-    it still holds, so such a memory comes back only if the keeper retracted it
-    during the pass, and the absorbed memories never point into an id no
-    snapshot has. A restatement nothing goes into is not re-added. *)
-val claims_to_apply
-  :  selection
-  -> absorbed:Keeper_memory_os_types.absorbed_statement list
-  -> Keeper_memory_os_types.fact list
-
 val selection_of_json_result
   :  ?now:float
   -> input

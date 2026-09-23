@@ -37,6 +37,17 @@ type exact_execution_error =
   ; detail : string
   }
 
+(* The two transports name their slots from separate spaces: an API slot by
+   its exact-output flow candidate id, a CLI slot by its lane runtime id. The
+   constructor keeps them apart so a caller never compares one to the other. *)
+type served_slot =
+  | Api_slot of string
+  | Cli_slot of string
+
+let served_slot_id = function
+  | Api_slot id | Cli_slot id -> id
+;;
+
 type extraction_error =
   | Prompt_render_failed of string
   | Execution_clock_unavailable
@@ -781,7 +792,7 @@ let execute_answer
        classification defensive in case either upstream contract changes. *)
     (match try_cli_slots ~requirement ~validate ~keeper_id ~base_path ~cli_runner ~cli_slots
        ~messages with
-     | Ok (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
+     | Ok (runtime_id, selection, output) -> Ok ((selection, output), Cli_slot runtime_id)
      | Error No_cli_slots -> Error No_transport_declared
      | Error (Slot_failures failures) ->
        Error (Cli_slots_exhausted { prior_error = None; failures })
@@ -798,7 +809,7 @@ let execute_answer
        Log.Keeper.warn ~keeper_name:keeper_id
          "librarian lane=%s every API slot refused projection; answered by cli slot=%s: %s"
          exact_lane_id runtime_id (extraction_error_to_string error);
-       Ok ((selection, output), runtime_id)
+       Ok ((selection, output), Cli_slot runtime_id)
      | Error cli_failure -> Error (with_cli_failure error cli_failure))
   | Ok preflight ->
   (if preflight.unusable <> [] then
@@ -830,7 +841,7 @@ let execute_answer
       |> Exact_output.flow_success_candidate
       |> fun candidate -> candidate.visit.identity.candidate_id
     in
-    Ok (success.accepted, selected_slot)
+    Ok (success.accepted, Api_slot selected_slot)
   | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
     (* A rejection the validator raised on an answer that arrived never enters
        the walk's advances, so the walk alone would answer differently
@@ -857,7 +868,7 @@ let execute_answer
             ~messages
         with
         | Ok (runtime_id, selection, output) ->
-          Ok ((selection, output), runtime_id)
+          Ok ((selection, output), Cli_slot runtime_id)
         | Error cli_failure ->
           Error
             (with_cli_failure
@@ -885,7 +896,7 @@ let execute_answer
          ~messages
      with
      | Ok (runtime_id, selection, output) ->
-       Ok ((selection, output), runtime_id)
+       Ok ((selection, output), Cli_slot runtime_id)
      | Error cli_failure ->
        Error
          (with_cli_failure
@@ -1067,7 +1078,7 @@ let run_best_effort
       ?(on_memory_committed = fun () -> ())
       ?(on_cli_input_limit = fun _ -> ())
       ?(on_not_committed = fun _ -> ())
-      ?(on_continuity_committed = fun _ -> ())
+      ?(on_continuity_committed = fun ~served_by:_ _ -> ())
       ?durable_range_id
       ?official_range_id
       ?cli_runner
@@ -1167,7 +1178,7 @@ let run_best_effort
                |> Result.map (fun material -> material.rendered)
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
-             let* (answer, exact_output), selected_slot =
+             let* (answer, exact_output), served_slot =
                execute_answer
                  ~requirement:(output_requirement_of_pass pass)
                  ~validate:(validate_answer pass prompt_input)
@@ -1179,6 +1190,7 @@ let run_best_effort
                  ~messages:[ message Agent_core.Types.User prompt ]
                  ()
              in
+             let selected_slot = served_slot_id served_slot in
 
              (* Working context is advisory and has its own revision. A stale
                 or failed context write cannot roll back memory or block the
@@ -1245,7 +1257,7 @@ let run_best_effort
                    continuity_write := `Assoc
                      ["status", `String "committed"; "end_atom", `Int snapshot.end_atom;
                       "prefix_sha256", `String snapshot.prefix_sha256];
-                   on_continuity_committed snapshot
+                   on_continuity_committed ~served_by:served_slot snapshot
                  | Error detail ->
                    continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
                    (* A snapshot that did not commit -- a CAS the history moved
@@ -1326,8 +1338,7 @@ let run_best_effort
                  { kind = Keeper_memory_os_current.Librarian
                  ; trace_id = input_trace_id inp
                  }
-               ~new_claims:
-                 (Keeper_librarian.claims_to_apply selection ~absorbed:applied_absorbed)
+               ~new_claims:selection.new_claims
                ()
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })

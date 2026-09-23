@@ -143,7 +143,7 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
   let resolver = Fixture.resolver_snapshot ~source:"context-review-fixture"
       [{Fixture.id = "context-librarian"; base_url = librarian.base_url}] in
   (match Runtime_exact_output_registry.publish ~lanes:[{Runtime_schema.id = "librarian_exact";
-      slot_ids = ["context-librarian"]; cli_slot_ids = []}] resolver with
+      slot_ids = ["context-librarian"]; cli_slot_ids = []; max_output_tokens = Some 4_096}] resolver with
    | Ok _ -> () | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-context-key") @@ fun () ->
   Masc_test_deps.with_typesafeai_policy

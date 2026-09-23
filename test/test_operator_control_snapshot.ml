@@ -895,12 +895,13 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "owner"));
       let ctx = operator_ctx env sw config "owner" in
+      (* Each actor stages as itself: the staging actor is the caller, not a
+         field of the request. *)
       let request_namespace_pause actor =
         match
-          Operator_control.action_json ctx
+          Operator_control.action_json (operator_ctx env sw config actor)
             (`Assoc
               [
-                ("actor", `String actor);
                 ("action_type", `String "namespace_pause");
                 ("target_type", `String "workspace");
               ])

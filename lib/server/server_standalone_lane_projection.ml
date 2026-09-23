@@ -28,8 +28,25 @@ type observed_terminal =
         the latency percentile (lane audit W7). It keeps [last_terminal_at]
         empty too: a finish time synthesised from the restart is the
         restart's clock, and the lane detail draws that as an age. *)
-  ; selected_slot : string option
+  ; answered_by : answered_by
   }
+
+(* Who a finished run's record names. The run registry keeps one
+   [selected_slot : string option], and [None] means different things
+   depending on how the run ended, so the reading is made here, once, from
+   the typed row. *)
+and answered_by =
+  | Slot of string
+  | Vendor_system_one
+      (** A Board Attention run that succeeded without a slot. The registry
+          contract (exact_lane_run_registry.mli, [mark_completed]) says
+          Vendor System One answers before any HTTP or CLI slot is bound and
+          leaves [selected_slot] empty; every other success binds one. *)
+  | Closed_by_restart
+      (** Closed on replay after a restart; replay cannot know the slot. *)
+  | No_slot
+      (** Finished without a slot for another reason: it failed or was
+          cancelled before one was bound, or its producer recorded none. *)
 
 type observed_status =
   | Running
@@ -455,27 +472,55 @@ let terminal_of_exact_outcome = function
   | Exact_lane_run_registry.Failed _ -> Failed
 ;;
 
+let closed_by_restart = function
+  | Exact_lane_run_registry.Failed { code; _ } ->
+    String.equal code Exact_lane_run_registry.server_restarted_code
+  | Exact_lane_run_registry.Succeeded | Exact_lane_run_registry.Cancelled -> false
+;;
+
+let exact_answered_by ~lane ~outcome = function
+  | Some slot -> Slot slot
+  | None ->
+    (match lane, outcome with
+     | Exact_lane_run_registry.Board_attention, Exact_lane_run_registry.Succeeded ->
+       Vendor_system_one
+     | _, outcome when closed_by_restart outcome -> Closed_by_restart
+     | ( ( Exact_lane_run_registry.Board_attention
+         | Exact_lane_run_registry.Librarian
+         | Exact_lane_run_registry.Hitl_auto_judge
+         | Exact_lane_run_registry.Workspace_curator )
+       , ( Exact_lane_run_registry.Succeeded
+         | Exact_lane_run_registry.Cancelled
+         | Exact_lane_run_registry.Failed _ ) ) -> No_slot)
+;;
+
+let optional_slot = function
+  | Some slot -> Slot slot
+  | None -> No_slot
+;;
+
 let observed_exact_run (run : Exact_lane_run_registry.run) =
   let status =
     match run.status with
     | Exact_lane_run_registry.Running -> Running
     | Exact_lane_run_registry.Completed { outcome; elapsed_s; selected_slot; _ } ->
-      let elapsed_measured =
-        match outcome with
-        | Exact_lane_run_registry.Failed { code; _ } ->
-          not (String.equal code "server_restarted")
-        | Exact_lane_run_registry.Succeeded
-        | Exact_lane_run_registry.Cancelled -> true
-      in
       Terminal
         { kind = terminal_of_exact_outcome outcome
         ; elapsed_s
-        ; elapsed_measured
-        ; selected_slot
+        ; elapsed_measured = not (closed_by_restart outcome)
+        ; answered_by = exact_answered_by ~lane:run.lane ~outcome selected_slot
         }
     | Exact_lane_run_registry.Completion_persistence_failed
-        { elapsed_s; selected_slot; _ } ->
-      Terminal { kind = Failed; elapsed_s; elapsed_measured = true; selected_slot }
+        { intended_outcome; elapsed_s; selected_slot; _ } ->
+      (* Counted as Failed: the record did not persist. Who answered is still
+         the intended outcome's answer. *)
+      Terminal
+        { kind = Failed
+        ; elapsed_s
+        ; elapsed_measured = true
+        ; answered_by =
+            exact_answered_by ~lane:run.lane ~outcome:intended_outcome selected_slot
+        }
   in
   { lane_id = Exact_lane_run_registry.lane_key run.lane; started_at = run.started_at; status }
 ;;
@@ -507,7 +552,11 @@ let observed_verification_run (run : Verification_run_registry.run) =
       Option.map
         (fun kind ->
            Terminal
-             { kind; elapsed_s; elapsed_measured = true; selected_slot = evaluator_runtime })
+             { kind
+             ; elapsed_s
+             ; elapsed_measured = true
+             ; answered_by = optional_slot evaluator_runtime
+             })
         (terminal_of_verification_outcome outcome)
   in
   Option.map
@@ -538,7 +587,7 @@ let observed_goal_verification_run (run : Goal_verification_run_registry.run) =
         { kind = terminal_of_goal_verification_outcome ~evaluated_verdict outcome
         ; elapsed_s
         ; elapsed_measured = true
-        ; selected_slot = evaluator_runtime
+        ; answered_by = optional_slot evaluator_runtime
         }
   in
   { lane_id = Runtime.verifier_exact_lane_id; started_at = run.started_at; status }
@@ -581,8 +630,8 @@ let slot_counts runs =
     (fun run ->
        match run.status with
        | Running -> ()
-       | Terminal { selected_slot = None; _ } -> ()
-       | Terminal { selected_slot = Some slot_id; _ } ->
+       | Terminal { answered_by = Vendor_system_one | Closed_by_restart | No_slot; _ } -> ()
+       | Terminal { answered_by = Slot slot_id; _ } ->
          let previous_count =
            match Hashtbl.find_opt counts slot_id with
            | None -> 0
@@ -593,6 +642,23 @@ let slot_counts runs =
   Hashtbl.to_seq counts
   |> List.of_seq
   |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+;;
+
+(* The finished runs [slot_counts] leaves out, by why. With the slot counts
+   they add up to succeeded + failed + cancelled, since all come from one list
+   of terminal runs. *)
+let runs_without_slot_json terminal_runs =
+  let count wanted =
+    List.fold_left
+      (fun count (_, terminal) -> if terminal.answered_by = wanted then count + 1 else count)
+      0
+      terminal_runs
+  in
+  `Assoc
+    [ "vendor_system_one", `Int (count Vendor_system_one)
+    ; "server_restarted", `Int (count Closed_by_restart)
+    ; "no_slot", `Int (count No_slot)
+    ]
 ;;
 
 let lane_json
@@ -710,6 +776,7 @@ let lane_json
              (fun (slot_id, count) ->
                 `Assoc [ "slot_id", `String slot_id; "count", `Int count ])
              (slot_counts runs)) )
+    ; "runs_without_slot", runs_without_slot_json terminal_runs
     ]
      @ jev_field)
 ;;

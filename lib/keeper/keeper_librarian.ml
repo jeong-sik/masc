@@ -192,6 +192,13 @@ let basis_for_prompt ~by_identity = function
       ]
 ;;
 
+(* When the fact was written ([first_seen]) and last written again with the
+   same bytes ([last_seen]). Without them a keeper's snapshots of one moving
+   state -- a game position rewritten every step -- read as equals, and none
+   can be told apart as the stale one (#37079). Both are needed: a state that
+   returns to an earlier value keeps its old [first_seen] and only moves
+   [last_seen]. They are write times, not the times the states held, and not
+   a strength signal (RFC-0418); the prompt says so. *)
 let current_fact_json ~by_identity index fact =
   `Assoc
     [ wire_field_memory_id, `String (surrogate_id_of_index index)
@@ -202,6 +209,10 @@ let current_fact_json ~by_identity index fact =
           ; wire_field_origin,
             `Assoc [ wire_field_kind, `String (origin_kind_to_string fact.origin.kind) ]
           ; wire_field_basis, basis_for_prompt ~by_identity fact.basis
+          ; ( wire_field_first_seen
+            , `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen) )
+          ; ( wire_field_last_seen
+            , `String (Masc_domain.iso8601_of_unix_seconds fact.last_seen) )
           ] )
     ]
 ;;
@@ -777,24 +788,6 @@ let materialize_facts ~current_facts ~new_claims ~dropped ~absorbed =
   ; restatements = List.rev restated_rev
   ; restatement_fields = List.rev ignored_rev
   }
-;;
-
-(* What the store is asked to add: the new claims, and each restated memory
-   that some applied absorption goes into. The store skips an identity it
-   still holds, so a restated memory is added again only when the keeper took
-   it away during the pass; without it the absorbed memories would leave and
-   their rows would point into an id no snapshot has. A restatement nothing
-   goes into stays a restatement: the keeper's retraction stands. *)
-let claims_to_apply (selection : selection) ~(absorbed : Keeper_memory_os_types.absorbed_statement list) =
-  let intos =
-    List.fold_left
-      (fun ids (statement : Keeper_memory_os_types.absorbed_statement) ->
-         String_set.add statement.into ids)
-      String_set.empty
-      absorbed
-  in
-  selection.new_claims
-  @ List.filter (fun fact -> String_set.mem (memory_id fact) intos) selection.restated
 ;;
 
 let working_contexts_of_json (inp : input) json =

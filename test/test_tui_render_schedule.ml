@@ -196,6 +196,9 @@ let overview_frame_rows ~has_cluster
   10
   + (if has_cluster then 1 else 0)
   + allocation.attention_rows
+  + (if allocation.team_rows > 0
+     then allocation.team_rows + Schedule.overview_team_chrome_rows
+     else 0)
   + allocation.task_error_rows
   + allocation.task_rows
   + allocation.filler_rows
@@ -203,7 +206,7 @@ let overview_frame_rows ~has_cluster
 let test_overview_rows_share_one_viewport_budget () =
   let max_data =
     Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
-      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:false
+      ~attention_count:6 ~event_count:0 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "14-row attention allocation" 2 max_data.attention_rows;
   check int "14-row task allocation" 1 max_data.task_rows;
@@ -212,7 +215,7 @@ let test_overview_rows_share_one_viewport_budget () =
     (overview_frame_rows ~has_cluster:true max_data);
   let task_error =
     Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
-      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:true
+      ~attention_count:6 ~event_count:0 ~team_count:0 ~task_count:5 ~has_task_error:true
   in
   check int "task error keeps its reserved row" 1
     task_error.task_error_rows;
@@ -221,26 +224,26 @@ let test_overview_rows_share_one_viewport_budget () =
     (overview_frame_rows ~has_cluster:true task_error);
   let full =
     Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
-      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:false
+      ~attention_count:6 ~event_count:0 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "full viewport restores attention cap" 6 full.attention_rows;
   check int "full viewport restores task cap" 5 full.task_rows;
   let events_only =
     Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
-      ~attention_count:0 ~event_count:6 ~task_count:5 ~has_task_error:false
+      ~attention_count:0 ~event_count:6 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "events size the shared panel" 6 events_only.attention_rows;
   check int "events preserve full task rows" 5 events_only.task_rows;
   let mixed_panel =
     Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
-      ~attention_count:2 ~event_count:4 ~task_count:5 ~has_task_error:false
+      ~attention_count:2 ~event_count:4 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "the longer panel column determines shared rows" 4
     mixed_panel.attention_rows;
   check int "mixed panel counts preserve full task rows" 5 mixed_panel.task_rows;
   let compact_events_only =
     Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
-      ~attention_count:0 ~event_count:6 ~task_count:5 ~has_task_error:false
+      ~attention_count:0 ~event_count:6 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "compact events use remaining panel rows" 2
     compact_events_only.attention_rows;
@@ -256,7 +259,7 @@ let test_overview_rows_share_one_viewport_budget () =
                 (fun has_task_error ->
                   let allocation =
                     Schedule.allocate_overview ~terminal_rows ~has_cluster
-                      ~attention_count ~event_count ~task_count ~has_task_error
+                      ~attention_count ~event_count ~team_count:0 ~task_count ~has_task_error
                   in
                   let total = overview_frame_rows ~has_cluster allocation in
                   if total > terminal_rows then
@@ -311,7 +314,7 @@ let test_overview_frame_always_fills_the_terminal () =
             for terminal_rows = 14 to 80 do
               let allocation =
                 Schedule.allocate_overview ~terminal_rows ~has_cluster
-                  ~attention_count ~event_count ~task_count ~has_task_error
+                  ~attention_count ~event_count ~team_count:0 ~task_count ~has_task_error
               in
               check int
                 (Printf.sprintf "rows %d cluster %b data %d/%d/%d/%b"
@@ -335,7 +338,7 @@ let test_overview_frame_always_fills_the_terminal () =
 let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
   let crowded =
     Schedule.allocate_overview ~terminal_rows:60 ~has_cluster:true
-      ~attention_count:80 ~event_count:0 ~task_count:20 ~has_task_error:false
+      ~attention_count:80 ~event_count:0 ~team_count:0 ~task_count:20 ~has_task_error:false
   in
   check int "the panel stops at its ceiling" 6 crowded.attention_rows;
   check int "every task is still drawn" 20 crowded.task_rows
@@ -346,11 +349,84 @@ let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
 let test_overview_blocks_grow_to_their_item_counts () =
   let roomy =
     Schedule.allocate_overview ~terminal_rows:60 ~has_cluster:true
-      ~attention_count:9 ~event_count:0 ~task_count:12 ~has_task_error:false
+      ~attention_count:9 ~event_count:0 ~team_count:0 ~task_count:12 ~has_task_error:false
   in
   check int "the panel stops at its ceiling" 6 roomy.attention_rows;
   check int "every task is drawn" 12 roomy.task_rows;
   check bool "the remainder becomes filler" true (roomy.filler_rows > 0)
+
+(* The Team block says who is doing what. On the operator's 40-row window with
+   sixteen Keepers it gets its rows ahead of the backlog, the frame still ends
+   on the terminal's last row at every size, and a viewport too short for a
+   title, a divider and one Keeper draws no Team block at all rather than
+   chrome with nothing under it. *)
+(* Pull request lines under the Team block take only blank rows: the 24-row
+   Overview keeps every task, and a tall one draws the lines. *)
+let test_team_detail_lines_take_only_spare_rows () =
+  let tight =
+    Schedule.allocate_overview ~terminal_rows:24 ~has_cluster:true
+      ~attention_count:6 ~event_count:6 ~team_count:0 ~task_count:5
+      ~has_task_error:false
+  in
+  let spent = Schedule.spend_spare_rows_on_team tight ~extra:3 in
+  check int "no blank row, no pull request line" tight.team_rows spent.team_rows;
+  check int "the backlog is untouched" tight.task_rows spent.task_rows;
+  let tall =
+    Schedule.allocate_overview ~terminal_rows:40 ~has_cluster:true
+      ~attention_count:2 ~event_count:2 ~team_count:4 ~task_count:3
+      ~has_task_error:false
+  in
+  let spent = Schedule.spend_spare_rows_on_team tall ~extra:3 in
+  check int "three lines join the drawn block" (tall.team_rows + 3) spent.team_rows;
+  check int "paid from the filler" (tall.filler_rows - 3) spent.filler_rows;
+  check int "the backlog is untouched" tall.task_rows spent.task_rows;
+  check int "40-row frame is exact" 40 (overview_frame_rows ~has_cluster:true spent);
+  let empty =
+    Schedule.allocate_overview ~terminal_rows:40 ~has_cluster:true
+      ~attention_count:2 ~event_count:2 ~team_count:0 ~task_count:3
+      ~has_task_error:false
+  in
+  let spent = Schedule.spend_spare_rows_on_team empty ~extra:2 in
+  check int "a new block opens with two rows" 2 spent.team_rows;
+  check int "and pays its chrome from the filler"
+    (empty.filler_rows - 2 - Schedule.overview_team_chrome_rows) spent.filler_rows;
+  check int "40-row frame is exact" 40 (overview_frame_rows ~has_cluster:true spent)
+
+let test_overview_team_block_sits_between_panel_and_backlog () =
+  let live =
+    Schedule.allocate_overview ~terminal_rows:40 ~has_cluster:true
+      ~attention_count:10 ~event_count:3 ~team_count:13 ~task_count:687
+      ~has_task_error:false
+  in
+  check int "the panel keeps its ceiling" 6 live.attention_rows;
+  check int "every Team row fits" 13 live.team_rows;
+  check int "the backlog takes what is left" 8 live.task_rows;
+  check int "40-row frame is exact" 40
+    (overview_frame_rows ~has_cluster:true live);
+  let short =
+    Schedule.allocate_overview ~terminal_rows:18 ~has_cluster:true
+      ~attention_count:6 ~event_count:0 ~team_count:13 ~task_count:20
+      ~has_task_error:false
+  in
+  check int "a short viewport gives Team no half block" 0 short.team_rows;
+  check int "the backlog keeps its held row" 1 short.task_rows;
+  List.iter
+    (fun team_count ->
+      for terminal_rows = 14 to 80 do
+        let allocation =
+          Schedule.allocate_overview ~terminal_rows ~has_cluster:true
+            ~attention_count:6 ~event_count:6 ~team_count ~task_count:40
+            ~has_task_error:true
+        in
+        check int
+          (Printf.sprintf "rows %d team %d" terminal_rows team_count)
+          terminal_rows
+          (overview_frame_rows ~has_cluster:true allocation);
+        if allocation.team_rows < 0 || allocation.team_rows > team_count then
+          failf "team rows out of range at rows=%d team=%d: %d" terminal_rows
+            team_count allocation.team_rows
+      done)
+    [ 0; 1; 3; 16; 60 ]
 
 let test_board_read_rows_reserve_comments_and_footer () =
   let crowded =
@@ -2004,6 +2080,10 @@ let () =
             test_overview_task_block_keeps_a_share_of_a_tall_viewport
         ; test_case "overview blocks grow to their item counts" `Quick
             test_overview_blocks_grow_to_their_item_counts
+        ; test_case "team detail lines take only spare rows" `Quick
+            test_team_detail_lines_take_only_spare_rows
+        ; test_case "overview team block sits between panel and backlog" `Quick
+            test_overview_team_block_sits_between_panel_and_backlog
         ; test_case "board read reserves comments and footer" `Quick
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick

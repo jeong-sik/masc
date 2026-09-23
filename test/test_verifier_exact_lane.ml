@@ -433,10 +433,12 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
          [ { Runtime_schema.id = "verifier_exact"
            ; slot_ids = [ "http.verifier-b"; "verifier-missing"; "http.verifier-a" ]
            ; cli_slot_ids = [ "official.verifier" ]
+           ; max_output_tokens = Some 4_096
            }
          ; { Runtime_schema.id = "auxiliary_exact"
            ; slot_ids = [ "http.verifier-a" ]
            ; cli_slot_ids = []
+           ; max_output_tokens = Some 4_096
            }
          ]
        snapshot
@@ -500,6 +502,7 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
          [ { Runtime_schema.id = "verifier_exact"
            ; slot_ids = [ "http.verifier-a"; "verifier-missing" ]
            ; cli_slot_ids = []
+           ; max_output_tokens = Some 4_096
            }
          ]
        snapshot
@@ -602,7 +605,13 @@ let with_mixed_verifier_clients ?(config = mixed_client_config) f =
 let publish_verifier_lane ~slot_ids ~cli_slot_ids =
   match
     Runtime.publish_exact_output_registry
-      ~lanes:[ { Runtime_schema.id = "verifier_exact"; slot_ids; cli_slot_ids } ]
+      ~lanes:
+        [ { Runtime_schema.id = "verifier_exact"
+          ; slot_ids
+          ; cli_slot_ids
+          ; max_output_tokens = Some 4_096
+          }
+        ]
       (load_verifier_snapshot ())
   with
   | Ok _ -> ()

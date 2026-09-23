@@ -293,39 +293,6 @@ let with_authenticated_activity_router ~prefix ~agent_name f =
        f ~base_path ~config ~state ~sw ~clock ~router ~token)
 ;;
 
-(* The schedule tools record the caller auth resolved and refuse a body that
-   names someone else. The HTTP boundary no longer stamps -- the tool owns the
-   actor -- so these drive the real routes. *)
-let test_schedule_write_actor_is_the_authenticated_caller () =
-  with_authenticated_activity_router
-    ~prefix:"schedule-write-http-actor-"
-    ~agent_name:"credential-owner"
-  @@ fun ~base_path:_ ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  let body =
-    `Assoc
-      [ "schedule_id", `String "sched-http-write-actor"
-      ; "due_at_unix", `Float 4_102_444_800.0
-      ; "keeper_name", `String "schedule-keeper"
-      ; "message", `String "actor binding"
-      ; "requested_by_id", `String "forged-body-actor"
-      ]
-    |> Yojson.Safe.to_string
-  in
-  let status, response =
-    dispatch_json ~router ~token
-      ~path:"/api/v1/tools/masc_schedule_create"
-      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
-  in
-  let open Yojson.Safe.Util in
-  check int "a body naming another actor is refused" 400 status;
-  check bool "the refusal names the forged actor" true
-    (let message = response |> member "message" |> to_string in
-     let needle = "forged-body-actor" in
-     let n = String.length needle and h = String.length message in
-     let rec loop i = i + n <= h && (String.sub message i n = needle || loop (i + 1)) in
-     loop 0)
-;;
-
 let test_schedule_cancel_actor_is_the_authenticated_caller () =
   with_authenticated_activity_router
     ~prefix:"schedule-cancel-http-actor-"
@@ -388,6 +355,110 @@ let test_schedule_cancel_actor_is_the_authenticated_caller () =
   check string "the kind is the action's default" "human_operator"
     (response |> member "data" |> member "cancelled_by" |> member "kind"
      |> to_string)
+;;
+
+(* A bearer admitted by the tool route is not the operator unless its
+   credential is one: a Worker credential -- what a keeper shell could hold
+   -- is a named caller and cannot cancel a row it neither made nor is woken
+   by. *)
+let test_schedule_cancel_with_a_worker_credential_is_not_the_operator () =
+  with_authenticated_activity_router
+    ~prefix:"schedule-cancel-http-worker-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token:_ ->
+  let worker_token =
+    match
+      Auth.create_token base_path ~agent_name:"keeper-shell"
+        ~role:Masc_domain.Worker
+    with
+    | Ok (token, _) -> token
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let operator : Schedule_domain.actor =
+    { id = "credential-owner"
+    ; kind = Schedule_domain.Human_operator
+    ; display_name = None
+    }
+  in
+  let schedule =
+    match
+      Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-worker"
+        ~requested_at:100.0 ~requested_by:operator ~scheduled_by:operator
+        ~due_at:200.0
+        ~payload:
+          (`Assoc
+             [ "kind", `String "consumer.note"
+             ; "body", `Assoc [ "text", `String "keep me" ]
+             ])
+        ~source:Schedule_domain.Operator_request ()
+    with
+    | Ok schedule -> schedule
+    | Error error -> fail (Schedule_service.service_error_to_string error)
+  in
+  let status, _ =
+    dispatch_json ~router ~token:worker_token
+      ~path:"/api/v1/tools/masc_schedule_cancel"
+      ~extra_headers:[ "X-Masc-Agent", "credential-owner" ]
+      ~body:
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "schedule_id", `String schedule.schedule_id
+              ; "reason", `String "not mine"
+              ]))
+      ()
+  in
+  (* 400 is the tool's refusal; 401/403 would be the route refusing the
+     credential, which would prove nothing about the operator rule. *)
+  check int "the tool refuses the worker cancel" 400 status;
+  match (Schedule_store.read_state config).schedules with
+  | [ stored ] ->
+    check bool "the operator's schedule is not cancelled" false
+      (stored.Schedule_domain.status = Schedule_domain.Cancelled)
+  | rows -> failf "expected one stored schedule, got %d" (List.length rows)
+;;
+
+(* The operator surface records the credential's actor as requester and
+   scheduler. The tool schema declares no actor field, so a body that names
+   one is refused before anything is written. *)
+let test_schedule_create_actor_comes_from_auth () =
+  with_authenticated_activity_router
+    ~prefix:"schedule-create-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  let body extra =
+    `Assoc
+      ([ "schedule_id", `String "sched-http-create"
+       ; "keeper_name", `String "http-keeper"
+       ; "message", `String "wake"
+       ; "due_in_sec", `Int 3600
+       ; "allow_unregistered_keeper", `Bool true
+       ]
+       @ extra)
+    |> Yojson.Safe.to_string
+  in
+  let post body =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_schedule_create"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
+  in
+  let forged_status, _ =
+    post (body [ "scheduled_by_id", `String "forged-body-actor" ])
+  in
+  check int "a body naming an actor is refused" 400 forged_status;
+  check int "nothing stored for the forged body" 0
+    (List.length (Schedule_store.read_state config).schedules);
+  let status, _ = post (body []) in
+  check int "create accepted" 201 status;
+  match (Schedule_store.read_state config).schedules with
+  | [ stored ] ->
+    check string "scheduler is the credential owner" "credential-owner"
+      stored.Schedule_domain.scheduled_by.Schedule_domain.id;
+    check string "requester is the credential owner" "credential-owner"
+      stored.Schedule_domain.requested_by.Schedule_domain.id;
+    check bool "the operator surface records a human operator" true
+      (stored.Schedule_domain.requested_by.Schedule_domain.kind
+       = Schedule_domain.Human_operator)
+  | rows -> failf "expected one stored schedule, got %d" (List.length rows)
 ;;
 
 let test_goal_transition_uses_authenticated_actor () =
@@ -1139,8 +1210,10 @@ let () =
             "no /api/v1/tools/* route drift"
             `Quick
             test_no_tools_route_drift
-        ; test_case "schedule write actor comes from auth" `Quick
-            test_schedule_write_actor_is_the_authenticated_caller
+        ; test_case "schedule create actor comes from auth" `Quick
+            test_schedule_create_actor_comes_from_auth
+        ; test_case "a worker credential cancelling is not the operator" `Quick
+            test_schedule_cancel_with_a_worker_credential_is_not_the_operator
         ; test_case "schedule cancel actor comes from auth" `Quick
             test_schedule_cancel_actor_is_the_authenticated_caller
         ; test_case "goal transition actor comes from auth" `Quick

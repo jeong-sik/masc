@@ -90,6 +90,17 @@ val may_have_unread :
     official-only rows do not require an atom checkpoint read. The full
     selector still validates unreadable lines and checkpoint digests. *)
 
+val has_completed_atom_boundary
+  :  trace_id:string
+  -> lines:
+       (int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result)
+         list
+  -> bool
+(** Whether the current restart segment of [trace_id] holds an end line with
+    an atom position, matching any checkpoint or not. It tells a history that
+    has not completed a turn yet from one whose completed turns no longer
+    match it: {!select} answers [Nothing_to_read] for both. *)
+
 (** [lines] is {!Keeper_turn_boundaries.read}'s answer. [messages] are the
     messages of the checkpoint of [trace_id], loaded after [lines] were read.
     Only lines of [trace_id] take part; a line that cannot be decoded stops the

@@ -95,10 +95,9 @@ let selected_runtime_result ?official_client_settlement (runtime : Runtime.t) ~l
     result
 ;;
 
-(* Whether the candidate answered at all. An attempt that yielded before any
-   provider turn completed -- the pre-first-token yield that
-   [Runtime_agent.yielded_pre_first_token] builds when a person queues behind
-   a silent provider -- did not, so it is no evidence the candidate is back. *)
+(* Whether the candidate answered at all. An attempt that stopped before any
+   provider turn completed did not, so it is no evidence the candidate is
+   back. *)
 let run_result_answered (run_result : Runtime_agent.run_result) =
   match run_result.Runtime_agent.stop_reason with
   | Runtime_agent.Completed -> true
@@ -1017,6 +1016,12 @@ let attempt_runtime_candidates
        then lane_terminal (this_candidate terminal_error)
        else if retry_admitted && error_is_retryable
        then loop ~observed_overflow ~repeated_models (idx + 1) rest
+       else if Keeper_internal_error.is_preempted_before_first_token error
+       then
+         (* A person queued behind this turn (#38094). An overflow an earlier
+            candidate saw must not replace it: the turn yields, it does not
+            fail for capacity. *)
+         lane_terminal (this_candidate error)
        else if is_last
        then (
          (* Lane fully exhausted: an overflow seen anywhere in the rotation

@@ -121,7 +121,8 @@ val judge
   -> outcome
 (** [facts] are the current memories the pass read, before the answer removes
     absorbed memories; [new_claims] the claims the answer adds; [absorbed] the
-    absorptions it states. One request per absorbing claim, chunked by
+    absorptions it states. An absorption whose [into] is a current memory the
+    answer restated is judged against that memory's text. One request per absorbing claim, chunked by
     {!questions_per_request}. *)
 
 (** {1 Entry point} *)

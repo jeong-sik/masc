@@ -1239,9 +1239,10 @@ let quarantined_outcome = "quarantined"
 
 (* [dropped_statements = None] means the writer makes no drop-reason
    statements (explicit keeper writes, upserts); [Some list] is the
-   librarian's own account of every drop in this commit, possibly empty.
-   Statements live only on the journal line: the snapshot codec stays
-   frozen, so existing on-disk snapshots keep parsing unchanged. *)
+   librarian's own account of the drops this commit carried out, possibly
+   empty ([dropped_by_commit]). Statements live only on the journal line:
+   the snapshot codec stays frozen, so existing on-disk snapshots keep
+   parsing unchanged. *)
 let journal_entry_to_json ~dropped_statements snapshot =
   `Assoc
     ([ "outcome", `String committed_outcome

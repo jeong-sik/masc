@@ -945,6 +945,9 @@ let test_a_supersede_of_a_memory_the_keeper_superseded_during_the_pass_is_not_st
           ; kind = Events.Revised { superseded_by = keeper_successor_id }
           }
         ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal leaves B to the keeper's own revision" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in
@@ -972,6 +975,9 @@ let test_a_supersede_of_a_memory_the_keeper_retracted_during_the_pass_is_not_sto
           ; kind = Events.Retracted
           }
         ]
+      ~inspect:(fun ~keepers_dir ~keeper_id ->
+        check (list string) "the journal leaves B to the keeper's retraction" []
+          (journaled_drop_ids ~keepers_dir ~keeper_id))
       ()
   in
   let successor = the_one_new_claim selection in

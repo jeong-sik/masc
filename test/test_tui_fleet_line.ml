@@ -164,6 +164,19 @@ let test_a_complete_scan_says_only_the_count () =
 let test_nothing_found_and_nothing_missed_draws_nothing () =
   check (option string) "no row" None (owner_scan_text (fleet ()))
 
+(* The server's placeholder carries no counts, so the line says the fleet was
+   not measured and why, instead of drawing an idle fleet from zeros. *)
+let test_an_unmeasured_fleet_says_why () =
+  let text status timed_out error =
+    Masc_tui_fleet_line.not_measured_text
+      { Tui_decode.fnm_status = status; fnm_timed_out = timed_out; fnm_error = error }
+  in
+  check string "a warming snapshot" "not measured (warming)" (text "warming" false None);
+  check string "a scan that raised names the server's reason"
+    "not measured (error) \xc2\xb7 Not_found" (text "error" false (Some "Not_found"));
+  check string "a refresh that ran out of time says so"
+    "not measured (warming) \xc2\xb7 refresh timed out" (text "warming" true None)
+
 let () =
   run "tui fleet line"
     [ ( "blocker names"
@@ -193,6 +206,10 @@ let () =
             test_a_complete_scan_says_only_the_count
         ; test_case "nothing found and nothing missed draws nothing" `Quick
             test_nothing_found_and_nothing_missed_draws_nothing
+        ] )
+    ; ( "not measured"
+      , [ test_case "an unmeasured fleet says why" `Quick
+            test_an_unmeasured_fleet_says_why
         ] )
     ; ( "failing"
       , [ test_case "names only the classes that hold a keeper" `Quick

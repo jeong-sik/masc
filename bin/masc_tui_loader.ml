@@ -1639,7 +1639,7 @@ let restore_preset ~(host : string) ~(port : int) ~(name : string)
    started has no row, so the roster shows nine keepers whether the tenth is
    absent by design or blocked. *)
 let load_fleet_safety ~(host : string) ~(port : int) :
-    (Tui_decode.fleet_safety, string) result =
+    (Tui_decode.fleet_safety_reading, string) result =
   match fetch_fleet_safety ~host ~port with
   | Error err -> Error ("fleet safety load failed: " ^ err)
   | Ok json -> Tui_decode.decode_fleet_safety json

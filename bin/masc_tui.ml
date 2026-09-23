@@ -1831,7 +1831,7 @@ type http_scoped_surface_results = {
   http_board_hearths: ((string * int) list, string) result option;
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
-  http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
+  http_fleet_safety: (Tui_decode.fleet_safety_reading, string) result option;
   (* [None] on surfaces that do not show it: the roster costs a request and
      only the Keepers surface reads it, so leaving it out keeps whatever the
      last Keepers refresh observed rather than dropping it. *)
@@ -10540,8 +10540,8 @@ let launch_system_logs_load state ~mailbox =
   | None -> run_load ()
 
 let apply_fleet_safety_load state = function
-  | Ok fleet ->
-      state.fleet_safety <- Some fleet;
+  | Ok reading ->
+      state.fleet_safety <- Some reading;
       state.fleet_safety_error <- None
   | Error err ->
       (* The last good reading is dropped: a stale fleet line is worse than an

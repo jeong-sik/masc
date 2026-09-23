@@ -2219,6 +2219,23 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type fleet_not_measured = {
+  fnm_status : string;
+      (** The placeholder's status: ["warming"] before the server's first
+          health snapshot, ["error"] when the fleet scan raised, or the
+          status the snapshot refresh gave up with. *)
+  fnm_timed_out : bool;  (** The snapshot refresh ran out of time. *)
+  fnm_error : string option;  (** The server's reason, when it gave one. *)
+}
+(** The server has no fleet reading to give, and says so with a placeholder
+    that carries no counts. *)
+
+type fleet_safety_reading =
+  | Fleet_measured of fleet_safety
+  | Fleet_not_measured of fleet_not_measured
+      (** Kept apart from a reading: zero counts would draw an idle fleet the
+          server never measured. *)
+
 type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
@@ -2814,11 +2831,17 @@ val decode_planning_snapshot :
     {!goal_store_unavailable_view_to_string} line as the [Error]; RFC-0444 PR-4
     lifts it into a [Planning_unavailable] constructor. *)
 
-val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
+val decode_fleet_safety :
+  Yojson.Safe.t -> (fleet_safety_reading, string) result
 (** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
     A body without the section is an error rather than an empty reading: an
     absent section and a healthy fleet are different facts, and rendering the
-    second for the first is how a blocked keeper stays invisible. *)
+    second for the first is how a blocked keeper stays invisible.
+
+    A section carrying [schema = "masc.keeper_fleet_operator.v1"] is a
+    reading, and every field of {!fleet_safety} is required: a missing count
+    is an error, not zero. A section without [schema] is the server's
+    placeholder and reads as {!Fleet_not_measured}. *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

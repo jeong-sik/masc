@@ -4990,7 +4990,12 @@ let render_keeper_list (state : state) =
        box_line buf cols
          ((Theme.bad ()) ^ "  fleet: " ^ Terminal_text.single_line err ^ Ansi.reset)
    | None, None -> ()
-   | Some fleet, None ->
+   | Some (Fleet_not_measured placeholder), None ->
+       box_line buf cols
+         ((Theme.warn ()) ^ "  fleet "
+          ^ Masc_tui_fleet_line.not_measured_text placeholder
+          ^ Ansi.reset)
+   | Some (Fleet_measured fleet), None ->
        let tone =
          if fleet.fs_operator_action_required then (Theme.bad ())
          else if String.equal fleet.fs_status "ok" then (Theme.ok ())

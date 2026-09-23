@@ -3009,7 +3009,9 @@ let test_fleet_official_client_recovery ~paused ~autoboot () =
         "turn_configuration_error" (json |> member "blocker" |> to_string);
       match Tui_decode.decode_fleet_safety (`Assoc [ "keeper_fleet_safety", json ]) with
       | Error error -> Alcotest.fail error
-      | Ok fleet ->
+      | Ok (Tui_decode.Fleet_not_measured _) ->
+        Alcotest.fail "the scan's own section decoded as not measured"
+      | Ok (Tui_decode.Fleet_measured fleet) ->
         Alcotest.(check int) "TUI retains the recovering count" 1 fleet.fs_recovering_count;
         Alcotest.(check int) "TUI retains session recovery count" (List.length required_names)
           fleet.fs_official_client_recovery_required_count;
@@ -3111,7 +3113,9 @@ let test_fleet_official_client_recovery_clears_after_success reason () =
         ((after |> member "blocker") = `Null);
       match Tui_decode.decode_fleet_safety (`Assoc [ "keeper_fleet_safety", after ]) with
       | Error error -> Alcotest.fail error
-      | Ok fleet ->
+      | Ok (Tui_decode.Fleet_not_measured _) ->
+        Alcotest.fail "the scan's own section decoded as not measured"
+      | Ok (Tui_decode.Fleet_measured fleet) ->
         Alcotest.(check int) "TUI clears session recovery count" 0
           fleet.fs_official_client_recovery_required_count;
         Alcotest.(check (list string)) "TUI clears session recovery names" []

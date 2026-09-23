@@ -44,6 +44,13 @@ let failing_text (fleet : Tui_decode.fleet_safety) =
                    (fun (label, count) -> Printf.sprintf "%s %d" label count)
                    classes)))
 
+let not_measured_text (placeholder : Tui_decode.fleet_not_measured) =
+  String.concat " \xc2\xb7 "
+    (Printf.sprintf "not measured (%s)"
+       (Terminal_text.single_line placeholder.fnm_status)
+     :: (if placeholder.fnm_timed_out then [ "refresh timed out" ] else [])
+     @ Option.to_list (Option.map Terminal_text.single_line placeholder.fnm_error))
+
 (* The task owners the fleet has no fiber for, and how much of that reading is
    missing. A Keeper whose profile does not load is a scan error: its tasks are
    left out of the count, and only a backlog failure moves the fleet status off

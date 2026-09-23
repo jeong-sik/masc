@@ -1099,7 +1099,8 @@ let fleet_safety_json ?(missing = true)
   `Assoc
     [ ( "keeper_fleet_safety"
       , `Assoc
-          ([ "status", `String "degraded"
+          ([ "schema", `String "masc.keeper_fleet_operator.v1"
+           ; "status", `String "degraded"
            ; "blocker", `String blocker
            ; "operator_action_required", `Bool true
            ; "bootable_keeper_count", `Int 10
@@ -1124,6 +1125,8 @@ let fleet_safety_json ?(missing = true)
                       (if missing
                        then [ "analyst"; "bluebird"; "haneul" ]
                        else [ "analyst"; "bluebird" ])) )
+             ; ( "running_keeper_names"
+               , `List [ `String "analyst"; `String "bluebird" ] )
              ; ( "executable_keeper_names"
                , `List [ `String "analyst"; `String "bluebird" ] )
              ; ( "turn_configuration_error_keeper_names"
@@ -1131,94 +1134,143 @@ let fleet_safety_json ?(missing = true)
              ]) )
     ]
 
+let measured = function
+  | Ok (Tui_decode.Fleet_measured fleet) -> fleet
+  | Ok (Tui_decode.Fleet_not_measured _) ->
+      Alcotest.fail "a fleet reading decoded as not measured"
+  | Error err -> Alcotest.fail err
+
 (* The scan errors ride the same section. A Keeper whose profile did not load
    is left out of the owner count above and does not move [status], so the row
    can only say the reading was short if this number reaches it. *)
 let test_decode_fleet_safety_carries_the_scan_shortfall () =
-  match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
-  | Error err -> Alcotest.fail err
-  | Ok fleet ->
-      Alcotest.(check int) "sources the scan could not read" 2
-        fleet.Tui_decode.fs_active_task_owner_scan_error_count
+  let fleet = measured (Tui_decode.decode_fleet_safety (fleet_safety_json ())) in
+  Alcotest.(check int) "sources the scan could not read" 2
+    fleet.Tui_decode.fs_active_task_owner_scan_error_count
 
 let test_decode_fleet_safety_carries_both_name_lists () =
-  match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
-  | Error err -> Alcotest.fail err
-  | Ok fleet ->
-      Alcotest.(check string) "status" "degraded" fleet.fs_status;
-      Alcotest.(check bool) "the blocker is read as the reason it names" true
-        (fleet.fs_blocker
-         = Some
-             (Tui_decode.Blocker
-                Keeper_fleet_blocker.Reaction_capacity_below_target));
-      Alcotest.(check bool) "operator must act" true
-        fleet.fs_operator_action_required;
-      Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
-      Alcotest.(check int) "running" 8 fleet.fs_running_count;
-      Alcotest.(check int) "shortfall" 1 fleet.fs_reaction_capacity_shortfall;
-      Alcotest.(check int) "task owner without fiber" 1
-        fleet.fs_active_task_owner_without_fiber_count;
-      (* The failing partition the header prints beside the whole: retrying
-         plus configuration-blocked. The reader takes both; the server does
-         not precompute the display string. *)
-      Alcotest.(check int) "failing" 1 fleet.fs_failing_count;
-      Alcotest.(check int) "retrying" 0 fleet.fs_recovering_count;
-      Alcotest.(check int) "config-blocked" 1
-        fleet.fs_turn_configuration_error_count;
-      Alcotest.(check (list string)) "config-blocked names" [ "bluebird" ]
-        fleet.fs_turn_configuration_error_names;
-      Alcotest.(check int) "no session recovery required" 0
-        fleet.fs_official_client_recovery_required_count;
-      (* The reader takes the difference; the server does not precompute it. *)
-      Alcotest.(check (list string)) "keepers that should run"
-        [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
-      (* Executable holds every keeper with a live fiber, failing ones
-         included -- bluebird is failing here and stays out of the
-         not-running difference the header draws from it. *)
-      Alcotest.(check (list string)) "keepers that can execute a turn"
-        [ "analyst"; "bluebird" ] fleet.fs_executable_names;
-      Alcotest.(check (list string)) "the difference names the missing keeper"
-        [ "haneul" ]
-        (List.filter
-           (fun n -> not (List.mem n fleet.fs_executable_names))
-           fleet.fs_bootable_names)
+  let fleet =
+    measured (Tui_decode.decode_fleet_safety (fleet_safety_json ()))
+  in
+  Alcotest.(check string) "status" "degraded" fleet.fs_status;
+  Alcotest.(check bool) "the blocker is read as the reason it names" true
+    (fleet.fs_blocker
+     = Some
+         (Tui_decode.Blocker
+            Keeper_fleet_blocker.Reaction_capacity_below_target));
+  Alcotest.(check bool) "operator must act" true
+    fleet.fs_operator_action_required;
+  Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
+  Alcotest.(check int) "running" 8 fleet.fs_running_count;
+  Alcotest.(check int) "shortfall" 1 fleet.fs_reaction_capacity_shortfall;
+  Alcotest.(check int) "task owner without fiber" 1
+    fleet.fs_active_task_owner_without_fiber_count;
+  (* The failing partition the header prints beside the whole: retrying
+     plus configuration-blocked. The reader takes both; the server does
+     not precompute the display string. *)
+  Alcotest.(check int) "failing" 1 fleet.fs_failing_count;
+  Alcotest.(check int) "retrying" 0 fleet.fs_recovering_count;
+  Alcotest.(check int) "config-blocked" 1
+    fleet.fs_turn_configuration_error_count;
+  Alcotest.(check (list string)) "config-blocked names" [ "bluebird" ]
+    fleet.fs_turn_configuration_error_names;
+  Alcotest.(check int) "no session recovery required" 0
+    fleet.fs_official_client_recovery_required_count;
+  (* The reader takes the difference; the server does not precompute it. *)
+  Alcotest.(check (list string)) "keepers that should run"
+    [ "analyst"; "bluebird"; "haneul" ] fleet.fs_bootable_names;
+  (* Executable holds every keeper with a live fiber, failing ones
+     included -- bluebird is failing here and stays out of the
+     not-running difference the header draws from it. *)
+  Alcotest.(check (list string)) "keepers that can execute a turn"
+    [ "analyst"; "bluebird" ] fleet.fs_executable_names;
+  Alcotest.(check (list string)) "the difference names the missing keeper"
+    [ "haneul" ]
+    (List.filter
+       (fun n -> not (List.mem n fleet.fs_executable_names))
+       fleet.fs_bootable_names)
 
-(* A fleet where every bootable keeper runs leaves the difference empty. *)
-let test_decode_fleet_safety_requires_session_recovery_fields () =
+(* The fleet reading writes every field on every scan, so each one the TUI
+   reads is required: a missing count is a broken payload, and reading it as
+   zero would draw an idle fleet nobody measured. [schema] is left out of the
+   walk because without it the section is the server's placeholder. *)
+let test_decode_fleet_safety_requires_every_field () =
   let section = Yojson.Safe.Util.member "keeper_fleet_safety" (fleet_safety_json ()) in
   match section with
   | `Assoc fields ->
     List.iter
-      (fun field ->
-        let json = `Assoc [ "keeper_fleet_safety", `Assoc (List.remove_assoc field fields) ] in
-        Alcotest.(check bool) ("missing observation is not zero: " ^ field) true
-          (Result.is_error (Tui_decode.decode_fleet_safety json)))
-      [ "official_client_recovery_required_keeper_count"
-      ; "official_client_recovery_required_keeper_names" ]
+      (fun (field, _) ->
+        if not (String.equal field "schema") then
+          let json =
+            `Assoc [ "keeper_fleet_safety", `Assoc (List.remove_assoc field fields) ]
+          in
+          Alcotest.(check bool) ("missing observation is not zero: " ^ field) true
+            (Result.is_error (Tui_decode.decode_fleet_safety json)))
+      fields
   | _ -> Alcotest.fail "fleet fixture must be an object"
+
+(* Server_routes_http_runtime.full_health_component_placeholder is what the
+   section holds before the first health snapshot and when the scan raised.
+   It carries no counts, and it reads as "not measured", never as a fleet of
+   zeros. *)
+let test_decode_fleet_safety_reads_the_placeholder_as_not_measured () =
+  let placeholder fields = `Assoc [ "keeper_fleet_safety", `Assoc fields ] in
+  (match
+     Tui_decode.decode_fleet_safety
+       (placeholder
+          [ "component", `String "keeper_fleet_safety"
+          ; "status", `String "warming"
+          ; "component_timed_out", `Bool false
+          ])
+   with
+   | Ok (Tui_decode.Fleet_not_measured { fnm_status; fnm_timed_out; fnm_error }) ->
+       Alcotest.(check string) "warming" "warming" fnm_status;
+       Alcotest.(check bool) "not timed out" false fnm_timed_out;
+       Alcotest.(check (option string)) "no reason" None fnm_error
+   | Ok (Tui_decode.Fleet_measured _) ->
+       Alcotest.fail "a warming placeholder decoded as a reading"
+   | Error err -> Alcotest.fail err);
+  (match
+     Tui_decode.decode_fleet_safety
+       (placeholder
+          [ "component", `String "keeper_fleet_safety"
+          ; "status", `String "error"
+          ; "component_timed_out", `Bool false
+          ; "error", `String "Not_found"
+          ])
+   with
+   | Ok (Tui_decode.Fleet_not_measured { fnm_error; _ }) ->
+       Alcotest.(check (option string)) "the server's reason" (Some "Not_found")
+         fnm_error
+   | Ok (Tui_decode.Fleet_measured _) ->
+       Alcotest.fail "a failed scan decoded as a reading"
+   | Error err -> Alcotest.fail err);
+  Alcotest.(check bool) "a schema this build does not know is refused" true
+    (Result.is_error
+       (Tui_decode.decode_fleet_safety
+          (placeholder [ "schema", `String "masc.keeper_fleet_operator.v2" ])))
 
 (* A newer server can name a reason this build has no constructor for. The
    header still has something to say, so the name is kept rather than read as
    no blocker at all. *)
 let test_decode_fleet_safety_keeps_an_unknown_blocker_by_name () =
-  match
-    Tui_decode.decode_fleet_safety
-      (fleet_safety_json ~blocker:"lane_capacity_withdrawn" ())
-  with
-  | Error err -> Alcotest.fail err
-  | Ok fleet ->
-      Alcotest.(check bool) "the unknown name is kept" true
-        (fleet.fs_blocker
-         = Some (Tui_decode.Unrecognised_blocker "lane_capacity_withdrawn"))
+  let fleet =
+    measured
+      (Tui_decode.decode_fleet_safety
+         (fleet_safety_json ~blocker:"lane_capacity_withdrawn" ()))
+  in
+  Alcotest.(check bool) "the unknown name is kept" true
+    (fleet.fs_blocker
+     = Some (Tui_decode.Unrecognised_blocker "lane_capacity_withdrawn"))
 
 let test_decode_fleet_safety_with_nothing_missing () =
-  match Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()) with
-  | Error err -> Alcotest.fail err
-  | Ok fleet ->
-      Alcotest.(check (list string)) "nothing missing" []
-        (List.filter
-           (fun n -> not (List.mem n fleet.fs_executable_names))
-           fleet.fs_bootable_names)
+  let fleet =
+    measured (Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()))
+  in
+  Alcotest.(check (list string)) "nothing missing" []
+    (List.filter
+       (fun n -> not (List.mem n fleet.fs_executable_names))
+       fleet.fs_bootable_names)
 
 (* A body without the section is refused rather than read as a healthy fleet.
    Rendering "ok" for "the server did not say" is how a blocked keeper stays
@@ -11178,8 +11230,10 @@ let () =
           test_decode_fleet_safety_carries_both_name_lists;
         Alcotest.test_case "fleet safety carries the scan shortfall" `Quick
           test_decode_fleet_safety_carries_the_scan_shortfall;
-        Alcotest.test_case "session recovery fields are required" `Quick
-          test_decode_fleet_safety_requires_session_recovery_fields;
+        Alcotest.test_case "every field is required" `Quick
+          test_decode_fleet_safety_requires_every_field;
+        Alcotest.test_case "the placeholder reads as not measured" `Quick
+          test_decode_fleet_safety_reads_the_placeholder_as_not_measured;
         Alcotest.test_case "an unknown blocker is kept by name" `Quick
           test_decode_fleet_safety_keeps_an_unknown_blocker_by_name;
         Alcotest.test_case "a full fleet leaves the difference empty" `Quick

@@ -1180,13 +1180,33 @@ def fleet_safety_fixture() -> HttpResponse:
 
     Without it the poll fails and the TUI records a "fleet safety data
     unreliable" event, which is correct behaviour but adds a row to scenarios
-    that are counting the event list. The current session-recovery fields
-    are explicit: a missing observation must not become a zero count.
+    that are counting the event list. Every field the reading carries is
+    here: the TUI requires each one, because a missing observation must not
+    become a zero count.
     """
     return (200, {"keeper_fleet_safety": {
+        "schema": "masc.keeper_fleet_operator.v1",
         "status": "ok",
+        "blocker": None,
+        "operator_action_required": False,
+        "bootable_keeper_count": 0,
+        "bootable_keeper_names": [],
+        "running_keeper_fiber_count": 0,
+        "running_keeper_names": [],
+        "executable_keeper_fiber_count": 0,
+        "executable_keeper_names": [],
+        "failing_keeper_fiber_count": 0,
+        "recovering_keeper_fiber_count": 0,
+        "turn_configuration_error_keeper_count": 0,
+        "turn_configuration_error_keeper_names": [],
         "official_client_recovery_required_keeper_count": 0,
         "official_client_recovery_required_keeper_names": [],
+        "paused_keeper_count": 0,
+        "target_reaction_capacity_count": 0,
+        "reaction_capacity_shortfall_count": 0,
+        "active_task_owner_without_executable_fiber_count": 0,
+        "completion_authority_pending_task_count": 0,
+        "active_task_owner_scan_error_count": 0,
     }})
 
 

@@ -1365,6 +1365,7 @@
   masc_tui_token_scale
   masc_tui_types
   masc_tui_message_layout
+  masc_tui_fleet_line
   unix))
 
 (library

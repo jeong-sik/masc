@@ -442,7 +442,8 @@ let test_exhaustion_reaches_the_runtime_exhausted_class () =
       ; reason = Some Keeper_meta_contract.Dns_failure
       }
   in
-  match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+  match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+      ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason with
   | None -> Alcotest.fail "an exhaustion reason must produce a blocker surface"
   | Some surface ->
     Alcotest.(check string)
@@ -464,7 +465,8 @@ let test_provider_error_without_reason_stays_provider_error () =
       ; reason = None
       }
   in
-  match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+  match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+      ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason with
   | None -> Alcotest.fail "a provider error must produce a blocker surface"
   | Some surface ->
     Alcotest.(check string)
@@ -476,7 +478,8 @@ let test_undecodable_blocker_classes_are_named_not_counted () =
   let undecodable =
     List.filter_map
       (fun reason ->
-        match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+        match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+            ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason with
         | None -> None
         | Some surface ->
           (match
@@ -508,7 +511,8 @@ let test_decodable_blocker_classes_stay_decodable () =
   let decodable =
     List.filter_map
       (fun reason ->
-        match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+        match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+            ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason with
         | None -> None
         | Some surface ->
           (match
@@ -535,8 +539,130 @@ let test_decodable_blocker_classes_stay_decodable () =
     true
     (List.exists
        (fun reason ->
-         Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason <> None)
+         (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+             ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason <> None)
        every_failure_reason)
+;;
+
+(* A turn_failures blocker is a count; the registry rebuilds it from the
+   durable streak on boot and the typed cause is gone. The summary reads the
+   newest execution receipt instead, so the operator sees what failed. Rows
+   go through the receipt serializer into the receipt store, which is the
+   path a failed turn writes. *)
+let receipt_row ~keeper_name ~outcome ~terminal_reason_code ~error_message ~ended_at
+  : Keeper_execution_receipt.t
+  =
+  { Keeper_execution_receipt.keeper_name
+  ; trace_id = "trace-turn-failures"
+  ; turn_count = Some 7
+  ; agent_core_turn_count = None
+  ; current_task_id = None
+  ; outcome
+  ; terminal_reason_code
+  ; response_text_present = false
+  ; completion_contract_result = Keeper_execution_receipt.Completion_observation_unknown
+  ; actionable_signal = None
+  ; tool_surface =
+      { Keeper_execution_receipt.turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_optional }
+  ; sandbox_kind = Keeper_types_profile_sandbox.Remote_ssh
+  ; sandbox_root = None
+  ; network_mode = Keeper_types_profile_sandbox.Network_none
+  ; runtime_id = "runtime-1"
+  ; runtime_selected_model = None
+  ; runtime_attempt_count = 1
+  ; runtime_lane_attempt_count = 1
+  ; runtime_fallback_applied = false
+  ; runtime_outcome = Keeper_execution_receipt.Runtime_failed
+  ; agent_core_internal_runtime_allowed = true
+  ; degraded_retry_applied = None
+  ; degraded_retry_deferred = None
+  ; stop_reason = None
+  ; error_kind = None
+  ; error_message
+  ; started_at = "2026-09-23T00:38:00Z"
+  ; ended_at
+  ; extra_system_context_digest = None
+  ; extra_system_context_injected_size = None
+  ; extra_system_context_computed_size = None
+  }
+;;
+
+let contains haystack needle =
+  let n = String.length needle in
+  let h = String.length haystack in
+  let rec go i = i + n <= h && (String.equal (String.sub haystack i n) needle || go (i + 1)) in
+  go 0
+;;
+
+let test_turn_failures_summary_names_the_newest_failed_receipt () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
+  let base_path = Filename.temp_dir "keeper_status_turn_failures_" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Eio_guard.disable ();
+      Fs_compat.remove_tree base_path)
+    (fun () ->
+      let config = Workspace.default_config base_path in
+      let keeper_name = "turn-failures" in
+      let store =
+        Keeper_types_support.keeper_execution_receipt_store config keeper_name
+      in
+      let summary () =
+        match
+          Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+            ~latest_receipt:(fun () ->
+              Keeper_execution_receipt.read_latest_receipt config keeper_name)
+            (Keeper_registry.Turn_consecutive_failures 2)
+        with
+        | Some surface ->
+          Alcotest.(check string)
+            "class" "turn_failures" surface.Keeper_status_bridge.blocker_class;
+          surface.Keeper_status_bridge.summary
+        | None -> Alcotest.fail "a turn failure streak must produce a blocker surface"
+      in
+      let empty = summary () in
+      Alcotest.(check bool)
+        "without a receipt the summary says no receipt names the cause"
+        true
+        (contains empty "no execution receipt");
+      Dated_jsonl.append
+        store
+        (Keeper_execution_receipt.to_json
+           (receipt_row
+              ~keeper_name
+              ~outcome:`Error
+              ~terminal_reason_code:"api_error_rate_limited"
+              ~error_message:(Some "Rate limited: Rate limit reached for requests")
+              ~ended_at:"2026-09-23T00:38:12Z"));
+      let failed = summary () in
+      List.iter
+        (fun (label, needle) ->
+          Alcotest.(check bool) label true (contains failed needle))
+        [ "keeps the streak count", "2 consecutive"
+        ; "names the terminal reason", "api_error_rate_limited"
+        ; "names the error message", "Rate limited: Rate limit reached for requests"
+        ; "names when the failed turn ended", "2026-09-23T00:38:12Z"
+        ];
+      Dated_jsonl.append
+        store
+        (Keeper_execution_receipt.to_json
+           (receipt_row
+              ~keeper_name
+              ~outcome:`Ok
+              ~terminal_reason_code:"success"
+              ~error_message:None
+              ~ended_at:"2026-09-23T01:00:00Z"));
+      let after_ok = summary () in
+      Alcotest.(check bool)
+        "a newer non-failed receipt is not presented as the cause"
+        false
+        (contains after_ok "api_error_rate_limited");
+      Alcotest.(check bool)
+        "the non-failed newest receipt is named as such"
+        true
+        (contains after_ok "not a failed turn"))
 ;;
 
 let () =
@@ -619,6 +745,12 @@ let () =
           "provider error without a reason stays provider_runtime_error"
           `Quick
           test_provider_error_without_reason_stays_provider_error
+      ] );
+    ( "turn_failures blocker cause"
+    , [ Alcotest.test_case
+          "summary names the newest failed receipt"
+          `Quick
+          test_turn_failures_summary_names_the_newest_failed_receipt
       ] );
     ]
 ;;

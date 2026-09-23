@@ -112,7 +112,8 @@ let check_preserved ~base_path ~keeper_name ~expected error =
        | Some { last_failure_reason = Some (R.Official_client_recovery_required payload as observed); _ } ->
          Alcotest.(check bool) "heartbeat retains typed claim refusal" true (payload = expected);
          let public =
-           match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason observed with
+           match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+               ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) observed with
            | Some surface ->
              Alcotest.(check string) "public local recovery class"
                "official_client_recovery_required" surface.blocker_class;

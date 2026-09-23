@@ -23,7 +23,11 @@ type runtime_blocker_surface = {
 val blocker_class_of_core_error :
   Agent_core.Error.t -> blocker_class option
 
+(** [latest_receipt] is read only for [Turn_consecutive_failures], whose
+    count carries no cause; the summary then names the newest receipt's
+    terminal reason when that receipt is a failed turn. *)
 val runtime_blocker_surface_of_failure_reason :
+  latest_receipt:(unit -> Keeper_execution_receipt.latest_receipt_reading) ->
   Keeper_registry.failure_reason -> runtime_blocker_surface option
 
 val auto_execution_session_surface_json : unit -> Yojson.Safe.t

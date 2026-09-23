@@ -160,7 +160,63 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   { blocker_class = str; summary }
 ;;
 
-let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_reason) =
+(* The streak is a count and survives a restart without its cause (the
+   registry is rebuilt from [Keeper_turn_failure_streak_store], which stores
+   only the number). The execution receipt of the failed turn is durable and
+   already names the cause, so the summary reads it instead of telling the
+   operator to go and find it. Only a failed newest receipt is presented as
+   the cause: a cycle that crashed before writing a receipt, or a later
+   non-failing receipt that did not reset the streak, would otherwise put a
+   stale or unrelated cause next to this count. *)
+let turn_failures_summary ~count (latest_receipt : Keeper_execution_receipt.latest_receipt_reading)
+  =
+  let streak = Printf.sprintf "Keeper turn failed %d consecutive cycle(s)" count in
+  match latest_receipt with
+  | Keeper_execution_receipt.Latest_receipt
+      { Keeper_execution_receipt.latest_outcome = `Error
+      ; latest_terminal_reason_code
+      ; latest_error_message
+      ; latest_ended_at
+      } ->
+    Printf.sprintf
+      "%s; last failed turn ended %s with %s%s"
+      streak
+      latest_ended_at
+      latest_terminal_reason_code
+      (match latest_error_message with
+       | None -> ""
+       | Some message -> ": " ^ short_preview message)
+  | Keeper_execution_receipt.Latest_receipt
+      { Keeper_execution_receipt.latest_outcome = (`Ok | `Skipped | `Cancelled) as outcome
+      ; latest_terminal_reason_code
+      ; latest_ended_at
+      ; latest_error_message = _
+      } ->
+    Printf.sprintf
+      "%s; the newest execution receipt (%s %s, ended %s) is not a failed turn, so no \
+       receipt names this failure's cause"
+      streak
+      (Keeper_execution_receipt.outcome_kind_to_string outcome)
+      latest_terminal_reason_code
+      latest_ended_at
+  | Keeper_execution_receipt.No_receipt ->
+    Printf.sprintf "%s; no execution receipt names the cause" streak
+  | Keeper_execution_receipt.Latest_receipt_undecodable { field } ->
+    Printf.sprintf
+      "%s; the newest execution receipt has no readable %s, so no cause is shown"
+      streak
+      field
+  | Keeper_execution_receipt.Receipt_store_unreadable err ->
+    Printf.sprintf
+      "%s; execution receipts could not be read (%s)"
+      streak
+      (Dated_jsonl.read_error_to_string err)
+;;
+
+let runtime_blocker_surface_of_failure_reason
+      ~(latest_receipt : unit -> Keeper_execution_receipt.latest_receipt_reading)
+      (reason : Keeper_registry.failure_reason)
+  =
   match reason with
   | Keeper_registry.Heartbeat_consecutive_failures count ->
     Some
@@ -173,11 +229,7 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
   | Keeper_registry.Turn_consecutive_failures count ->
     Some
       { blocker_class = "turn_failures"
-      ; summary =
-          Printf.sprintf
-            "Keeper turn failed %d consecutive cycle(s); inspect the last runtime error \
-             before retry."
-            count
+      ; summary = turn_failures_summary ~count (latest_receipt ())
       }
   | Keeper_registry.Stale_termination_storm { count } ->
     Some

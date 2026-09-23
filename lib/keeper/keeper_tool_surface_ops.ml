@@ -232,7 +232,9 @@ let keeper_list_row_json ~runtime_class config name =
       let runtime_blocker_summary =
         Option.bind registry_entry (fun entry ->
           Option.bind entry.Keeper_registry.last_failure_reason
-            Keeper_status_bridge.runtime_blocker_surface_of_failure_reason)
+            (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+               ~latest_receipt:(fun () ->
+                 Keeper_execution_receipt.read_latest_receipt config meta.name)))
         |> Option.map (fun blocker -> blocker.Keeper_status_bridge.summary)
       in
       let keepalive_running =

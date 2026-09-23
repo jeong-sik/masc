@@ -245,7 +245,8 @@ let provider_runtime_surface_exn
       ; reason
       }
   in
-  match KSB.runtime_blocker_surface_of_failure_reason failure_reason with
+  match (KSB.runtime_blocker_surface_of_failure_reason
+      ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) failure_reason with
   | Some surface -> surface
   | None ->
     fail "runtime_blocker_surface_of_failure_reason returned None for Provider_runtime_error"

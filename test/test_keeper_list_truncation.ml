@@ -349,7 +349,8 @@ let timeout_reason () =
 
 (* This is a wiring test, not another definition of status wording. *)
 let timeout_summary () =
-  match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason (timeout_reason ()) with
+  match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+      ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) (timeout_reason ()) with
   | Some surface -> surface.summary
   | None -> fail "runtime failure did not produce a status summary"
 ;;

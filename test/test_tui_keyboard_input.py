@@ -10515,6 +10515,7 @@ def standalone_lane_fixture(
         "last_outcome": "succeeded",
         "p50_elapsed_s": 8.0,
         "selected_slots": [{"slot_id": "glm-coding.glm-5-turbo", "count": 12}],
+        "runs_without_slot": {"vendor_system_one": 0, "server_restarted": 0, "no_slot": 0},
     }
     if lane_id == "board_attention_exact":
         row["jev"] = {"state": "off"}

@@ -97,6 +97,25 @@ let redacted_tool_output_json ~tool_name:_ output =
   in
   Some redacted
 
+(* The marker a shrunk object carries. The budget must leave room for its
+   serialized length, so that length is measured rather than guessed. *)
+let truncated_marker = ("_truncated", `Bool true)
+
+let marker_len =
+  String.length (Yojson.Safe.to_string (`Assoc [ truncated_marker ]))
+
+(* A shrunk array ends with this element; it is what tells a reader the tail
+   was dropped. *)
+let list_truncation_sentinel = `String "..."
+
+(* A serialized string is wrapped in two quote characters, so a string cut to
+   [budget] bytes must leave room for them. *)
+let string_quote_len = 2
+
+(* A member or element that shrinks to nothing still costs its own syntax, so
+   a budget below this floor cannot make progress; the recursion stops there. *)
+let min_budget = 8
+
 (* A tool output that is a JSON document must not be cut at a byte boundary:
    the stored string stops parsing, so the TUI falls back to raw bytes instead
    of the structure (issue #37804). Shrink the document itself — drop trailing
@@ -110,29 +129,31 @@ let rec shrink_json_to_budget (budget : int) (json : Yojson.Safe.t) : Yojson.Saf
       let rec keep acc budget = function
         | [] -> List.rev acc
         | (key, value) :: rest ->
-          let value' = shrink_json_to_budget (max 8 (budget / 2)) value in
+          let value' = shrink_json_to_budget (max min_budget (budget / 2)) value in
           let acc' = (key, value') :: acc in
           if String.length (Yojson.Safe.to_string (`Assoc (List.rev acc'))) <= budget
           then keep acc' budget rest
           else List.rev acc
       in
       `Assoc
-        (keep [] (max 8 (budget - 24)) fields @ [ ("_truncated", `Bool true) ])
+        (keep [] (max min_budget (budget - marker_len)) fields @ [ truncated_marker ])
     | `List items ->
       let rec keep acc budget = function
         | [] -> List.rev acc
         | value :: rest ->
-          let value' = shrink_json_to_budget (max 8 (budget / 2)) value in
+          let value' = shrink_json_to_budget (max min_budget (budget / 2)) value in
           let acc' = value' :: acc in
           if String.length (Yojson.Safe.to_string (`List (List.rev acc'))) <= budget
           then keep acc' budget rest
           else List.rev acc
       in
-      `List (keep [] (max 8 (budget - 24)) items @ [ `String "..." ])
+      `List
+        (keep [] (max min_budget (budget - marker_len)) items
+        @ [ list_truncation_sentinel ])
     | `String s ->
       let cut =
         String_util.utf8_char_boundary s
-          (min (String.length s) (max 0 (budget - 2)))
+          (min (String.length s) (max 0 (budget - string_quote_len)))
       in
       `String (String.sub s 0 cut)
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as scalar -> scalar
@@ -144,7 +165,20 @@ let truncate_json_document ?(max_len = default_max_len) (s : string) : string =
     match Yojson.Safe.from_string s with
     | exception Yojson.Json_error _ -> redact_preview ~max_len s
     | json ->
-      json |> redact_json_value |> shrink_json_to_budget max_len
-      |> Yojson.Safe.to_string |> redact_patterns
+      let redacted = redact_json_value json in
+      (* [shrink_json_to_budget] bounds the document it returns, but the
+         serialized form can still grow past that bound: a string leaf spends
+         two characters per escaped byte, and [redact_patterns] runs after the
+         budget is spent. Measure the result and shrink again on a smaller
+         budget until it fits — halving reaches a string, which always fits. *)
+      let rec fit budget =
+        let out =
+          shrink_json_to_budget budget redacted
+          |> Yojson.Safe.to_string |> redact_patterns
+        in
+        if String.length out <= max_len || budget <= 1 then out
+        else fit (budget / 2)
+      in
+      fit max_len
 ;;
 

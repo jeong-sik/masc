@@ -381,6 +381,39 @@ let test_truncate_json_document_passes_non_json_through () =
   Alcotest.(check bool) "non-JSON falls back to the byte preview" true
     (String_util.contains_substring out "(truncated)")
 
+(* A document that is itself a string spends two characters per escaped byte
+   when serialized, so the budget spent on the raw bytes is not the budget the
+   stored value costs. The shrink is measured on the serialized form and
+   repeated, so the result still fits. *)
+let test_truncate_json_document_string_leaf_fits () =
+  let doc = Yojson.Safe.to_string (`String (String.make 5000 '\n')) in
+  let out = Observability_redact.truncate_json_document ~max_len:200 doc in
+  Alcotest.(check bool)
+    (Printf.sprintf "a string document fits the budget (%d bytes)" (String.length out))
+    true (String.length out <= 200);
+  (match Yojson.Safe.from_string out with
+   | `String _ -> ()
+   | _ -> Alcotest.fail "stored value is not a JSON string"
+   | exception Yojson.Json_error e ->
+     Alcotest.fail ("stored value is not JSON: " ^ e))
+
+(* An array is shrunk at element boundaries and ends with the sentinel; the
+   serialized result fits the budget. *)
+let test_truncate_json_document_list_fits () =
+  let doc =
+    `List (List.init 200 (fun i -> `String (Printf.sprintf "element-%d" i)))
+    |> Yojson.Safe.to_string
+  in
+  let out = Observability_redact.truncate_json_document ~max_len:200 doc in
+  Alcotest.(check bool)
+    (Printf.sprintf "an array fits the budget (%d bytes)" (String.length out))
+    true (String.length out <= 200);
+  (match Yojson.Safe.from_string out with
+   | `List _ -> ()
+   | _ -> Alcotest.fail "stored value is not a JSON array"
+   | exception Yojson.Json_error e ->
+     Alcotest.fail ("stored value is not JSON: " ^ e))
+
 let () =
   Alcotest.run "observability_redact"
     [
@@ -428,6 +461,10 @@ let () =
             test_truncate_json_document_keeps_json_parseable;
           Alcotest.test_case "truncate_json_document passes non-json through" `Quick
             test_truncate_json_document_passes_non_json_through;
+          Alcotest.test_case "truncate_json_document string leaf fits the budget" `Quick
+            test_truncate_json_document_string_leaf_fits;
+          Alcotest.test_case "truncate_json_document list fits the budget" `Quick
+            test_truncate_json_document_list_fits;
         ] );
       ( "tool_observability",
         [

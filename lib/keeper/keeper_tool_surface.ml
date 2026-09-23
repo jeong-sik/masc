@@ -293,6 +293,12 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           (match Keeper_checkpoint_store.load_agent_core
                    ~session_dir:session.session_dir ~session_id:trace_id with
            | Error Not_found -> Clear_no_checkpoint
+           (* A checkpoint an earlier build wrote is one no turn loads: the
+              turn starts without saved history (Saved_history_superseded)
+              and its first save replaces the file. Clear reads it the same
+              way, so a version bump does not leave the keeper uncleanable
+              with its official-client session still in place. *)
+           | Error (Superseded_version _) -> Clear_no_checkpoint
            | Error error ->
              Clear_checkpoint_unreadable
                { path = Keeper_checkpoint_store.agent_core_checkpoint_path

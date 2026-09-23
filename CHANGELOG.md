@@ -6,6 +6,8 @@
 
 ### Upgrade notes
 
+- HTTP/2 request bodies now have the same size limit as HTTP/1: a body over `MASC_MAX_BODY_BYTES` (default 20 MiB) is refused with 413 instead of being buffered in full. If a client sends larger bodies over HTTP/2, raise `MASC_MAX_BODY_BYTES` and restart the server (#37893).
+- Prompt overrides no longer have a 10,000-byte limit. An override you saved earlier that the server held back for being too long takes effect on the first boot after upgrading; clear it first if you no longer want it (#38079).
 - A prompt file under `<config-root>/prompts` that was edited by hand
   before this version is overwritten on the first boot, because no digest
   was recorded for it yet. Move such an edit into a prompt override before
@@ -108,6 +110,11 @@
 
 ### Changed
 
+- A prompt override may now be as long as the prompt it replaces; the old limit counted bytes while its message said characters, so about 3,300 Korean characters were refused (#38079).
+- Attention rows say only who and why — `lane-smith: paused` instead of `lane-smith needs operator attention: paused` — so the reason is no longer cut off (#37876).
+- Boot reads the goal store once; if it cannot, it logs one INFO line naming the reason and keeps starting, instead of the problem surfacing only on the first goal screen or tool (#37889).
+- Answering an ask, approving a held tool call, and interrupting a turn now record the authenticated caller in the log, the response and the late-approval record, instead of a self-reported `actor_id` or nothing (#38038).
+- The dashboard and TUI no longer send a self-reported `actor_id` when answering an ask; the server already recorded the authenticated caller as the responder (#38139).
 - The Librarian reads a new claim that repeats a current memory word for word
   as that memory instead of refusing the whole pass as
   `duplicate_selected_memory_id`: the stored fact keeps its first sighting and
@@ -332,6 +339,9 @@
 
 ### Fixed
 
+- grok-4.3 requests that carry a reasoning effort are sent instead of refused: those rows now declare xAI's documented ladder (none, low, medium, high, xhigh). `grok-latest`, which xAI does not document, still refuses an effort-carrying request before sending it (#37868).
+- HTTP/2 `POST /graphql` checks authentication before reading the request body, as HTTP/1 already did (#37893).
+- HTTP/2 responses are no longer cut off at the client's flow-control window: a client with a small window used to receive a 200 with a truncated body, and parallel streams could arrive empty (#37942).
 - An autonomous turn that yields to a queued person before its provider's first
   event (RFC-0441) is no longer a failed keeper cycle. The preemption used to
   return a synthesized zero-turn run result that the keeper could only read as
@@ -710,6 +720,8 @@
 
 ### Internal
 
+- The keys a `[<provider>.<model>]` binding accepts are now the keys the parser reads, instead of a hand-kept list that could drift from it; the accepted set is unchanged (#38303).
+- Fusion settings tests pin one write at a time, the all-or-nothing loader, and which site a notice is drawn in (#37845).
 - The `tui-chat-design` Skill's `Origin_row` density row now matches the header
   the TUI draws: the speaker's whole name, a receding clock at the right edge
   and a rule between them; a row whose time cell is empty draws no clock and no

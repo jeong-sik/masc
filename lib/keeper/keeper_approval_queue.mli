@@ -205,9 +205,11 @@ val install_error_to_string : install_error -> string
     [retired_deliveries]. A delivery is spent when its wake was delivered and
     is no longer in its Keeper's event queue, no unsettled execution of that
     Keeper names the approval, and an approval's grant is consumed; or when its
-    Keeper's meta is gone. A delivery whose Keeper meta, queue, or operation
-    store cannot be read, or whose Keeper has meta but no queue, is kept. The
-    removal is skipped while the store or the replay projection is
+    Keeper's meta is gone: deleting a Keeper drops its approvals and
+    rejections, used or not, at the next install, so a Keeper created again
+    under the same name starts without them. A delivery whose Keeper meta,
+    queue, or operation store cannot be read, or whose Keeper has meta but no
+    queue, is kept. The removal is skipped while the store or the replay projection is
     unavailable, and a failed write is reported in
     [delivery_retirement_error] and retried at the next install. *)
 val install_persistence :
@@ -465,7 +467,13 @@ type resolution_result =
 
     [base_path] is the authenticated caller workspace. The pending or
     in-progress delivery entry must belong to it exactly before any resolution
-    claim or journal mutation is attempted. *)
+    claim or journal mutation is attempted.
+
+    A delivery that {!install_persistence} retired as spent is gone from the
+    queue, so deciding it again returns [Not_found] and writes nothing; the
+    decision stays on the audit ledger. While the delivery is still held, the
+    same request again completes without a new ledger row and a different one
+    is [Already_resolved]. *)
 val resolve_with_policy :
   base_path:string ->
   id:string ->

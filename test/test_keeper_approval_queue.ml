@@ -51,6 +51,22 @@ let resolved_history_exn = function
   | Error error -> Alcotest.fail (Keeper_approval.Audit.read_error_to_string error)
 ;;
 
+let resolved_rows_for_approval ~base_path id =
+  let history =
+    Keeper_approval.Audit.list_recent_resolved
+      ~base_path
+      ~now_ts:(Unix.gettimeofday ())
+      ~window_minutes:60
+      ()
+    |> resolved_history_exn
+  in
+  let open Yojson.Safe.Util in
+  List.length
+    (List.filter
+       (fun row -> String.equal (row |> member "id" |> to_string) id)
+       history.resolved_rows)
+;;
+
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_" "" in
   Unix.unlink dir;
@@ -2105,6 +2121,27 @@ let check_delivery_retired ~base_path approval_id =
   | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
 ;;
 
+(* After retirement the queue holds nothing for the approval, so pressing the
+   same decision again is [Not_found], not the silent success a retained
+   delivery gave. Every caller of [resolve_with_policy] folds [Not_found] and
+   [Already_resolved] into the same answer (HTTP 410 Gone on the dashboard,
+   [Judgment_skipped] for the auto judge). The press writes no ledger row: the
+   decision stays on the audit ledger exactly once. *)
+let check_resolve_after_retirement ~base_path ~decision approval_id =
+  let rows_before = resolved_rows_for_approval ~base_path approval_id in
+  Alcotest.(check int) "the retired decision stays on the ledger" 1 rows_before;
+  (match aq_resolve ~base_path ~id:approval_id ~decision with
+   | Error (AQ.Not_found actual) ->
+     Alcotest.(check string) "not found names the approval" approval_id actual
+   | Ok () -> Alcotest.fail "a retired approval was resolved again"
+   | Error error ->
+     Alcotest.fail ("expected Not_found, got " ^ AQ.resolve_error_to_string error));
+  Alcotest.(check int)
+    "the second press adds no ledger row"
+    rows_before
+    (resolved_rows_for_approval ~base_path approval_id)
+;;
+
 let check_delivery_kept ~base_path approval_id =
   Alcotest.(check bool)
     "durable store still holds the delivery"
@@ -2147,6 +2184,10 @@ let test_consumed_delivery_with_acknowledged_wake_leaves_the_store () =
       true
       (Option.is_none report.delivery_retirement_error);
     check_delivery_retired ~base_path approval_id;
+    check_resolve_after_retirement
+      ~base_path
+      ~decision:Rule_types.Decision.Approve
+      approval_id;
     (* The sidecar lost the outcome with its delivery, so the next load finds
        no outcome without a delivery. *)
     let second = reinstall_exn ~base_path in
@@ -2221,6 +2262,7 @@ let test_rejection_leaves_the_store_once_its_wake_was_delivered () =
     Alcotest.(check int) "delivered rejection retired" 1 report.retired_deliveries;
     Alcotest.(check int) "undelivered rejection replayed" 1 report.replayed_deliveries;
     check_delivery_retired ~base_path delivered_id;
+    check_resolve_after_retirement ~base_path ~decision:reject delivered_id;
     check_delivery_kept ~base_path undelivered_id;
     let replayed =
       durable_resolution_opt ~base_path ~keeper_name ~approval_id:undelivered_id
@@ -4745,22 +4787,6 @@ let test_boot_replay_does_not_record_the_decision_again () =
          report.replayed_deliveries;
        Alcotest.(check int) "and still records nothing new" 1
          (resolved_rows_for_id ()))
-;;
-
-let resolved_rows_for_approval ~base_path id =
-  let history =
-    Keeper_approval.Audit.list_recent_resolved
-      ~base_path
-      ~now_ts:(Unix.gettimeofday ())
-      ~window_minutes:60
-      ()
-    |> resolved_history_exn
-  in
-  let open Yojson.Safe.Util in
-  List.length
-    (List.filter
-       (fun row -> String.equal (row |> member "id" |> to_string) id)
-       history.resolved_rows)
 ;;
 
 (* A keeper meta file that is not JSON makes the durable wake enqueue fail

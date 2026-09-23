@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- The model catalog and the seed runtime config carry the three models released on 2026-09-22. `claude-opus-5-5` gets its own catalog row (1M/128K, $4/$20, cache read 0.05x, forced tool use refused) — without it the id lands on the `claude-opus-5` row and bills cache reads at double the real rate — plus Claude Code subscription bindings at low..max. `gpt-6-sol` and `gpt-6-luna` get bare catalog rows (efforts `none`,`low`..`max`, from a /v1/responses parameter probe) and Codex subscription bindings at low..max. Release evidence entries for all three (#38118).
+
 ### Changed
 
 - The runtime startup degradation record no longer carries fields that were always empty. It is built only when no default, media-failover or lane reference names a missing runtime, so `dropped_routes`, `dropped_media_failover`, `dropped_lane_candidates` and `dropped_lanes` were always `[]` and `effective_default_runtime_id` always equaled `configured_default_runtime_id`. They leave the record, its JSON and the dashboard decoder; the log line names the default once instead of `configured default "x" -> effective default "x"`, and the dashboard alert reads `default:` (#38074).

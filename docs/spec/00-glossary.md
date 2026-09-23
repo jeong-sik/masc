@@ -1234,6 +1234,11 @@ status: reference
   된다(`Turn_record`). 거절이 앞을 옮긴 뒤에는 그 이동을 이름으로 남긴다
   (`Halved_after_refusal`·`Evicted_after_refusal`). 씨앗으로 보낸 범위가 거절돼 이번
   턴의 시작부터 다시 보낼 때도 이름을 남긴다(`Turn_start_after_seed_refusal`).
+  Seed와 이월된 앞머리를 포함한 범위 구성에서 거절이 앞을 옮기는 것은 크기 때문인 typed 거절
+  (`ContextOverflow`·`Request_body_refused_by_provider`)뿐이다. 모델링되지 않은 400/422
+  (`Unknown_invalid_request`, 도구 스키마 오류나 지원하지 않는 인자 등)는 오래된
+  맥락을 자르거나(evict/halve) 강등하지 않고 받은 그대로 반환하여, 다음 턴이 좁혀진
+  앞머리가 아니라 정상 수용된 전체 범위를 구성하게 한다(#38286).
   위치는 번호와 digest의 쌍이라, 손에 든 History가 같은 번호를 같은 Message로
   열 때만 쓴다(`for_history`). History의 Atom 개수는 비교하지 않는다.
   RFC 코퍼스는 이 자리를 **씨앗**이라 부른다.

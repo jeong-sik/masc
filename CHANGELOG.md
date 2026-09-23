@@ -61,7 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- The keeper cost view no longer shows an unknown cost as $0. Subscription runtimes report no cost, so their turn rows carry `cost_usd: null`, and `/api/v1/dashboard/keeper-costs` folded that null into `0.0`: every keeper read `total_cost_usd: 0.0` beside tens of millions of tokens. The feed now sums only reported costs and says how many turns reported one (`cost_reported_samples`) and how many did not (`cost_unreported_samples`); `total_cost_usd` is `null` when no turn in the window reported a cost. `model_breakdown` always held a single redacted `runtime` bucket equal to the total and is removed. The dashboard's Keeper cost table and Total Cost tile say `미보고` and the unreported turn count instead of `$0` (#38105).
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result

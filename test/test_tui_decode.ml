@@ -2086,10 +2086,20 @@ let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
     else [ ("cancellation_reason", cancellation_reason) ])
 
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
-    ?(truncated = false) ?(unresolved = []) ?backlog_error ?backlog_recovery
-    requests =
+    ?(truncated = false) ?(unresolved = []) ?unresolved_total ?backlog_error
+    ?backlog_recovery requests =
+  (* Only the awaiting view joins the backlog, so only it counts what it could
+     not resolve; the list beside it is one page. *)
+  let unresolved_total_field =
+    match view, unresolved_total with
+    | "awaiting", None ->
+        [ ("awaiting_unresolved_total", `Int (List.length unresolved)) ]
+    | "awaiting", Some total -> [ ("awaiting_unresolved_total", `Int total) ]
+    | _, _ -> []
+  in
   `Assoc
-    ([ ("updated_at", `String "2026-08-23T09:00:01Z")
+    (unresolved_total_field
+     @ [ ("updated_at", `String "2026-08-23T09:00:01Z")
      ; ("total", `Int total)
      ; ("view", `String view)
      ; ("offset", `Int offset)
@@ -4564,6 +4574,60 @@ let test_decode_memory_fact_reads_the_use_record () =
           Alcotest.fail "a row without events must be rejected"
       | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
 
+(* The server writes a fact's category through [category_to_string], so a
+   word outside the eight is a wire error -- not a ninth category for the
+   renderer to guess a colour for. *)
+let test_decode_memory_fact_refuses_an_unknown_category () =
+  let snapshot category =
+    Tui_decode.decode_memory_fact_snapshot
+      (memory_fact_snapshot_json
+         ~ordinary:
+           (`Assoc
+              [ "present", `Bool true
+              ; "revision", `Int 7
+              ; "updated_at", `Float 1_775_000_100.0
+              ; ( "facts"
+                , `List
+                    [ `Assoc
+                        [ "claim", `String "the deploy needs assets"
+                        ; "category", `String category
+                        ; "origin", `String "authored"
+                        ; "first_seen", `Float 1_775_000_000.0
+                        ; "last_seen", `Float 1_775_000_050.0
+                        ; "memory_id", `String "mem-1"
+                        ; "events", memory_fact_events_json ()
+                        ]
+                    ] )
+              ])
+         ~source_bound:(`Assoc [ "present", `Bool false ]) ())
+  in
+  let contains_substring text needle =
+    let n = String.length needle and h = String.length text in
+    let rec go i = i + n <= h && (String.sub text i n = needle || go (i + 1)) in
+    go 0
+  in
+  let refused_naming word = function
+    | Error error -> contains_substring error word
+    | Ok snapshot -> (
+        match snapshot.Tui_decode.mfs_ordinary with
+        | Tui_decode.Memory_store_read_error error ->
+            contains_substring error word
+        | Tui_decode.Memory_store_present _ | Tui_decode.Memory_store_absent ->
+            false)
+  in
+  Alcotest.(check bool) "a word the producer never writes is refused" true
+    (refused_naming "rule" (snapshot "rule"));
+  List.iter
+    (fun category ->
+      let word = Masc.Keeper_memory_os_types.category_to_string category in
+      match snapshot word with
+      | Ok { Tui_decode.mfs_ordinary = Tui_decode.Memory_store_present
+               { Tui_decode.mos_facts = [ fact ]; _ }; _ } ->
+          Alcotest.(check bool) (word ^ " round-trips") true
+            (fact.Tui_decode.mf_category = category)
+      | Ok _ | Error _ -> Alcotest.failf "%s did not decode" word)
+    Masc.Keeper_memory_os_types.all_categories
+
 let test_decode_memory_facts_keeps_both_stores () =
   let ordinary =
     `Assoc
@@ -4621,7 +4685,9 @@ let test_decode_memory_facts_keeps_both_stores () =
            (match store.Tui_decode.mos_facts with
             | [ fact ] ->
                 Alcotest.(check string) "category as the server spelled it"
-                  "lesson" fact.Tui_decode.mf_category;
+                  "lesson"
+                  (Masc.Keeper_memory_os_types.category_to_string
+                     fact.Tui_decode.mf_category);
                 Alcotest.(check string) "origin" "authored"
                   fact.Tui_decode.mf_origin
             | facts ->
@@ -4962,6 +5028,9 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "last_outcome", (if retained = 0 then `Null else `String "succeeded")
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
+    ; ( "runs_without_slot"
+      , `Assoc
+          [ "vendor_system_one", `Int 0; "server_restarted", `Int 0; "no_slot", `Int 0 ] )
     ]
      @ jev)
 
@@ -5034,6 +5103,46 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
     Alcotest.(check bool) "the configuration reader is what refused it" true
       (String.starts_with
          ~prefix:"lanes[0]: standalone lane configuration: unknown value" detail)
+
+(* The lane detail line reads [obligation ^ " lane"], then this clause, then
+   the last run. The caller used to introduce the clause with a noun of its
+   own -- "configuration " ^ the word -- while three of the four words
+   already carry their subject, so the live screen read "configuration not
+   configured" over an unconfigured lane, and the other two would have read
+   "configuration no slot admitted" and "configuration registry unreadable".
+   Each state now says its own subject and the caller says none. *)
+let test_a_lane_configuration_clause_carries_its_own_subject () =
+  let clause = Tui_decode.standalone_lane_configuration_phrase in
+  Alcotest.(check string) "ready" "configuration ready"
+    (clause Tui_decode.Lane_ready);
+  Alcotest.(check string) "configured with nothing admitted"
+    "configured, but no slot admitted" (clause Tui_decode.Lane_slotless);
+  Alcotest.(check string) "unconfigured" "not configured"
+    (clause Tui_decode.Lane_unconfigured);
+  Alcotest.(check string) "registry unreadable" "registry unreadable"
+    (clause Tui_decode.Lane_registry_unavailable);
+  (* Read back in the shape the line draws them: none of the four names the
+     subject a second time. *)
+  List.iter
+    (fun state ->
+      let line =
+        Printf.sprintf "Required lane %s no run has finished" (clause state)
+      in
+      List.iter
+        (fun stutter ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%S does not read %S" line stutter)
+            false
+            (String_util.contains_substring line stutter))
+        [ "configuration not configured"
+        ; "configuration no slot"
+        ; "configuration registry"
+        ])
+    [ Tui_decode.Lane_ready
+    ; Tui_decode.Lane_slotless
+    ; Tui_decode.Lane_unconfigured
+    ; Tui_decode.Lane_registry_unavailable
+    ]
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
@@ -6541,6 +6650,29 @@ let test_decode_verification_separates_an_empty_queue_from_an_unreadable_one ()
         (Some "backlog.json: bad json") snapshot.Tui_decode.vs_backlog_error;
       Alcotest.(check (list string)) "and so does what it could not resolve"
         [ "vrf-missing" ] snapshot.Tui_decode.vs_awaiting_unresolved
+
+(* The server sends one page of unresolved ids and the count of all of them.
+   The warning row's "(+N)" is read from the count, so a long list is not
+   reported as a short one. *)
+let test_decode_verification_counts_unresolved_beyond_the_page () =
+  (match
+     Tui_decode.decode_verification_snapshot
+       (verification_snapshot_json ~total:0 ~unresolved:[ "vrf-a" ]
+          ~unresolved_total:5 [])
+   with
+   | Error err -> Alcotest.failf "decode failed: %s" err
+   | Ok snapshot ->
+       Alcotest.(check int) "the count outlives the page" 5
+         snapshot.Tui_decode.vs_awaiting_unresolved_total);
+  let without_count =
+    match verification_snapshot_json ~total:0 [] with
+    | `Assoc fields ->
+        `Assoc (List.remove_assoc "awaiting_unresolved_total" fields)
+    | other -> other
+  in
+  match Tui_decode.decode_verification_snapshot without_count with
+  | Ok _ -> Alcotest.fail "an awaiting view without its count decoded"
+  | Error _ -> ()
 
 (* A queue built from a recovery snapshot holds real rows and is older than
    the workspace. Read as an ordinary queue it would be acted on as current,
@@ -10669,8 +10801,12 @@ let () =
           test_decode_memory_alert_keeps_the_code_contract;
         Alcotest.test_case "standalone lane configuration is a closed set" `Quick
           test_decode_standalone_lane_configuration_is_a_closed_set;
+        Alcotest.test_case "a lane configuration clause carries its subject"
+          `Quick test_a_lane_configuration_clause_carries_its_own_subject;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
+        Alcotest.test_case "memory fact refuses an unknown category" `Quick
+          test_decode_memory_fact_refuses_an_unknown_category;
         Alcotest.test_case "memory fact row carries the use record" `Quick
           test_decode_memory_fact_reads_the_use_record;
         Alcotest.test_case "memory facts keep store states apart" `Quick
@@ -10804,6 +10940,8 @@ let () =
           test_decode_verification_carries_the_page_and_what_it_could_not_resolve;
         Alcotest.test_case "an empty queue is not an unreadable one" `Quick
           test_decode_verification_separates_an_empty_queue_from_an_unreadable_one;
+        Alcotest.test_case "unresolved ids are counted beyond the page" `Quick
+          test_decode_verification_counts_unresolved_beyond_the_page;
         Alcotest.test_case "a stale queue is not a failed one" `Quick
           test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick

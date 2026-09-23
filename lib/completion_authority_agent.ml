@@ -859,13 +859,12 @@ let process_task_once
             defer_unavailable
               ~stage:Verification_run_registry.Lookup_surface
               ~detail:reason
-          | Ok root_layout ->
+          | Ok lookup_root ->
             let lookup =
-              Task.Anti_rationalization.Lookup_tools
-                { schemas = Verification_authority_tools.schemas lookup_tools
-                ; dispatch = Verification_authority_tools.dispatch lookup_tools
-                ; root_layout
-                }
+              { Task.Anti_rationalization.schemas =
+                  Verification_authority_tools.schemas lookup_tools
+              ; dispatch = Verification_authority_tools.dispatch lookup_tools
+              }
             in
             (* Human labels close the judge's own loop: where an operator
                disagreed with a past verdict, the divergence returns to the
@@ -887,6 +886,7 @@ let process_task_once
                 ~base_path:runtime.config.base_path
                 ~sw:(Some runtime.sw)
                 ~lookup
+                ~lookup_root
                 ~question
                 ~on_tool_result
                 prepared.review_request

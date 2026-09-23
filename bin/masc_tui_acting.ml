@@ -161,9 +161,29 @@ let elapsed_text ms =
     let seconds = int_of_float (ms /. 1000.) in
     Printf.sprintf "%dm%02ds" (seconds / 60) (seconds mod 60)
 
-let turn_text = function
-  | Some turn -> Printf.sprintf "turn %d" turn
-  | None -> "turn ?"
+let turn_number_text turn = Printf.sprintf "turn %d" turn
+
+(* Two readings of the same value, because the two places it goes want
+   different things from a turn nobody numbered.
+
+   The number is missing whenever the settle that carries it is not in the
+   held window, which on a live-only feed is the common case, not the odd
+   one: over a two-minute live window the Events list drew ten
+   turn-labelled rows and nine of them had no number.
+
+   The column that names the event still has something to say -- it is a
+   turn, and the glyph beside it already says whether it started or
+   finished. The detail beside it does not: a turn with no number adds
+   nothing to "in 812 out 96". Neither of them asks [turn ?], a question
+   the row cannot answer and the reader cannot act on; the acting pane
+   reached the same conclusion about the same value. *)
+let turn_label = function
+  | Some turn -> turn_number_text turn
+  | None -> "turn"
+
+let turn_detail = function
+  | Some turn -> turn_number_text turn
+  | None -> ""
 
 (* The keeper turn a provider call belongs to, as the keeper's hook reports
    it: [total_turns] keeper turns had completed when the call ran, so the
@@ -332,28 +352,35 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
            | None -> c.Observer.kt_tool)
       }
   | Observer.Keeper_turn_complete t ->
+      (* Each part says only itself; the separator belongs to the join. They
+         each carried a leading " \xc2\xb7 " on the reading that the turn
+         ahead of them is always there to hang it off, and the turn is the
+         one part that can be missing. *)
       let tokens =
         match (t.Observer.tc_input_tokens, t.Observer.tc_output_tokens) with
-        | Some i, Some o -> Printf.sprintf " \xc2\xb7 in %d out %d" i o
-        | Some i, None -> Printf.sprintf " \xc2\xb7 in %d" i
-        | None, Some o -> Printf.sprintf " \xc2\xb7 out %d" o
+        | Some i, Some o -> Printf.sprintf "in %d out %d" i o
+        | Some i, None -> Printf.sprintf "in %d" i
+        | None, Some o -> Printf.sprintf "out %d" o
         | None, None -> ""
       in
       let cost =
         match t.Observer.tc_cost_usd with
-        | Some usd -> Printf.sprintf " \xc2\xb7 $%.4f" usd
+        | Some usd -> Printf.sprintf "$%.4f" usd
         | None -> ""
       in
       let calls =
         match t.Observer.tc_tool_calls with
-        | Some n -> Printf.sprintf " \xc2\xb7 %d call%s" n (if n = 1 then "" else "s")
+        | Some n -> Printf.sprintf "%d call%s" n (if n = 1 then "" else "s")
         | None -> ""
       in
       { at
       ; keeper = t.Observer.tc_keeper
       ; glyph = Turn_done
       ; label = "turn done"
-      ; detail = turn_text t.Observer.tc_turn ^ tokens ^ cost ^ calls
+      ; detail =
+          [ turn_detail t.Observer.tc_turn; tokens; cost; calls ]
+          |> List.filter (fun part -> part <> "")
+          |> String.concat " \xc2\xb7 "
       }
   | Observer.Keeper_composite_changed { keeper; _ } ->
       { at; keeper; glyph = Quiet; label = "composite"; detail = "" }
@@ -362,7 +389,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; keeper = o.Observer.to_keeper
       ; glyph = Quiet
       ; label = "call"
-      ; detail = turn_text (keeper_turn_of_observation o)
+      ; detail = turn_detail (keeper_turn_of_observation o)
       }
   | Observer.Keeper_chat_appended { keeper; connector; _ } ->
       { at
@@ -747,7 +774,7 @@ let row_of_chunk chunk =
   { at = chunk.ck_at
   ; keeper = chunk.ck_keeper
   ; glyph = (if chunk.ck_settled then Turn_done else Call_started)
-  ; label = turn_text chunk.ck_turn
+  ; label = turn_label chunk.ck_turn
   ; detail
   }
 

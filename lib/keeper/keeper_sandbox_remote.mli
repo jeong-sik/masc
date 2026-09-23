@@ -49,8 +49,9 @@ val of_container_exec :
   t
 (** A guest endpoint. [remote_root] is the guest path of the work volume and
     [gh_config_dir] the guest path of the mounted GitHub identity snapshot.
-    [injected_env] is server-authored env sent with every request beyond
-    [GH_CONFIG_DIR] and [GIT_TERMINAL_PROMPT] (the guest's config mount);
+    [injected_env] is server-authored env (the guest's config mount) sent
+    with every request beyond [GH_CONFIG_DIR], [GIT_TERMINAL_PROMPT] and the
+    Keeper's commit names ({!Exec_ssh_protocol.keeper_git_author_env});
     the guest's shim must allowlist those names in its config for them to
     reach the payload. *)
 
@@ -92,8 +93,9 @@ val gh_config_dir : t -> string
 val transport : t -> transport
 
 val injected_env : t -> (string * string) list
-(** The server-authored env every request carries: [GH_CONFIG_DIR] and
-    [GIT_TERMINAL_PROMPT], then the endpoint's own injected pairs. *)
+(** The server-authored env every request carries: [GH_CONFIG_DIR],
+    [GIT_TERMINAL_PROMPT], [GIT_AUTHOR_NAME] and [GIT_COMMITTER_NAME] (both
+    the Keeper's name), then the endpoint's own injected pairs. *)
 
 val lane_prefix : transport -> string
 (** ["remote_ssh"], ["microvm_remote"] or ["docker_observe"]: the prefix every lane-specific

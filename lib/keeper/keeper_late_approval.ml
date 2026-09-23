@@ -32,11 +32,8 @@ type remembered = {
 ; remembered_args_fingerprint : string
 ; remembered_decision : Registry.decision
   (* The authenticated caller who made the decision, recorded at the HTTP
-     boundary (task-1662). [None] only for entries predating the stamp; the
-     memory is process-local and rebuilt empty on restart, so in practice
-     every live entry is [Some] — the field stays an option so the record
-     shape never reorders under an existing serialized form. *)
-; remembered_decision_actor : string option
+     boundary (task-1662). *)
+; remembered_decision_actor : string
 ; remembered_answered_at : float
 }
 
@@ -185,7 +182,7 @@ let take t ?(now = Unix.gettimeofday ()) ~keeper_name ~tool_name ~args () =
             "keeper_late_approval: consumed remembered decision keeper=%s tool=%s decision=%s actor=%s"
             keeper_name entry.remembered_tool_name
             (Registry.decision_to_string entry.remembered_decision)
-            (Option.value entry.remembered_decision_actor ~default:"unattributed"); (* NDT-OK: the actor is a stored record field, not parsed input; the default only labels a log line *)
+            entry.remembered_decision_actor;
           t.remembered <-
             List.filter
               (fun existing ->

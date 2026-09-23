@@ -1,5 +1,6 @@
 [@@@warning "-32-69"]
 module Tui_decode = Masc.Tui_decode
+module Memory_category = Masc.Keeper_memory_os_types
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
 
@@ -1239,12 +1240,23 @@ type attention_severity =
   | Attention_warning
   | Attention_info
 
+(** What an attention item is about. Parsed once at the decode boundary so a
+    reader that joins items to Keepers matches a constructor instead of
+    comparing the wire word. A target the TUI does not join on keeps its wire
+    words as they came. *)
+type attention_target =
+  | Attention_keeper of string
+  | Attention_other of { target_type: string; target_id: string option }
+
 type attention_item = {
   ai_kind: string;
   ai_severity: attention_severity;
   ai_summary: string;
-  ai_target_type: string;
-  ai_target_id: string option;
+  ai_target: attention_target;
+  ai_blocker_summary: string option;
+      (** [evidence.runtime_blocker.runtime_blocker_summary] on a Keeper
+          runtime-blocker item: the cause alone, without the Keeper name and
+          class word [ai_summary] wraps it in. [None] on every other item. *)
   ai_evidence_ts: float option;
       (** Epoch seconds of the evidence's [log_ts], when the producer stamped
           one (tool-host failures do). The row's age is drawn from it; items
@@ -1277,13 +1289,15 @@ type board_post = {
   bp_votes: int;
   bp_comment_count: int;
   bp_created_at: string;
+  bp_created_at_unix: float option;
+      (** Unix seconds of the moment the post appeared. Four of the five sort
+          orders rank or break ties on it, so it is the number those lists are
+          made from. [None] when the post carried no numeric [created_at]. *)
   bp_updated_at: float option;
-      (** Unix seconds of the last move on the post or its comments. The server
-          has always sent it; the list drew neither timestamp, so the one
-          question a board answers -- what is still alive -- had no column, and
-          two of the sort orders ([recent], [updated]) ranked by a number the
-          reader could not see. [None] when the post carried neither this nor a
-          numeric [created_at]: there is no time to measure an age from. *)
+      (** Unix seconds of the last move on the post or its comments. The
+          [updated] order ranks on it. [None] when the post carried neither
+          this nor a numeric [created_at]: there is no time to measure an age
+          from. *)
   bp_hearth: string option;
       (** The sub-board it lives in. 24 of them here, and 1550 of 2171 posts
           sit in [verification] alone — a flat list is 71% one topic with
@@ -1389,6 +1403,35 @@ let schedule_payload_body = function
        | Some (`Assoc _ as body) -> body
        | Some _ | None -> `Assoc [])
   | _ -> `Assoc []
+
+(** Why the store would refuse a modify, read before the editor opens.
+
+    [Schedule_store.Transition_refused] names its own boundary: "the request
+    is [Running] or terminal", terminal being [Schedule_domain.is_terminal].
+    That sentence is the whole rule, so it is asked here rather than restated
+    as a word list -- a status the store adds later lands on the right side
+    of it without this file changing.
+
+    [None] is the answer for a word this build does not name. It is the same
+    promise [sch_status] makes by staying a string: an unrecognised status
+    renders as itself, and it is the server's call, not ours, whether it can
+    be modified. Refusing on a word we cannot read would turn forward
+    compatibility into a locked row. *)
+let schedule_modify_refusal (row : schedule_row) : string option =
+  match Schedule_domain.schedule_status_of_string row.sch_status with
+  | Error _ -> None
+  | Ok status ->
+      let refused =
+        match status with
+        | Schedule_domain.Running -> true
+        | other -> Schedule_domain.is_terminal other
+      in
+      if refused then
+        Some
+          (Printf.sprintf
+             "the store refuses a %s schedule; only scheduled and due rows change"
+             row.sch_status)
+      else None
 
 let schedule_update_form_json (row : schedule_row) =
   let body = schedule_payload_body row.sch_payload in
@@ -1869,9 +1912,11 @@ let acting_retained_quiet = 200
     same as nine running ones.
 
     [klc_unreadable] counts rows whose word is missing or outside the
-    vocabulary. They are not folded into any state: a Keeper whose liveness
-    this build cannot name is a different fact from an idle one, and the row
-    says so rather than picking the convenient neighbour. *)
+    vocabulary, and the Keepers the briefing lists under [keepers_unread]
+    because the server could not build their row. They are not folded into
+    any state: a Keeper whose liveness this build cannot name is a different
+    fact from an idle one, and the row says so rather than picking the
+    convenient neighbour. *)
 type keeper_liveness_counts = {
   klc_active: int;
   klc_offline: int;
@@ -1880,15 +1925,88 @@ type keeper_liveness_counts = {
   klc_unreadable: int;
 }
 
+(** The Overview's reading of the runtime catalogue's quota windows. A failed
+    read is kept apart from one not made yet, and neither is drawn as "no
+    window is shut". *)
+type overview_quota_reading =
+  | Quota_unread
+  | Quota_read of Tui_decode.runtime_option list
+  | Quota_failed of string
+
+(** One open pull request as [GET /api/v1/repositories/pulls] reports it
+    (RFC-0465). The check and review words are parsed at decode; a word this
+    build cannot name makes the row undecodable rather than a default. *)
+type pull_checks = Pull_checks_passing | Pull_checks_failing | Pull_checks_running | Pull_checks_none
+type pull_review = Pull_review_approved | Pull_review_changes_requested | Pull_review_waiting | Pull_review_none
+
+type open_pull = {
+  op_number: int;
+  op_title: string;
+  op_head_branch: string;
+  op_draft: bool;
+  op_checks: pull_checks;
+  op_review: pull_review;
+}
+
+type repository_pulls_reading =
+  | Repo_pulls_read of { pulls: open_pull list; undecodable: int }
+  | Repo_pulls_failed of string
+      (** The server's failure kind, with its detail when it carried one. *)
+  | Repo_pulls_not_read
+  | Repo_not_github
+
+type repository_pulls_row = { rp_repository: string; rp_state: repository_pulls_reading }
+
+type pulls_reader =
+  | Pulls_reader_ready of string
+  | Pulls_reader_not_ready of string
+      (** Why the server is not reading: not declared, the Keeper is missing,
+          or its token cannot be read. *)
+
+type overview_pulls_reading =
+  | Overview_pulls_unread
+  | Overview_pulls_read of {
+      reader: pulls_reader;
+      repositories_error: string option;
+          (** The server could not list the registered repositories; the rows
+              are the last list it could, so they may be out of date. *)
+      repositories: repository_pulls_row list;
+    }
+  | Overview_pulls_failed of string
+
+(** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
+    briefing writes [null] for a Keeper with no registry entry (an offline
+    Keeper that never booted this process), which is a different fact from a
+    word this build cannot name; neither is folded into a phase. *)
+type overview_keeper_phase =
+  | Keeper_phase of Tui_decode.keeper_phase
+  | Keeper_phase_absent
+  | Keeper_phase_unreadable of string
+
+(** One [keeper_briefs] row, as the Overview Team block reads it. *)
+type overview_keeper = {
+  okp_name: string;
+  okp_phase: overview_keeper_phase;
+  okp_last_turn_ago_s: float option;
+      (** [None] when the Keeper has not finished a turn this process saw. *)
+  okp_paused: bool option;
+      (** The brief's [paused]: an operator paused this Keeper. It is read
+          apart from [okp_phase] because a paused Keeper is left out of
+          autoboot, so after a server restart it has no registry entry and
+          its phase is [null] while [paused] still says [true]. [None] when
+          the brief carried no boolean there. *)
+}
+
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
-  ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_liveness: keeper_liveness_counts;
+  ov_keeper_rows: overview_keeper list;
+      (** Every [keeper_briefs] row with a name, in the briefing's order. *)
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
-  ov_top_attention: attention_item option;
   ov_generated_at: string;
 }
 
@@ -2088,6 +2206,51 @@ let planning_visible_goals ~filter ~sort (goals : planning_goal list)
   in
   List.stable_sort compare (List.filter (planning_passes_filter filter) goals)
 
+(* How far a standalone lane's slot history is from its finished runs. The
+   server counts the slots and the runs without one from the same list of
+   finished runs, so the two add up and this is 0. Anything else means the
+   server's projection broke, and the detail draws the difference, positive
+   or negative, rather than rounding it away. Running rows are in neither
+   count: a run that has not finished has not chosen. *)
+let standalone_lane_slot_history_gap (lane : Tui_decode.standalone_lane) =
+  let named =
+    List.fold_left
+      (fun n (sc : Tui_decode.standalone_lane_slot_count) -> n + sc.slsc_count)
+      0 lane.sl_selected_slots
+  in
+  let without = lane.sl_runs_without_slot in
+  let accounted =
+    named + without.slws_vendor_system_one + without.slws_server_restarted
+    + without.slws_no_slot
+  in
+  lane.sl_succeeded_count + lane.sl_failed_count + lane.sl_cancelled_count
+  - accounted
+
+(* What the slot history line says after the slots: the finished runs that
+   named no slot, by the reason the server gives, and then any gap between
+   all the counts and the finished runs. Zero counts say nothing. *)
+let standalone_lane_runs_without_slot_parts (lane : Tui_decode.standalone_lane) =
+  let without = lane.sl_runs_without_slot in
+  let counted label count =
+    if count = 0 then [] else [ Printf.sprintf "%s: %d" label count ]
+  in
+  let no_slot =
+    if without.slws_no_slot = 0 then []
+    else
+      [ Masc_tui_message_layout.count_noun without.slws_no_slot "run" ^ " named no slot" ]
+  in
+  let gap =
+    match standalone_lane_slot_history_gap lane with
+    | 0 -> []
+    | gap when gap > 0 ->
+      [ Printf.sprintf "%s finished in no count"
+          (Masc_tui_message_layout.count_noun gap "run") ]
+    | gap -> [ Printf.sprintf "counts exceed finished runs by %d" (-gap) ]
+  in
+  counted "Vendor System One" without.slws_vendor_system_one
+  @ counted "closed by server restart" without.slws_server_restarted
+  @ no_slot @ gap
+
 type board_sort =
   | Board_hot
   | Board_trending
@@ -2117,6 +2280,40 @@ let board_sort_explanation = function
   | Board_updated -> "latest changed first"
   | Board_discussed -> "most replies first; newer breaks ties"
 ;;
+
+(** Which of a post's two times the sort put the rows in order by. Four of the
+    five orders key or break ties on the moment the post appeared; only
+    [Board_updated] keys on the moment it last changed.
+
+    This is a reading of what the server does, not a rule it follows: the
+    orders are applied in [Board_dispatch.sort_posts] and [Board_sort], and
+    nothing here can see them. It sits beside [board_sort_explanation] because
+    the two answer the same question -- what this order is -- and a server
+    that changed an order would leave both wrong together. Move them
+    together. *)
+type board_sort_time =
+  | Board_time_posted
+  | Board_time_changed
+
+let board_sort_time = function
+  | Board_hot | Board_trending | Board_recent | Board_discussed ->
+      Board_time_posted
+  | Board_updated -> Board_time_changed
+
+(** The word over the list's age column. It names the time the column holds,
+    so the header changes with the sort rather than letting one word stand for
+    both times. Both fit the six cells the column has. *)
+let board_age_header = function
+  | Board_time_posted -> "AGE"
+  | Board_time_changed -> "MOVED"
+
+(** Which of a post's two times the age column measures from. Both are
+    [option] because a post can arrive carrying neither, and the column then
+    has no age to draw. *)
+let board_age_source ~time ~posted ~changed =
+  match time with
+  | Board_time_posted -> posted
+  | Board_time_changed -> changed
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
@@ -2553,6 +2750,18 @@ type surface =
   | Tools
   | System_logs
 
+(** The Keeper roster or one Keeper's detail: where the selected Keeper is
+    the one on screen, so a key can be read as meaning that Keeper. Every
+    constructor is named so a new surface has to decide. *)
+let shows_selected_keeper = function
+  | Keepers (Keeper_list | Keeper_detail) -> true
+  | Keepers (Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories
+  | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+  | System_logs ->
+      false
+
 (** The Activity screen is two surfaces under one tab strip: the event
     feed and the system logs, reached from each other with 1 and 2. A
     rule about "the Activity screen" reads this rather than [Acting]
@@ -2618,6 +2827,8 @@ type surface_needs = {
   needs_keeper_chat : bool;
   needs_operator_approvals : bool;
   needs_asks : bool;
+  needs_runtime_quota : bool;
+  needs_repository_pulls : bool;
 }
 
 let nothing =
@@ -2630,6 +2841,8 @@ let nothing =
     needs_keeper_chat = false;
     needs_operator_approvals = false;
     needs_asks = false;
+    needs_runtime_quota = false;
+    needs_repository_pulls = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2650,7 +2863,15 @@ let rec surface_needs ~keeper_pane_drawn surface =
   else needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  | Overview -> { nothing with needs_transport = true }
+  (* The Team block names the quota windows that are shut. The catalogue is
+     43 KB and answers in under two milliseconds on the live runtime, and
+     only this surface draws the windows beside the Keepers they stop. *)
+  | Overview ->
+      { nothing with
+        needs_transport = true
+      ; needs_runtime_quota = true
+      ; needs_repository_pulls = true
+      }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -2702,6 +2923,10 @@ let surface_needs_delta ~previous ~next =
       next.needs_operator_approvals
       && not previous.needs_operator_approvals
   ; needs_asks = next.needs_asks && not previous.needs_asks
+  ; needs_runtime_quota =
+      next.needs_runtime_quota && not previous.needs_runtime_quota
+  ; needs_repository_pulls =
+      next.needs_repository_pulls && not previous.needs_repository_pulls
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -3543,13 +3768,13 @@ let next_memory_sort = function
 
 type memory_category_filter =
   | Category_all
-  | Category_ordinary of string
+  | Category_ordinary of Memory_category.category
   | Category_source
   | Category_dropped
 
 let memory_category_filter_label = function
   | Category_all -> "All"
-  | Category_ordinary cat -> cat
+  | Category_ordinary cat -> Memory_category.category_to_string cat
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
@@ -5206,6 +5431,10 @@ type state = {
   mutable github_identity_view_error: string option;
   mutable github_token_input: string option;
   mutable github_token_save_status: string option;
+  (* The scopes the next [L] login asks for beyond gh's minimum. Off until the
+     operator ticks one: [workflow] lets the token change CI, which runs with
+     the repository's secrets. *)
+  mutable github_login_scopes: Masc.Keeper_github_identity.login_scope list;
   (* The Identity tab. Stamped with the keeper it was fetched for, like the
      other fetched tabs, so the pane shows loading rather than another
      keeper's answer. The providers are held rather than pre-rendered lines
@@ -5319,6 +5548,11 @@ type state = {
   mutable runtime_pick_keeper: string option;
   mutable runtime_pick_cursor: int;
   mutable runtime_catalog: Tui_decode.runtime_option list;
+  (* The Overview's own read of the same catalogue, kept apart from the
+     picker's [runtime_catalog] so a refresh behind the Overview never moves
+     the rows under an open picker's cursor. *)
+  mutable overview_quota: overview_quota_reading;
+  mutable overview_pulls: overview_pulls_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -5623,10 +5857,29 @@ type state = {
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
+  (* A binding write landed while a load was in flight; read once more when
+     that load answers. *)
+  mutable connectors_reload_after_inflight: bool;
   mutable connectors_scroll: int;
   mutable connectors_cursor: int;
   mutable connectors_binding_cursor: int;
   mutable connector_unbind_armed: (string * string * string) option;
+  (* The first [U] on the Channels tab: whose bindings, and exactly which.
+     The second press sends these and no others, so a binding that appeared
+     after the first press is not removed without being named. *)
+  mutable connector_unbind_all_armed:
+    (string * Masc_tui_connector_unbind.target list) option;
+  mutable connector_unbind_all_inflight: bool;
+  (* A Keeper the operator just paused or shut down, waiting for a fresh
+     connector read to learn whether it still holds bindings to offer to
+     remove. *)
+  mutable connector_unbind_offer_pending: string list;
+  (* The offer after a pause or shutdown, while it waits for its one key.
+     Separate from the unbind-all arm: that arm answers [U], and on the
+     Keeper list [U] is the runtime picker. *)
+  mutable connector_unbind_offer: Masc_tui_connector_unbind.offer option;
+  (* Frames the terminal accepted with changed output. *)
+  mutable frames_presented: int;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
@@ -6303,6 +6556,28 @@ let text_input_target (state : state) ~compact_viewport =
   else if state.view = Board && state.board_mode = Board_compose then
     Some Text_board_draft
   else None
+;;
+
+(* Whether the quit key is a quit key right now. A field taking typed text
+   owns every printable key it is handed, [q] with them, so the answer is no
+   while any of them is open.
+
+   Written out rather than closed with [Some _]: the list is the whole
+   vocabulary of typing places, and a field added to it has to be walked past
+   here before it reaches an operator. It was three names and a catch-all, and
+   the other ten -- the command palette among them -- let a typed [q] arm the
+   exit instead of landing in the field. Two of the ten were caught again by a
+   condition spelled at the quit branch itself, which is the shape this
+   function exists to stop. *)
+let quit_key_allowed_for = function
+  | Some
+      ( Text_browser_url | Text_ask_answer | Text_fusion_launch
+      | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
+      | Text_voice_wizard | Text_palette | Text_row_search
+      | Text_identity_app_form | Text_identity_filter | Text_github_token
+      | Text_board_draft ) ->
+      false
+  | None -> true
 ;;
 
 (* One reading of the state for both the send path and the footer; the order
@@ -7369,6 +7644,7 @@ let create_state
   github_identity_view = None;
   github_token_input = None;
   github_token_save_status = None;
+  github_login_scopes = [];
   identity_view = None;
   identity_view_error = None;
   identity_login = None;
@@ -7408,6 +7684,8 @@ let create_state
   runtime_pick_keeper = None;
   runtime_pick_cursor = 0;
   runtime_catalog = [];
+  overview_quota = Quota_unread;
+  overview_pulls = Overview_pulls_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;
@@ -7580,10 +7858,16 @@ let create_state
   connectors = None;
   connectors_error = None;
   connectors_inflight = false;
+  connectors_reload_after_inflight = false;
   connectors_scroll = 0;
   connectors_cursor = 0;
   connectors_binding_cursor = 0;
   connector_unbind_armed = None;
+  connector_unbind_all_armed = None;
+  connector_unbind_all_inflight = false;
+  connector_unbind_offer_pending = [];
+  connector_unbind_offer = None;
+  frames_presented = 0;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;
@@ -8473,17 +8757,30 @@ let surface_search_query surface query =
 
 let memory_fact_search_text = function
   | Memory_row_fact f ->
-      f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
-      ^ f.Tui_decode.mf_origin
+      f.Tui_decode.mf_claim ^ " "
+      ^ Memory_category.category_to_string f.Tui_decode.mf_category
+      ^ " " ^ f.Tui_decode.mf_origin
   | Memory_row_source_fact f ->
       f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
   | Memory_row_invalidation f ->
       f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
 
+(* The filter the Memory surface is narrowed by: the text being typed while a
+   search is open, and the applied one otherwise. Every count, every list and
+   every banner on the surface reads it here, so the number beside a filter is
+   a count of what that filter left. The rule was written out twice -- once
+   for the keeper table, once inside [memory_fact_rows] -- and the facts
+   banner read a third value, [search_last], so with a filter already applied
+   it quoted the old word over a count of the new one. *)
+let memory_search_query (state : state) =
+  match state.search with
+  | Some q -> surface_search_query Memory q
+  | None -> surface_search_query Memory state.search_last
+
+(* The keeper table matches case-folded, so its own reading is folded. Same
+   filter, one normalisation. *)
 let memory_overview_query (state : state) =
-    match state.search with
-    | Some q -> String.lowercase_ascii (surface_search_query Memory q)
-    | None -> String.lowercase_ascii (surface_search_query Memory state.search_last)
+  String.lowercase_ascii (memory_search_query state)
 
 
 (* What Esc does on Memory, nearest layer first: a filter, then the fact
@@ -8584,7 +8881,10 @@ let selected_memory_keeper (state : state) =
   let rows = visible_memory_keepers state in
   List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
 
-let memory_overview_scrolled ?cursor (state : state) =
+(* [header_rows] is how many rows the fleet header above the sort row takes.
+   The renderer wraps it to the frame, so only it knows the number; it passes
+   the length of the rows it draws ([Masc_tui_render_memory.memory_overview_scrolled]). *)
+let memory_overview_scrolled ~header_rows ?cursor (state : state) =
   let keepers = visible_memory_keepers state in
   let count = List.length keepers in
   let cursor = Option.value cursor ~default:state.memory_health_cursor in
@@ -8616,8 +8916,8 @@ let memory_overview_scrolled ?cursor (state : state) =
   { sc_count = count
   ; sc_chrome =
       Masc_tui_frame.chrome_rows
-      (* Totals, Librarian, legend, sort, divider, headings, divider. *)
-      + 7 + context_rows
+      (* The fleet header, then legend, sort, divider, headings, divider. *)
+      + header_rows + 5 + context_rows
       + (if memory_overview_query state <> "" then 1 else 0)
       + (if Option.is_some state.memory_health_error then 2 else 0)
       + refused_rows
@@ -8646,7 +8946,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
               | Category_ordinary category ->
                   List.filter
                     (fun (fact : Tui_decode.memory_fact) ->
-                      String.equal fact.Tui_decode.mf_category category)
+                      fact.Tui_decode.mf_category = category)
                     store.Tui_decode.mos_facts
               | Category_source | Category_dropped -> []
             in
@@ -8677,11 +8977,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
             (src, inv)
       in
       let all_rows = ordinary @ source_rows @ invalidation_rows in
-      let query =
-        match state.search with
-        | Some q -> surface_search_query Memory q
-        | None -> surface_search_query Memory state.search_last
-      in
+      let query = memory_search_query state in
       let filtered_rows =
         if query = "" then all_rows
         else
@@ -8741,7 +9037,8 @@ let memory_fact_rows (state : state) : memory_fact_row list =
            List.sort
              (fun a b ->
                let cat = function
-                 | Memory_row_fact f -> (0, f.Tui_decode.mf_category)
+                 | Memory_row_fact f ->
+                     (0, Memory_category.category_to_string f.Tui_decode.mf_category)
                  | Memory_row_source_fact _ -> (1, "source")
                  | Memory_row_invalidation _ -> (2, "dropped")
                in
@@ -8769,10 +9066,10 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                String.compare (claim a) (claim b))
              filtered_rows)
 
-(* The categories the loaded ordinary store and source store actually hold, distinct and
-   sorted -- the [c] cycle walks these. Read from the rows, never from a
-   list this side hardcodes: the taxonomy is the server's, and a category it
-   adds appears here without a code change. *)
+(* The categories the loaded ordinary store and source store actually hold,
+   distinct and in the taxonomy's constructor order -- the [c] cycle walks
+   these. Read from the rows rather than [all_categories], so the strip names
+   only the categories this keeper has written. *)
 let memory_fact_categories (state : state) : memory_category_filter list =
   match state.memory_facts with
   | None -> []
@@ -9550,7 +9847,10 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         listing ~error:state.memory_facts_error
           (List.length (memory_fact_rows state))
       else
-        Some (memory_overview_scrolled state)
+        (* The overview's header rows are wrapped to the terminal width, which
+           this module does not read. [Masc_tui.scrolled_surface] answers it
+           from the renderer, as it does for Tools. *)
+        None
   | Changes when Option.is_some (opened_file_change state) -> None
   | Changes ->
       Some

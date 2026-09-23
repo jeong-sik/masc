@@ -393,7 +393,8 @@ let for_surface = function
                     Masc_tui_types.keeper_detail_tabs))
       ; b Act "o" "logs"
           ~help:"open container logs in Sandbox; Keeper activity elsewhere"
-      ; b Act "U" "runtime" ~help:"pick a runtime candidate order"
+      ; b Act "U" "runtime"
+          ~help:"pick a runtime candidate order (on the Channels tab U is unbind all)"
       ; b Act "Left / Esc" "back"
       ; b Navigate "Home/End" "top/bottom" ~help:"the ends of this tab"
       ]
@@ -1301,9 +1302,18 @@ let here_marker = " \xc2\xb7 you are here"
 let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   match tab with
   | Detail_github ->
-      [ b Act "L" "login" ~help:"start the gh device-flow login"
+      [ b Act "L" "login" ~help:"start the gh device-flow login with the ticked scopes"
       ; b Act "P" "token" ~help:"set fine-grained PAT / token"
       ]
+      (* One digit per scope the login can ask for, in the order the tab
+         lists them, so a scope added to the server's list gets its key here
+         without a second edit. *)
+      @ List.mapi
+          (fun index scope ->
+            b Act (string_of_int (index + 1))
+              (Masc.Keeper_github_identity.login_scope_to_string scope)
+              ~help:"tick or untick this scope for the next L login")
+          Masc.Keeper_github_identity.all_login_scopes
   | Detail_sandbox ->
       [ b Act "o" "actual logs"
       ; b Act "d/m/s" "backend"
@@ -1331,6 +1341,12 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Act "b / e / u u" "bind / reassign / remove"
           ~help:"bind a channel, reassign the selected row, or remove it twice-confirmed"
+        (* Takes [U] from the runtime picker on this tab only, the way [u]
+           is taken above: the picker stays on every other tab. *)
+      ; b Act "U U" "unbind all"
+          ~help:"remove every channel binding of this Keeper on every \
+                 transport, twice-confirmed; a channel rebound to another \
+                 Keeper meanwhile is left as is"
       ]
   | Detail_info | Detail_secrets | Detail_automation | Detail_runs -> []
 

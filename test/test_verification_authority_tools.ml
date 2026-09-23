@@ -202,9 +202,16 @@ let with_surface ?(sandbox_profile = "remote_ssh") ?ssh_script f =
   else run ()
 ;;
 
-let require_layout = function
-  | Ok layout -> layout
+let require_root = function
+  | Ok root -> root
   | Error detail -> Alcotest.failf "root layout unavailable: %s" detail
+;;
+
+let require_layout result =
+  match require_root result with
+  | AR.Producer_tree layout -> layout
+  | AR.Producer_root_absent { root } ->
+    Alcotest.failf "expected a producer tree, got an absent root: %s" root
 ;;
 
 (* Create the producer playground used to resolve relative tool paths. *)
@@ -375,7 +382,9 @@ let test_keeper_surface_uses_the_effective_sandbox_root () =
     match VAT.root_layout surface with
     | Error detail ->
       Alcotest.failf "Docker producer root was not inspected: %s" detail
-    | Ok layout ->
+    | Ok (AR.Producer_root_absent { root }) ->
+      Alcotest.failf "Docker producer root was reported absent: %s" root
+    | Ok (AR.Producer_tree layout) ->
       Alcotest.(check bool)
         "inspects the Docker-scoped producer root"
         true
@@ -481,7 +490,7 @@ let test_workspace_producer_gets_owned_read_surface () =
    Its absence is a fact about the producer, not an unavailable surface, and
    deferring on it left every Task submitted over MCP awaiting a verdict that
    never came (nine Tasks, 131 sweep lines on 2026-09-11). The judge gets the
-   fact as its layout and rules on the evidence that is there. *)
+   fact as its own lookup section and rules on the evidence that is there. *)
 let test_workspace_producer_without_a_playground_gets_a_stated_absence () =
   Eio_main.run
   @@ fun env ->
@@ -499,12 +508,16 @@ let test_workspace_producer_without_a_playground_gets_a_stated_absence () =
   match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
   | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
   | Ok surface ->
-    let layout = VAT.root_layout surface |> require_layout in
-    Alcotest.(check int) "one line states the absence" 1 (List.length layout);
-    Alcotest.(check bool)
-      "the line names the absent root"
-      true
-      (List.exists (fun entry -> Astring.String.is_infix ~affix:bundle entry) layout);
+    (match VAT.root_layout surface |> require_root with
+     | AR.Producer_tree layout ->
+       Alcotest.failf
+         "a missing workspace root was listed as a tree: %s"
+         (String.concat ", " layout)
+     | AR.Producer_root_absent { root } ->
+       Alcotest.(check bool)
+         "the absence names the missing root"
+         true
+         (Astring.String.is_infix ~affix:bundle root));
     Alcotest.(check bool)
       "the playground is not created as a side effect of the review"
       false
@@ -601,10 +614,12 @@ let make_checkout root relative =
 let test_root_layout_fails_closed_when_discovery_is_unavailable () =
   with_surface (fun _config surface ->
     match VAT.root_layout surface with
-    | Ok layout ->
+    | Ok (AR.Producer_tree layout) ->
       Alcotest.failf
         "missing producer root was presented as a usable layout: %s"
         (String.concat ", " layout)
+    | Ok (AR.Producer_root_absent { root }) ->
+      Alcotest.failf "a Keeper's missing root was presented as absence: %s" root
     | Error detail ->
       Alcotest.(check bool)
         "unavailable discovery remains an error"
@@ -620,10 +635,12 @@ let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
       make_checkout root (Printf.sprintf "checkout-%02d" index)
     done;
     match VAT.root_layout surface with
-    | Ok layout ->
+    | Ok (AR.Producer_tree layout) ->
       Alcotest.failf
         "partial checkout discovery was presented as complete: %s"
         (String.concat ", " layout)
+    | Ok (AR.Producer_root_absent { root }) ->
+      Alcotest.failf "partial checkout discovery was presented as absence: %s" root
     | Error detail ->
       Alcotest.(check bool)
         "partial discovery names its limit"
@@ -684,12 +701,8 @@ let test_prompt_states_the_root_and_not_a_repository () =
             ; evidence_posture = AR.Note_only
             ; few_shot_block = ""
             }
-          ~lookup:
-            (AR.Lookup_tools
-               { schemas = VAT.schemas surface
-               ; dispatch = VAT.dispatch surface
-               ; root_layout = VAT.root_layout surface |> require_layout
-               })
+          ~lookup:{ AR.schemas = VAT.schemas surface; dispatch = VAT.dispatch surface }
+          ~lookup_root:(VAT.root_layout surface |> require_root)
           request
       with
       | Ok text -> text
@@ -711,69 +724,111 @@ let test_prompt_states_the_root_and_not_a_repository () =
       (Astring.String.is_infix ~affix:"<live_lookup>" text))
 ;;
 
+let render_review_prompt surface =
+  let request : AR.review_request =
+    { agent_name = producer
+    ; task_title = "t"
+    ; task_description = "d"
+    ; completion_notes = "n"
+    ; task_id = "task-001"
+    ; evidence_refs = []
+    ; evidence_images = []
+    }
+  in
+  let question =
+    { AR.completion_contract = None
+    ; required_evidence = []
+    ; evidence_posture = AR.Note_only
+    ; few_shot_block = ""
+    }
+  in
+  match
+    AR.build_prompt
+      ~question
+      ~lookup:{ AR.schemas = VAT.schemas surface; dispatch = VAT.dispatch surface }
+      ~lookup_root:(VAT.root_layout surface |> require_root)
+      request
+  with
+  | Ok text -> text
+  | Error detail -> Alcotest.failf "prompt render failed: %s" detail
+;;
+
+(* The lookup status block names the slot that rendered; it is data inside
+   the section, so a check on it pins which slot the root chose without
+   pinning any sentence around it. *)
+let lookup_status slot =
+  Printf.sprintf {|{"lookup_surface":"%s","evidence_lookup_succeeded":false}|} slot
+;;
+
 let test_prompt_states_the_available_surface () =
   with_surface (fun config surface ->
     ignore (producer_playground config producer);
-    let request : AR.review_request =
-      { agent_name = producer
-      ; task_title = "t"
-      ; task_description = "d"
-      ; completion_notes = "n"
-      ; task_id = "task-001"
-      ; evidence_refs = []
-      ; evidence_images = []
-      }
-    in
-    let render lookup =
-      let question =
-        { AR.completion_contract = None
-        ; required_evidence = []
-        ; evidence_posture = AR.Note_only
-        ; few_shot_block = ""
-        }
-      in
-      match AR.build_prompt ~question ~lookup request with
-      | Ok text -> text
-      | Error detail -> Alcotest.failf "prompt render failed: %s" detail
-    in
-    let without = render AR.No_lookup_surface in
-    let with_tools =
-      render
-        (AR.Lookup_tools
-           { schemas = VAT.schemas surface
-           ; dispatch = VAT.dispatch surface
-           ; root_layout = VAT.root_layout surface |> require_layout
-           })
-    in
+    let text = render_review_prompt surface in
     Alcotest.(check bool)
-      "toolless prompt carries the no-lookup section"
+      "a producer tree renders the producer_tree slot"
       true
-      (Astring.String.is_infix ~affix:"<no_lookup_surface>" without);
+      (Astring.String.is_infix ~affix:(lookup_status "producer_tree") text);
     Alcotest.(check bool)
-      "toolless prompt carries no live lookup section"
+      "a producer tree does not render the absent-root slot"
       false
-      (Astring.String.is_infix ~affix:"<live_lookup>" without);
-    Alcotest.(check bool)
-      "toolless prompt does not advertise a tool"
-      false
-      (Astring.String.is_infix ~affix:"tool_search_files" without);
+      (Astring.String.is_infix ~affix:(lookup_status "producer_root_absent") text);
     Alcotest.(check bool)
       "tool prompt names the tools"
       true
-      (Astring.String.is_infix ~affix:"tool_search_files" with_tools);
-    Alcotest.(check bool)
-      "tool prompt carries no no-lookup section"
-      false
-      (Astring.String.is_infix ~affix:"<no_lookup_surface>" with_tools);
+      (Astring.String.is_infix ~affix:"tool_search_files" text);
     (* The read-only boundary is a sentence inside the live-lookup fragment
        (config/prompts/verification.md, slot lookup.producer_tree); the prompt is
        checked for carrying that fragment, and the sentence is reviewed there. *)
     Alcotest.(check bool)
       "tool prompt carries the live lookup section"
       true
-      (Astring.String.is_infix ~affix:"<live_lookup>" with_tools))
+      (Astring.String.is_infix ~affix:"<live_lookup>" text))
 ;;
 
+(* A workspace producer with no playground holds a different tool set (no
+   search tool) and no tree. Its prompt renders the absent-root slot, names
+   the tools that surface really holds and the missing root, and carries none
+   of the producer-tree section. *)
+let test_absent_root_renders_its_own_lookup_section () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let producer_name = "mcp-client" in
+  match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
+  | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
+  | Ok surface ->
+    let text = render_review_prompt surface in
+    let holds affix = Astring.String.is_infix ~affix text in
+    Alcotest.(check bool)
+      "the absent-root slot renders"
+      true
+      (holds (lookup_status "producer_root_absent"));
+    Alcotest.(check bool)
+      "the producer_tree slot does not render"
+      false
+      (holds (lookup_status "producer_tree"));
+    Alcotest.(check bool)
+      "the missing root is named"
+      true
+      (holds (Filename.concat Playground_paths.all_playgrounds_prefix producer_name));
+    List.iter
+      (fun (schema : Masc_domain.tool_schema) ->
+         Alcotest.(check bool)
+           ("the section names the held tool " ^ schema.name)
+           true
+           (holds schema.name))
+      (VAT.schemas surface);
+    Alcotest.(check bool)
+      "the section names no tool this surface lacks"
+      false
+      (holds "tool_search_files")
+;;
 
 (* masc#28989: a URL left in note evidence must be inspectable by the judge
    itself. The fetch boundary is stubbed; what is pinned here is the surface —
@@ -1193,6 +1248,8 @@ let () =
     ; ( "prompt"
       , [ Alcotest.test_case "prompt states the available surface" `Quick
             test_prompt_states_the_available_surface
+        ; Alcotest.test_case "an absent root renders its own lookup section" `Quick
+            test_absent_root_renders_its_own_lookup_section
         ; Alcotest.test_case
             "root_layout reports entries and discovered checkouts"
             `Quick

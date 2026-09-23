@@ -83,7 +83,14 @@ val record :
   unit ->
   receipt
 
-val record_rule : base_path:string -> event_type:event -> approval_rule -> receipt
+val record_rule_created : base_path:string -> approval_rule -> receipt
+(** [Rule_created] row. Its actor is the rule's own [created_by]: the
+    principal whose remembered approval made the rule. *)
+
+val record_rule_deleted :
+  base_path:string -> deleted_by:string -> approval_rule -> receipt
+(** [Rule_deleted] row. [deleted_by] is the authenticated principal that
+    removed the rule, which is not the rule's author. *)
 
 val recent_resolved_history_limit : int
 val recent_resolved_max_limit : int

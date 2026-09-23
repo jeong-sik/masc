@@ -370,9 +370,14 @@ let wire_env t env =
    GH_CONFIG_DIR names the endpoint-resident identity preflight already
    proved (remote_github_identity_missing); without it every gh/git call in
    a frame runs identity-blind. A frame has no tty, so a git that wants to
-   prompt for credentials must fail instead of hanging the call. *)
+   prompt for credentials must fail instead of hanging the call. The commit
+   author and committer names are the Keeper's, so a commit made in any frame
+   says which Keeper made it. *)
 let injected_env t =
-  let lane = [ "GH_CONFIG_DIR", t.gh_config_dir; "GIT_TERMINAL_PROMPT", "0" ] in
+  let lane =
+    [ "GH_CONFIG_DIR", t.gh_config_dir; "GIT_TERMINAL_PROMPT", "0" ]
+    @ Exec_ssh_protocol.keeper_git_author_env ~keeper_name:t.keeper_name
+  in
   lane @ List.filter (fun (name, _) -> not (List.mem_assoc name lane)) t.injected_env
 ;;
 

@@ -3,6 +3,13 @@ module Runtime = Keeper_librarian_runtime
 module Fixture = Exact_output_fixture
 module Runs = Exact_lane_run_registry
 
+let served_slot =
+  Alcotest.testable
+    (fun fmt -> function
+       | Runtime.Api_slot id -> Format.fprintf fmt "Api_slot %s" id
+       | Runtime.Cli_slot id -> Format.fprintf fmt "Cli_slot %s" id)
+    ( = )
+
 let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -40,7 +47,8 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
   (match Runtime_exact_output_registry.publish
       ~lanes:[{Runtime_schema.id = "librarian_exact";
         slot_ids = List.map (fun (target : Fixture.target_fixture) -> target.id) targets;
-        cli_slot_ids = List.map fst cli_errors}] resolver with
+        cli_slot_ids = List.map fst cli_errors;
+        max_output_tokens = Some 4_096}] resolver with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Runtime_exact_output_registry.publication_error_to_string error));
   let input : Keeper_librarian.input =
@@ -238,7 +246,8 @@ let test_prefit_real_continuity ~base_path () =
      ~clock:env#clock ~net:env#net ~base_path ~keeper_id ~selected_input:{(input half) with working_context=Context.empty}
      ~messages:[Agent_core.Types.user_msg "synthesize completed source"] () with
    | Ok (({ Runtime.continuity_answer; _ }, _), slot) ->
-     Alcotest.(check string) "API validation advances to declared successor" "valid-state" slot;
+     Alcotest.check served_slot "API validation advances to declared successor"
+       (Runtime.Api_slot "valid-state") slot;
      Alcotest.(check (option string)) "API successor supplies working state"
        (Some "API saved state.")
        (match continuity_answer with
@@ -253,9 +262,11 @@ let test_prefit_real_continuity ~base_path () =
   let execute prepared state =
     let input = input prepared in
     let expected = rendered prepared input in
+    let answered_by = ref None in
     let runner ~runtime_id ~system_prompt:_ ~output_schema ~prompt =
       check_working_state_schema ~continuity:true output_schema;
       calls := prompt :: !calls;
+      answered_by := Some runtime_id;
       Alcotest.(check string) "prefit and dispatch use identical full text" expected prompt;
       Alcotest.(check bool) "no oversized CLI probe after learning the bound" true
         (chars prompt <= max_chars);
@@ -271,15 +282,20 @@ let test_prefit_real_continuity ~base_path () =
         "new_claims", `List []; "dropped", `List []; "working_contexts", `List [];
         "working_state", `String state]))) in
     let committed = ref false and memory_committed = ref false in
+    let served_by = ref None in
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
     Runtime.run_best_effort ~continuity:prepared
       ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id prepared |> get)
-      ~cli_runner:runner ~on_continuity_committed:(fun _ -> committed:=true)
+      ~cli_runner:runner
+      ~on_continuity_committed:(fun ~served_by:slot _ ->
+        served_by := Some slot; committed:=true)
       ~on_memory_committed:(fun () -> memory_committed:=true)
       ~base_path ~keepers_dir ~keeper_id
       ~expected_revision:(Option.map (fun (s : Current.t) -> s.revision) current) input;
     Alcotest.(check bool) "actual Memory publication completed" true !memory_committed;
     Alcotest.(check bool) "actual continuity publication completed" true !committed;
+    Alcotest.(check (option served_slot)) "the commit names the CLI runtime that answered"
+      (Option.map (fun id -> Runtime.Cli_slot id) !answered_by) !served_by;
     let saved = P.read ~config ~keeper_name:keeper_id |> get |> some in
     Alcotest.(check int) "stored frontier advances to the selected atom group"
       (P.end_atom prepared) saved.end_atom;
@@ -325,7 +341,7 @@ let test_prefit_real_continuity ~base_path () =
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
     ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
-    ~last_resort:false ~base_path
+    ~current_turn_results:Driver.Current_turn_verbatim ~base_path
     ~demote_before:completed_end ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })
     ~materialize:(fun ~pending:_ _ -> Alcotest.fail "unfinished work was demoted") canonical in
   let wire = view.wire

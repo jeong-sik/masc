@@ -1104,7 +1104,7 @@ val no_memory_fact_events : memory_fact_events
     equality and never classifies on its own. *)
 type memory_fact = {
   mf_claim : string;
-  mf_category : string;
+  mf_category : Keeper_memory_os_types.category;
   mf_origin : string;
   mf_first_seen : float;
   mf_last_seen : float;
@@ -1262,7 +1262,10 @@ type verification_snapshot = {
   vs_truncated : bool;  (** A further page exists. *)
   vs_awaiting_unresolved : string list;
       (** Request ids the backlog waits on that name no record. A task holding
-          one of these is waiting on something that is not there. *)
+          one of these is waiting on something that is not there. One page of
+          them: the server cuts the list at the request's limit. *)
+  vs_awaiting_unresolved_total : int;
+      (** How many such ids there are in all, which the page may not hold. *)
   vs_backlog_error : string option;
       (** Why the queue could not be resolved. An empty list carrying this is
           not an empty queue. *)
@@ -1284,6 +1287,14 @@ val keeper_phase_is_running : keeper_phase -> bool
 (** Whether the phase is the normal running lifecycle. The Keepers table
     silences the word for it and spells out every other phase; exhaustive in
     the implementation so a new phase cannot silently count as not-running. *)
+
+(** Which Overview Team band a phase puts a Keeper in (RFC-0464). A stuck
+    Keeper's turns are failing or its fiber crashed; an alive one can take a
+    turn now or is between runs; a parked one was stopped or never started.
+    Exhaustive in the implementation, so a new phase has to choose a band. *)
+type keeper_phase_band = Phase_stuck | Phase_alive | Phase_parked
+
+val keeper_phase_band : keeper_phase -> keeper_phase_band
 
 type keeper_health
 (** A validated keeper health reading — whether the keeper's keepalive is
@@ -1440,6 +1451,16 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_runs_without_slot = {
+  slws_vendor_system_one : int;
+  slws_server_restarted : int;
+  slws_no_slot : int;
+}
+(** The lane's finished runs that name no slot, by why: Vendor System One
+    answered a Board Attention run before any slot was bound, a restart
+    closed the run on replay, or it finished before a slot was bound. With
+    the slot counts they add up to the finished runs. *)
+
 type standalone_lane_jev_destination = {
   sljd_destination_uri : string;
   sljd_model : string;
@@ -1485,6 +1506,7 @@ type standalone_lane = {
   sl_last_outcome : string option;
   sl_p50_elapsed_s : float option;
   sl_selected_slots : standalone_lane_slot_count list;
+  sl_runs_without_slot : standalone_lane_runs_without_slot;
 }
 
 type standalone_lanes_snapshot = {
@@ -1497,7 +1519,9 @@ type standalone_lanes_snapshot = {
 
 val standalone_lane_status_to_string : standalone_lane_status -> string
 
-val standalone_lane_configuration_to_string :
+(** The configuration clause of the lane detail line, subject included where
+    the state needs one. The caller writes no noun of its own. *)
+val standalone_lane_configuration_phrase :
   standalone_lane_configuration -> string
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result

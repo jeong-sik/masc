@@ -390,13 +390,14 @@ let test_registry_failure_reason_preserves_typed_configuration_error () =
       "provider configuration failed"
       detail;
     let surface =
-      Status_blocker.runtime_blocker_surface_of_failure_reason reason
+      (Status_blocker.runtime_blocker_surface_of_failure_reason
+          ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) reason
       |> Option.get
     in
     Alcotest.(check bool)
       "operator summary excludes raw InvalidConfig detail"
       false
-      (String_util.contains_substring surface.summary secret)
+      (String_util.contains_substring (Lazy.force surface.summary) secret)
   | Some other ->
     Alcotest.failf
       "expected redacted Provider_runtime_error, got %s"

@@ -130,10 +130,11 @@ let check_registry_observation terminal ~core_error ~expected ~expected_timeout_
       | None ->
         Printf.sprintf "Provider runtime error (%s): %s" code raw_error
     in
-    match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason stored with
+    match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+        ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) stored with
     | Some surface ->
       Alcotest.(check string) "public status describes the observed failure"
-        expected_summary surface.summary
+        expected_summary (Lazy.force surface.summary)
     | None -> Alcotest.fail "registry cause was missing from public status")
 
 let check_error_observation err expected expected_timeout_prefix () =
@@ -454,7 +455,8 @@ let test_failed_ticks_preserve_current_runtime_cause () =
     (match failure_reason ~base_path ~keeper_name:meta.name with
      | R.Provider_runtime_error { reason = Some Keeper_meta_contract.No_providers_available; _ } -> ()
      | reason -> Alcotest.failf "exhaustion cause lost: %s" (R.failure_reason_to_string reason));
-    (match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+    (match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+        ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt))
              (failure_reason ~base_path ~keeper_name:meta.name) with
      | Some surface -> Alcotest.(check string) "public blocker" "runtime_exhausted" surface.blocker_class
      | None -> Alcotest.fail "missing public blocker");

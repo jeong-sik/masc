@@ -18,6 +18,8 @@ val bool_of_env_opt : string -> bool option
 (* ── Name validation ────────────────────────────────────────── *)
 
 val validate_name : string -> bool
+(** A portable name that is not the directory name of a runtime store kept
+    directly under [keepers/] ([Common.Keepers_root_scoped]). *)
 val invalid_name_error : string -> string
 (** Canonical explanation for a value rejected by {!validate_name}. *)
 

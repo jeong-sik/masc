@@ -187,13 +187,13 @@ let readiness draft ~(row : Decode.ask_row) =
                  Option.map (answer_json question.aq_id) response)
                paired))
 
-let request_body ~answers ~actor_id ~session_id =
-  let optional key = function
-    | Some value when String.trim value <> "" -> [ (key, `String value) ]
+let request_body ~answers ~session_id =
+  let session =
+    match session_id with
+    | Some value when String.trim value <> "" -> [ ("session_id", `String value) ]
     | Some _ | None -> []
   in
-  `Assoc
-    (("answers", answers) :: (optional "actor_id" actor_id @ optional "session_id" session_id))
+  `Assoc (("answers", answers) :: session)
 
 type gate =
   | Ask_gate_blocked_inflight

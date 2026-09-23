@@ -4,6 +4,15 @@
 
 ### Changed
 
+- The keeper failure route and the runtime candidate walk now give the same
+  answer for every error the rotation census covers (#38045). A provider's own
+  400/413 refusal, a malformed/unknown/oversized wire payload and a
+  non-transient 5xx are routed as same-turn rotations (`request_refused`,
+  `provider_wire_defect`, `server_error_not_transient`) instead of terminal
+  labels, matching the walk that already moved to the next candidate. A
+  `ProviderTerminal` error now stops the walk, as the route and every other
+  provider terminal already did, instead of rotating as an invented
+  `permission` capability mismatch.
 - The runtime startup degradation record no longer carries fields that were always empty. It is built only when no default, media-failover or lane reference names a missing runtime, so `dropped_routes`, `dropped_media_failover`, `dropped_lane_candidates` and `dropped_lanes` were always `[]` and `effective_default_runtime_id` always equaled `configured_default_runtime_id`. They leave the record, its JSON and the dashboard decoder; the log line names the default once instead of `configured default "x" -> effective default "x"`, and the dashboard alert reads `default:` (#38074).
 - The runtime failover concept is now named the **Runtime Candidate Order** in
   the TUI: the lane key help and status strings say "candidate order" where

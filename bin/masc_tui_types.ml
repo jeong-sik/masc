@@ -5652,11 +5652,10 @@ type state = {
      connector read to learn whether it still holds bindings to offer to
      remove. *)
   mutable connector_unbind_offer_pending: string list;
-  (* Set when the unbind-all arm came from the pause offer rather than a
-     keypress: the count of frames presented when it was armed. A key read
-     before a later frame was presented never saw the offer, so it does not
-     answer it. *)
-  mutable connector_unbind_all_offered_at: int option;
+  (* The offer after a pause or shutdown, while it waits for its one key.
+     Separate from the unbind-all arm: that arm answers [U], and on the
+     Keeper list [U] is the runtime picker. *)
+  mutable connector_unbind_offer: Masc_tui_connector_unbind.offer option;
   (* Frames the terminal accepted with changed output. *)
   mutable frames_presented: int;
   (* Two server-owned documents joined by exact runtime id: resolved owns
@@ -7620,7 +7619,7 @@ let create_state
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
   connector_unbind_offer_pending = [];
-  connector_unbind_all_offered_at = None;
+  connector_unbind_offer = None;
   frames_presented = 0;
   runtime_surface = None;
   runtime_surface_error = None;

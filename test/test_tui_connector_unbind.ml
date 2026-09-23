@@ -152,11 +152,55 @@ let test_an_unreadable_transport_is_named () =
 let test_offer_leads_with_the_key () =
   let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
   check string "key first, then the channels"
-    "U: also unbind sangsu's 3 channels, or any other key to keep them -- \
+    "y: also unbind sangsu's 3 channels, or any other key to keep them -- \
      general (111), 333 (name unknown), C9 (name unknown); not included, \
      binding list unreadable: Teams"
-    (Unbind.offer_prompt ~keeper_name:"sangsu" ~confirm_key:"U"
-       ~unreadable:[ "Teams" ] targets)
+    (Unbind.offer_prompt ~keeper_name:"sangsu" ~unreadable:[ "Teams" ] targets)
+
+let offer_reading =
+  testable
+    (fun formatter reading ->
+       Format.pp_print_string formatter
+         (match reading with
+          | Unbind.Offer_waits -> "Offer_waits"
+          | Unbind.Offer_accepted -> "Offer_accepted"
+          | Unbind.Offer_dropped -> "Offer_dropped"))
+    ( = )
+
+(* The offer was made while frame 4 was the last one presented. *)
+let offer_at_frame_4 () =
+  { Unbind.offer_keeper = "sangsu"
+  ; offer_targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ())
+  ; offered_at = 4
+  }
+
+let test_offer_is_not_the_runtime_picker_key () =
+  (* #38191 review: on the Keeper list [U] opens the runtime picker, and an
+     operator who pauses and then picks another runtime must not lose the
+     Keeper's channels. *)
+  check bool "the offer key is not unbind-all's U" false
+    (String.equal Unbind.offer_key Unbind.unbind_all_key);
+  check offer_reading "U after the offer was drawn drops it"
+    Unbind.Offer_dropped
+    (Unbind.read_offer_input (offer_at_frame_4 ()) ~frames_presented:5
+       ~input_seen:true ~key:(Some "U"))
+
+let test_offer_takes_its_key_only_after_it_was_drawn () =
+  let offer = offer_at_frame_4 () in
+  check offer_reading "its key, read after a later frame, takes it"
+    Unbind.Offer_accepted
+    (Unbind.read_offer_input offer ~frames_presented:5 ~input_seen:true
+       ~key:(Some Unbind.offer_key));
+  check offer_reading "its key, read before the offer reached the screen"
+    Unbind.Offer_dropped
+    (Unbind.read_offer_input offer ~frames_presented:4 ~input_seen:true
+       ~key:(Some Unbind.offer_key));
+  check offer_reading "a mouse report or paste drops it" Unbind.Offer_dropped
+    (Unbind.read_offer_input offer ~frames_presented:5 ~input_seen:true
+       ~key:None);
+  check offer_reading "a turn that read nothing leaves it" Unbind.Offer_waits
+    (Unbind.read_offer_input offer ~frames_presented:9 ~input_seen:false
+       ~key:None)
 
 let test_elsewhere_the_offer_only_informs () =
   let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
@@ -179,6 +223,10 @@ let () =
         ; test_case "unreadable transport" `Quick
             test_an_unreadable_transport_is_named
         ; test_case "pause offer" `Quick test_offer_leads_with_the_key
+        ; test_case "offer key is not U" `Quick
+            test_offer_is_not_the_runtime_picker_key
+        ; test_case "offer takes a key read after it was drawn" `Quick
+            test_offer_takes_its_key_only_after_it_was_drawn
         ; test_case "offer elsewhere" `Quick
             test_elsewhere_the_offer_only_informs
         ] )

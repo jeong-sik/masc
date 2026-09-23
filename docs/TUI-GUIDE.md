@@ -616,10 +616,11 @@ everywhere else in Keeper detail.
 Pausing (`p`) or shutting down (`s`) a Keeper that still holds channel
 bindings offers to remove them too. A paused Keeper keeps its channels routed
 to itself and answers on them as soon as it runs again. Once the pause or
-shutdown is accepted, the footer reads `U: also unbind <keeper>'s N channels,
-or any other key to keep them -- <channels>`. `U` sends the same conditional
-unbinds as `U` `U` on the Channels tab; any other key leaves the bindings, and
-the next `U` is the runtime picker again.
+shutdown is accepted, the footer reads `y: also unbind <keeper>'s N channels,
+or any other key to keep them -- <channels>`. `y` sends the same conditional
+unbinds as `U` `U` on the Channels tab; any other key leaves the bindings.
+The offer does not answer to `U`: on the list `U` still opens the runtime
+picker, so pausing and then picking another runtime keeps the channels.
 
 ### Keeper logs
 

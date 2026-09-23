@@ -6,7 +6,7 @@
     names that Keeper, so a channel rebound to another Keeper in between is
     left alone and reported as such. *)
 
-(** The key that arms and confirms unbind-all, and answers the pause offer. *)
+(** The key that arms and confirms unbind-all on a Keeper's Channels tab. *)
 val unbind_all_key : string
 
 (** One binding to remove: where it lives, which channel, and the Keeper the
@@ -72,12 +72,38 @@ val arm_prompt :
     transports so "none" is not claimed for them. *)
 val nothing_to_unbind : keeper_name:string -> unreadable:string list -> string
 
+(** The one key that takes the pause offer. It is not {!unbind_all_key}:
+    on the Keeper list that key opens the runtime picker, and an operator
+    who pauses a Keeper and then picks another runtime must not lose its
+    channels. *)
+val offer_key : string
+
+(** An offer on screen: the Keeper, the bindings it named, and the count of
+    frames presented when it was made. *)
+type offer = {
+  offer_keeper : string;
+  offer_targets : target list;
+  offered_at : int;
+}
+
+(** What one loop turn's input does to an offer. *)
+type offer_reading =
+  | Offer_waits  (** Nothing was read; the offer stays. *)
+  | Offer_accepted  (** {!offer_key}, read after the offer was drawn. *)
+  | Offer_dropped
+      (** Any other input, or any key read before a frame after the offer
+          was presented -- that key was typed for something else. The key
+          keeps its own meaning. *)
+
+val read_offer_input :
+  offer -> frames_presented:int -> input_seen:bool -> key:string option ->
+  offer_reading
+
 (** The line shown after the operator paused or shut down a Keeper that still
-    holds bindings: the one key that removes them, then the channels it would
-    answer on again once it runs. Doing nothing is the default. *)
+    holds bindings: {!offer_key}, then the channels it would answer on again
+    once it runs. Doing nothing is the default. *)
 val offer_prompt :
-  keeper_name:string -> confirm_key:string -> unreadable:string list ->
-  target list -> string
+  keeper_name:string -> unreadable:string list -> target list -> string
 
 (** The line for a paused Keeper whose offer cannot take the next key here
     (another view, another Keeper selected, or another arm open). *)

@@ -15333,19 +15333,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                          | Some keeper -> String.equal keeper.k_name keeper_name
                          | None -> false)
                      && Option.is_none state.connector_unbind_all_armed
+                     && not state.composer_focused
                    in
                    if offer_here then begin
-                     (* Armed exactly as a first [U] would be, so the key that
-                        answers it goes through the same confirmation. The
-                        frame count keeps a key typed before this line was
-                        drawn from answering it. *)
-                     state.connector_unbind_all_armed <-
-                       Some (keeper_name, targets);
-                     state.connector_unbind_all_offered_at <-
-                       Some state.frames_presented;
+                     (* The frame count keeps a key typed before this line
+                        was drawn from answering it. *)
+                     state.connector_unbind_offer <-
+                       Some
+                         { Masc_tui_connector_unbind.offer_keeper = keeper_name
+                         ; offer_targets = targets
+                         ; offered_at = state.frames_presented
+                         };
                      report_action state "system"
                        (Masc_tui_connector_unbind.offer_prompt ~keeper_name
-                          ~confirm_key:Masc_tui_connector_unbind.unbind_all_key
                           ~unreadable targets)
                    end
                    else
@@ -16757,12 +16757,10 @@ let main
   let handle_connector_unbind_all () =
     state.connector_unbind_armed <- None;
     (* The selected Keeper decides, and a second press confirms only an arm
-       for that same Keeper. The pause offer arms only for the selected
-       Keeper, so it answers here the same way. *)
+       for that same Keeper. *)
     let keeper_name =
       Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
     in
-    state.connector_unbind_all_offered_at <- None;
     match keeper_name, state.connectors with
     | None, _ ->
         state.connector_unbind_all_armed <- None;
@@ -16796,6 +16794,53 @@ let main
               (Masc_tui_connector_unbind.arm_prompt ~keeper_name
                  ~confirm_key:Masc_tui_connector_unbind.unbind_all_key
                  ~unreadable targets))
+  in
+  (* The pause offer's one key. It sends only what the offer named, for the
+     Keeper it named: a roster refresh can move the selection, and a
+     snapshot read since can hold other bindings. A changed list is offered
+     again rather than sent unread. *)
+  let handle_connector_unbind_offer_accept
+      (offer : Masc_tui_connector_unbind.offer) =
+    state.connector_unbind_offer <- None;
+    state.connector_unbind_armed <- None;
+    state.connector_unbind_all_armed <- None;
+    let keeper_name = offer.offer_keeper in
+    let still_selected =
+      match selected_keeper state with
+      | Some (keeper : keeper) -> String.equal keeper.k_name keeper_name
+      | None -> false
+    in
+    match still_selected, state.connectors with
+    | false, (Some _ | None) ->
+        report_action state "error"
+          (Printf.sprintf
+             "unbind all: %s is no longer the selected Keeper; nothing removed"
+             (Terminal_text.single_line keeper_name))
+    | true, None ->
+        report_action state "error"
+          "unbind all: channel transports have not been read yet"
+    | true, Some snapshot -> (
+        let targets =
+          Masc_tui_connector_unbind.targets ~keeper_name snapshot.cs_connectors
+        in
+        let unreadable =
+          Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
+        in
+        match targets with
+        | [] ->
+            report_action state "system"
+              (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
+                 ~unreadable)
+        | _ :: _ when targets = offer.offer_targets ->
+            launch_connector_unbind_all state ~mailbox:async_messages
+              ~keeper_name targets
+        | _ :: _ ->
+            state.connector_unbind_offer <-
+              Some { offer with offer_targets = targets
+                              ; offered_at = state.frames_presented };
+            report_action state "system"
+              (Masc_tui_connector_unbind.offer_prompt ~keeper_name ~unreadable
+                 targets))
   in
   let handle_connector_edit () =
     state.connector_unbind_armed <- None;
@@ -18402,19 +18447,25 @@ and is loaded on demand through keeper_skill.
          Not scoped to the Channels tab: an arm the operator left behind on
          another surface is exactly the stale confirmation this cancels. *)
       if cancelled [ "u" ] then state.connector_unbind_armed <- None;
-      if cancelled [ "U" ] then begin
-        state.connector_unbind_all_armed <- None;
-        state.connector_unbind_all_offered_at <- None
-      end;
-      (* A key read before the pause offer reached the screen was typed for
-         something else -- [U] on the list is the runtime picker -- so it
-         drops the offer and keeps its own meaning. *)
-      (match state.connector_unbind_all_offered_at with
-       | Some offered_at
-         when Option.is_some input && state.frames_presented <= offered_at ->
-           state.connector_unbind_all_armed <- None;
-           state.connector_unbind_all_offered_at <- None
-       | Some _ | None -> ());
+      if cancelled [ "U" ] then state.connector_unbind_all_armed <- None;
+      (* The pause offer takes one key. Anything else -- or any key read
+         before the offer reached the screen, typed for something else --
+         drops it, and that key keeps its own meaning. *)
+      let accepted_unbind_offer =
+        match state.connector_unbind_offer with
+        | None -> None
+        | Some offer -> (
+            match
+              Masc_tui_connector_unbind.read_offer_input offer
+                ~frames_presented:state.frames_presented
+                ~input_seen:(Option.is_some input) ~key
+            with
+            | Masc_tui_connector_unbind.Offer_waits -> None
+            | Masc_tui_connector_unbind.Offer_accepted -> Some offer
+            | Masc_tui_connector_unbind.Offer_dropped ->
+                state.connector_unbind_offer <- None;
+                None)
+      in
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
          send. Everything it does not claim reaches the surface with its
@@ -18454,6 +18505,8 @@ and is loaded on demand through keeper_skill.
        | None, _ | Some _, None -> ());
       (match key with
        | Some _ when composer_claimed -> ()
+       | Some _ when Option.is_some accepted_unbind_offer ->
+           Option.iter handle_connector_unbind_offer_accept accepted_unbind_offer
        (* The keeper-voice screen owns every key while it is open: it is drawn
           instead of the pane, so a key that fell through would act on a
           surface nobody is looking at. *)
@@ -23867,14 +23920,6 @@ and is loaded on demand through keeper_skill.
            in
            launch_keeper_tool_mode_set state ~mailbox:async_messages
              ~keeper_name:keeper.k_name ~mode
-       | Some "U"
-         when Masc_tui_types.shows_selected_keeper state.view
-              && Option.is_some state.connector_unbind_all_armed ->
-           (* An armed unbind-all -- a first [U] on Channels, or the offer
-              after a pause -- takes the next [U] before the runtime picker
-              does. The arm lives for one key, so this cannot be a stale
-              one. *)
-           handle_connector_unbind_all ()
        | Some "u" | Some "U"
          when (match state.view with
                | Keepers Keeper_list -> true

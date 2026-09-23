@@ -152,7 +152,12 @@ let run_durable_with_commit ~config ~keeper_name ~commit =
   in
   try
     let last_pass = drain () in
-    let unread = match last_pass with Off -> None | _ -> measure_unread ~config ~keeper_name in
+    let unread =
+      match last_pass with
+      | Off -> None
+      | Lane_unconfigured | Drained | Not_committed | Stopped _ | Raised _ ->
+        measure_unread ~config ~keeper_name
+    in
     publish_measurement ~config ~keeper_name ~last_pass ~unread
   with
   | Eio.Cancel.Cancelled _ as exn ->

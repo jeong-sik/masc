@@ -119,6 +119,57 @@ let test_openai_extended () =
   check bool "has min_p" true c.supports_min_p
 ;;
 
+(* #37849. The repository catalog's native Claude provider reads the Claude
+   bare rows, dated ids included. deepseek-anthropic takes the same wire but
+   answers claude-* ids with its own models, so it keeps its own base for them:
+   the same answer it gives an id it has no row for. *)
+let test_claude_provider_reads_claude_bare_rows () =
+  let lookup provider_label model_id =
+    Capabilities.for_provider_model_id
+      ~wire:(Some Provider_kind.Anthropic)
+      ~allow_bare_fallback:false
+      ~provider_label
+      ~model_id
+  in
+  (* What claude answered for every model before: its base. Comparing with the
+     bare lookup instead would read the same function on both sides. *)
+  let claude_base =
+    match lookup "claude" "no-such-model" with
+    | Some base -> base
+    | None -> fail "provider claude has no base capabilities"
+  in
+  List.iter
+    (fun model_id ->
+       match lookup "claude" model_id with
+       | None -> fail (model_id ^ ": provider claude has no capabilities")
+       | Some via_provider ->
+         check
+           bool
+           (model_id ^ ": the ladder is declared")
+           true
+           (Option.is_some via_provider.Capabilities.accepted_reasoning_efforts);
+         check
+           bool
+           (model_id ^ ": the window is the model row's, not the base's")
+           true
+           (via_provider.Capabilities.max_context_tokens
+            <> claude_base.Capabilities.max_context_tokens))
+    [ "claude-fable-5"; "claude-fable-5-20260901"; "claude-opus-5"; "claude-sonnet-5" ];
+  match lookup "deepseek-anthropic" "claude-fable-5", lookup "deepseek-anthropic" "no-such-model" with
+  | Some named, Some unknown ->
+    check
+      (option (list string))
+      "deepseek-anthropic does not take the Claude row's ladder"
+      (accepted_reasoning_effort_strings unknown)
+      (accepted_reasoning_effort_strings named);
+    check
+      (option int)
+      "deepseek-anthropic does not take the Claude row's window"
+      unknown.Capabilities.max_context_tokens
+      named.Capabilities.max_context_tokens
+  | _ -> fail "deepseek-anthropic has no base capabilities"
+;;
+
 let test_lookup_mimo_v25_pro () =
   match
     Capabilities.for_provider_model_id
@@ -3585,6 +3636,12 @@ let () =
             "a row with no policy rejects an explicit toggle"
             `Quick
             test_anthropic_no_policy_rejects_explicit_toggle
+        ] )
+    ; ( "provider serves bare rows"
+      , [ test_case
+            "claude reads the Claude bare rows, deepseek-anthropic does not"
+            `Quick
+            test_claude_provider_reads_claude_bare_rows
         ] )
     ]
 ;;

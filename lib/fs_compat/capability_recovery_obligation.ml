@@ -1106,7 +1106,7 @@ let decode_json raw decoder =
     Ok (decoder json)
   with
   | Record_validation_failed error -> Error error
-  | exception_ ->
+  | exception_ -> (* cancel-guard-ok: Yojson decoding performs no Eio operation *)
     let backtrace = Printexc.get_raw_backtrace () in
     Error (Invalid_record_json { exception_; backtrace })
 ;;
@@ -1982,6 +1982,8 @@ let capture_failure ~operation ~subject f =
     []
   with
   | Store_failure failure -> [ failure ]
+  | Eio.Cancel.Cancelled _ as cancelled ->
+    Printexc.raise_with_backtrace cancelled (Printexc.get_raw_backtrace ())
   | exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
     [ make_failure ~operation ~subject exception_ backtrace ]

@@ -195,7 +195,7 @@ let read_file path =
     |> fun contents -> Some contents
   with
   | Sys_error _ -> None
-  | exn ->
+  | exn -> (* cancel-guard-ok: In_channel and Fun.protect perform no Eio operation *)
     Log.Identity.warn "build_identity read_file %s failed: %s" path (Printexc.to_string exn);
     None
 ;;
@@ -262,7 +262,7 @@ let probe_commit_unix_ts_from_candidates candidates commit_hash_opt =
                     (string_of_process_status status)));
             None
         with
-        | exn ->
+        | exn -> (* cancel-guard-ok: the git capture is a Unix process call, no Eio operation *)
           observe_probe_failure ~site:"commit_ts_git_capture" exn;
           None
       in

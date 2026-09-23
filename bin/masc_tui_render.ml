@@ -5240,7 +5240,7 @@ let render_lanes_overview (state : state) =
            slot_rows;
        box_line_styled buf cols ~style:(Theme.recede ())
          "  j/k move · x drop · J/K reorder · Esc close");
-  (* The failover-candidate picker the "a" key opens. Same projection the
+  (* The runtime-candidate picker the "a" key opens. Same projection the
      Runtime surface draws; the row order both render and the key handler
      read is the picker's own, so the cursor and the drawing cannot drift. *)
   (match Masc_tui_types.runtime_picker_projection state with
@@ -11510,7 +11510,7 @@ let render_runtime (state : state) =
    | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
    | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
        c.push_styled ~style:(Theme.info ())
-         "  [runtime].media_failover — the Runtime Candidate Order for the vision fleet";
+         "  [runtime].media_failover — the order the vision fleet is called in";
        let entries = Masc_tui_types.slot_editor_rows state in
        if entries = [] then
          c.push_styled ~style:(Theme.recede ())
@@ -11539,7 +11539,7 @@ let render_runtime (state : state) =
               Printf.sprintf "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_media_failover ->
-              "  adding to [runtime].media_failover, the Runtime Candidate Order for the vision fleet — j/k move, Enter append, e cancel"
+              "  adding to [runtime].media_failover, the order the vision fleet is called in — j/k move, Enter append, e cancel"
           | Masc_tui_types.Pick_route_default ->
               (* Replaces rather than appends, and the row it replaces is
                  marked "(already a candidate)" in the choices below. *)
@@ -11704,7 +11704,7 @@ let render_runtime (state : state) =
             (* [Lane_undeclared] reads like a one-candidate lane on the wire --
                one candidate, first position -- so until this row said so there
                was nothing on the surface telling them apart. A declared lane
-               of one candidate walks no failover either; what separates this
+               of one candidate has no next candidate either; what separates this
                one is that [D] has no table to remove. *)
             match Masc_tui_types.runtime_lane_fact_of_row candidate with
             | Masc_tui_types.Lane_undeclared ->
@@ -12432,7 +12432,7 @@ let render_runtime_pick (state : state) =
               Printf.sprintf "  %s  %s  %s"
                 (fit_width "KIND   TARGET" (7 + target_width))
                 (fit_width "CONFIGURED ROUTE / MODEL" route_width)
-                (fit_width "PROPERTIES / FAILOVER"
+                (fit_width "PROPERTIES / CANDIDATES"
                    (Masc_tui_types.runtime_pick_properties_room ~cols
                       ~target:target_width ~route:route_width))
             in

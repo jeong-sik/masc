@@ -9541,7 +9541,10 @@ let test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape () =
 let test_decode_execute_row_details_the_whole_command () =
   (* The summary line may be cut; the detail pane may not be. The stored
      input's own keys are the detail's fields, so argv rides whole no matter
-     how long the command is. *)
+     how long the command is. A list rides as the JSON it is: joined with
+     spaces, ["rm"; "-rf"; "a b"] and ["rm"; "-rf"; "a"; "b"] would draw as
+     the same line and the word boundaries the operator approves between
+     would be gone. *)
   let long_url = String.make 180 'x' in
   let rows =
     decoded_execute_rows ~preview:"{\"cut\":true}"
@@ -9564,8 +9567,10 @@ let test_decode_execute_row_details_the_whole_command () =
       Alcotest.(option string)
       "argv is whole, not the cut summary"
       (Some
-         (String.concat " "
-            [ "git"; "clone"; "https://example.org/" ^ long_url ]))
+         (Yojson.Safe.to_string
+            (`List
+               [ `String "git"; `String "clone";
+                 `String ("https://example.org/" ^ long_url) ])))
       (List.assoc_opt "argv" fields)
   | Tui_decode.Flattened _ ->
     Alcotest.fail "an object input must draw key by key"

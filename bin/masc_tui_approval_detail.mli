@@ -23,11 +23,3 @@ val of_fields : width:int -> (string * string) list -> line list
     [width] cells wide. A value keeps its own line breaks and each line wraps;
     a blank value is drawn as such rather than omitted, because a field that
     is present and empty is a different fact from one that is absent. *)
-
-val input_rows :
-  rows:Tui_decode.gate_input_rows -> (string * string) list
-(** [input_rows ~rows] is the [(label, value)] pairs for the input of a Gate
-    row, drawn whole rather than summarized. [Rows fields] passes the stored
-    object's keys through as labels; [Flattened preview] is the server's
-    preview kept under a label that names it, because the wire's preview is
-    cut and must not present itself as the whole input. *)

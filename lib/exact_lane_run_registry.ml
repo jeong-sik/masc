@@ -1,9 +1,29 @@
-type lane = Standalone_lane.t =
+type lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
   | Workspace_curator
-  | Verifier
+
+let standalone_lane = function
+  | Librarian -> Standalone_lane.Librarian
+  | Hitl_auto_judge -> Standalone_lane.Hitl_auto_judge
+  | Board_attention -> Standalone_lane.Board_attention
+  | Workspace_curator -> Standalone_lane.Workspace_curator
+;;
+
+(* The one place this registry decides which lanes it records. A Verifier
+   review is recorded by Verification_run_registry or
+   Goal_verification_run_registry, each keyed by the Task or Goal it reviews,
+   so a Verifier row here would be a second record of one review. *)
+let lane_of_standalone = function
+  | Standalone_lane.Librarian -> Some Librarian
+  | Standalone_lane.Hitl_auto_judge -> Some Hitl_auto_judge
+  | Standalone_lane.Board_attention -> Some Board_attention
+  | Standalone_lane.Workspace_curator -> Some Workspace_curator
+  | Standalone_lane.Verifier -> None
+;;
+
+let lane_id lane = Standalone_lane.to_id (standalone_lane lane)
 
 type outcome =
   | Succeeded
@@ -125,24 +145,15 @@ type run =
   ; output_availability : payload_availability option
   }
 
-(* The one place this registry decides which lanes it records. A Verifier
-   review is recorded by Verification_run_registry or
-   Goal_verification_run_registry, each keyed by the Task or Goal it reviews,
-   so a Verifier row here would be a second record of one review.
-   [register_running] and replay both ask this. *)
-let recorded_lane = function
-  | (Librarian | Hitl_auto_judge | Board_attention | Workspace_curator) as lane -> Ok lane
-  | Verifier ->
-    Error
-      (Printf.sprintf
-         "exact lane %S is recorded by the verification run registries"
-         (Standalone_lane.to_id Verifier))
-;;
-
 let lane_of_key key =
   match Standalone_lane.of_id key with
   | None -> Error (Printf.sprintf "unknown exact lane %S" key)
-  | Some lane -> recorded_lane lane
+  | Some standalone ->
+    (match lane_of_standalone standalone with
+     | Some lane -> Ok lane
+     | None ->
+       Error
+         (Printf.sprintf "exact lane %S is recorded by the verification run registries" key))
 ;;
 
 let outcome_label = function
@@ -260,7 +271,7 @@ module Payload = struct
      compaction fires only on a capacity refusal, and under the old global
      bound the busiest lane evicted the quietest — retained_run_count = 0 for
      compaction was indistinguishable from "never ran" (lane audit W8). *)
-  let retention_group = Some (fun registration -> Standalone_lane.to_id registration.lane)
+  let retention_group = Some (fun registration -> lane_id registration.lane)
 
   (* A value kept in a payload file is dropped from the copy the store keeps.
      The list projection reads none of it -- [projected_run_of_entry] sets both
@@ -282,7 +293,7 @@ module Payload = struct
 
   let registration_to_yojson registration =
     `Assoc
-      [ "lane", `String (Standalone_lane.to_id registration.lane)
+      [ "lane", `String (lane_id registration.lane)
       ; "actor", `String registration.actor
       ; ( "input"
         , match registration.input with
@@ -692,9 +703,6 @@ let replay path =
 let register_running t ~run_id ~lane ~actor ~started_at ~input =
   if not (run_id_is_a_segment run_id)
   then invalid_arg (Printf.sprintf "exact lane run id %S is not a path segment" run_id);
-  (match recorded_lane lane with
-   | Ok _ -> ()
-   | Error detail -> invalid_arg detail);
   (* Outside the lock: the file name carries its digest, so this write shares
      nothing with another run's or with this run's earlier files. *)
   let input_source =
@@ -962,7 +970,7 @@ let status_label = function
 let run_summary_fields run =
   let base =
     [ "run_id", `String run.run_id
-    ; "lane", `String (Standalone_lane.to_id run.lane)
+    ; "lane", `String (lane_id run.lane)
     ; ( "subject_id"
       , `Null
         (* This registry has no generic subject identity. Keep absence explicit

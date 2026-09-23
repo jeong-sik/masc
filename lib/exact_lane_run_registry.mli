@@ -1,17 +1,23 @@
 (** Admin-only durable execution records for model-driven Keeper exact-output
     lanes. Input/output values are exact. *)
 
-(** A run's lane, written as {!Standalone_lane.to_id}. Every lane but
-    [Verifier] is recorded here: a Verifier review is recorded by
-    Verification_run_registry or Goal_verification_run_registry, so
-    {!register_running} refuses that lane and replay refuses a row naming
-    it. *)
-type lane = Standalone_lane.t =
+(** A run's lane. Every standalone lane but [Standalone_lane.Verifier] is
+    recorded here: a Verifier review is recorded by Verification_run_registry
+    or Goal_verification_run_registry, so this type leaves it out and replay
+    refuses a row naming it. *)
+type lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
   | Workspace_curator
-  | Verifier
+
+val standalone_lane : lane -> Standalone_lane.t
+(** The lane in the shared vocabulary. A run record writes its
+    {!Standalone_lane.to_id}. *)
+
+val lane_of_standalone : Standalone_lane.t -> lane option
+(** [None] for [Standalone_lane.Verifier], whose runs this registry does not
+    record. *)
 
 type outcome =
   | Succeeded

@@ -600,9 +600,11 @@ let test_exact_history_is_not_pruned_across_lanes () =
   check
     (list string)
     "every registered lane survives replay"
-    (recorded_lanes |> List.map Standalone_lane.to_id |> List.sort String.compare)
+    (recorded_lanes
+     |> List.map (fun lane -> Standalone_lane.to_id (R.standalone_lane lane))
+     |> List.sort String.compare)
     (R.list_runs replayed
-     |> List.map (fun (run : R.run) -> Standalone_lane.to_id run.lane)
+     |> List.map (fun (run : R.run) -> Standalone_lane.to_id (R.standalone_lane run.lane))
      |> List.sort_uniq String.compare);
   let permissions = (Unix.stat path).Unix.st_perm land 0o777 in
   check int "durable registry is private" 0o600 permissions;
@@ -667,27 +669,20 @@ let registration_row lane =
     (Standalone_lane.to_id lane)
 ;;
 
-(* A Verifier review is recorded by the verification run registries, so this
-   registry refuses the lane on the way in and on replay. The Board row beside
-   it has the same shape, so the lane is the only reason for the refusal. *)
+(* A Verifier review is recorded by the verification run registries. The
+   registry's lane type leaves that lane out, so no code can register one; a
+   row naming it can still arrive from disk, and replay refuses it. The Board
+   row beside it has the same shape, so the lane is the only reason. *)
 let test_the_registry_refuses_the_verifier_lane () =
-  let registry = R.create () in
-  let refused =
-    match
-      R.register_running registry ~run_id:"verifier-run" ~lane:R.Verifier
-        ~actor:"keeper-a" ~started_at:1.0 ~input:(R.Exact_input `Null)
-    with
-    | () -> false
-    | exception Invalid_argument _ -> true
-  in
-  check bool "a Verifier registration is refused" true refused;
-  check int "and nothing is recorded" 0 (List.length (R.list_runs registry));
-  (* The same call on a lane the registry records goes through, so the lane is
-     what was refused, not the run id or the input. *)
-  R.register_running registry ~run_id:"verifier-run" ~lane:R.Librarian
-    ~actor:"keeper-a" ~started_at:1.0 ~input:(R.Exact_input `Null);
-  check int "the same call on a recorded lane is kept" 1
-    (List.length (R.list_runs registry));
+  check bool "the Verifier lane has no registry lane" true
+    (Option.is_none (R.lane_of_standalone Standalone_lane.Verifier));
+  List.iter
+    (fun lane ->
+       check bool (Standalone_lane.to_id lane ^ " converts back to itself") true
+         (match R.lane_of_standalone lane with
+          | Some recorded -> R.standalone_lane recorded = lane
+          | None -> lane = Standalone_lane.Verifier))
+    Standalone_lane.all;
   let read_and_refused lane =
     let path = fresh_log_path "exact-lane-verifier-row-" in
     Fs_compat.save_file path (registration_row lane ^ "\n");
@@ -696,9 +691,9 @@ let test_the_registry_refuses_the_verifier_lane () =
     report.Run_registry_core.lines_read, report.Run_registry_core.malformed_lines
   in
   check (pair int int) "a Board row is read and kept" (1, 0)
-    (read_and_refused R.Board_attention);
+    (read_and_refused Standalone_lane.Board_attention);
   check (pair int int) "a Verifier row is read and refused" (1, 1)
-    (read_and_refused R.Verifier)
+    (read_and_refused Standalone_lane.Verifier)
 ;;
 
 let test_failed_durable_registration_is_not_published_in_memory () =

@@ -168,7 +168,8 @@ let retained_run_id = function
 ;;
 
 let retained_run_lane = function
-  | Exact_run run -> Standalone_lane.to_id run.Exact_lane_run_registry.lane
+  | Exact_run run ->
+    Standalone_lane.to_id (Exact_lane_run_registry.standalone_lane run.Exact_lane_run_registry.lane)
   | Task_verification_run _ | Goal_verification_run _ ->
     Standalone_lane.to_id Standalone_lane.Verifier
 ;;
@@ -257,8 +258,7 @@ let retained_run_skill_evidence_json = function
      | Exact_lane_run_registry.Librarian
      | Exact_lane_run_registry.Hitl_auto_judge
      | Exact_lane_run_registry.Board_attention
-     | Exact_lane_run_registry.Workspace_curator
-     | Exact_lane_run_registry.Verifier ->
+     | Exact_lane_run_registry.Workspace_curator ->
        `Assoc [ "state", `String "no_keeper_skills" ])
   | Task_verification_run _ | Goal_verification_run _ ->
     `Assoc [ "state", `String "no_keeper_skills" ]
@@ -514,8 +514,7 @@ let exact_answered_by ~lane ~outcome = function
      | ( ( Exact_lane_run_registry.Board_attention
          | Exact_lane_run_registry.Librarian
          | Exact_lane_run_registry.Hitl_auto_judge
-         | Exact_lane_run_registry.Workspace_curator
-         | Exact_lane_run_registry.Verifier )
+         | Exact_lane_run_registry.Workspace_curator )
        , ( Exact_lane_run_registry.Succeeded
          | Exact_lane_run_registry.Cancelled
          | Exact_lane_run_registry.Failed _ ) ) -> No_slot)
@@ -549,7 +548,7 @@ let observed_exact_run (run : Exact_lane_run_registry.run) =
             exact_answered_by ~lane:run.lane ~outcome:intended_outcome selected_slot
         }
   in
-  { lane = run.lane; started_at = run.started_at; status }
+  { lane = Exact_lane_run_registry.standalone_lane run.lane; started_at = run.started_at; status }
 ;;
 
 (* Success for this lane means A VERDICT WAS PRODUCED. [Not_reviewed] is

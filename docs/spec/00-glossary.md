@@ -530,9 +530,10 @@ status: reference
 : 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. 다섯
   (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)은
   닫힌 타입 `Standalone_lane.t` 하나다. `Standalone_lane.all`이 열거하고 `to_id`가
-  이름을 적는다. `Runtime.exact_lane`과 `Exact_lane_run_registry.lane`은 이 타입을
-  그대로 쓴다. 실행 기록은 `Verifier`를 적지 않는다. Verifier 검토는 Task·Goal
-  검증 기록에 남는다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
+  이름을 적는다. `Runtime.exact_lane`은 이 타입을 그대로 쓴다. 실행 기록의
+  `Exact_lane_run_registry.lane`은 `Verifier`를 뺀 넷이고, `standalone_lane`·
+  `lane_of_standalone`으로 이 타입과 오간다. Verifier 검토는 Task·Goal 검증 기록에
+  남는다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
   Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
   경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
   `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는 **Runtime Candidate Order**다.

@@ -836,7 +836,8 @@ let test_every_retained_run_kind_projects_skill_evidence () =
       ~exact_runs:[ run ]
       ~verification_runs:[]
       ~goal_verification_runs:[]
-    |> check_no_keeper_skill_evidence ~label:(Standalone_lane.to_id lane));
+    |> check_no_keeper_skill_evidence
+         ~label:(Standalone_lane.to_id (Exact.standalone_lane lane)));
   let task = task_verification_run ~verification_id:"task-skill" ~started_at:90. in
   Projection.For_testing.run_detail_json_with
     ~run_id:"task-skill"

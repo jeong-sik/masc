@@ -1138,6 +1138,57 @@ let () =
     ; tool_surface
     }
   in
+  (* An operator reads one keeper's cycles by the log's keeper field, and a
+     cycle line names the runtime the run settled on, not the redacted lane
+     label every line shares. *)
+  let () =
+    let settled_runtime = "runtime-the-run-settled-on" in
+    let result = { (run_result ()) with runtime_id = settled_runtime } in
+    let usage_resolution, _ =
+      Masc.Keeper_usage_resolution.resolve
+        ~cursor:meta.runtime.usage_cursor
+        ~basis:result.usage_basis
+        ~observation:
+          (Some (Masc.Keeper_usage_resolution.sample_of_api_usage result.usage))
+        ~observed_at:42.0
+    in
+    let since_seq =
+      match Log.Ring.recent ~limit:1 () with
+      | [] -> -1
+      | entry :: _ -> entry.Log.Ring.seq
+    in
+    let lifecycle : Masc.Keeper_context_runtime.post_turn_lifecycle =
+      { updated_meta = meta
+      ; checkpoint = None
+      ; checkpoint_bytes = None
+      ; message_count = 0
+      }
+    in
+    UTS.emit_usage_metrics_and_log
+      ~updated_meta:meta
+      ~result
+      ~usage_resolution
+      ~latency_ms:1
+      ~usage_trust:Masc.Keeper_unified_metrics.Usage_trusted
+      ~turn_mode_label:"test"
+      ~lifecycle
+      ~terminal_outcome:UTS.Terminal_done;
+    let cycle_lines =
+      Log.Ring.recent ~since_seq ()
+      |> List.filter (fun (entry : Log.Ring.entry) ->
+        entry.category = Some Log.Turn
+        && Option.equal String.equal entry.keeper_name (Some keeper_name))
+    in
+    check
+      "a success cycle line carries its keeper as the log's keeper field"
+      (List.length cycle_lines = 1);
+    check
+      "a success cycle line names the runtime the run settled on"
+      (List.for_all
+         (fun (entry : Log.Ring.entry) ->
+            Astring.String.is_infix ~affix:settled_runtime entry.message)
+         cycle_lines)
+  in
   let direct_outcome =
     let () =
       Eio_main.run @@ fun env ->

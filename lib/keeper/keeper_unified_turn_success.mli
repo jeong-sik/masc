@@ -29,6 +29,17 @@ module For_testing : sig
   val post_action_of_channel
     :  Keeper_world_observation.keeper_cycle_channel
     -> cycle_post_action
+
+  val emit_usage_metrics_and_log
+    :  updated_meta:Keeper_meta_contract.keeper_meta
+    -> result:Keeper_agent_run.run_result
+    -> usage_resolution:Keeper_usage_resolution.t
+    -> latency_ms:int
+    -> usage_trust:Keeper_usage_trust.t
+    -> turn_mode_label:string
+    -> lifecycle:Keeper_context_runtime.post_turn_lifecycle
+    -> terminal_outcome:terminal_outcome
+    -> unit
 end
 
 type handle_result =

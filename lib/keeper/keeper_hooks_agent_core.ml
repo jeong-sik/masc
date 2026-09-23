@@ -298,15 +298,15 @@ let make_hooks
          | Keeper_usage_trust.Usage_untrusted reasons when not usage_missing ->
           if Keeper_usage_trust.warns_operator usage_trust then
             Log.Keeper.warn ~keeper_name:meta.name
-              "after_turn usage telemetry untrusted model=%s reasons=%s input=%d output=%d context_max=%s"
-              model
+              "after_turn usage telemetry untrusted runtime_lane=%s reasons=%s input=%d output=%d context_max=%s"
+              runtime_lane_label
               (String.concat "," reasons)
               raw_input_tok raw_output_tok
               context_max_log
           else
             Log.Keeper.info ~keeper_name:meta.name
-              "after_turn usage telemetry unavailable model=%s reasons=%s input=%d output=%d context_max=%s"
-              model
+              "after_turn usage telemetry unavailable runtime_lane=%s reasons=%s input=%d output=%d context_max=%s"
+              runtime_lane_label
               (String.concat "," reasons)
               raw_input_tok raw_output_tok
               context_max_log

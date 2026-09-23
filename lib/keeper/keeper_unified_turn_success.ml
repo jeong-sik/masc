@@ -112,7 +112,7 @@ let append_metrics_snapshot
           ; "site", Keeper_metric_emit_dropped_site.(to_label Keeper_unified_turn)
           ]
         ();
-      Log.Keeper.error
+      Log.Keeper.error ~keeper_name:updated_meta.name
         "write metrics snapshot failed after keeper cycle: %s"
         (Printexc.to_string exn);
       Otel_metric_store.inc_counter
@@ -241,9 +241,8 @@ let emit_activity_graph
         ~tags:[ "keeper"; "turn"; "metrics" ]
         ()
        in
-       Log.Keeper.debug
-         "%s: activity graph %s emitted seq=%d"
-         updated_meta.name
+       Log.Keeper.debug ~keeper_name:updated_meta.name
+         "activity graph %s emitted seq=%d"
          activity_kind
          event.seq)
 ;;
@@ -355,8 +354,7 @@ let emit_usage_metrics_and_log
     in
     log_usage
       ~keeper_name:updated_meta.name
-      "%s: keeper usage telemetry %s runtime=%s reasons=%s input=%d output=%d"
-      updated_meta.name
+      "keeper usage telemetry %s runtime=%s reasons=%s input=%d output=%d"
       (if Keeper_usage_trust.warns_operator usage_trust
        then "untrusted"
        else "unavailable")
@@ -367,8 +365,7 @@ let emit_usage_metrics_and_log
    | Keeper_usage_trust.Usage_missing ->
      Log.Keeper.info
        ~keeper_name:updated_meta.name
-       "%s: keeper usage telemetry missing runtime=%s"
-       updated_meta.name
+       "keeper usage telemetry missing runtime=%s"
        result.Keeper_agent_run.runtime_id
    | Keeper_usage_trust.Usage_trusted -> ());
   let logged_total_tokens =
@@ -376,14 +373,13 @@ let emit_usage_metrics_and_log
     | Some usage -> usage.input_tokens + usage.output_tokens
     | None -> 0
   in
-  (* Internal log: the keeper and the runtime that answered, as observed. The
-     redacted lane label is for external metric labels only
-     (Boundary_redaction). *)
+  (* Internal log: the keeper and the runtime the run settled on, the same
+     runtime its receipt records. The redacted lane label is for external
+     metric labels only (Boundary_redaction). *)
   Log.Keeper.info
     ~keeper_name:updated_meta.name
     ~category:Log.Turn
-    "%s: keeper cycle %s runtime=%s tokens=%d latency=%dms mode=%s stop=%s"
-    updated_meta.name
+    "keeper cycle %s runtime=%s tokens=%d latency=%dms mode=%s stop=%s"
     (terminal_outcome_to_log_label terminal_outcome)
     result.Keeper_agent_run.runtime_id
     logged_total_tokens
@@ -572,6 +568,7 @@ module For_testing = struct
     | Empty_queue_sleep
 
   let post_action_of_channel = post_action_of_channel
+  let emit_usage_metrics_and_log = emit_usage_metrics_and_log
 end
 
 let emit_terminal_fsm ~meta ~keeper_turn_id =

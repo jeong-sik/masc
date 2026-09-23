@@ -142,8 +142,6 @@ let create_args
     ([ "due_at_unix", `Float future_due_at
      ; "keeper_name", `String "schedule-keeper"
      ; "message", `String message
-     ; "requested_by_id", `String "operator"
-     ; "scheduled_by_id", `String "scheduler-agent"
      ]
      @ (if allow_unregistered_keeper
         then [ "allow_unregistered_keeper", `Bool true ]
@@ -318,7 +316,6 @@ let test_create_list_get_cancel () =
     dispatch_exn config Tool_schemas_schedule.Cancel_request
       (`Assoc
         [ "schedule_id", `String "sched-tools"
-        ; "cancelled_by_id", `String "operator"
         ; "reason", `String "superseded"
         ])
   in
@@ -390,7 +387,6 @@ let test_update_requires_id_and_active_row () =
     (dispatch_exn config Tool_schemas_schedule.Cancel_request
        (`Assoc
          [ "schedule_id", `String schedule_id
-         ; "cancelled_by_id", `String "operator"
          ; "reason", `String "done"
          ]));
   let refused =
@@ -449,7 +445,6 @@ let test_results_survive_the_checkpoint_encoder () =
     dispatch_exn config Tool_schemas_schedule.Cancel_request
       (`Assoc
         [ "schedule_id", `String "sched-canonical"
-        ; "cancelled_by_id", `String "operator"
         ; "reason", `String "superseded"
         ])
   in
@@ -635,8 +630,6 @@ let test_removed_convenience_input_does_not_synthesize_payload () =
         [ "schedule_id", `String "sched-removed-convenience"
         ; "due_at_unix", `Float future_due_at
         ; "board_content", `String "must not become a scheduled product effect"
-        ; "requested_by_id", `String "operator"
-        ; "scheduled_by_id", `String "scheduler-agent"
         ])
   in
   check bool "removed convenience input rejected" false (Tool_result.is_success result);
@@ -657,8 +650,6 @@ let test_unregistered_wake_target_rejected () =
        ; "due_at_unix", `Float future_due_at
        ; "keeper_name", `String "ghost-keeper"
        ; "message", `String "wake for a keeper that does not exist"
-       ; "requested_by_id", `String "operator"
-       ; "scheduled_by_id", `String "scheduler-agent"
        ]
        @ if allow then [ "allow_unregistered_keeper", `Bool true ] else [])
   in
@@ -770,8 +761,6 @@ let test_known_fields_still_create () =
         ; "message", `String "wake up"
         ; "title", `String "a title"
         ; "urgency", `String "normal"
-        ; "requested_by_id", `String "operator"
-        ; "scheduled_by_id", `String "scheduler-agent"
         ; "allow_unregistered_keeper", `Bool true
         ])
   in
@@ -1161,7 +1150,6 @@ let test_cancel_refusal_says_the_state_and_the_last_wake () =
     dispatch_exn config Tool_schemas_schedule.Cancel_request
       (`Assoc
         [ "schedule_id", `String schedule_id
-        ; "cancelled_by_id", `String "analyst"
         ; "reason", `String "no longer needed"
         ])
   in
@@ -1335,16 +1323,78 @@ let test_an_unnamed_caller_names_the_actor_itself () =
          ~extra:
            [ "due_in_sec", `Int 60
            ; "schedule_id", `String "sched-named-scheduler"
+           ; "requested_by_id", `String "named-requester"
            ; "scheduled_by_id", `String "named-scheduler"
            ]
          ())
   in
-  check bool "create with scheduled_by_id succeeds" true (Tool_result.is_success created);
+  check bool "create with named actors succeeds" true (Tool_result.is_success created);
   check_refusal "note without author_id"
     Schedule_contract_values.Refusal_caller_unidentified
     (dispatch_exn ~caller config Tool_schemas_schedule.Add_note
        (`Assoc
          [ "schedule_id", `String "sched-named-scheduler"; "body", `String "why" ]))
+;;
+
+(* The actor a schedule records is the caller the boundary resolved. A
+   client-supplied id that names someone else is refused rather than silently
+   ignored: the HTTP boundary already replaced it (#37149), and the MCP path
+   does not stamp, so the tool itself must refuse -- otherwise an MCP caller
+   names any actor it likes on create, cancel and note_add. *)
+let test_a_named_caller_is_the_actor_not_the_argument () =
+  with_config
+  @@ fun config ->
+  let caller = Tool_schedule.Named_caller "real-caller" in
+  let create extra =
+    dispatch_exn ~caller config Tool_schemas_schedule.Create_request
+      (`Assoc
+        ([ "schedule_id", `String "sched-actor-binding"
+         ; "due_at_unix", `Float future_due_at
+         ; "keeper_name", `String "schedule-keeper"
+         ; "message", `String "actor binding"
+         ]
+         @ extra))
+  in
+  check_refusal "requested_by_id naming another actor"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (create [ "requested_by_id", `String "spoofed-requester" ]);
+  check_refusal "scheduled_by_id naming another actor"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (create [ "scheduled_by_id", `String "spoofed-scheduler" ]);
+  let created = create [ "requested_by_id", `String "real-caller" ] in
+  check bool "an id that names the caller is accepted" true
+    (Tool_result.is_success created);
+  let open Yojson.Safe.Util in
+  check string "requested_by is the caller" "real-caller"
+    (Tool_result.data created |> member "requested_by" |> member "id" |> to_string);
+  check string "scheduled_by is the caller" "real-caller"
+    (Tool_result.data created |> member "scheduled_by" |> member "id" |> to_string);
+  check_refusal "cancelled_by_id naming another actor"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (dispatch_exn ~caller config Tool_schemas_schedule.Cancel_request
+       (`Assoc
+         [ "schedule_id", `String "sched-actor-binding"
+         ; "cancelled_by_id", `String "spoofed-canceller"
+         ; "reason", `String "spoofed"
+         ]));
+  check_refusal "author_id naming another actor"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (dispatch_exn ~caller config Tool_schemas_schedule.Add_note
+       (`Assoc
+         [ "schedule_id", `String "sched-actor-binding"
+         ; "body", `String "spoofed author"
+         ; "author_id", `String "spoofed-author"
+         ]));
+  let cancelled =
+    dispatch_exn ~caller config Tool_schemas_schedule.Cancel_request
+      (`Assoc
+        [ "schedule_id", `String "sched-actor-binding"
+        ; "reason", `String "done"
+        ])
+  in
+  check bool "cancel without an id succeeds" true (Tool_result.is_success cancelled);
+  check string "cancelled_by is the caller" "real-caller"
+    (Tool_result.data cancelled |> member "cancelled_by" |> member "id" |> to_string)
 ;;
 
 (* A call gives one due input, or none when a calendar recurrence derives
@@ -1702,6 +1752,8 @@ let () =
             test_list_pages_by_schedule_id
         ; test_case "an unnamed caller names the actor itself" `Quick
             test_an_unnamed_caller_names_the_actor_itself
+        ; test_case "a named caller is the actor, not the argument" `Quick
+            test_a_named_caller_is_the_actor_not_the_argument
         ; test_case "a call gives exactly one due input" `Quick
             test_a_call_gives_exactly_one_due_input
         ; test_case "due_in_sec counts from the dispatch clock" `Quick

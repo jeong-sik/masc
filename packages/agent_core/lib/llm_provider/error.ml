@@ -94,7 +94,7 @@ type provider_error =
       }
   | ProviderTerminal of
       { provider : string
-      ; reason : string
+      ; kind : Http_client.provider_terminal_kind
       ; detail : string
       }
 
@@ -143,6 +143,11 @@ let retry_after_suffix = function
 let affected_suffix = function
   | [] -> ""
   | affected -> Printf.sprintf " affected=[%s]" (String.concat "," affected)
+;;
+
+let provider_terminal_reason = function
+  | Http_client.Session_conflict -> "session_conflict"
+  | Http_client.Other reason -> reason
 ;;
 
 let to_string = function
@@ -228,7 +233,11 @@ let to_string = function
     Printf.sprintf "Provider '%s' invalid request: %s" r.provider r.reason
   | NotFound r -> Printf.sprintf "Provider '%s' not found: %s" r.provider r.detail
   | ProviderTerminal r ->
-    Printf.sprintf "Provider '%s' terminal %s: %s" r.provider r.reason r.detail
+    Printf.sprintf
+      "Provider '%s' terminal %s: %s"
+      r.provider
+      (provider_terminal_reason r.kind)
+      r.detail
 ;;
 
 let of_retry_api_error ?provider err =
@@ -414,11 +423,8 @@ let of_http_error ?provider = function
   | Http_client.AcceptRejected { reason } ->
     InvalidRequest
       { provider = provider_name provider; reason = "accept rejected: " ^ reason }
-  | Http_client.ProviderTerminal { kind = Http_client.Session_conflict; message } ->
-    ProviderTerminal
-      { provider = provider_name provider; reason = "session_conflict"; detail = message }
-  | Http_client.ProviderTerminal { kind = Http_client.Other reason; message } ->
-    ProviderTerminal { provider = provider_name provider; reason; detail = message }
+  | Http_client.ProviderTerminal { kind; message } ->
+    ProviderTerminal { provider = provider_name provider; kind; detail = message }
   | Http_client.ProviderFailure { kind; message } ->
     of_provider_failure ?provider kind message
 ;;

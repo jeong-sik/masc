@@ -1103,7 +1103,7 @@ class InvalidWorkspaceDiagnostic(StepByStep):
         return observation('/workspace', (
             ('workspace', 'satisfied', 'Workspace found.'),
             ('model_connection', 'invalid', 'The workspace runtime.toml is unreadable.'),
-            ('keeper_persistence', 'satisfied', 'imp has persisted history.')))
+            ('keeper_persistence', 'satisfied', 'Persisted Keeper history: imp.')))
 
     def test_invalid_check_is_named_with_its_reason(self):
         errors = io.StringIO()

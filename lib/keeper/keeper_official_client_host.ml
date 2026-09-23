@@ -1442,6 +1442,11 @@ let masc_observation_sentence masc =
             "was running this turn when MASC shut down"
           | Keeper_internal_error.Runtime_reported_interrupt ->
             "reported this turn as interrupted")
+     | Keeper_internal_error.Preempted_before_first_token { runtime_id } ->
+       Printf.sprintf
+         "the turn yielded to a queued person before runtime %s produced \
+          anything"
+         runtime_id
      | Keeper_internal_error.Runtime_connection_closed
          { runtime_id; detail; turn_accepted } ->
        Printf.sprintf

@@ -15,11 +15,42 @@ let sub_board_access_to_string = function
   | Owner_only -> "owner_only"
 ;;
 
-let sub_board_access_of_string_opt = function
-  | "open" -> Some Open
-  | "members_only" -> Some Members_only
-  | "owner_only" -> Some Owner_only
-  | _ -> None
+let all_sub_board_accesses = [ Open; Members_only; Owner_only ]
+
+let sub_board_access_of_string_opt raw =
+  List.find_opt
+    (fun access -> String.equal (sub_board_access_to_string access) raw)
+    all_sub_board_accesses
+;;
+
+let access_field = "access"
+
+let invalid_access_field ~got =
+  Error
+    (Validation_error
+       (Printf.sprintf
+          "%s %s is not one of: %s"
+          access_field
+          got
+          (all_sub_board_accesses
+           |> List.map sub_board_access_to_string
+           |> String.concat ", ")))
+;;
+
+let sub_board_access_field_of_yojson (args : Yojson.Safe.t) =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt access_field fields with
+     | None | Some `Null -> Ok None
+     | Some (`String raw) ->
+       (match sub_board_access_of_string_opt raw with
+        | Some access -> Ok (Some access)
+        | None -> invalid_access_field ~got:(Printf.sprintf "%S" raw))
+     | Some other -> invalid_access_field ~got:(Yojson.Safe.to_string other))
+  | other ->
+    Error
+      (Validation_error
+         ("arguments must be a JSON object, got " ^ Yojson.Safe.to_string other))
 ;;
 
 let valid_sub_board_slug_pattern =

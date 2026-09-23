@@ -1136,8 +1136,10 @@ let add_routes ~sw ~clock router =
        let json = `Assoc [("flairs", `List flairs)] in
        Http.Response.json_value json reqd)
 
-  |> Http.Router.get "/api/v1/board/sub-boards" (fun _request reqd ->
-       respond_board_json reqd (board_sub_boards_json ()))
+  |> Http.Router.get "/api/v1/board/sub-boards" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         respond_board_json reqd (board_sub_boards_json ())
+       ) request reqd)
 
   |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_keeper_delegate"
@@ -1164,13 +1166,12 @@ let add_routes ~sw ~clock router =
              in
              let members = Safe_ops.json_string_list "members" args in
              let owner = board_actor_author_for_write agent_name in
-             let access =
-               match Safe_ops.json_string_opt "access" args with
-               | Some s -> Board.sub_board_access_of_string_opt s
-               | None -> None
-             in
-             (match Board_dispatch.create_sub_board ~slug ~name ~description
-                      ~owner ~members ?access () with
+             (match
+                Result.bind (Board.sub_board_access_field_of_yojson args)
+                  (fun access ->
+                    Board_dispatch.create_sub_board ~slug ~name ~description
+                      ~owner ~members ?access ())
+              with
               | Ok sb ->
                   Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
               | Error e ->
@@ -1184,6 +1185,7 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.prefix_get "/api/v1/board/sub-boards/" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
        let path = Http.Request.path request in
        (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
         | None ->
@@ -1197,7 +1199,8 @@ let add_routes ~sw ~clock router =
              | Error e ->
                  Http.Response.json_value ~status:`Not_found
                    (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
-                   reqd)))
+                   reqd))
+       ) request reqd)
 
   |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_board_sub_board_delete"
@@ -1240,13 +1243,14 @@ let add_routes ~sw ~clock router =
              let description = Safe_ops.json_string_opt "description" args in
              let members = Safe_ops.json_string_list "members" args in
              let members_arg = if members = [] then None else Some members in
-             let access =
-               match Safe_ops.json_string_opt "access" args with
-               | Some s -> Board.sub_board_access_of_string_opt s
-               | None -> None
-             in
              let path = Http.Request.path request in
-             (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
+             (match Board.sub_board_access_field_of_yojson args with
+              | Error e ->
+                  Http.Response.json_value ~status:`Bad_request
+                    (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
+                    reqd
+              | Ok access ->
+             match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
               | None ->
                   Http.Response.json_value ~status:`Bad_request
                     (`Assoc [("error", `String "sub_board_id is required")])

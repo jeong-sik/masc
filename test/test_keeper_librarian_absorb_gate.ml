@@ -185,6 +185,18 @@ let test_an_absorption_the_pass_cannot_place_goes_through_unjudged () =
     (not (List.exists (fun s -> s = "a memory the pass did not carry") !asked))
 ;;
 
+(* A current memory the answer wrote again as it stands adds no new claim, yet
+   what it absorbs goes into it: the gate asks against that memory's text. *)
+let test_an_absorption_into_a_restated_memory_is_judged () =
+  let facts = List.map fact (sources @ [ merged.claim ]) in
+  let absorbed = absorbed_into merged (List.map fact sources) in
+  let evaluate, requests, _ = table ~noul_of:(fun _ -> 0.9) in
+  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[] ~absorbed) in
+  Alcotest.(check int) "both absorptions judged and conveyed" 2 (List.length j.conveyed);
+  Alcotest.(check int) "none passed through unjudged" 0 (List.length j.unjudged);
+  Alcotest.(check int) "one request for the restated memory" 1 !requests
+;;
+
 let test_statements_are_asked_in_bounded_requests () =
   let many =
     fact
@@ -1242,6 +1254,8 @@ let () =
             test_the_model_not_answering_keeps_the_sources
         ; Alcotest.test_case "an absorption the pass cannot place goes through unjudged" `Quick
             test_an_absorption_the_pass_cannot_place_goes_through_unjudged
+        ; Alcotest.test_case "an absorption into a restated memory is judged" `Quick
+            test_an_absorption_into_a_restated_memory_is_judged
         ; Alcotest.test_case "statements are asked in bounded requests" `Quick
             test_statements_are_asked_in_bounded_requests
         ; Alcotest.test_case "a noul outside the unit interval keeps the source" `Quick

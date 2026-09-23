@@ -1445,65 +1445,80 @@ let cancel_keeper_schedules config ~keeper_name =
   Result.bind withdrawal (fun () -> Schedule_store.cancel_matching config ~should_cancel)
 ;;
 
-(* Self-clock heartbeat schedules (#36213). A [result_delivery = None] interval
-   schedule tracks no per-occurrence deliverable — it only wakes the keeper — so
-   firing a fresh occurrence while the previous one is still unconsumed just
-   piles the keeper's queue: emission runs on the wall clock, consumption on the
-   keeper's turn cadence, and a keeper that cannot keep up accumulates one
-   occurrence per period without bound (msx-retro-mania reached 30 on
-   2026-09-14). Holding the schedule at its current due until the keeper drains
-   the pending occurrence makes emission track consumption: at most one pending
-   occurrence per instance, and [next_due_after ~now] then skips missed ticks to
-   a single catch-up rather than backfilling them.
+(* Self-clock wake schedules (#36213). A [result_delivery = None] keeper wake
+   tracks no per-occurrence deliverable — it only wakes the keeper. Firing a
+   fresh occurrence while the previous one is still unconsumed changes nothing
+   the keeper will read: intake supersedes the pending occurrence, so a keeper
+   that cannot keep up gets one durable cancellation and one new wake record per
+   period while the schedule advances on the wall clock. Holding the schedule at
+   its current due until the keeper drains the pending occurrence makes emission
+   track consumption: the pending occurrence stays as it was, and
+   [next_due_after ~now] then skips missed ticks to a single catch-up rather
+   than backfilling them.
 
-   Only heartbeat interval schedules self-clock. A schedule that delivers a
-   result, and every non-interval kind, keeps firing on each due — each of their
-   occurrences is distinct work whose accumulation is intended. The pending
-   check reads the keeper's own event queue (the authoritative unconsumed
-   signal), so it does not depend on the reaction-ledger ack transition. A queue
-   read failure is fail-open (fire as before) so a transient read never starves
-   the schedule. *)
+   The hold follows the delivery, not the recurrence: an Interval, Daily or Cron
+   wake with nothing to deliver churns the same way. A one-shot has no earlier
+   occurrence, so the pending check never holds it. A schedule that delivers a
+   result keeps firing on each due. The pending check reads the keeper's own event
+   queue (the authoritative unconsumed signal), so it does not depend on the
+   reaction-ledger ack transition.
+
+   Both unreadable answers fire rather than hold. Holding would record
+   [Dispatch_deferred] — a claim that an earlier occurrence is pending, which
+   nothing read — and would repeat it every tick with no failure anywhere. Firing
+   sends the schedule into dispatch, which re-parses [result_delivery] and fails
+   the occurrence with the parse error, and writes through the same queue store
+   whose read failed, so a broken store fails the occurrence there too. *)
+let earlier_occurrence_pending config ~occurrence_id ~keeper_name
+      (request : Schedule_domain.schedule_request) =
+  let base_path = config.Workspace_utils.base_path in
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Error detail ->
+    Log.Keeper.warn
+      "defer_wake: queue snapshot unreadable for keeper=%s schedule=%s; \
+       firing without the pending-occurrence check: %s"
+      keeper_name
+      request.Schedule_domain.schedule_id
+      detail;
+    false
+  | Ok queue ->
+    List.exists
+      (fun (stimulus : Keeper_event_queue.stimulus) ->
+         match stimulus.Keeper_event_queue.payload with
+         | Keeper_event_queue.Schedule_due wake ->
+           String.equal
+             wake.Keeper_event_queue.schedule_instance_id
+             request.Schedule_domain.schedule_instance_id
+           (* Enqueue can commit before activation or the schedule's
+              acceptance fails. Retrying that exact occurrence repairs
+              the remaining work; only an earlier occurrence holds a
+              new wake back. *)
+           && not (String.equal wake.occurrence_id
+                     (Schedule_occurrence_id.to_string occurrence_id))
+         | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_attention _
+         | Keeper_event_queue.Bootstrap
+         | Keeper_event_queue.Fusion_completed _
+         | Keeper_event_queue.Connector_attention _
+         | Keeper_event_queue.Hitl_resolved _
+         | Keeper_event_queue.Ask_answered _
+         | Keeper_event_queue.Completion_authority_rejected _
+         | Keeper_event_queue.Task_outcome _
+         | Keeper_event_queue.Task_cancelled _
+         | Keeper_event_queue.Workspace_message _
+         | Keeper_event_queue.Delegate_completed _
+         | Keeper_event_queue.Composition_completed _ -> false)
+      (Keeper_event_queue.to_list queue)
+;;
+
 let defer_wake config ~occurrence_id (request : Schedule_domain.schedule_request) =
-  match request.Schedule_domain.recurrence with
-  | Schedule_domain.Interval _ ->
-    (match Schedule_payload_projection.result_delivery request with
-     | Ok None ->
-       (match Schedule_payload_projection.wake_keeper_name request with
-        | None -> false
-        | Some keeper_name ->
-          let base_path = config.Workspace_utils.base_path in
-          (match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
-           | Error _ -> false
-           | Ok queue ->
-             List.exists
-               (fun (stimulus : Keeper_event_queue.stimulus) ->
-                  match stimulus.Keeper_event_queue.payload with
-                  | Keeper_event_queue.Schedule_due wake ->
-                    String.equal
-                      wake.Keeper_event_queue.schedule_instance_id
-                      request.Schedule_domain.schedule_instance_id
-                    (* Enqueue can commit before activation or the schedule's
-                       acceptance fails. Retrying that exact occurrence repairs
-                       the remaining work; only an earlier occurrence holds a
-                       new wake back. *)
-                    && not (String.equal wake.occurrence_id
-                              (Schedule_occurrence_id.to_string occurrence_id))
-                  | Keeper_event_queue.Board_signal _
-                  | Keeper_event_queue.Board_attention _
-                  | Keeper_event_queue.Bootstrap
-                  | Keeper_event_queue.Fusion_completed _
-                  | Keeper_event_queue.Connector_attention _
-                  | Keeper_event_queue.Hitl_resolved _
-                  | Keeper_event_queue.Ask_answered _
-                  | Keeper_event_queue.Completion_authority_rejected _
-                  | Keeper_event_queue.Task_outcome _
-                  | Keeper_event_queue.Task_cancelled _
-                  | Keeper_event_queue.Workspace_message _
-                  | Keeper_event_queue.Delegate_completed _
-                  | Keeper_event_queue.Composition_completed _ -> false)
-               (Keeper_event_queue.to_list queue)))
-     | Ok (Some _) | Error _ -> false)
-  | Schedule_domain.One_shot | Schedule_domain.Daily _ | Schedule_domain.Cron _ -> false
+  match Schedule_payload_projection.result_delivery request with
+  | Ok (Some _) | Error _ -> false
+  | Ok None ->
+    (match Schedule_payload_projection.wake_keeper_name request with
+     | None -> false
+     | Some keeper_name ->
+       earlier_occurrence_pending config ~occurrence_id ~keeper_name request)
 ;;
 
 let consumer : Schedule_runner.consumer = { accepts; dispatch; defer_wake }

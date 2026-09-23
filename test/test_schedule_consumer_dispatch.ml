@@ -979,6 +979,52 @@ let test_recurring_wake_supersedes_the_earlier_pending_occurrence () =
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
+let test_cron_wake_without_delivery_holds_while_an_earlier_occurrence_is_pending () =
+  (* The self-clock hold follows [result_delivery = None], not the recurrence
+     kind: a delivery=none cron wake on a keeper that has not drained its last
+     occurrence is held, the same as a delivery=none interval, instead of
+     superseding the pending occurrence every period. *)
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  let _entry = register_keeper config keeper_name in
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
+    (fun () ->
+       let request =
+         create_named_keeper_wake_schedule
+           ~recurrence:(Schedule_domain.Cron { expression = "* * * * *"; timezone = "UTC" })
+           config
+           ~schedule_id:"cron-keep-playing"
+           ~keeper_name
+       in
+       let pending_ids () =
+         Keeper_registry_event_queue.snapshot ~base_path keeper_name
+         |> Keeper_event_queue.to_list
+         |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
+       in
+       let first = tick_ok config ~now:201.0 in
+       let first_id = single_occurrence_id first in
+       check bool "the first occurrence is accepted" true
+         ((List.hd first.dispatches).status = Schedule_runner.Dispatch_succeeded);
+       let stored_due () =
+         match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+         | Some stored -> stored.due_at
+         | None -> fail "cron schedule disappeared"
+       in
+       check (float 0.001) "acceptance advances to the next minute" 240.0
+         (stored_due ());
+       let next = tick_ok config ~now:241.0 in
+       check bool "the next occurrence waits for the pending one" true
+         ((List.hd next.dispatches).status = Schedule_runner.Dispatch_deferred);
+       check int "the held occurrence emits no signal" 0 (List.length next.emitted);
+       check (list string) "the pending occurrence is kept, not superseded"
+         [ first_id ] (pending_ids ());
+       check (float 0.001) "the held schedule keeps its due" 240.0
+         (stored_due ()))
+;;
+
 let test_one_call_cancels_every_pending_occurrence_of_a_schedule () =
   (* The live shape of 2026-09-14 18:20: two occurrences of one schedule
      pending at once, cancelled in one call. The first tick was refused as an
@@ -3094,6 +3140,10 @@ let () =
             test_routed_schedule_carries_occurrence_destination_to_keeper
         ; test_case "a recurring wake supersedes the earlier pending occurrence" `Quick
             test_recurring_wake_supersedes_the_earlier_pending_occurrence
+        ; test_case
+            "a delivery=none cron wake holds while an earlier occurrence is pending"
+            `Quick
+            test_cron_wake_without_delivery_holds_while_an_earlier_occurrence_is_pending
         ; test_case
             "one call cancels every pending occurrence of a schedule"
             `Quick

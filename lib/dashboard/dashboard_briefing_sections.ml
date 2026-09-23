@@ -152,6 +152,14 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
         ~agents:compact_agents ~recent_messages:messages_json ~metadata_gaps
     in
     let now_iso = Masc_domain.now_iso () in
+    (* [keeper_count] counts briefs. A Keeper the snapshot could not build a
+       row for has none, so its count travels beside it (#38090). *)
+    match
+      Keeper_snapshot_unread.list_of_json
+        (briefing_json |> member_assoc "keepers_unread")
+    with
+    | Error detail -> Error ("briefing keepers_unread: " ^ detail)
+    | Ok keepers_unread ->
     Ok
       (`Assoc
         [
@@ -176,6 +184,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
                   |> member_assoc "project" );
                 ("agent_count", `Int (List.length agents_json));
                 ("keeper_count", `Int (List.length keepers));
+                ("keeper_unread_count", `Int (List.length keepers_unread));
               ] );
           ("sections", `List sections);
           ("error", `Null);

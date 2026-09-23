@@ -165,7 +165,7 @@ let test_fake_gh_login_and_effective_identity () =
         | Error message -> Alcotest.fail message
         | Ok lane ->
           Alcotest.(check int) "fake login exits successfully" 0
-            (Github.run_cli_login ~lane));
+            (Github.run_cli_login ~lane ~scopes:[]));
        let keeper_config = Github.config_dir ~config ~keeper_name in
        let login_args = read_file (Filename.concat keeper_config "login-args") in
        Alcotest.(check bool) "web login argv reached fake gh" true
@@ -684,11 +684,74 @@ let test_run_inherited_empty_argv_is_127 () =
     "empty argv yields 127" (Unix.WEXITED 127) status
 ;;
 
+(* Without a chosen scope the argv is the one every login ran before scopes
+   existed, so gh asks for its own minimum. A chosen scope becomes one
+   [--scopes] argument, named once however often it was asked for. *)
+let test_login_argv_carries_only_chosen_scopes () =
+  let has_scopes argv = List.mem "--scopes" argv in
+  Alcotest.(check bool)
+    "no scope asks gh for nothing extra"
+    false
+    (has_scopes (Github.login_argv ~hostname:"github.com" ~scopes:[]));
+  let argv =
+    Github.login_argv ~hostname:"github.com" ~scopes:[ Github.Workflow; Github.Workflow ]
+  in
+  let rec after = function
+    | "--scopes" :: value :: _ -> Some value
+    | _ :: rest -> after rest
+    | [] -> None
+  in
+  Alcotest.(check (option string)) "workflow is named once" (Some "workflow") (after argv)
+;;
+
+(* The request names scopes by string. Every offered scope reads back as
+   itself, and a name nobody offered is refused rather than dropped, so a
+   surface that asked for it is told. *)
+let test_login_scopes_of_query () =
+  let names = function
+    | Ok scopes -> Ok (List.map Github.login_scope_to_string scopes)
+    | Error _ as e -> e
+  in
+  let result = Alcotest.(result (list string) string) in
+  Alcotest.check result "absent is none" (Ok []) (names (Github.login_scopes_of_query None));
+  Alcotest.check result "empty is none" (Ok []) (names (Github.login_scopes_of_query (Some "")));
+  Alcotest.check
+    result
+    "workflow"
+    (Ok [ "workflow" ])
+    (names (Github.login_scopes_of_query (Some " workflow ")));
+  List.iter
+    (fun scope ->
+      Alcotest.(check bool)
+        "an offered scope reads back as itself"
+        true
+        (Github.login_scope_of_string (Github.login_scope_to_string scope) = Some scope))
+    Github.all_login_scopes;
+  match Github.login_scopes_of_query (Some "workflow,admin:org") with
+  | Ok _ -> Alcotest.fail "an unoffered scope must be refused"
+  | Error message ->
+    Alcotest.(check bool)
+      "the refusal names the scope"
+      true
+      (let needle = "admin:org" in
+       let n = String.length needle in
+       let rec go i =
+         i + n <= String.length message
+         && (String.equal (String.sub message i n) needle || go (i + 1))
+       in
+       go 0)
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
     [ ( "contract"
       , [ Alcotest.test_case "environment isolation" `Quick test_pure_environment_contract
+        ; Alcotest.test_case
+            "login argv carries only chosen scopes"
+            `Quick
+            test_login_argv_carries_only_chosen_scopes
+        ; Alcotest.test_case "login scopes from the query" `Quick test_login_scopes_of_query
         ; Alcotest.test_case
             "fake gh login and effective identity"
             `Quick

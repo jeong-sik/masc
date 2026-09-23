@@ -31,21 +31,89 @@ let login_command =
    crossing it costs the operator a restart and nothing else. *)
 let self_mint_expiry_hours = 24 * 30
 
+(* What the server said about the bearer it refused, read from the typed
+   [auth_error_code] its 401/403 body carries. One sentence for every refusal
+   sent an operator whose token had simply expired to look for a broken
+   credential elsewhere -- on 2026-09-23 a Keeper's GitHub identity view read
+   as a GitHub account problem. Only the two codes that change what the
+   operator should believe are told apart; every other code, and a body with
+   none, is the plain refusal it always was. The code is the server's closed
+   type, matched in full, so a code added there has to be placed here. *)
+type server_reason =
+  | Expired
+  | Insufficient_role
+  | Rejected
+
+let server_reason_of_code : Masc_error.Auth_error_code.t -> server_reason =
+  function
+  | Masc_error.Auth_error_code.Token_expired -> Expired
+  | Masc_error.Auth_error_code.Insufficient_role -> Insufficient_role
+  | Masc_error.Auth_error_code.Invalid_token
+  | Masc_error.Auth_error_code.Same_origin_blocked
+  | Masc_error.Auth_error_code.Actor_mismatch
+  | Masc_error.Auth_error_code.Missing_token
+  | Masc_error.Auth_error_code.Unknown ->
+      Rejected
+
+(* The server writes the code in one of two places. The REST refusal
+   ([Server_auth.auth_error_json]) puts it at the top of the body; an /mcp
+   refusal is a JSON-RPC error and carries it in [error.data]
+   ([Server_mcp_transport_http_respond.error_body]). The TUI reads both kinds
+   of route, so reading only the first left every /mcp refusal generic. *)
+let auth_error_code_field fields =
+  match List.assoc_opt "auth_error_code" fields with
+  | Some _ as code -> code
+  | None -> (
+      match List.assoc_opt "error" fields with
+      | Some (`Assoc error) -> (
+          match List.assoc_opt "data" error with
+          | Some (`Assoc data) -> List.assoc_opt "auth_error_code" data
+          | Some _ | None -> None)
+      | Some _ | None -> None)
+
+let server_reason_of_body body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> (
+      match auth_error_code_field fields with
+      | Some (`String code) -> (
+          match Masc_error.Auth_error_code.of_string code with
+          | Some code -> server_reason_of_code code
+          | None -> Rejected)
+      | Some _ | None -> Rejected)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Rejected
+  | exception Yojson.Json_error _ -> Rejected
+
 (* A refusal names two situations and only one of them is fixed by providing a
    token. This client finds the bearer masc login left in the workspace, so it
    usually does present one, and then "you have no token" is both false and
-   advice the operator has already followed. *)
-let refusal_cause ~credential_sent =
-  if credential_sent then
-    Printf.sprintf
-      "the operator token this %s presented was refused" agent_name
-  else Printf.sprintf "this %s holds no operator token" agent_name
+   advice the operator has already followed. The server's reason only means
+   something when a bearer was sent: with none there is nothing for it to have
+   judged. *)
+let refusal_cause ~credential_sent reason =
+  if not credential_sent then
+    Printf.sprintf "this %s holds no operator token" agent_name
+  else
+    match reason with
+    | Expired ->
+        Printf.sprintf "the operator token this %s presented has expired"
+          agent_name
+    (* Not "lacks the role": the server sends this code for every Forbidden,
+       and some of those are not about the role at all. *)
+    | Insufficient_role ->
+        Printf.sprintf
+          "the operator token this %s presented is not allowed to make this \
+           request"
+          agent_name
+    | Rejected ->
+        Printf.sprintf "the operator token this %s presented was refused"
+          agent_name
 
 let remedy =
   Printf.sprintf "run '%s' and restart %s" login_command agent_name
 
-let refusal ~credential_sent =
-  Printf.sprintf "%s — %s" (refusal_cause ~credential_sent) remedy
+let refusal ~credential_sent reason =
+  Printf.sprintf "%s — %s" (refusal_cause ~credential_sent reason) remedy
 
 (* What the workspace holds for this client, judged the way the server judges
    it. The file [masc login] writes carries only the bearer; its expiry lives

@@ -290,14 +290,18 @@ const keeperTotals = computed(() => {
   const s = keeperState.value
   if (s.status !== 'loaded') return null
   const data = s.data
-  let totalCost = 0
+  let reportedCost = 0
+  let costReportedSamples = 0
+  let costUnreportedSamples = 0
   let totalIn = 0
   let totalOut = 0
   let p50Sum = 0
   let p50Count = 0
   let p95Max = 0
   for (const k of data) {
-    totalCost += k.total_cost_usd
+    if (k.total_cost_usd != null) reportedCost += k.total_cost_usd
+    costReportedSamples += k.cost_reported_samples
+    costUnreportedSamples += k.cost_unreported_samples
     totalIn += k.total_input_tokens
     totalOut += k.total_output_tokens
     if (k.p50_latency_ms != null) {
@@ -307,8 +311,27 @@ const keeperTotals = computed(() => {
     if (k.p95_latency_ms != null && k.p95_latency_ms > p95Max) p95Max = k.p95_latency_ms
   }
   const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
-  return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length, totalSuccess: 0, totalError: 0, errorRate: null, avgTtfrc: null, totalCache: 0, totalCacheCreation: 0, totalReasoning: 0, cacheRatio: null, reasoningRatio: null }
+  // No keeper reported a cost in this window: the total is unknown, not $0.
+  const totalCost = costReportedSamples > 0 ? reportedCost : null
+  return { totalCost, costUnreportedSamples, totalIn, totalOut, p50Avg, p95Max, count: data.length, totalSuccess: 0, totalError: 0, errorRate: null, avgTtfrc: null, totalCache: 0, totalCacheCreation: 0, totalReasoning: 0, cacheRatio: null, reasoningRatio: null }
 })
+
+// Keepers whose cost is unknown sort after every keeper with a reported cost.
+function compareKeeperCost(a: KeeperCostMetric, b: KeeperCostMetric): number {
+  if (a.total_cost_usd == null && b.total_cost_usd == null) return 0
+  if (a.total_cost_usd == null) return 1
+  if (b.total_cost_usd == null) return -1
+  return b.total_cost_usd - a.total_cost_usd
+}
+
+function costTileNote(
+  t: { count: number; costUnreportedSamples?: number },
+  mode: ViewMode,
+): string {
+  const scope = `${t.count} ${mode === 'model' ? 'runtime lanes' : 'keepers'}`
+  const unreported = t.costUnreportedSamples ?? 0
+  return unreported > 0 ? `${scope} · ${unreported}턴 비용 미보고` : scope
+}
 
 function ThRight({ children }: { children: unknown }) {
   return html`<th scope="col" class="px-2 py-1.5 text-right">${children}</th>`
@@ -452,10 +475,10 @@ function KeeperRow({
   const outTok = keeper.total_output_tokens
   const p50 = keeper.p50_latency_ms
   const p95 = keeper.p95_latency_ms
-  const costPct = maxCost > 0 ? (cost / maxCost) * 100 : 0
+  const costPct = cost != null && maxCost > 0 ? (cost / maxCost) * 100 : 0
   const p95Pct = maxP95 > 0 && p95 != null ? (p95 / maxP95) * 100 : 0
   const overBudget = p95 != null && p95 > 8000
-  const topModel = keeper.model_breakdown[0]
+  const unreported = keeper.cost_unreported_samples
 
   return html`
     <tr class="border-b border-[var(--color-border-default)]/40 align-baseline">
@@ -464,12 +487,12 @@ function KeeperRow({
       </th>
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(inTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(outTok)}</td>
-      <td class="px-2 py-1.5 text-right font-mono text-xs text-[var(--color-accent-fg)]">
-        ${formatCost(cost)}
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${cost == null ? 'text-text-disabled' : 'text-[var(--color-accent-fg)]'}">
+        ${cost == null ? '미보고' : formatCost(cost)}
       </td>
       <td class="px-2 py-1.5 min-w-[80px]">
         <div class="h-1.5 rounded-[var(--r-0)] bg-[var(--color-bg-surface)]">
-          <div class="h-full rounded-[var(--r-0)] bg-[var(--color-accent-fg)]" style=${`width: ${costPct.toFixed(1)}%`}></div>
+          ${cost == null ? null : html`<div class="h-full rounded-[var(--r-0)] bg-[var(--color-accent-fg)]" style=${`width: ${costPct.toFixed(1)}%`}></div>`}
         </div>
       </td>
       <td class="px-2 py-1.5 text-right font-mono text-xs ${p50 == null ? 'text-text-disabled' : ''}">
@@ -486,8 +509,8 @@ function KeeperRow({
           ></div>
         </div>
       </td>
-      <td class="px-2 py-1.5 text-left font-mono text-2xs text-text-muted">
-        ${topModel ? formatCost(topModel.cost_usd) : '—'}
+      <td class="px-2 py-1.5 text-right font-mono text-2xs ${unreported > 0 ? 'text-[var(--color-status-warn)]' : 'text-text-muted'}">
+        ${unreported > 0 ? `${unreported}/${keeper.sample_count}턴` : '—'}
       </td>
     </tr>
   `
@@ -961,9 +984,9 @@ function CostDashboardContent({ view }: { view: CostView }) {
       .slice()
       .sort((a, b) => (mode === 'model'
         ? ((b as DashboardRuntimeModelMetric).total_cost_usd ?? 0) - ((a as DashboardRuntimeModelMetric).total_cost_usd ?? 0)
-        : (b as KeeperCostMetric).total_cost_usd - (a as KeeperCostMetric).total_cost_usd))
+        : compareKeeperCost(a as KeeperCostMetric, b as KeeperCostMetric)))
     const maxCost = Math.max(0, ...data.map(m =>
-      mode === 'model' ? ((m as DashboardRuntimeModelMetric).total_cost_usd ?? 0) : (m as KeeperCostMetric).total_cost_usd))
+      mode === 'model' ? ((m as DashboardRuntimeModelMetric).total_cost_usd ?? 0) : ((m as KeeperCostMetric).total_cost_usd ?? 0)))
     const maxP95 = Math.max(0, ...data.map(m => {
       const p95 = mode === 'model' ? (m as DashboardRuntimeModelMetric).p95_latency_ms : (m as KeeperCostMetric).p95_latency_ms
       return p95 ?? 0
@@ -1066,9 +1089,9 @@ function CostDashboardContent({ view }: { view: CostView }) {
           <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
             <${StatTile}
               label="Total Cost"
-              value=${formatCost(t.totalCost)}
+              value=${t.totalCost == null ? '미보고' : formatCost(t.totalCost)}
               status="ok"
-              delta=${{ direction: 'up', text: `${t.count} ${mode === 'model' ? 'runtime lanes' : 'keepers'}` }}
+              delta=${{ direction: 'up', text: costTileNote(t, mode) }}
             />
             <${StatTile}
               label="Tokens In / Out"
@@ -1156,7 +1179,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                     <${ThRight}>coverage</${ThRight}>
                     <${ThRight}>trust</${ThRight}>
                   ` : null}
-                  ${mode === 'keeper' ? html`<th scope="col" class="px-2 py-1.5 text-left">runtime cost</th>` : null}
+                  ${mode === 'keeper' ? html`<${ThRight}>cost 미보고</${ThRight}>` : null}
                 </tr>
               </thead>
               <tbody>

@@ -38,6 +38,21 @@ status: reference
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
   provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.
 
+**Clients (TUI 클라이언트 표)**
+: `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
+  모두를 한 번에 보여준다 — directory agent, state-backed session, runtime fiber.
+  행의 `cr_status`는 닫힌 `client_status` 넷(`Client_active`·`Client_busy`·
+  `Client_listening`·`Client_inactive`)이고, `cr_keeper_name`은 Keeper에 묶인 행만
+  이름을 갖는다(비-Keeper MCP 클라이언트는 `None` — 이 표가 보여주려는 행이다).
+  - **ACTING FOR** 열: 어떤 클라이언트가 **제 이름으로** Keeper의 세션에 묶였을 때
+    그 Keeper를 적는다. Keeper 자신의 세션은 Keeper 이름으로 접수되므로 그 행에서는
+    이름을 되풀이하지 않는다(`client_acting_for`가 `keeper_name = name`이면 `None`).
+    그런 행이 하나도 없으면 열 자체를 그리지 않는다(`clients_act_for_others`) — 빈 열이
+    행 끝 시계를 잘라 먹기 때문이다. **그래서 열이 안 보이는 것은 결함이 아니라 정보이다
+    — 남을 대신하는 클라이언트가 없다는 뜻이다.**
+  → [Tui_decode.client_row](../../lib/tui_decode.mli),
+  [Masc_tui_types.client_acting_for](../../bin/masc_tui_types.ml)
+
 **MCP**
 : Model Context Protocol의 약어. MASC는 양쪽으로 쓴다. 자기 도구와 협업 상태를
   MCP 서버로 내보내고(`masc_*` 도구), Agent는 `mcp_clients`로 바깥 MCP 서버에
@@ -204,6 +219,16 @@ status: reference
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
+**Turn**
+: "turn"이 가리키는 단위는 넷이고 서로 다르다. 문맥 없이 쓰지 않는다.
+  - **Keeper Turn** — MASC가 하나의 Keeper 작업을 시도하는 단위. (아래 항목)
+  - **agent core Turn** — 하나의 agent core Agent run 내부의 한 단계. Keeper turn과
+    동일한 단위가 아니다. (아래 항목)
+  - **Turn Boundary** — 끝난 Keeper turn이 `turn-boundaries.jsonl`에 남기는 한 줄.
+    History 안에는 turn의 경계가 없다. (아래 항목)
+  - **Turn Configuration Error** — Keeper turn이 typed Agent Core 구성 오류로 끝난
+    latch된 실패 원인. (아래 항목)
+
 **Keeper Turn**
 : MASC가 하나의 Keeper 작업을 시도하는 단위. 선택한 runtime에 따라 AGENT_CORE
   Agent run 또는 공식 클라이언트의 모델·도구 실행을 사용한다
@@ -306,6 +331,26 @@ status: reference
 **Runtime Attempt**
 : Keeper turn에서 하나의 resolved runtime 후보를 실행하는 시도.
 
+**Failure Route (실패 경로)**
+: Keeper turn이 실패했을 때 그 실패를 타입으로 분류한 관측(`Keeper_runtime_failure_route.route`).
+  모든 turn 실패 오류가 정확히 하나의 route로 매핑되고, `None` 갈래도 catch-all도 없다.
+  세 갈래다 — `Retry_after_observed`(provider/infra 실패를 관측; provider의 `retry_after`
+  힌트를 보존하되 지연을 지어내거나 강제하지 않음)·`Rotate_now`(다른 runtime이 즉시
+  성공할 수 있음)·`Exhausted_visible_alive`(기계적 재시도·회전이 결과를 못 바꾸는 결정적
+  실패; Keeper는 계속 살아 있고 두 번째 LLM 호출을 파견하지 않음). telemetry 라벨은
+  `route_kind_label`(`retry_after_observed`·`rotate_now`·`exhausted_visible_alive`)과
+  `route_class_label`(retry/rotate/terminal class)이다. 영수증·blocker에는
+  `exhausted_visible_alive:deterministic_request`처럼 kind와 class를 붙여 적고, metric은
+  `route`·`class` 라벨로 나눠 적는다. 이 route는 관측이지 스케줄링 권위가 아니다 — Keeper를
+  멈추거나 기상 시각을 지어내지 못한다. 같은 실패를 두 곳이 다르게 읽어서는 안 된다:
+  route(영수증에 적히는 답)와 walk(`Runtime_attempt_fsm.should_try_next`가 실제로 다음
+  후보로 넘어가는지)가 같은 답을 해야 한다(#38045). `retry_after` 힌트도 한 규칙으로 읽는다 —
+  `usable_retry_after`가 없거나 0·음수·무한·NaN인 힌트는 "대기 시간을 말하지 않음"으로 답하고,
+  후보 backpressure·경로 휴식·quota 재개·드라이버가 모두 이 한 규칙에서 답한다(#38065).
+  `Exact-output route`·`Fusion Route`
+  (실행 경로 이름)와 이름이 겹치지만 다른 축이다.
+  → [keeper_runtime_failure_route](../../lib/keeper_runtime/keeper_runtime_failure_route.mli)
+
 **Demotion (강등)**
 : 어떤 항목을 제거하지 않고 우선순위·가시성·전송 여부만 낮추는 처분. 세 곳이 같은
   불변식을 지킨다 — 강등된 것은 사라지지 않는다.
@@ -338,6 +383,20 @@ status: reference
   보내게 되므로 쓸 수 없다. Codex는 도구 실행 뒤 넘친 경우에만 이 기록을 쓴다.
   도구 실행 전이면 같은 thread에서 줄여 다시 보내는 재시도가 아직 가능하다.
   → [Keeper_direct_gate_continuation.session_full](../../lib/keeper/keeper_direct_gate_continuation.mli)
+
+**Turn Configuration Error (턴 구성 오류)**
+: Keeper turn이 typed Agent Core 구성 오류로 끝나 latch된 실패 원인
+  (`Keeper_registry.Turn_configuration_error { code; field; detail }`). 현재 프로세스는
+  운영자가 설정이나 환경을 바꾸지 않고는 이 실패를 고칠 수 없다. `code`는 닫힌
+  타입이 아니라 문자열이고, 그 값을 만드는 생산 지점은
+  `keeper_unified_turn_types.ml`이다. `field`는 관련 설정 키다. Fleet는 일시정지되지
+  않은 `Failing` Keeper의 이 원인을 `turn_configuration_error_keeper_count/names`로
+  표시하고, 다른 차단 사유가 없으면 `degraded`로 표시하며 `operator_action_required`를
+  참으로 만든다. autoboot 대상만 세는 `configuration_blocked_*`와 달리 이 값은 autoboot
+  집합 밖의 수동 Keeper도 포함한다. `recovering`·`official_client_recovery_required`와
+  함께 `Failing` 수를 정확히 분할한다.
+  → [Keeper_registry.failure_reason](../../lib/keeper/keeper_registry_types_failure.mli),
+  [blocker](../../lib/keeper/keeper_status_bridge_blocker.ml)
 
 **Usage Scope**
 : Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는
@@ -516,6 +575,18 @@ status: reference
   없음과, 토글이 사다리 밖으로 만든 값이다.
   → [Provider_config.reasoning_effort_request_rejection](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
+**Lane Add-on**
+: 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
+  Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
+  Lane 행을 제공할 수 있고, 패키지 worker는 관측 계산만 격리한다. attach·detach와
+  Add-on 장애는 기존 Keeper의 권한·도구·진행 중 작업을 축소하지 않으며, 추가 근거는
+  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·`lane_output`·
+  `browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
+  검사·표시한다.
+  → [설계 계약](../design/lane-addon-v0.md),
+  [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
+  [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.ml)
+
 **Runtime execution**
 : 모델·도구·재개 상태를 Agent Core가 소유하는지 공식 클라이언트가 소유하는지의 구분.
   → [Runtime_execution.t](../../lib/runtime/runtime_execution.mli)
@@ -600,6 +671,17 @@ status: reference
   다시 만든다([board_types.mli](../../lib/board_types/board_types.mli)의 `karma_event`,
   [board_votes.ml](../../lib/board/board_votes.ml)).
 
+**Flair (표시 태그)**
+: 글쓴이가 본문에 `[flair:<name>]` 꼴로 적는 표시 태그. 이름은 소문자이고
+  (`[a-z]+`), 고정 카탈로그 `Board_votes.available_flairs`에 있는 이름만 붙는다 —
+  모르는 이름은 아무 표시도 붙지 않는다(`extract_flair`). 카탈로그 항목은
+  `(name, emoji, label)` 셋이고 `GET /api/v1/board/flairs`가 내보내며,
+  `flair_to_yojson`이 한 항목을 `{name, emoji, label}`로 직렬화한다. 대시보드는
+  이 값을 배지(`bd-badge`)로 그린다. 표시만 하고 아무것도 정하지 않는다 — 순위·권한·분류에
+  쓰이지 않는다. **Hearth**와 다른 축이다 — hearth는 글을 주제로 가르는 필드이고,
+  flair는 글쓴이가 본문에 적는 표시다.
+  → [board_votes.mli](../../lib/board/board_votes.mli)
+
 **Hearth (토픽 카테고리)**
 : Board 글을 주제로 가르는 축. 글은 선택적으로 `hearth` 필드를 갖고 lowercase로
   정규화한다. `list_hearths`가 hearth별 글 수를 내림차순으로 돌려주고,
@@ -652,9 +734,28 @@ status: reference
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
   `admits_self_directed_progress`가 이 경계를 정의한다.
 
-**Schedule**
-: 미래 시점에 Keeper를 깨우는 durable 요청. 만들기, 조회, 수정, 취소와
-  기록 추가·조회 도구가 있다. Schedule은 이후 외부 효과를 자동 승인하지 않는다.
+**Schedule (예약)**
+: 미래 시점에 Keeper를 깨우는 durable 요청. 만들기·조회·수정·취소와 기록(노트)
+  추가·조회 도구가 있다. Schedule은 이후 외부 효과를 자동 승인하지 않는다 — payload가
+  낳을 효과의 권한은 소비자의 leaf gate가 쥔다.
+  - 두 식별자: `schedule_id`는 정의를 교체해도 살아남는 안정 id이고,
+    `schedule_instance_id`는 정의 하나의 인스턴스마다 새로 발급된다. 그래서 이전 정의의
+    wake는 교체된 정의의 증거가 되지 않는다.
+  - 두 행위자: 행은 `requested_by`(요청한 쪽)와 `scheduled_by`(예약한 쪽)를 가진다.
+    기록되는 actor는 인자가 아니라 경계가 인증한 호출자이고, 만들기(`create`)는 호출자를
+    두 칸에 똑같이 적는다. 도구 스키마에는 actor 인자가 없다. 호출이
+    `requested_by_*`·`scheduled_by_*`에 호출자와 다른 값을 적으면 `actor_mismatch`로
+    거절되고, 호출자와 같은 값은 아무것도 바꾸지 않는다. 이름 없는 호출자(`Unnamed_caller`)는
+    거절된다. 수정(`update`)은 기존 행에 저장된 두 행위자를 보존하며, named caller는
+    자신이 소유한 예약(`owner=self`: 자신이 예약했거나 자신을 깨우는 행)만 수정·취소할
+    수 있고 다른 예약은 `not_schedule_owner`로 거절된다(운영자 자격만 임의 변경 가능).
+  - `wake_record`는 scheduler가 남기는 일반 wake 시도(`Wake_running`·`Wake_succeeded`·
+    `Wake_failed`)이고, Keeper turn 결과는 Keeper 원장에 산다 — 같은 것이 아니다.
+  - 노트는 `schedule_id`에 매이고 append-only다. terminal 전이 뒤에도 남는다 —
+    상태가 아니라 이력이다.
+  - 상태는 `Scheduled`·`Due`·`Running`·`Succeeded`·`Failed`·`Cancelled`·`Expired`,
+    반복은 `One_shot`·`Interval`·`Daily`·`Cron`이다.
+  → [Schedule_domain](../../lib/schedule/schedule_domain.mli) · [Schedule_store](../../lib/schedule/schedule_store.mli)
 
 **Fusion**
 : 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행. 패널 구성원
@@ -788,6 +889,11 @@ status: reference
 
 **Verification ID**
 : 제출 하나의 식별자. 판정은 자기가 읽은 id 가 지금 id 와 같을 때만 적용된다.
+  운영자 판정(`POST /api/v1/verification/verdict`)은 읽은 `verification_id`를
+  필수로 요구하며, 백로그 잠금 아래에서 지금 id와 다르면
+  `Task_error.VerificationSuperseded`(HTTP 409)로 거절된다. 판정자가 증거를
+  읽는 사이에 Producer가 재제출하거나 취소 요청으로 제출을 교체한 경우, 낡은
+  판정이 새 제출에 붙는 것을 막는다.
 
 **Completion Authority**
 : 판정을 내리는 쪽. 서버 안의 판정 에이전트(`System_llm_agent`)이거나 인증된 HTTP
@@ -927,6 +1033,45 @@ status: reference
   [공식 클라이언트 세션 저장소](../../lib/keeper/keeper_official_client_session_store.mli)에
   기록한다.
   → [Keeper_types.working_context](../../lib/keeper_types/keeper_types.mli)
+  이 저장점은 **Checkpoint Load**(위 Core 항목)가 읽고, **Checkpoint Purge**(아래
+  항목)가 LLM 없이 재작성한다.
+
+**Checkpoint Purge (체크포인트 청소)**
+: 멈춘 Keeper의 canonical AGENT_CORE checkpoint를 LLM 없이 두 닫힌 규칙으로 줄이는
+  운영자 작업(RFC-0351 S1). 둘 다 atom을 여는 message는 지우지 않는다. 추론 제거는
+  assistant message의 서명 없는 `Thinking`·`ReasoningDetails` 블록을 지우되, 지우면
+  빈 message가 되는 것은 그대로 둔다. tool 결과 비우기는 닫힌 tool cycle의 `ToolResult`
+  내용을 고정 표시로 바꾸되, 실패한 결과(`Tool_failed`)는 예외로 바이트 그대로 남긴다 —
+  그 payload가 다음 turn에 Keeper가 읽는 피드백이고 durable 이력이 가진 유일한 오류
+  증거다. tool protocol cycle은 쪼개거나 순서를 바꾸지 않고, 마지막
+  `keep_recent_messages`개와 구조적으로 보호된 꼬리는 바이트 그대로 남긴다. `messages`
+  밖의 필드는 바뀌지 않아 같은 watermark 재저장으로 받아들여진다. Dashboard의
+  "정리 미리보기"는 읽기 전용이고, "백업 후 청소"는 원본을 바이트 그대로 백업한 뒤
+  저장하며 Keeper가 등록돼 있으면 쓸 수 없다. CLI `masc-checkpoint-purge`는 기본이
+  dry-run이고 `--apply`가 백업 후 저장한다.
+
+  atom을 여는 message를 지우지 않으므로 atom 번호는 그대로다. atom으로 자리를 세는
+  저장소 넷(turn-boundary 로그, Librarian 위치, continuity 스냅숏, carried-front 씨앗)이
+  같은 이력을 계속 가리키도록, 기록이 지목하는 message는 바이트 그대로 남긴다 — 마지막
+  atom과 꼬리, 각 완료 turn이 끝난 atom의 여는 message(`Turn_ended` 줄이 지목), 이
+  이력에 맞는 Librarian 작업 상태가 덮는 앞부분. `purge_messages`가 atom 수·남긴 여는
+  message의 digest·작업 상태를 `Librarian_continuity_snapshot.restore`로 대조하고, 어긋나면
+  이력을 돌려주지 않고 오류를 낸다. carried-front 씨앗은 남기지 않는다 — purge가 그
+  atom의 여는 message를 다시 썼으면 씨앗이 안 맞아 요청은 마지막 완료 turn이 끝난 자리에서
+  시작한다. 구조적으로 깨진 입력의 복구는 깨진 꼬리를 버리므로 끝이 옮겨지는 것이
+  설계다. 복구가 Librarian 위치를 옮길 때는 `witness_line`이 확인한 마지막 turn
+  끝에서 이력을 끝내고, 그런 줄이 없으면 `Recovery_end_unwitnessed`로 거절한다.
+  위치가 없거나 rebase가 위치를 거절하면 깨진 곳에서 끝낸다.
+
+  Librarian의 atom 위치(`librarian_rebase`)는 sound transcript면 그대로 돌려받고, 깨진
+  transcript 복구에서만 새 끝으로 옮긴다. 어느 쪽이든 Librarian이 아직 읽을 atom을
+  남겼으면 재작성을 거부한다. continuity 스냅숏(`librarian-continuity.json`)은 지우지
+  않는다 — 스냅숏이 덮는 앞부분을 바이트 그대로 남겨 purge 뒤에도 맞는다. 복구가 그
+  부분을 버리면 `Continuity_no_longer_fits`로 거절되고, 서버를 멈춘 채
+  `librarian-continuity.json`을 지우면 통과한다. 서버의 dashboard 청소 동작은 그 전에
+  Librarian lane을 취소하고 기다린다(`with_librarian_purge`).
+  → [Keeper_checkpoint_purge](../../lib/keeper/keeper_checkpoint_purge.mli),
+  [Runbook](../CHECKPOINT-PURGE-RUNBOOK.md)
 
 **Transcript Tail Recovery (전사 꼬리 복구)**
 : 프로세스가 죽어 열린 채 남은 tool cycle을 부팅 때 닫는 일
@@ -974,6 +1119,17 @@ status: reference
   운영자의 `masc_keeper_clear`는 Keeper Owner의 배타적 유지보수 구간에서 비운다.
   함께 남아 있던 official-client session binding도 지워 다음 provider turn을 새 session으로
   시작한다. 진행 중인 turn이 있으면 거절하며, paused Keeper는 다시 실행하지 않고 비울 수 있다.
+
+**History Fragment (히스토리 조각)**
+: official-client turn이 자기 trace 디렉터리에 남긴 줄. 그 turn은 AGENT_CORE
+  checkpoint를 저장하지 않으므로, 무슨 말을 했고 어떤 tool을 불렀는지는
+  `<session_dir>/history.jsonl`과 `<session_dir>/history.internal.jsonl`에 남는다.
+  각 줄은 자기를 쓴 turn(`Turn_ref`)과 종류(`message`|`tool_observation`)를 적는다.
+  `Turn_ref` 없는 줄은 `Untagged`로 어느 turn에도 속하지
+  않으며 reader는 지나간다. `Turn_ref`가 있는데 decoder가 거부하는 줄은 `Error`이며
+  untagged로 읽지 않는다. main 파일을 먼저, internal 파일을 다음으로, 각각 파일 순서로
+  읽는다. Checkpoint의 `messages`(History)와 달리 이 줄들은 자기 turn을 안다.
+  → [Keeper_turn_fragments](../../lib/keeper/keeper_turn_fragments.mli)
 
 **Message**
 : History의 한 항목. role(`System`, `User`, `Assistant`, `Tool`) 하나와 content
@@ -1180,6 +1336,24 @@ status: reference
   요약이 빠져도 turn은 거절하지 않고 WARN으로 알린다.
   → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
+**Extra System Context (턴별 문맥)**
+: Keeper hook이 매 turn 새로 조립해 provider 지시 표면에 얹는 `System` 메시지.
+  `Agent_core.Types.Extra_system_context_provenance`를 달고, 그 태그가 `Invalid`나
+  `Duplicate`여도 이 문맥이다(`is_extra_context`). 고정(Pinned)이라 atom으로 세지
+  않고 어떤 자르기도 지우지 않는다 — 매 turn 다시 조립되므로 살아남아야 한다. 이
+  문맥을 실은 요청은 실어 보낸 History 크기의 표본이 아니다.
+  - **Working State와 다른 것**: Librarian working state도 같은 표면의 두 번째
+    `System` 메시지지만 표식이 다르다 — `working_state_marker_key`(`working_state_metadata`)
+    하나만 달고, 요약된 범위가 조립한다. 턴별 문맥은 AGENT_CORE가 덧붙이는 carrier이고,
+    working state는 범위가 조립하는 것이다.
+  - **Composed System Context**: 이 둘을 함께 부르는 이름(`is_composed_system_context`).
+    공식 클라이언트 어댑터는 이 메시지들을 canonical history 스냅숏에서 빼고 resume 때
+    다시 보낸다.
+  - **입력 귀속 검사**: turn 기록의 입력 귀속(`input_components`)은 요청 하나에 carrier가
+    하나라고 보고 푼다. carrier가 두 번 보이면 요청은 그대로 나가고, 입력 귀속만 비운 채
+    `prompt_context_carrier_repeated`를 사유로 남긴다.
+  → [Runtime_model_input_tail_window](../../lib/runtime/runtime_model_input_tail_window.mli) · [Keeper_official_client_host.is_composed_system_context](../../lib/keeper/keeper_official_client_host.mli) · [Keeper_agent_prompt_metrics](../../lib/keeper/keeper_agent_prompt_metrics.mli)
+
 **Continuity Synthesis Observation (대화 요약 진행 관측)**
 : 이번 서버 실행에서 Librarian이 마지막으로 선택한 Atom 구간, 그때 확인한
   완료 경계, 실행·저장·중단 상태. `context_cycle.synthesis`와 TUI Memory 화면에
@@ -1297,7 +1471,10 @@ status: reference
   에도 있어야 한다. `absorbs`는 Fact 여러 개를 새 claim 하나가 대신 말하며(N:1)
   그 id들은 `dropped`에 없어야 한다. 흡수된 원문은
   `<keeper>.memory-absorbed.jsonl`에 남는다. Librarian이 말하지 않은 Fact는
-  그대로 남고, 규칙을 어긴 답은 통째로 거절된다.
+  그대로 남고, 규칙을 어긴 답은 통째로 거절된다. 이미 있는 Fact와 같은 글자를
+  다시 쓰는 것은 새 Fact가 아니라 그 Fact다 — 아무것도 더하지 않고 저장된 Fact를
+  유지하며, 거절이 아니다. 같은 답이 그 Fact를 `dropped`로도 적으면 "사라졌다"와
+  "남는다"를 함께 말한 모순이라 거절한다(`Dropped_memory_id_recreated`).
 
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는

@@ -130,7 +130,7 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
 
 **4·5·6. 공식 클라이언트 경로**
 - `max-prompt-bytes` 는 공식 클라이언트에 넘길 때의 실제 전송 한도일 때만 판정 근거가 된다. Antigravity 는 typed overflow를 보내지 않는다. 2,078,915 바이트가 끝까지 간 실측만으로 상한을 없앤 뒤, 세 장기 Keeper가 매번 21.9~48.5MB를 fresh session에 실어 첫 턴 전에 실패했다(#37123, 2026-09-19). 따라서 이 레인은 성공이 확인된 전송 크기를 명시하고, 그 안에서 이력을 자른다. 선언이 없으면 추측하지 않고 admission에서 거절한다.
-- 2026-09-20부터 Antigravity와 Claude Code의 fresh-session 이력은 먼저 §10.4의 검증된 씨앗 앞머리에서 시작한다. 각 레인의 선언 창이 더 깊게 자르면 그 뒤쪽 자리가 이기며, 씨앗이 없거나 현재 이력이 같은 atom을 열지 않으면 전체 이력에서 레인 창을 적용한다.
+- 2026-09-20부터 Antigravity와 Claude Code의 fresh-session 이력은 먼저 §10.4의 검증된 씨앗 앞머리에서 시작한다. 각 레인의 선언 창이 더 깊게 자르면 그 뒤쪽 자리가 이기며, 씨앗이 없거나 현재 이력이 같은 atom을 열지 않으면 §13.4의 턴 경계(`Turn_start`)에서 시작해 레인 창을 적용한다. 턴 경계를 모르면(`Turn_boundary_unknown`) 가장 새 atom 하나에서 시작한다.
 - Antigravity 합성 순서는 durable 이력에서 씨앗 앞머리 승인 → Gate replay reference 추가 → 선언 바이트 창 적용 → durable 이력 좌표로 관측 기록이다. Gate reference는 실제 전송 한도에는 포함하지만 다음 checkpoint 이력의 앞머리 atom으로 기록하지 않는다.
 - 부당한 부분:
   - 그 한도를 창 크기 결정에 쓴다.
@@ -519,7 +519,6 @@ origin/main `64ef87af83` 의 원장은 T 를 실은 usage 로도 전체와 묶�
 | 어느 provider 로 어느 모델을 부른다 | 2 (`runtime.toml` 바인딩 / overlay `[[targets]]`) | `librarian_exact` 가 선언 없는 슬롯을 가리킨 채 돌았고, `#36984` 이 deadline 을 요구하자 세 슬롯이 한꺼번에 떨어졌다 |
 | 이 모델의 창은 얼마인가 | 2 (`runtime.toml max-context` / overlay `max_context_tokens`) | 둘이 싸우면 작은 쪽이 이긴다(`Override_clamped_by_capability`). 그래서 배포가 카탈로그 값을 받아 적는 8행이 생겼다 |
 | 이 요청은 얼마나 커도 되나 | 3 (`max-prompt-bytes` / `context-high·low-water-tokens` / 공급자 판정) | 셋이 각자 답해서 `critic` 이 2시간 죽었다 |
-| 어디서부터 실을까 | 4 (`Ledger` / `Turn_record` / `Unfinished_turn` / `Whole_history`) | 넷 다 못 찾으면 이력 전체(22.7 MB) |
 | 남은 예산은 얼마인가 | 20 (`*_bytes` 이름, 전부 `int`) | `capacity - reserved - undroppable` 을 잘못 써도 컴파일러가 안 잡는다 |
 
 두 벌을 맞춰 두라고 주석으로 부탁하는 자리가 여러 곳이다. 부탁은 지켜지지 않는다.

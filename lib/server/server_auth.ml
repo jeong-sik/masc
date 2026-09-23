@@ -734,6 +734,7 @@ let http_status_of_auth_error = function
       | Masc_domain.Task_error.NotClaimed _
       | Masc_domain.Task_error.InvalidState _
       | Masc_domain.Task_error.InvalidId _) -> `Bad_request
+  | Masc_domain.Task (Masc_domain.Task_error.VerificationSuperseded _) -> `Conflict
   | Masc_domain.Agent (Masc_domain.Agent_error.InvalidName _) -> `Bad_request
   | Masc_domain.System _ -> `Bad_request
   | Masc_domain.RateLimitExceeded _ -> `Too_many_requests

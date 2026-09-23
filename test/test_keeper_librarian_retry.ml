@@ -28,12 +28,17 @@ let current_b = fact ~claim:"drop B"
 let current_a_id = Memory.memory_id current_a
 let current_b_id = Memory.memory_id current_b
 
+(* Spelled nowhere else in the fixture, so its count in a rendered prompt is
+   the count of the host-data slot. *)
+let librarian_subject_keeper = "librarian-subject-keeper"
+
 let input () : Librarian.input =
   { turn_ref =
       Ids.Turn_ref.make
         ~trace_id:"trace-selection"
         ~absolute_turn:7
   ; goal_context = Masc.Keeper_librarian.No_task
+  ; keeper_id = Masc_test_deps.keeper_id_fixture librarian_subject_keeper
   ; keeper_instructions = "You are the retry-test keeper."
   ; current =
       Some
@@ -1552,6 +1557,50 @@ let test_rendered_prompt_is_the_template_with_every_slot_filled () =
       (user_text_of_messages messages)
 ;;
 
+(* RFC-0468 §3.1: every librarian prompt names the Keeper it curates for, as
+   host data. Structure only, no prose: each pass supplies the id, each
+   template has the slot, and the rendered prompt carries the id once, on a
+   line of its own. *)
+let occurrences ~needle text =
+  let step = String.length needle in
+  let rec count from acc =
+    match String_util.find_substring ~pos:from text needle with
+    | None -> acc
+    | Some at -> count (at + step) (acc + 1)
+  in
+  count 0 0
+;;
+
+let test_every_librarian_prompt_names_its_keeper () =
+  let input = input () in
+  let rule = "working contexts rule fixture" in
+  List.iter
+    (fun (key, variables) ->
+       check (option string) (key ^ " supplies the Keeper id")
+         (Some librarian_subject_keeper)
+         (List.assoc_opt "keeper_id" variables);
+       check bool (key ^ " has a keeper_id slot") true
+         (List.mem "keeper_id" (template_slot_names (Prompt_registry.get_prompt key)));
+       match
+         Prompt_registry.render_prompt_template key
+           (("working_contexts_rule", rule) :: variables)
+       with
+       | Error detail -> failf "%s render failed: %s" key detail
+       | Ok rendered ->
+         check int (key ^ " carries the Keeper id once") 1
+           (occurrences ~needle:librarian_subject_keeper rendered);
+         check bool (key ^ " carries it on a line of its own") true
+           (List.exists
+              (fun line -> String.equal (String.trim line) librarian_subject_keeper)
+              (String.split_on_char '\n' rendered)))
+    [ Prompt_names.librarian, Librarian.prompt_variables input
+    ; ( Prompt_names.librarian_continuity
+      , Librarian.continuity_prompt_variables input ~continuity:`Null )
+    ; ( Prompt_names.librarian_working_context
+      , Librarian.working_context_prompt_variables input )
+    ]
+;;
+
 let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
   Eio.Switch.run (fun sw ->
     let previous = Domain_pool_ref.get () in
@@ -1979,6 +2028,8 @@ let () =
             test_prompt_omits_tool_result_payload_and_has_one_message
         ; test_case "repo template renders Keeper instructions" `Quick
             test_repo_template_renders_keeper_instructions
+        ; test_case "every librarian prompt names its Keeper" `Quick
+            test_every_librarian_prompt_names_its_keeper
         ; test_case "goal criteria reach the librarian model input" `Quick
             test_repo_template_carries_goal_criteria
         ; test_case "rendered prompt is the template with every slot filled" `Quick

@@ -20,6 +20,7 @@ type outcome =
 type error =
   | Keeper_meta_absent
   | Keeper_meta_unreadable of string
+  | Keeper_name_blank
   | Boundary_log_unreadable of string
   | Progress_unreadable of P.read_error
   | Checkpoint_unreadable of
@@ -80,6 +81,7 @@ let range_stop_to_string = function
 let error_to_string = function
   | Keeper_meta_absent -> "keeper metadata is absent"
   | Keeper_meta_unreadable detail -> "keeper metadata is unreadable: " ^ detail
+  | Keeper_name_blank -> "keeper name is blank, so it names no Keeper for the Librarian"
   | Boundary_log_unreadable detail -> "turn-boundary log is unreadable: " ^ detail
   | Progress_unreadable error -> P.read_error_to_string error
   | Checkpoint_unreadable { trace_id; error } ->
@@ -1100,8 +1102,13 @@ let consume_one_with_extent
             ~before:ended_at
           |> Result.map_error (fun error -> Counterpart_observations_unreadable error)
       in
+      let* keeper_id =
+        Option.to_result ~none:Keeper_name_blank
+          (Keeper_identity.Keeper_id.of_string keeper_name)
+      in
       let input : Keeper_librarian.input =
         { turn_ref
+        ; keeper_id
         (* Turn boundaries do not carry historical task identity. The current
            task can belong to a later turn, so borrowing it would attach an old
            range to an unrelated Goal. Exact historical identity must be added

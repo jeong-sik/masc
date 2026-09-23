@@ -31,6 +31,9 @@ type outcome =
 type error =
   | Keeper_meta_absent
   | Keeper_meta_unreadable of string
+  | Keeper_name_blank
+      (** The lane's keeper name mints no {!Keeper_identity.Keeper_id.t}, so
+          the Librarian cannot be told whose memory it curates. *)
   | Boundary_log_unreadable of string
   | Progress_unreadable of Keeper_librarian_progress.read_error
   | Checkpoint_unreadable of

@@ -273,9 +273,13 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
     select prepared;
     let inputs = Domain_pool_ref.submit_io_or_inline (fun () ->
       let ( let* ) = Result.bind in
+      let* keeper_id =
+        Option.to_result ~none:"keeper name is blank"
+          (Keeper_identity.Keeper_id.of_string keeper_name) in
       let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
       let input : Keeper_librarian.input =
         { turn_ref = P.turn_ref prepared; goal_context = Keeper_librarian.No_task;
+          keeper_id;
           keeper_instructions = meta.Keeper_meta_contract.instructions;
           current = Option.map (fun (value : Keeper_memory_os_current.t) ->
             {Keeper_librarian.facts = value.facts}) current;
@@ -418,9 +422,10 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
    the Keeper's current task is the task these inputs belong to. The durable
    and continuity passes read turns that may predate that task, and a turn
    boundary does not record its task, so they stay [No_task]. *)
-let queue_input ~config ~(meta : Keeper_meta_contract.keeper_meta) ~current ~working_context
-  : Keeper_librarian.input =
-  { turn_ref = Ids.Turn_ref.make
+let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta) ~current
+    ~working_context : Keeper_librarian.input =
+  { keeper_id
+  ; turn_ref = Ids.Turn_ref.make
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~absolute_turn:meta.runtime.usage.total_turns
   ; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -430,36 +435,42 @@ let queue_input ~config ~(meta : Keeper_meta_contract.keeper_meta) ~current ~wor
   ; working_context
   ; messages = []; tool_observations = []; counterpart_observations = [] }
 
+let run_queue ~base_path ~keeper_name ~keeper_id ~meta =
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+    Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
+  let refs sources = List.map (fun (s : Keeper_librarian_context.source) -> s.reference) sources
+                     |> List.sort String.compare in
+  let prior_refs = match working_context.previous with None -> [] | Some s -> refs s.sources in
+  let needs_reconsideration = match working_context.previous with
+    | None -> false
+    | Some snapshot -> List.exists (fun (p : Keeper_librarian_context.pocket) ->
+        p.completeness = Keeper_librarian_context.Needs_reconsideration) snapshot.pockets in
+  let sources_changed = refs working_context.sources <> prior_refs || needs_reconsideration in
+  if sources_changed then (
+    match Domain_pool_ref.submit_io_or_inline (fun () ->
+      Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) with
+    | Error detail -> Log.Keeper.warn ~keeper_name "queue Librarian memory unavailable: %s" detail
+    | Ok current ->
+      let current_selection = Option.map (fun (s : Keeper_memory_os_current.t) ->
+        {Keeper_librarian.facts = s.facts}) current in
+      let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
+          ~current:current_selection ~working_context in
+      Keeper_librarian_runtime.run_best_effort
+        ~write_scope:Keeper_librarian_runtime.Context_only
+        ~base_path ~keepers_dir ~keeper_id:keeper_name
+        ~expected_revision:(Option.map (fun (s : Keeper_memory_os_current.t) -> s.revision) current) inp)
+;;
+
 let run ~base_path ~keeper_name =
   run_durable ~base_path ~keeper_name;
   run_continuity ~base_path ~keeper_name ();
   match Env_config.KeeperMemoryOs.librarian_config_state (),
         Keeper_owner_projection.lookup ~base_path ~keeper_name with
   | Enabled, Owner_projection {meta = Some meta; stopping = false} ->
-    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-    let working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
-      Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
-    let refs sources = List.map (fun (s : Keeper_librarian_context.source) -> s.reference) sources
-                       |> List.sort String.compare in
-    let prior_refs = match working_context.previous with None -> [] | Some s -> refs s.sources in
-    let needs_reconsideration = match working_context.previous with
-      | None -> false
-      | Some snapshot -> List.exists (fun (p : Keeper_librarian_context.pocket) ->
-          p.completeness = Keeper_librarian_context.Needs_reconsideration) snapshot.pockets in
-    let sources_changed = refs working_context.sources <> prior_refs || needs_reconsideration in
-    if sources_changed then (
-      match Domain_pool_ref.submit_io_or_inline (fun () ->
-        Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) with
-      | Error detail -> Log.Keeper.warn ~keeper_name "queue Librarian memory unavailable: %s" detail
-      | Ok current ->
-        let current_selection = Option.map (fun (s : Keeper_memory_os_current.t) ->
-          {Keeper_librarian.facts = s.facts}) current in
-        let inp = queue_input ~config:(Workspace.default_config base_path) ~meta
-            ~current:current_selection ~working_context in
-        Keeper_librarian_runtime.run_best_effort
-          ~write_scope:Keeper_librarian_runtime.Context_only
-          ~base_path ~keepers_dir ~keeper_id:keeper_name
-          ~expected_revision:(Option.map (fun (s : Keeper_memory_os_current.t) -> s.revision) current) inp)
+    (match Keeper_identity.Keeper_id.of_string keeper_name with
+     | None -> Log.Keeper.warn ~keeper_name "queue Librarian skipped: keeper name is blank"
+     | Some keeper_id -> run_queue ~base_path ~keeper_name ~keeper_id ~meta)
   | (Disabled | Invalid), _
   | Enabled, (Owner_absent | Owner_projection {meta = None; _}
              | Owner_projection {stopping = true; _}) -> ()

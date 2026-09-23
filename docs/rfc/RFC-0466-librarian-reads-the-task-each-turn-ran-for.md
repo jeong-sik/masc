@@ -71,15 +71,39 @@ field"). 새 생성자를 더해도 옛 줄은 그대로 읽힌다. 호환 reade
 
 - `Turn_tasks { turn_ref; tasks : Task_id.t list }`. 빈 목록은 "이 턴은 Task 가 없었다"
   는 사실이다.
-- finalize 가 `Turn_ended` 줄 **바로 앞에**, 같은 잠금 아래 같은 append 로 쓴다.
-  #37527 의 fragment 줄이 경계 줄보다 먼저 쓰이는 것과 같은 순서다
-  (`keeper_agent_run_finalize_response.ml`). 경계 줄을 읽은 reader 는 그 앞의 Task 줄도
-  이미 볼 수 있다.
-- 짝은 줄 순서로 맞춘다. `Turn_ended` 바로 앞의 `Turn_tasks` 가 그 턴의 것이다.
-  `turn_ref` 는 키가 아니다(같은 mli). 번호가 다시 쓰여도 줄 순서는 흔들리지 않는다.
-- 경계 줄을 읽는 모든 reader 는 새 생성자를 빠짐없이 다뤄야 한다. 컴파일러가
-  강제한다. 줄 번호는 위치일 뿐이라 `boundary_lines_seen` 같은 위치 값은 바뀌지 않는다.
-  줄 수로 턴을 세는 reader 가 있는지는 구현 때 확인한다.
+- finalize 가 `Turn_ended` 줄을 쓰기 **바로 전에** 따로 한 번 append 한다. 지금
+  `Keeper_turn_boundaries.append` 는 레코드 하나를 한 번에 쓰는 API 다
+  (`keeper_turn_boundaries.mli`, "One record in one durable append"). 두 줄을 한 번에
+  쓰는 API 는 만들지 않는다. 만들어도 쓰던 중 죽으면 마지막 온전한 줄까지 잘라
+  남기므로(같은 mli), Task 줄만 남는 경우가 어차피 생긴다.
+- 쓰는 자리는 `keeper_agent_run_finalize_response.ml` 의 `Ok position` 갈래 안, 재시작 줄
+  (`History_restarted`) 뒤, `Turn_ended` append 앞이다. 위치를 못 만들어 경계 줄을 쓰지
+  않는 턴(`site:"position"`)은 Task 줄도 쓰지 않는다. #37527 의 fragment 줄이 경계 줄보다
+  먼저 쓰이는 것과 같은 방향이다. 경계 줄을 읽은 reader 는 그 앞의 Task 줄도 이미 볼 수
+  있다.
+- 짝은 줄 순서로 맞춘다. `Turn_ended` 의 **바로 앞 줄**이 `Turn_tasks` 이고 두 줄의
+  `turn_ref` 가 같으면 그 턴의 것이다. 그 밖이면 그 턴은 기록 없음이다. `turn_ref` 는
+  파일 전체의 키가 아니다(같은 mli). 번호가 다시 쓰여도 붙어 있는 두 줄의 짝은 흔들리지
+  않는다. `turn_ref` 비교는 붙어 있는 두 줄이 같은 finalize 에서 나왔는지만 본다.
+- 두 번 append 하므로 "Task 줄은 썼는데 경계 줄은 실패" 가 생긴다. 이 짝 없는
+  `Turn_tasks` 는 어느 턴의 것도 아니다. 다음 턴이 두 줄을 다 쓰면 그 턴의 Task 줄이
+  바로 앞 줄이라 짝이 맞는다. 다음 턴의 Task 줄마저 실패하면 그 턴의 경계 줄 바로 앞이
+  앞 턴의 짝 없는 줄이 된다. 두 줄의 `turn_ref` 가 달라서 그 턴은 기록 없음이 된다. 앞 턴의
+  Task 를 빌려 오지 않는다.
+- 경계 줄을 읽는 reader 는 `Keeper_turn_boundaries.read` 호출자 9곳이다
+  (`keeper_carried_front.ml`, `keeper_librarian_durable_consumer.ml`,
+  `keeper_turn_driver_try_provider.ml` 2곳, `server_dashboard_http_keeper_api_checkpoints.ml`,
+  `bin/` 의 `deployment_preflight_helper.ml`·`masc_librarian_replay.ml`·
+  `masc_librarian_continuity.ml`·`masc_checkpoint_purge.ml`). 새 생성자를 더해도 컴파일러가
+  잡지 못하는 와일드카드 match 가 main 에 있다.
+  - `keeper_carried_front.ml` 의 `| (_, Ok _) :: rest -> loop latest_turn floor rest`
+  - `librarian_continuity_snapshot.ml` 의 세 fold 끝 `| _ -> None` / `| _ -> false`
+  - `keeper_librarian_durable_consumer.ml` 의 `| Ok _ | Error _ -> false`, `| Ok _ | Error _ -> None`
+
+  이 자리들은 `Turn_tasks` 를 조용히 건너뛴다. 대부분은 맞는 동작이지만, 구현 PR 에서
+  reader 하나씩 판정하고 와일드카드를 생성자를 적은 갈래로 바꾼다. 그래야 다음 생성자부터
+  컴파일러가 실제로 강제한다. 줄 번호는 위치일 뿐이라 `boundary_lines_seen` 같은 위치
+  값은 바뀌지 않는다. 줄 수로 턴을 세는 reader 가 있는지도 같은 판정에서 본다.
 
 ### 2.3 모르는 턴은 모른다고 싣는다
 
@@ -87,11 +111,20 @@ field"). 새 생성자를 더해도 옛 줄은 그대로 읽힌다. 호환 reade
 접으면 "Task 가 없었다" 는 거짓이 된다(`docs/constitution.xml` `strict_parse_no_default`).
 
 ```ocaml
+type task_goals =
+  { task_id : string
+  ; criteria : ((string * Goal_phase.t * Goal_store.criterion) list, string) result
+  }
+
 type goal_context =
   | No_task
-  | Task_goals of { tasks : task_goals Nonempty_list.t; unrecorded_turns : int }
+  | Task_goals of { tasks : task_goals Agent_core_base.Nonempty.t; unrecorded_turns : int }
   | Unrecorded of { turns : int }
 ```
+
+`task_goals` 는 지금 `Keeper_librarian.goal_context` 의 `Task_goals` 가 싣는 필드 그대로다
+(#38114). 비어 있지 않은 목록은 새로 만들지 않고 `packages/agent_core/lib/base/nonempty.mli`
+의 `Agent_core_base.Nonempty.t` 를 쓴다(`lib/dune` 이 이미 `masc.agent_core.base` 에 기댄다).
 
 - 범위의 턴이 모두 기록돼 있고 Task 가 없으면 `No_task`.
 - 하나라도 Task 가 있으면 `Task_goals`. 기록이 없는 턴이 섞였으면 그 수를 함께 싣는다.
@@ -101,7 +134,8 @@ type goal_context =
 
 Task 줄 append 가 실패하면 그 턴은 영구히 `unrecorded` 다. 경계 줄과 달리 다음 줄이
 대신 덮어 주지 않는다. finalize 는 경계 줄 실패와 같은 방식으로 실패를 센다
-(`TurnBoundaryFailures` 와 같은 자리, site 를 나눈다).
+(`TurnBoundaryFailures`, `site:"tasks_append"`). 두 번 append 하므로 Task 줄만 따로
+실패할 수 있다(§2.2).
 
 ### 2.4 범위와 맞춘다
 
@@ -134,7 +168,7 @@ reader 가 있다는 것을 보장하려는 것이다.
 
 | 그대로 | 왜 |
 |---|---|
-| queue 회차의 Task 읽기 | 턴 범위가 없는 회차라 도는 순간의 Task 를 쓴다. #38114 가 연결한다(열린 PR). 이 RFC 의 타입 변경과 부딪히므로 #38114 를 먼저 병합하고, 그 `Task_goals` 를 새 모양으로 옮긴다. |
+| queue 회차의 Task 읽기 | 턴 범위가 없는 회차라 도는 순간의 Task 를 쓴다. #38114 가 연결했다(병합됨). 구현 PR 은 그 `Task_goals { task_id; criteria }` 를 원소 하나짜리 `tasks` 로 옮긴다. |
 | 옛 경계 줄 | 새 생성자만 더한다. 옛 줄은 그대로 읽힌다. |
 | Goal 기준을 기억의 근거로 쓰지 않는다는 프롬프트 규칙 | Goal 은 참고 자료다. |
 
@@ -163,6 +197,13 @@ reader 가 있다는 것을 보장하려는 것이다.
 - `no_task` 와 `unrecorded` 가 프롬프트에 다르게 그려진다.
 - 줄인 continuity 범위의 Goal 목록이 실제로 보낸 턴과 맞는다.
 - 모르는 `kind` 는 읽기 오류다.
+- red control: `Turn_tasks` 를 모르는 reader(= reader 릴리스 이전 바이너리)가
+  `turn_tasks` 줄이 든 파일을 읽으면 `Keeper_carried_front.current_generation_floor` 가
+  `Error` 다. §2.5 의 두 릴리스 순서가 왜 필요한지 이 테스트가 말한다.
+- Task 줄만 쓰고 경계 줄이 실패한 뒤, 다음 턴이 두 줄을 다 쓰면 다음 턴은 자기 Task 를
+  싣는다. 다음 턴의 Task 줄도 실패하면 다음 턴은 기록 없음이고 앞 턴의 Task 를 빌리지
+  않는다(`turn_ref` 불일치).
+- `Turn_ended` 바로 앞이 `Turn_tasks` 가 아닌 줄(예: `History_restarted`)이면 기록 없음이다.
 
 라이브: 배포 뒤 Task 를 가진 keeper 의 durable 회차 입력(exact-input payload)에
 `goal_context` 가 실리는지 본다.
@@ -172,7 +213,5 @@ reader 가 있다는 것을 보장하려는 것이다.
 - 공식 클라이언트 턴은 끝까지 가면 finalize 를 지나고 `No_atom_history` 경계 줄을
   남긴다. finalize 전에 `Error` 로 끝난 턴은 경계 줄도 없어서 지금도 읽히지 않는다.
   이 RFC 가 바꾸지 않는다.
-- 모르는 `kind` 는 지금 경계 파일 reader 가 하는 대로 읽기 오류다. 새 생성자는 같은
-  배포에서 reader 와 writer 가 함께 들어가므로 이 경우가 새로 생기지 않는다. 배포를
-  되돌리면 옛 reader 가 `turn_tasks` 줄을 모르는 줄로 만난다. 되돌리기 전에 이 점을
-  운영 절차에 적는다.
+- 모르는 `kind` 는 지금 경계 파일 reader 가 하는 대로 읽기 오류다. 옛 reader 가
+  `turn_tasks` 줄을 만나지 않게 하는 순서는 §2.5 가 정한다.

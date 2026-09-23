@@ -213,10 +213,10 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
     match Env_config.KeeperMemoryOs.librarian_config_state () with
     | Disabled | Invalid -> observe O.Disabled
     | Enabled ->
-      match Keeper_meta_store.read_effective_meta_presence config keeper_name with
-      | Error detail | Ok (Keeper_meta_store.Meta_not_current detail) -> report O.Source_unavailable detail
-      | Ok Keeper_meta_store.Meta_absent -> observe O.Source_unavailable
-      | Ok (Keeper_meta_store.Meta_present meta) ->
+      match Keeper_meta_store.read_effective_meta_presence_named config keeper_name with
+      | Error detail | Ok (_, Keeper_meta_store.Meta_not_current detail) -> report O.Source_unavailable detail
+      | Ok (_, Keeper_meta_store.Meta_absent) -> observe O.Source_unavailable
+      | Ok (keeper_id, Keeper_meta_store.Meta_present meta) ->
         let current_trace = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
         if !trace_id <> Some current_trace then selected_range := None;
         trace_id := Some current_trace;
@@ -241,9 +241,9 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
         | Ok (P.No_source no_source) -> settle_no_source no_source
         | Ok (P.Ready prepared) ->
           (match limited_width ~config ~keeper_name ~trace_id:current_trace with
-           | None -> attempt meta prepared
+           | None -> attempt ~keeper_id meta prepared
            | Some width when P.end_atom prepared - P.start_atom prepared <= width ->
-             attempt meta prepared
+             attempt ~keeper_id meta prepared
            | Some width ->
              (* Cut at the width: the unit read is then the width the last
                 refusal left, and the logged number is the number of atoms
@@ -268,14 +268,11 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
                    end_atom=%d -> %d"
                   width (P.start_atom prepared) (P.completed_end_atom prepared)
                   (P.end_atom prepared) (P.end_atom one_unit);
-                attempt meta one_unit))
-  and attempt meta prepared =
+                attempt ~keeper_id meta one_unit))
+  and attempt ~keeper_id meta prepared =
     select prepared;
     let inputs = Domain_pool_ref.submit_io_or_inline (fun () ->
       let ( let* ) = Result.bind in
-      let* keeper_id =
-        Option.to_result ~none:"keeper name is blank"
-          (Keeper_identity.Keeper_id.of_string keeper_name) in
       let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
       let input : Keeper_librarian.input =
         { turn_ref = P.turn_ref prepared; goal_context = Keeper_librarian.No_task;
@@ -409,7 +406,7 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
              "continuity input fitted to reported capacity; runtime=%s max_chars=%d end_atom=%d -> %d"
              observed.runtime_id observed.capacity.max_chars
              (P.end_atom selected) (P.end_atom smaller);
-           attempt meta smaller
+           attempt ~keeper_id meta smaller
          | Ok (Some _) ->
            report O.Capacity_refused "provider capacity refusal disagrees with local prompt measurement")
   in
@@ -435,42 +432,49 @@ let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta) ~c
   ; working_context
   ; messages = []; tool_observations = []; counterpart_observations = [] }
 
-let run_queue ~base_path ~keeper_name ~keeper_id ~meta =
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
-    Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
-  let refs sources = List.map (fun (s : Keeper_librarian_context.source) -> s.reference) sources
-                     |> List.sort String.compare in
-  let prior_refs = match working_context.previous with None -> [] | Some s -> refs s.sources in
-  let needs_reconsideration = match working_context.previous with
-    | None -> false
-    | Some snapshot -> List.exists (fun (p : Keeper_librarian_context.pocket) ->
-        p.completeness = Keeper_librarian_context.Needs_reconsideration) snapshot.pockets in
-  let sources_changed = refs working_context.sources <> prior_refs || needs_reconsideration in
-  if sources_changed then (
-    match Domain_pool_ref.submit_io_or_inline (fun () ->
-      Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) with
-    | Error detail -> Log.Keeper.warn ~keeper_name "queue Librarian memory unavailable: %s" detail
-    | Ok current ->
-      let current_selection = Option.map (fun (s : Keeper_memory_os_current.t) ->
-        {Keeper_librarian.facts = s.facts}) current in
-      let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
-          ~current:current_selection ~working_context in
-      Keeper_librarian_runtime.run_best_effort
-        ~write_scope:Keeper_librarian_runtime.Context_only
-        ~base_path ~keepers_dir ~keeper_id:keeper_name
-        ~expected_revision:(Option.map (fun (s : Keeper_memory_os_current.t) -> s.revision) current) inp)
-;;
+(* The queue signal hands this unit a bare name, and the queue pass reads the
+   Owner's meta, not the store read that refuses a blank name for the durable
+   and continuity passes. So the name is parsed here, once, before any pass
+   runs. A blank one names no Keeper the Librarian could be told about
+   (RFC-0468 §3.1): the unit raises, and the memory lane logs and counts it
+   as a failed unit. *)
+exception Blank_keeper_name
 
 let run ~base_path ~keeper_name =
+  let keeper_id =
+    match Keeper_identity.Keeper_id.of_string keeper_name with
+    | Some keeper_id -> keeper_id
+    | None -> raise Blank_keeper_name
+  in
   run_durable ~base_path ~keeper_name;
   run_continuity ~base_path ~keeper_name ();
   match Env_config.KeeperMemoryOs.librarian_config_state (),
         Keeper_owner_projection.lookup ~base_path ~keeper_name with
   | Enabled, Owner_projection {meta = Some meta; stopping = false} ->
-    (match Keeper_identity.Keeper_id.of_string keeper_name with
-     | None -> Log.Keeper.warn ~keeper_name "queue Librarian skipped: keeper name is blank"
-     | Some keeper_id -> run_queue ~base_path ~keeper_name ~keeper_id ~meta)
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let working_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+      Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
+    let refs sources = List.map (fun (s : Keeper_librarian_context.source) -> s.reference) sources
+                       |> List.sort String.compare in
+    let prior_refs = match working_context.previous with None -> [] | Some s -> refs s.sources in
+    let needs_reconsideration = match working_context.previous with
+      | None -> false
+      | Some snapshot -> List.exists (fun (p : Keeper_librarian_context.pocket) ->
+          p.completeness = Keeper_librarian_context.Needs_reconsideration) snapshot.pockets in
+    let sources_changed = refs working_context.sources <> prior_refs || needs_reconsideration in
+    if sources_changed then (
+      match Domain_pool_ref.submit_io_or_inline (fun () ->
+        Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) with
+      | Error detail -> Log.Keeper.warn ~keeper_name "queue Librarian memory unavailable: %s" detail
+      | Ok current ->
+        let current_selection = Option.map (fun (s : Keeper_memory_os_current.t) ->
+          {Keeper_librarian.facts = s.facts}) current in
+        let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
+            ~current:current_selection ~working_context in
+        Keeper_librarian_runtime.run_best_effort
+          ~write_scope:Keeper_librarian_runtime.Context_only
+          ~base_path ~keepers_dir ~keeper_id:keeper_name
+          ~expected_revision:(Option.map (fun (s : Keeper_memory_os_current.t) -> s.revision) current) inp)
   | (Disabled | Invalid), _
   | Enabled, (Owner_absent | Owner_projection {meta = None; _}
              | Owner_projection {stopping = true; _}) -> ()

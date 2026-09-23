@@ -650,7 +650,7 @@ let launch_supervised_fiber
          (Keeper_lane.start_error_to_string lane_error));
     Error err
   | Ok _ ->
-    (* Propagate the fork outcome: a rejected [Keeper_lane.fork] returns
+    (* Propagate the fork outcome: a rejected [Keeper_lane.fork_server_owned] returns
        [Error] here so the caller suppresses the Started/Running lifecycle
        for a keeper whose lane was never forked. *)
     launch_supervised_fiber_body

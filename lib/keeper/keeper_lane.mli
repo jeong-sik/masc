@@ -70,10 +70,15 @@ val fork :
     admission completes without recording a competing switch failure that
     could erase release evidence. *)
 
+(** The [Failed] payload of a lane that [fork_server_owned] refused for want
+    of a live server root switch. *)
+exception Server_root_switch_unavailable_at_start
+
 (** A Keeper lane is server-owned: it must outlive the turn, request or tool
     call that asked for it. [fork_server_owned] therefore takes no switch from
     the caller and forks on the server root switch ({!Eio_context.get_root_switch_opt}).
-    When no live root switch is installed there is no owner that outlives the
+    When no root switch is installed, or the installed one is cancelling or
+    finished, there is no owner that outlives the
     lane, so nothing is forked: the lane is settled through [cleanup] and the
     call returns [Error Server_root_switch_unavailable]. *)
 val fork_server_owned :

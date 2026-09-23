@@ -1759,11 +1759,6 @@ let test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures () =
   | Supervisor_launch.Cleanup_completed -> fail "ordinary failure was reported as completed"
   | Supervisor_launch.Cleanup_cancelled -> fail "ordinary failure was reported as cancellation"
 
-(* Fail-closed launch gate: a registry FSM in a terminal state rejects
-   [Fiber_started]; the launch must abort without announcing
-   [Started]/[Running], and the entry's done promise must resolve through
-   the crash path so the sweep observes a typed outcome. Pre-fix the fiber
-   forked and Running was published despite the reject. *)
 (* #38175: the supervisor's own context is not a lane owner either. With no
    server root switch installed the launch is refused and the lane settled;
    before, it forked on [ctx.sw] and only logged a WARN. *)
@@ -1814,8 +1809,16 @@ let test_supervised_launch_without_server_root_is_refused () =
            with
            | Ok () -> fail "a supervised lane started with no server root switch"
            | Error _ -> ());
-      check bool "the refused lane is settled" true (Reg.lane_has_exited reg))
+      match Masc.Keeper_lane.peek_exit reg.lane with
+      | Some { outcome = Masc.Keeper_lane.Failed Masc.Keeper_lane.Server_root_switch_unavailable_at_start; _ } -> ()
+      | Some _ -> fail "the lane was settled by something other than the missing root switch"
+      | None -> fail "the refused lane was not settled")
 
+(* Fail-closed launch gate: a registry FSM in a terminal state rejects
+   [Fiber_started]; the launch must abort without announcing
+   [Started]/[Running], and the entry's done promise must resolve through
+   the crash path so the sweep observes a typed outcome. Pre-fix the fiber
+   forked and Running was published despite the reject. *)
 let test_supervised_stop_joins_board_attention_worker () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

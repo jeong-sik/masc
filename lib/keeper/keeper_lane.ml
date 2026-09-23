@@ -99,7 +99,7 @@ let start_error_to_string = function
   | Already_exited -> "lane already exited"
   | Fork_failed exn -> Printf.sprintf "lane fork failed: %s" (Printexc.to_string exn)
   | Server_root_switch_unavailable ->
-    "lane has no owner: the server root switch is not installed"
+    "lane has no owner: the server root switch is not installed or no longer live"
 ;;
 
 let create () =

@@ -1350,8 +1350,8 @@ let rec start_keepalive
             then record_stopped "manual stop"
             else record_lane_exception exn
         in
-        (* Lane cleanup is declared outside [run] because [Keeper_lane.fork]
-           invokes it only after the child-owning switch and all children
+        (* Lane cleanup is declared outside [run] because
+           [Keeper_lane.fork_server_owned] invokes it only after the child-owning switch and all children
            finish. *)
         let cleanup_tracking outcome =
           let lifecycle_result =

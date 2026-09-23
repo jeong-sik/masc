@@ -1499,7 +1499,7 @@
  (name masc_tui_overview_team)
  (wrapped false)
  (modules masc_tui_overview_team)
- (libraries masc masc_types masc.keeper_registry masc_tui_types))
+ (libraries masc masc_types masc_tui_types))
 
 (executable
  (name masc_tui)

@@ -7,6 +7,7 @@
 open Alcotest
 module Team = Masc_tui_overview_team
 module Types = Masc_tui_types
+module Tui_decode = Masc.Tui_decode
 
 let keeper ?(ago = Some 60.) name phase : Types.overview_keeper =
   { okp_name = name; okp_phase = phase; okp_last_turn_ago_s = ago }
@@ -34,15 +35,18 @@ let keeper_item name summary : Types.attention_item =
   ; ai_evidence_ts = None
   }
 
-let phase p = Types.Keeper_phase p
+let phase word =
+  match Tui_decode.keeper_phase_of_string word with
+  | Some p -> Types.Keeper_phase p
+  | None -> Alcotest.failf "fixture phase %S is not a Keeper phase" word
 
 let fleet =
-  [ keeper "won-chik" (phase Keeper_state_machine.Running)
-  ; keeper "tui-developer" (phase Keeper_state_machine.Failing)
-  ; keeper "glossary-maniac" (phase Keeper_state_machine.Running)
-  ; keeper ~ago:None "lane-smith" (phase Keeper_state_machine.Paused)
+  [ keeper "won-chik" (phase "running")
+  ; keeper "tui-developer" (phase "failing")
+  ; keeper "glossary-maniac" (phase "running")
+  ; keeper ~ago:None "lane-smith" (phase "paused")
   ; keeper ~ago:(Some 50460.) "sangsu" Types.Keeper_phase_absent
-  ; keeper "rondo" (phase Keeper_state_machine.Paused)
+  ; keeper "rondo" (phase "paused")
   ]
 
 let tasks =
@@ -55,6 +59,7 @@ let tasks =
   ; task "task-1800" (in_progress "codex-mcp-client")
   ; task "task-1801" (in_progress "codex-mcp-client")
   ; task "task-1900" (awaiting "analyst")
+  ; task "task-1950" (in_progress "rondo")
   ; task "task-2000" Masc_domain.Todo
   ]
 
@@ -81,8 +86,9 @@ let test_bands_order_stuck_then_working_then_idle () =
   check (list string) "stuck Keepers first, by name; then working; then idle"
     [ "sangsu"; "tui-developer"; "glossary-maniac"; "won-chik" ]
     (names team.rows);
-  check (list string) "paused Keepers roll into one parked line"
-    [ "lane-smith"; "rondo" ] team.parked;
+  check (list (pair string int))
+    "paused Keepers roll into one parked line, with the work they still hold"
+    [ ("lane-smith", 0); ("rondo", 1) ] team.parked;
   check int "need you" 2 (Team.count team Team.Needs_you);
   check int "working" 1 (Team.count team Team.Working);
   check int "idle" 1 (Team.count team Team.Idle);
@@ -123,7 +129,7 @@ let test_a_working_row_names_its_first_task () =
 let test_only_keeper_targets_join () =
   let only_board =
     Team.project
-      ~keepers:[ keeper "tui-developer" (phase Keeper_state_machine.Failing) ]
+      ~keepers:[ keeper "tui-developer" (phase "failing") ]
       ~tasks:[]
       ~attention:[ List.nth attention 3 ]
   in

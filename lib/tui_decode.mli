@@ -325,11 +325,15 @@ type inventory_freshness =
       (** The server answered from a built inventory. An empty list here does
           mean no tools. *)
 
+(** One tool the keeper's effective surface carries. [et_skill_source_id]
+    names the configured skill source a composition skill came from, read
+    from [origin.skill_provenance.identity.source_id]; it is [None] for any
+    tool with no skill behind it, and for a composition skill whose
+    provenance the producer could not resolve. *)
 type effective_tool = {
   et_name : string;
   et_origin : string;
-  et_group : string option;
-  et_skill_source : string option;
+  et_skill_source_id : string option;
 }
 
 type effective_tool_delivery =
@@ -566,6 +570,24 @@ type connector_directory_state =
   | Connector_directory_complete
   | Connector_directory_partial
 
+(** Where a websocket transport's gateway stands, as the Slack and Discord
+    gateway state machines report it on the wire ([gateway_state]). *)
+type connector_gateway_state =
+  | Connector_gateway_disconnected
+  | Connector_gateway_awaiting_hello
+  | Connector_gateway_identifying
+  | Connector_gateway_resuming
+  | Connector_gateway_connected
+  | Connector_gateway_reconnect_pending
+  | Connector_gateway_failed
+
+(** Where a polling transport stands, as the iMessage poller reports it on
+    the wire ([poll_state]). *)
+type connector_poll_state =
+  | Connector_poll_not_started
+  | Connector_poll_polling
+  | Connector_poll_degraded
+
 (** A connector the gate can deliver through, including the server-owned
     configuration and route evidence an operator needs to act on it. *)
 type connector = {
@@ -581,8 +603,8 @@ type connector = {
   cn_channel : string option;
   cn_error : string option;
   cn_status_source : string option;
-  cn_gateway_state : string option;
-  cn_poll_state : string option;
+  cn_gateway_state : connector_gateway_state option;
+  cn_poll_state : connector_poll_state option;
   cn_endpoint : string option;
   cn_status_path : string option;
   cn_binding_store_path : string option;
@@ -637,8 +659,18 @@ val decode_connector_name_page :
 val connector_with_name_pages :
   connector -> pages:connector_name_page list -> error:string option -> connector
 
+(** A connector row the TUI could not read. The row is refused on its own,
+    so the rows beside it still decode and draw. *)
+type connector_refusal = {
+  cr_row : int;  (** Position in the server's [connectors] list. *)
+  cr_connector_id : string option;
+      (** The row's [connector_id], when the row carries one. *)
+  cr_reason : string;
+}
+
 type connector_snapshot = {
   cs_connectors : connector list;
+  cs_refused : connector_refusal list;
   cs_total : int;
   cs_active : int;  (** How many the server counted as available. *)
 }

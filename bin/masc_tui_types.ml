@@ -9432,11 +9432,21 @@ let runtime_pick_facts_width facts =
     facts
   + max 0 (List.length facts - 1)
 
+(* The kind badge that opens each row. Both are padded to the wider one, so
+   the target column starts at the same cell on a lane row and a model row. *)
+let runtime_pick_lane_badge = "[LANE]"
+let runtime_pick_model_badge = "[MODEL]"
+
+let runtime_pick_badge_cells =
+  max
+    (Masc_tui_message_layout.display_width runtime_pick_lane_badge)
+    (Masc_tui_message_layout.display_width runtime_pick_model_badge)
+
 (* Everything in the row that is not one of the two columns and not the facts:
    the cursor mark, the kind badge, and the two-space gap on each side of the
    route column. The row the renderer draws is
    [cursor ^ badge ^ target ^ "  " ^ route ^ "  " ^ facts]. *)
-let runtime_pick_fixed_cells = 2 + 7 + 2 + 2
+let runtime_pick_fixed_cells = 2 + runtime_pick_badge_cells + 2 + 2
 
 (* What is left for the facts once the chrome and the two column floors are
    paid. At 80 columns that is 15 cells, which one fact fills. *)

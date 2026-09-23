@@ -130,6 +130,7 @@ describe('VerifyQueue', () => {
 
   it('gates 승인 behind operator confirmation of every gate row, then commits the verdict', async () => {
     tasks.value = [makeTask()]
+    mockState.value = { loading: false, error: null, data: requestsResponse([{}]) }
     const { container } = render(html`<${VerifyQueue} />`)
 
     const approve = screen.getByText('✓ 승인 · 통과') as HTMLButtonElement
@@ -142,7 +143,7 @@ describe('VerifyQueue', () => {
 
     fireEvent.click(approve)
     await waitFor(() => {
-      expect(submitVerificationVerdict).toHaveBeenCalledWith({ taskId: 'task-1', decision: 'approve' })
+      expect(submitVerificationVerdict).toHaveBeenCalledWith({ taskId: 'task-1', verificationId: 'vr-0', decision: 'approve' })
     })
     await waitFor(() => {
       expect(container.querySelector('.vq-verdict.approved')).toBeTruthy()
@@ -177,6 +178,7 @@ describe('VerifyQueue', () => {
 
   it('collects a reject reason via chips and commits a reject verdict', async () => {
     tasks.value = [makeTask()]
+    mockState.value = { loading: false, error: null, data: requestsResponse([{}]) }
     const { container } = render(html`<${VerifyQueue} />`)
 
     fireEvent.click(screen.getByText('✕ 반려'))
@@ -189,6 +191,7 @@ describe('VerifyQueue', () => {
     await waitFor(() => {
       expect(submitVerificationVerdict).toHaveBeenCalledWith({
         taskId: 'task-1',
+        verificationId: 'vr-0',
         decision: 'reject',
         reason: '게이트 증거 미충족',
       })
@@ -215,6 +218,7 @@ describe('VerifyQueue', () => {
   it('surfaces mutation errors inline and keeps the task in the queue', async () => {
     submitVerificationVerdict.mockRejectedValue(new Error('Task task-1 is done; operator evidence and verdicts require awaiting_verification'))
     tasks.value = [makeTask()]
+    mockState.value = { loading: false, error: null, data: requestsResponse([{}]) }
     const { container } = render(html`<${VerifyQueue} />`)
 
     confirmAllGateRows(container)
@@ -224,6 +228,22 @@ describe('VerifyQueue', () => {
     })
     expect(container.querySelector('.vq-card')).toBeTruthy()
     expect(container.querySelector('.vq-verdict')).toBeFalsy()
+  })
+
+  // The card with no request row drew nothing from a submission, so there is
+  // no submission for the verdict to name; sending the bare task id would let
+  // the verdict land on whichever submission is current.
+  it('refuses to send a verdict while the task has no loaded request row', async () => {
+    tasks.value = [makeTask()]
+    const { container } = render(html`<${VerifyQueue} />`)
+
+    confirmAllGateRows(container)
+    fireEvent.click(screen.getByText('✓ 승인 · 통과'))
+    await waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain('검증 요청')
+    })
+    expect(submitVerificationVerdict).not.toHaveBeenCalled()
+    expect(container.querySelector('.vq-card')).toBeTruthy()
   })
 
   it('renders evidence projection failure as a failed gate row and bad stat', () => {
@@ -354,7 +374,7 @@ describe('VerifyQueue', () => {
 
     fireEvent.click(approve)
     await waitFor(() => {
-      expect(submitVerificationVerdict).toHaveBeenCalledWith({ taskId: 'task-1', decision: 'approve' })
+      expect(submitVerificationVerdict).toHaveBeenCalledWith({ taskId: 'task-1', verificationId: 'vr-0', decision: 'approve' })
     })
   })
 

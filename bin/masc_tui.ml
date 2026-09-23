@@ -12016,7 +12016,7 @@ let handle_schedule_cancel_key state ~mailbox =
    verification is the route's store rules to say, so the TUI does not
    pre-guess from the row it rendered a moment ago. *)
 let start_verification_verdict state ~mailbox ~(task_id : string)
-    ~(verdict : [ `Approve | `Reject of string ]) =
+    ~(verification_id : string) ~(verdict : [ `Approve | `Reject of string ]) =
   state.verification_verdict_error <- None;
   let verb = match verdict with `Approve -> "approving" | `Reject _ -> "rejecting" in
   add_event state "system" (Printf.sprintf "%s %s" verb task_id);
@@ -12024,7 +12024,10 @@ let start_verification_verdict state ~mailbox ~(task_id : string)
   let port = state.port in
   let run_verdict () =
     let result =
-      match Masc_tui_http.post_verification_verdict ~host ~port ~task_id ~verdict with
+      match
+        Masc_tui_http.post_verification_verdict ~host ~port ~task_id
+          ~verification_id ~verdict
+      with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.verification_verdict_outcome json
     in
@@ -12192,7 +12195,8 @@ let handle_verification_approve_key state ~mailbox =
       match state.verification_verdict_armed with
       | Some armed when String.equal armed task_id ->
           state.verification_verdict_armed <- None;
-          start_verification_verdict state ~mailbox ~task_id ~verdict:`Approve
+          start_verification_verdict state ~mailbox ~task_id
+            ~verification_id:row.Masc.Tui_decode.vr_request_id ~verdict:`Approve
       | Some _ | None ->
           state.verification_verdict_armed <- Some task_id;
           state.verification_verdict_error <- None;
@@ -16774,6 +16778,7 @@ let main
                     else
                       start_verification_verdict state
                         ~mailbox:async_messages ~task_id
+                        ~verification_id:row.Masc.Tui_decode.vr_request_id
                         ~verdict:(`Reject reason))))
   in
   (* Task cancel: same form discipline as the verification reject — the

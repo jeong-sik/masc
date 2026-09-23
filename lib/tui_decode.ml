@@ -896,27 +896,72 @@ let is_invisible_codepoint code =
   || code = 0xFEFF
 ;;
 
+let zero_width_joiner = 0x200D
+let variation_selector_15 = 0xFE0E
+let variation_selector_16 = 0xFE0F
+
+(* The one ZWJ that is not hiding anything: the one holding an emoji
+   together. [Masc_tui_message_layout] already reads it that way when it
+   measures a cluster ("a family joined by ZWJ"), and escaping it everywhere
+   drew 🤷‍♂️ as six ASCII characters on the screen and put them back in the
+   input line on recall. UAX #29 GB11 is the line: a ZWJ between two
+   pictographs joins them and stays; every other ZWJ joins nothing a reader
+   can see, so it is drawn as its escape with the rest of the invisibles.
+   The scalars below sit inside a cluster without ending it -- the two
+   presentation selectors and the skin tones -- so a joined ZWJ is still
+   recognised after them (🧑🏽‍💻). *)
+let continues_pictograph scalar =
+  let code = Uchar.to_int scalar in
+  code = variation_selector_15
+  || code = variation_selector_16
+  || Uucp.Emoji.is_emoji_modifier scalar
+
+let scalar_at text index =
+  if index >= String.length text
+  then None
+  else (
+    let decoded = String.get_utf_8_uchar text index in
+    if Uchar.utf_decode_is_valid decoded
+    then Some (Uchar.utf_decode_uchar decoded)
+    else None)
+
+let opens_pictograph text index =
+  match scalar_at text index with
+  | Some scalar -> Uucp.Emoji.is_extended_pictographic scalar
+  | None -> false
+
 let escape_invisible text =
   let output = Buffer.create (String.length text) in
   let length = String.length text in
-  let rec walk index =
+  let rec walk index ~after_pictograph =
     if index < length
     then (
       let decoded = String.get_utf_8_uchar text index in
       let step = Uchar.utf_decode_length decoded in
       let scalar = Uchar.utf_decode_uchar decoded in
-      if
-        Uchar.utf_decode_is_valid decoded
-        && is_invisible_codepoint (Uchar.to_int scalar)
-      then (
-        Buffer.add_string output
-          (Printf.sprintf "\\u%04X" (Uchar.to_int scalar));
-        walk (index + step))
-      else (
-        Buffer.add_substring output text index step;
-        walk (index + step)))
+      let valid = Uchar.utf_decode_is_valid decoded in
+      let code = Uchar.to_int scalar in
+      let joins_two_pictographs =
+        valid
+        && code = zero_width_joiner
+        && after_pictograph
+        && opens_pictograph text (index + step)
+      in
+      if valid && is_invisible_codepoint code && not joins_two_pictographs
+      then Buffer.add_string output (Printf.sprintf "\\u%04X" code)
+      else Buffer.add_substring output text index step;
+      let after_pictograph =
+        if not valid
+        then false
+        else if Uucp.Emoji.is_extended_pictographic scalar
+        then true
+        else if continues_pictograph scalar || code = zero_width_joiner
+        then after_pictograph
+        else false
+      in
+      walk (index + step) ~after_pictograph)
   in
-  walk 0;
+  walk 0 ~after_pictograph:false;
   Buffer.contents output
 ;;
 

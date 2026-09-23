@@ -4,6 +4,7 @@
 
 ### Changed
 
+- The runtime startup degradation record no longer carries fields that were always empty. It is built only when no default, media-failover or lane reference names a missing runtime, so `dropped_routes`, `dropped_media_failover`, `dropped_lane_candidates` and `dropped_lanes` were always `[]` and `effective_default_runtime_id` always equaled `configured_default_runtime_id`. They leave the record, its JSON and the dashboard decoder; the log line names the default once instead of `configured default "x" -> effective default "x"`, and the dashboard alert reads `default:` (#38074).
 - The runtime failover concept is now named the **Runtime Candidate Order** in
   the TUI: the lane key help and status strings say "candidate order" where
   they said "failover" — the `e` key help and its label on the lane sheet

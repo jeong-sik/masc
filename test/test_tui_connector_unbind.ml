@@ -85,7 +85,8 @@ let test_statuses_split_rebound_and_gone_from_failure () =
   let outcome status = Unbind.outcome_of_status ~status ~refusal:"why" in
   check bool "2xx removed" true (outcome 200 = Unbind.Removed);
   check bool "409 rebound" true (outcome 409 = Unbind.Rebound);
-  check bool "404 already unbound" true (outcome 404 = Unbind.Already_unbound);
+  check bool "404 keeps the server's words, not a claim of already gone" true
+    (outcome 404 = Unbind.Not_found "why");
   check bool "500 failed with the refusal" true
     (outcome 500 = Unbind.Failed "why");
   check bool "401 failed with the refusal" true
@@ -95,26 +96,67 @@ let test_a_partial_result_is_not_reported_as_whole () =
   let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
   let results =
     List.combine targets
-      [ Unbind.Removed; Unbind.Rebound; Unbind.Failed "HTTP 500" ]
+      [ Unbind.Failed "HTTP 500"; Unbind.Rebound; Unbind.Removed ]
   in
-  check string "the summary counts each kind"
-    "unbind all of sangsu: 1 removed, 1 skipped, 1 failed"
+  check string "the summary counts each kind and names the failures"
+    "unbind all of sangsu: 1 removed, 1 kept, 0 not found, 1 failed -- \
+     general (111)"
     (Unbind.summary ~keeper_name:"sangsu" results);
   check bool "a failure is flagged" true (Unbind.any_failed results);
-  check (list string) "one line per binding, with its channel"
-    [ "unbind Discord general (111): removed"
-    ; "unbind Discord 333 (name unknown): skipped: now bound to another \
-       Keeper, left as is"
-    ; "unbind Slack C9 (name unknown): FAILED: HTTP 500"
+  check (list string) "one line per binding, failures last"
+    [ "unbind Slack C9 (name unknown): removed"
+    ; "unbind Discord 333 (name unknown): kept: now bound to another Keeper"
+    ; "unbind Discord general (111): FAILED: HTTP 500"
     ]
-    (List.map Unbind.outcome_line results)
+    (List.map Unbind.outcome_line (Unbind.report_order results))
 
 let test_arm_prompt_names_every_channel () =
   let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
   check string "count, keeper and each label"
     "unbind all armed: press U again to remove 3 bindings of sangsu: general \
      (111), 333 (name unknown), C9 (name unknown)"
-    (Unbind.arm_prompt ~keeper_name:"sangsu" ~confirm_key:"U" targets)
+    (Unbind.arm_prompt ~keeper_name:"sangsu" ~confirm_key:"U" ~unreadable:[]
+       targets)
+
+(* A transport whose binding store the server could not read has unknown
+   bindings. It cannot be a target, and the prompts must not read as if it
+   held none. *)
+let test_an_unreadable_transport_is_named () =
+  let json =
+    `Assoc
+      [ ( "connectors"
+        , `List
+            [ `Assoc
+                [ ("connector_id", `String "slack")
+                ; ("display_name", `String "Slack")
+                ; ("status", `String "connected")
+                ; ("available", `Bool true)
+                ; ("connected", `Bool true)
+                ; ("binding_store_read_ok", `Bool false)
+                ; ("configured_bindings", `List [])
+                ] ] )
+      ; ("total", `Int 1)
+      ; ("active_count", `Int 1)
+      ]
+  in
+  match Reading.decode_connector_snapshot json with
+  | Error reason -> fail reason
+  | Ok snapshot ->
+      let unreadable = Unbind.unreadable_transports snapshot.cs_connectors in
+      check (list string) "the unreadable transport" [ "Slack" ] unreadable;
+      check string "no readable binding is not called none"
+        "unbind all: sangsu has no channel bindings; not included, binding \
+         list unreadable: Slack"
+        (Unbind.nothing_to_unbind ~keeper_name:"sangsu" ~unreadable)
+
+let test_offer_leads_with_the_key () =
+  let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
+  check string "key first, then the channels"
+    "U: also unbind sangsu's 3 channels, or any other key to keep them -- \
+     general (111), 333 (name unknown), C9 (name unknown); not included, \
+     binding list unreadable: Teams"
+    (Unbind.offer_prompt ~keeper_name:"sangsu" ~confirm_key:"U"
+       ~unreadable:[ "Teams" ] targets)
 
 let () =
   run "masc_tui_connector_unbind"
@@ -128,5 +170,8 @@ let () =
         ; test_case "partial result" `Quick
             test_a_partial_result_is_not_reported_as_whole
         ; test_case "arm prompt" `Quick test_arm_prompt_names_every_channel
+        ; test_case "unreadable transport" `Quick
+            test_an_unreadable_transport_is_named
+        ; test_case "pause offer" `Quick test_offer_leads_with_the_key
         ] )
     ]

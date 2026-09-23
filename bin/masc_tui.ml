@@ -15248,11 +15248,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let kind =
              match outcome with
              | Masc_tui_connector_unbind.Failed _ -> "error"
-             | Removed | Rebound | Already_unbound -> "system"
+             | Removed | Rebound | Not_found _ -> "system"
            in
-           report_action state kind
-             (Masc_tui_connector_unbind.outcome_line result))
-        results;
+           add_event state kind (Masc_tui_connector_unbind.outcome_line result))
+        (Masc_tui_connector_unbind.report_order results);
       report_action state
         (if Masc_tui_connector_unbind.any_failed results then "error"
          else "system")
@@ -15287,11 +15286,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            | None -> ()
            | Some keeper_name ->
                state.connector_unbind_offer_pending <- None;
+               let unreadable =
+                 Masc_tui_connector_unbind.unreadable_transports
+                   snapshot.cs_connectors
+               in
                (match
                   Masc_tui_connector_unbind.targets ~keeper_name
                     snapshot.cs_connectors
                 with
-                | [] -> ()
+                | [] -> (
+                    (* No readable binding. An unreadable transport may still
+                       hold some, and saying nothing would read as none. *)
+                    match unreadable with
+                    | [] -> ()
+                    | _ :: _ ->
+                        report_action state "system"
+                          (Masc_tui_connector_unbind.nothing_to_unbind
+                             ~keeper_name ~unreadable))
                 | targets -> (
                     match state.view with
                     | Keepers (Keeper_list | Keeper_detail) ->
@@ -15302,13 +15313,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                           Some (keeper_name, targets);
                         report_action state "system"
                           (Masc_tui_connector_unbind.offer_prompt ~keeper_name
-                             ~confirm_key:"U" targets)
+                             ~confirm_key:"U" ~unreadable targets)
                     | _ ->
                         report_action state "system"
                           (Printf.sprintf
                              "%s still holds %d channel binding%s; U U on its \
                               Channels tab removes them"
-                             keeper_name (List.length targets)
+                             (Masc_tui_ansi.Terminal_text.single_line
+                                keeper_name)
+                             (List.length targets)
                              (if List.length targets = 1 then "" else "s")))))
       | Error detail ->
           state.connectors_error <- Some detail;
@@ -16732,11 +16745,15 @@ let main
         let targets =
           Masc_tui_connector_unbind.targets ~keeper_name snapshot.cs_connectors
         in
+        let unreadable =
+          Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
+        in
         match targets, state.connector_unbind_all_armed with
         | [], _ ->
             state.connector_unbind_all_armed <- None;
             report_action state "system"
-              ("unbind all: " ^ keeper_name ^ " has no channel bindings")
+              (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
+                 ~unreadable)
         | _ :: _, Some (armed_keeper, armed_targets)
           when String.equal armed_keeper keeper_name && armed_targets = targets
           ->
@@ -16747,7 +16764,7 @@ let main
             state.connector_unbind_all_armed <- Some (keeper_name, targets);
             report_action state "system"
               (Masc_tui_connector_unbind.arm_prompt ~keeper_name
-                 ~confirm_key:"U" targets))
+                 ~confirm_key:"U" ~unreadable targets))
   in
   let handle_connector_edit () =
     state.connector_unbind_armed <- None;

@@ -393,7 +393,8 @@ let for_surface = function
                     Masc_tui_types.keeper_detail_tabs))
       ; b Act "o" "logs"
           ~help:"open container logs in Sandbox; Keeper activity elsewhere"
-      ; b Act "U" "runtime" ~help:"pick a runtime candidate order"
+      ; b Act "U" "runtime"
+          ~help:"pick a runtime candidate order (on the Channels tab U is unbind all)"
       ; b Act "Left / Esc" "back"
       ; b Navigate "Home/End" "top/bottom" ~help:"the ends of this tab"
       ]

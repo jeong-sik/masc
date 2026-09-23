@@ -11507,7 +11507,7 @@ def run_keeper_unbind_all_channels_regression(executable: str) -> None:
         if any(path.startswith(CONNECTOR_UNBIND_PATH) for path, _ in requests):
             raise AssertionError(f"the first U sent an unbind: {requests!r}")
         send_and_wait(process, master_fd, output, b"U",
-                      b"unbind all of alpha: 1 removed, 1 skipped, 0 failed")
+                      b"unbind all of alpha: 1 removed, 1 kept, 0 not found, 0 failed")
         sent = sorted(
             (json.loads(body)["channel_id"], json.loads(body)["keeper_name"])
             for path, body in requests
@@ -11564,7 +11564,7 @@ def run_pause_offers_channel_unbind_regression(executable: str) -> None:
                    _slave_fd: int, output: bytearray, _base_path: str) -> None:
         pause_alpha(process, master_fd, output)
         send_and_wait(process, master_fd, output, b"U",
-                      b"unbind all of alpha: 1 removed, 1 skipped, 0 failed")
+                      b"unbind all of alpha: 1 removed, 1 kept, 0 not found, 0 failed")
         if unbinds(taken) != [("111", "alpha"), ("333", "alpha")]:
             raise AssertionError(
                 f"the offer did not send exactly alpha's two bindings: {unbinds(taken)!r}"

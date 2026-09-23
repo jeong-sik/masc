@@ -292,12 +292,18 @@ let test_context_commits_when_memory_store_fails () =
        journal)
 ;;
 
+(* How the answer below gets its working contexts wrong. *)
+type organization_slip =
+  | Refused  (** It organizes no source, so it cannot account for the one pending. *)
+  | Missing  (** It leaves the field out. *)
+
 (* The mirror of the case above: a Memory answer whose working contexts fail
-   the selector still commits its Memory decision on the slot that answered.
-   The pending input stays unorganized for a later pass, and the run record
-   says why. On the live Librarian lane (2026-09-21) one slot answered this
-   way 219 times, and each time the Memory decision was thrown away with it. *)
-let test_memory_commits_when_working_contexts_are_refused () =
+   the selector, or are left out, still commits its Memory decision on the
+   slot that answered. The pending input stays unorganized for a later pass,
+   and the run record says why. On the live Librarian lane (2026-09-21) one
+   slot answered this way 219 times, and each time the Memory decision was
+   thrown away with it. *)
+let test_memory_commits_when_working_contexts_slip slip () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
@@ -312,13 +318,21 @@ let test_memory_commits_when_working_contexts_are_refused () =
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir (prompt_root ());
   Prompt_defaults.init ();
-  let keeper_id = "librarian-refused-context" in
+  let keeper_id =
+    match slip with
+    | Refused -> "librarian-refused-context"
+    | Missing -> "librarian-missing-context"
+  in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  (* [selection_output] organizes no source, so it cannot account for the one
-     pending source below. *)
+  let answer =
+    match slip, selection_output with
+    | Refused, output -> output
+    | Missing, `Assoc fields -> `Assoc (List.remove_assoc "working_contexts" fields)
+    | Missing, _ -> fail "selection fixture must be an object"
+  in
   let answering =
     Fixture.start_server ~sw ~net ~clock
-      (Fixture.Reply (Fixture.openai_response selection_output))
+      (Fixture.Reply (Fixture.openai_response answer))
   in
   let successor =
     Fixture.start_server ~sw ~net ~clock
@@ -326,7 +340,7 @@ let test_memory_commits_when_working_contexts_are_refused () =
   in
   let snapshot =
     Fixture.resolver_snapshot
-      ~source:"librarian-refused-context"
+      ~source:keeper_id
       [ { Fixture.id = "librarian-answering"; base_url = answering.base_url }
       ; { Fixture.id = "librarian-successor"; base_url = successor.base_url }
       ]
@@ -386,12 +400,17 @@ let test_memory_commits_when_working_contexts_are_refused () =
   match run with
   | Some { status = Exact_lane_run_registry.Completed { output; _ }; _ } ->
     let write = Yojson.Safe.Util.member "context_write" output in
-    check string "the run record names the refusal" "answer_refused"
-      (Yojson.Safe.Util.(member "status" write |> to_string));
-    check bool "and carries the selector's reason" true
-      (contains
-         ~needle:"working context must account for every source exactly once"
-         (Yojson.Safe.Util.(member "detail" write |> to_string)))
+    let status = Yojson.Safe.Util.(member "status" write |> to_string) in
+    (match slip with
+     | Refused ->
+       check string "the run record names the refusal" "answer_refused" status;
+       check bool "and carries the selector's reason" true
+         (contains
+            ~needle:"working context must account for every source exactly once"
+            (Yojson.Safe.Util.(member "detail" write |> to_string)))
+     | Missing ->
+       check string "the run record names the missing organization" "answer_missing"
+         status)
   | Some { status = Exact_lane_run_registry.Running; _ }
   | Some { status = Exact_lane_run_registry.Completion_persistence_failed _; _ } ->
     fail "the Librarian run did not complete"
@@ -566,7 +585,11 @@ let () =
         ; test_case
             "Memory commits when its working contexts are refused"
             `Quick
-            test_memory_commits_when_working_contexts_are_refused
+            (test_memory_commits_when_working_contexts_slip Refused)
+        ; test_case
+            "Memory commits when its working contexts are left out"
+            `Quick
+            (test_memory_commits_when_working_contexts_slip Missing)
         ; test_case "excluded last slot preserves domain failure" `Quick
             test_excluded_last_slot_preserves_domain_failure
         ; test_case "an empty ladder reports nothing" `Quick

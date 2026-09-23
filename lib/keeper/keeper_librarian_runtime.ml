@@ -710,19 +710,17 @@ type accepted =
 
 (* A continuity pass must produce both Memory disposition and its saved
    working state before either may be published. Ordinary Memory extraction
-   has no continuity obligation and still accepts an absent working state.
-   The accepted answer carries the pair, so publication has no case for a
-   continuity pass without one. *)
+   has no continuity obligation and does not read the working state, so a
+   slip in it cannot refuse the Memory decision. The accepted answer carries
+   the pair, so publication has no case for a continuity pass without one. *)
 let validate_selection ?continuity selected_input output =
   let open Result.Syntax in
   let* selection = Keeper_librarian.selection_of_json_result selected_input output in
-  match continuity, selection.Keeper_librarian.working_state with
-  | None, _ -> Ok { selection; continuity_answer = Memory_only }
-  | Some prepared, Some working_state ->
-    Ok { selection; continuity_answer = Continuity { prepared; working_state } }
-  | Some _, None ->
-    Error (Keeper_librarian.Working_state_invalid
-      "continuity requires a nonblank working_state")
+  match continuity with
+  | None -> Ok { selection; continuity_answer = Memory_only }
+  | Some prepared ->
+    let+ working_state = Keeper_librarian.continuity_working_state_of_json_result output in
+    { selection; continuity_answer = Continuity { prepared; working_state } }
 ;;
 
 (* The accepted answer of each pass. A context-only answer carries no
@@ -1191,7 +1189,9 @@ let run_best_effort
              review, so its write status is the only evidence of the skip. *)
           let context =
             match !observed_context_review, !context_write with
-            | Some review, write ->
+            | Some review,
+              ((Not_attempted | Answer_missing | Answer_refused _ | Withheld
+               | Outcome_unconfirmed | Committed _ | Write_failed _) as write) ->
               [ "context_write", context_write_json write
               ; "context_review", Keeper_librarian_context_review.observation_to_yojson review ]
             | None, ((Answer_missing | Answer_refused _) as write) ->
@@ -1342,25 +1342,23 @@ let run_best_effort
              | Memory_answer { selection; continuity_answer } ->
              (* A continuity range owns no pending input; only a Memory pass
                 without one organizes the working context. An organization the
-                answer left out or got wrong is skipped for this pass; the
-                Memory decision below is kept. *)
-             (match continuity_answer with
-              | Memory_only ->
-                (match selection.working_contexts with
-                 | Keeper_librarian.Working_contexts_organized pockets ->
-                   organize_working_context pockets
-                 | Keeper_librarian.Working_contexts_missing ->
-                   context_write := Answer_missing;
-                   Log.Keeper.warn
-                     ~keeper_name:keeper_id
-                     "memory os librarian kept the memory answer; it named no working_contexts, so pending input was not organized"
-                 | Keeper_librarian.Working_contexts_invalid detail ->
-                   context_write := Answer_refused detail;
-                   Log.Keeper.warn
-                     ~keeper_name:keeper_id
-                     "memory os librarian kept the memory answer; its working_contexts were refused, so pending input was not organized: %s"
-                     detail)
-              | Continuity _ -> ());
+                answer left out or got wrong is skipped for this pass and
+                recorded on the run; the Memory decision below is kept. *)
+             (match selection.working_contexts, continuity_answer with
+              | Keeper_librarian.Working_contexts_organized pockets, Memory_only ->
+                organize_working_context pockets
+              | Keeper_librarian.Working_contexts_organized _, Continuity _ -> ()
+              | Keeper_librarian.Working_contexts_missing, (Memory_only | Continuity _) ->
+                context_write := Answer_missing;
+                Log.Keeper.warn
+                  ~keeper_name:keeper_id
+                  "memory os librarian kept the memory answer without working_contexts"
+              | Keeper_librarian.Working_contexts_invalid detail, (Memory_only | Continuity _) ->
+                context_write := Answer_refused detail;
+                Log.Keeper.warn
+                  ~keeper_name:keeper_id
+                  "memory os librarian kept the memory answer and refused its working_contexts: %s"
+                  detail);
              (* The decision goes to the store, not the whole set it projects
                 to. [selection.facts] is that projection, taken against the
                 snapshot this pass read before its provider turn; writing it

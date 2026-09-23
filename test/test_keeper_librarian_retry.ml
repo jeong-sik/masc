@@ -1080,6 +1080,46 @@ let test_a_working_context_slip_keeps_the_memory_decision () =
     fail "an absent organization was not reported as missing"
 ;;
 
+(* The working state belongs to a continuity pass. A Memory answer's parse
+   does not read it, so a blank or non-text value cannot refuse the Memory
+   decision; the continuity reader alone requires nonblank text. *)
+let test_only_a_continuity_pass_reads_the_working_state () =
+  let memory_answer working_state =
+    `Assoc
+      [ "working_contexts", `List []
+      ; Librarian.wire_field_new_claims, `List []
+      ; Librarian.wire_field_dropped, `List [ dropped_json "m2" ]
+      ; Librarian.wire_field_working_state, working_state
+      ]
+  in
+  List.iter
+    (fun (label, working_state) ->
+       match parse (memory_answer working_state) with
+       | Ok selection ->
+         check (list string) (label ^ ": the drop of B stands") [ current_b_id ]
+           (List.map (fun (d : Memory.dropped_statement) -> d.memory_id) selection.dropped)
+       | Error error ->
+         failf "%s: the Memory answer was refused: %s" label
+           (Librarian.parse_error_to_string error))
+    [ "blank", `String ""; "non-text", `Int 5; "null", `Null ];
+  List.iter
+    (fun (label, answer) ->
+       match Librarian.continuity_working_state_of_json_result answer with
+       | Error (Librarian.Working_state_invalid _) -> ()
+       | Error error ->
+         failf "%s: wrong continuity refusal: %s" label
+           (Librarian.parse_error_to_string error)
+       | Ok text -> failf "%s: continuity accepted %S" label text)
+    [ "blank", memory_answer (`String " ")
+    ; "null", memory_answer `Null
+    ; "missing", `Assoc [ Librarian.wire_field_new_claims, `List [] ]
+    ];
+  match Librarian.continuity_working_state_of_json_result (memory_answer (`String "s")) with
+  | Ok text -> check string "a continuity pass keeps its state" "s" text
+  | Error error ->
+    failf "a nonblank working state was refused: %s" (Librarian.parse_error_to_string error)
+;;
+
 let test_dropped_statements_validate () =
   (match
      parse (selection_json ~dropped:[ dropped_json "missing" ] ())
@@ -2042,6 +2082,8 @@ let () =
             test_a_selection_without_the_dropped_field_rejects
         ; test_case "a working-context slip keeps the Memory decision" `Quick
             test_a_working_context_slip_keeps_the_memory_decision
+        ; test_case "only a continuity pass reads the working state" `Quick
+            test_only_a_continuity_pass_reads_the_working_state
         ; test_case "dropped statements validate" `Quick
             test_dropped_statements_validate
         ; test_case "strict JSON boundary" `Quick test_strict_json_boundary

@@ -784,6 +784,98 @@ let test_exact_recovery_restart () =
     | None -> fail "recovery resolution evidence was not persisted")
 ;;
 
+(* A Gate continuation whose resume was refused as full cannot continue: the
+   continuation may only resume that session, and resending the resume meets
+   the same refusal. The record ends it and frees the Keeper for a new
+   session. *)
+let test_vendor_session_full_ends_the_continuation_and_frees_the_session () =
+  with_workspace "masc-official-client-store-full-" (fun base_path ->
+    let keeper_name = "full" in
+    let runtime_id = "claude-code.default" in
+    let claimed =
+      claim_new ~base_path ~keeper_name ~client_kind:Claude_code ~runtime_id
+        ~owner_epoch ~at:1.0
+    in
+    let active =
+      mark_active ~base_path ~keeper_name ~expected:claimed ~session_id:"session-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let starting =
+      mark_turn_starting ~base_path ~keeper_name ~expected:active
+        ~session_id:"session-1" ~updated_at:3.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_started ~base_path ~keeper_name ~expected:starting
+        ~session_id:"session-1" ~turn_id:"turn-1" ~turn_count:starting.turn_count
+        ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle ~base_path ~keeper_name ~expected:inflight ~session_id:"session-1"
+        ~turn_id:"turn-1" ~updated_at:5.0
+      |> Result.get_ok
+    in
+    let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
+      { client_kind = Claude_code; runtime_id; session_id = "session-1"
+      ; turn_id = "turn-1"; tool_surface_sha256 = empty_surface
+      ; frame = Keeper_repetition_snapshot.empty }
+    in
+    check bool "the Gate session admits its continuation before the refusal" true
+      (validate_continuation ~checkpoint ~expected:(Some settled)
+         ~client_kind:Claude_code ~runtime_id ~tool_surface_sha256:empty_surface
+       = Ok ());
+    let resumed_claim =
+      claim ~base_path ~keeper_name ~expected:(Some settled) ~client_kind:Claude_code
+        ~owner_epoch ~runtime_id ~tool_surface_sha256:empty_surface ~updated_at:6.0
+      |> Result.get_ok
+    in
+    let full =
+      require_recovery ~base_path ~keeper_name ~expected:resumed_claim
+        ~failure:Vendor_session_full ~detail:"the resumed session is full"
+        ~required_at:7.0
+      |> Result.get_ok
+    in
+    let reloaded =
+      match load ~base_path ~keeper_name with
+      | Ok (Some state) -> state
+      | Ok None | Error _ -> fail "the full-session record did not load back"
+    in
+    let recovery_id =
+      match reloaded.phase with
+      | Recovery_required { failure = Vendor_session_full; recovery_id; _ } -> recovery_id
+      | Recovery_required _ | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        fail "the full-session record did not keep its failure"
+    in
+    check bool "the continuation is refused once its session is full" true
+      (Result.is_error
+         (validate_continuation ~checkpoint ~expected:(Some reloaded)
+            ~client_kind:Claude_code ~runtime_id ~tool_surface_sha256:empty_surface));
+    (match
+       resolve_recovery ~base_path ~keeper_name ~expected:full ~recovery_id
+         ~resolution:Retry_previous ~resolved_by:"operator" ~resolved_at:8.0
+     with
+     | Error Retry_previous_unavailable -> ()
+     | Error _ | Ok _ -> fail "a full session offered to resend the same resume");
+    let plan =
+      plan_claim ~expected:(Some reloaded) ~client_kind:Claude_code ~runtime_id
+      |> Result.get_ok
+    in
+    check bool "the next ordinary turn starts a new session" true
+      (Option.is_none plan.previous_settlement);
+    check int "the new session restarts the ordinal" 1 plan.turn_count;
+    let fresh =
+      claim ~base_path ~keeper_name ~expected:(Some reloaded) ~client_kind:Claude_code
+        ~owner_epoch ~runtime_id ~tool_surface_sha256:empty_surface ~updated_at:9.0
+      |> Result.get_ok
+    in
+    match fresh.phase with
+    | Start { previous_settlement = None; _ } -> ()
+    | Start _ | Ready | Active _ | Turn_inflight _ | Recovery_required _ | Settled _ ->
+      fail "the claim after a full session was not a fresh start")
+;;
+
 let test_retry_previous_restores_exact_settlement () =
   with_workspace "masc-official-client-store-retry-" (fun base_path ->
     let keeper_name = "retry" in
@@ -1577,6 +1669,8 @@ let () =
             `Quick
             test_restart_recovery_and_transient_release
         ; test_case "exact recovery restart" `Quick test_exact_recovery_restart
+        ; test_case "vendor session full ends the continuation and frees the session" `Quick
+            test_vendor_session_full_ends_the_continuation_and_frees_the_session
         ; test_case
             "retry previous restores exact settlement"
             `Quick

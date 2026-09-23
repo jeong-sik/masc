@@ -441,6 +441,25 @@ let recovery_failure_of_client_error = function
   | Runtime_claude_code.Stopped_by_host _ -> Session_store.Protocol_failed
 ;;
 
+(* A Gate continuation may only resume the session it was captured in. When
+   that session refuses the resume before any response or tool activity, the
+   vendor's own conversation is full: the resume prompt is the same at every
+   masc capacity, and no fresh start may carry the continuation. That is not an
+   input rejection an operator can retry -- [Retry_previous] would send the
+   same resume -- so it is recorded [Vendor_session_full]: the continuation
+   ends for good ({!Keeper_direct_gate_continuation.session_full} reads it) and
+   the next ordinary turn supersedes it with a fresh session. *)
+let recovery_failure_of_attempt ~session_mode ~gate_continuation error =
+  match session_mode, gate_continuation, error with
+  | ( Runtime_claude_code.Resume _
+    , true
+    , Runtime_claude_code.Context_window_exceeded
+        { tool_effect_attempted = false; response_emitted = false; _ } ) ->
+    Session_store.Vendor_session_full
+  | (Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), _ ->
+    recovery_failure_of_client_error error
+;;
+
 (* The CLI frame carries Anthropic exclusive counts; the shared constructor
    produces the canonical inclusive api_usage without changing its scope. *)
 let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
@@ -469,6 +488,7 @@ module For_testing = struct
   let bounded_probe_config = bounded_probe_config
   let host_stop_turn_identity = host_stop_turn_identity
   let recovery_failure_of_client_error = recovery_failure_of_client_error
+  let recovery_failure_of_attempt = recovery_failure_of_attempt
 
   let start_seed_projection ~capacity_bytes ?carried_front_seed ?librarian_front ?on_carried_front
         ~turn_start ?on_model_input_window_observation ~keeper_name ~runtime_id messages
@@ -1156,7 +1176,12 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                 Keeper_provider_attempt_effect.No_effect_observed
             | _ -> ());
            if not !state_persistence_failed
-           then recovery_failure := recovery_failure_of_client_error error;
+           then
+             recovery_failure :=
+               recovery_failure_of_attempt
+                 ~session_mode
+                 ~gate_continuation:(Option.is_some official_client_continuation)
+                 error;
            Error (claude_error_to_core_error error)
          | Ok turn ->
            recovery_failure := Session_store.Protocol_failed;

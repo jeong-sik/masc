@@ -1093,9 +1093,60 @@ let test_keeper_shrinks_history_after_statusless_context_error
            (String_util.contains_substring
               (In_channel.with_open_bin first_system_marker In_channel.input_all)
               "masc.official-client-canonical-context.v1");
-         match (load_state base_path).phase with
-         | Recovery_required _ -> ()
-         | _ -> fail "a Gate resume refused for size did not keep its session for recovery")
+         let checkpoint = match official_client_continuation with
+           | Some checkpoint -> checkpoint
+           | None -> fail "native Gate seed produced no continuation" in
+         let full = load_state base_path in
+         let recovery_id = match full.phase with
+           | Recovery_required
+               { failure = Keeper_official_client_session_store.Vendor_session_full
+               ; recovery_id
+               ; _
+               } -> recovery_id
+           | _ -> fail "a Gate resume refused for size did not record Vendor_session_full" in
+         (* The operation fails with this cause: the Gate cannot continue in
+            any session other than the full one. *)
+         (match Keeper_direct_gate_continuation.session_full_cause ~checkpoint
+             ~approval_id:"approval-full" (Some full) with
+          | Some (Keeper_request_failure.Gate_session_full
+              { approval_id; runtime_id; session_id; recovery_id = recorded }) ->
+            check string "the failure names the Gate" "approval-full" approval_id;
+            check string "the failure names the runtime" checkpoint.runtime_id runtime_id;
+            check string "the failure names the full session" checkpoint.session_id session_id;
+            check string "the failure names the session record" recovery_id recorded
+          | Some _ | None -> fail "a full Gate session did not end the operation with its cause");
+         check bool "the full session no longer admits the continuation" true
+           (Result.is_error
+              (Keeper_official_client_session_store.validate_continuation ~checkpoint
+                 ~expected:(Some full) ~client_kind:checkpoint.client_kind
+                 ~runtime_id:checkpoint.runtime_id
+                 ~tool_surface_sha256:checkpoint.tool_surface_sha256));
+         (match Eio_main.run (fun _ ->
+             Keeper_official_client_session_store.resolve_recovery ~base_path
+               ~keeper_name:"claude-fixture" ~expected:full ~recovery_id
+               ~resolution:Keeper_official_client_session_store.Retry_previous
+               ~resolved_by:"test"
+               ~resolved_at:(Unix.gettimeofday ())) with
+          | Error Keeper_official_client_session_store.Retry_previous_unavailable -> ()
+          | Error _ | Ok _ -> fail "a full session offered to resend the same resume");
+         (* The next ordinary turn is not held for an operator: it supersedes
+            the record and starts a new session. *)
+         with_fixture
+           [ Emit (assistant ~turn_id:"turn-fresh" "MASC_CLAUDE_FRESH")
+           ; Emit (result ~turn_id:"turn-fresh" "MASC_CLAUDE_FRESH") ]
+           (fun cli_path ->
+              match run_keeper_turn ~base_path ~cli_path ~goal:"AFTER_FULL" () with
+              | Ok turn ->
+                check string "the next turn answers" "MASC_CLAUDE_FRESH"
+                  (keeper_response_text turn)
+              | Error error -> fail (Agent_core.Error.to_string error));
+         let fresh = load_state base_path in
+         check int "the new session restarts the ordinal" 1 fresh.turn_count;
+         match fresh.phase with
+         | Settled { turn_id = "turn-fresh"; session_id } ->
+           check bool "the new session is not the full one" false
+             (String.equal session_id checkpoint.session_id)
+         | _ -> fail "the turn after a full Gate session did not settle a new session")
        else (
        List.iter (fun marker ->
          let scoped_path = In_channel.with_open_bin (marker ^ ".path") In_channel.input_all in
@@ -2692,7 +2743,7 @@ let () =
             "Agent Core checkpoint starts official-client turn"
             `Quick
             test_agent_core_checkpoint_starts_official_client_turn
-        ; test_case "native Gate resume refused for size ends the turn in its session" `Quick
+        ; test_case "native Gate resume refused as full ends the Gate and frees the session" `Quick
             (test_keeper_shrinks_history_after_statusless_context_error
                ~native_gate:true
                ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])

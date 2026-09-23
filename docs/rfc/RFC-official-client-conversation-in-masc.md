@@ -220,6 +220,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 - **usage** (`runtime_claude_code.ml:98-118`): 턴 레코드는 가장 최근 요청의 usage 를 `per_request` 로 적는다(#36725).
 - **원래 세션이 필요한 이어가기**
   - Gate 이어가기(`validate_continuation`, `keeper_official_client_session_store.mli:184-188`)
+    - 그 원래 세션이 가득 차서 resume 이 응답·도구 실행 전에 거절되면, 세션은 `Vendor_session_full` 로 기록된다. Gate operation 은 `Gate_session_full` 원인으로 실패하고, 다음 일반 턴은 새 세션을 연다(`Keeper_direct_gate_continuation.session_full`, #38086).
   - direct checkpoint 이어가기(`keeper_direct_checkpoint_continuation.ml:18-27`). 사이에 끼인 steering 턴도 같은 세션에서 돌아야 한다.
   - `Retry_previous` 복구는 대화를 그대로 잇는 것이 계약이다(`keeper_official_client_session_store.ml:1219-1224`).
 - **Codex** (`keeper_codex_runtime.ml:591-595`): resume 규칙이 같다. usage 는 `tokenUsage.last` 다.

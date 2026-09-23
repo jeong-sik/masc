@@ -186,6 +186,12 @@ let every_cause =
   ; Krf.Turn_continuation_unpersisted
       { stage = Krf.Checkpoint_retain; detail = "no receipt" }
   ; Krf.User_row_unpersisted { detail = "append failed" }
+  ; Krf.Gate_session_full
+      { approval_id = "approval-1"
+      ; runtime_id = "claude_code"
+      ; session_id = "session-1"
+      ; recovery_id = "00000000-0000-4000-8000-000000000001"
+      }
   ; Krf.Reply_contract_rejected { field = Krf.Reply_payload; detail = "not an object" }
   ; Krf.Reply_contract_rejected { field = Krf.Turn_outcome; detail = "missing" }
   ; Krf.Reply_contract_rejected { field = Krf.Turn_ref; detail = "invalid" }

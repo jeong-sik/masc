@@ -301,6 +301,12 @@ status: reference
   `official_client_recovery_required_keeper_count/names`로 표시한다. 이는 운영자
   조치가 필요한 fleet health 저하 사유이며, 다른 차단 사유가 없으면 `degraded`로
   표시한다. 실행 fiber의 생존·실행 가능 여부를 바꾸거나 세션 복구를 승인하지 않는다.
+  경계: `vendor_session_full`은 이 상태가 아니다. Gate 이어가기가 원래 세션을
+  resume 했는데 응답이나 도구 실행 전에 세션이 가득 찼다고 거절된 기록이다. 그
+  Gate는 다른 세션에서 이어갈 수 없어서 operation이 `Gate_session_full` 원인으로
+  실패하고, 다음 일반 턴은 이 기록을 넘기고 새 세션을 연다. `Retry_previous`는
+  같은 resume을 다시 보내게 되므로 쓸 수 없다.
+  → [Keeper_direct_gate_continuation.session_full](../../lib/keeper/keeper_direct_gate_continuation.mli)
 
 **Usage Scope**
 : Runtime이 보고한 토큰 수의 집계 범위(`Runtime_usage_scope`). `per_request`는

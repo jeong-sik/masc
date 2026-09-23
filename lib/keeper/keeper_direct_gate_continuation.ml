@@ -443,6 +443,44 @@ let record_completed ~config ~keeper_name admission =
     Keeper_approval_queue.ensure_settled_continuation_chat_projection
       ~base_path:config.Workspace.base_path ~keeper_name ~resolution:admission.resolution
 
+(* The durable session is the evidence: the adapter records
+   [Vendor_session_full] only for the continuation's own resume, and only the
+   session that captured this Gate can carry it. Once that session is full the
+   continuation cannot run anywhere, so the caller ends the operation for good
+   rather than yielding it back to a Gate that would resume into the same
+   refusal. *)
+let session_full_cause ~(checkpoint : Semantic.official_client_checkpoint) ~approval_id
+    (expected : Native.t option) =
+  match expected with
+  | Some
+      { Native.phase =
+          Native.Recovery_required
+            { Native.failure = Native.Vendor_session_full; recovery_id; _ }
+      ; client_kind
+      ; runtime_id
+      ; _
+      }
+    when client_kind = checkpoint.client_kind
+         && String.equal runtime_id checkpoint.runtime_id ->
+    Some
+      (Keeper_request_failure.Gate_session_full
+         { approval_id; runtime_id; session_id = checkpoint.session_id; recovery_id })
+  | Some
+      { Native.phase =
+          ( Native.Ready | Native.Start _ | Native.Active _ | Native.Turn_inflight _
+          | Native.Recovery_required _ | Native.Settled _ )
+      ; _
+      }
+  | None -> None
+
+let session_full ~config ~keeper_name admission =
+  match admission.authority with
+  | Agent_core _ -> Ok None
+  | Official_client checkpoint ->
+    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name in
+    Ok (session_full_cause ~checkpoint
+      ~approval_id:admission.selected.obligation.approval_id expected)
+
 let finish_run ~config ~keeper_name ~operation_id admission run_result =
   match admission.authority, run_result with
   | Agent_core _, Error _ -> run_result

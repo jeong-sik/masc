@@ -86,7 +86,9 @@ let frame_response ~incarnation ~steps =
     match Dos_lane.capture_with_identity () with
     | Ok capture -> `OK, frame_json ~known capture
     | Error Dos_lane.No_machine -> `OK, `Assoc [ ("loaded", `Bool false) ]
-    | Error ((Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _) as e) ->
+    | Error
+        ((Dos_lane.Invalid_request _ | Dos_lane.Unreadable _ | Dos_lane.Held_by _
+         | Dos_lane.Guest_fault _) as e) ->
       `Internal_server_error, error_json (Dos_lane.error_to_string e))
 ;;
 

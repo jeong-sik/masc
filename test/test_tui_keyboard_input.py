@@ -14067,6 +14067,8 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # to this file, and editing this file puts the whole walk inside the
         # gate's twelve-minute step alongside every other suite the change
         # selects. The row is on Activity's status line.
+        read_available(master_fd, output)
+        activity_start = len(output)
         send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         wait_for_output(
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
@@ -14083,7 +14085,16 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # the observation is held but hidden. The default view folds the call
         # into a turn chunk: the running turn names its in-flight call under
         # the keeper's number.
-        acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+        # The walk is already on Activity; another Tab would leave it.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            "(1 row \u00b7 2 events held)".encode(),
+            start=activity_start,
+            timeout=10.0,
+        )
+        acting = bytes(output[activity_start:])
         for needle, what in (
             ("(1 row \u00b7 2 events held)".encode(), "the shown rows and held events"),
             (b"alpha", "the keeper that acted"),

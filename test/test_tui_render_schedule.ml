@@ -395,7 +395,7 @@ let test_overview_team_block_sits_between_panel_and_backlog () =
   check int "40-row frame is exact" 40
     (overview_frame_rows live);
   let short =
-    Schedule.allocate_overview ~terminal_rows:18
+    Schedule.allocate_overview ~terminal_rows:17
       ~attention_count:6 ~event_count:0 ~team_count:13 ~task_count:20
       ~has_task_error:false
   in

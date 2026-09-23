@@ -1,7 +1,9 @@
 name = "masc_schedule_cancel"
 description = """
 Cancel a scheduled or due request before execution.
-A running or finished one is refused with current_status and last_wake."""
+A running or finished one is refused with current_status and last_wake.
+You are recorded as the canceller. You may cancel a schedule you made or one
+that wakes you; any other is refused with error_kind not_schedule_owner."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.
@@ -15,17 +17,6 @@ name = "schedule_id"
 type = "string"
 required = true
 description = "Schedule id to cancel."
-
-[[params]]
-name = "cancelled_by_id"
-type = "string"
-required = true
-description = "Human or system actor id cancelling the schedule."
-
-[[params]]
-name = "cancelled_by_kind"
-type = "string"
-enum = ["human_operator", "automated_actor", "system"]
 
 [[params]]
 name = "reason"

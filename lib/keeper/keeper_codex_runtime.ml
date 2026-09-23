@@ -513,6 +513,25 @@ let recovery_failure_of_client_error = function
     Keeper_official_client_session_store.Protocol_failed
 ;;
 
+(* A Gate continuation may only resume the thread it was captured in. An
+   overflow there after a tool effect cannot be shrink-retried and the thread
+   cannot take the continuation again, so it is recorded [Vendor_session_full]
+   like the Claude Code lane: the Gate operation fails for good, the effect
+   stays on the attempt's evidence, and the next ordinary turn starts fresh.
+   An observation-free overflow keeps [Input_rejected Bootstrap_floor_exceeded]:
+   this lane resends its canonical context on resume, so the same-thread
+   shrink retry ([resolve_input_rejected_for_shrink_retry]) can still fit. *)
+let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
+  match thread_mode, gate_continuation, error with
+  | ( Runtime_codex_app_server.Resume _
+    , true
+    , Runtime_codex_app_server.Context_window_exceeded { tool_effect_attempted = true; _ } ) ->
+    Keeper_official_client_session_store.Vendor_session_full
+      Keeper_official_client_session_store.Activity_observed
+  | (Runtime_codex_app_server.Start | Runtime_codex_app_server.Resume _), (true | false), _ ->
+    recovery_failure_of_client_error error
+;;
+
 (* Codex ships its own file tools and neither it nor MASC can switch them
    off -- [permissions_profile_of_posture] says as much. Under [Native_read]
    they run in a read-only sandbox, so the model holds a working [Write] and a
@@ -1129,7 +1148,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        (match error with
         | Runtime_codex_app_server.Turn_input_write_failed _ -> observe_transport_uncertain ()
         | _ -> ());
-       recovery_failure := recovery_failure_of_client_error error;
+       recovery_failure :=
+         recovery_failure_of_attempt ~thread_mode
+           ~gate_continuation:(Option.is_some official_client_continuation) error;
        Error (codex_error_to_core_error error)
      | Ok turn ->
        recovery_failure := Keeper_official_client_session_store.Protocol_failed;
@@ -1460,4 +1481,5 @@ module For_testing = struct
   let native_posture_note = native_posture_note
   let codex_error_to_core_error = codex_error_to_core_error
   let recovery_failure_of_client_error = recovery_failure_of_client_error
+  let recovery_failure_of_attempt = recovery_failure_of_attempt
 end

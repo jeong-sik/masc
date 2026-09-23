@@ -61,27 +61,34 @@ type login_lane =
 val config_dir : config:Workspace.config -> keeper_name:string -> string
 val container_config_dir : container_masc_dir:string -> keeper_name:string -> string
 
+val default_hostname : string
+(** The GitHub host a login, a status read and a token read address when the
+    caller names none. *)
+
 val secret_files_of_base_path : base_path:string -> keeper_name:string -> string list
-
-val stored_token
-  :  base_path:string
-  -> keeper_name:string
-  -> hostname:string
-  -> (string, string) result
-(** The token this Keeper's gh CLI holds for [hostname], read from its
-    hosts.yml at the moment of asking.
-
-    masc keeps no second copy: gh rewrites that file on login and logout, so
-    a copy would answer with a credential the Keeper no longer has. Callers
-    that need a bearer for a GitHub-backed provider come here rather than to
-    the secret projection. An absent or logged-out identity is an error
-    naming what to do, not an empty string. *)
 (** Paths of the GitHub CLI files that can hold credentials ([hosts.yml])
-    for callers that hold only [base_path] (default cluster). Intended as
-    [additional_secret_files] input for
+    for callers that hold only [base_path]. The directory is the one
+    {!config_dir} names for this process's cluster, which is where a login
+    writes. Intended as [additional_secret_files] input for
     {!Keeper_secret_redaction.snapshot_with_additional_secret_files};
     missing files are ignored there, so the paths are safe to pass
     unconditionally. *)
+
+val stored_token
+  :  config:Workspace.config
+  -> keeper_name:string
+  -> hostname:string
+  -> (string, string) result
+(** The token this host's copy of the Keeper's gh CLI holds for [hostname],
+    read from the hosts.yml under {!config_dir} at the moment of asking.
+
+    masc keeps no second copy: gh rewrites that file on login and logout, so
+    a copy would answer with a credential the Keeper no longer has. This reads
+    the host directory only; a caller that does not already know the Keeper's
+    sandbox profile goes through {!Keeper_github_login_lane.stored_token},
+    which refuses a Remote_ssh Keeper whose identity lives on its endpoint.
+    An absent or logged-out identity is an error naming what to do, not an
+    empty string. *)
 val ensure_config_dir : config:Workspace.config -> keeper_name:string -> (string, string) result
 val overlay_config_env : config_dir:string -> string array -> string array
 val projected_config_dir : string array -> string option
@@ -105,18 +112,6 @@ val current_tool_identity_revision :
   config:Workspace.config -> keeper_name:string -> (string, string) result
 (** SHA-256 identity of the exact files a new tool snapshot would receive.
     The digest is comparison authority only and never exposes token bytes. *)
-
-(** Projects the deterministic Keeper path without provisioning it. Missing
-    state and a safe directory without a stored token in [hosts.yml] are
-    [Unconfigured]; malformed or unsafe state is a typed error rather than
-    being collapsed into absence. *)
-val runtime_env_for_tool :
-  config:Workspace.config ->
-  keeper_name:string ->
-  string array ->
-  (string array * tool_identity_state * (unit -> unit), string) result
-(** Local tools receive a per-dispatch copy-on-write snapshot and an explicit
-    cleanup capability. They never receive the operator-owned identity path. *)
 
 (** Stable-directory variant for keeper-lifetime containers: the mount is the
     live config directory (read-only), not a per-turn snapshot, so identity
@@ -142,11 +137,12 @@ val refresh_git_credential_config :
 val existing_config_dir :
   config:Workspace.config -> keeper_name:string -> (string option, string) result
 
-(** Docker counterpart of [runtime_env_for_tool]. Each dispatch receives an
-    immutable read-only snapshot, including when the Keeper is unconfigured,
-    plus an explicit cleanup capability. A host login that happens while a
-    tool is running cannot change that tool's credential authority. Malformed
-    state remains a typed error. *)
+(** Per-dispatch identity for a Docker tool. Missing state and a safe
+    directory without a stored token in [hosts.yml] are [Unconfigured]. Each
+    dispatch receives an immutable read-only snapshot, including when the
+    Keeper is unconfigured, plus an explicit cleanup capability. A host login
+    that happens while a tool is running cannot change that tool's credential
+    authority. Malformed state remains a typed error. *)
 val docker_args_for_tool :
   config:Workspace.config ->
   keeper_name:string ->
@@ -250,5 +246,9 @@ val run_cli_set_token :
   int
 (** Run token login on [lane] with [token] and print the resulting observation. *)
 
-val run_cli_status : config:Workspace.config -> keeper_name:string -> hostname:string -> int
+val run_cli_status : observe:(unit -> (observation, string) result) -> int
+(** Print one observation, read by [observe] -- the Keeper's lane, so a
+    Remote_ssh Keeper answers from its endpoint. Answers 0 only when it
+    could be read. *)
+
 val run_cli_logout : config:Workspace.config -> keeper_name:string -> hostname:string -> int

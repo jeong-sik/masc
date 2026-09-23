@@ -673,6 +673,7 @@ let test_json_shape () =
 (* A Keeper directory that cannot be listed: the snapshot says so instead of
    reading as an empty Keeper list. *)
 let test_unreadable_keeper_list_is_visible () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
   let base_path = temp_base_path () in
   register base_path;
   let config = Masc.Workspace.default_config base_path in
@@ -686,12 +687,76 @@ let test_unreadable_keeper_list_is_visible () =
   in
   (match snapshot.keepers with
    | Pulls.Keepers_list_failed _ -> ()
-   | Pulls.Keepers_listed _ -> failf "a missing Keeper directory must not read as an empty Keeper list"
+   | Pulls.Keepers_listed _ -> failf "an unreadable Keeper directory must not read as an empty Keeper list"
    | Pulls.Keepers_not_listed -> failf "a refresh must list the Keepers");
   let open Yojson.Safe.Util in
   let keepers = Pulls.snapshot_to_yojson snapshot |> member "keepers" in
   Alcotest.(check string) "state" "list_failed" (keepers |> member "state" |> to_string);
   Alcotest.(check bool) "the reason is carried" true (keepers |> member "reason" |> to_string <> "")
+
+(* [.masc] is read-only and holds no [keepers] directory, so listing the
+   Keepers fails to create that directory and raises. The refresh still
+   returns and publishes the repositories it read. *)
+let test_a_raising_keeper_list_does_not_drop_the_refresh () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_base_path () in
+  register base_path;
+  let config = Masc.Workspace.default_config base_path in
+  let masc_dir = Masc.Workspace.masc_root_dir config in
+  Alcotest.(check bool) "fixture: no keepers directory yet" false
+    (Sys.file_exists (Masc.Workspace.keepers_runtime_dir config));
+  Unix.chmod masc_dir 0o500;
+  let snapshot =
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod masc_dir 0o700)
+      (fun () ->
+        (match Masc.Keeper_meta_store.keeper_names_result config with
+         | _ -> failf "the fixture must make the Keeper list read raise"
+         | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+         | exception _ -> ());
+        Pulls.refresh
+          ~now
+          ~http_post:never_called
+          ~config
+          ~previous:(snapshot_with ~keepers:(Pulls.Keepers_listed [ "edgar" ]) []))
+  in
+  (match snapshot.keepers with
+   | Pulls.Keepers_list_failed reason ->
+     Alcotest.(check bool) "the reason names the raise" true
+       (String.starts_with ~prefix:"keeper list read raised" reason)
+   | Pulls.Keepers_listed _ -> failf "the previous Keeper list must not stand after a raise"
+   | Pulls.Keepers_not_listed -> failf "a refresh must list the Keepers");
+  Alcotest.(check bool) "the rows are this refresh's" true
+    (Option.is_none snapshot.repositories_error);
+  match pulls_by_id snapshot with
+  | [ ("masc", Pulls.Pulls_not_read); ("mirror", Pulls.Pulls_not_github) ] -> ()
+  | _ -> failf "the registered repositories must be published beside the failed Keeper list"
+
+(* The repository list cannot be read: the previous rows stand, and the
+   Keeper list is still read for this refresh. *)
+let test_unread_repositories_still_list_keepers () =
+  let base_path = temp_base_path () in
+  write_file (Config_dir_resolver.repositories_toml_path ~base_path) "not = [toml";
+  let previous =
+    snapshot_with ~keepers:Pulls.Keepers_not_listed [ pull ~number:1 ~author:(Some "edgar") ]
+  in
+  let snapshot =
+    Pulls.refresh
+      ~now
+      ~http_post:never_called
+      ~config:(Masc.Workspace.default_config base_path)
+      ~previous
+  in
+  Alcotest.(check bool) "the rows are marked old" true (Option.is_some snapshot.repositories_error);
+  Alcotest.(check int) "the previous rows stand" 1 (List.length snapshot.repositories);
+  match snapshot.keepers with
+  | Pulls.Keepers_listed [] -> ()
+  | Pulls.Keepers_listed _ -> failf "this workspace persists no Keeper"
+  | Pulls.Keepers_list_failed reason -> failf "the Keeper list must be read: %s" reason
+  | Pulls.Keepers_not_listed -> failf "the previous Keeper state must not stand"
 
 (* While the list is unread, a pull whose author is a Keeper's name is not
    called that Keeper's; the snapshot state is what says the join is off. *)
@@ -815,6 +880,14 @@ let () =
             "unreadable keeper list is visible"
             `Quick
             test_unreadable_keeper_list_is_visible
+        ; Alcotest.test_case
+            "a raising keeper list does not drop the refresh"
+            `Quick
+            test_a_raising_keeper_list_does_not_drop_the_refresh
+        ; Alcotest.test_case
+            "unread repositories still list keepers"
+            `Quick
+            test_unread_repositories_still_list_keepers
         ; Alcotest.test_case
             "unlisted keepers join nothing"
             `Quick

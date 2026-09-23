@@ -551,9 +551,15 @@ let is_token_rejected = function
   | Pulls_failed { failure = Token_rejected; _ } -> true
   | Pulls_not_read | Pulls_not_github | Pulls_read _ | Pulls_failed _ -> false
 
-let keeper_names_of_result = function
+(* Listing the Keepers creates their directory when it is missing, and a
+   failed mkdir raises. The raise is this list's failure, not the refresh's:
+   the GitHub reads beside it still publish. *)
+let list_keepers config =
+  match Keeper_meta_store.keeper_names_result config with
   | Ok names -> Keepers_listed names
   | Error reason -> Keepers_list_failed reason
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception exn -> Keepers_list_failed ("keeper list read raised " ^ Printexc.to_string exn)
 
 (* Exact match: git records the author name as the runtime exported it, and
    a Keeper name that differs in case is another name. *)
@@ -565,6 +571,7 @@ let keeper_of_author ~keepers pull =
 let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
   let base_path = config.base_path in
   let now_s = now () in
+  let keepers = list_keepers config in
   let credential = resolve_reader ~config in
   let reader =
     match credential with
@@ -576,7 +583,7 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
     { reader
     ; repositories_error = Some ("repository list unread: " ^ reason)
     ; repositories = previous.repositories
-    ; keepers = keeper_names_of_result (Keeper_meta_store.keeper_names_result config)
+    ; keepers
     ; rejected_token_digest = previous.rejected_token_digest
     }
   | Ok repos ->
@@ -619,7 +626,7 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
     { reader
     ; repositories_error = None
     ; repositories
-    ; keepers = keeper_names_of_result (Keeper_meta_store.keeper_names_result config)
+    ; keepers
     ; rejected_token_digest
     }
 

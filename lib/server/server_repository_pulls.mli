@@ -126,8 +126,9 @@ type keeper_names =
       (** The persisted Keeper names ({!Keeper_meta_store.keeper_names_result}),
           read once per refresh. *)
   | Keepers_list_failed of string
-      (** The Keeper list could not be read. No pull request is then said to
-          be a Keeper's or not. *)
+      (** The Keeper list could not be read, or reading it raised (the
+          exception text). No pull request is then said to be a Keeper's or
+          not, and the GitHub reads of the same refresh still publish. *)
 
 type repository_entry =
   { repository_id : string
@@ -194,7 +195,7 @@ val read_repository :
 val refresh :
   now:(unit -> float) -> http_post:http_post -> config:Workspace.config -> previous:snapshot -> snapshot
 (** One full read: resolve the reader, load the registered repositories and
-    read each GitHub one, then list the persisted Keeper names once. A repository whose previous answer was
+    read each GitHub one. The persisted Keeper names are listed once, first. A repository whose previous answer was
     [Token_rejected] for the same token, or [Rate_limited] with a reset time
     still ahead of [now], keeps that answer and is not fetched. When the
     reader is not ready, nothing is fetched and
@@ -206,7 +207,9 @@ val keeper_of_author : keepers:string list -> pull_request -> string option
 (** [Some author] when the head commit's author name is exactly one of
     [keepers] (case counts); [None] otherwise. A Keeper leaves the branch
     after opening a pull request, so the join is by who wrote the last
-    commit, not by which checkout has the branch. *)
+    commit, not by which checkout has the branch. The result is for display
+    only and is not an identity for authority: any committer can set the
+    author name. *)
 
 val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 (** Each pull carries ["author"] and ["keeper"] (string or [null]) and

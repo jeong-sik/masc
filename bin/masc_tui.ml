@@ -4884,6 +4884,14 @@ let launch_connectors_load state ~mailbox =
         enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
   end
 
+(* A binding write changed what the server holds. A load already in flight
+   may have read before the write landed, so it cannot stand in for this
+   read: mark one more to run when it answers, and the pane does not keep
+   showing bindings that are gone. *)
+let reload_connectors_after_write state ~mailbox =
+  if state.connectors_inflight then state.connectors_reload_after_inflight <- true
+  else launch_connectors_load state ~mailbox
+
 (* One fiber sends the unbinds in order and reports them together: each
    binding's answer is its own line, so a partial success cannot read as a
    whole one. *)
@@ -15240,9 +15248,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         (if Masc_tui_connector_unbind.any_failed results then "error"
          else "system")
         (Masc_tui_connector_unbind.summary ~keeper_name results);
-      launch_connectors_load state ~mailbox
+      reload_connectors_after_write state ~mailbox
   | Connectors_loaded result ->
       state.connectors_inflight <- false;
+      if state.connectors_reload_after_inflight then begin
+        state.connectors_reload_after_inflight <- false;
+        launch_connectors_load state ~mailbox
+      end;
       (match result with
       | Ok snapshot ->
           let previous_id =
@@ -16552,7 +16564,8 @@ let main
                       state.connector_unbind_armed <- None;
                       report_action state "system"
                         (action ^ ": ok (" ^ connector ^ ")");
-                      launch_connectors_load state ~mailbox:async_messages
+                      reload_connectors_after_write state
+                        ~mailbox:async_messages
                   | Error detail ->
                       report_action state "error" (action ^ ": " ^ detail))))))
   in
@@ -16637,7 +16650,8 @@ let main
                     | Ok _ ->
                       report_action state "system"
                         ("unbind: removed " ^ label);
-                      launch_connectors_load state ~mailbox:async_messages
+                      reload_connectors_after_write state
+                        ~mailbox:async_messages
                     | Error detail ->
                       report_action state "error" ("unbind: " ^ detail)
                   end else begin

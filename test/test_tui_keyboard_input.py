@@ -11456,7 +11456,9 @@ CONNECTOR_NAMES_PATH = "/api/v1/gate/connector/names"
 CONNECTOR_UNBIND_PATH = "/api/v1/gate/connector/unbind"
 
 
-def connector_unbind_all_fixtures() -> HttpFixtures:
+def connector_unbind_all_fixtures(
+    requests: HttpRequests | None = None,
+) -> HttpFixtures:
     """alpha holds two Discord channels, beta one; one of alpha's is rebound.
 
     The name directory knows 111 only, so the other channel has to say its
@@ -11464,27 +11466,39 @@ def connector_unbind_all_fixtures() -> HttpFixtures:
     the channel now names another Keeper -- so the result has a skip in it.
     """
     fixtures = keeper_runtime_http_fixtures()
-    fixtures[CONNECTORS_PATH] = (
-        200,
-        {
-            "connectors": [
-                {
-                    "connector_id": "discord",
-                    "display_name": "Discord",
-                    "status": "connected",
-                    "available": True,
-                    "connected": True,
-                    "configured_bindings": [
-                        {"channel_id": "111", "keeper_name": "alpha"},
-                        {"channel_id": "444", "keeper_name": "beta"},
-                        {"channel_id": "333", "keeper_name": "alpha"},
-                    ],
-                }
-            ],
-            "total": 1,
-            "active_count": 1,
-        },
-    )
+
+    def connectors() -> HttpResponse:
+        # With [requests], a removed binding leaves the list once its unbind
+        # was answered 200 -- the reading the post-unbind reload must show.
+        removed = {
+            json.loads(body)["channel_id"]
+            for path, body in (requests or [])
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        } - {"333"}
+        bindings = [
+            {"channel_id": channel, "keeper_name": keeper}
+            for channel, keeper in (("111", "alpha"), ("444", "beta"), ("333", "alpha"))
+            if channel not in removed
+        ]
+        return (
+            200,
+            {
+                "connectors": [
+                    {
+                        "connector_id": "discord",
+                        "display_name": "Discord",
+                        "status": "connected",
+                        "available": True,
+                        "connected": True,
+                        "configured_bindings": bindings,
+                    }
+                ],
+                "total": 1,
+                "active_count": 1,
+            },
+        )
+
+    fixtures[CONNECTORS_PATH] = connectors
     fixtures[CONNECTOR_NAMES_PATH] = (
         200,
         {
@@ -11550,13 +11564,17 @@ def run_keeper_unbind_all_channels_regression(executable: str) -> None:
             raise AssertionError(
                 f"unbind all did not send exactly alpha's two bindings: {sent!r}"
             )
+        # The pane reads the bindings again after the write: 111 is gone and
+        # 333, kept by the 409, is still alpha's.
+        wait_for_output(process, master_fd, output, b"1 here / 2 total",
+                        start=0, timeout=5.0)
         os.write(master_fd, b"q")
 
     run_terminal_scenario(
         executable,
         description="U U on the Channels tab unbinds every binding of the Keeper",
         interact=interact,
-        http_fixtures=connector_unbind_all_fixtures(),
+        http_fixtures=connector_unbind_all_fixtures(requests),
         http_requests=requests,
     )
 

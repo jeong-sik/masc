@@ -130,7 +130,10 @@ readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
 # 1c75fbc = ocaml-dos #28: a guest reading the BIOS ring head itself counts as
 # asking for a key, so a game that polls the ring (삼국지3's copy protection
 # and name entry) settles instead of spending every step budget.
-readonly OCAML_DOS_SHA="1c75fbcff4aa215c6a4df342468028264f6d1faa"
+# 49bc232 = ocaml-dos #29: a mode set reloads the VGA DAC and the ROM font is
+# served in IBM bit order, so 삼국지3's copy-protection prompt is visible and
+# its letters are no longer mirrored.
+readonly OCAML_DOS_SHA="49bc23217cfc9ed12acc04eef1f1562603c4a5cd"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

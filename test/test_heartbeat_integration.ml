@@ -958,7 +958,7 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun sw ->
-      Eio_context.set_switch sw;
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -1250,7 +1250,7 @@ let test_direct_stop_ignores_a_dead_librarian_executor () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun keeper_sw ->
-      Eio_context.set_switch keeper_sw;
+      Masc_test_deps.with_server_root_switch ~sw:keeper_sw @@ fun () ->
       Masc.Keeper_process_switch.set keeper_sw;
       install_owner_inventory_exn ~sw:keeper_sw config;
       ensure_owner_meta_exn config meta;
@@ -1757,7 +1757,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
-  Eio_context.set_switch sw;
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir "shutdown-supersession" in
   Fun.protect
     ~finally:(fun () ->
@@ -2464,7 +2464,7 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
-  Eio_context.set_switch sw;
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir "update-turn-in-flight" in
   Fun.protect
     ~finally:(fun () ->
@@ -2608,7 +2608,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       seed_keeper_sandbox_profile ~base_dir name;
       Eio.Switch.run @@ fun root_sw ->
-      Eio_context.set_switch root_sw;
+      Masc_test_deps.with_server_root_switch ~sw:root_sw @@ fun () ->
       install_owner_inventory_exn ~sw:root_sw config;
       Memory_lane.init ~sw:root_sw;
       let clock = Eio.Stdenv.clock env in
@@ -4969,7 +4969,7 @@ let test_running_librarian_does_not_block_start_keepalive () =
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
       Eio.Switch.run @@ fun sw ->
-      Eio_context.set_switch sw;
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       Memory_lane.init ~sw;
       let librarian_started, resolve_librarian_started = Eio.Promise.create () in
       let librarian_release, resolve_librarian_release = Eio.Promise.create () in
@@ -5113,7 +5113,7 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
            (KSM.Turn_failed { consecutive = 1 }));
       resolve_done_for_test original (`Crashed "provider runtime error");
       Eio.Switch.run @@ fun sw ->
-      Eio_context.set_switch sw;
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -5430,7 +5430,7 @@ let test_field_only_update_honors_toml_declared_profile () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
-  Eio_context.set_switch sw;
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir "update-toml-profile" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)

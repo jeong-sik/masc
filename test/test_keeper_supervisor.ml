@@ -579,10 +579,7 @@ let publication_recovery_registry env sw config =
     fail
       (Fs_compat.Publication_recovery.registry_error_to_string error)
 
-(* The supervisor's context is server-owned, and a Keeper lane forks only on
-   the server root switch, so the fixture installs [sw] as that root. *)
 let keeper_runtime_context env sw config : _ Keeper_types_profile.context =
-  Eio_context.set_switch sw;
   { config
   ; agent_name = supervisor_agent_name
   ; sw
@@ -615,6 +612,7 @@ let test_declarative_boot_materializes_instructions () =
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   install_owner_inventory_exn ~sw config;
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let ctx = keeper_runtime_context env sw config in
   Fun.protect
     ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
@@ -644,6 +642,7 @@ let test_declarative_boot_allows_empty_goal_links () =
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   install_owner_inventory_exn ~sw config;
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let ctx = keeper_runtime_context env sw config in
   Fun.protect
     ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
@@ -677,6 +676,7 @@ let test_declarative_boot_rematerializes_incompatible_meta () =
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   install_owner_inventory_exn ~sw config;
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let ctx = keeper_runtime_context env sw config in
   let meta_path = Keeper_types_profile.keeper_meta_path config name in
   let base_meta = make_meta name in
@@ -813,6 +813,7 @@ let test_declarative_boot_records_typed_invalid_config_failure () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let ctx = keeper_runtime_context env sw config in
   check bool "invalid configured keeper remains discoverable" true
     (List.mem name (Keeper_meta_store.configured_keeper_names config));
@@ -850,6 +851,7 @@ let test_reconcile_materializes_configured_keeper_without_meta () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let ctx = keeper_runtime_context env sw config in
   let materialized = ref [] in
   let supervised = ref [] in
@@ -886,6 +888,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let ctx = keeper_runtime_context env sw config in
   let materialized = ref [] in
   let supervised = ref [] in
@@ -926,6 +929,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let ctx = keeper_runtime_context env sw config in
   let base_meta = make_meta name in
   let created =
@@ -980,6 +984,7 @@ let test_reconcile_materialize_failure_continues_with_metric () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let ctx = keeper_runtime_context env sw config in
   let supervised = ref [] in
   let metric = Keeper_metrics.(to_string KeeperMaterializationFailures) in
@@ -1020,6 +1025,7 @@ let test_reconcile_supervise_exception_continues () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let ctx = keeper_runtime_context env sw config in
   let supervised = ref [] in
   let metric = Keeper_metrics.(to_string ReconcileFailures) in
@@ -1062,6 +1068,7 @@ let test_supervise_keepalive_retains_sweep_owned_entries () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let ctx = keeper_runtime_context env sw config in
   let launched = ref [] in
   let publish_lifecycle ~event:_ _name _detail () = () in
@@ -1243,6 +1250,7 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
              ^ Chat_operation.state_to_string state));
        Eio.Fiber.yield ();
        check int "unready runner starts no operation child" 0 !execution_count;
+       Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
        let ctx = keeper_runtime_context env sw config in
        let publish_lifecycle ~event:_ _name _detail () = () in
        let launch_supervised_fiber
@@ -1526,6 +1534,7 @@ let test_sweep_reports_pending_hitl_approval () =
       in
       approval_id := Some id;
       let baseline = latest_log_seq () in
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
       let ctx = keeper_runtime_context env sw config in
       sweep_and_recover_no_materialize ctx;
       let expected =
@@ -1824,7 +1833,7 @@ let test_supervised_stop_joins_board_attention_worker () =
   ensure_fs env;
   ensure_test_runtime ();
   Eio.Switch.run @@ fun sw ->
-  Eio_context.set_switch sw;
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -1892,7 +1901,7 @@ let test_supervised_stop_does_not_wait_for_librarian () =
   ensure_fs env;
   ensure_test_runtime ();
   Eio.Switch.run @@ fun sw ->
-  Eio_context.set_switch sw;
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->

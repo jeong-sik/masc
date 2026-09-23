@@ -76,6 +76,15 @@ val show : t -> string
 val to_yojson : t -> Yojson.Safe.t
 val code : t -> int
 
+val auth_error_code_token_expired : string
+(** The [auth_error_code] a 401 body carries for an expired bearer. Named so a
+    client that reads the code compares against the value the server writes
+    rather than a second spelling of it. *)
+
+val auth_error_code_insufficient_role : string
+(** The [auth_error_code] a 403 body carries when the bearer is valid but its
+    role does not reach the permission the route asks for. *)
+
 val dashboard_auth_error_code : t -> string option
 (** [dashboard_auth_error_code err] maps a typed error to the stable
     dashboard auth-error-code string consumed by the dashboard shell

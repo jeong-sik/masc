@@ -4,12 +4,17 @@ module Credential = Masc_tui_credential
 
 let has needle line = String_util.string_contains_substring ~needle line
 
+let reasons = [ Credential.Expired; Credential.Insufficient_role; Credential.Rejected ]
+
+let every_case =
+  List.concat_map (fun sent -> List.map (fun r -> (sent, r)) reasons) [ true; false ]
+
 (* The two clauses must not be readable as each other: an operator who already
    presented a bearer needs to hear that it was rejected, not to be told to
    provide one they have. *)
 let test_causes_do_not_overlap () =
-  let absent = Credential.refusal_cause ~credential_sent:false in
-  let refused = Credential.refusal_cause ~credential_sent:true in
+  let absent = Credential.refusal_cause ~credential_sent:false Credential.Rejected in
+  let refused = Credential.refusal_cause ~credential_sent:true Credential.Rejected in
   check bool "absent says it holds none" true (has "holds no operator token" absent);
   check bool "absent does not say refused" false (has "was refused" absent);
   check bool "refused says it was refused" true (has "was refused" refused);
@@ -25,21 +30,21 @@ let test_one_name_reaches_the_command () =
   check bool "the remedy carries the command" true
     (has Credential.login_command Credential.remedy);
   List.iter
-    (fun credential_sent ->
-      let clause = Credential.refusal_cause ~credential_sent in
+    (fun (credential_sent, reason) ->
+      let clause = Credential.refusal_cause ~credential_sent reason in
       check bool "the cause names this agent" true (has Credential.agent_name clause))
-    [ true; false ]
+    every_case
 
 (* Callers with no context of their own get cause and remedy together; callers
    that add their own sentence take the two halves apart. Both must hold. *)
 let test_refusal_is_cause_and_remedy () =
   List.iter
-    (fun credential_sent ->
-      let whole = Credential.refusal ~credential_sent in
+    (fun (credential_sent, reason) ->
+      let whole = Credential.refusal ~credential_sent reason in
       check bool "the whole carries its cause" true
-        (has (Credential.refusal_cause ~credential_sent) whole);
+        (has (Credential.refusal_cause ~credential_sent reason) whole);
       check bool "the whole carries the remedy" true (has Credential.remedy whole))
-    [ true; false ]
+    every_case
 
 (* Clauses, not sentences: a caller places them mid-sentence, so a capital or a
    trailing period would read as a break in its own line. *)
@@ -52,10 +57,49 @@ let test_clauses_compose () =
         (String.length clause > 0
          && Char.equal clause.[0] (Char.uppercase_ascii clause.[0])
          && Char.lowercase_ascii clause.[0] <> clause.[0]))
-    [ ("the absent cause", Credential.refusal_cause ~credential_sent:false)
-    ; ("the refused cause", Credential.refusal_cause ~credential_sent:true)
-    ; ("the remedy", Credential.remedy)
+    (("the remedy", Credential.remedy)
+     :: List.map
+          (fun (credential_sent, reason) ->
+            ("a cause", Credential.refusal_cause ~credential_sent reason))
+          every_case)
+
+(* The server's typed code is what tells an expired bearer from a rejected one.
+   The codes are compared against the constants the server writes, so a rename
+   on one side cannot leave the other matching a spelling nobody sends. *)
+let test_the_server_reason_comes_from_the_typed_code () =
+  let body code = Printf.sprintf {|{"error":"x","auth_error_code":%S}|} code in
+  check bool "an expired code is Expired" true
+    (Credential.server_reason_of_body (body Masc_error.auth_error_code_token_expired)
+     = Credential.Expired);
+  check bool "an insufficient role is its own reason" true
+    (Credential.server_reason_of_body
+       (body Masc_error.auth_error_code_insufficient_role)
+     = Credential.Insufficient_role);
+  List.iter
+    (fun (label, raw) ->
+      check bool (label ^ " is a plain refusal") true
+        (Credential.server_reason_of_body raw = Credential.Rejected))
+    [ ("another code", body "invalid_token")
+    ; ("no code", {|{"error":"x"}|})
+    ; ("a code that is not a string", {|{"auth_error_code":1}|})
+    ; ("a body that is not JSON", "forbidden")
+    ; ("a JSON value that is not an object", {|"token_expired"|})
     ]
+
+(* Each reason says something different, and none of them contradicts sending a
+   bearer; without one the reason is not consulted. *)
+let test_each_reason_reads_as_itself () =
+  let sent = Credential.refusal_cause ~credential_sent:true in
+  check bool "expired says expired" true (has "has expired" (sent Credential.Expired));
+  check bool "a role refusal names the role" true
+    (has "lacks the role" (sent Credential.Insufficient_role));
+  check bool "the rest is a refusal" true (has "was refused" (sent Credential.Rejected));
+  List.iter
+    (fun reason ->
+      check string "no bearer ignores the reason"
+        (Credential.refusal_cause ~credential_sent:false Credential.Rejected)
+        (Credential.refusal_cause ~credential_sent:false reason))
+    reasons
 
 (* The environment wins so one run can be pointed at another credential, and
    the workspace file is next because that is where masc login put it. *)
@@ -197,6 +241,10 @@ let () =
         ; test_case "a whole refusal is cause and remedy" `Quick
             test_refusal_is_cause_and_remedy
         ; test_case "the clauses compose" `Quick test_clauses_compose
+        ; test_case "the server reason comes from the typed code" `Quick
+            test_the_server_reason_comes_from_the_typed_code
+        ; test_case "each reason reads as itself" `Quick
+            test_each_reason_reads_as_itself
         ; test_case "the plan prefers the environment" `Quick
             test_plan_prefers_the_environment
         ; test_case "minting is only into a workspace that demands one" `Quick

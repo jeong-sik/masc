@@ -21,16 +21,27 @@ val self_mint_expiry_hours : int
     session left running overnight; shorter than forever, which would leave an
     admin secret on disk that nothing retires. *)
 
-val refusal_cause : credential_sent:bool -> string
+type server_reason =
+  | Expired  (** The bearer was known and has expired. *)
+  | Insufficient_role
+      (** The bearer was accepted but its role does not reach this route. *)
+  | Rejected  (** Any other refusal, including one whose body names no code. *)
+
+val server_reason_of_body : string -> server_reason
+(** The server's reason, read from the [auth_error_code] of a 401/403 body and
+    compared against the codes the server writes ({!Masc_error}). A body that
+    is not JSON, or carries no code this client acts on, is {!Rejected}. *)
+
+val refusal_cause : credential_sent:bool -> server_reason -> string
 (** Why the server refused, as a lowercase clause a caller can place in its own
     sentence. [credential_sent] is whether the request carried a bearer at all:
-    without one the operator has none to present, with one the server rejected
-    what it was given. Only the first is fixed by providing a token. *)
+    without one the operator has none to present and the reason is not
+    consulted; with one, the clause says what the server found wrong with it. *)
 
 val remedy : string
-(** The action that clears either refusal, as a lowercase clause. *)
+(** The action that clears any of these refusals, as a lowercase clause. *)
 
-val refusal : credential_sent:bool -> string
+val refusal : credential_sent:bool -> server_reason -> string
 (** {!refusal_cause} and {!remedy} as one clause, for callers with no context
     of their own to add. *)
 

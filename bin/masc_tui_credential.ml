@@ -30,21 +30,62 @@ let login_command =
    next start, so crossing it costs the operator nothing. *)
 let self_mint_expiry_hours = 24 * 30
 
+(* What the server said about the bearer it refused, read from the typed
+   [auth_error_code] its 401/403 body carries. One sentence for every refusal
+   sent an operator whose token had simply expired to look for a broken
+   credential elsewhere -- on 2026-09-23 a Keeper's GitHub identity view read
+   as a GitHub account problem. Only the two codes that change what the
+   operator should believe are told apart; every other code, and a body with
+   none, is the plain refusal it always was. *)
+type server_reason =
+  | Expired
+  | Insufficient_role
+  | Rejected
+
+let server_reason_of_body body =
+  let of_code code =
+    if String.equal code Masc_error.auth_error_code_token_expired then Expired
+    else if String.equal code Masc_error.auth_error_code_insufficient_role then
+      Insufficient_role
+    else Rejected
+  in
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> (
+      match List.assoc_opt "auth_error_code" fields with
+      | Some (`String code) -> of_code code
+      | Some _ | None -> Rejected)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Rejected
+  | exception Yojson.Json_error _ -> Rejected
+
 (* A refusal names two situations and only one of them is fixed by providing a
    token. This client finds the bearer masc login left in the workspace, so it
    usually does present one, and then "you have no token" is both false and
-   advice the operator has already followed. *)
-let refusal_cause ~credential_sent =
-  if credential_sent then
-    Printf.sprintf
-      "the operator token this %s presented was refused" agent_name
-  else Printf.sprintf "this %s holds no operator token" agent_name
+   advice the operator has already followed. The server's reason only means
+   something when a bearer was sent: with none there is nothing for it to have
+   judged. *)
+let refusal_cause ~credential_sent reason =
+  if not credential_sent then
+    Printf.sprintf "this %s holds no operator token" agent_name
+  else
+    match reason with
+    | Expired ->
+        Printf.sprintf "the operator token this %s presented has expired"
+          agent_name
+    | Insufficient_role ->
+        Printf.sprintf
+          "the operator token this %s presented lacks the role this request \
+           needs"
+          agent_name
+    | Rejected ->
+        Printf.sprintf "the operator token this %s presented was refused"
+          agent_name
 
 let remedy =
   Printf.sprintf "run '%s' and restart %s" login_command agent_name
 
-let refusal ~credential_sent =
-  Printf.sprintf "%s — %s" (refusal_cause ~credential_sent) remedy
+let refusal ~credential_sent reason =
+  Printf.sprintf "%s — %s" (refusal_cause ~credential_sent reason) remedy
 
 (* Which bearer this client should carry, decided from three facts and nothing
    else, so the decision can be read and tested apart from the file and network

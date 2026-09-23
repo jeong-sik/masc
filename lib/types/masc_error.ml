@@ -303,11 +303,14 @@ let code = function
    variant trips Warning 8 here instead of silently falling through.
    [SameOriginBlocked] is a distinct typed producer outcome; this mapping
    therefore cannot drift when a human-readable error message changes. *)
+let auth_error_code_token_expired = "token_expired"
+let auth_error_code_insufficient_role = "insufficient_role"
+
 let dashboard_auth_error_code : t -> string option = function
   | Auth (Auth_error.InvalidToken _) -> Some "invalid_token"
-  | Auth (Auth_error.TokenExpired _) -> Some "token_expired"
+  | Auth (Auth_error.TokenExpired _) -> Some auth_error_code_token_expired
   | Auth Auth_error.SameOriginBlocked -> Some "same_origin_blocked"
-  | Auth (Auth_error.Forbidden _) -> Some "insufficient_role"
+  | Auth (Auth_error.Forbidden _) -> Some auth_error_code_insufficient_role
   | Auth (Auth_error.Unauthorized { reason; _ }) ->
       Some (Auth_error.unauthorized_reason_to_string reason)
   | Task _ | Agent _ | System _ | RateLimitExceeded _ | CacheError _ ->

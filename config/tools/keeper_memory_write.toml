@@ -4,6 +4,8 @@ Record a durable claim for later turns.
 
 memory_id identifies exact claim bytes: identical writes reuse its ID, even after retraction. A repeated ID is not a duplicate and needs no cleanup. Receipts distinguish inserted/reobserved.
 
+Memory is for thoughts, decisions and state worth remembering. When a new claim replaces your own earlier claim of the same kind (e.g. a progress or position snapshot), pass that claim's memory_id as supersedes instead of writing another copy. Do not write the same kind of snapshot again without superseding the previous one.
+
 Keep task sequencing and operating constraints in typed stores, not memory prose. Writes carry typed provenance and report failures. source_path binds recall to unchanged source bytes. For a derived conclusion, pass rule_id and premise_ids; one complete support set must remain current. For Board evidence, pass board_post_id and optional board_comment_id. Board evidence cannot combine with source_path or derivation."""
 additional_properties = false
 
@@ -39,6 +41,11 @@ unique_items = true
 description = "Exact memory_id values supporting a derived conclusion. Must be paired with rule_id."
 
 [[params]]
+name = "supersedes"
+type = "string"
+description = "memory_id of your own earlier claim that this one replaces. It is removed in the same commit; nothing is written if it is not one of your current claims."
+
+[[params]]
 name = "board_post_id"
 type = "string"
 description = "The Board post the claim was read from (the post_id the Board tools return). Only for observations, not for derivations or source_path claims."
@@ -56,6 +63,7 @@ key_constraints = [
   "Do not use for transient scratch notes.",
   "A source-bound claim is discarded when its source bytes change or become unreadable.",
   "A derived claim cannot use source_path and is automatically retracted when no complete support set remains current.",
+  "supersedes names one of your own current claims written with this tool; it cannot combine with source_path.",
 ]
 details_markdown = "Writes an observed or derived claim into the Memory OS fact store. An ordinary-current receipt returns memory_id, identity_disposition (inserted or reobserved), and a bounded basis summary (kind and proof_count for derived facts). Exact proof identities remain available through memory search. A source-bound receipt instead returns source_path and source_sha256 and is not eligible as a derived premise in this slice. For a derived claim, pass the rule identity and exact ordinary-current premise memory ids; Memory OS maintains the least supported fixed point."
 examples = ["title='region' content='The deployment region is eu-west-1.' source_path='config/deploy.env'", "content='The rollout is blocked.' rule_id='blocked_when_dependency_fails' premise_ids=['sha256:...']"]

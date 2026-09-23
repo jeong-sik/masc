@@ -3243,7 +3243,7 @@ let test_exception_after_durable_advance_stops_before_successor () =
                   ~before_advance:(fun ~failed ~next ->
                     let failed, failure = flow_execution_failure failed in
                     (match failure.EO.cause with
-                     | EO.Completion_failed -> ()
+                     | EO.Completion_failed _ -> ()
                      | _ ->
                        fail
                          "advance callback did not receive the typed completion failure");

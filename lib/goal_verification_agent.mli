@@ -66,8 +66,9 @@ module For_testing : sig
   (** Reconciles or re-arms only currently-Verifying Goals through
       authoritative, locked reads. A goal that fails reconciliation lands in
       [unreconciled] and does not stop the other goals from being collected.
-      Pure read: the row and the WARN line for a skipped scan, and the ERROR
-      line for each unreconciled goal, are written by the scan that calls it
+      It writes the Goal store when it reconciles or re-arms a proof, and
+      writes no log: the row and the WARN line for a skipped scan, and the
+      ERROR line for each unreconciled goal, come from the scan that calls it
       ({!drain_once}, the daemon). *)
 
   val process_pending_work :

@@ -3,7 +3,7 @@
 type retry_class =
   | Rate_limited
   | Hard_quota
-  | Capacity_backpressure
+  | Provider_capacity
   | Empty_completion of { stop_reason : Llm_provider.Types.stop_reason }
   | Server_error
   | Network_transient
@@ -114,10 +114,9 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   match internal with
   | Keeper_internal_error.Resumable_cli_session _ -> rotate Resumable_cli_session
   | Keeper_internal_error.Capacity_backpressure { retry_after; _ } ->
-    observe_retry ?retry_after:(retry_after_of_capacity_hint retry_after) Capacity_backpressure
+    observe_retry ?retry_after:(retry_after_of_capacity_hint retry_after) Provider_capacity
   | Keeper_internal_error.Runtime_exhausted { reason; _ } ->
     (match reason with
-     | Keeper_internal_error.Capacity_exhausted -> observe_retry Capacity_backpressure
      | Keeper_internal_error.Candidates_filtered_after_cycles ->
        rotate Candidates_filtered
      | Keeper_internal_error.Connection_refused
@@ -210,7 +209,7 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
   | Llm_provider.Retry.RateLimited { retry_after; _ } ->
     observe_retry ?retry_after Rate_limited
   | Llm_provider.Retry.PaymentRequired _ -> observe_retry Hard_quota
-  | Llm_provider.Retry.Overloaded _ -> observe_retry Capacity_backpressure
+  | Llm_provider.Retry.Overloaded _ -> observe_retry Provider_capacity
   | Llm_provider.Retry.ServerError _ -> observe_retry Server_error
   | Llm_provider.Retry.AuthError _
   | Llm_provider.Retry.AuthorizationError _ ->
@@ -258,7 +257,7 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.RateLimit { retry_after; _ } -> observe_retry ?retry_after Rate_limited
   | Llm_provider.Error.HardQuota { retry_after; _ } -> observe_retry ?retry_after Hard_quota
   | Llm_provider.Error.CapacityExhausted { retry_after; _ } ->
-    observe_retry ?retry_after Capacity_backpressure
+    observe_retry ?retry_after Provider_capacity
   | Llm_provider.Error.ProviderUnavailable _ -> observe_retry Server_error
   | Llm_provider.Error.EmptyCompletion { stop_reason; _ } ->
     observe_retry (Empty_completion { stop_reason })
@@ -404,7 +403,7 @@ let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
     match retry_class with
     | Hard_quota -> cap_sec
     | Rate_limited
-    | Capacity_backpressure
+    | Provider_capacity
     | Empty_completion _
     | Server_error
     | Network_transient
@@ -427,7 +426,7 @@ let route_kind_label = function
 let retry_class_label = function
   | Rate_limited -> "rate_limited"
   | Hard_quota -> "hard_quota"
-  | Capacity_backpressure -> "capacity_backpressure"
+  | Provider_capacity -> "provider_capacity"
   | Empty_completion { stop_reason } ->
     "empty_completion_" ^ Llm_provider.Types.stop_reason_to_metric_label stop_reason
   | Server_error -> "server_error"
@@ -496,8 +495,9 @@ let response_observed = function
      (* 429: the request was refused before any generation. *)
      | Hard_quota
      (* 402: refused before any generation. *)
-     | Capacity_backpressure
-     (* overload / capacity pool exhausted: refused before any generation. *)
+     | Provider_capacity
+     (* the provider's overload or capacity pool: refused before any
+        generation. *)
      | Server_error
      (* 5xx or provider unavailable: nothing the model said is on record. *)
      | Network_transient
@@ -607,8 +607,8 @@ let route_resumes_on_same_path = function
      (* 429: the provider lifts the throttle over time. A weekly limit sent as
         a 429 fails the resumed attempt before it runs a tool, which ends the
         operation. *)
-     | Capacity_backpressure
-     (* the provider's or MASC's own slot was full for the moment. *)
+     | Provider_capacity
+     (* the provider's capacity was full for the moment. *)
      | Empty_completion
          { stop_reason =
              ( Llm_provider.Types.EndTurn | Llm_provider.Types.MaxTokens

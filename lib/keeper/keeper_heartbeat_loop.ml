@@ -173,15 +173,12 @@ let owner_turn_rejection_cycle_status
    [Continue_on_deferred_lane]: the walk head of the deferred suffix is not
    resting, and a pending input runs on it without a sleep.
    [Wait_for_path_release]: the sleep lasts until [release_at]; [waiting_on]
-   names the runtime or assignment whose release that is. A rate limit or
-   quota wait is not cut short by a wakeup (#34653); capacity backpressure
-   comes from MASC's own slot and client envelopes, which clear on their own,
-   so that wait stays interruptible (#34663 review). *)
+   names the runtime or assignment whose release that is. A wakeup does not
+   cut the wait short (#34653). *)
 type after_failure =
   | Continue_on_deferred_lane of { next_runtime_id : string }
   | Wait_for_path_release of
       { release_at : float
-      ; wake_policy : Keeper_keepalive_signal.wake_policy
       ; waiting_on : string
       }
 
@@ -222,14 +219,8 @@ let after_failure ~now ~assignment_id (failure : Keeper_unified_turn.turn_failur
   | None -> None
   | Some (Keeper_turn_driver.Dispatch_now { runtime_id }) ->
     Some (Continue_on_deferred_lane { next_runtime_id = runtime_id })
-  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on; wait }) ->
-    let wake_policy =
-      match wait with
-      | Keeper_turn_driver.Capacity_release -> Keeper_keepalive_signal.Interrupt_on_wakeup
-      | Keeper_turn_driver.Path_release ->
-        Keeper_keepalive_signal.Serve_wakeup_after_duration
-    in
-    Some (Wait_for_path_release { release_at; wake_policy; waiting_on })
+  | Some (Keeper_turn_driver.Wait_until { release_at; waiting_on }) ->
+    Some (Wait_for_path_release { release_at; waiting_on })
 ;;
 
 exception Event_queue_cycle_failed of string
@@ -1583,27 +1574,20 @@ let run_heartbeat_loop
               the next cycle takes it without waiting"
              m.name
              next_runtime_id
-         | Some (Wait_for_path_release { release_at; wake_policy; waiting_on }) ->
-           let stimulus_note =
-             match wake_policy with
-             | Keeper_keepalive_signal.Serve_wakeup_after_duration ->
-               "stimuli queued meanwhile are served when it ends"
-             | Keeper_keepalive_signal.Interrupt_on_wakeup ->
-               "a queued stimulus still wakes it"
-           in
+         | Some (Wait_for_path_release { release_at; waiting_on }) ->
            Log.Keeper.warn
              ~keeper_name:m.name
-             "%s: the next dispatch waits %.0fs for %s to be released at %.0f; %s"
+             "%s: the next dispatch waits %.0fs for %s to be released at %.0f; \
+              stimuli queued meanwhile are served when it ends"
              m.name
              (Float.max 0.0 (release_at -. Time_compat.now ()))
              waiting_on
              release_at
-             stimulus_note
          | None -> ());
         let wake_policy =
           match turn_outcome.after_failure with
-          | Some (Wait_for_path_release { wake_policy; release_at = _; waiting_on = _ }) ->
-            wake_policy
+          | Some (Wait_for_path_release { release_at = _; waiting_on = _ }) ->
+            Keeper_keepalive_signal.Serve_wakeup_after_duration
           | Some (Continue_on_deferred_lane _) | None ->
             Keeper_keepalive_signal.Interrupt_on_wakeup
         in
@@ -1616,7 +1600,7 @@ let run_heartbeat_loop
            which is true, only later than the outcome vocabulary can say. *)
         let sleep_duration () =
           match turn_outcome.after_failure with
-          | Some (Wait_for_path_release { release_at; wake_policy = _; waiting_on = _ }) ->
+          | Some (Wait_for_path_release { release_at; waiting_on = _ }) ->
             Float.max 0.0 (release_at -. Time_compat.now ())
           | Some (Continue_on_deferred_lane _) | None ->
             Keeper_keepalive_signal.periodic_remaining

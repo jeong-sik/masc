@@ -1768,15 +1768,18 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
                (max 8 (cols - 10)))
             Ansi.reset )
   in
-  let metadata_line =
+  (* The rows are counted here rather than read back off the joined string.
+     [approval_detail_rows] answers that question for the detail line and the
+     surface pins it to one call; this row already holds its own rows as a
+     list, so its height is the length of what it is about to draw. *)
+  let metadata_rows =
     match clauses with
-    | [] -> ""
+    | [] -> [ "" ]
     | clauses ->
         Message_layout.pack_clauses ~max_cells:(framed_inner_width cols) clauses
         |> List.map (fun row -> Printf.sprintf "  %s%s%s" Ansi.dim row Ansi.reset)
-        |> String.concat "\n"
   in
-  metadata_line, payload_line
+  String.concat "\n" metadata_rows, payload_line, List.length metadata_rows
 ;;
 
 
@@ -1806,10 +1809,10 @@ let render_approvals (state : state) =
   (* The same reading for the two rows under the queue. A metadata row that
      breaks into two takes a row from the block below unless the budget knows
      about it -- the drift [detail_extra_rows] is here to stop. *)
-  let metadata_line, payload_line =
+  let metadata_line, payload_line, metadata_rows =
     approval_metadata_lines state ~approvals ~cols
   in
-  let metadata_extra_rows = approval_detail_rows metadata_line - 1 in
+  let metadata_extra_rows = metadata_rows - 1 in
   (* What the questions may spend. The block is drawn last, and a surface that
      overruns loses its final rows, so an unbudgeted question list does not
      push the approval queue off the screen -- it pushes itself off, cursor and

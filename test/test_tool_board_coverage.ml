@@ -706,6 +706,57 @@ let test_keeper_board_sub_board_owner_is_runtime_bound () =
   Alcotest.(check bool) "spoofed owner is absent" false
     (String_util.contains_substring fetched "spoofed-owner")
 
+(* An access value the handler cannot read is refused with the accepted
+   values named; it never becomes [Open] on create or a no-op on update. *)
+let test_sub_board_unknown_access_is_rejected () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, message =
+    dispatch
+      "masc_board_sub_board_create"
+      (make_args
+         [ "slug", `String "wrong-case-access"
+         ; "name", `String "Wrong case"
+         ; "owner", `String "access-owner"
+         ; "access", `String "Members_only"
+         ])
+  in
+  Alcotest.(check bool) "create with unknown access fails" false ok;
+  Alcotest.(check bool) "create error names members_only" true
+    (String_util.contains_substring message "members_only");
+  Alcotest.(check bool) "no sub-board was created" true
+    (Result.is_error
+       (Board_dispatch.get_sub_board ~sub_board_id:"wrong-case-access"));
+  let ok, _ =
+    dispatch
+      "masc_board_sub_board_create"
+      (make_args
+         [ "slug", `String "guarded-access"
+         ; "name", `String "Guarded"
+         ; "owner", `String "access-owner"
+         ; "access", `String "owner_only"
+         ])
+  in
+  Alcotest.(check bool) "create with owner_only succeeds" true ok;
+  let ok, message =
+    dispatch
+      "masc_board_sub_board_update"
+      (make_args
+         [ "sub_board_id", `String "guarded-access"
+         ; "owner", `String "access-owner"
+         ; "access", `String "private"
+         ])
+  in
+  Alcotest.(check bool) "update with unknown access fails" false ok;
+  Alcotest.(check bool) "update error names owner_only" true
+    (String_util.contains_substring message "owner_only");
+  match Board_dispatch.get_sub_board ~sub_board_id:"guarded-access" with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok sb ->
+    Alcotest.(check bool) "stored access unchanged" true
+      (sb.Board.access = Board.Owner_only)
+
 let test_direct_board_reaction_binds_keeper_identity () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2486,6 +2537,8 @@ let () =
             test_masc_board_post_preserves_meta_reason;
           Alcotest.test_case "keeper sub-board owner is runtime-bound" `Quick
             test_keeper_board_sub_board_owner_is_runtime_bound;
+          Alcotest.test_case "sub-board unknown access is rejected" `Quick
+            test_sub_board_unknown_access_is_rejected;
           Alcotest.test_case "direct Board reaction binds keeper identity" `Quick
             test_direct_board_reaction_binds_keeper_identity;
           Alcotest.test_case

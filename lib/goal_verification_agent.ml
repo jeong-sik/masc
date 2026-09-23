@@ -789,6 +789,8 @@ let start ~sw ~(config : Workspace_utils_backend_setup.config) =
     Eio.Switch.on_release sw (fun () ->
       if Atomic.compare_and_set active_runtime owner None
       then (
+        (* No scan runs after this, so its last list would read as current. *)
+        Atomic.set last_unreconciled [];
         Atomic.set
           Workspace_hooks.goal_verification_pending_fn
           previous_pending_hook;

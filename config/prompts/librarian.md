@@ -49,7 +49,7 @@ template_variables: [continuity, working_context, current_memory, conversation_h
   다시 쓰세요. 같은 대상을 다룬 기억이 여러 개 모이면 중심이 되는 말을 정하고,
   그 대상에 대해 무엇이 중요한지를 정리합니다. 묶어서 쓴 기억을 `new_claims`에
   넣고, 재료가 된 기억의 짧은 ID는 모두 그 claim의 `absorbs`에 적습니다.
-  `absorbs`에 적은 기억은 현재 기억에서 빠집니다(아래 확인에서 떨어진 재료는 남습니다). 같은 ID를 `dropped`에 넣지 말고, 한 ID는 한 claim에만 적습니다.
+  `absorbs`에 적은 기억은 현재 기억에서 빠집니다(묶기를 확인하는 Keeper에서는 확인되지 않은 재료가 남습니다). 같은 ID를 `dropped`에 넣지 말고, 한 ID는 한 claim에만 적습니다.
   묶을 거리가 없으면 묶지 않습니다.
 - 묶은 claim은 재료가 말하던 것을 하나도 빠뜨리면 안 됩니다. 호스트가 묶기를
   확인하는 Keeper에서는 재료를 문장 단위로 쪼개 "이 claim이 그 문장을 말하는가"를
@@ -116,8 +116,8 @@ template_variables: [continuity, working_context, current_memory, conversation_h
 - 호스트 필드에서 가장 안정적인 참조로 사람을 구분합니다. 외부 화자는
   `channel + workspace_id + user_id`로 식별하고, `user_name`은 표시 이름으로만
   씁니다. 대화에 보이는 `[External channel context]` 블록과 충돌하면 typed
-  observation을 따릅니다. 안정 참조가 없으면 observation의 `authority`
-  (`owner`, `external`)로 구분하고,
+  observation을 따릅니다. 안정 참조가 없으면 `authority`로 owner와 외부
+  화자만 가를 수 있고, 외부 화자끼리는 구분하지 못합니다. 이때
   ID를 지어내거나 같은 이름의 사람을 합치지 마세요.
 - Keeper의 관점에서 행위자를 claim 안에 명시합니다. 자기 진술은 “행위자 X가
   Y라고 밝혔다”로 남길 수 있습니다. 타인에 대한 주장은 다른 믿을 만한 곳에서
@@ -233,8 +233,9 @@ template_variables: [continuity, working_context, current_memory, conversation_h
 ### 현재 Task에 연결된 Goal 기준
 {{goal_context}}
 
-목표 자체를 완료 증거로 취급하지 마세요. `unavailable`은 목표 자료를 받지
-못했다는 뜻이지 목표가 없다는 뜻이 아닙니다. `no_task`는 이번 입력에 연결된
+목표 자체를 완료 증거로 취급하지 마세요. phase가 `completed`나 `dropped`인
+목표는 지난 작업의 맥락이며 새 실행 의무가 아닙니다. `unavailable`은 목표 자료를
+받지 못했다는 뜻이지 목표가 없다는 뜻이 아닙니다. `no_task`는 이번 입력에 연결된
 Task가 없다는 뜻입니다.
 
 ### 정확한 현재 기억
@@ -256,8 +257,11 @@ Task가 없다는 뜻입니다.
 작업·사용자 제약·결정과 근거·미해결 사항을 `working_state` 문자열로 정리하세요.
 대화 속 도구 결과와 아직 완료되지 않은 일을 구분하고, 이전 상태를 갱신하되
 유효한 제약과 남은 일을 지우지 마세요. 요약만 읽은 다음 턴도 올바르게 이어갈
-수 있어야 합니다. `completed_conversation`은 위 대화 기록과 같은 대화입니다.
-Memory 판단은 위 기준대로 하고, 같은 대화를 증거로 두 번 세지 마세요.
+수 있어야 합니다. `completed_conversation`은 위 대화 기록과 같은 메시지입니다.
+다만 여기에는 대화 기록이 가린 도구 payload와 추론 블록이 그대로 들어 있습니다.
+Memory 판단은 위 대화 기록으로 하고, 이 자료의 payload·추론과
+`previous_working_state`는 기억의 근거로 쓰지 마세요. 같은 대화를 증거로 두 번
+세지도 마세요.
 큐 원본 정리인 `working_contexts`와는 별도이며, 새 실행이나 완료 선언이 아닙니다.
 
 {{continuity}}

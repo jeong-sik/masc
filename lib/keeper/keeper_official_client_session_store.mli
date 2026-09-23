@@ -117,8 +117,18 @@ type transient_release_record =
     external snapshot available to this vendor turn, not persistent history
     injection. Canonical_source_guard binds the pre-projection source used by
     a client without replacement support; it does not claim all source bytes
-    were delivered. No receipt asserts that the model understood its contents. *)
-type context_delivery = Prepared_start_context | Replaced_configuration | Canonical_source_guard
+    were delivered. Held_by_vendor_session records a resume that sent none of
+    the canonical snapshot: the vendor session holds the conversation and the
+    system prompt it recorded at its first launch, and MASC sent only its
+    composed per-turn context in front of the user prompt
+    ({!Keeper_official_client_host.resume_prompt}). Its snapshot hash names the
+    canonical history MASC held at that turn, not bytes the model read. No
+    receipt asserts that the model understood its contents. *)
+type context_delivery =
+  | Prepared_start_context
+  | Replaced_configuration
+  | Canonical_source_guard
+  | Held_by_vendor_session
 
 type context_frontier =
   { snapshot_sha256 : string

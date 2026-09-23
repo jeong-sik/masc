@@ -749,6 +749,7 @@ let test_runner_status_snapshot_tracks_liveness () =
     { due_changed = 1
     ; emitted = []
     ; rescheduled = 2
+    ; held = []
     ; dispatches =
         [ { occurrence_id = test_occurrence_id "status-1"
           ; schedule_id = "status-1"
@@ -780,10 +781,43 @@ let test_runner_status_snapshot_tracks_liveness () =
   check int "last unsupported dispatch count" 0 (json_int "dispatch_unsupported" counts);
   check int "last start-rejected dispatch count" 0
     (json_int "dispatch_start_rejected" counts);
+  check int "a tick that held nothing lists no held occurrence" 0
+    (match json_field "held" ok with
+     | Some (`List held) -> List.length held
+     | Some _ | None -> fail "held is not a list");
+  let held_signal : wake_signal =
+    { occurrence_id = test_occurrence_id "status-held"
+    ; kind = Due_candidate
+    ; schedule_instance_id = "instance-status-held"
+    ; schedule_id = "status-held"
+    ; emitted_at = 1.5
+    ; due_at = 200.0
+    ; payload_digest = "test-payload"
+    ; payload = `Assoc []
+    }
+  in
+  Schedule_runner_status.record_tick_ok ~started_at:1.5 ~finished_at:1.75
+    (* A hold-only tick: zero counts, so the totals checked below are the
+       other ticks' sums. *)
+    { ok_result with due_changed = 0; rescheduled = 0; dispatches = []; held = [ held_signal ] };
+  let held_ids () =
+    match json_field "held" (render ~now:2.0 ()) with
+    | Some (`List held) ->
+      List.map
+        (fun row ->
+           match json_field "schedule_id" row with
+           | Some (`String id) -> id
+           | Some _ | None -> fail "held row has no schedule_id")
+        held
+    | Some _ | None -> fail "held is not a list"
+  in
+  check (list string) "the newest tick's held occurrence is listed" [ "status-held" ]
+    (held_ids ());
   let dispatch_failure_result =
     { due_changed = 3
     ; emitted = []
     ; rescheduled = 0
+    ; held = []
     ; dispatches =
         [ { occurrence_id = test_occurrence_id "status-dispatch-failed"
           ; schedule_id = "status-dispatch-failed"
@@ -810,6 +844,8 @@ let test_runner_status_snapshot_tracks_liveness () =
     ~started_at:2.0
     ~finished_at:2.125
     dispatch_failure_result;
+  check (list string) "held is replaced by the next tick, not accumulated" []
+    (held_ids ());
   let dispatch_degraded = render ~now:2.25 () in
   check string "dispatch failure degrades status" "degraded"
     (json_string "status" dispatch_degraded);
@@ -854,7 +890,8 @@ let test_runner_status_snapshot_tracks_liveness () =
   check int "wake unregistered keeper count" 1
     (json_int "wake_skipped_unregistered_keeper" wake_counts);
   check int "wake failed count" 1 (json_int "wake_failed" wake_counts);
-  (* Three successful ticks so far: totals keep what last_counts forgot. *)
+  (* Four successful ticks so far (one held-only, all zero): totals keep what
+     last_counts forgot. *)
   let totals =
     match json_field "totals" wake_degraded with
     | Some totals -> totals
@@ -936,8 +973,21 @@ let test_tick_defers_held_wake_without_advancing () =
   let result = tick_ok config ~now:201.0 ~consumer in
   check int "held wake is not dispatched" 0 (List.length !calls);
   check int "held wake emits no signal" 0 (List.length result.emitted);
-  check int "held wake is reported once" 1 (List.length result.dispatches);
-  check_dispatch_status "deferred" Dispatch_deferred (List.hd result.dispatches).status;
+  check int "a held wake is not a dispatch" 0 (List.length result.dispatches);
+  check (list string) "held wake is reported as held once" [ request.schedule_id ]
+    (List.map (fun (signal : wake_signal) -> signal.schedule_id) result.held);
+  let again = tick_ok config ~now:216.0 ~consumer in
+  check (list string) "the same occurrence is held on the next tick"
+    (List.map
+       (fun (signal : wake_signal) -> Schedule_occurrence_id.to_string signal.occurrence_id)
+       result.held)
+    (List.map
+       (fun (signal : wake_signal) -> Schedule_occurrence_id.to_string signal.occurrence_id)
+       again.held);
+  check int "a hold that continues is not newly held" 0
+    (List.length (Schedule_runner.newly_held ~previous:result.held again.held));
+  check int "a hold with no earlier tick is newly held" 1
+    (List.length (Schedule_runner.newly_held ~previous:[] again.held));
   match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
   | None -> fail "schedule missing after deferral"
   | Some stored ->

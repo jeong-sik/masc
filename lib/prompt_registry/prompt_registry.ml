@@ -806,7 +806,6 @@ let admit key value ~bind =
   let file_value = file_value_of_key key in
   if not (is_valid_prompt_key key) then Error "Invalid prompt key"
   else if trimmed = "" then Error "Prompt cannot be empty"
-  else if String.length trimmed > 10000 then Error "Prompt too long (max 10000 chars)"
   else
     with_mutex (fun () ->
         match Hashtbl.find_opt meta_tbl key with

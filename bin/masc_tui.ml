@@ -15229,11 +15229,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let kind =
              match outcome with
              | Masc_tui_connector_unbind.Failed _ -> "error"
-             | Removed | Rebound | Already_unbound -> "system"
+             | Removed | Rebound | Not_found _ -> "system"
            in
-           report_action state kind
-             (Masc_tui_connector_unbind.outcome_line result))
-        results;
+           add_event state kind (Masc_tui_connector_unbind.outcome_line result))
+        (Masc_tui_connector_unbind.report_order results);
       report_action state
         (if Masc_tui_connector_unbind.any_failed results then "error"
          else "system")
@@ -16667,11 +16666,15 @@ let main
         let targets =
           Masc_tui_connector_unbind.targets ~keeper_name snapshot.cs_connectors
         in
+        let unreadable =
+          Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
+        in
         match targets, state.connector_unbind_all_armed with
         | [], _ ->
             state.connector_unbind_all_armed <- None;
             report_action state "system"
-              ("unbind all: " ^ keeper_name ^ " has no channel bindings")
+              (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
+                 ~unreadable)
         | _ :: _, Some (armed_keeper, armed_targets)
           when String.equal armed_keeper keeper_name && armed_targets = targets
           ->
@@ -16682,7 +16685,7 @@ let main
             state.connector_unbind_all_armed <- Some (keeper_name, targets);
             report_action state "system"
               (Masc_tui_connector_unbind.arm_prompt ~keeper_name
-                 ~confirm_key:"U" targets))
+                 ~confirm_key:"U" ~unreadable targets))
   in
   let handle_connector_edit () =
     state.connector_unbind_armed <- None;

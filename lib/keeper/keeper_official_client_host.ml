@@ -1698,7 +1698,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                     (Repeated_tool_call { tool_name = tool.schema.name; repeated_count }) })
           in
           (try on_result_handoff ~invocation ~content:final_result.content with
-           | exn ->
+           | exn -> (* cancel-guard-ok: reraise_if_reserved re-raises Cancelled *)
              Llm_provider.Reserved_exn.reraise_if_reserved exn;
              Log.Keeper.warn
                ~keeper_name
@@ -1714,7 +1714,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
            | Some observe ->
              let boundary =
                try observe () with
-               | exn ->
+               | exn -> (* cancel-guard-ok: reraise_if_reserved re-raises Cancelled *)
                  Llm_provider.Reserved_exn.reraise_if_reserved exn;
                  Error (Agent_core.Error.Internal (Printexc.to_string exn))
              in

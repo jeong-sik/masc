@@ -72,7 +72,7 @@ let classify_exn exn =
   | Unix.Unix_error (Unix.EPERM, _, _) -> Permission_denied
   | Unix.Unix_error (Unix.ECONNREFUSED, _, _) -> Connection_refused
   | Unix.Unix_error (Unix.ETIMEDOUT, _, _) -> Timeout
-  | _ -> classify_string (Printexc.to_string exn)
+  | _ -> classify_string (Printexc.to_string exn) (* cancel-guard-ok: classify_string performs no Eio operation *)
 
 let to_short_tag = function
   | Fd_exhaustion -> "fd_exhaustion"

@@ -165,14 +165,12 @@ let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
   match provider.Provider.credential_source with
   | Provider.Github_cli { hostname } ->
     (match Keeper_github_login_lane.stored_token ~config ~keeper_name:keeper ~hostname with
-     (* Logging in again from the GitHub tab changes nothing here: that login
-        is written on the endpoint, which is exactly why this read refused. *)
      | Error
-         (Keeper_github_login_lane.Remote_ssh_identity_on_endpoint _ as refusal) ->
+         (( Keeper_github_login_lane.Remote_ssh_identity_on_endpoint _
+          | Keeper_github_login_lane.Keeper_meta_unreadable _ ) as refusal) ->
+       (* Neither is fixed by logging in again, so neither gets that advice. *)
        Error (Keeper_github_login_lane.stored_token_error_to_string refusal)
-     | Error
-         (( Keeper_github_login_lane.Keeper_meta_unavailable _
-          | Keeper_github_login_lane.Host_identity_unavailable _ ) as problem) ->
+     | Error (Keeper_github_login_lane.Host_identity_unavailable _ as problem) ->
        Error
          (Printf.sprintf
             "GitHub uses %s's GitHub CLI token (%s). Please switch to the GitHub tab or run 'gh auth login' to authenticate this keeper."

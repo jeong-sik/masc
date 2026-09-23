@@ -28,12 +28,15 @@ val observe
 (** The identity on the machine {!for_keeper} would log [meta] into. Docker and
     Micro_vm read this host's directory ({!Keeper_github_identity.observe}); a
     Remote_ssh Keeper runs one [gh] probe on its endpoint and creates nothing
-    there. [meta] comes from {!Keeper_meta_store.read_effective_meta}, for the
+    there. A probe the transport could not deliver is an error
+    ([remote_ssh_github_endpoint_unreachable]) rather than an unauthenticated
+    reading. [meta] comes from {!Keeper_meta_store.read_effective_meta}, for the
     reason {!for_keeper} gives. *)
 
 type stored_token_error =
-  | Keeper_meta_unavailable of string
-      (** The Keeper's effective meta could not be read, or it has none. *)
+  | Keeper_meta_unreadable of string
+      (** The Keeper has a meta file and it could not be read. A Keeper with
+          no meta at all declares no endpoint and is read on this host. *)
   | Remote_ssh_identity_on_endpoint of { keeper_name : string }
       (** The login lives on a Remote_ssh endpoint. Reading it would copy a
           credential from the endpoint back to this host, which nothing in
@@ -51,5 +54,5 @@ val stored_token
   -> (string, stored_token_error) result
 (** The token the Keeper's gh CLI holds for [hostname], for a caller on this
     host that sends it itself (the GitHub MCP identity). Reads the Keeper's
-    effective meta to find the profile, then the host directory for Docker and
-    Micro_vm. *)
+    effective meta to find the profile, then the host directory for Docker,
+    Micro_vm and a Keeper with no meta. *)

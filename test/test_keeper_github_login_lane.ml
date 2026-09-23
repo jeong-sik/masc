@@ -124,6 +124,12 @@ let stub_main () =
        when List.equal String.equal argv (Keeper_github_identity.auth_probe_argv ~hostname)
        ->
        record "probe";
+       if Sys.file_exists (Filename.concat dir "fail-transport")
+       then (
+         (* What ssh itself prints when it cannot reach the host: no trailer,
+            exit 255. *)
+         write_all Unix.stderr "ssh: connect to host fixture.invalid port 22: refused\n";
+         exit 255);
        write_all Unix.stdout (probe_login ^ "\n");
        write_all Unix.stderr (trailer 0)
      | [ "test"; "-d"; path ] when String.equal path endpoint_remote_root ->
@@ -574,6 +580,59 @@ let test_remote_observe_reads_the_endpoint_and_writes_nothing () =
     (Sys.file_exists (Keeper_github_identity.config_dir ~config ~keeper_name))
 ;;
 
+(* A probe that never reached the endpoint is not a logged-out endpoint. Read
+   as an exit status it became "unauthenticated", and the tab told an operator
+   with a working login to log in again. *)
+let test_remote_observe_names_an_unreachable_endpoint () =
+  with_eio
+  @@ fun () ->
+  let base_path = temp_dir () in
+  let dir = temp_dir () in
+  write_runtime_toml ~base_path;
+  write_keeper_toml ~base_path;
+  save (Filename.concat dir "fail-transport") "fail";
+  with_stub_ssh ~dir
+  @@ fun () ->
+  let config = workspace ~base_path in
+  match
+    Keeper_github_login_lane.observe
+      ~config
+      ~meta:(meta ~sandbox:Keeper_types_profile_sandbox.Remote_ssh)
+      ~hostname
+  with
+  | Ok _ -> fail "an unreachable endpoint was read as an identity"
+  | Error error ->
+    check bool "the probe was attempted" true (Sys.file_exists (frame_path ~dir "probe"));
+    check
+      bool
+      "the refusal names the unreachable endpoint"
+      true
+      (String.starts_with ~prefix:"remote_ssh_github_endpoint_unreachable: endpoint " error)
+;;
+
+(* A Keeper with no meta declares no endpoint, so the only place its login can
+   be is this host, and the token read goes there as it always has. *)
+let test_stored_token_without_meta_reads_the_host () =
+  with_eio
+  @@ fun () ->
+  let base_path = temp_dir () in
+  let config = workspace ~base_path in
+  let config_dir =
+    match Keeper_github_identity.ensure_config_dir ~config ~keeper_name with
+    | Error error -> failf "gh config dir: %s" error
+    | Ok path -> path
+  in
+  let hosts = Filename.concat config_dir "hosts.yml" in
+  save hosts "github.com:\n  oauth_token: gho_host\n";
+  Unix.chmod hosts 0o600;
+  match Keeper_github_login_lane.stored_token ~config ~keeper_name ~hostname with
+  | Ok token -> check string "the host login is read" "gho_host" token
+  | Error error ->
+    failf
+      "a Keeper with no meta was refused: %s"
+      (Keeper_github_login_lane.stored_token_error_to_string error)
+;;
+
 (* The GitHub MCP identity sends the token from this host. A Remote_ssh
    Keeper's token is on its endpoint, so the read is refused by name instead
    of telling the operator to log in from the GitHub tab, which they did. *)
@@ -597,7 +656,7 @@ let test_remote_stored_token_is_refused_by_name () =
     ->
     check string "the refusal names the keeper" keeper_name named
   | Error
-      ((Keeper_github_login_lane.Keeper_meta_unavailable _
+      ((Keeper_github_login_lane.Keeper_meta_unreadable _
        | Keeper_github_login_lane.Host_identity_unavailable _) as other) ->
     failf
       "expected the Remote_ssh refusal, got: %s"
@@ -620,6 +679,14 @@ let () =
               "remote observe reads the endpoint and writes nothing"
               `Quick
               test_remote_observe_reads_the_endpoint_and_writes_nothing
+          ; test_case
+              "remote observe names an unreachable endpoint"
+              `Quick
+              test_remote_observe_names_an_unreachable_endpoint
+          ; test_case
+              "stored token without meta reads the host"
+              `Quick
+              test_stored_token_without_meta_reads_the_host
           ; test_case
               "remote stored token is refused by name"
               `Quick

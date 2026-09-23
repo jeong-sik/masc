@@ -318,9 +318,10 @@ status: reference
 **Keeper Chat Operation**
 : Keeper 대화에 접수한 메시지 실행의 durable 기록. `operation_id`로 식별하며
   `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론이나 다른 Keeper(`masc_keeper_msg`·
-  `delegate`)도 이 operation을 제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상
-  Keeper다. 소스 스키마는 `masc.keeper_chat_operation.source.v2`이며 발신 Keeper
-  식별자(`sender_keeper`)를 필수로 싣는다(RFC-0468 §3.2). 접수 응답은 실행 완료를 뜻하지 않는다.
+  `masc_keeper_delegate`)도 이 operation을 제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상
+  Keeper다. 소스 스키마는 `masc.keeper_chat_operation.source.v2`이며 `sender_keeper` 키를
+  반드시 싣는다. 값은 다른 Keeper가 보낸 경우 그 Keeper 식별자이고, 운영자·커넥터 화자면 `null`이다
+  (RFC-0468 §3.2). 접수 응답은 실행 완료를 뜻하지 않는다.
   → [Keeper_chat_operation_payload](../../lib/keeper/keeper_chat_operation_payload.mli)
 
 **Speaker Authority (화자 권한)**

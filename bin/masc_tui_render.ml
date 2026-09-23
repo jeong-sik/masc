@@ -386,7 +386,7 @@ let overview_team_detail_lines (state : state) =
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line ~detail_lines =
+    ~quota_line ~detail_lines ~pr_tag_of_keeper =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -435,11 +435,14 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
           Printf.sprintf "%sno open task%s%s" Ansi.dim Ansi.reset
             (awaiting_tail awaiting)
     in
-    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s" tone mark Ansi.reset
+    (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
+       number and one glyph for its checks, "+N" for more. *)
+    let pr_tag = pr_tag_of_keeper row.keeper.okp_name in
+    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
       (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
       tone
       (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
-      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset detail
+      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail
   in
   let parked_line =
     match team.parked with
@@ -937,6 +940,7 @@ let render_overview (state : state) =
            ~flow:state.task_flow ~cols
            ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
            ~detail_lines:(overview_team_detail_lines state)
+           ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;

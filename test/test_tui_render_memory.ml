@@ -967,6 +967,88 @@ let test_the_row_badge_says_what_the_store_says () =
     (contains "[VALIDATED\xe2\x80\xa6]" (line (fact_row Cat.Validated_approach)))
 ;;
 
+(* Every badge this cell can draw has to be told apart from every other one.
+
+   The cell is ten cells wide and cuts what runs past it, which was the right
+   shape while the category was a wire string nobody could enumerate. It is a
+   closed set of eight now, plus the pane's own two words, and two of the ten
+   are longer than the cell: [CODE_CHANGE] draws as "CODE_CHAN..." and
+   [VALIDATED_APPROACH] as "VALIDATED...". Nothing collides today, and this
+   is what says so -- a category added later whose first nine characters
+   repeat another's would draw the same cell for two different things, which
+   is the whole job of the column.
+
+   Walked from [all_categories], so a ninth is measured without this file
+   changing. *)
+let test_every_badge_this_cell_draws_is_its_own () =
+  let fact_row (category : Cat.category) : Types.memory_fact_row =
+    Types.Memory_row_fact
+      { Decode.mf_claim = "a claim of a fixed length"
+      ; mf_category = category
+      ; mf_origin = "authored"
+      ; mf_first_seen = 100.0
+      ; mf_last_seen = 200.0
+      ; mf_memory_id = "mem-1"
+      ; mf_events = Decode.no_memory_fact_events
+      }
+  in
+  let source_row : Types.memory_fact_row =
+    Types.Memory_row_source_fact
+      { Decode.msf_claim = "a claim of a fixed length"
+      ; msf_first_seen = 100.0
+      ; msf_path = "docs/x.md"
+      ; msf_sha256 = "abc"
+      }
+  in
+  let dropped_row : Types.memory_fact_row =
+    Types.Memory_row_invalidation
+      { Decode.mi_source_path = "docs/x.md"
+      ; mi_invalidated_at = 100.0
+      ; mi_reason = "gone"
+      }
+  in
+  (* The badge is the bracketed head of the row, which every row draws before
+     anything that varies between them. *)
+  let badge row =
+    let line =
+      Masc_tui_theme.strip_sgr
+        (Render_memory.memory_fact_row_line ~cols:120 row)
+    in
+    match String.index_opt line '[' with
+    | None -> Alcotest.failf "a memory row drew no badge: %S" line
+    | Some open_at -> (
+        match String.index_from_opt line open_at ']' with
+        | None -> Alcotest.failf "a memory row's badge never closed: %S" line
+        | Some close_at ->
+            String.sub line open_at (close_at - open_at + 1))
+  in
+  let named =
+    List.map (fun category ->
+        (Cat.category_to_string category, badge (fact_row category)))
+      Cat.all_categories
+    @ [ ("source", badge source_row); ("dropped", badge dropped_row) ]
+  in
+  List.iter
+    (fun (name, drawn) ->
+      List.iter
+        (fun (other_name, other_drawn) ->
+          if name <> other_name && String.equal drawn other_drawn then
+            Alcotest.failf "%s and %s draw the same badge %S" name other_name
+              drawn)
+        named)
+    named;
+  (* And the cell keeps its width whatever it holds, or the columns beside it
+     would move from row to row. *)
+  List.iter
+    (fun (name, drawn) ->
+      (* Cells, not bytes: the cut labels end in an ellipsis that spends one
+         cell and three bytes. *)
+      check int
+        (Printf.sprintf "%s takes the cell's width" name)
+        12 (Layout.display_width drawn))
+    named
+;;
+
 (* Only [Blocker] is dressed. It is the one category whose name is an alarm,
    and the table this replaced drew it in the same receded style as every
    word it did not know, while [lesson] drew in the colour of something going
@@ -1713,6 +1795,8 @@ let () =
             test_the_category_row_is_the_shared_strip
         ; test_case "the narrowest body spends its row on the sort" `Quick
             test_the_narrowest_body_spends_its_row_on_the_sort
+        ; test_case "every badge this cell draws is its own" `Quick
+            test_every_badge_this_cell_draws_is_its_own
         ; test_case "the row badge says what the store says" `Quick
             test_the_row_badge_says_what_the_store_says
         ; test_case "only the alarm category is dressed" `Quick

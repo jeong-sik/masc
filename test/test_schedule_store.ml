@@ -160,6 +160,59 @@ let test_update_accepts_due_but_refuses_terminal_definition () =
   check int "refusal does not bump" before.version (read_state config).version
 ;;
 
+(* [Schedule_domain.modify_allowed] is the one written rule for which rows
+   accept a modify; the TUI asks it before opening the editor. This pins that
+   the store's own answer is that function for every status the contract
+   names, so the two cannot drift apart again. *)
+let every_status = [ Scheduled; Due; Running; Succeeded; Failed; Cancelled; Expired ]
+
+let test_update_refuses_exactly_where_modify_allowed_says_no () =
+  check (list string) "the list names every status the contract has"
+    (List.sort compare Schedule_contract_values.schedule_status_strings)
+    (List.sort compare (List.map schedule_status_to_string every_status));
+  with_workspace
+  @@ fun config ->
+  let id_of status = "modify-" ^ schedule_status_to_string status in
+  List.iter
+    (fun status -> ignore (insert_ok config (make_request ~schedule_id:(id_of status) ())))
+    every_status;
+  let state = read_state config in
+  let status_for schedule_id =
+    List.find (fun status -> String.equal (id_of status) schedule_id) every_status
+  in
+  let state_json : Yojson.Safe.t =
+    `Assoc
+      [ "version", `Int state.version
+      ; "updated_at", `Float state.updated_at
+      ; ( "schedules"
+        , `List
+            (List.map
+               (fun (request : schedule_request) ->
+                  schedule_request_to_yojson
+                    { request with status = status_for request.schedule_id })
+               state.schedules) )
+      ; "wakes", `List []
+      ]
+  in
+  Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string state_json);
+  List.iter
+    (fun status ->
+       let label = schedule_status_to_string status in
+       match
+         ( modify_allowed status
+         , update_request config ~now:100.0 (make_request ~schedule_id:(id_of status) ()) )
+       with
+       | true, Ok _ -> ()
+       | false, Error (Transition_refused { current; _ }) ->
+         check_status (label ^ ": the refusal reads the stored status") status current
+       | true, Error err ->
+         fail (label ^ ": modify_allowed says yes, store said " ^ store_error_to_string err)
+       | false, Ok _ -> fail (label ^ ": modify_allowed says no, store modified it")
+       | false, Error err ->
+         fail (label ^ ": expected Transition_refused, got " ^ store_error_to_string err))
+    every_status
+;;
+
 (* The TUI's edit form sends a due row's due time back as it read it, and a
    Keeper editing only the message does the same: that is not a new due time,
    and refusing it would make a due row uneditable. Moving the due time
@@ -1681,6 +1734,8 @@ let () =
             test_update_replaces_active_definition_with_fresh_instance;
           test_case "update accepts due and refuses terminal" `Quick
             test_update_accepts_due_but_refuses_terminal_definition;
+          test_case "update refuses exactly where modify_allowed says no" `Quick
+            test_update_refuses_exactly_where_modify_allowed_says_no;
           test_case "update requires existing schedule" `Quick
             test_update_requires_an_existing_schedule;
           test_case "update refuses only a changed due time behind the clock" `Quick

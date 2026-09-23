@@ -171,12 +171,6 @@ let keepers_for_runtime (state : state) (runtime_id : string) : Tui_decode.keepe
            | Some def -> String.equal def runtime_id
            | None -> false)
 
-let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
-  let turns = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc + k.k_total_turns) 0 keepers in
-  let tokens = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc + k.k_total_tokens) 0 keepers in
-  let cost = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc +. k.k_total_cost_usd) 0.0 keepers in
-  turns, tokens, cost
-
 (* Pure preparation shared with the loop. Terminal dimensions are the raw
    cached measurement, before the surface strip and composer reserve rows. *)
 let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols =
@@ -386,7 +380,7 @@ let overview_team_detail_lines (state : state) =
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line ~detail_lines =
+    ~quota_line ~detail_lines ~pr_tag_of_keeper =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -435,11 +429,14 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
           Printf.sprintf "%sno open task%s%s" Ansi.dim Ansi.reset
             (awaiting_tail awaiting)
     in
-    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s" tone mark Ansi.reset
+    (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
+       number and one glyph for its checks, "+N" for more. *)
+    let pr_tag = pr_tag_of_keeper row.keeper.okp_name in
+    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
       (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
       tone
       (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
-      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset detail
+      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail
   in
   let parked_line =
     match team.parked with
@@ -937,6 +934,7 @@ let render_overview (state : state) =
            ~flow:state.task_flow ~cols
            ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
            ~detail_lines:(overview_team_detail_lines state)
+           ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;
@@ -960,9 +958,9 @@ let render_overview (state : state) =
        story, so the empty header keeps them. *)
     if List.is_empty state.tasks then
       match state.task_flow with
-      | None -> Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset
+      | None -> Printf.sprintf " %sTasks%s" Ansi.bold Ansi.reset
       | Some _ ->
-          Printf.sprintf " %sTasks%s (0 open%s)\n" Ansi.bold Ansi.reset
+          Printf.sprintf " %sTasks%s (0 open%s)" Ansi.bold Ansi.reset
             done_segment
     else
       let count = List.length state.tasks in
@@ -981,7 +979,7 @@ let render_overview (state : state) =
           (fun acc (t : task) -> match t.status with Todo -> acc + 1 | _ -> acc)
           0 state.tasks
       in
-      Printf.sprintf " %sTasks%s (%d open%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)\n"
+      Printf.sprintf " %sTasks%s (%d open%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)"
         Ansi.bold Ansi.reset
         count
         done_segment
@@ -989,7 +987,12 @@ let render_overview (state : state) =
         (Theme.warn ()) awaiting_c Ansi.reset
         Ansi.dim todo_c Ansi.reset
   in
-  Buffer.add_string buf task_header;
+  (* Fitted to the frame, the way the Team title above it is. This title is
+     the longest thing the surface writes and it went in raw: at sixty columns
+     it read seven cells past the box edge while every other row stopped at
+     it. The segments are ordered so the one a fit gives up last is the one a
+     reader can work out -- todo is open less active less awaiting. *)
+  Buffer.add_string buf (fit_width task_header cols ^ "\n");
 
   (match tasks_error with
    | Some err when row_budget.task_error_rows > 0 ->
@@ -1461,7 +1464,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
       box_divider buf cols;
       box_line buf cols
         (Printf.sprintf "  %s%s[?] Questions waiting on you (%d) · a:open answers%s" Ansi.bold (Theme.warn ())
-           (List.length open_rows) Ansi.reset);
+           (Masc_tui_types.approvals_open_question_count state) Ansi.reset);
       match open_rows with
       | [] ->
           box_line buf cols
@@ -1513,11 +1516,23 @@ let draw_ask_questions buf cols (state : state) ~budget =
             question_blocks;
           if plan.Ask_layout.questions_hidden > 0 then
             box_line buf cols
-              (Printf.sprintf "    %s+%d more question%s -- j/k to reach%s"
-                 Ansi.dim plan.Ask_layout.questions_hidden
-                 (if plan.Ask_layout.questions_hidden = 1 then "" else "s")
-                 Ansi.reset);
-          if plan.Ask_layout.context_shown then Buffer.add_string buf why_text;
+              (* "in this ask", because the count above names every question
+                 the fleet is waiting on and this one names the selected
+                 ask's own. Both said "questions", and a reader saw "(1)"
+                 three rows above "+2 more questions". *)
+              (Printf.sprintf "    %s+%d more in this ask -- j/k to reach%s"
+                 Ansi.dim plan.Ask_layout.questions_hidden Ansi.reset);
+          if plan.Ask_layout.context_shown then Buffer.add_string buf why_text
+          else if plan.Ask_layout.context_notice then
+            (* The questions are the ask and the reason explains it, so the
+               reason is what the plan drops first. It used to drop without a
+               word: hidden questions are counted on a line of their own and
+               folded asks are too, and only this one left no trace, so a
+               reader had nothing to tell them there was a reason to go and
+               read. The answering view draws it whole and scrolls. *)
+            box_line buf cols
+              (Printf.sprintf "    %sthe reason did not fit -- a opens it%s"
+                 Ansi.dim Ansi.reset);
           let printed = ref 0 in
           List.iteri
             (fun index row ->
@@ -1837,7 +1852,14 @@ let render_approvals (state : state) =
   let approvals_error =
     Terminal_text.optional_single_line state.approvals_error
   in
-  if count = 0 then begin
+  (* The queue's own population, not the surface's. [count] above is the
+     approval rows plus the open questions -- the right reading for the title
+     and the badge, which name the screen -- and this block is about one of
+     the three lists the screen draws. With the queue empty and a question
+     waiting, [count] was three, so the list drew its empty self: a cursor
+     mark on a blank row and nothing to say the queue was empty, where the
+     same screen with no question at all said "(no pending approvals)". *)
+  if approvals = [] then begin
     (match state.approval_snapshot, approvals_error with
      | _, Some err ->
          box_line buf cols (data_unreliable_row ~cols err);
@@ -2287,6 +2309,10 @@ let board_heading_with_tail ~cols head tail =
    The page is one listing of fifty and the hearth it belongs to may hold
    hundreds; a count taken from it would understate every hearth and
    understate the crowded ones most. *)
+(* Between two hearths on the census row. Its width is what the row budgets
+   with, so the two cannot drift apart. *)
+let census_separator = "  \xc2\xb7  "
+
 let board_hearth_census_line ~cols (state : state) =
   match state.board_hearths with
   | [] ->
@@ -2317,27 +2343,46 @@ let board_hearth_census_line ~cols (state : state) =
       in
       (* What fits, then how many it could not carry. The board here holds
          eleven hearths and a narrow pane holds four of them; a row sized by
-         how many exist is a row that runs off the edge on the next one. *)
+         how many exist is a row that runs off the edge on the next one.
+
+         Every piece is measured where it is drawn. The budget used to count
+         three cells for the separator this row draws five wide, and to leave
+         a fixed 26 for a lead and a tail it never measured: live, eight
+         hearths ran past the frame and "198 posts" -- the reading the row
+         ends on -- was cut to "19". *)
+      let cells = Message_layout.display_width in
+      let label = "hearths" in
+      let lead = "  " ^ label ^ " " in
+      let tail =
+        Printf.sprintf "   %s" (Masc_tui_message_layout.count_noun total "post")
+      in
+      let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
+      (* Room for the widest note the row could end on: any hearth but the
+         first may be the one that does not fit. *)
+      let room =
+        max 8
+          (framed_inner_width cols - cells lead - cells tail
+          - cells (dropped_note (List.length census)))
+      in
       let rec take kept used = function
         | [] -> (List.rev kept, 0)
         | ((name, count, _) as banded_entry) :: rest ->
             let width =
-              Message_layout.display_width
-                (Printf.sprintf "%s %d" name count)
-              + if kept = [] then 0 else 3
+              cells (Printf.sprintf "%s %d" name count)
+              + if kept = [] then 0 else cells census_separator
             in
-            if used + width > max 8 (cols - 26) then
-              (List.rev kept, 1 + List.length rest)
+            if used + width > room then (List.rev kept, 1 + List.length rest)
             else take (banded_entry :: kept) (used + width) rest
       in
       let kept, dropped = take [] 0 banded in
       let shown =
-        List.map entry kept |> String.concat (Ansi.dim ^ "  \xc2\xb7  " ^ Ansi.reset)
+        List.map entry kept
+        |> String.concat (Ansi.dim ^ census_separator ^ Ansi.reset)
       in
-      Printf.sprintf "  %shearths%s %s%s%s" Ansi.dim Ansi.reset shown
+      Printf.sprintf "  %s%s%s %s%s%s" Ansi.dim label Ansi.reset shown
         (if dropped = 0 then ""
-         else Printf.sprintf "%s  \xc2\xb7  +%d%s" Ansi.dim dropped Ansi.reset)
-        (Printf.sprintf "%s   %s%s" Ansi.dim (Masc_tui_message_layout.count_noun total "post") Ansi.reset)
+         else Printf.sprintf "%s%s%s" Ansi.dim (dropped_note dropped) Ansi.reset)
+        (Printf.sprintf "%s%s%s" Ansi.dim tail Ansi.reset)
 
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -3861,8 +3906,21 @@ let schedule_delivery_summary (row : schedule_row) =
     | None -> "reaction:\xe2\x80\x94"
     | Some status -> "reaction:" ^ status
   in
-  ( Printf.sprintf "%s \xc2\xb7 status:%s" row.sch_schedule_id
-      row.sch_status
+  (* A held occurrence has no wake of its own, so the queue and reaction
+     readings on the next line still describe the previous one. The hold says
+     so on the identity line, next to the status it would otherwise leave
+     reading as a late [due]. The short tag, because the line is already
+     most of a narrow screen; the detail pane carries the full sentence. *)
+  let hold =
+    match row.sch_runner_hold with
+    | None -> ""
+    | Some hold ->
+        " \xc2\xb7 "
+        ^ Render_schedule.schedule_hold_tag
+            ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso)
+  in
+  ( Printf.sprintf "%s \xc2\xb7 status:%s%s" row.sch_schedule_id
+      row.sch_status hold
   , Printf.sprintf "%s \xc2\xb7 %s" queue reaction )
 
 (* Both readers draw this through [data_unreliable_row], which already opens
@@ -4366,6 +4424,14 @@ let schedule_detail_lines ~width (row : schedule_row)
              row.sch_reaction_projection_status)
         "Reaction" reaction
     ]
+  @ (match row.sch_runner_hold with
+     | None -> []
+     | Some hold ->
+         [ field ~style:(Theme.warn ()) "Held"
+             (Render_schedule.schedule_hold_reading
+                ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso))
+         ; field "Held id" hold.Tui_decode.srh_occurrence_id
+         ])
   @ schedule_turn_rows ~field row
   @ (if keeper_wake then
        [ Ansi.dim, ""
@@ -4488,6 +4554,26 @@ let keeper_runtime_label (runtime : keeper_runtime option) =
         (Tui_decode.keeper_phase_to_string row.kr_phase)
         (Terminal_text.single_line row.kr_runtime_id)
 
+(* The two halves of the runtime cell, so the column that has to be wide
+   enough for them is measured from the same strings that get drawn. *)
+let keeper_runtime_parts (row : keeper_runtime) =
+  let phase =
+    if row.kr_paused then "paused "
+    else if Tui_decode.keeper_phase_is_running row.kr_phase then ""
+    else Tui_decode.keeper_phase_to_string row.kr_phase ^ " "
+  in
+  (phase, Terminal_text.single_line row.kr_runtime_id)
+
+(* What the widest row would spend on this cell. A keeper the roster cannot
+   see draws an em dash, which is one cell. *)
+let keeper_runtime_cells (runtime : keeper_runtime option) =
+  match runtime with
+  | None -> 1
+  | Some row ->
+      let phase, runtime_id = keeper_runtime_parts row in
+      Message_layout.display_width phase
+      + Message_layout.display_width runtime_id
+
 let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
   match runtime with
   | None -> fit_width "\xe2\x80\x94" width
@@ -4503,12 +4589,7 @@ let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
          operator acts on -- a person stopped that one, so nothing is wrong
          with it. The phase this replaces is still on the chat header, which
          draws [kr_phase] unconditionally. *)
-      let phase =
-        if row.kr_paused then "paused "
-        else if Tui_decode.keeper_phase_is_running row.kr_phase then ""
-        else Tui_decode.keeper_phase_to_string row.kr_phase ^ " "
-      in
-      let runtime_id = Terminal_text.single_line row.kr_runtime_id in
+      let phase, runtime_id = keeper_runtime_parts row in
       let phase_width = Message_layout.display_width phase in
       if phase_width >= width then fit_width (keeper_runtime_label runtime) width
       else
@@ -4951,7 +5032,23 @@ let render_keeper_list (state : state) =
             (Theme.warn ()) (List.length observed) (Masc_tui_message_layout.count_noun total "keeper") Ansi.reset)
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
-  let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
+  (* Measured over every reading rather than the rows on screen, so the
+     columns do not move while a reader scrolls. *)
+  let widest_runtime =
+    List.fold_left
+      (fun widest (reading : Keeper_control.reading) ->
+        let runtime =
+          match reading.Keeper_control.liveness with
+          | Keeper_control.Present row -> Some row
+          | Keeper_control.Absent | Keeper_control.Unobserved
+          | Keeper_control.Invalid _ -> None
+        in
+        max widest (keeper_runtime_cells runtime))
+      0 readings
+  in
+  let columns =
+    Render_schedule.allocate_keeper_columns ~inner_width:inner ~widest_runtime
+  in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);
@@ -5367,15 +5464,20 @@ let render_lanes_overview (state : state) =
       now.Unix.tm_sec
   in
   let header =
-    let keeper_lane_count =
-      match state.runtime_surface with
-      | Some snapshot -> List.length snapshot.rss_resolved.rrs_lanes
-      | None -> 0
+    (* Both readings come from [runtime_surface], which the Runtime screen
+       loads and this one does not, so on a first visit here they were zeros
+       nobody measured. *)
+    let lane_reading =
+      Option.map
+        (fun snapshot ->
+          string_of_int (List.length snapshot.rss_resolved.rrs_lanes))
+        state.runtime_surface
     in
-    let all_count =
-      match state.runtime_surface with
-      | Some snapshot -> List.length snapshot.rss_resolved.rrs_runtimes
-      | None -> 0
+    let all_reading =
+      Option.map
+        (fun snapshot ->
+          string_of_int (List.length snapshot.rss_resolved.rrs_runtimes))
+        state.runtime_surface
     in
     let standalone_count =
       match state.standalone_lanes with
@@ -5395,10 +5497,12 @@ let render_lanes_overview (state : state) =
                (tab_strip_width ~cols
                   ~before:(screen_title " MASC Lanes \xc2\xb7 Standalone" ^ tab_strip_gap)
                   ~after:("  " ^ timestamp ^ "  " ^ connection_badge state))
-             [ ( Printf.sprintf "Lanes (%d)" keeper_lane_count, false )
-             ; ( Printf.sprintf "All runtimes (%d)" all_count, false )
-             ; ( Printf.sprintf "Standalone (%s)"
-                   (Masc_tui_message_layout.count_noun standalone_count "lane"), true )
+             [ (tab_entry_label "Lanes" lane_reading, false)
+             ; (tab_entry_label "All runtimes" all_reading, false)
+             ; ( tab_entry_label "Standalone"
+                   (Some
+                      (Masc_tui_message_layout.count_noun standalone_count "lane"))
+               , true )
              ])
           timestamp (connection_badge state)
   in
@@ -6981,6 +7085,24 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     |> List.iter (fun line -> add_line (indent ^ failure_tone ^ line ^ Ansi.reset));
     add_empty ();
 
+    (* Blocked Board-attention partitions wait here for an
+       operator's requeue, and nothing else on the screens said they existed.
+       Beside the current failure because it is one: this Keeper's Board
+       judgments for those posts do not move until someone presses Q. *)
+    add_section "Board attention";
+    Masc_tui_board_quarantine.lines ~now:(Unix.gettimeofday ())
+      state.keeper_board_quarantines ~keeper_name:k.k_name
+    |> List.iter (fun (tone, text) ->
+         let color =
+           match tone with
+           | Masc_tui_board_quarantine.Plain -> ""
+           | Masc_tui_board_quarantine.Dim -> Ansi.dim
+           | Masc_tui_board_quarantine.Warn -> Theme.warn ()
+           | Masc_tui_board_quarantine.Bad -> Theme.bad ()
+         in
+         add_line (indent ^ color ^ text ^ Ansi.reset));
+    add_empty ();
+
     (* Gate section. Two settings with similar names decide different things,
        so both are named rather than merged: YOLO is the in-memory stance that
        stops this chat asking and a restart clears, while the Gate mode is
@@ -7579,14 +7701,28 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                   ^ Ansi.reset
                 ]
           else
-            List.map
-              (fun (row : schedule_row) ->
-                 Printf.sprintf "  %-12s %-18s %s"
-                   (Terminal_text.single_line row.sch_status)
-                   (Terminal_text.single_line row.sch_recurrence_summary)
-                   (Terminal_text.single_line
-                      (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
-              rows
+            (* What the store holds, above the rows it sent. The rows come
+               live-first, and a Keeper whose store has run for weeks answers
+               with a page of closed work behind the one live row -- without
+               this line a reader learns that only by scrolling to the end.
+               The counts describe the whole store, so they stay right when
+               the page below them is capped. *)
+            (match snapshot.scs_counts with
+             | None -> []
+             | Some counts ->
+                 [ Ansi.dim ^ "  "
+                   ^ Masc_tui_types.schedule_counts_line counts
+                   ^ Ansi.reset
+                 ; ""
+                 ])
+            @ List.map
+                (fun (row : schedule_row) ->
+                   Printf.sprintf "  %-12s %-18s %s"
+                     (Terminal_text.single_line row.sch_status)
+                     (Terminal_text.single_line row.sch_recurrence_summary)
+                     (Terminal_text.single_line
+                        (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
+                rows
       | _, _ ->
           [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
     in
@@ -11746,10 +11882,13 @@ let render_runtime (state : state) =
         let all_count =
           List.length snapshot.rss_resolved.Masc.Tui_decode.rrs_runtimes
         in
-        let standalone_count =
-          match state.standalone_lanes with
-          | Some snapshot -> List.length snapshot.sls_lanes
-          | None -> 0
+        (* [standalone_lanes] is the Lanes screen's reading, which this one
+           does not load, so its absence is not a count of zero. *)
+        let standalone_reading =
+          Option.map
+            (fun (snapshot : Masc.Tui_decode.standalone_lanes_snapshot) ->
+              string_of_int (List.length snapshot.sls_lanes))
+            state.standalone_lanes
         in
         let lanes_active = state.runtime_mode = Masc_tui_types.Runtime_lanes in
         Printf.sprintf "%s  %s  %s%s  %s  %s"
@@ -11761,58 +11900,23 @@ let render_runtime (state : state) =
                   ~after:
                     (Printf.sprintf "  %s%s  %s  %s" probe_status probe_read
                        timestamp (connection_badge state)))
-             [ ( Printf.sprintf "Lanes (%s, %s)" (Masc_tui_message_layout.count_noun lane_count "lane")
-                   (Masc_tui_message_layout.count_noun (List.length snapshot.rss_candidates) "slot")
+             [ ( tab_entry_label "Lanes"
+                   (Some
+                      (Printf.sprintf "%s, %s"
+                         (Masc_tui_message_layout.count_noun lane_count "lane")
+                         (Masc_tui_message_layout.count_noun
+                            (List.length snapshot.rss_candidates) "slot")))
                , lanes_active )
-             ; (Printf.sprintf "All runtimes (%d)" all_count, not lanes_active)
-             ; (Printf.sprintf "Standalone (%d)" standalone_count, false)
+             ; ( tab_entry_label "All runtimes" (Some (string_of_int all_count))
+               , not lanes_active )
+             ; (tab_entry_label "Standalone" standalone_reading, false)
              ])
           probe_status probe_read timestamp (connection_badge state)
   in
-  let authority_line =
-    match state.runtime_surface with
-    | None ->
-        "  SSOT: runtime.toml  projections: /api/v1/runtime/resolved + runtime-probe"
-    | Some snapshot ->
-        let config =
-          Terminal_text.single_line_or ~default:"config path unavailable"
-            snapshot.rss_resolved.rrs_config_path
-        in
-        let summary_text =
-          match snapshot.Masc.Tui_decode.rss_probe with
-          | None -> "probe unavailable"
-          | Some probe ->
-              let summary = probe.rps_summary in
-              Printf.sprintf "%d reachable / %d failed / %d skipped"
-                summary.rpsu_reachable summary.rpsu_failed summary.rpsu_skipped
-        in
-        let probe_note =
-          match snapshot.rss_probe_error, snapshot.rss_probe with
-          | Some detail, _ -> "  probe: " ^ Terminal_text.single_line detail
-          | None, Some probe ->
-              (match probe.rps_errors with
-               | detail :: _ -> "  probe: " ^ Terminal_text.single_line detail
-               | [] -> "")
-          | None, None -> ""
-        in
-        let probe_only_note =
-          match snapshot.rss_unassigned_probe_count with
-          | 0 -> ""
-          | count -> Printf.sprintf "  %d probe-only" count
-        in
-        let fleet_note =
-          let total_keepers = List.length state.keepers in
-          if total_keepers > 0 then
-            let turns, tokens, cost = aggregate_keeper_stats state.keepers in
-            Printf.sprintf "  fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
-              total_keepers turns (format_context_tokens tokens) cost
-          else ""
-        in
-        Printf.sprintf
-          "  SSOT: runtime.toml  projections: resolved + probe  %s%s  %s%s%s"
-          summary_text fleet_note config probe_only_note probe_note
-  in
-  let chrome_rows = runtime_surface_listing_chrome state in
+  let authority_rows = Masc_tui_types.runtime_authority_rows ~cols state in
+  (* The budget counts the rows this screen draws, so it comes from the same
+     call the drawing reads rather than a fixed one. *)
+  let chrome_rows = runtime_surface_listing_chrome ~cols state in
   let content_height = max 0 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
@@ -11833,7 +11937,7 @@ let render_runtime (state : state) =
     | Some snapshot when Option.is_some snapshot.rss_probe_error -> (Theme.warn ())
     | Some _ | None -> Ansi.dim
   in
-  c.push_styled ~style:authority_style authority_line;
+  List.iter (fun row -> c.push_styled ~style:authority_style row) authority_rows;
   c.push_divider ();
   (* The two routes that are not lanes. They hold runtime ids and nothing
      dispatches a keeper turn to them, so they sit above the lane table rather

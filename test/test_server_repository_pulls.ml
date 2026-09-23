@@ -46,7 +46,8 @@ let pull_node
   Printf.sprintf
     {|{"number":%d,"title":"PR %d","headRefName":"%s","isDraft":%b,
        "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":%s,%s
-       "commits":{"nodes":[{"commit":{"author":%s,"statusCheckRollup":%s}}]}}|}
+       "authored":{"nodes":[{"commit":{"parents":{"totalCount":1},"author":%s}}]},
+       "head":{"nodes":[{"commit":{"statusCheckRollup":%s}}]}}|}
     number
     number
     branch
@@ -158,7 +159,8 @@ let test_unknown_enum_is_counted () =
       ; pull_node ~number:3 ~branch:"c" ~draft:false ~review:{|"DISMISSED_NEW"|} ~rollup:"null" ()
       ; {|{"number":4,"title":"PR 4","headRefName":"d","isDraft":false,
           "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
-          "commits":{"nodes":[{"commit":{"author":null}}]}}|}
+          "authored":{"nodes":[{"commit":{"parents":{"totalCount":1},"author":null}}]},
+          "head":{"nodes":[{"commit":{}}]}}|}
       ]
   in
   let http_post, _ = recording_stub [ ok_response body ] in
@@ -507,14 +509,15 @@ let test_rate_limit_waits_for_reset () =
   let _third = Pulls.refresh ~now:after_reset ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:second in
   Alcotest.(check int) "asked again at the reset" 2 !calls
 
-(* --- Author, mergeable, Keeper join (RFC-0465: join by the head commit's
-   author, because a Keeper leaves the branch once its pull request is open) --- *)
+(* --- Author, mergeable, Keeper join (RFC-0465: join by the newest
+   single-parent commit's author, because a Keeper leaves the branch once its
+   pull request is open and a merge commit's author only brought the base in) --- *)
 
 let no_commit_node ~number =
   Printf.sprintf
     {|{"number":%d,"title":"PR %d","headRefName":"n","isDraft":false,
        "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"UNKNOWN",
-       "commits":{"nodes":[]}}|}
+       "authored":{"nodes":[]},"head":{"nodes":[]}}|}
     number
     number
 
@@ -583,7 +586,8 @@ let test_unknown_mergeable_or_missing_author_is_counted () =
       ; pull_node ~mergeable:"" ~number:2 ~branch:"b" ~draft:false ~review:"null" ~rollup:"null" ()
       ; {|{"number":3,"title":"PR 3","headRefName":"c","isDraft":false,
           "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
-          "commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}}|}
+          "authored":{"nodes":[{"commit":{"parents":{"totalCount":1}}}]},
+          "head":{"nodes":[{"commit":{"statusCheckRollup":null}}]}}|}
       ; pull_node ~author:"{}" ~number:4 ~branch:"d" ~draft:false ~review:"null" ~rollup:"null" ()
       ; pull_node ~number:5 ~branch:"e" ~draft:false ~review:"null" ~rollup:"null" ()
       ]
@@ -596,6 +600,109 @@ let test_unknown_mergeable_or_missing_author_is_counted () =
     undecodable;
   Alcotest.(check (list int)) "none of them is shown as a known state" [ 5 ]
     (List.map (fun (p : Pulls.pull_request) -> p.number) pulls)
+
+(* The head is a merge commit (GitHub's Update branch, an updater Keeper, a
+   local [git merge origin/main]): the author is the commit under it that has
+   one parent, while the check state stays the head's. *)
+let authored_node ~parents ~author =
+  Printf.sprintf {|{"commit":{"parents":{"totalCount":%d},"author":{"name":%S}}}|} parents author
+
+let merge_head_node ~number ~authored ~head_rollup =
+  Printf.sprintf
+    {|{"number":%d,"title":"PR %d","headRefName":"m","isDraft":false,
+       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+       "authored":{"nodes":[%s]},
+       "head":{"nodes":[{"commit":{"statusCheckRollup":%s}}]}}|}
+    number
+    number
+    (String.concat "," authored)
+    head_rollup
+
+let test_a_merge_commit_head_keeps_the_writing_keeper () =
+  let body =
+    page
+      ~has_next:false
+      ~cursor:None
+      [ merge_head_node
+          ~number:1
+          ~authored:
+            [ authored_node ~parents:1 ~author:"older-keeper"
+            ; authored_node ~parents:1 ~author:"edgar"
+            ; authored_node ~parents:2 ~author:"pr-updater"
+            ]
+          ~head_rollup:{|{"state":"PENDING"}|}
+      ; merge_head_node
+          ~number:2
+          ~authored:
+            [ authored_node ~parents:1 ~author:"edgar"
+            ; authored_node ~parents:2 ~author:"jeong-sik"
+            ; authored_node ~parents:2 ~author:"pr-updater"
+            ]
+          ~head_rollup:{|{"state":"FAILURE"}|}
+      ; merge_head_node
+          ~number:3
+          ~authored:
+            [ authored_node ~parents:2 ~author:"pr-updater"
+            ; authored_node ~parents:2 ~author:"pr-updater"
+            ]
+          ~head_rollup:"null"
+      ]
+  in
+  let http_post, _ = recording_stub [ ok_response body ] in
+  let pulls, undecodable = Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> read_or_fail in
+  Alcotest.(check int) "every row decodes" 0 undecodable;
+  let keepers = [ "edgar"; "older-keeper"; "pr-updater"; "jeong-sik" ] in
+  let facts =
+    List.map
+      (fun (p : Pulls.pull_request) ->
+        ( p.number
+        , Pulls.keeper_of_author ~keepers p
+        , match p.checks with
+          | Pulls.Checks_passing -> "passing"
+          | Pulls.Checks_failing -> "failing"
+          | Pulls.Checks_running -> "running"
+          | Pulls.Checks_none -> "none" ))
+      pulls
+  in
+  Alcotest.(check (list (triple int (option string) string)))
+    "the Keeper under the merge commits, and the head's check state"
+    [ 1, Some "edgar", "running"
+    ; 2, Some "edgar", "failing"
+    ; 3, None, "none"
+    ]
+    facts
+
+let test_the_query_reads_head_checks_and_an_author_window () =
+  let seen = ref None in
+  let http_post ~url:_ ~token:_ ~body =
+    seen := Some body;
+    ok_response (page ~has_next:false ~cursor:None [])
+  in
+  let _ = Pulls.read_repository ~now ~http_post ~token:"t" "o/r" in
+  match !seen with
+  | Some (`Assoc fields) ->
+    let query =
+      match List.assoc_opt "query" fields with
+      | Some (`String query) -> query
+      | _ -> failf "no query"
+    in
+    let contains needle =
+      let n = String.length needle and h = String.length query in
+      let rec at i = i + n <= h && (String.sub query i n = needle || at (i + 1)) in
+      at 0
+    in
+    Alcotest.(check bool) "checks come from the head commit" true
+      (contains "head: commits(last: 1)");
+    Alcotest.(check bool) "the author window reads each commit's parent count" true
+      (contains "parents { totalCount }");
+    (match List.assoc_opt "variables" fields with
+     | Some (`Assoc vars) ->
+       Alcotest.(check bool) "the window size is sent" true
+         (match List.assoc_opt "authorWindow" vars with
+          | Some (`Int size) -> size > 1
+          | _ -> false)
+     | _ -> failf "no variables")
+  | _ -> failf "no request was sent"
 
 let pull ~number ~author =
   { Pulls.repo_slug = "jeong-sik/masc"
@@ -830,6 +937,10 @@ let () =
       , [ Alcotest.test_case "two pages decode in order" `Quick test_decodes_two_pages
         ; Alcotest.test_case "unknown enum is counted" `Quick test_unknown_enum_is_counted
         ; Alcotest.test_case "author and mergeable decode" `Quick test_author_and_mergeable_decode
+        ; Alcotest.test_case "a merge commit head keeps the writing Keeper" `Quick
+            test_a_merge_commit_head_keeps_the_writing_keeper
+        ; Alcotest.test_case "query reads head checks and an author window" `Quick
+            test_the_query_reads_head_checks_and_an_author_window
         ; Alcotest.test_case
             "unknown mergeable or missing author is counted"
             `Quick

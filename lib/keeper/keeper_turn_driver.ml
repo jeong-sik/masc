@@ -1583,17 +1583,15 @@ let run_named
         | None, _ | _, Some _ -> None
         | Some trace_id, None ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
-            let config = Workspace.default_config base_path in
-            let keepers_dir = Workspace.keepers_runtime_dir config in
-            Some
-              (Keeper_turn_driver_try_provider.continuity_for_request
-                 ~keeper_name ~trace_id ~messages:initial_messages
-                 ~snapshot:(Keeper_librarian_continuity.read ~config ~keeper_name)
-                 ~lines:(fun () ->
-                   Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:keeper_name)
-                 ~progress:(fun () ->
-                   Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name
-                   |> Result.map_error Keeper_librarian_progress.read_error_to_string))))
+            let continuity, notes =
+              Keeper_turn_driver_try_provider.read_keeper_continuity
+                ~config:(Workspace.default_config base_path)
+                ~keeper_name ~trace_id ~messages:initial_messages
+            in
+            List.iter
+              (Keeper_turn_driver_try_provider.log_continuity_note ~keeper_name)
+              notes;
+            Some continuity))
       in
 	  let refused_carried_front = ref None in
 	  (* The same front the Agent Core branch reads, for the official-client

@@ -3484,6 +3484,17 @@
  (modules test_tui_connection_status)
  (libraries alcotest masc masc_tui_types))
 
+; Anchored here rather than at the head of the file. That alone is not enough
+; to keep two pull requests apart -- this stanza and the one below it both
+; chose the same anchor and collided on the merge -- so a suite added later
+; picks a stanza no open branch is already sitting under.
+; [masc.masc_schedule] is here for [Schedule_domain], whose status list and
+; terminal rule the line under test walks rather than restating.
+(test
+ (name test_tui_schedule_counts_line)
+ (modules test_tui_schedule_counts_line)
+ (libraries alcotest masc.masc_schedule masc_tui_types))
+
 ; Its own anchor, under the other suite that links only the state vocabulary
 ; and the wire types, so two pull requests adding a suite do not both land on
 ; the head of this file.
@@ -3874,6 +3885,9 @@
  (modules test_tui_render_tools)
  (libraries
   alcotest
+  ; The wire decoder, so the surface under test is built the way the live
+  ; loader builds it rather than by hand.
+  masc
   masc_tui_keys
   masc_tui_render_tools
   masc_tui_theme
@@ -5367,6 +5381,11 @@
  (libraries alcotest masc_tui_wire_age))
 
 (test
+ (name test_tui_board_quarantine)
+ (modules test_tui_board_quarantine)
+ (libraries alcotest masc yojson masc_tui_fetched masc_tui_board_quarantine))
+
+(test
  (name test_tui_text_block)
  (modules test_tui_text_block)
  (libraries alcotest astring masc_tui_text_block))
@@ -5820,6 +5839,11 @@
 
 (include stanzas/test_tui_ask_projection.inc)
 
+(include stanzas/test_tui_tasks_title_fits_the_frame.inc)
+(include stanzas/test_tui_board_hearth_census_width.inc)
+
+(include stanzas/test_tui_ask_context_block.inc)
+
 (include stanzas/test_tui_memory_back.inc)
 
 (include stanzas/test_tui_resources_empty_note.inc)
@@ -6080,7 +6104,12 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries alcotest masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+ ; The pick dispatch lives in the executable, which no test can link, so the
+ ; one assertion about it is read through Ast_grep. The source is a dep:
+ ; without it the test reads a cached verdict and stays green while the
+ ; wiring it asserts is gone.
+ (deps %{workspace_root}/bin/masc_tui.ml)
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 
 (rule

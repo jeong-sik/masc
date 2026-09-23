@@ -47,28 +47,28 @@ let fleet =
   ; keeper "tui-developer" (phase "failing")
   ; keeper "glossary-maniac" (phase "running")
   ; keeper ~ago:None "lane-smith" (phase "paused")
-  ; keeper ~ago:(Some 50460.) "sangsu" Types.Keeper_phase_absent
-  ; keeper "rondo" (phase "paused")
+  ; keeper ~ago:(Some 50460.) "stuck-fixture-keeper" Types.Keeper_phase_absent
+  ; keeper "parked-fixture-keeper" (phase "paused")
   ]
 
 let tasks =
   [ task "task-1519" (in_progress "glossary-maniac")
   ; task "task-1520" (in_progress "glossary-maniac")
   ; task "task-1600" (awaiting "glossary-maniac")
-  ; task "task-1700" (in_progress "sangsu")
-  ; task "task-1701" (in_progress "sangsu")
-  ; task "task-1702" (in_progress "sangsu")
+  ; task "task-1700" (in_progress "stuck-fixture-keeper")
+  ; task "task-1701" (in_progress "stuck-fixture-keeper")
+  ; task "task-1702" (in_progress "stuck-fixture-keeper")
   ; task "task-1800" (in_progress "codex-mcp-client")
   ; task "task-1801" (in_progress "codex-mcp-client")
   ; task "task-1900" (awaiting "analyst")
-  ; task "task-1950" (in_progress "rondo")
+  ; task "task-1950" (in_progress "parked-fixture-keeper")
   ; task "task-2000" Masc_domain.Todo
   ]
 
 let attention =
   [ keeper_item "tui-developer"
       "tui-developer: runtime_blocked (Keeper turn failed 2 consecutive cycle(s))"
-  ; keeper_item "sangsu" "sangsu: keepalive_stopped"
+  ; keeper_item "stuck-fixture-keeper" "stuck-fixture-keeper: keepalive_stopped"
   ; { (keeper_item "lane-smith" "lane-smith: paused") with
       ai_severity = Types.Attention_warning
     }
@@ -87,11 +87,11 @@ let names rows = List.map (fun (row : Team.row) -> row.keeper.okp_name) rows
 
 let test_bands_order_stuck_then_working_then_idle () =
   check (list string) "stuck Keepers first, by name; then working; then idle"
-    [ "sangsu"; "tui-developer"; "glossary-maniac"; "won-chik" ]
+    [ "stuck-fixture-keeper"; "tui-developer"; "glossary-maniac"; "won-chik" ]
     (names team.rows);
   check (list (pair string int))
     "paused Keepers roll into one parked line, with the work they still hold"
-    [ ("lane-smith", 0); ("rondo", 1) ] team.parked;
+    [ ("lane-smith", 0); ("parked-fixture-keeper", 1) ] team.parked;
   check int "need you" 2 (Team.count team Team.Needs_you);
   check int "working" 1 (Team.count team Team.Working);
   check int "idle" 1 (Team.count team Team.Idle);
@@ -110,10 +110,10 @@ let test_a_stuck_row_carries_the_attention_sentence_and_held_work () =
        check int "holds nothing" 0 held
    | Team.Phase_word _ | Team.Working_on _ | Team.No_open_task _ ->
        fail "a failing Keeper named by an attention item carries its sentence");
-  match detail_of "sangsu" with
+  match detail_of "stuck-fixture-keeper" with
   | Team.Blocker { summary; held; _ } ->
       check string "no registry phase, but named by attention"
-        "sangsu: keepalive_stopped" summary;
+        "stuck-fixture-keeper: keepalive_stopped" summary;
       check int "the three tasks it stopped holding are said" 3 held
   | Team.Phase_word _ | Team.Working_on _ | Team.No_open_task _ ->
       fail "a phase-less Keeper that attention names needs the operator"
@@ -332,13 +332,13 @@ let info_item name summary : Types.attention_item =
 let test_an_info_item_is_not_a_blocker () =
   let phase_less =
     Team.project
-      ~keepers:[ keeper "sangsu" Types.Keeper_phase_absent ]
+      ~keepers:[ keeper "stuck-fixture-keeper" Types.Keeper_phase_absent ]
       ~tasks:[]
-      ~attention:[ info_item "sangsu" "sangsu has 3 external messages waiting" ]
+      ~attention:[ info_item "stuck-fixture-keeper" "stuck-fixture-keeper has 3 external messages waiting" ]
   in
   check (list string) "an info item alone does not make Needs_you" []
     (names phase_less.rows);
-  check (list (pair string int)) "it stays parked" [ ("sangsu", 0) ]
+  check (list (pair string int)) "it stays parked" [ ("stuck-fixture-keeper", 0) ]
     phase_less.parked;
   let failing =
     Team.project

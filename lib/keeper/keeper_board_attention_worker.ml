@@ -758,29 +758,31 @@ let deliver_and_settle_completed ~base_path ~keeper_name partition =
        ^ partition.partition_id)
 ;;
 
+(* [Not_relevant] carries nothing across the owner lane: no event is
+   enqueued for the owner to consume (keeper_board_attention_candidate.mli:
+   "Relevant judgments cross the owner lane only when the owner durably
+   applies and consumes the exact candidate judgment"). Waiting for the
+   owner's own heartbeat to run [settle_completed_snapshot] orphans the
+   candidate whenever that specific owner is not currently ticking
+   (task-1666's measured 98 live cases); the worker settles it here
+   instead, independent of the owner. *)
+let settle_if_not_relevant ~base_path completed =
+  if is_not_relevant_completion completed
+  then (
+    let* (_ : Partition.t) =
+      deliver_and_settle_completed
+        ~base_path
+        ~keeper_name:completed.Partition.keeper_name
+        completed
+    in
+    Ok ())
+  else Ok ()
+;;
+
 let signal_completion ~base_path = function
   | Completion_blocked step -> Ok step
   | Completion_projected (completed, owner) ->
-    (* [Not_relevant] carries nothing across the owner lane: no event is
-       enqueued for the owner to consume (keeper_board_attention_candidate.mli:
-       "Relevant judgments cross the owner lane only when the owner durably
-       applies and consumes the exact candidate judgment"). Waiting for the
-       owner's own heartbeat to run [settle_completed_snapshot] orphans the
-       candidate whenever that specific owner is not currently ticking
-       (task-1666's measured 98 live cases); the worker settles it here
-       instead, independent of the owner. *)
-    let* () =
-      if is_not_relevant_completion completed
-      then (
-        let* (_ : Partition.t) =
-          deliver_and_settle_completed
-            ~base_path
-            ~keeper_name:completed.Partition.keeper_name
-            completed
-        in
-        Ok ())
-      else Ok ()
-    in
+    let* () = settle_if_not_relevant ~base_path completed in
     let owner_wake =
       Keeper_registry.wakeup_running_exact
         ~intent:Keeper_registry.Attention_result
@@ -1053,18 +1055,7 @@ let complete_existing_judgment
         "existing judgment completion"
         transition
     in
-    let* () =
-      if is_not_relevant_completion completed
-      then (
-        let* (_ : Partition.t) =
-          deliver_and_settle_completed
-            ~base_path
-            ~keeper_name:completed.Partition.keeper_name
-            completed
-        in
-        Ok ())
-      else Ok ()
-    in
+    let* () = settle_if_not_relevant ~base_path completed in
     let owner_wake =
       exact_owner_wake
         ~base_path

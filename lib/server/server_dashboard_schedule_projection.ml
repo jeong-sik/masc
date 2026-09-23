@@ -682,9 +682,24 @@ let schedule_signal_rows_and_errors config limit =
     ([], [])
 ;;
 
+(* The runner's own hold, read from the same [held] list [/health] reports.
+   A held occurrence has no signal and no wake yet, so nothing else on the row
+   can say the schedule is waiting for its target to take the previous one. *)
+let schedule_runner_hold_dashboard_json = function
+  | None -> `Null
+  | Some (signal : Schedule_runner.wake_signal) ->
+    `Assoc
+      [ ( "occurrence_id"
+        , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
+      ; "due_at", `Float signal.due_at
+      ; "due_at_iso", unix_iso_json signal.due_at
+      ]
+;;
+
 let schedule_request_dashboard_json
   ~now
   ~evidence_snapshot
+  ~runner_status
   ?last_wake
   (request : Schedule_domain.schedule_request)
   =
@@ -768,6 +783,12 @@ let schedule_request_dashboard_json
       , schedule_keeper_reaction_evidence_dashboard_json
           ~evidence_snapshot
           last_wake )
+    ; ( "runner_hold"
+      , schedule_runner_hold_dashboard_json
+          (Schedule_runner_status.held_occurrence
+             runner_status
+             ~schedule_instance_id:request.schedule_instance_id
+             ~schedule_id:request.schedule_id) )
     ]
 ;;
 
@@ -973,11 +994,13 @@ let schedule_request_rows_dashboard_json ~config ~now state request_rows =
       ~config
       (List.map snd request_rows_with_wakes)
   in
+  let runner_status = Schedule_runner_status.snapshot () in
   List.map
     (fun (request, last_wake) ->
        schedule_request_dashboard_json
          ~now
          ~evidence_snapshot
+         ~runner_status
          ?last_wake
          request)
     request_rows_with_wakes

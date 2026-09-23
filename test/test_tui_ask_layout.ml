@@ -92,6 +92,37 @@ let test_the_reason_is_drawn_when_it_costs_nothing () =
   Alcotest.(check bool) "there was room" true p.Layout.context_shown
 ;;
 
+(* Saying the reason was dropped costs a row, so the plan decides it here.
+   The renderer drew that line whenever the reason was dropped, outside the
+   plan: with the questions filling the room exactly there was no row for it,
+   and the row it took came off the bottom -- where the folded asks and the
+   one line saying how many of them are hidden live. *)
+let test_the_dropped_reason_notice_is_in_the_budget () =
+  (* Ten rows to spend, two questions of five: nothing left. *)
+  let p = plan ~budget:12 ~question_heights:[ 5; 5 ] ~context_height:3 () in
+  Alcotest.(check int) "both questions drawn" 2 p.Layout.questions_shown;
+  Alcotest.(check bool) "the reason does not fit" false p.Layout.context_shown;
+  Alcotest.(check bool) "and neither does saying so" false
+    p.Layout.context_notice
+;;
+
+let test_one_row_left_is_enough_to_say_the_reason_went () =
+  (* The same shape with one row to spare. *)
+  let p = plan ~budget:13 ~question_heights:[ 5; 5 ] ~context_height:3 () in
+  Alcotest.(check bool) "the reason still does not fit" false
+    p.Layout.context_shown;
+  Alcotest.(check bool) "but the line saying so does" true
+    p.Layout.context_notice
+;;
+
+(* Nothing was dropped, so there is nothing to say. *)
+let test_a_drawn_reason_needs_no_notice () =
+  let p = plan ~budget:20 ~question_heights:[ 4 ] ~context_height:3 () in
+  Alcotest.(check bool) "the reason is drawn" true p.Layout.context_shown;
+  Alcotest.(check bool) "and says nothing about itself" false
+    p.Layout.context_notice
+;;
+
 (* A pane too small to draw anything asks for nothing rather than for a
    negative number of rows. *)
 let test_a_budget_that_is_gone_asks_for_nothing () =
@@ -159,6 +190,7 @@ let test_a_plan_always_fits_what_it_was_given () =
                        + List.fold_left ( + ) 0 drawn_questions
                        + (if p.Layout.questions_hidden > 0 then 1 else 0)
                        + (if p.Layout.context_shown then context_height else 0)
+                       + (if p.Layout.context_notice then 1 else 0)
                        + p.Layout.summaries_shown
                        + if p.Layout.summaries_hidden > 0 then 1 else 0
                      in
@@ -222,7 +254,13 @@ let () =
             test_every_question_is_drawn_or_counted
         ] )
     ; ( "edges"
-      , [ Alcotest.test_case "a spent budget asks for nothing" `Quick
+      , [ Alcotest.test_case "the dropped-reason notice is in the budget" `Quick
+            test_the_dropped_reason_notice_is_in_the_budget
+        ; Alcotest.test_case "one row left is enough to say the reason went"
+            `Quick test_one_row_left_is_enough_to_say_the_reason_went
+        ; Alcotest.test_case "a drawn reason needs no notice" `Quick
+            test_a_drawn_reason_needs_no_notice
+        ; Alcotest.test_case "a spent budget asks for nothing" `Quick
             test_a_budget_that_is_gone_asks_for_nothing
         ; Alcotest.test_case "an ask with no questions" `Quick
             test_an_ask_with_no_questions_is_survivable

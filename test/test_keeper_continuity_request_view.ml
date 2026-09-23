@@ -380,6 +380,65 @@ let test_absorbed_history_starts_at_the_librarians_position () =
    | Error _ -> () | Ok () -> fail "a history that changed under the position passed its check")
 ;;
 
+(* The forecast asks the driver's own chooser, so every start the driver
+   can take shows up in the forecast unchanged: the origin, the atom the
+   range opens on and its bytes. The first three cases hold a seed this
+   history still opens with the same message, so a forecast that tried the
+   seed before the Librarian point would name the seed where the driver
+   names the snapshot or the read position. *)
+let test_the_forecast_takes_the_drivers_start () =
+  let fresh = text T.User "Fresh unsummarized work" in
+  let messages = source @ [fresh] in
+  let digest_at = Window.atom_opening_digest messages in
+  let held_seed : Front.seed =
+    {first_atom = 0; front_digest = Option.get (digest_at 0); source = Front.Ledger} in
+  let outlived_seed : Front.seed =
+    {first_atom = 0; front_digest = "not-the-opening-message"; source = Front.Ledger} in
+  let snapshot, lines = capture_source source in
+  let summarized = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+    | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
+  let absorbed =
+    match Driver.absorbed_history ~trace_id ~messages
+            (progress ~trace_id ~end_atom:1 ~last_atom_digest:(Option.get (digest_at 0))) with
+    | Some (_, continuity) -> continuity
+    | None -> fail "a position that matches this history was refused" in
+  let boundary = Front.Turn_boundary { end_atom = 2 } in
+  let unknown = Front.Turn_boundary_unknown { reason = "boundary read failed: fixture" } in
+  let cases =
+    [ "a fitting snapshot", summarized, Some held_seed, boundary,
+      (function Front.Librarian_snapshot _ -> true | _ -> false);
+      "the read position", absorbed, Some held_seed, boundary,
+      (function Front.Librarian_progress { end_atom = 1 } -> true | _ -> false);
+      "a held seed", Driver.without_snapshot, Some held_seed, boundary,
+      (function Front.Carried Front.Ledger -> true | _ -> false);
+      "an outlived seed", Driver.without_snapshot, Some outlived_seed, boundary,
+      (function Front.Turn_start { end_atom = 2 } -> true | _ -> false);
+      "the turn boundary", Driver.without_snapshot, None, boundary,
+      (function Front.Turn_start { end_atom = 2 } -> true | _ -> false);
+      "an unknown boundary", Driver.without_snapshot, None, unknown,
+      (function Front.Turn_start_unknown _ -> true | _ -> false) ]
+  in
+  List.iter (fun (name, continuity, front, turn_boundary, expected) ->
+    let driver =
+      Driver.For_testing.request_view ~continuity ~provider_config
+        ~measure_message_bytes:measure ~front ~history_digest_at:digest_at
+        ~current_turn_results:Driver.Current_turn_verbatim
+        ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0 ~turn_boundary
+        ~materialize:(fun ~pending:_ messages -> messages) messages in
+    let forecast =
+      Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~front
+        ~turn_start:turn_boundary ~counted_tokens:None messages in
+    check bool (name ^ ": the driver takes the start this case names") true
+      (expected driver.composed.origin);
+    check bool (name ^ ": the forecast names the driver's origin") true
+      (forecast.origin = driver.composed.origin);
+    check int (name ^ ": from the same atom")
+      driver.composed.projection.dropped_atoms forecast.first_atom;
+    check int (name ^ ": with the same bytes")
+      driver.composed.transmitted_bytes forecast.transmitted_bytes)
+    cases
+;;
+
 let exchange id body =
   [message T.Assistant [T.ToolUse {id; name = "read_file"; input = `Assoc []}];
    { (message T.Tool [T.ToolResult {tool_use_id = id; content = body;
@@ -764,6 +823,8 @@ let () = run "continuity request projection"
                test_case "the reader says unknown when no end line matches the history" `Quick test_turn_start_is_unknown_when_no_end_line_matches_the_history;
                test_case "absorbed history starts at the Librarian's position" `Quick
                  test_absorbed_history_starts_at_the_librarians_position;
+               test_case "the forecast takes the driver's start" `Quick
+                 test_the_forecast_takes_the_drivers_start;
                test_case "an unusable snapshot starts without it" `Quick
                  test_an_unusable_snapshot_starts_without_it;
                test_case "official lanes take the same choice" `Quick

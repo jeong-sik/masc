@@ -658,7 +658,7 @@ let reconcile_committed_proof config ~goal_id =
   (* This locked re-read folds its write_error — including a store that
      became unavailable after the verifier scan listed it — to a string. The
      scan records only its own list read as [Scan_skipped] (RFC-0444 PR-5);
-     a failure here reaches it as [Ledger_reconcile_failed] naming the goal. *)
+     a failure here reaches it as an unreconciled goal it skips and logs. *)
   Result.map (fun ((goal : Goal_store.goal), (outcome, verdict)) ->
     Option.iter (fun verdict -> emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
       ~payload:(gate_event_payload ctx ~phase:goal.phase verdict)) verdict;

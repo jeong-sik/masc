@@ -15,6 +15,10 @@ val keeper_api_prefix : string
 val keeper_suffix_config : string
 val keeper_suffix_secrets : string
 val keeper_suffix_github_identity : string
+val keeper_suffix_board_attention_quarantines : string
+(** [GET /api/v1/keepers/<name>/board-attention/quarantines]: that Keeper's
+    rows of the Board-attention quarantine inventory, the same rows the
+    operator snapshot lists for the fleet. *)
 val keeper_suffix_github_login : string
 val keeper_suffix_github_token : string
 

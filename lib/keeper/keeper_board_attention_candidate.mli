@@ -219,12 +219,16 @@ exception Candidate_unavailable of string
    caller outside it ever named one -- exporting them offered a second way to
    read and write the ledger's shape beside the operations that own it. The
    functions stay; only the interface stops advertising them.
-   [quarantine_failure_category_to_string] is the exception and is kept:
-   [Keeper_board_attention_quarantine_command] renders the category. *)
+   The [quarantine_failure_category] pair is the exception and is kept:
+   [Keeper_board_attention_quarantine_command] renders the category into the
+   operator inventory and reads it back from that inventory for the TUI. *)
 
 val judgment_to_yojson : judgment -> Yojson.Safe.t
 val judgment_of_yojson : Yojson.Safe.t -> (judgment, string) result
 val quarantine_failure_category_to_string : quarantine_failure_category -> string
+val quarantine_failure_category_of_string : string -> quarantine_failure_category option
+(** Inverse of {!quarantine_failure_category_to_string}; [None] for any other
+    spelling. *)
 val status_view : status -> status_view
 (** Total classification of a durable status. Unlike the removed pair of
     optional projections, this preserves both operational resumability and

@@ -137,3 +137,13 @@ val inventory_json :
   base_path:string ->
   keeper_names:string list ->
   Yojson.Safe.t
+
+val request_to_json : request -> Yojson.Safe.t
+(** The request body {!parse_request} accepts, schema included. *)
+
+val inventory_item_of_json : Yojson.Safe.t -> (inventory_item, string) result
+(** Inverse of the item rows {!inventory_to_json} writes. An unknown [phase]
+    or [failure_category] spelling is an [Error], never a default. *)
+
+val inventory_error_of_json : Yojson.Safe.t -> (inventory_error, string) result
+(** Inverse of the [errors] rows {!inventory_to_json} writes. *)

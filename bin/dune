@@ -1098,6 +1098,14 @@
  (wrapped false)
  (modules masc_tui_fetched))
 
+;; A Keeper's Board-attention quarantine rows on its Info tab. Own library so
+;; the lines and the requeue target have a test that does not draw a screen.
+(library
+ (name masc_tui_board_quarantine)
+ (wrapped false)
+ (modules masc_tui_board_quarantine)
+ (libraries masc masc_tui_ansi masc_tui_fetched yojson))
+
 (library
  (name masc_tui_fork_guard)
  (wrapped false)
@@ -1248,6 +1256,7 @@
   masc_tui_ask_layout
   masc_tui_ask_projection
   masc_tui_board_detail
+  masc_tui_board_quarantine
   masc_tui_fetched
   masc_tui_attachment
   masc_tui_code_lexer
@@ -1661,6 +1670,7 @@
   masc_tui_command
   masc_tui_gate_text
   masc_tui_wire_age
+  masc_tui_board_quarantine
   masc_tui_text_block
   masc_tui_preset_text
   masc_tui_mcp

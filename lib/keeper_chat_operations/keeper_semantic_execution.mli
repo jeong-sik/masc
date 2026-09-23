@@ -137,6 +137,11 @@ val error_to_string : error -> string
 val phase_name : phase -> string
 val is_terminal : t -> bool
 val checkpoint_references : t -> Keeper_checkpoint_ref.t list
+val gate_approval_ids : t -> string list
+(** Approval ids this execution may still read from the Gate store: the
+    obligations of a Gate wait or of the wait it is resuming, and the approval
+    ids and obligations of a Gate binding, plus the obligations not yet
+    discharged. *)
 (** Every Agent Core checkpoint the record can still ask the store for: the
     one it resumes, a retry's, a Gate wait's and a Gate preparation's. A
     retained continuation named by no record's list is never read again. *)

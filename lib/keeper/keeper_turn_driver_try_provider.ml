@@ -253,40 +253,33 @@ let working_state_text (snapshot : Librarian_continuity_snapshot.t) =
    changes while the request is in flight is still refused, by
    [validate_continuity].
 
-   [lines] is read only when a snapshot is saved. *)
-let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~progress =
-  let absorbed_or_turn_start ~why =
-    let absorbed =
+   [lines] is read only when a snapshot is saved. What was passed over and
+   why comes back beside the choice rather than going to the log here, so
+   a caller that only looks -- the next-request forecast -- takes the same
+   choice without writing the turn's log lines. *)
+type continuity_note =
+  | Snapshot_unusable of { why : string }
+  | Progress_unreadable of { why : string; detail : string }
+  | Started_at_read_position of { why : string; end_atom : int }
+  | Started_at_turn_boundary of { why : string }
+
+let choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress =
+  let absorbed_or_turn_start ~why notes =
+    let absorbed, notes =
       match progress () with
-      | Ok (Some progress) -> absorbed_history ~trace_id ~messages progress
-      | Ok None -> None
-      | Error detail ->
-        Log.Keeper.warn ~keeper_name
-          "Librarian progress unreadable while no continuity snapshot fits (%s): %s"
-          why detail;
-        None
+      | Ok (Some progress) -> absorbed_history ~trace_id ~messages progress, notes
+      | Ok None -> None, notes
+      | Error detail -> None, Progress_unreadable { why; detail } :: notes
     in
     match absorbed with
     | Some (end_atom, continuity) ->
-      Log.Keeper.info ~keeper_name
-        "no Librarian continuity snapshot fits the current history (%s); starting at the Librarian's position, atom %d"
-        why end_atom;
-      continuity
-    | None ->
-      Log.Keeper.info ~keeper_name
-        "no Librarian continuity snapshot fits the current history (%s); the request starts at this turn's own boundary"
-        why;
-      Without_snapshot
+      continuity, List.rev (Started_at_read_position { why; end_atom } :: notes)
+    | None -> Without_snapshot, List.rev (Started_at_turn_boundary { why } :: notes)
   in
-  let unusable ~why =
-    Log.Keeper.warn ~keeper_name
-      "Librarian continuity snapshot cannot be used (%s); the request starts without it"
-      why;
-    absorbed_or_turn_start ~why
-  in
+  let unusable ~why = absorbed_or_turn_start ~why [ Snapshot_unusable { why } ] in
   match snapshot with
   | Error detail -> unusable ~why:("snapshot unreadable: " ^ detail)
-  | Ok None -> absorbed_or_turn_start ~why:"no continuity snapshot is saved"
+  | Ok None -> absorbed_or_turn_start ~why:"no continuity snapshot is saved" []
   | Ok (Some snapshot) ->
     (match lines () with
      | Error detail -> unusable ~why:("turn boundaries unreadable: " ^ detail)
@@ -294,7 +287,7 @@ let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~pr
        (match prepare_continuity ~trace_id ~lines ~messages snapshot with
         | Ok restored ->
           (match snapshot.Librarian_continuity_snapshot.catch_up_end_atom with
-           | None -> restored
+           | None -> restored, []
            | Some target ->
              (* A rewrite from atom 0 that fits but has not reached where a
                 request starts without it, as of the Librarian's last round:
@@ -304,7 +297,8 @@ let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~pr
              absorbed_or_turn_start
                ~why:(Printf.sprintf
                        "the snapshot is being rewritten from atom 0 and ends at atom %d, short of %d"
-                       snapshot.Librarian_continuity_snapshot.end_atom target))
+                       snapshot.Librarian_continuity_snapshot.end_atom target)
+               [])
         | Error
             ((Librarian_continuity_snapshot.Trace_mismatch
              | Librarian_continuity_snapshot.History_changed
@@ -314,7 +308,7 @@ let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~pr
              position may still fit: goo-yang-bong's did on 2026-09-22 while
              its snapshot did not, and the keeper sent its 12,720 atoms,
              16.4 MB, 44 cycles in a row until the position was used. *)
-          absorbed_or_turn_start ~why:(Librarian_continuity_snapshot.error_to_string mismatch)
+          absorbed_or_turn_start ~why:(Librarian_continuity_snapshot.error_to_string mismatch) []
         | Error
             ((Librarian_continuity_snapshot.Prefix_changed
              | Librarian_continuity_snapshot.Invalid_snapshot _
@@ -322,6 +316,42 @@ let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~pr
              | Librarian_continuity_snapshot.Read_failed _
              | Librarian_continuity_snapshot.Write_failed _) as error) ->
           unusable ~why:(Librarian_continuity_snapshot.error_to_string error)))
+;;
+
+let log_continuity_note ~keeper_name = function
+  | Snapshot_unusable { why } ->
+    Log.Keeper.warn ~keeper_name
+      "Librarian continuity snapshot cannot be used (%s); the request starts without it"
+      why
+  | Progress_unreadable { why; detail } ->
+    Log.Keeper.warn ~keeper_name
+      "Librarian progress unreadable while no continuity snapshot fits (%s): %s"
+      why detail
+  | Started_at_read_position { why; end_atom } ->
+    Log.Keeper.info ~keeper_name
+      "no Librarian continuity snapshot fits the current history (%s); starting at the Librarian's position, atom %d"
+      why end_atom
+  | Started_at_turn_boundary { why } ->
+    Log.Keeper.info ~keeper_name
+      "no Librarian continuity snapshot fits the current history (%s); the request starts at this turn's own boundary"
+      why
+;;
+
+let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~progress =
+  let continuity, notes = choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress in
+  List.iter (log_continuity_note ~keeper_name) notes;
+  continuity
+;;
+
+(* The keeper's own files, read the way every turn reads them. *)
+let read_keeper_continuity ~config ~keeper_name ~trace_id ~messages =
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  choose_continuity ~trace_id ~messages
+    ~snapshot:(Keeper_librarian_continuity.read ~config ~keeper_name)
+    ~lines:(fun () -> Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:keeper_name)
+    ~progress:(fun () ->
+      Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name
+      |> Result.map_error Keeper_librarian_progress.read_error_to_string)
 ;;
 
 (** Explicit context record for the extracted [try_provider] function.
@@ -991,6 +1021,99 @@ let demotion_plan ?(demote_from = 0) ~measure_message_bytes ~base_path ~demote_b
     Keeper_model_input_demotion.plan ~demote_from ~measure_message_bytes ~demote_before messages
 ;;
 
+(* Where a request's carried range opens (RFC keeper-context-window-in-tokens
+   §13.4, §13.6), from values the caller read: a snapshot that fits this
+   history, else the Librarian's read position in it, else a seed this
+   history still opens with the same message, else where the last completed
+   turn on this history ended. Nothing else chooses the start: the turn's
+   composition and the next-request forecast both ask here, so the forecast
+   shows the start the request will have. A seed this history does not hold
+   is dropped and returned with the reason. *)
+type range_start =
+  | From_snapshot of Librarian_continuity_snapshot.t
+  | From_read_position of { end_atom : int }
+  | From_seed of Keeper_carried_front.seed
+  | From_turn_boundary of Keeper_carried_front.turn_start
+
+type start_choice =
+  { start : range_start
+  ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
+  }
+
+let choose_range_start ~continuity ~front ~history_digest_at ~turn_boundary =
+  let without_point () =
+    match front with
+    | None -> { start = From_turn_boundary turn_boundary; outlived_seed = None }
+    | Some seed ->
+      (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
+       | Ok seed -> { start = From_seed seed; outlived_seed = None }
+       | Error dropped ->
+         { start = From_turn_boundary turn_boundary; outlived_seed = Some (seed, dropped) })
+  in
+  match continuity with
+  | Some (Summarized { snapshot; _ }) -> { start = From_snapshot snapshot; outlived_seed = None }
+  | Some (Absorbed { end_atom; _ }) ->
+    { start = From_read_position { end_atom }; outlived_seed = None }
+  | Some Without_snapshot | None -> without_point ()
+;;
+
+let range_start_origin = function
+  | From_snapshot snapshot ->
+    Keeper_carried_front.Librarian_snapshot
+      { end_atom = snapshot.Librarian_continuity_snapshot.end_atom
+      ; boundary_line = snapshot.Librarian_continuity_snapshot.end_boundary_line
+      }
+  | From_read_position { end_atom } -> Keeper_carried_front.Librarian_progress { end_atom }
+  | From_seed seed -> Keeper_carried_front.Carried seed.Keeper_carried_front.source
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
+    Keeper_carried_front.Turn_start { end_atom }
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown { reason }) ->
+    Keeper_carried_front.Turn_start_unknown { reason }
+;;
+
+(* The range [start] opens, over [messages] of [atom_count] atoms. A
+   snapshot's working state rides ahead of the atoms it does not cover, and
+   a Librarian point may leave no history atom at all: a Librarian that has
+   read everything, which is the only state a purge leaves it in. A seed or
+   a turn boundary always carries the newest atom ({!Keeper_carried_front.clamp});
+   an unknown boundary carries that atom alone. *)
+let project_range_start ~measure_message_bytes ~atom_count start messages =
+  match start with
+  | From_snapshot snapshot ->
+    let working : Agent_core.Types.message =
+      { role = Agent_core.Types.User
+      ; content = [ Agent_core.Types.Text (working_state_text snapshot) ]
+      ; name = None; tool_call_id = None
+      ; metadata = Runtime_model_input_tail_window.working_state_metadata
+      }
+    in
+    Runtime_model_input_tail_window.project_from_atom
+      ~allow_empty_history:true
+      ~history_already_announced:true ~measure_message_bytes
+      ~first_atom:snapshot.Librarian_continuity_snapshot.end_atom
+      (working :: messages)
+  | From_read_position { end_atom } ->
+    (* No summary stands in for the absorbed atoms; the omission preamble
+       says older turns are left out. *)
+    Runtime_model_input_tail_window.project_from_atom
+      ~allow_empty_history:true ~measure_message_bytes ~first_atom:end_atom messages
+  | From_seed (seed : Keeper_carried_front.seed) ->
+    Runtime_model_input_tail_window.project_from_atom
+      ~measure_message_bytes
+      ~first_atom:(Keeper_carried_front.clamp ~atom_count seed.first_atom)
+      messages
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
+    Runtime_model_input_tail_window.project_from_atom
+      ~measure_message_bytes
+      ~first_atom:(Keeper_carried_front.clamp ~atom_count end_atom)
+      messages
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown _) ->
+    Runtime_model_input_tail_window.project_from_atom
+      ~measure_message_bytes
+      ~first_atom:(Keeper_carried_front.newest_atom ~atom_count)
+      messages
+;;
+
 let compose_carried_model_input
       ?(input_policy = Keeper_input_policy.Wide)
       ?continuity
@@ -1010,14 +1133,8 @@ let compose_carried_model_input
      rather than carrying the newest atom alone from a position that would
      never widen again. A history that only lost an unsaved attempt's tail
      keeps the position. *)
-  let front, outlived_seed =
-    match continuity, front with
-    | Some (Summarized _ | Absorbed _), _ -> None, None
-    | (None | Some Without_snapshot), Some seed ->
-      (match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
-       | Ok seed -> Some seed, None
-       | Error dropped -> None, Some (seed, dropped))
-    | (None | Some Without_snapshot), None -> None, None
+  let { start; outlived_seed } =
+    choose_range_start ~continuity ~front ~history_digest_at ~turn_boundary
   in
   (* A range that opens on a seed reaches behind this turn, so its aged tool
      results are demoted at the turn boundary on either path that carries
@@ -1028,9 +1145,9 @@ let compose_carried_model_input
     | Keeper_input_policy.Small, _ -> demote_before
     | Keeper_input_policy.Wide, Some (Summarized _ | Absorbed _) -> 0
     | Wide, Some Without_snapshot ->
-      (match front with
-       | Some (_ : Keeper_carried_front.seed) -> demote_before
-       | None -> 0)
+      (match start with
+       | From_seed _ -> demote_before
+       | From_snapshot _ | From_read_position _ | From_turn_boundary _ -> 0)
     | Wide, None -> demote_before
   in
   (* After a size refusal this turn's own atoms join the demotion, whatever
@@ -1058,86 +1175,24 @@ let compose_carried_model_input
   let planned =
     demotion_plan ~demote_from ~measure_message_bytes ~base_path ~demote_before messages
   in
-  let projection, transmitted_bytes, origin =
-    match continuity, front with
-    | Some (Summarized { snapshot; _ }), _ ->
-      let working : Agent_core.Types.message =
-        { role = Agent_core.Types.User
-        ; content = [ Agent_core.Types.Text (working_state_text snapshot) ]
-        ; name = None; tool_call_id = None
-        ; metadata = Runtime_model_input_tail_window.working_state_metadata
-        }
-      in
-      let projection, transmitted_bytes =
-        Runtime_model_input_tail_window.project_from_atom
-          ~allow_empty_history:true
-          ~history_already_announced:true ~measure_message_bytes
-          ~first_atom:snapshot.end_atom
-          (working :: planned.Keeper_model_input_demotion.messages)
-      in
-      projection, transmitted_bytes,
-        Keeper_carried_front.Librarian_snapshot
-          { end_atom = snapshot.end_atom; boundary_line = snapshot.end_boundary_line }
-    | Some (Absorbed { end_atom; _ }), _ ->
-      (* No summary stands in for the absorbed atoms; the omission preamble
-         says older turns are left out, and an exclusive end at the newest
-         atom -- a Librarian that has read everything, which is the only
-         state a purge leaves it in -- carries no history atom at all. *)
-      let projection, transmitted_bytes =
-        Runtime_model_input_tail_window.project_from_atom
-          ~allow_empty_history:true ~measure_message_bytes
-          ~first_atom:end_atom
-          planned.Keeper_model_input_demotion.messages
-      in
-      projection, transmitted_bytes, Keeper_carried_front.Librarian_progress { end_atom }
-    | (None | Some Without_snapshot), Some (seed : Keeper_carried_front.seed) ->
-      let first_atom =
-        Keeper_carried_front.clamp ~atom_count:history_atom_count seed.first_atom
-      in
-      (* A response-observed persisted seed is evidence for the range it names.
-         Composition consumes that evidence; it does not reinterpret the prior
-         outcome as a size refusal. A size refusal of this range is answered
-         after the attempt: with no continuity by the in-turn ladder, which
-         owns any further move toward the newest atom; with no Librarian point
-         by one resend from the turn boundary ([seed_refusal_sequence]). *)
-      let projection, transmitted_bytes =
-        Runtime_model_input_tail_window.project_from_atom
-          ~measure_message_bytes
-          ~first_atom
-          planned.Keeper_model_input_demotion.messages
-      in
-      projection, transmitted_bytes, Keeper_carried_front.Carried seed.source
-    | (None | Some Without_snapshot), None ->
-      (* No absorbed point and no seed valid for this history (RFC
-         keeper-context-window-in-tokens §13.4): the range begins where the last completed turn on this
-         history ended, clamped so the newest atom always goes. The atoms
-         before it wait for the Librarian's next pass. A history with no
-         completed turn starts at 0, which is everything it has. The origin
-         names the boundary itself, not the atom the clamp opened on. A
-         boundary that could not be read opens on the newest atom alone,
-         and the origin says so. *)
-      let first_atom, origin =
-        match turn_boundary with
-        | Keeper_carried_front.Turn_boundary { end_atom } ->
-          ( Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom
-          , Keeper_carried_front.Turn_start { end_atom } )
-        | Keeper_carried_front.Turn_boundary_unknown { reason } ->
-          ( Keeper_carried_front.newest_atom ~atom_count:history_atom_count
-          , Keeper_carried_front.Turn_start_unknown { reason } )
-      in
-      let projection, transmitted_bytes =
-        Runtime_model_input_tail_window.project_from_atom
-          ~measure_message_bytes
-          ~first_atom
-          planned.Keeper_model_input_demotion.messages
-      in
-      projection, transmitted_bytes, origin
+  (* A response-observed persisted seed is evidence for the range it names.
+     Composition consumes that evidence; it does not reinterpret the prior
+     outcome as a size refusal. A size refusal of this range is answered
+     after the attempt: with no continuity by the in-turn ladder, which owns
+     any further move toward the newest atom; with no Librarian point by one
+     resend from the turn boundary ([seed_refusal_sequence]). *)
+  let projection, transmitted_bytes =
+    project_range_start
+      ~measure_message_bytes
+      ~atom_count:history_atom_count
+      start
+      planned.Keeper_model_input_demotion.messages
   in
   { planned
   ; projection
   ; transmitted_bytes
   ; history_atom_count
-  ; origin
+  ; origin = range_start_origin start
   ; outlived_seed
   ; demote_from
   ; demote_before = applied_demote_before ~base_path ~demote_before

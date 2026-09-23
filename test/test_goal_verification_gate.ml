@@ -573,7 +573,7 @@ let test_reopened_goal_enters_a_new_verification_cycle () =
   ignore (must_succeed "new completion request" (transition ctx goal_id "request_complete"));
   check string "new request reaches verifying" "verifying" (stored_phase config goal_id);
   (match Goal_verification_agent.For_testing.collect_pending config with
-   | Ok work -> check bool "the verifier can collect the new proof request" true
+   | Ok { Goal_verification_agent.For_testing.collected = work; _ } -> check bool "the verifier can collect the new proof request" true
        (List.exists (fun (work : Goal_verification_agent.For_testing.pending_work) -> work.goal_id = goal_id) work)
    | Error failure -> fail (Goal_verification_agent.For_testing.scan_failure_to_string failure));
   (* Reopen from the new Verifying goes back to Executing and archives the

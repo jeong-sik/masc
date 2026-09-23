@@ -107,6 +107,16 @@ let github_hostname = "github.com"
    repository with fewer than 100 open pull requests at one request. *)
 let page_size = 100
 
+(* How many of a pull request's newest commits are searched for its author
+   (RFC-0465 §2.1). Merge commits are skipped, so the window has to reach past
+   a run of them. Measured 2026-09-23 over the open pull requests of
+   jeong-sik/masc: the longest run of merge commits ending at the head was 1,
+   the longest anywhere in the last 30 commits was 4. The measured GraphQL
+   cost of a page goes from 1 to 2 points with this window. A window of only
+   merge commits reads as no author, which counts the pull request as not a
+   Keeper's rather than joining it to the wrong one. *)
+let author_window = 10
+
 (* --- Transport --- *)
 
 let curl_meta_marker = "\n--MASC-GITHUB-META--\n"
@@ -218,13 +228,14 @@ let github_slug_of_remote remote =
 (* --- GraphQL --- *)
 
 let query =
-  {|query($owner: String!, $name: String!, $first: Int!, $after: String) {
+  {|query($owner: String!, $name: String!, $first: Int!, $after: String, $authorWindow: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequests(states: OPEN, first: $first, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
         number title headRefName isDraft updatedAt reviewDecision mergeable
-        commits(last: 1) { nodes { commit { author { name } statusCheckRollup { state } } } }
+        head: commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+        authored: commits(last: $authorWindow) { nodes { commit { parents { totalCount } author { name } } } }
       }
     }
   }
@@ -238,6 +249,7 @@ let request_body ~owner ~name ~after =
           [ "owner", `String owner
           ; "name", `String name
           ; "first", `Int page_size
+          ; "authorWindow", `Int author_window
           ; ("after", match after with Some cursor -> `String cursor | None -> `Null)
           ] )
     ]
@@ -267,8 +279,10 @@ let mergeable_of_wire = function
   | "UNKNOWN" -> Some Mergeable_unknown
   | _ -> None
 
+(* The check state is the head commit's, merge commit or not: the head is
+   what GitHub ran the checks on. *)
 let decode_checks node =
-  match Option.bind (field "commits" node) (field "nodes") with
+  match Option.bind (field "head" node) (field "nodes") with
   | Some (`List []) -> Some Checks_none
   | Some (`List (last :: _)) ->
     (* The query asks for [statusCheckRollup], so only an explicit [null]
@@ -294,21 +308,48 @@ let decode_mergeable node =
   | Some (`String state) -> mergeable_of_wire state
   | _ -> None
 
-(* [Some None] is GitHub saying there is no author name: no commit, a
-   [null] author, or a [null] name. The query asks for [author { name }], so
-   a missing key is a shape this reader does not know and reads [None]. *)
+(* One commit of the author window: its parent count and author name.
+   [Some (_, None)] is GitHub giving a [null] author or name. The query asks
+   for both keys, so a missing one is a shape this reader does not know and
+   reads [None]. *)
+let decode_authored_commit node =
+  let commit = field "commit" node in
+  let parents =
+    match Option.bind (Option.bind commit (field "parents")) (field "totalCount") with
+    | Some (`Int count) -> Some count
+    | _ -> None
+  in
+  let author =
+    match Option.bind commit (field "author") with
+    | None -> None
+    | Some `Null -> Some None
+    | Some author ->
+      (match field "name" author with
+       | Some `Null -> Some None
+       | Some (`String name) -> Some (Some name)
+       | _ -> None)
+  in
+  match parents, author with
+  | Some parents, Some author -> Some (parents, author)
+  | _ -> None
+
+(* The author of the newest commit with one parent (RFC-0465 §2.1). A merge
+   commit's author is whoever brought the base in -- GitHub's Update branch,
+   an updater Keeper, a local [git merge] -- not who wrote the pull request.
+   [Some None] is no such commit in the window, or GitHub giving that
+   commit no author name. *)
 let decode_author node =
-  match Option.bind (field "commits" node) (field "nodes") with
-  | Some (`List []) -> Some None
-  | Some (`List (last :: _)) ->
-    (match Option.bind (field "commit" last) (field "author") with
-     | None -> None
-     | Some `Null -> Some None
-     | Some author ->
-       (match field "name" author with
-        | Some `Null -> Some None
-        | Some (`String name) -> Some (Some name)
-        | _ -> None))
+  match Option.bind (field "authored" node) (field "nodes") with
+  | Some (`List nodes) ->
+    let rec newest_single_parent = function
+      | [] -> Some None
+      | commit :: older ->
+        (match decode_authored_commit commit with
+         | None -> None
+         | Some (1, author) -> Some author
+         | Some (_, _) -> newest_single_parent older)
+    in
+    newest_single_parent (List.rev nodes)
   | _ -> None
 
 let decode_pull ~repo_slug node =

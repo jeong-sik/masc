@@ -255,6 +255,25 @@ let checkpoint_references execution = match execution.phase with
      | Runtime_retry retry -> [retry.checkpoint]
      | Gate_wait {waiting; _} -> gate_wait_references waiting
      | Gate_binding binding -> gate_binding_references binding)
+(* Approval ids an unsettled execution may still read from the Gate store: a
+   wait observes its obligations, a binding observes its approval ids, and a
+   resuming wait still carries the obligation it resumed with, and an
+   obligation stays on the execution until its evidence is discharged. *)
+let gate_approval_ids execution =
+  let of_obligations = List.map (fun (obligation : gate_obligation) -> obligation.approval_id) in
+  let of_wait (waiting : gate_wait) = of_obligations waiting.obligations in
+  of_obligations execution.gate_obligations @
+  match execution.phase with
+  | Preparing | Ready | Running | Resuming_runtime_retry _ | Suspended _ | Settled _ -> []
+  | Resuming_gate (waiting, _) -> of_wait waiting
+  | Recovering {origin; _} ->
+    (match origin with
+     | Unconfirmed_sources | Confirmed_undispatched | Checkpointed _ | Official_checkpointed _
+     | Interrupted_execution | Runtime_retry _ -> []
+     | Gate_wait {waiting; _} -> of_wait waiting
+     | Gate_binding binding ->
+       binding.approval_ids @ of_obligations binding.obligations
+       @ (match binding.unconfirmed_wait with Some waiting -> of_wait waiting | None -> []))
 let valid_terminal = function Failed detail -> String.trim detail <> "" | Completed | Cancelled -> true
 
 let validate_sources sources =

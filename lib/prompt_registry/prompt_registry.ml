@@ -103,14 +103,13 @@ let meta_tbl = store.meta_tbl
 
 (* Overrides the operator saved that this process will not apply.
 
-   A persisted override is bound to the default body it was authored against,
-   and when that body changes the entry is refused at restore. Refusing is
-   right -- the text was written for a different prompt. Forgetting it is
-   not, and forgetting is what happened: the live table was the only record
-   the save path read, so the next write of any key -- a preset restore, an
-   unrelated override -- rewrote the file without it. An operator's 4.4 KB
-   prompt went from "not applied" to "gone" with nothing in between and no
-   way to tell the two apart (2026-09-05).
+   Restore refuses a persisted override only when it no longer renders under
+   the prompt's current contract: an unknown key, an empty body, or a template
+   variable the prompt no longer declares ([admit]). A changed default body is
+   not a reason; that override stays in force. A refused override is still
+   the operator's text, so it is kept here rather than dropped. If the save
+   path read only the live table, the next write of any key -- a preset
+   restore, an unrelated override -- would rewrite the file without it.
 
    So the two questions are kept apart. [override_tbl] answers what is in
    force; this answers what the operator saved. The file is written from

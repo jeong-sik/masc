@@ -2480,7 +2480,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ];
   check_fields "overview_layout" [ "tasks_error" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)
-  check_fields "overview_team_lines" [ "okp_name"; "id"; "title" ];
+  (* pr_tag_of_keeper looks the name up; it does not draw it. *)
+  check_fields ~non_rendering_calls:[ "pr_tag_of_keeper" ] "overview_team_lines"
+    [ "okp_name"; "id"; "title" ];
   (* The pull request lines print repository ids and failure text the server
      relayed from GitHub. *)
   check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"
@@ -2602,6 +2604,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
       ; "List.mem"
       ; "List.assoc_opt"
       ; "Masc_tui_types.detail_read_started"
+        (* Reads the name only as the key of the Board-quarantine read; the
+           rows it returns are sanitized inside, and the guard below holds
+           that function to it. *)
+      ; "Masc_tui_board_quarantine.lines"
       ]
     "keeper_detail_pane"
     [ "k_name"
@@ -2615,6 +2621,14 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ];
   check_fields "render_keeper_logs"
     [ "k_name"; "le_ts"; "le_tools_used"; "le_work_kind" ];
+  (* The Info tab's Board-attention rows are drawn from wire strings -- a
+     partition id, a Keeper name on a ledger error, the server's own words on
+     a failed read -- so the module that builds them is held to the same
+     boundary as the pane it draws into. *)
+  check_fields ~module_path:"bin/masc_tui_board_quarantine.ml" "lines"
+    [ "partition_id"; "keeper_name" ];
+  check_identifiers ~module_path:"bin/masc_tui_board_quarantine.ml"
+    ~binding:"lines" ~callees:sanitizer_calls [ "detail"; "first" ];
   check_fields ~module_path:"bin/masc_tui_render_prim.ml" "footer_line"
     [ "sid_base_path" ];
   check int "footer path has no workspace fallback" 0

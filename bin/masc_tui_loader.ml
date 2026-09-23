@@ -834,6 +834,7 @@ let decode_schedule_row json =
     optional_nested_int_field json "keeper_reaction_evidence"
       "quarantined_record_count"
   in
+  let* sch_runner_hold = Tui_decode.decode_schedule_runner_hold json in
   Ok
     { sch_schedule_instance_id
     ; sch_schedule_id
@@ -877,6 +878,7 @@ let decode_schedule_row json =
     ; sch_wake_cancelled_recorded_at_iso
     ; sch_reaction_quarantined
     ; sch_reaction_latest_at_iso
+    ; sch_runner_hold
     }
 
 let decode_schedule_rows json_list =
@@ -1821,6 +1823,13 @@ let load_keeper_github_identity_view ~(host : string) ~(port : int)
   with
   | Error err -> Error ("github identity load failed: " ^ err)
   | Ok json -> Ok (github_identity_lines json)
+
+let load_keeper_board_quarantines ~(host : string) ~(port : int)
+    ~(keeper_name : string) :
+    (Masc_tui_board_quarantine.t, string) result =
+  match Masc_tui_http.fetch_keeper_board_quarantines ~host ~port ~keeper_name with
+  | Error err -> Error ("board quarantines: " ^ err)
+  | Ok json -> Masc_tui_board_quarantine.decode json
 
 (* What a Keeper can be attached to, and what each of those currently offers
    it. One fetch rather than two: a list of providers and a list of

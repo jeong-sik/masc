@@ -358,6 +358,32 @@ let test_the_schedule_detail_says_what_became_of_the_wake () =
        ~binding_name:"schedule_detail_lines" ~callee:"schedule_turn_rows"
      > 0)
 
+(* #38205: [/health] reported which occurrence the schedule runner held back
+   and no screen read it. The schedule row carries the hold now; this pins
+   that the loader decodes it and that both the list's summary line and the
+   detail pane draw it through the one reading. *)
+let test_the_schedules_screen_draws_the_runner_hold () =
+  Alcotest.(check bool) "the loader decodes the row's hold" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:loader
+       ~binding_name:"decode_schedule_row"
+       ~callee:"Tui_decode.decode_schedule_runner_hold"
+     > 0);
+  List.iter
+    (fun (binding_name, callee) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s reads the hold" binding_name)
+        true
+        (reads ~binding_name ~fields:[ "sch_runner_hold" ] > 0);
+      Alcotest.(check bool)
+        (Printf.sprintf "%s words it through %s" binding_name callee)
+        true
+        (Ast_grep.count_calls_in_value_binding ~module_path:render ~binding_name
+           ~callee
+         > 0))
+    [ "schedule_delivery_summary", "Render_schedule.schedule_hold_tag"
+    ; "schedule_detail_lines", "Render_schedule.schedule_hold_reading"
+    ]
+
 let test_the_schedule_subject_is_measured_not_given_the_line () =
   (* Twice: once to measure the column, once to fill the cell. One call would
      mean the width came from somewhere else, which is the state this replaced. *)
@@ -1021,6 +1047,8 @@ let () =
             test_the_roster_title_says_whether_the_reading_is_live
         ; Alcotest.test_case "the schedule detail says what became of the wake"
             `Quick test_the_schedule_detail_says_what_became_of_the_wake
+        ; Alcotest.test_case "the Schedules screen draws the runner hold"
+            `Quick test_the_schedules_screen_draws_the_runner_hold
         ; Alcotest.test_case "Repositories show the server-resolved path"
             `Quick test_repositories_show_the_server_resolved_checkout_path
         ; Alcotest.test_case "Repository changes keep the Git axes" `Quick

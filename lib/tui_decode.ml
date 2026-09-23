@@ -11186,3 +11186,18 @@ let decode_async_request_observation json =
     Ok (Async_ready { summary; requests; recovery })
   | _ -> Error (Printf.sprintf "unknown async inventory status %S" status)
 ;;
+
+type schedule_runner_hold =
+  { srh_occurrence_id : string
+  ; srh_due_at_iso : string
+  }
+
+let decode_schedule_runner_hold row =
+  match member "runner_hold" row with
+  | `Null -> Ok None
+  | `Assoc _ as hold ->
+    let* srh_occurrence_id = required_string_field hold "occurrence_id" in
+    let* srh_due_at_iso = required_string_field hold "due_at_iso" in
+    Ok (Some { srh_occurrence_id; srh_due_at_iso })
+  | bad -> field_type_error "runner_hold" "an object or null" bad
+;;

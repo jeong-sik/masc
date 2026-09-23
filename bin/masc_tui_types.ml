@@ -1381,6 +1381,10 @@ type schedule_row = {
   sch_reaction_quarantined: int option;
       (** Ledger records the projection could not match. Nonzero is why a
           status reads worse than the steps below it look. *)
+  sch_runner_hold: Tui_decode.schedule_runner_hold option;
+      (** The occurrence the schedule runner is holding back because the
+          target Keeper has not taken the previous one yet. A held occurrence
+          has no wake, so none of the fields above can say it (#38205). *)
 }
 
 let schedule_json_string field = function
@@ -1446,11 +1450,10 @@ let schedule_counts_line counts =
 
 (** Why the store would refuse a modify, read before the editor opens.
 
-    [Schedule_store.Transition_refused] names its own boundary: "the request
-    is [Running] or terminal", terminal being [Schedule_domain.is_terminal].
-    That sentence is the whole rule, so it is asked here rather than restated
-    as a word list -- a status the store adds later lands on the right side
-    of it without this file changing.
+    The rule is [Schedule_domain.modify_allowed], the same function
+    [Schedule_store.update_request] calls, so this file holds no copy of it.
+    The reason names only the status the row showed: the screen may be one
+    refresh behind a recurring schedule that has since finished running.
 
     [None] is the answer for a word this build does not name. It is the same
     promise [sch_status] makes by staying a string: an unrecognised status
@@ -1461,17 +1464,13 @@ let schedule_modify_refusal (row : schedule_row) : string option =
   match Schedule_domain.schedule_status_of_string row.sch_status with
   | Error _ -> None
   | Ok status ->
-      let refused =
-        match status with
-        | Schedule_domain.Running -> true
-        | other -> Schedule_domain.is_terminal other
-      in
-      if refused then
+      if Schedule_domain.modify_allowed status then None
+      else
         Some
           (Printf.sprintf
-             "the store refuses a %s schedule; only scheduled and due rows change"
+             "the store refuses to modify a %s schedule (status as last \
+              read; refresh if it has changed)"
              row.sch_status)
-      else None
 
 let schedule_update_form_json (row : schedule_row) =
   let body = schedule_payload_body row.sch_payload in
@@ -5498,6 +5497,13 @@ type state = {
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
+  (* The Info tab's Board-attention rows, keyed by the Keeper they were read
+     for. [requeue_board_quarantine_inflight] holds the partition a requeue
+     press is waiting on, so a second press before the answer is not a second
+     request against the same quarantine. *)
+  mutable keeper_board_quarantines:
+    (string, Masc_tui_board_quarantine.t) Masc_tui_fetched.t;
+  mutable board_quarantine_requeue_inflight: string option;
   mutable github_token_input: string option;
   mutable github_token_save_status: string option;
   (* The scopes the next [L] login asks for beyond gh's minimum. Off until the
@@ -7711,6 +7717,8 @@ let create_state
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;
+  keeper_board_quarantines = Masc_tui_fetched.initial;
+  board_quarantine_requeue_inflight = None;
   github_token_input = None;
   github_token_save_status = None;
   github_login_scopes = [];
@@ -10085,9 +10093,17 @@ let approval_items (state : state) =
 let approvals_open_questions (state : state) =
   Option.map Masc_tui_ask_projection.open_rows state.asks_snapshot
 
+(* The questions themselves. One ask can carry several, and counting the asks
+   under the word "question" understated the work: the live surface read
+   "MASC Approvals (1 question)" and "Questions waiting on you (1)" over one
+   ask holding two, with "+2 more questions" three rows below saying so. *)
 let approvals_open_question_count (state : state) =
   match approvals_open_questions state with
-  | Some rows -> List.length rows
+  | Some rows ->
+      List.fold_left
+        (fun total (row : Tui_decode.ask_row) ->
+          total + List.length row.Tui_decode.ar_questions)
+        0 rows
   | None -> 0
 
 let approvals_surface_pending (state : state) =

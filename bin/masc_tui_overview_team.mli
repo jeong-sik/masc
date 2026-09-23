@@ -4,6 +4,8 @@
     Pure. The render reads [project]'s result and draws it; nothing here
     touches the terminal, the network or the clock. *)
 
+module Tui_decode = Masc.Tui_decode
+
 (** Which band a Keeper's row sits in. The bands are drawn in this order and
     decided by the Keeper's phase and the tasks it holds -- not by a score. *)
 type group =
@@ -36,11 +38,14 @@ type row = {
 type t = {
   rows : row list;
       (** Needs_you, then Working, then Idle; by name inside a band. *)
-  parked : string list;  (** Parked Keeper names, by name. *)
+  parked : (string * int) list;
+      (** Parked Keeper names, by name, with the open tasks each still holds:
+          work behind a stopped Keeper is work nobody is doing. *)
   other_holders : (string * int) list;
       (** Assignees that are not Keepers in the briefing (MCP clients, retired
           names) with how many open tasks each holds, most first. Work held
-          outside the fleet is still work the team is waiting on. *)
+          outside the fleet is still work the team is waiting on; work a
+          Keeper holds is counted on that Keeper's row or parked entry. *)
 }
 
 val project :

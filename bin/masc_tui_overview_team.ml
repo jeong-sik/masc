@@ -1,4 +1,5 @@
 module Types = Masc_tui_types
+module Tui_decode = Masc.Tui_decode
 
 type group = Needs_you | Working | Idle | Parked
 
@@ -12,7 +13,7 @@ type row = { keeper : Types.overview_keeper; group : group; detail : detail }
 
 type t = {
   rows : row list;
-  parked : string list;
+  parked : (string * int) list;
   other_holders : (string * int) list;
 }
 
@@ -65,22 +66,20 @@ let classify ~attention ~holding (keeper : Types.overview_keeper) =
   let name = keeper.okp_name in
   match keeper.okp_phase with
   | Types.Keeper_phase phase -> (
-      let word = Keeper_state_machine.phase_to_string phase in
-      match phase with
-      | Keeper_state_machine.Failing | Keeper_state_machine.Crashed ->
+      let word = Tui_decode.keeper_phase_to_string phase in
+      match Tui_decode.keeper_phase_band phase with
+      | Tui_decode.Phase_stuck ->
           Some (Needs_you, stuck ~attention ~holding ~word name)
-      | Keeper_state_machine.Running | Keeper_state_machine.Draining
-      | Keeper_state_machine.Restarting ->
-          Some (alive holding)
-      | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
-      | Keeper_state_machine.Offline ->
-          None)
+      | Tui_decode.Phase_alive -> Some (alive holding)
+      | Tui_decode.Phase_parked -> None)
   | Types.Keeper_phase_unreadable word ->
       Some (Needs_you, stuck ~attention ~holding ~word name)
   | Types.Keeper_phase_absent -> (
       (* No registry entry: the Keeper is not running in this process. Whether
          that is a stop the operator chose or one they have not seen yet is
-         what the attention list says, so the row follows it. *)
+         what the attention list says, so the row follows it. A paused
+         Keeper stays parked even when an item names it: the item says it is
+         paused, which is the choice the parked line already reports. *)
       match first_blocker ~attention name with
       | Some summary -> Some (Needs_you, Blocker { summary; held = held holding })
       | None -> None)
@@ -94,7 +93,7 @@ let project ~keepers ~tasks ~attention =
         let holding = holding_of ~tasks keeper.okp_name in
         match classify ~attention ~holding keeper with
         | Some (group, detail) -> ({ keeper; group; detail } :: rows, parked)
-        | None -> (rows, keeper.okp_name :: parked))
+        | None -> (rows, (keeper.okp_name, held holding) :: parked))
       ([], []) keepers
   in
   let rows =
@@ -121,7 +120,10 @@ let project ~keepers ~tasks ~attention =
            let by_count = Int.compare right left in
            if by_count <> 0 then by_count else String.compare left_name right_name)
   in
-  { rows; parked = List.sort String.compare parked; other_holders }
+  { rows
+  ; parked = List.sort (fun (left, _) (right, _) -> String.compare left right) parked
+  ; other_holders
+  }
 
 let drawn_rows t =
   List.length t.rows
@@ -136,6 +138,6 @@ let count t group =
 
 let phase_word (keeper : Types.overview_keeper) =
   match keeper.okp_phase with
-  | Types.Keeper_phase phase -> Keeper_state_machine.phase_to_string phase
+  | Types.Keeper_phase phase -> Tui_decode.keeper_phase_to_string phase
   | Types.Keeper_phase_unreadable word -> word
   | Types.Keeper_phase_absent -> "no phase"

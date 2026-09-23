@@ -381,16 +381,24 @@ let overview_team_lines (team : Overview_team.t) ~team_rows =
     Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s" tone mark Ansi.reset
       (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
       tone
-      (fit_width (Overview_team.phase_word row.keeper) 10)
+      (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
       Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset detail
   in
   let parked_line =
     match team.parked with
     | [] -> []
-    | names ->
-        [ Printf.sprintf "%s\xe2\x97\x8b parked: %s%s" Ansi.dim
-            (String.concat ", " (List.map Terminal_text.single_line names))
+    | parked ->
+        let still_held = List.fold_left (fun sum (_, held) -> sum + held) 0 parked in
+        [ Printf.sprintf "%s\xe2\x97\x8b parked: %s%s%s" Ansi.dim
+            (String.concat ", "
+               (List.map (fun (name, _) -> Terminal_text.single_line name) parked))
             Ansi.reset
+            (if still_held > 0 then
+               Printf.sprintf " %s\xc2\xb7 %d open task%s still held%s" (Theme.warn ())
+                 still_held
+                 (if still_held = 1 then "" else "s")
+                 Ansi.reset
+             else "")
         ]
   in
   let holders_line =

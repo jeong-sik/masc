@@ -75,6 +75,17 @@ let keeper_phase_is_running : keeper_phase -> bool = function
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
       false
 
+type keeper_phase_band = Phase_stuck | Phase_alive | Phase_parked
+
+let keeper_phase_band : keeper_phase -> keeper_phase_band = function
+  | Keeper_state_machine.Failing | Keeper_state_machine.Crashed -> Phase_stuck
+  | Keeper_state_machine.Running | Keeper_state_machine.Draining
+  | Keeper_state_machine.Restarting ->
+      Phase_alive
+  | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
+  | Keeper_state_machine.Offline ->
+      Phase_parked
+
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 
 type keeper_runtime = {

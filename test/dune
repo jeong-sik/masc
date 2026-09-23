@@ -4148,7 +4148,6 @@
   alcotest
   masc
   masc_types
-  masc.keeper_registry
   masc_tui_types
   masc_tui_overview_team))
 

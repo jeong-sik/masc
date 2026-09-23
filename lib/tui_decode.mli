@@ -1505,7 +1505,9 @@ type standalone_lanes_snapshot = {
 
 val standalone_lane_status_to_string : standalone_lane_status -> string
 
-val standalone_lane_configuration_to_string :
+(** The configuration clause of the lane detail line, subject included where
+    the state needs one. The caller writes no noun of its own. *)
+val standalone_lane_configuration_phrase :
   standalone_lane_configuration -> string
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result

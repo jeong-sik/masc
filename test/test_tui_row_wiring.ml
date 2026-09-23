@@ -444,6 +444,21 @@ let test_the_two_p50s_on_the_lanes_screen_agree () =
        ~binding_name:"standalone_lane_detail_lines"
        ~needle:" \xc2\xb7 p50 latency %.2fs")
 
+(* The configuration clause is written once, in [Tui_decode]. This line used
+   to introduce it with a noun of its own -- "configuration " ^ a word that
+   three of the four states already give a subject -- so an unconfigured lane
+   read "configuration not configured". The caller draws the clause as it
+   comes. *)
+let test_the_lane_line_writes_no_noun_of_its_own () =
+  Alcotest.(check int) "the line takes the clause whole" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:"%s lane \xc2\xb7 %s \xc2\xb7 %s");
+  Alcotest.(check int) "and no longer names the subject itself" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:"%s lane \xc2\xb7 configuration %s \xc2\xb7 %s")
+
 let test_board_lane_detail_draws_typed_jev_readiness () =
   Alcotest.(check int) "the detail reads the decoded JEV field" 1
     (reads ~binding_name:"standalone_lane_detail_lines" ~fields:[ "sl_jev" ]);
@@ -941,6 +956,8 @@ let () =
             test_a_detail_heading_is_spelled_the_way_a_heading_is
         ; Alcotest.test_case "the two p50s on the Lanes screen agree" `Quick
             test_the_two_p50s_on_the_lanes_screen_agree
+        ; Alcotest.test_case "the lane line writes no noun of its own" `Quick
+            test_the_lane_line_writes_no_noun_of_its_own
         ; Alcotest.test_case "Board lane detail draws typed JEV readiness" `Quick
             test_board_lane_detail_draws_typed_jev_readiness
         ; Alcotest.test_case "the Code tree draws one folder arrow" `Quick

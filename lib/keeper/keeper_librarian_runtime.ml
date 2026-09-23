@@ -364,6 +364,63 @@ let prepare_attempt ~requirement ~selected_slots messages =
       Exact_setup_failed (Exact_flow_start_failed error))
 ;;
 
+module Http_client = Llm_provider.Http_client
+
+(* A provider error that is not an HTTP refusal, on a request that was sent,
+   read by its typed kind. Only a provider that named the size, an answer the
+   size used up, or a deadline on the request's own processing moves the
+   width. A transport that could not carry the request, a quota, a provider
+   that stopped for a reason of its own, a wiring error, and every failure
+   this layer could not classify meet a smaller range the same way: not
+   knowing why is no evidence of size. An empty completion counts only when
+   its stop reason names the context window or the output budget. *)
+let sent_error_shows_size (error : Http_client.http_error) =
+  match error with
+  (* Exact_output routes every HTTP refusal to [Provider_response_refused],
+     whose table is below; this constructor never carries one. *)
+  | HttpError _ -> false
+  | NetworkError
+      { kind =
+          ( Connection_refused | Dns_failure | Tls_error | Timeout
+          | Local_resource_exhaustion | End_of_file | Unknown )
+      ; _
+      } -> false
+  | TimeoutError { phase; _ } ->
+    (match phase with
+     (* The provider held the whole request and did not finish with it in
+        time: §4.3 counts this among the size failures. *)
+     | First_token | Wall_clock | Http_operation | Non_streaming_body | Stream_body ->
+       true
+     (* A stream or a step that went quiet, a wait for a slot or for
+        capacity, or a deadline nobody named: none says how large the input
+        was. *)
+     | Stream_idle _ | Cli_stdout_idle | Provider_step | Queue | Capacity_backpressure
+     | Unknown_timeout -> false)
+  | AcceptRejected _ | ProviderTerminal _ -> false
+  | ProviderFailure { kind; _ } ->
+    (match kind with
+     | Context_overflow _ | Response_body_too_large _ -> true
+     | Empty_completion { stop_reason } ->
+       (match stop_reason with
+        | ContextWindowExceeded | MaxTokens -> true
+        | EndTurn | StopToolUse | StopSequence | Refusal | ContentFilter
+        | RepetitionTruncation | PauseTurn | Compaction | UnmatchedToolCalls
+        | Unknown _ -> false)
+     | Capacity_exhausted _ | Hard_quota _ | Capability_mismatch _
+     | Cli_policy_invalid _ | Cli_startup_failed _ | Provider_parse_error _
+     | Provider_wire_error _ | Provider_reported_error _ | Provider_interrupted
+     | Repeating_generation _ | Unknown_provider_failure _ -> false)
+;;
+
+(* A request that never left this process was judged by no provider, so its
+   failure says nothing about size -- a connect deadline included, which the
+   transport reports as an [Http_operation] timeout. *)
+let completion_failure_shows_size ~dispatch error =
+  match (dispatch : Exact_output.generation_dispatch_fact) with
+  | No_generation_dispatch -> false
+  | Generation_dispatch_started -> sent_error_shows_size error
+;;
+
 (* Whether a failure is evidence that the range's size is what stopped the
    pass. Only such evidence moves the width: a pass that saw none keeps what
    it had, because reading less answers nothing it met.
@@ -375,8 +432,9 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
   | Provider_response_refused { refusal; _ } ->
     (match refusal with
      (* The provider judged the size. Timeout is counted with them by
-        RFC-librarian-lifecycle §4.3, and the two that do not say why are read
-        toward progress, which is reading less. *)
+        RFC-librarian-lifecycle §4.3. The two that do not say why are refusals
+        of a request that arrived, which the window RFC §10.4 answers as a
+        size refusal. *)
      | Context_overflow | Input_capacity | Request_body_refused | Timeout
      | Invalid_request | Refusal_body_not_received -> true
      (* The request was taken and the provider could not serve it, or only an
@@ -388,15 +446,7 @@ let cause_shows_size (cause : Exact_output.execution_error_cause) =
   | Incomplete_output | Missing_output | Ambiguous_output _
   | Unexpected_output_content | Invalid_json_output | Internal_non_json_output
   | Response_body_deadline_exceeded -> true
-  (* Agent_core reports every provider error other than an HTTP refusal and a
-     typed context overflow as this one cause: a connection the provider
-     dropped, a DNS or TLS failure, a hard quota, an unparsable reply. §4.3
-     reads a failure that does not say why toward progress, as it reads
-     Invalid_request, so it narrows, and a transport outage reported here
-     narrows with it. A request too large for the connection ends here too,
-     with no response to read. Telling those apart needs the cause split
-     where it is produced (#37899). *)
-  | Completion_failed -> true
+  | Completion_failed { error; dispatch } -> completion_failure_shows_size ~dispatch error
   (* Nothing was judged: this process could not start, time, or match the
      attempt it held. *)
   | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch -> false
@@ -569,17 +619,33 @@ type cli_fallback_failure =
   | Fitted_prompt_unavailable
   | Slot_failures of Keeper_lane_cli_oneshot.failure list
 
+type continuity_answer =
+  | Memory_only
+  | Continuity of
+      { prepared : Keeper_librarian_continuity.prepared
+      ; working_state : string
+      }
+
+type accepted =
+  { selection : Keeper_librarian.selection
+  ; continuity_answer : continuity_answer
+  }
+
 (* A continuity pass must produce both Memory disposition and its saved
    working state before either may be published. Ordinary Memory extraction
-   has no continuity obligation and still accepts an absent working state. *)
+   has no continuity obligation and still accepts an absent working state.
+   The accepted answer carries the pair, so publication has no case for a
+   continuity pass without one. *)
 let validate_selection ?continuity selected_input output =
   let open Result.Syntax in
   let* selection = Keeper_librarian.selection_of_json_result selected_input output in
   match continuity, selection.Keeper_librarian.working_state with
+  | None, _ -> Ok { selection; continuity_answer = Memory_only }
+  | Some prepared, Some working_state ->
+    Ok { selection; continuity_answer = Continuity { prepared; working_state } }
   | Some _, None ->
     Error (Keeper_librarian.Working_state_invalid
       "continuity requires a nonblank working_state")
-  | None, _ | Some _, Some _ -> Ok selection
 ;;
 
 let try_cli_slots
@@ -1019,7 +1085,7 @@ let run_best_effort
                |> Result.map (fun material -> material.rendered)
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
-             let* (selection, exact_output), selected_slot =
+             let* ({ selection; continuity_answer }, exact_output), selected_slot =
                execute_exact_output_classified
                  ~continuity
                  ?cli_runner
@@ -1087,10 +1153,9 @@ let run_best_effort
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
                   "working context commit failed independently of memory: %s" (Printexc.to_string exn))));
              let publish_continuity () =
-               match continuity, selection.working_state with
-              | None, _ -> ()
-              | Some _, None -> continuity_write := `Assoc ["status", `String "not_provided"]
-              | Some prepared, Some working_state ->
+               match continuity_answer with
+              | Memory_only -> ()
+              | Continuity { prepared; working_state } ->
                 continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
                 commit_continuity
                   ~commit:(fun () ->
@@ -1126,6 +1191,19 @@ let run_best_effort
                 one fact of its own in that window ended the pass (masc
                 #32859). The decision itself has no such requirement: a fact it
                 never mentions is one it never saw. *)
+             (* A restatement keeps the stored memory's fields; what it said
+                differently is not refused, only named once here. *)
+             List.iter
+               (fun (ignored : Keeper_librarian.ignored_fields) ->
+                  Log.Keeper.info
+                    ~keeper_name:keeper_id
+                    "memory os librarian restated memory_id=%s kept=%s ignored differing %s"
+                    ignored.restated_id
+                    (Keeper_librarian.kept_fields_from_to_string ignored.kept_from)
+                    (String.concat
+                       ","
+                       (List.map Keeper_librarian.claim_field_to_string ignored.differing)))
+               selection.ignored_fields;
              (* An absorption the merged claim does not convey is not applied:
                 that memory stays current (RFC-librarian-absorb-gate). The
                 gate only narrows the list. A gate switched off, or an
@@ -1144,6 +1222,7 @@ let run_best_effort
                  ~absorbed:selection.absorbed
                  ()
              in
+             let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in
              let+ snapshot =
                Keeper_memory_os_current.apply_disposition
                  ~on_committed:(fun snapshot ->
@@ -1153,7 +1232,7 @@ let run_best_effort
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
                  ?official_range_id
-                 ~absorbed:(Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate)
+                 ~absorbed:applied_absorbed
                ~keepers_dir
                ~keeper_id
                ~now:(Time_compat.now ())
@@ -1161,7 +1240,8 @@ let run_best_effort
                  { kind = Keeper_memory_os_current.Librarian
                  ; trace_id = input_trace_id inp
                  }
-               ~new_claims:selection.new_claims
+               ~new_claims:
+                 (Keeper_librarian.claims_to_apply selection ~absorbed:applied_absorbed)
                ()
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })

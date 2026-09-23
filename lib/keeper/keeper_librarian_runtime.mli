@@ -58,8 +58,14 @@ type not_committed =
             absent model), and every failure that never reached a provider all
             answer false, as does a pass that recorded no typed cause at all.
             A provider error that is not an HTTP refusal arrives as
-            [Completion_failed], which answers true whatever it held,
-            a dropped connection or a hard quota included (#37899).
+            [Completion_failed] with its typed transport error and whether
+            the request was sent. A request never sent answers false. A sent
+            one answers true only for a named context overflow, an oversized
+            response, a deadline on the request's own processing, or an empty
+            completion stopped by the context window or the output budget. A
+            dropped connection, a DNS failure, a hard quota, an idle stream,
+            any other empty completion and every unclassified failure answer
+            false.
 
             The verdict covers every failed visit of the walk, not the last
             one, so the same set of causes answers the same way whatever order
@@ -105,6 +111,20 @@ val run_best_effort
     sidecar, so a durable consumer can recover a later progress-file failure
     without submitting the completed-turn range again. *)
 
+(** What an accepted answer publishes besides Memory. A continuity pass is
+    accepted only with its working state, so the two arrive together. *)
+type continuity_answer =
+  | Memory_only
+  | Continuity of
+      { prepared : Keeper_librarian_continuity.prepared
+      ; working_state : string
+      }
+
+type accepted =
+  { selection : Keeper_librarian.selection
+  ; continuity_answer : continuity_answer
+  }
+
 module For_testing : sig
   val cause_shows_size : Agent_core.Exact_output.execution_error_cause -> bool
   (** The size verdict one provider cause gives, so the whole table can be
@@ -137,7 +157,7 @@ module For_testing : sig
     -> selected_input:Keeper_librarian.input
     -> messages:Agent_core.Types.message list
     -> unit
-    -> ( (Keeper_librarian.selection * Yojson.Safe.t) * string
+    -> ( (accepted * Yojson.Safe.t) * string
        , classified_error )
        result
 

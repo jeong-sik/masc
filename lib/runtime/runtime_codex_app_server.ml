@@ -203,6 +203,38 @@ let history_bytes messages =
 
 let dynamic_tool_bytes = Runtime_official_client_tool.dynamic_tool_bytes
 
+(* [CodexErrorInfo] from the app-server's generated protocol schema
+   (codex-cli 0.156.0, [codex app-server generate-json-schema],
+   v2/ErrorNotification.json, definitions.CodexErrorInfo), without
+   [contextWindowExceeded]: that value is read into
+   {!error.Context_window_exceeded}, so a failed turn never carries it.
+   A value the schema does not name is kept whole in [Unrecognized]. *)
+module Codex_error_info = struct
+  type non_steerable_turn_kind =
+    | Review
+    | Compact
+
+  type t =
+    | Session_budget_exceeded
+    | Usage_limit_exceeded
+    | Rate_limit_exceeded
+    | Server_overloaded
+    | Cyber_policy
+    | Misalignment_policy_violation
+    | Internal_server_error
+    | Unauthorized
+    | Bad_request
+    | Thread_rollback_failed
+    | Sandbox_error
+    | Other
+    | Http_connection_failed of { http_status_code : int option }
+    | Response_stream_connection_failed of { http_status_code : int option }
+    | Response_stream_disconnected of { http_status_code : int option }
+    | Response_too_many_failed_attempts of { http_status_code : int option }
+    | Active_turn_not_steerable of { turn_kind : non_steerable_turn_kind }
+    | Unrecognized of Yojson.Safe.t
+end
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -226,7 +258,10 @@ type error =
       { message : string
       ; tool_effect_attempted : bool
       }
-  | Turn_failed of string
+  | Turn_failed of
+      { detail : string
+      ; codex_error_info : Codex_error_info.t option
+      }
   | Stopped_by_host of host_stop
   | Turn_interrupted
   | Runtime_shutting_down
@@ -324,7 +359,8 @@ let error_to_string = function
       "Codex app-server context window exceeded (tool_effect_attempted=%b): %s"
       tool_effect_attempted
       message
-  | Turn_failed detail -> "Codex app-server turn failed: " ^ detail
+  | Turn_failed { detail; codex_error_info = _ } ->
+    "Codex app-server turn failed: " ^ detail
   | Stopped_by_host (Repeated_tool_call { tool_name; repeated_count }) ->
     Printf.sprintf
       "Codex app-server stopped after repeated tool call: tool=%s count=%d"
@@ -836,9 +872,8 @@ let messages_of_items ~stage = function
   | _ -> protocol_error stage "turn items must be an array"
 ;;
 
-(* [CodexErrorInfo] is part of Codex app-server's generated protocol schema.
-   The exact [contextWindowExceeded] enum is the provider-owned classification;
-   human prose and ad-hoc scalar fields remain observational detail only. *)
+(* Human prose and ad-hoc scalar fields are observational detail only; the
+   provider-owned classification is [codexErrorInfo], read below. *)
 let turn_error_detail ~message error_fields =
   let annotation (name, value) =
     if String.equal name "message"
@@ -858,11 +893,81 @@ let turn_error_detail ~message error_fields =
   | annotations -> message ^ " (" ^ String.concat " " annotations ^ ")"
 ;;
 
+type codex_error_info_reading =
+  | Context_window
+  | Turn_failure of Codex_error_info.t
+
+let codex_error_info_of_json json =
+  let open Codex_error_info in
+  let unrecognized = Turn_failure (Unrecognized json) in
+  let http_status_code fields =
+    match List.assoc_opt "httpStatusCode" fields with
+    | None | Some `Null -> Some None
+    | Some (`Int code) -> Some (Some code)
+    | Some _ -> None
+  in
+  let with_status constructor = function
+    | `Assoc fields ->
+      (match http_status_code fields with
+       | Some http_status_code -> Turn_failure (constructor http_status_code)
+       | None -> unrecognized)
+    | _ -> unrecognized
+  in
+  match json with
+  | `String "contextWindowExceeded" -> Context_window
+  | `String "sessionBudgetExceeded" -> Turn_failure Session_budget_exceeded
+  | `String "usageLimitExceeded" -> Turn_failure Usage_limit_exceeded
+  | `String "rateLimitExceeded" -> Turn_failure Rate_limit_exceeded
+  | `String "serverOverloaded" -> Turn_failure Server_overloaded
+  | `String "cyberPolicy" -> Turn_failure Cyber_policy
+  | `String "misalignmentPolicyViolation" ->
+    Turn_failure Misalignment_policy_violation
+  | `String "internalServerError" -> Turn_failure Internal_server_error
+  | `String "unauthorized" -> Turn_failure Unauthorized
+  | `String "badRequest" -> Turn_failure Bad_request
+  | `String "threadRollbackFailed" -> Turn_failure Thread_rollback_failed
+  | `String "sandboxError" -> Turn_failure Sandbox_error
+  | `String "other" -> Turn_failure Other
+  | `Assoc [ ("httpConnectionFailed", payload) ] ->
+    with_status
+      (fun http_status_code ->
+        Http_connection_failed { http_status_code })
+      payload
+  | `Assoc [ ("responseStreamConnectionFailed", payload) ] ->
+    with_status
+      (fun http_status_code ->
+        Response_stream_connection_failed { http_status_code })
+      payload
+  | `Assoc [ ("responseStreamDisconnected", payload) ] ->
+    with_status
+      (fun http_status_code ->
+        Response_stream_disconnected { http_status_code })
+      payload
+  | `Assoc [ ("responseTooManyFailedAttempts", payload) ] ->
+    with_status
+      (fun http_status_code ->
+        Response_too_many_failed_attempts { http_status_code })
+      payload
+  | `Assoc [ ("activeTurnNotSteerable", `Assoc fields) ] ->
+    (match List.assoc_opt "turnKind" fields with
+     | Some (`String "review") ->
+       Turn_failure (Active_turn_not_steerable { turn_kind = Review })
+     | Some (`String "compact") ->
+       Turn_failure (Active_turn_not_steerable { turn_kind = Compact })
+     | Some _ | None -> unrecognized)
+  | `String _ | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+  | `List _ ->
+    unrecognized
+;;
+
 let turn_error_of_fields ~tool_effect_attempted ~message error_fields =
+  let detail = turn_error_detail ~message error_fields in
   match List.assoc_opt "codexErrorInfo" error_fields with
-  | Some (`String "contextWindowExceeded") ->
-    Context_window_exceeded { message; tool_effect_attempted }
-  | Some _ | None -> Turn_failed (turn_error_detail ~message error_fields)
+  | None | Some `Null -> Turn_failed { detail; codex_error_info = None }
+  | Some json ->
+    (match codex_error_info_of_json json with
+     | Context_window -> Context_window_exceeded { message; tool_effect_attempted }
+     | Turn_failure info -> Turn_failed { detail; codex_error_info = Some info })
 ;;
 
 let turn_error ~tool_effect_attempted fields =
@@ -875,7 +980,9 @@ let turn_error ~tool_effect_attempted fields =
       | _ -> "turn failed without a typed error message"
     in
     turn_error_of_fields ~tool_effect_attempted ~message error_fields
-  | Some _ | None -> Turn_failed "turn failed without an error object"
+  | Some _ | None ->
+    Turn_failed
+      { detail = "turn failed without an error object"; codex_error_info = None }
 ;;
 
 let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
@@ -1643,7 +1750,7 @@ let terminate_spawned_process ~clock proc stdin_w =
            Log.Runtime_agent.warn
              "Codex app-server forced reap failed: %s"
              (Printexc.to_string exn))
-      | exn ->
+      | exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect *)
         Log.Runtime_agent.debug
           "Codex app-server reap observed an already-closed process: %s"
           (Printexc.to_string exn))

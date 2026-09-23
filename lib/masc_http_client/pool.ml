@@ -225,7 +225,7 @@ let create_scoped_client ~sw env uri =
           raise Client_scope_closed)
       with
       | Client_scope_closed -> Ok ()
-      | exn -> Error exn
+      | exn -> Error exn (* cancel-guard-ok: the daemon resolves its promises and stops after this arm; the switch observes the cancellation *)
     in
     (match outcome with
      | Error exn ->

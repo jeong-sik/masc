@@ -3666,8 +3666,8 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.post "/api/v1/keepers/turn/interrupt" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
-         handle_keeper_turn_interrupt state request reqd) request reqd)
+       with_tool_actor_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state actor _req reqd ->
+         handle_keeper_turn_interrupt ~actor state request reqd) request reqd)
 
   (* Answers a tool call the keeper is holding. Same authority as interrupting
      a turn: both decide what a running turn is allowed to do next. The route
@@ -3675,8 +3675,8 @@ let add_routes ~sw ~clock router =
      borrowing a dispatchable tool's name, so the permission it enforces stays
      reviewable on its own terms. *)
   |> Http.Router.post "/api/v1/keepers/tool-approval" (fun request reqd ->
-       with_tool_auth ~tool_name:"keeper_tool_approval_route" (fun state _req reqd ->
-         handle_keeper_tool_approval state request reqd) request reqd)
+       with_tool_actor_auth ~tool_name:"keeper_tool_approval_route" (fun state actor _req reqd ->
+         handle_keeper_tool_approval ~actor state request reqd) request reqd)
 
   (* What one Keeper is waiting on a human for. *)
   |> Http.Router.get "/api/v1/keepers/asks" (fun request reqd ->
@@ -3686,8 +3686,8 @@ let add_routes ~sw ~clock router =
   (* Answers a Keeper's question. The operator may be at any surface; the
      log settles concurrent submissions on first write. *)
   |> Http.Router.post "/api/v1/keepers/ask-answer" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_ask" (fun state _req reqd ->
-         handle_keeper_ask_answer state request reqd) request reqd)
+       with_tool_actor_auth ~tool_name:"masc_ask" (fun state actor _req reqd ->
+         handle_keeper_ask_answer ~actor state request reqd) request reqd)
 
   (* Lists the tool calls keepers are holding, so a wait whose owning stream
      watcher is gone can still be answered instead of only timing out

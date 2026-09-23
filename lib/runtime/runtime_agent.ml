@@ -562,6 +562,16 @@ let merge_modality_counts a b =
     a
     b
 
+(* The encoders read [content_blocks = Some _] as the whole tool result and
+   leave [content] unsent: [Some []] reaches the OpenAI tool message and the
+   Responses function output as the string "[]", and the Anthropic tool_result
+   and the official-client context as an empty array. An empty block list is
+   no structured view, so this walk leaves none: a tool result with no blocks
+   comes out with [content_blocks = None] and every encoder sends [content],
+   the canonical string the type keeps for exactly this. The rule reads the
+   same whether the media strip emptied the list or it was already empty —
+   one shape, one answer, no second sentence for the model to read. The turn's
+   own degrade note already says media was left out ([media_degrade_note]). *)
 let rec strip_unsupported_modality_blocks
     (caps : Llm_provider.Capabilities.capabilities)
     (blocks : Agent_core.Types.content_block list) :
@@ -584,12 +594,13 @@ let rec strip_unsupported_modality_blocks
              let nested_kept, nested_dropped =
                strip_unsupported_modality_blocks caps nested
              in
+             let content_blocks =
+               match nested_kept with
+               | [] -> None
+               | _ :: _ -> Some nested_kept
+             in
              ( Agent_core.Types.ToolResult
-                 { tool_use_id
-                 ; content
-                 ; outcome
-                 ; json
-                 ; content_blocks = Some nested_kept }
+                 { tool_use_id; content; outcome; json; content_blocks }
                :: kept
              , merge_modality_counts dropped nested_dropped )
          | Agent_core.Types.ToolResult { content_blocks = None; _ }
@@ -941,29 +952,6 @@ let stop_reason_of_cooperative_yield ~turns_used = function
      the typed reply effect already completed. This is successful completion,
      not a continuation checkpoint that should replay on the next cycle. *)
   | Terminal_tool_completed -> Completed
-;;
-
-(* A turn that abandoned its provider attempt before the first streaming event
-   arrived, because a person queued behind it and there was no tool boundary to
-   yield at (the pre-first-token gap RFC-0441 leaves open). It produced nothing:
-   [turns_used = 0], no checkpoint. The keeper race layer synthesizes this so the
-   attempt reads downstream exactly like a durable-stimulus yield -- the source
-   wake stays pending and re-runs fresh next cycle -- without entering AGENT_CORE
-   or persisting a checkpoint. It is not a forced cancel of a productive turn
-   (nothing was produced); it is the same cooperative yield, one turn-phase
-   earlier. *)
-let yielded_pre_first_token ~session_id : run_result =
-  { response = Runtime_agent_checkpoint.partial_response_of_stop ~session_id ~text:""
-  ; checkpoint = None
-  ; cooperative_boundary = None
-  ; session_id
-  ; session_resumed = None
-  ; turns = 0
-  ; trace_ref = None
-  ; run_validation = None
-  ; runtime_observation = None
-  ; stop_reason = Yielded_to_durable_stimulus { turns_used = 0 }
-  }
 ;;
 
 let cooperative_boundary_callback

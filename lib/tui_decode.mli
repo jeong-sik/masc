@@ -128,6 +128,7 @@ type planning_backlog = {
   pb_todo : int;
   pb_claimed : int;
   pb_running : int;
+  pb_awaiting_verification : int;
   pb_done : int;
   pb_cancelled : int;
 }
@@ -1136,17 +1137,33 @@ type harness_snapshot = {
 }
 
 (** One task waiting on a verdict, as the verification surface lists it. *)
+type verification_ask =
+  | Asks_completion
+  | Asks_cancellation of string option
+      (** The case the producer made for stopping the Task, which is what an
+          operator decides on. [None] where the record kept no copy of it,
+          which is every stop submitted before the record did. *)
+  | Ask_unstated
+      (** The row's [intent] is [null]: the backlog join found nothing, so the
+          record does not say which verdict it waits on. A missing
+          [cancellation_reason] is not an answer to that question -- a stop
+          without its reason has none either -- so nothing is inferred. *)
+  | Unrecognised_ask of string
+      (** A word outside the pair, kept as itself. *)
+(** What a request asks the authority to answer. [intent] is the field that
+    says which, and the queue writes it on every row. *)
+
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
-  vr_intent : Masc_domain.verification_intent option;
-      (** Which verdict the row waits on, when the server joined the backlog
-          (the awaiting view): a completion, or a cancellation that only an
-          operator's verdict clears. [None] in the history view, which has
-          no join, and drawn as nothing rather than as [complete]. *)
+  vr_ask : verification_ask;
+      (** Which verdict the row waits on: a completion, or a cancellation that
+          only an operator's verdict clears. [Ask_unstated] where the row's
+          [intent] is [null], which the history view's rows are, and drawn as
+          nothing rather than as either verdict. *)
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;

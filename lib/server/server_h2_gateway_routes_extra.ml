@@ -150,15 +150,16 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/api/v1/board/sub-boards" ->
-      let sub_boards = Board_dispatch.list_sub_boards () in
-      let json =
-        `Assoc
-          [
-            ( "sub_boards",
-              `List (List.map Board.sub_board_to_yojson sub_boards) );
-          ]
-      in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
+      with_public_read (fun () ->
+        let sub_boards = Board_dispatch.list_sub_boards () in
+        let json =
+          `Assoc
+            [
+              ( "sub_boards",
+                `List (List.map Board.sub_board_to_yojson sub_boards) );
+            ]
+        in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
       true
 
   | `GET, "/api/v1/board/karma/ledger" ->
@@ -247,7 +248,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            let response = H2.Response.create ~headers `OK in
            let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
            H2.Body.Writer.write_string writer body;
-           H2.Body.Writer.close writer
+           h2_close_after_flush writer
        | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
@@ -261,7 +262,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            let response = H2.Response.create ~headers `OK in
            let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
            H2.Body.Writer.write_string writer body;
-           H2.Body.Writer.close writer
+           h2_close_after_flush writer
        | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
@@ -300,7 +301,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
              let response = H2.Response.create ~headers `OK in
              let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
              H2.Body.Writer.write_string writer final_body;
-             H2.Body.Writer.close writer
+             h2_close_after_flush writer
          | Error error ->
            (match Web_dashboard.asset_error_http_status error with
             | `Not_found ->

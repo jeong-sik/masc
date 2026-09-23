@@ -505,6 +505,7 @@ type planning_backlog = {
   pb_todo : int;
   pb_claimed : int;
   pb_running : int;
+  pb_awaiting_verification : int;
   pb_done : int;
   pb_cancelled : int;
 }
@@ -1935,9 +1936,19 @@ let decode_planning_backlog json =
   let* pb_todo = required_int_field json "todo" in
   let* pb_claimed = required_int_field json "claimed" in
   let* pb_running = required_int_field json "in_progress" in
+  let* pb_awaiting_verification =
+    required_int_field json "awaiting_verification"
+  in
   let* pb_done = required_int_field json "done" in
   let* pb_cancelled = required_int_field json "cancelled" in
-  Ok { pb_todo; pb_claimed; pb_running; pb_done; pb_cancelled }
+  Ok
+    { pb_todo
+    ; pb_claimed
+    ; pb_running
+    ; pb_awaiting_verification
+    ; pb_done
+    ; pb_cancelled
+    }
 
 type system_log_level =
   | System_debug
@@ -2740,12 +2751,29 @@ type harness_snapshot = {
   hs_overview : harness_overview option;
 }
 
+(* What a request asks the authority to answer: finish this Task, or stop it.
+
+   [intent] is the field that says which, and the queue writes it on every
+   row ([Dashboard_verification.request_to_json]); it is [null] where the
+   backlog join found nothing. [cancellation_reason] answers a different
+   question -- the case the producer made for stopping -- and its absence is
+   not an answer to this one: a stop submitted before the record kept that
+   copy carries none either, so reading absence as "completion" would be the
+   queue inventing an answer the record does not hold
+   (lib/dashboard/dashboard_verification.ml). [Ask_unstated] is that silence,
+   and it is drawn as such. *)
+type verification_ask =
+  | Asks_completion
+  | Asks_cancellation of string option
+  | Ask_unstated
+  | Unrecognised_ask of string
+
 type verification_request = {
   vr_request_id : string;
   vr_task_id : string;
   vr_task_title : string;
   vr_submitted_by : string;
-  vr_intent : Masc_domain.verification_intent option;
+  vr_ask : verification_ask;
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
@@ -5619,16 +5647,19 @@ let decode_verification_request json =
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
-  (* [null] is the history view, which has no backlog join. A name outside
-     the pair is refused rather than read as either intent. *)
-  let* vr_intent =
-    let* raw = optional_string_field json "intent" in
-    match raw with
-    | None -> Ok None
-    | Some raw ->
-      (match Masc_domain.verification_intent_of_string raw with
-       | Ok intent -> Ok (Some intent)
-       | Error detail -> Error detail)
+  (* [null] is a row the backlog join found nothing for. A word outside the
+     pair is kept as itself rather than folded into either intent, so a
+     vocabulary this build does not know reaches the screen as that word. *)
+  let* vr_ask =
+    let* intent = optional_string_field json "intent" in
+    let* reason = optional_string_field json "cancellation_reason" in
+    match intent with
+    | None -> Ok Ask_unstated
+    | Some word -> (
+        match Masc_domain.verification_intent_of_string word with
+        | Ok Masc_domain.Complete_task -> Ok Asks_completion
+        | Ok Masc_domain.Cancel_task -> Ok (Asks_cancellation reason)
+        | Error _ -> Ok (Unrecognised_ask word))
   in
   let* vr_created_at = required_string_field json "created_at" in
   let* vr_required_artifacts =
@@ -5645,7 +5676,7 @@ let decode_verification_request json =
     ; vr_task_id
     ; vr_task_title
     ; vr_submitted_by
-    ; vr_intent
+    ; vr_ask
     ; vr_created_at
     ; vr_required_artifacts
     ; vr_submitted_evidence

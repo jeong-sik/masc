@@ -152,7 +152,12 @@ let run_durable_with_commit ~config ~keeper_name ~commit =
   in
   try
     let last_pass = drain () in
-    let unread = match last_pass with Off -> None | _ -> measure_unread ~config ~keeper_name in
+    let unread =
+      match last_pass with
+      | Off -> None
+      | Lane_unconfigured | Drained | Not_committed | Stopped _ | Raised _ ->
+        measure_unread ~config ~keeper_name
+    in
     publish_measurement ~config ~keeper_name ~last_pass ~unread
   with
   | Eio.Cancel.Cancelled _ as exn ->
@@ -455,6 +460,23 @@ let submit_durable ~base_path ~keeper_name =
       run_continuity ~base_path ~keeper_name ())
   in
   ()
+;;
+
+let with_purge_then_catch_up ~base_path ~keeper_name action =
+  (* The purge cancels the running unit and discards wakes while it holds
+     the Keeper's files, so nothing else puts the unread backlog back on the
+     lane. A stopped Keeper ends no turn, and a purge refused for unread
+     atoms would stay refused. The lane is serial and coalesces, so a
+     submission with nothing unread ends at once. *)
+  match Keeper_memory_lane.with_librarian_purge ~base_path ~keeper_name action with
+  | result ->
+    submit_durable ~base_path ~keeper_name;
+    result
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    submit_durable ~base_path ~keeper_name;
+    Printexc.raise_with_backtrace exn backtrace
 ;;
 
 let unlaunched_keeper_names ~persisted ~launched =

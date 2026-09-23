@@ -19,6 +19,16 @@ type entry =
     (** The provider documents a request control that limits a response to at
         most one tool call. Missing declarations are false; this is separate
         from a model being able to generate parallel tool calls. *)
+  ; serves_bare_rows : bool
+    (** The provider is the vendor's own endpoint for the models the catalog
+        describes with bare rows (rows without [provider_name]). Capability
+        resolution for a config that names it then reads those rows, by
+        prefix, wherever no row is scoped to it
+        ({!Capabilities.for_provider_model_id}). Missing declarations are
+        false, and the provider's base answers instead. This decides
+        capability resolution only: pricing and the Anthropic thinking control
+        fall back to bare rows for every provider whatever it declares, and the
+        wizard and exact-output lookups read scoped rows only (#37935). *)
   }
 
 val parse_entry : Otoml.t -> (entry, string) result

@@ -74,6 +74,9 @@ template_variables: [continuity, working_context, current_memory, conversation_h
   반대로 `m3`의 잘못된 내용을 교정하면 새 claim에 `supersedes: "m3"`,
   `absorbs: []`를 쓰고 `dropped`에도 `m3`와 교정 이유를 적습니다.
   새 claim 없이 없앨 기억만 `dropped`에 단독으로 적습니다.
+- 현재 기억을 글자 그대로 다시 쓰면 바뀌지 않은 것으로 읽습니다. 다른 기억을
+  이미 있는 기억에 묶으려면 그 기억의 문장을 그대로 두고 나머지 짧은 ID를
+  `absorbs`에 적습니다.
 - 규칙의 범위를 넓히거나 좁히지 마세요. “X일 때 Y하라”를 “X일 때만 Y하라”로,
   특정 업무 제외를 주변 업무 전체의 금지로 바꾸면 안 됩니다.
 - 에이전트가 **스스로 만든** 영구적인 업무 제외·대기·참여 제한은 저장하지

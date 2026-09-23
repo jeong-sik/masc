@@ -87,24 +87,49 @@ let user_message text : Agent_core.Types.message =
    synthetic User-message encoding, while retaining the shared typed identity
    used by prompt attribution and input-window projection.
 
-   The Librarian's working state rides here too, so it reaches the client the
-   way each adapter delivers System text: Claude Code joins it into
-   [--system-prompt] on every turn, a resume included
+   The Librarian's working state rides the same System path, so it reaches
+   the client the way each adapter delivers System text: Claude Code joins it
+   into [--system-prompt] on every turn, a resume included
    ([Keeper_claude_code_runtime]); Antigravity renders it as a [SYSTEM:]
    section ahead of the history ([Keeper_antigravity_runtime]). The Agent
    Core lane sends the same text as a [User] message, which only that lane's
-   wire has. Moving it to [User] here would change when Claude Code delivers
-   it -- into the start prompt's history alone, absent from resumes -- not
-   only what the model reads it as; that is a lane decision to measure, not
-   a role to flip. The text names itself a summary to use as context, not as
-   new instructions ([Keeper_turn_driver_try_provider.working_state_text]). *)
-let extra_system_context_message text : Agent_core.Types.message =
+   wire has. The text names itself a summary to use as context, not as new
+   instructions ([Keeper_turn_driver_try_provider.working_state_text]).
+
+   The two carry different tags. The composition check over a request expects
+   exactly one per-turn carrier; a working state stamped with the carrier's
+   tag made every request that carried both fail it as a repeated carrier.
+   The working state carries {!Runtime_model_input_tail_window.working_state_metadata},
+   as on the Agent Core lane, and the adapters select both through
+   [is_composed_system_context]. *)
+let system_context_message ~metadata text : Agent_core.Types.message =
   { role = System
   ; content = [ Text text ]
   ; name = None
   ; tool_call_id = None
-  ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+  ; metadata
   }
+;;
+
+let extra_system_context_message text =
+  system_context_message
+    ~metadata:Agent_core.Types.Extra_system_context_provenance.metadata
+    text
+;;
+
+let working_state_message text =
+  system_context_message
+    ~metadata:Runtime_model_input_tail_window.working_state_metadata
+    text
+;;
+
+let is_composed_system_context (message : Agent_core.Types.message) =
+  (match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
+   | Agent_core.Types.Extra_system_context_provenance.Present -> true
+   | Agent_core.Types.Extra_system_context_provenance.Absent
+   | Agent_core.Types.Extra_system_context_provenance.Invalid
+   | Agent_core.Types.Extra_system_context_provenance.Duplicate -> false)
+  || Runtime_model_input_tail_window.is_working_state message
 ;;
 
 let last_tool_results messages =
@@ -625,9 +650,8 @@ let carried_start_range
     | Absorbed_through { first_atom; absorbed_through; boundary_line; working_state } ->
       (* The working state stands in front of the range, in the same System
          place this lane puts every other piece of context it composes; see
-         [extra_system_context_message] for what that place is on each
-         client. *)
-      ( extra_system_context_message working_state :: messages
+         [working_state_message] for what that place is on each client. *)
+      ( working_state_message working_state :: messages
       , first_atom
       , Librarian_snapshot { absorbed_through; boundary_line } )
     | Plain (first_atom, front) -> messages, first_atom, front
@@ -1391,6 +1415,11 @@ let masc_observation_sentence masc =
             "was running this turn when MASC shut down"
           | Keeper_internal_error.Runtime_reported_interrupt ->
             "reported this turn as interrupted")
+     | Keeper_internal_error.Preempted_before_first_token { runtime_id } ->
+       Printf.sprintf
+         "the turn yielded to a queued person before runtime %s produced \
+          anything"
+         runtime_id
      | Keeper_internal_error.Runtime_connection_closed
          { runtime_id; detail; turn_accepted } ->
        Printf.sprintf
@@ -1698,7 +1727,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                     (Repeated_tool_call { tool_name = tool.schema.name; repeated_count }) })
           in
           (try on_result_handoff ~invocation ~content:final_result.content with
-           | exn ->
+           | exn -> (* cancel-guard-ok: reraise_if_reserved re-raises Cancelled *)
              Llm_provider.Reserved_exn.reraise_if_reserved exn;
              Log.Keeper.warn
                ~keeper_name
@@ -1714,7 +1743,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
            | Some observe ->
              let boundary =
                try observe () with
-               | exn ->
+               | exn -> (* cancel-guard-ok: reraise_if_reserved re-raises Cancelled *)
                  Llm_provider.Reserved_exn.reraise_if_reserved exn;
                  Error (Agent_core.Error.Internal (Printexc.to_string exn))
              in

@@ -201,11 +201,14 @@ val install_error_to_string : install_error -> string
     In-flight summaries retain their durable state. Independent delivery replay
     failures are returned in [delivery_replay_failures] and never prevent later
     journals or Gate recovery from being attempted.
-    A delivery whose grant is consumed and whose [Hitl_resolved] wake is no
-    longer in its Keeper's event queue is removed from the store; the count is
-    [retired_deliveries]. A consumed delivery whose wake is still queued, or
-    whose queue cannot be read, is kept. The removal is skipped while the store
-    or the replay projection is unavailable, and a failed write is reported in
+    A spent delivery is removed from the store; the count is
+    [retired_deliveries]. A delivery is spent when its wake was delivered and
+    is no longer in its Keeper's event queue, no unsettled execution of that
+    Keeper names the approval, and an approval's grant is consumed; or when its
+    Keeper's meta is gone. A delivery whose Keeper meta, queue, or operation
+    store cannot be read, or whose Keeper has meta but no queue, is kept. The
+    removal is skipped while the store or the replay projection is
+    unavailable, and a failed write is reported in
     [delivery_retirement_error] and retried at the next install. *)
 val install_persistence :
   base_path:string -> (install_report, install_error) result

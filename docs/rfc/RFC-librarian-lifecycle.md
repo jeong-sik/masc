@@ -329,6 +329,8 @@ flowchart TD
   | `Rate_limited` · `Overloaded` · `Server_error` · `Network_error` | 기다린다 | 요청 자체는 받아들여졌다. 접으면 폭만 잃는다 |
   | `Auth_failed` · `Authorization_refused` · `Payment_required` · `Not_found` | 기다린다 | 크기와 무관하고 운영자가 고쳐야 풀린다. 접어도 같은 거절이 온다 |
 
+  HTTP 거절이 아닌 공급자 오류는 `Exact_output.Completion_failed` 로 오고, 그 안에 든 `Http_client.http_error` 갈래로 판정한다(#37899, `keeper_librarian_runtime.ml` 의 `transport_error_shows_size`). 접는 것은 크기를 말한 것뿐이다. 공급자가 context overflow 라고 말했거나, 응답 본문이 한도를 넘었거나, 요청 시간 초과(슬롯·용량을 기다린 시간 초과는 빼고)이거나, 빈 완료의 stop reason 이 `ContextWindowExceeded`·`MaxTokens` 일 때다. 연결 실패, DNS·TLS, 끊긴 연결, 하드 쿼터, 용량 소진, 설정 오류, 그 밖의 빈 완료는 기다린다.
+
   갈래를 보기 전에 무엇이 갈래를 가진 실패인지 먼저 가른다. 후보가 디스패치에 닿기 전에 걸러진 사전 거절(`Exact_output.Flow_advance_candidate_rejected`)은 요청을 보낸 적이 없으므로 접을지 기다릴지의 근거가 되지 못한다. 그 걸음은 아무 말도 하지 않은 것으로 둔다.
 
   회차가 자기 자리에서 낸 오류도 접지 않는다. 렌더 실패, clock 없음, setup 실패, transport 미선언, 스냅숏 쓰기 실패, CLI 프롬프트 없음은 작게 보낸다고 달라지지 않는다. 스냅숏 쓰기 실패에서 접으면 특히 나쁘다 — 커밋이 안 되니 백로그가 비지 않고, 좁힌 표식은 소진에서만 풀리므로 영영 안 풀린다. 이 자리에서 접는 것은 `Domain_output_invalid` 하나뿐이고, 그것이 §4.3 이 말한 "출력 거절"이다.

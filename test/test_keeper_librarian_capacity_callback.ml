@@ -21,6 +21,9 @@ let test_callback ?(cli_errors = []) ?shows_size ~base_path ~registry ~keeper_id
     let body = match status with
       | `Request_entity_too_large -> {|{"error":{"message":"fixture body limit","type":"invalid_request_error"}}|}
       | `Too_many_requests -> {|{"error":{"message":"fixture quota","type":"rate_limit_error"}}|}
+      (* A 200 whose one choice carries nothing: the provider answered empty. *)
+      | `OK ->
+        {|{"id":"fixture","object":"chat.completion","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}
       | _ -> {|{"error":{"message":"fixture authorization","type":"authentication_error"}}|} in
     Cohttp_eio.Server.respond_string ~status ~body () in
   let server = Cohttp_eio.Server.make ~callback:handler () in
@@ -346,6 +349,12 @@ let test_size_verdict_table () =
   (* The verdict reads the refusal and never the status it arrived with. *)
   let any_status = 400 in
   let refused refusal = E.Provider_response_refused { http_status = any_status; refusal } in
+  let module Http = Agent_core.Llm_provider.Http_client in
+  let module Types = Agent_core.Llm_provider.Types in
+  let failed kind = E.Completion_failed (Http.ProviderFailure { kind; message = "" }) in
+  let network kind = E.Completion_failed (Http.NetworkError { message = ""; kind }) in
+  let timed_out phase = E.Completion_failed (Http.TimeoutError { message = ""; phase }) in
+  let empty stop_reason = failed (Http.Empty_completion { stop_reason }) in
   List.iter
     (fun (name, cause, expected) ->
        Alcotest.(check bool) name expected (Runtime.For_testing.cause_shows_size cause))
@@ -363,7 +372,34 @@ let test_size_verdict_table () =
     ; "authorization refused", refused E.Authorization_refused, false
     ; "payment required", refused E.Payment_required, false
     ; "model not found", refused E.Not_found, false
-    ; "completion failed, response unknown", E.Completion_failed, true
+    (* A provider error that is not an HTTP refusal, read by its typed kind
+       (#37899). On 2026-09-22 msx-retro-mania's walk narrowed from 130 to 16
+       atoms on quota and empty-response failures while its keeper's request
+       kept growing. *)
+    ; "completion failed, context overflow", failed (Http.Context_overflow { limit = None }), true
+    ; ( "completion failed, response too large"
+      , failed (Http.Response_body_too_large { limit_bytes = 1 })
+      , true )
+    ; "completion failed, empty at the context window", empty Types.ContextWindowExceeded, true
+    ; "completion failed, empty at the output budget", empty Types.MaxTokens, true
+    ; "completion failed, empty at end of turn", empty Types.EndTurn, false
+    ; "completion failed, hard quota", failed (Http.Hard_quota { retry_after = None }), false
+    ; ( "completion failed, capacity exhausted"
+      , failed
+          (Http.Capacity_exhausted
+             { scope = Http.Failure_scope_account; retry_after = None; model = None })
+      , false )
+    ; ( "completion failed, unclassified provider failure"
+      , failed (Http.Unknown_provider_failure { reason = None })
+      , false )
+    ; "completion failed, dns failure", network Http.Dns_failure, false
+    ; "completion failed, connection refused", network Http.Connection_refused, false
+    ; "completion failed, peer closed", network Http.End_of_file, false
+    ; "completion failed, request deadline", timed_out Http.Wall_clock, true
+    ; "completion failed, queued past its deadline", timed_out Http.Queue, false
+    ; ( "completion failed, wiring rejected"
+      , E.Completion_failed (Http.AcceptRejected { reason = "" })
+      , false )
     ; "incomplete output", E.Incomplete_output, true
     ; "missing output", E.Missing_output, true
     ; "ambiguous output", E.Ambiguous_output 2, true
@@ -464,7 +500,10 @@ let () =
       case "capacity-final" false `Request_entity_too_large 0 true;
       case "quota-final" false `Too_many_requests 0 false;
       case "capacity-then-quota" true `Too_many_requests 0 true;
-      case "capacity-then-auth" true `Unauthorized 0 true];
+      case "capacity-then-auth" true `Unauthorized 0 true;
+      (* An empty answer that ended its turn says nothing about size: a
+         smaller range meets the same provider (#37899). *)
+      case "empty-completion-final" false `OK 0 false];
     "HTTP to CLI outcomes", [
       (* An official client's failure arrives untyped, so it is no evidence
          either way (#37877). A measured limit is handed over separately. *)

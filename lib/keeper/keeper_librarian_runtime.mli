@@ -58,8 +58,11 @@ type not_committed =
             absent model), and every failure that never reached a provider all
             answer false, as does a pass that recorded no typed cause at all.
             A provider error that is not an HTTP refusal arrives as
-            [Completion_failed], which answers true whatever it held,
-            a dropped connection or a hard quota included (#37899).
+            [Completion_failed] with its typed transport error, and answers
+            true only for a named context overflow, an oversized response, a
+            request deadline, or an empty completion stopped by the context
+            window or the output budget. A dropped connection, a DNS failure,
+            a hard quota or any other empty completion answers false.
 
             The verdict covers every failed visit of the walk, not the last
             one, so the same set of causes answers the same way whatever order

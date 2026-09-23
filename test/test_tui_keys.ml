@@ -775,7 +775,7 @@ let test_overview_footer_projects_by_focus () =
      detail as a reading the frame clamps, the task column as a row list
      whose window follows its cursor. *)
   check str "tasks mode keeps arrow/Enter/Esc and drops t"
-    ("j/k:tasks  m:telemetry  Home/End:top/bottom"
+    ("j/k:move  m:telemetry  Home/End:top/bottom"
      ^ "  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh"
      ^ "  Tab:next  q:quit")
     (Masc_tui_keys.footer_hints_overview ~task_focus:true)

@@ -14014,7 +14014,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           (match apply_runtime_config_jump state with
            | None -> ()
            | Some (section, true) ->
-             report_action state "info"
+             add_event state "info"
                (Printf.sprintf "runtime.toml at [%s] - e to edit" section)
            | Some (section, false) ->
              report_action state "error"
@@ -17245,7 +17245,7 @@ let main
              set_runtime_config_cursor_near state ~direction:1 ~target:i;
              state.config_scroll <- max 0 (i - 3)
          | None -> ());
-        report_action state "info"
+        add_event state "info"
           (Printf.sprintf "runtime.toml at [models.%s] - e to edit"
              row.Masc_tui_model_runtime_table.model))
   in
@@ -24967,15 +24967,18 @@ and is loaded on demand through keeper_skill.
                    state.view <- Config;
                    state.config_pane <- Config_runtime;
                    state.runtime_config_jump_section <- Some section;
+                   (* The answer to [e] is Config opening on the table, so
+                      these notes stay in the session log. On the footer
+                      they named the table before the pane had drawn it. *)
                    (match state.runtime_config_view with
                     | None ->
-                      report_action state "info"
+                      add_event state "info"
                         (Printf.sprintf "loading runtime.toml for [%s]" section);
                       launch_runtime_config_load state ~mailbox:async_messages
                     | Some _ ->
                       (match apply_runtime_config_jump state with
                        | Some (_, true) ->
-                         report_action state "info"
+                         add_event state "info"
                            (Printf.sprintf
                               "runtime.toml at [%s] - e to edit" section)
                        | Some (_, false) ->

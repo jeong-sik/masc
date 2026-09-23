@@ -315,7 +315,7 @@ let fusion_board_key = b Navigate "B" "Board evidence"
 
 let for_surface = function
   | Overview ->
-      [ b Navigate "j/k" "tasks" ~help:"move through the selected task list"
+      [ b Navigate "j/k" "move" ~help:"move through the selected task list"
       ; b Navigate "m" "telemetry"
           ~help:"system metrics, engine telemetry and this TUI's session log"
       ; b Act "t" "tasks" ~help:"select the task list for j/k"

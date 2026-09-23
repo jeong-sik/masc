@@ -44,7 +44,7 @@ type input =
 (* A new claim that continues a dropped memory: the librarian said so with
    [supersedes], and the parser checked that the old id exists and is in
    [dropped]. Recorded as a [Revised] event on the old id (RFC-0418). *)
-type revision =
+type revision = Keeper_memory_os_types.revision =
   { superseded : string
   ; superseded_by : string
   }
@@ -298,6 +298,7 @@ let continuity_prompt_variables (inp : input) ~continuity =
     , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
   ; "current_memory", format_current_selection_for_prompt inp.current
+  ; "conversation_history", format_messages_for_prompt inp.messages
   ; "continuity", Yojson.Safe.to_string continuity
   ]
 ;;

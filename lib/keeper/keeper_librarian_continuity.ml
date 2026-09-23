@@ -207,8 +207,7 @@ let memory_committed ~config ~keeper_name prepared =
               ~messages:prepared.messages prepared.range)
     | None, _ | Some _, None -> false)
 let prompt_json prepared =
-  `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text);
-    "completed_conversation", `List (List.map Agent_core.Checkpoint.message_to_json prepared.unread)]
+  `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text)]
 let commit ~config ~keeper_name ~prepared ~working_state =
   let* covered = memory_committed ~config ~keeper_name prepared in
   let* () = if covered then Ok () else Error "Memory has not committed this continuity source" in

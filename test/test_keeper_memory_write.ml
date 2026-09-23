@@ -1600,7 +1600,7 @@ let test_absorbed_search_preserves_board_basis source =
     | Error error -> Alcotest.fail (Librarian.parse_error_to_string error)
   in
   (match
-     Current.apply_disposition
+     Current.apply_disposition ~revisions:[]
        ~keepers_dir ~keeper_id:meta.name ~now:(Time_compat.now ())
        ~source:{ Current.kind = Current.Librarian; trace_id = "absorb-board-sources" }
        ~new_claims:selection.new_claims ~dropped_statements:selection.dropped
@@ -1672,7 +1672,7 @@ let test_absorbed_facts_are_searchable () =
   replace_current_facts ~keepers_dir ~keeper_id:meta.name [ alpha; beta; gamma ];
   let merged = fact "alpha and beta deploy on tuesday" in
   (match
-     Current.apply_disposition
+     Current.apply_disposition ~revisions:[]
        ~keepers_dir
        ~keeper_id:meta.name
        ~now:(Time_compat.now ())
@@ -1803,7 +1803,7 @@ let test_absorbed_rows_follow_later_merges_and_leave_room () =
   let id = Masc.Keeper_memory_os_types.memory_id in
   let absorb ~keeper_id ~trace_id pairs new_claims =
     match
-      Current.apply_disposition
+      Current.apply_disposition ~revisions:[]
         ~keepers_dir
         ~keeper_id
         ~now:(Time_compat.now ())
@@ -1980,7 +1980,7 @@ let test_a_query_of_several_words_is_answered () =
     [ apart; together; other; retired; retired_later ];
   let merged = fact "alpha deploys on a fixed weekday" in
   (match
-     Current.apply_disposition
+     Current.apply_disposition ~revisions:[]
        ~keepers_dir
        ~keeper_id:meta.name
        ~now:(Time_compat.now ())
@@ -2068,7 +2068,7 @@ let test_all_ranks_complete_queries_before_fragments_across_stores () =
     [ ordinary_fragment; absorbed_exact ];
   let merged = fact "merged weekday decision" in
   (match
-     Current.apply_disposition
+     Current.apply_disposition ~revisions:[]
        ~keepers_dir
        ~keeper_id:meta.name
        ~now:(Time_compat.now ())

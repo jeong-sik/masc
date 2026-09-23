@@ -59,7 +59,7 @@ type input =
     The librarian named the old one with [supersedes]; the parser checked
     that it exists and is in [dropped]. Recorded as a [Revised] event on the
     old id after the snapshot commits (RFC-0418). *)
-type revision =
+type revision = Keeper_memory_os_types.revision =
   { superseded : string
   ; superseded_by : string
   }
@@ -136,8 +136,9 @@ val goal_context_to_json : goal_context -> Yojson.Safe.t
 val prompt_variables : input -> (string * string) list
 
 (** Variables of the continuity pass over a range whose Memory is already
-    committed. The conversation arrives once, inside [continuity]; the
-    current memory is reference material, not a subject of judgment. *)
+    committed. The conversation arrives once, folded, as
+    [conversation_history]; [continuity] carries the prior working state.
+    The current memory is reference material, not a subject of judgment. *)
 val continuity_prompt_variables
   :  input
   -> continuity:Yojson.Safe.t

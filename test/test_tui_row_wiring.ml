@@ -173,8 +173,14 @@ let test_the_approvals_title_counts_what_the_badge_counts () =
     (Ast_grep.count_string_literals_in_value_binding ~module_path:render
        ~binding_name:"render_approvals"
        ~literals:[ "held"; "gate"; "op"; "question" ]);
-  Alcotest.(check bool) "the questions come off the asks reading" true
-    (reads ~binding_name:"render_approvals" ~fields:[ "asks_snapshot" ] > 0)
+  (* And takes the question count from the same place the block heading and
+     the badge take it, rather than reading the asks snapshot a third time. *)
+  Alcotest.(check int) "the questions come off the shared reading" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals"
+       ~callee:"Masc_tui_types.approvals_open_question_count");
+  Alcotest.(check int) "and the surface reads the asks snapshot nowhere else" 0
+    (reads ~binding_name:"render_approvals" ~fields:[ "asks_snapshot" ])
 
 (* The Overview summary row wears the same word as the tab badge beside it,
    and for a while they counted different things: the badge walked all three

@@ -225,6 +225,10 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
             [ elapsed_text (elapsed_s *. 1000.); error_code; error ] )
     | Observer.Agent_yielded { elapsed_s } ->
         (Quiet, "agent yielded", elapsed_text (elapsed_s *. 1000.))
+    | Observer.Agent_input_required { elapsed_s; question } ->
+        ( Attention
+        , "waiting for input"
+        , String.concat " · " [ elapsed_text (elapsed_s *. 1000.); question ] )
     (* Where the tool name is the whole detail, an event that carries none
        leaves the cell empty rather than printing the [?] the default stands
        for. A lone [?] in the Detail column reads as a failure marker and says
@@ -239,7 +243,8 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
   let detail =
     match e.Observer.kind, e.Observer.task with
     | ( ( Observer.Agent_started | Observer.Agent_completed _
-        | Observer.Agent_failed _ | Observer.Agent_yielded _ )
+        | Observer.Agent_failed _ | Observer.Agent_yielded _
+        | Observer.Agent_input_required _ )
       , (Some _ | None) ) ->
         detail
     | ( ( Observer.Tool_called | Observer.Tool_completed | Observer.Turn_started
@@ -560,6 +565,7 @@ let member_of_event (event : Observer.event) =
       | Observer.Telemetry -> Some Member_quiet
       | Observer.Agent_started | Observer.Agent_completed _
       | Observer.Agent_failed _ | Observer.Agent_yielded _
+      | Observer.Agent_input_required _
       | Observer.Tool_approval_completed | Observer.Agent_core_other _ ->
           None)
   | Observer.Keeper_tool_call c ->
@@ -1080,7 +1086,9 @@ let evidence_fields (entry : entry) =
         | Turn_started -> "turn_started" | Turn_ready -> "turn_ready"
         | Turn_completed -> "turn_completed" | Agent_started -> "agent_started"
         | Agent_completed _ -> "agent_completed" | Agent_failed _ -> "agent_failed"
-        | Agent_yielded _ -> "agent_yielded" | Tool_approval_completed -> "tool_approval_completed"
+        | Agent_yielded _ -> "agent_yielded"
+        | Agent_input_required _ -> "agent_input_required"
+        | Tool_approval_completed -> "tool_approval_completed"
         | Telemetry -> "telemetry_event" | Agent_core_other name -> name in
       [ some "Source" "runtime observer event"
       ; some "Event kind" kind
@@ -1095,8 +1103,9 @@ let evidence_fields (entry : entry) =
       ; field "Runtime agent" e.agent
       ; field
           (match e.kind with
-           (* These four carry the run's own wire id there, not a task. *)
-           | Agent_started | Agent_completed _ | Agent_failed _ | Agent_yielded _ ->
+           (* These carry the run's own wire id there, not a task. *)
+           | Agent_started | Agent_completed _ | Agent_failed _ | Agent_yielded _
+           | Agent_input_required _ ->
                "Agent run ID"
            | Tool_called | Tool_completed | Turn_started | Turn_ready
            | Turn_completed | Tool_approval_completed | Telemetry

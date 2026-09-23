@@ -22,6 +22,20 @@ status: reference
   코드 식별자는 `agent_core`와 `Agent_core`다.
   → [Agent Core 경계](13-agent-core.md)
 
+**Agent Run (에이전트 실행)**
+: `Agent_core.Agent`를 거치는 한 번의 실행. 그 수명주기를 `Agent_core.Event_bus`의 typed
+  event가 그린다 — `agent_started`·`agent_completed`·`agent_failed`·`agent_yielded`·`…`.
+  Keeper turn과 같은 단위가 아니며, 그 안에 여러 agent core Turn이 있다.
+  `agent_completed`·`agent_yielded`는 걸린 시간(`elapsed_s`)을, `agent_failed`는 걸린
+  시간과 오류의 `error_code`·`error`를, `agent_input_required`는 요청(`request`)을
+  payload에 싣는다. 이 event들은 payload의 `task_id`에 **Agent run ID**를 싣는다 —
+  `Event_envelope.fresh_id`가 만드는 `evt-` 접두 id이고, `agent_lifecycle_events`가
+  `AgentStarted`에서 연 run id를 그대로 쓴다. 이 값은 MASC **Task**의 id가 아니다.
+  필드 이름이 `task_id`라 Activity row가 이것을 Task로 읽어 `evt-…`를 그대로 찍은
+  적이 있다(#37910에서 고침).
+  → [Agent_core.Event_bus](../../packages/agent_core/lib/event_bus.mli),
+  [agent_lifecycle_events](../../packages/agent_core/lib/agent/agent_lifecycle_events.ml)
+
 **Official Client Lane**
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
   provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.
@@ -250,12 +264,12 @@ status: reference
   단계. Keeper turn과 동일한 단위가 아니다.
 
 **Agent run ID (Agent run 식별자)**
-: observer event의 `task` 필드가 agent lifecycle 네 kind(`Agent_started`·
-  `Agent_completed`·`Agent_failed`·`Agent_yielded`)에서 나르는 값. MASC task id가 아니라
-  그 run 자신의 wire id(`evt-` 접두, `Event_envelope.fresh_id`)다. 나머지 kind에서는 같은
-  필드가 MASC task id를 나르므로, Activity는 이 네 kind에서만 필드 이름을 "Agent run ID"로
-  적고 그 밖에서는 "Task ID"로 적는다. 한 필드가 두 개념을 나르는 자리라, run의 wire id를
-  task로 읽으면 `evt-…`가 행의 detail로 그대로 찍힌다.
+: observer event의 `task` 필드가 그 run 자신의 wire id(`evt-` 접두,
+  `Event_envelope.fresh_id`)를 나르는 값 — `task` 필드가 run의 wire id를 나르는 event가
+  그렇다(`agent_started`·…). MASC task id가 아니다. 같은 필드가 다른 event에서는 MASC
+  task id를 나르므로, Activity는 run의 wire id를 나르는 event에서만 필드 이름을
+  "Agent run ID"로 적고 그 밖에서는 "Task ID"로 적는다. 한 필드가 두 개념을 나르는
+  자리라, run의 wire id를 task로 읽으면 `evt-…`가 행의 detail로 그대로 찍힌다.
   → [Observer event](../../bin/masc_tui_observer.mli), [Activity 라벨](../../bin/masc_tui_acting.ml)
 
 **Runtime Attempt**
@@ -491,6 +505,18 @@ status: reference
   그 인자를 빠뜨린 판은 예전처럼 모든 바인딩을 광고한다. `has_detail_scoped_keys`가
   그런 판을 잡는다.
   → [masc_tui_keys.mli](../../bin/masc_tui_keys.mli)
+
+**Connector Connection (커넥터 연결)**
+: Channels 판이 한 transport의 연결에 대해 그리는 닫힌 다섯 값
+  (`Masc.Tui_decode.connector_connection`) — `Connector_connected`·
+  `Connector_connected_unavailable`·`Connector_disconnected`·`Connector_offline`·
+  `Connector_stale`. 배지가 철자하는 단어는 `CONNECTED`·`CONNECTED / UNAVAILABLE`·
+  `DISCONNECTED`·`UNAVAILABLE`·`STALE`(`Masc_tui_connector_state.badge_word`). 같은 판이
+  gateway·poll 상태를 따로 그리는데, 그 값이 배지가 이미 철자한 단어와 같으면(대소문자·
+  앞뒤 공백 무시) 그리지 않는다 — Discord 행이 `Connection ● CONNECTED` 위에
+  `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한 번만 그린다.
+  → [Masc_tui_connector_state.mli](../../bin/masc_tui_connector_state.mli),
+  [Tui_decode.connector_connection](../../lib/tui_decode.mli)
 
 ## Collaboration State
 
@@ -770,6 +796,18 @@ status: reference
 
 **Worktree**
 : 한 repository 안에서 branch 작업을 격리하는 Git worktree.
+
+**Repository Status (저장소 상태)**
+: Workspace가 추적하는 repository 하나의 상태. `Repo_manager_types.repository_status`가
+  닫힌 어휘를 소유한다 — `Active`·`Paused`·`Cloning`·`Error of string`. wire 단어는
+  `status_wire_name` 한 표가 정하고(`active`·`paused`·`cloning`·`error`), `Error`는
+  사유 문자열을 함께 나른다(`status_error_message`). 읽는 쪽은
+  `status_of_wire_name`으로 되돌리며, 이 빌드가 모르는 단어와 사유 없는 `error`는
+  `None`이다(TUI는 `Unrecognised_repository_status`로 그대로 보존한다). Workspace
+  표면은 상태 칸에 단어만 그리고, 사유는 선택 행의 context에 Path·Keepers 아래로
+  그린다.
+  → [Repo_manager_types](../../lib/repo_manager/repo_manager_types.mli),
+  [Tui_decode](../../lib/tui_decode.mli)
 
 ## Continuity
 

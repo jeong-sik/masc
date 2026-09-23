@@ -598,6 +598,7 @@ type fleet_safety = {
   fs_official_client_recovery_required_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
+  fs_active_task_owner_scan_error_count : int;
 }
 
 type log_kind =
@@ -9239,6 +9240,14 @@ let decode_fleet_safety json =
   let* fs_completion_authority_pending_count =
     int_field_or section "completion_authority_pending_task_count" ~default:0
   in
+  (* Sources the task-owner scan could not read -- the backlog, or a Keeper
+     whose profile did not load. Their tasks are left out of the count above,
+     and only a backlog failure moves [status] off "ok", so a Keeper that
+     could not be read leaves the count short with nothing on the row saying
+     so. Absent reads as none, the way every count in this section does. *)
+  let* fs_active_task_owner_scan_error_count =
+    int_field_or section "active_task_owner_scan_error_count" ~default:0
+  in
   Ok
     { fs_status
     ; fs_blocker
@@ -9260,6 +9269,7 @@ let decode_fleet_safety json =
     ; fs_turn_configuration_error_names
     ; fs_active_task_owner_without_fiber_count
     ; fs_completion_authority_pending_count
+    ; fs_active_task_owner_scan_error_count
     }
 
 let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)

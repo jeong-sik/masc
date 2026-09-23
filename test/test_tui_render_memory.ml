@@ -627,6 +627,68 @@ let test_render_memory_body_cursor_clamping () =
   check bool "selected row was clamped and called" true !selected_called
 ;;
 
+(* The twin of [test_the_memory_filter_bar_names_the_query_it_counted], on the
+   fact browser's own bar. Its rows are narrowed by the text being typed while
+   a search is open, and the bar decided and quoted from the applied filter
+   instead: with one already applied, a second one typed over it drew the old
+   word above rows the new one had left. The empty-quotes shape the keeper
+   table showed never appeared here, because the old word was still there to
+   draw -- which is why this one needs a filter applied first. *)
+let test_the_fact_filter_bar_names_the_query_it_counted () =
+  let claim_fact claim id : Decode.memory_fact =
+    { mf_claim = claim
+    ; mf_category = "architecture"
+    ; mf_origin = "manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = id
+    ; mf_events = Decode.no_memory_fact_events
+    }
+  in
+  let bar ~applied ~typing =
+    let state = make_state () in
+    let store : Decode.memory_ordinary_store =
+      { mos_revision = 1
+      ; mos_updated_at = 1000.0
+      ; mos_facts =
+          [ claim_fact "alpha keeps the deploy assets" "mem-alpha"
+          ; claim_fact "beta claims the port" "mem-beta"
+          ]
+      }
+    in
+    state.memory_facts <-
+      Some
+        { Decode.mfs_keeper = "alpha"
+        ; mfs_ordinary = Decode.Memory_store_present store
+        ; mfs_source = Decode.Memory_store_absent
+        ; mfs_events_read_error = None
+        };
+    state.memory_facts_cursor <- 0;
+    state.Types.search_last <- applied;
+    state.Types.search <- typing;
+    let drawn = ref [] in
+    let add line = drawn := line :: !drawn in
+    Render_memory.render_memory_facts_body ~cols:110 ~budget:24 state ~push:add
+      ~push_styled:(fun ~style:_ line -> add line)
+      ~push_selected:add
+      ~push_divider:(fun () -> ())
+      ~push_empty:(fun () -> ());
+    String.concat "\n" (List.rev !drawn)
+  in
+  let applied_only = bar ~applied:"alpha" ~typing:None in
+  check bool "the applied filter is the one quoted" true
+    (contains "\"alpha\"" applied_only);
+  check bool "and its one match takes the singular" true
+    (contains "(1 matching fact)" applied_only);
+  let typed_over = bar ~applied:"alpha" ~typing:(Some "beta") in
+  check bool "the filter being typed is the one quoted" true
+    (contains "\"beta\"" typed_over);
+  check bool "and the filter it replaced is not" false
+    (contains "\"alpha\"" typed_over);
+  check bool "its one match takes the singular too" true
+    (contains "(1 matching fact)" typed_over)
+;;
+
 let test_render_memory_facts_body () =
   let state = make_state () in
   let fact : Decode.memory_fact =
@@ -1246,6 +1308,8 @@ let () =
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
         ; test_case "the filter bar names the query it counted" `Quick
             test_the_memory_filter_bar_names_the_query_it_counted
+        ; test_case "the fact filter bar names the query it counted" `Quick
+            test_the_fact_filter_bar_names_the_query_it_counted
         ; test_case "the librarian line says when the continuity lag is unknown" `Quick
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
         ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting

@@ -800,9 +800,15 @@ let render_memory_facts_body ~cols ~budget (state : state)
   push stats_line;
   if pills_line <> "" then push pills_line;
   let search_banner =
-    if String.length (String.trim state.search_last) > 0 then
+    (* [memory_search_query], the value [memory_fact_rows] filtered by, for
+       all three of the decision, the quotation and the count. It used to
+       decide and quote from [search_last] while the rows were already
+       narrowed by the text being typed, so a second filter typed over an
+       applied one drew the old word above rows the new one had left. *)
+    let filter = memory_search_query state in
+    if String.trim filter <> "" then
       Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
-        Ansi.bold Ansi.reset (Terminal_text.single_line state.search_last)
+        Ansi.bold Ansi.reset (Terminal_text.single_line filter)
         (Masc_tui_message_layout.count_noun total "matching fact")
         (Theme.recede ()) Ansi.reset
     else ""

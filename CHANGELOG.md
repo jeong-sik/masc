@@ -61,7 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- The Memory filter bar names the filter its number is over, and every count on the surface spells its own noun. `visible_memory_keepers` narrows on the text being typed while a search is open and on the applied one otherwise; the bar decided whether to draw from that value and then quoted the applied one instead, so typing the first filter drew the live count beside an empty pair of quotes -- a filter that matches everything, and a number that says one keeper. The counts around it hardcoded the plural, and one is what they reach on an ordinary day: filtering by a Keeper's name usually leaves exactly one, which read `1 matching keepers`, beside `1 keeper not measured`, `1 atom behind in continuity` and `1 failure since server start`. The unread turns keep `?` where nothing measured them, which is not a count and takes no noun from one. The fact browser's own bar had the same split and is now read from the same place: it decided and quoted from the applied filter while its rows were narrowed by the text being typed, so a second filter typed over an applied one drew the old word above rows the new one had left. The rule that picks between the two is written once, in `memory_search_query`, and the keeper list, the fact list and both bars read it (#38067).
 
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one

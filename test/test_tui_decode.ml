@@ -2536,9 +2536,9 @@ let test_decode_skills_catalog_keeps_invalid_only_rejections () =
      | _ -> Alcotest.fail "typed name-mismatch diagnostic was not retained")
   | Ok _ -> Alcotest.fail "invalid-only rejection was dropped"
 
-(* The snapshot names every package another source's package shadows (RFC
-   keeper-self-authored-skills). The decoder used to require the list and
-   throw it away, so the screen could not say which copy Keepers see. *)
+(* The snapshot names every package that an entry earlier in catalog order
+   shadows. The decoder keeps each pair, so the screen can say which copy
+   Keepers see. *)
 let test_decode_skills_catalog_keeps_shadows () =
   let identity ~source_id name =
     `Assoc
@@ -2588,6 +2588,13 @@ let test_decode_skills_catalog_keeps_shadows () =
           ] )
     ; ( "a shadow with a field the server never sends"
       , `Assoc [ "winner", winner; "shadowed", shadowed; "reason", `String "x" ] )
+    ; ( "a shadow that pairs two different names"
+      , `Assoc
+          [ "winner", winner
+          ; "shadowed", identity ~source_id:"project-agents" "other"
+          ] )
+    ; ( "a shadow that names one identity twice"
+      , `Assoc [ "winner", winner; "shadowed", winner ] )
     ]
 
 let test_decode_skills_catalog_keeps_empty_invalid_identifiers () =

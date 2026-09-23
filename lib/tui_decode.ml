@@ -3631,7 +3631,17 @@ let decode_skill_catalog_shadow json =
   in
   let* scsh_winner = identity "winner" in
   let* scsh_shadowed = identity "shadowed" in
-  Ok { scsh_winner; scsh_shadowed }
+  (* The snapshot pairs two entries that declare one name
+     (Skill_catalog_snapshot.effective_projection). A pair with two names, or
+     one identity twice, is not a shadow. *)
+  if not (String.equal scsh_winner.Skill_reference.name scsh_shadowed.Skill_reference.name)
+  then
+    Error
+      (Printf.sprintf "skill snapshot shadow pairs two names, %S and %S"
+         scsh_winner.Skill_reference.name scsh_shadowed.Skill_reference.name)
+  else if Skill_reference.equal_identity scsh_winner scsh_shadowed
+  then Error "skill snapshot shadow names one identity as both winner and shadowed"
+  else Ok { scsh_winner; scsh_shadowed }
 
 (* Shadows and rejections are the two ways a declared Skill stays out of what
    Keeper turns see, and both are read from the same closed snapshot object. *)

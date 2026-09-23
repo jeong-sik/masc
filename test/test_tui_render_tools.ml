@@ -144,13 +144,13 @@ let test_the_screen_names_a_configured_skill_that_is_not_there () =
   Alcotest.(check bool) "a healthy surface gains no row" false
     (contains "not in the turn catalog" healthy)
 
-(* When two sources declare one name the earlier one wins, and the later
-   package is published but listed to no Keeper turn by that name (RFC
-   keeper-self-authored-skills). The Skill usage pane draws the catalog's
-   rejections; the shadows beside them in the same snapshot were decoded and
-   dropped, so the operator the RFC leaves to settle a shadow could not see
-   one. The payload is the server's snapshot shape, run through the decoder
-   the live loader uses. *)
+(* When two catalog entries declare one Skill name, the first in catalog order
+   wins and the other is published but listed to no Keeper turn by that name.
+   The Skill usage pane draws the catalog's shadows beside its rejections, so
+   an operator can see which copy Keepers get. The payload is a hand-written
+   copy of the snapshot shape, run through the decoder the live loader uses;
+   test_skill_catalog_snapshot runs the server's own serializer through the
+   same decoder. *)
 let skill_identity ~source_id name =
   `Assoc
     [ "source_id", `String source_id
@@ -204,23 +204,30 @@ let test_the_usage_pane_names_both_sides_of_a_shadow () =
             ; "shadowed", skill_identity ~source_id:"project-agents" "shared"
             ] ]
   in
+  (* The shared name and the shadowed package lead; the winner stands on the
+     next line by itself, so a narrow pane that cuts the first line never
+     cuts the winner. *)
   (match List.filter (contains shadowed) lines with
    | [ row ] ->
-     (* The row reads like a rejection row: the package that is out first,
-        then the one Keepers see instead. *)
-     (match index_of shadowed row, index_of winner row with
-      | Some shadowed_at, Some winner_at ->
-        Alcotest.(check bool) "the winner follows the shadowed package" true
-          (shadowed_at < winner_at)
-      | None, _ | _, None -> Alcotest.failf "the row does not name both: %S" row)
+     Alcotest.(check bool) "the row names the Skill the two share" true
+       (match index_of "shared" row, index_of shadowed row with
+        | Some name_at, Some package_at -> name_at < package_at
+        | None, _ | _, None -> false);
+     Alcotest.(check bool) "and not the winner" false (contains winner row)
    | rows ->
      Alcotest.failf "expected one row naming the shadowed package, got %d"
        (List.length rows));
-  (* The pane scrolls, so a shadow costs rows only there: its heading and
-     one line, and a catalog without shadows gains nothing. *)
+  (match List.filter (contains winner) lines with
+   | [ row ] ->
+     Alcotest.(check bool) "the winner's line says it shadows" true
+       (contains ("shadowed by " ^ winner) row)
+   | rows ->
+     Alcotest.failf "expected one line naming the winner, got %d" (List.length rows));
+  (* The pane scrolls, so a shadow costs rows only there: its heading and two
+     lines, and a catalog without shadows gains nothing. *)
   let healthy = usage_pane_lines ~shadows:[] in
-  Alcotest.(check int) "one heading and one row per shadow"
-    (List.length healthy + 2) (List.length lines)
+  Alcotest.(check int) "one heading and two lines per shadow"
+    (List.length healthy + 3) (List.length lines)
 
 let () =
   Alcotest.run "masc_tui_render_tools"

@@ -450,10 +450,13 @@ type skill_usage_coverage = {
   suc_unavailable : string list;
 }
 
-(** One name two sources declare. The earlier source wins
-    (RFC keeper-self-authored-skills): Keeper turns list Skills by name and
-    see [scsh_winner]. [scsh_shadowed] is published, but reaches a turn only
-    when a Task names its exact reference. *)
+(** One Skill name two catalog entries declare. The first entry for the name
+    in catalog order wins (Skill_catalog_snapshot.effective_projection):
+    [scsh_winner]. The two can sit in different sources, or in one source
+    whose directory names normalize to the same Skill name. A Keeper turn that
+    lists Skills by name gets the winner, when the winner loads;
+    [scsh_shadowed] is published but reaches a turn only when a Task names its
+    exact reference. Both carry the same name and differ in identity. *)
 type skill_catalog_shadow = {
   scsh_winner : Skill_reference.identity;
   scsh_shadowed : Skill_reference.identity;

@@ -1828,7 +1828,7 @@ type http_scoped_surface_results = {
   (* [None] off the Overview, the one surface that draws the quota windows. *)
   http_runtime_quota: (Tui_decode.runtime_option list, string) result option;
   http_repository_pulls:
-    (pulls_reader * string option * repository_pulls_row list, string) result
+    (overview_pulls_reading, string) result
     option;
 }
 
@@ -10415,9 +10415,7 @@ let apply_runtime_quota_load state = function
   | Error err -> state.overview_quota <- Quota_failed err
 
 let apply_repository_pulls_load state = function
-  | Ok (reader, repositories_error, repositories) ->
-      state.overview_pulls <-
-        Overview_pulls_read { reader; repositories_error; repositories }
+  | Ok reading -> state.overview_pulls <- reading
   | Error err -> state.overview_pulls <- Overview_pulls_failed err
 
 let apply_keeper_roster_load state = function

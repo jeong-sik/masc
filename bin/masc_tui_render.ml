@@ -28,6 +28,7 @@ module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
+module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
@@ -373,83 +374,7 @@ let overview_quota_line (state : state) ~now =
                Ansi.reset
                (String.concat " \xc2\xb7 " (List.map window_text windows))))
 
-(* One line per registered GitHub repository the server reads pull requests
-   for (RFC-0465): how many are open and how many need a person -- failing
-   checks, changes requested -- beside the Keepers doing the work. A
-   repository that is not on GitHub has nothing to say and draws nothing. A
-   reader the server cannot use is one line saying why, which is the setup
-   step left to take. *)
-let overview_pulls_lines (state : state) =
-  let dim text = Ansi.dim ^ text ^ Ansi.reset in
-  match state.overview_pulls with
-  | Overview_pulls_unread -> []
-  | Overview_pulls_failed err ->
-      [ dim ("\xe2\x87\x85 pull requests unread: " ^ Terminal_text.single_line err) ]
-  | Overview_pulls_read { reader = Pulls_reader_not_ready reason; _ } ->
-      [ dim ("\xe2\x87\x85 pull requests not read: " ^ Terminal_text.single_line reason) ]
-  | Overview_pulls_read
-      { reader = Pulls_reader_ready _; repositories_error; repositories } ->
-      let stale =
-        match repositories_error with
-        | None -> []
-        | Some err ->
-            [ Printf.sprintf "%s\xe2\x87\x85 pull request rows may be old: %s%s"
-                (Theme.warn ()) (Terminal_text.single_line err) Ansi.reset ]
-      in
-      let rows =
-      List.filter_map
-        (fun (row : repository_pulls_row) ->
-          let repository = Terminal_text.single_line row.rp_repository in
-          match row.rp_state with
-          | Repo_not_github -> None
-          | Repo_pulls_not_read ->
-              Some (dim (Printf.sprintf "\xe2\x87\x85 %s  not read yet" repository))
-          | Repo_pulls_failed failure ->
-              Some
-                (Printf.sprintf "%s\xe2\x87\x85%s %s  %snot read: %s%s" (Theme.warn ())
-                   Ansi.reset repository Ansi.dim
-                   (Terminal_text.single_line failure) Ansi.reset)
-          | Repo_pulls_read { pulls; undecodable } ->
-              let count predicate = List.length (List.filter predicate pulls) in
-              let failing =
-                count (fun (pull : open_pull) ->
-                    match pull.op_checks with
-                    | Pull_checks_failing -> true
-                    | Pull_checks_passing | Pull_checks_running | Pull_checks_none -> false)
-              in
-              let changes =
-                count (fun (pull : open_pull) ->
-                    match pull.op_review with
-                    | Pull_review_changes_requested -> true
-                    | Pull_review_approved | Pull_review_waiting | Pull_review_none -> false)
-              in
-              let drafts = count (fun (pull : open_pull) -> pull.op_draft) in
-              let parts =
-                List.filter_map Fun.id
-                  [ Some (Printf.sprintf "%d open" (List.length pulls))
-                  ; (if failing > 0 then
-                       Some (Printf.sprintf "%s%d checks failing%s" (Theme.bad ()) failing Ansi.reset)
-                     else None)
-                  ; (if changes > 0 then
-                       Some (Printf.sprintf "%s%d changes requested%s" (Theme.warn ()) changes Ansi.reset)
-                     else None)
-                  ; (if drafts > 0 then Some (Printf.sprintf "%d draft" drafts) else None)
-                  ; (if undecodable > 0 then
-                       Some (Printf.sprintf "%d unreadable" undecodable)
-                     else None)
-                  ]
-              in
-              Some
-                (Printf.sprintf "%s\xe2\x87\x85%s %s  %s" (Theme.info ()) Ansi.reset
-                   repository
-                   (String.concat " \xc2\xb7 " parts)))
-        repositories
-      in
-      (* A ready reader with nothing on GitHub to read says so; drawing no
-         line would look the same as not having loaded. *)
-      match stale @ rows with
-      | [] -> [ dim "\xe2\x87\x85 pull requests: no registered GitHub repository" ]
-      | lines -> lines
+let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
 
 (* Lines under the Team block that explain no Keeper row: an unread quota
    and the pull request summary. *)

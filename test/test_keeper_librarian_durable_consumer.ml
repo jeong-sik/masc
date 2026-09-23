@@ -881,6 +881,268 @@ let test_unread_prior_trace_finishes_before_current_trace () =
     !carried
 ;;
 
+let counterpart_contents (input : Masc.Keeper_librarian.input) =
+  List.map
+    (fun (observation : Keeper_counterpart_observation.t) -> observation.content)
+    input.counterpart_observations
+;;
+
+(* #37362. Progress sits on trace A. Trace B finished a turn while nothing
+   read it, then the keeper moved on to trace C. B is read before C. A chat
+   message from before A's boundary was read with A's range, so B's first
+   range, which starts the atoms again from zero, must not read it again.
+   Chat rows take the clock at append time, so the turn ends are placed after
+   it. *)
+let test_intervening_trace_is_read_before_the_current_trace () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-walk-a" in
+  let trace_b = "trace-walk-b" in
+  let trace_c = "trace-walk-c" in
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name
+    ~content:"before-a"
+    ~speaker
+    ();
+  let a_ended = Time_compat.now () +. 100.0 in
+  write_meta config trace_a;
+  save_checkpoint config ~trace_id:trace_a [ message "a" ] 1;
+  append_boundary config ~trace_id:trace_a ~turn:1 ~recorded_at:a_ended [ message "a" ];
+  let carried = ref [] in
+  let commit ~expected_revision:_ ~range_id:_ ~official_range_id:_ input =
+    carried := !carried @ [ text_markers input, counterpart_contents input ];
+    true
+  in
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "trace A is read" trace_a progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "trace A was not read");
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary
+    config ~trace_id:trace_b ~turn:1 ~recorded_at:(a_ended +. 100.0) [ message "b" ];
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary
+    config ~trace_id:trace_c ~turn:1 ~recorded_at:(a_ended +. 200.0) [ message "c" ];
+  write_meta config trace_c;
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "the trace in between is read first" trace_b progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the trace in between was not read");
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "the current trace follows" trace_c progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the current trace did not follow");
+  check
+    (list (pair (list string) (list string)))
+    "each trace once in order; A's counterpart is not read again"
+    [ [ "a" ], [ "before-a" ]; [ "b" ], []; [ "c" ], [] ]
+    !carried
+;;
+
+(* A trace in between whose checkpoint is gone has no atoms to read. The walk
+   passes it and reaches the current trace in the same pass. *)
+let test_intervening_trace_without_checkpoint_is_passed () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-pass-a" in
+  let trace_b = "trace-pass-b" in
+  let trace_c = "trace-pass-c" in
+  establish_progress config ~trace_id:trace_a "a";
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 [ message "b" ];
+  let session_dir_b = Masc.Keeper_fs.keeper_session_dir config trace_b in
+  Sys.remove (Store.agent_core_checkpoint_path ~session_dir:session_dir_b ~session_id:trace_b);
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary config ~trace_id:trace_c ~turn:1 ~recorded_at:3.0 [ message "c" ];
+  write_meta config trace_c;
+  let carried = ref [] in
+  match
+    Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
+        carried := text_markers input;
+        true)
+  with
+  | Ok (Consumer.Progress_advanced progress) ->
+    check string "the current trace is reached" trace_c progress.position.trace_id;
+    check (list string) "only the current trace is read" [ "c" ] !carried
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "a trace without a checkpoint stopped the walk"
+;;
+
+let overwrite_checkpoint config ~trace_id contents =
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  (match Fs_compat.save_file_atomic path contents with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  session_dir
+;;
+
+(* A trace in between whose checkpoint holds a version this build supersedes.
+   No turn runs on a trace the keeper has left, so nothing rewrites that file:
+   the walk passes it, and the current trace is still read in the same pass. *)
+let test_superseded_intervening_checkpoint_is_passed () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-superseded-a" in
+  let trace_b = "trace-superseded-b" in
+  let trace_c = "trace-superseded-c" in
+  establish_progress config ~trace_id:trace_a "a";
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 [ message "b" ];
+  (* [to_json] refuses a version this build does not write, which is what the
+     field is for, so the fixture cannot be built by handing it a retired
+     number. Only an older build leaves such a file, and this writes what that
+     build would have: the current document with the number put back. The
+     control below reads the file and fails if that did not take. *)
+  let older =
+    match
+      Agent_core.Checkpoint.to_json (checkpoint ~trace_id:trace_b [ message "b" ] 1)
+    with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if String.equal key "version"
+             then key, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
+             else key, value)
+           fields)
+    | _ -> fail "a checkpoint document is a JSON object"
+  in
+  let session_dir_b =
+    overwrite_checkpoint config ~trace_id:trace_b (Yojson.Safe.to_string older)
+  in
+  (* Positive control, as [damage_checkpoint] does: the real store calls this
+     superseded, not damaged. *)
+  (match Store.load_agent_core ~session_dir:session_dir_b ~session_id:trace_b with
+   | Error (Store.Superseded_version _) -> ()
+   | Error error ->
+     failf "superseded fixture: %s" (Store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "superseded checkpoint unexpectedly loaded");
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary config ~trace_id:trace_c ~turn:1 ~recorded_at:3.0 [ message "c" ];
+  write_meta config trace_c;
+  let carried = ref [] in
+  match
+    Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ input ->
+        carried := text_markers input;
+        true)
+  with
+  | Ok (Consumer.Progress_advanced progress) ->
+    check string "the current trace is reached" trace_c progress.position.trace_id;
+    check (list string) "only the current trace is read" [ "c" ] !carried
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "a superseded checkpoint stopped the walk"
+;;
+
+(* A damaged checkpoint in between is not passed. A newer binary or an
+   operator can still make that file readable, so the pass does not walk past
+   the turns it holds: it stops and names the trace. *)
+let test_corrupt_intervening_checkpoint_stops_the_pass () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-corrupt-a" in
+  let trace_b = "trace-corrupt-b" in
+  let trace_c = "trace-corrupt-c" in
+  establish_progress config ~trace_id:trace_a "a";
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:2.0 [ message "b" ];
+  let session_dir_b = overwrite_checkpoint config ~trace_id:trace_b "{" in
+  (match Store.load_agent_core ~session_dir:session_dir_b ~session_id:trace_b with
+   | Error (Store.Parse_error _) -> ()
+   | Error error ->
+     failf "damaged fixture: %s" (Store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "damaged checkpoint unexpectedly loaded");
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary config ~trace_id:trace_c ~turn:1 ~recorded_at:3.0 [ message "c" ];
+  write_meta config trace_c;
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+         fail "a damaged trace in between reached commit")
+   with
+   | Error (Consumer.Checkpoint_unreadable { trace_id; error = Store.Parse_error _ }) ->
+     check string "the error names the trace it could not read" trace_b trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "a damaged trace in between was walked past");
+  match read_progress config with
+  | Some progress ->
+    check
+      string
+      "the position stays on the trace before it"
+      trace_a
+      progress.position.trace_id
+  | None -> fail "the stopped pass removed progress"
+;;
+
+(* The wall clock went backwards between the retired trace and the one that
+   follows it, and a counterpart row arrived in between. The hand-off range
+   reads nothing -- its own end is older than the bound carried from the trace
+   before it -- and the round after it, whose bound is that range's end, reads
+   the row. Nothing is stranded. *)
+let test_backwards_clock_at_hand_off_reads_the_row_next_round () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-backwards-a" in
+  let trace_b = "trace-backwards-b" in
+  let trace_c = "trace-backwards-c" in
+  let now = Time_compat.now () in
+  let a_ended = now +. 100.0 in
+  let b_ended = now -. 100.0 in
+  write_meta config trace_a;
+  save_checkpoint config ~trace_id:trace_a [ message "a" ] 1;
+  append_boundary config ~trace_id:trace_a ~turn:1 ~recorded_at:a_ended [ message "a" ];
+  let carried = ref [] in
+  let commit ~expected_revision:_ ~range_id:_ ~official_range_id:_ input =
+    carried := !carried @ [ text_markers input, counterpart_contents input ];
+    true
+  in
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "trace A was not read");
+  (* The row arrives after A's range was read, and the clock has gone back. *)
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name
+    ~content:"between the traces"
+    ~speaker
+    ();
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary config ~trace_id:trace_b ~turn:1 ~recorded_at:b_ended [ message "b" ];
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary
+    config ~trace_id:trace_c ~turn:1 ~recorded_at:(now +. 300.0) [ message "c" ];
+  write_meta config trace_c;
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "the trace in between is read" trace_b progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the trace in between was not read");
+  (match Consumer.consume_one ~config ~keeper_name ~commit with
+   | Ok (Consumer.Progress_advanced progress) ->
+     check string "the current trace follows" trace_c progress.position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the current trace did not follow");
+  check
+    (list (pair (list string) (list string)))
+    "the row between the two traces is read once, by the round after the hand-off"
+    [ [ "a" ], []; [ "b" ], []; [ "c" ], [ "between the traces" ] ]
+    !carried
+;;
+
 let test_failed_long_range_retries_only_oldest_cut_point () =
   with_workspace @@ fun config ->
   let trace_id = "trace-bounded-retry" in
@@ -1456,7 +1718,7 @@ let test_new_completed_cut_still_reads_checkpoint () =
     (current @ [message "next completed"]);
   match Consumer.consume_one ~config ~keeper_name
       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "corrupt checkpoint called commit") with
-  | Error (Consumer.Checkpoint_unreadable (Store.Parse_error _)) -> ()
+  | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
   | Error error -> fail (Consumer.error_to_string error)
   | Ok _ -> fail "new completed cut skipped checkpoint validation"
 ;;
@@ -1470,7 +1732,7 @@ let test_unseen_restart_still_reads_checkpoint () =
    | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
   match Consumer.consume_one ~config ~keeper_name
       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> fail "unreadable restart called commit") with
-  | Error (Consumer.Checkpoint_unreadable (Store.Parse_error _)) -> ()
+  | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
   | Error error -> fail (Consumer.error_to_string error)
   | Ok _ -> fail "unseen restart skipped checkpoint validation"
 ;;
@@ -1910,7 +2172,7 @@ let test_official_turns_skip_unchanged_atom_checkpoint ~with_atoms () =
     match Consumer.consume_one ~config ~keeper_name
         ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
           fail "corrupt atom checkpoint reached commit") with
-    | Error (Consumer.Checkpoint_unreadable (Store.Parse_error _)) -> ()
+    | Error (Consumer.Checkpoint_unreadable { error = Store.Parse_error _; _ }) -> ()
     | Error error -> fail (Consumer.error_to_string error)
     | Ok _ -> fail "new atom boundary did not reopen checkpoint"
   in
@@ -2227,6 +2489,72 @@ let test_a_refused_boundary_line_is_not_lifted_for_official_turns () =
   | Ok _ -> fail "the restart lifted the official stop"
 ;;
 
+(* The same backwards clock, but an official-client line of the retired era
+   is still the official cursor. This commit does not replace that cursor, so
+   the round after the hand-off would carry the same stamp and the row between
+   the traces would be read by nobody. The pass refuses instead of advancing
+   past it. *)
+let test_official_cursor_above_the_range_end_refuses_the_hand_off () =
+  with_workspace @@ fun config ->
+  let trace_a = "trace-official-backwards-a" in
+  let trace_b = "trace-official-backwards-b" in
+  let trace_c = "trace-official-backwards-c" in
+  let now = Time_compat.now () in
+  let a_ended = now +. 100.0 in
+  write_meta config trace_a;
+  save_checkpoint config ~trace_id:trace_a [ message "a" ] 1;
+  append_boundary config ~trace_id:trace_a ~turn:1 ~recorded_at:a_ended [ message "a" ];
+  append_official_boundary config ~trace_id:trace_a ~turn:2 ~recorded_at:a_ended;
+  (match
+     Official.write
+       ~keepers_dir:(Workspace.keepers_runtime_dir config)
+       ~keeper_id:keeper_name
+       { Official.boundary_line = 2 }
+   with
+   | Ok () -> ()
+   | Error error -> fail (Official.write_error_to_string error));
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ -> true)
+   with
+   | Ok (Consumer.Progress_advanced _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "trace A was not read");
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"
+    ; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  Keeper_chat_store.append_user_message
+    ~base_dir:config.Workspace.base_path
+    ~keeper_name
+    ~content:"between the traces"
+    ~speaker
+    ();
+  save_checkpoint config ~trace_id:trace_b [ message "b" ] 1;
+  append_boundary
+    config ~trace_id:trace_b ~turn:1 ~recorded_at:(now -. 100.0) [ message "b" ];
+  save_checkpoint config ~trace_id:trace_c [ message "c" ] 1;
+  append_boundary
+    config ~trace_id:trace_c ~turn:1 ~recorded_at:(now +. 300.0) [ message "c" ];
+  write_meta config trace_c;
+  (match
+     Consumer.consume_one ~config ~keeper_name
+       ~commit:(fun ~expected_revision:_ ~range_id:_ ~official_range_id:_ _ ->
+         fail "the hand-off committed a range that strands the row")
+   with
+   | Error (Consumer.Counterpart_interval_non_monotone { after; before }) ->
+     check (float 0.001) "the refusal names the carried bound" a_ended after;
+     check (float 0.001) "and this range's end" (now -. 100.0) before
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the hand-off advanced past a row no later range would read");
+  match read_progress config with
+  | Some progress ->
+    check string "the position stays on the retired trace" trace_a progress.position.trace_id
+  | None -> fail "the refused pass removed progress"
+;;
+
 let () =
   run
     "Keeper Librarian durable consumer"
@@ -2255,6 +2583,16 @@ let () =
             test_absent_prior_checkpoint_requires_current_history_start
         ; test_case "unread prior trace finishes before current trace" `Quick
             test_unread_prior_trace_finishes_before_current_trace
+        ; test_case "trace in between is read before current trace" `Quick
+            test_intervening_trace_is_read_before_the_current_trace
+        ; test_case "trace in between without checkpoint is passed" `Quick
+            test_intervening_trace_without_checkpoint_is_passed
+        ; test_case "superseded checkpoint in between is passed" `Quick
+            test_superseded_intervening_checkpoint_is_passed
+        ; test_case "damaged checkpoint in between stops the pass" `Quick
+            test_corrupt_intervening_checkpoint_stops_the_pass
+        ; test_case "backwards clock at hand-off reads the row next round" `Quick
+            test_backwards_clock_at_hand_off_reads_the_row_next_round
         ; test_case "failed growing range retries oldest cut" `Quick
             test_failed_long_range_retries_only_oldest_cut_point
         ; test_case "last boundary wins when wall clock goes backward" `Quick
@@ -2327,6 +2665,8 @@ let () =
             test_an_official_line_older_than_the_baseline_is_read
         ; test_case "a refused boundary line is not lifted for official turns" `Quick
             test_a_refused_boundary_line_is_not_lifted_for_official_turns
+        ; test_case "official cursor above the range end refuses the hand-off" `Quick
+            test_official_cursor_above_the_range_end_refuses_the_hand_off
         ] )
     ; ( "production wake"
       , [ test_case "failure stops and a later wake drains successful cuts" `Quick

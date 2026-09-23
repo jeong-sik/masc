@@ -542,6 +542,29 @@ let count_applications_with_exact_positional_identifier_in_value_binding
     ~arguments_match
 ;;
 
+(* Whether [callee] is called in [binding_name] with [label] given at all,
+   whatever value it carries. The identifier and constructor matchers below
+   cannot stand in: a labelled [true]/[false] is a constructor, and an
+   optional argument that a caller simply omits is exactly what this is for --
+   the call still compiles, so only a check like this one sees the omission. *)
+let count_applications_with_labelled_argument_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~label
+  =
+  let arguments_match args =
+    List.exists
+      (fun (argument_label, _) ->
+        match argument_label with
+        | Asttypes.Labelled name -> String.equal name label
+        | Asttypes.Nolabel | Asttypes.Optional _ -> false)
+      args
+  in
+  count_exact_applications_in_value_binding ~module_path ~binding_name ~callee
+    ~arguments_match
+;;
+
 let count_applications_with_exact_identifier_and_constructor_in_value_binding
       ~module_path
       ~binding_name
@@ -630,6 +653,65 @@ let expressions_of_value_binding ~module_path ~binding_name =
   List.rev !expressions
 ;;
 
+(* Every string literal a binding holds, in source order.
+
+   The counting form above answers "is this exact text here"; this one answers
+   "what are all of them", which is the question a width check asks. A column
+   whose cell truncates silently cannot be held by naming today's longest
+   string -- the next arm somebody adds is the one that overflows, and it
+   arrives without a list to update. Reading the arms themselves means the new
+   arm is measured the moment it compiles.
+
+   Format strings come back with their directives intact ("recording(%d/%d)").
+   The caller decides what a directive costs; the AST cannot know. *)
+let string_literals_in_value_binding ~module_path ~binding_name =
+  let collected = ref [] in
+  List.iter
+    (fun expression ->
+      let iter =
+        { Ast_iterator.default_iterator with
+          expr =
+            (fun self node ->
+              (match node.pexp_desc with
+               | Pexp_constant { pconst_desc = Pconst_string (text, _, _); _ } ->
+                 collected := text :: !collected
+               | _ -> ());
+              Ast_iterator.default_iterator.expr self node)
+        }
+      in
+      iter.expr iter expression)
+    (expressions_of_value_binding ~module_path ~binding_name);
+  List.rev !collected
+;;
+
+(* Integer literals a binding holds, in source order. For reading a layout
+   constant out of the module that owns it, so a test can compare against the
+   width the screen actually uses instead of a number copied into the test --
+   a copy drifts, and a drifted width check passes while the column is wrong.
+   Literals with a suffix (3L, 3n) are skipped: a width is a plain int. *)
+let int_literals_in_value_binding ~module_path ~binding_name =
+  let collected = ref [] in
+  List.iter
+    (fun expression ->
+      let iter =
+        { Ast_iterator.default_iterator with
+          expr =
+            (fun self node ->
+              (match node.pexp_desc with
+               | Pexp_constant { pconst_desc = Pconst_integer (text, None); _ }
+                 ->
+                 (match int_of_string_opt text with
+                  | Some value -> collected := value :: !collected
+                  | None -> ())
+               | _ -> ());
+              Ast_iterator.default_iterator.expr self node)
+        }
+      in
+      iter.expr iter expression)
+    (expressions_of_value_binding ~module_path ~binding_name);
+  List.rev !collected
+;;
+
 (* [Pexp_field] is a read. Clearing a field is [Pexp_setfield], so a test
    that pins "this path clears X" has to look for the write or it counts
    zero while the code is correct. *)
@@ -646,6 +728,29 @@ let count_field_clears_to_none ~module_path ~binding_name ~field_name =
              | Parsetree.Pexp_construct ({ txt; _ }, None)
                when String.equal (longident_leaf txt) "None" -> incr count
              | _ -> ())
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self expression)
+    }
+  in
+  List.iter (iter.expr iter)
+    (expressions_of_value_binding ~module_path ~binding_name);
+  !count
+;;
+
+(* Every [_.field] read inside a binding. Where two places have to agree on
+   what a field means, one of them owns the reading and the other calls it --
+   and the way that arrangement breaks is the second place reading the raw
+   field again, which compiles and looks right. Zero here is the claim that it
+   goes through the owner. *)
+let count_field_reads_in_value_binding ~module_path ~binding_name ~field_name =
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self expression ->
+          (match expression.Parsetree.pexp_desc with
+           | Parsetree.Pexp_field (_, { txt; _ })
+             when String.equal (longident_leaf txt) field_name -> incr count
            | _ -> ());
           Ast_iterator.default_iterator.expr self expression)
     }
@@ -710,6 +815,36 @@ let direct_call_sequence_matches_in_value_binding
       in
       List.equal (Option.equal String.equal) actual (List.map Option.some callees)
   | [] | _ :: _ :: _ -> false
+;;
+
+(* The identifiers a binding hands to [callee] at [position], in the order its
+   direct sequence makes the calls. Counting the calls says how many there
+   are; only the order says which one runs last -- and for [at_exit], whose
+   callbacks run in reverse of registration, that order is the whole
+   guarantee. An argument that is not a plain identifier reads as [None]
+   rather than being dropped, so a call never silently leaves the sequence. *)
+let positional_identifier_sequence_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~position
+  =
+  match expressions_of_value_binding ~module_path ~binding_name with
+  | [ expression ] ->
+      expression
+      |> strip_function_parameters
+      |> flatten_direct_sequence
+      |> List.filter_map (fun (statement : Parsetree.expression) ->
+           match statement.pexp_desc with
+           | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
+             when String.equal (longident_to_string txt) callee ->
+               Some
+                 (match positional_argument args position with
+                  | Some { pexp_desc = Pexp_ident { txt = argument; _ }; _ } ->
+                      Some (longident_to_string argument)
+                  | Some _ | None -> None)
+           | _ -> None)
+  | [] | _ :: _ :: _ -> []
 ;;
 
 let unit_lambda_body (expression : Parsetree.expression) =

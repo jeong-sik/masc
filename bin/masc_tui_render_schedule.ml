@@ -346,10 +346,10 @@ let memory_updated_width = 16
 let memory_facts_width = 5
 let memory_size_width = 9
 let memory_source_width = 20
-(* [+12 -23] is 7 cells, and a cell that overruns is cut in the middle: the
-   column drew [+\xe2\x80\xa6 -23] and the added count was gone. Measured on the
-   live fleet (2026-09-22): the widest pair was [+11 -16]. Three digits each
-   keeps a large revision whole. *)
+(* The column carries a pair of counts, and a cell that overruns folds in the
+   middle, which takes the first count. Three digits each keeps a large
+   revision whole; the widest pair on the live fleet (2026-09-22) was
+   [+11 -16]. *)
 let memory_delta_width = 9
 
 type memory_columns = {
@@ -591,7 +591,8 @@ let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
       ~width:system_log_keeper_width values.slog_keeper
   ; Table.cell ~style:styles.slog_category_style ~header:"CATEGORY"
       ~width:system_log_category_width values.slog_category
-  ; Table.cell ~header:"MESSAGE" ~width:message_width values.slog_message
+  ; Table.cell ~fold:Table.Fold_tail ~header:"MESSAGE" ~width:message_width
+      values.slog_message
   ]
 
 let system_log_message_width ~inner_width =
@@ -623,13 +624,20 @@ let system_log_row ~styles ~level_style ~message_width values =
    capitals.
 
    The last column carries the task's own title, which is what a verification
-   request asks for: that this task be verified. *)
+   request asks for: that this task be verified.
+
+   VERDICT says which verdict the row waits on. A cancellation waits on this
+   queue beside completions and only an operator's verdict clears it; without
+   the column the two read as the same row and seven cancellations sat for
+   three days. *)
 let verification_task_width = 14
+let verification_verdict_width = String.length "complete"
 let verification_evidence_width = 9
 let verification_minimum_title_width = 16
 
 type verification_row_values = {
   vrow_task : string;
+  vrow_verdict : string;
   vrow_submitted_by : string;
   vrow_evidence : string;
   vrow_title : string;
@@ -637,6 +645,7 @@ type verification_row_values = {
 
 let verification_no_values =
   { vrow_task = ""
+  ; vrow_verdict = ""
   ; vrow_submitted_by = ""
   ; vrow_evidence = ""
   ; vrow_title = ""
@@ -644,11 +653,14 @@ let verification_no_values =
 
 let verification_cells ~submitter_width ~title_width values =
   [ Table.cell ~header:"TASK" ~width:verification_task_width values.vrow_task
+  ; Table.cell ~header:"VERDICT" ~width:verification_verdict_width
+      values.vrow_verdict
   ; Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
       values.vrow_submitted_by
   ; Table.cell ~header:"EVIDENCE" ~width:verification_evidence_width
       values.vrow_evidence
-  ; Table.cell ~header:"TITLE" ~width:title_width values.vrow_title
+  ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+      values.vrow_title
   ]
 
 let verification_title_width ~inner_width ~submitter_width =
@@ -845,7 +857,8 @@ let change_cells ?(op_style = "") ?(result_style = "") ~summary_width values =
   ; Table.cell ~style:result_style ~header:"RESULT" ~width:change_result_width
       values.crow_result
   ; Table.cell ~header:"FILE" ~width:change_file_width values.crow_file
-  ; Table.cell ~header:"WHAT" ~width:summary_width values.crow_summary
+  ; Table.cell ~fold:Table.Fold_tail ~header:"WHAT" ~width:summary_width
+      values.crow_summary
   ]
 
 let change_summary_width ~inner_width =
@@ -872,7 +885,16 @@ let change_row ~op_style ~result_style ~summary_width values =
 
 let fusion_time_width = 16
 let fusion_age_width = 7
-let fusion_state_width = 18
+(* A running stage ("recording(3/1)") or how the run ended: a failed run draws
+   a code from the delivery set or the judge set.
+
+   The column is full. Three vocabularies share it, none of them written near
+   here, and [Table.cell] fits what it is given without a word -- so the
+   widths are checked in [test/test_tui_fusion_state_width.ml], which reads
+   this number and all three sets out of the source. Naming today's longest
+   string here instead would be a copy, and the copy is what goes stale while
+   the screen quietly truncates. *)
+let fusion_state_width = 20
 let fusion_preset_width = 10
 let fusion_minimum_run_width = 12
 
@@ -1054,7 +1076,8 @@ let harness_cells ?(verdict_style = "") ~reason_width values =
       ~width:harness_verdict_width values.hrow_verdict
   ; Table.cell ~header:"EVALUATOR" ~width:harness_evaluator_width
       values.hrow_evaluator
-  ; Table.cell ~header:"REASON" ~width:reason_width values.hrow_reason
+  ; Table.cell ~fold:Table.Fold_tail ~header:"REASON" ~width:reason_width
+      values.hrow_reason
   ]
 
 let harness_reason_width ~inner_width =
@@ -1129,7 +1152,8 @@ let planning_cells ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
       values.prow_priority
   ; Table.cell ~style:open_style ~header:"OPEN" ~width:planning_open_width
       values.prow_open
-  ; Table.cell ~header:"TITLE" ~width:title_width values.prow_title
+  ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+      values.prow_title
   ; Table.cell ~align:Table.Right ~header:"AGE" ~width:planning_age_width
       values.prow_age
   ; Table.cell ~header:"DUE" ~width:planning_due_width values.prow_due
@@ -1225,7 +1249,8 @@ let board_cells ?(styles = board_no_styles) ~title_width values =
       ~width:board_hearth_width values.brow_hearth
   ; Table.cell ~style:styles.bstyle_author ~header:"AUTHOR"
       ~width:board_author_width values.brow_author
-  ; Table.cell ~header:"TITLE" ~width:title_width values.brow_title
+  ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+      values.brow_title
     (* Right, the way Planning's age reads. A span is a number and the two
        screens are read one after the other; left on one and right on the
        other is the drift this description exists to close. *)

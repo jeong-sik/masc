@@ -48,6 +48,25 @@ let test_real_store_refusals exe () = with_workspace (fun root keepers traces ->
   check string "refused boundary preserved" "{invalid boundary}\n" (read boundary);
   check string "refused fragment preserved" "{invalid fragment}\n" (read fragment))
 
+(* Every Memory write for a keeper reconciles its range receipt ledger before
+   it builds, so a ledger this build cannot decode must stop the rollout here,
+   not every Memory write after it. *)
+let test_range_receipt_ledger exe () = with_workspace (fun root _keepers _traces ->
+  let config_keepers = Filename.concat root ".masc/config/keepers" in
+  Fs_compat.mkdir_p config_keepers;
+  let ledger = Filename.concat config_keepers "keeper.librarian-range-commit.json" in
+  write ledger {|{"receipts":[]}|};
+  let status, output = invoke exe root in
+  check bool ("a readable ledger passes: " ^ output) true (status = Unix.WEXITED 0);
+  check bool ("the readable ledger is read: " ^ output) true
+    (String_util.contains_substring output "Librarian range receipt ledger rows=1 refused=0");
+  write ledger {|{"receipts":{}}|};
+  let status, output = invoke exe root in
+  check bool "an undecodable ledger refuses deployment" true (status <> Unix.WEXITED 0);
+  check bool ("reports the ledger: " ^ output) true
+    (String_util.contains_substring output "Librarian range receipt ledger rows=1 refused=1");
+  check string "refused ledger preserved" {|{"receipts":{}}|} (read ledger))
+
 let test_symlink_refusal exe () = with_workspace (fun root keepers _traces ->
   Unix.symlink (Filename.concat keepers "keeper") (Filename.concat keepers "linked");
   let status, output = invoke exe root in
@@ -60,4 +79,6 @@ let () =
   run "deployment store directories"
     ["live layout", [test_case "regular journals and locks are not stores" `Quick (test_regular_siblings exe);
       test_case "real decoder failures remain visible" `Quick (test_real_store_refusals exe);
-      test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe)]]
+      test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe);
+      test_case "range receipt ledger is read before rollout" `Quick
+        (test_range_receipt_ledger exe)]]

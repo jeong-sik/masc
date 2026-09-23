@@ -2016,15 +2016,18 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
       ~module_path:main_path ~binding_name:"enter_terminal_session" ~signal
       ~handler
   in
-  (* Two [at_exit] calls, and which is which matters: they run in reverse of
+  (* Three [at_exit] calls, and which is which matters: they run in reverse of
      this order and stop at the first that raises, so the frame summary --
      which appends to a file and can fail on the write -- registers first and
-     the terminal restore registers last, where it runs first. *)
+     the terminal restore registers last, where it runs first. The exit-reason
+     writer registers before both, so it runs last, after the terminal is
+     back. *)
   check bool "startup registers cleanup and handlers before raw mode" true
     (Ast_grep.direct_call_sequence_matches_in_value_binding
        ~module_path:main_path ~binding_name:"enter_terminal_session"
        ~callees:
          [ "at_exit"
+         ; "at_exit"
          ; "at_exit"
          ; "Sys.set_signal"
          ; "Sys.set_signal"
@@ -2046,6 +2049,24 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      .count_applications_with_exact_positional_identifier_in_value_binding
        ~module_path:main_path ~binding_name:"enter_terminal_session"
        ~callee:"at_exit" ~position:0 ~identifier:"cleanup");
+  (* Counting the registrations says there are three; only their order says
+     which one runs last. [at_exit] runs callbacks in reverse, so this list
+     read backwards is the run order: the terminal restore first, the frame
+     summary next, and the exit-reason writer last -- where the terminal is
+     already back and stderr is still the per-PID log. Swapping any two moves
+     the writer without changing the count, which is exactly what the
+     sequence check above cannot see. *)
+  check
+    (list (option string))
+    "the exit callbacks are registered in the order that runs the reason \
+     writer last"
+    [ Some "write_exit_reason"
+    ; Some "Masc_tui_frame_timing.report"
+    ; Some "cleanup"
+    ]
+    (Ast_grep.positional_identifier_sequence_in_value_binding
+       ~module_path:main_path ~binding_name:"enter_terminal_session"
+       ~callee:"at_exit" ~position:0);
   check int "main enters the guarded terminal session once" 1
     (Ast_grep
      .count_applications_with_exact_labelled_identifiers_in_value_binding
@@ -2179,11 +2200,16 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   (* Signal-driven quit and the armed q shortcut are separate exits. Pin
      the condition of each rather than letting an arbitrary second raise
      satisfy the count; both must still unwind through the root switch. *)
-  let raises_break (expression : Parsetree.expression) =
+  (* The exit now writes its reason down before it leaves, so the arm that
+     raises [Break] is a sequence whose last expression is the raise. What the
+     guard pins is unchanged: the signal poll's [Quit] arm and the armed q key
+     are the only two ways out, and each ends in [raise Break]. *)
+  let rec ends_with_break (expression : Parsetree.expression) =
     match expression.pexp_desc with
     | Pexp_apply (callee, [Asttypes.Nolabel, argument]) ->
         Ast_grep.expression_is_identifier "raise" callee
         && Ast_grep.expression_is_constructor "Break" argument
+    | Pexp_sequence (_, rest) -> ends_with_break rest
     | _ -> false
   in
   let count_exit matches =
@@ -2198,7 +2224,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
           match case.pc_lhs.ppat_desc, case.pc_guard with
           | Ppat_construct ({txt; _}, None), None ->
               String.equal (Ast_grep.longident_to_string txt) "Masc_tui_exit_signals.Quit"
-              && raises_break case.pc_rhs
+              && ends_with_break case.pc_rhs
           | _ -> false) cases
     | _ -> false) in
   let armed_key_exit = count_exit (fun expression ->
@@ -2207,7 +2233,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
         ({pexp_desc = Pexp_field (receiver, {txt; _}); _}, yes, Some _)
       when Ast_grep.expression_is_identifier "state" receiver
            && String.equal (Ast_grep.longident_to_string txt) "quit_armed" ->
-        raises_break yes
+        ends_with_break yes
     | _ -> false) in
   check int "signal poll Quit propagates Break" 1 signal_exit;
   check int "q propagates Break only once armed" 1 armed_key_exit;
@@ -2857,6 +2883,33 @@ let test_lane_run_payload_uses_the_json_document_renderer () =
        ~binding_name:"lane_run_payload_lines" ~callee:"document_markdown")
 ;;
 
+(* Two places decide how many in-flight rows the chat status area holds, and
+   they have to decide it the same way: the pane skips the request the live
+   transcript is already drawing, so the budget has to skip it too. The budget
+   did not, and a single message in flight -- the ordinary case -- left a
+   reserved row nobody drew (#37741).
+
+   A unit test can pin what the shared function answers, but not that both
+   callers ask it. That is a call shape, and the way it comes back is somebody
+   writing [List.length state.msg_inflight] again: it compiles, it reads
+   correctly, and it is wrong by one row. So the budget's reads of the raw
+   field are counted at zero. *)
+let test_the_row_budget_reads_the_in_flight_rows_the_pane_draws () =
+  check int "the budget asks for the rows the pane draws" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_message_status_rows"
+       ~callee:"keeper_message_inflight_drawn");
+  check int "and reads the raw in-flight list nowhere in that sum" 0
+    (Ast_grep.count_field_reads_in_value_binding
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_message_status_rows" ~field_name:"msg_inflight");
+  check int "the pane asks the same question through the same function" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render_chat.ml"
+       ~binding_name:"render_keeper_message"
+       ~callee:"Masc_tui_types.keeper_message_inflight_drawn")
+;;
 
 let () =
   run "masc-tui-http-regression" [
@@ -3011,6 +3064,10 @@ let () =
           "lane run payload uses the JSON document renderer"
           `Quick
           test_lane_run_payload_uses_the_json_document_renderer;
+        test_case
+          "the row budget reads the in-flight rows the pane draws"
+          `Quick
+          test_the_row_budget_reads_the_in_flight_rows_the_pane_draws;
       ]
     )
   ]

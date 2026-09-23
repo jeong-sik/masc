@@ -179,10 +179,80 @@ let test_confirmation_read_cannot_rearm_after_cancel () =
       check_bool "late evidence cannot rearm a cancelled confirmation" true
         (Read.view_for ~equal:String.equal late ~key:"goal-1" = Absent)
 
+let timeline_event ~kind ~lane ~title ~summary : Proof.goal_timeline_event =
+  { gt_ts = "2026-09-22T14:18:09Z"
+  ; gt_kind = kind
+  ; gt_lane = lane
+  ; gt_title = title
+  ; gt_summary = summary
+  ; gt_severity = "ok"
+  }
+
+let timeline_rows events =
+  texts
+    (Detail.timeline ~width:100 ~goal_id:"goal-1"
+       (Some ("goal-1", Ok (Proof.Goal_timeline_ready events))))
+
+let contains needle text =
+  let n = String.length needle and h = String.length text in
+  let rec go i = i + n <= h && (String.sub text i n = needle || go (i + 1)) in
+  go 0
+
+(* A goal's own creation event carries its kind in the subject column and in
+   the summary, so the row said it twice: "goal_created  Goal Event \xc2\xb7
+   goal_created". Every goal has one. *)
+let test_a_summary_that_repeats_the_subject_is_dropped () =
+  let rows =
+    timeline_rows
+      [ timeline_event ~kind:"goal_created" ~lane:"goal" ~title:"Goal Event"
+          ~summary:"goal_created"
+      ]
+  in
+  let row =
+    match List.filter (fun text -> contains "goal_created" text) rows with
+    | [ row ] -> row
+    | rows ->
+      Alcotest.failf "expected one row naming the event, got %d"
+        (List.length rows)
+  in
+  let occurrences needle text =
+    let n = String.length needle and h = String.length text in
+    let rec go i found =
+      if i + n > h then found
+      else if String.sub text i n = needle then go (i + n) (found + 1)
+      else go (i + 1) found
+    in
+    go 0 0
+  in
+  check_int "the kind is drawn once, by the subject column" 1
+    (occurrences "goal_created" row);
+  check_bool "and the title still names the row" true
+    (contains "Goal Event" row)
+
+(* A summary that qualifies the row stays: a task's status is not its id. *)
+let test_a_summary_that_says_more_than_the_subject_stays () =
+  let rows =
+    timeline_rows
+      [ timeline_event ~kind:"task_state" ~lane:"task:task-1522"
+          ~title:"restart replay" ~summary:"todo \xc2\xb7 created by analyst"
+      ]
+  in
+  let row =
+    match List.filter (fun text -> contains "task-1522" text) rows with
+    | [ row ] -> row
+    | rows -> Alcotest.failf "expected one task row, got %d" (List.length rows)
+  in
+  check_bool "the title names the row" true (contains "restart replay" row);
+  check_bool "and the status still qualifies it" true (contains "todo" row)
+
 let () =
   Alcotest.run "tui_planning_detail"
     [ ( "body"
-      , [ Alcotest.test_case "every verdict draws something" `Quick
+      , [ Alcotest.test_case "a summary that repeats the subject is dropped"
+            `Quick test_a_summary_that_repeats_the_subject_is_dropped
+        ; Alcotest.test_case "a summary that says more than the subject stays"
+            `Quick test_a_summary_that_says_more_than_the_subject_stays
+        ; Alcotest.test_case "every verdict draws something" `Quick
             test_every_verdict_draws_something
         ; Alcotest.test_case "idle is not silence" `Quick test_idle_is_not_silence
         ; Alcotest.test_case "a long reason wraps instead of being cut" `Quick

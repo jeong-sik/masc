@@ -874,7 +874,7 @@ let inspect_runtime_directory ~base_path runtime_directory =
     | Ok Fs_compat.Owned_directory_missing -> Ok `Missing
     | Error rejection -> Error (Runtime_directory_rejected rejection)
   with
-  | exn ->
+  | exn -> (* cancel-guard-ok: Fs_compat directory inspection is Unix calls, no Eio operation *)
     Error
       (Lease_io_failed
          { operation = "inspect_runtime_directory"
@@ -988,7 +988,7 @@ let establish_runtime_directory prepared =
          Ok ()
        with
        | Unix.Unix_error (Unix.EEXIST, _, _) -> Ok ()
-       | exn ->
+       | exn -> (* cancel-guard-ok: Unix.mkdir performs no Eio operation *)
          Error
            (Runtime_directory_creation_failed
               { path = prepared.runtime_directory; reason = Printexc.to_string exn })
@@ -1019,7 +1019,7 @@ let observe_lease_path path =
     else Ok (Lease_path_other stat.st_kind)
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Lease_path_missing
-  | exn ->
+  | exn -> (* cancel-guard-ok: Unix.lstat performs no Eio operation *)
     Error
       (Lease_io_failed
          { operation = "lstat_lease_file"

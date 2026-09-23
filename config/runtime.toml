@@ -1832,7 +1832,7 @@ max-concurrent = 1
 max-concurrent = 1
 
 
-# ── Runtime lanes (ordered failover) ─────────────────────────────────
+# ── Runtime candidate orders ─────────────────────────────────
 # A lane is an ordered list of runtime candidates under a name you pick. When a
 # keeper is assigned to a lane, the turn attempts candidates in order until one
 # succeeds or the lane is exhausted. Lanes are resolved at config load; unknown

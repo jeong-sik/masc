@@ -418,7 +418,10 @@
  ; masc for the wire's own routing table: which event types are whole-projection
  ; pushes is the wire's business, and this decoder used to keep a copy that had
  ; drifted by two.
- (libraries masc agent_core masc_tui_keeper_chat_projection yojson))
+ ; masc.sse_event for the agent lifecycle payloads, read with the generated
+ ; readers of the contract the bridge writes them with (RFC-0004).
+ (libraries masc masc.sse_event atdgen-runtime agent_core
+  masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_lane_declaration)
@@ -610,6 +613,14 @@
  (name masc_tui_exit_signals)
  (wrapped false)
  (modules masc_tui_exit_signals))
+
+;; Why a session ended, in the vocabulary the exit line is written in. Own
+;; library so the normal/abnormal split and the one-row flattening run under a
+;; test with no terminal.
+(library
+ (name masc_tui_exit_reason)
+ (wrapped false)
+ (modules masc_tui_exit_reason))
 
 ;; The exit-time tcsetattr on a descriptor that is no longer a terminal:
 ;; ENOTTY and EIO mean the terminal is gone and the rest of the at_exit chain
@@ -866,6 +877,12 @@
  (libraries masc_tui_message_layout))
 
 (library
+ (name masc_tui_fleet_line)
+ (wrapped false)
+ (modules masc_tui_fleet_line)
+ (libraries masc masc_tui_ansi masc_tui_message_layout))
+
+(library
  (name masc_tui_table)
  (wrapped false)
  ; masc_tui_message_layout so a cell is fitted in display cells rather than
@@ -923,6 +940,12 @@
   ; agent_core for the tool schedule contract a ledger call carries: batch
   ; size and execution mode decide the dispatch marks.
   agent_core))
+
+(library
+ (name masc_tui_connector_state)
+ (wrapped false)
+ (modules masc_tui_connector_state)
+ (libraries masc))
 
 (library
  (name masc_tui_keeper_mark)
@@ -1496,6 +1519,8 @@
   masc_tui_lane_subscriptions
   masc_tui_lane_declaration
   masc_tui_lane_table
+  masc_tui_connector_state
+  masc_tui_fleet_line
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
   masc.build_commit
@@ -1548,6 +1573,7 @@
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
   masc_tui_exit_signals
+  masc_tui_exit_reason
   masc_tui_terminal_restore
   masc.runtime
   masc.keeper_registry

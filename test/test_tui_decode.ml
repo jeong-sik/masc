@@ -674,6 +674,7 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
                   [ "todo", `Int 0
                   ; "claimed", `Int 0
                   ; "in_progress", `Int 0
+                  ; "awaiting_verification", `Int 0
                   ; "done", `Int 0
                   ; "cancelled", `Int 0
                   ] )
@@ -839,6 +840,7 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
           [ "todo", `Int 6
           ; "claimed", `Int 7
           ; running_key, `Int 8
+          ; "awaiting_verification", `Int 11
           ; "done", `Int 9
           ; "cancelled", `Int 10
           ] )
@@ -989,6 +991,10 @@ let test_decode_planning_snapshot_current_contract () =
       Alcotest.(check int) "todo" 6 snapshot.pl_backlog.pb_todo;
       Alcotest.(check int) "claimed" 7 snapshot.pl_backlog.pb_claimed;
       Alcotest.(check int) "in progress" 8 snapshot.pl_backlog.pb_running;
+      (* Its own count, not folded into the one above: the surface draws the
+         waiting Tasks beside the ones being worked. *)
+      Alcotest.(check int) "awaiting verification" 11
+        snapshot.pl_backlog.pb_awaiting_verification;
       Alcotest.(check int) "backlog done" 9 snapshot.pl_backlog.pb_done;
       Alcotest.(check int) "cancelled" 10 snapshot.pl_backlog.pb_cancelled;
       Alcotest.(check string) "generated at" "2026-08-21T05:06:07Z"
@@ -1051,12 +1057,13 @@ let test_decode_planning_snapshot_rejects_running_alias () =
 
 (* The shape the server actually sent while a keeper was failing to start,
    trimmed to the fields the TUI reads. *)
-let fleet_safety_json ?(missing = true) () =
+let fleet_safety_json ?(missing = true)
+    ?(blocker = "reaction_capacity_below_target") () =
   `Assoc
     [ ( "keeper_fleet_safety"
       , `Assoc
           ([ "status", `String "degraded"
-           ; "blocker", `String "reaction_capacity_below_target"
+           ; "blocker", `String blocker
            ; "operator_action_required", `Bool true
            ; "bootable_keeper_count", `Int 10
            ; "running_keeper_fiber_count", `Int 8
@@ -1071,6 +1078,7 @@ let fleet_safety_json ?(missing = true) () =
            ; "reaction_capacity_shortfall_count", `Int 1
            ; "active_task_owner_without_executable_fiber_count", `Int 1
            ; "completion_authority_pending_task_count", `Int 1
+           ; "active_task_owner_scan_error_count", `Int 2
            ]
            @ [ ( "bootable_keeper_names"
                , `List
@@ -1086,13 +1094,26 @@ let fleet_safety_json ?(missing = true) () =
              ]) )
     ]
 
+(* The scan errors ride the same section. A Keeper whose profile did not load
+   is left out of the owner count above and does not move [status], so the row
+   can only say the reading was short if this number reaches it. *)
+let test_decode_fleet_safety_carries_the_scan_shortfall () =
+  match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check int) "sources the scan could not read" 2
+        fleet.Tui_decode.fs_active_task_owner_scan_error_count
+
 let test_decode_fleet_safety_carries_both_name_lists () =
   match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
   | Error err -> Alcotest.fail err
   | Ok fleet ->
       Alcotest.(check string) "status" "degraded" fleet.fs_status;
-      Alcotest.(check (option string)) "blocker"
-        (Some "reaction_capacity_below_target") fleet.fs_blocker;
+      Alcotest.(check bool) "the blocker is read as the reason it names" true
+        (fleet.fs_blocker
+         = Some
+             (Tui_decode.Blocker
+                Keeper_fleet_blocker.Reaction_capacity_below_target));
       Alcotest.(check bool) "operator must act" true
         fleet.fs_operator_action_required;
       Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
@@ -1139,6 +1160,20 @@ let test_decode_fleet_safety_requires_session_recovery_fields () =
       ; "official_client_recovery_required_keeper_names" ]
   | _ -> Alcotest.fail "fleet fixture must be an object"
 
+(* A newer server can name a reason this build has no constructor for. The
+   header still has something to say, so the name is kept rather than read as
+   no blocker at all. *)
+let test_decode_fleet_safety_keeps_an_unknown_blocker_by_name () =
+  match
+    Tui_decode.decode_fleet_safety
+      (fleet_safety_json ~blocker:"lane_capacity_withdrawn" ())
+  with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check bool) "the unknown name is kept" true
+        (fleet.fs_blocker
+         = Some (Tui_decode.Unrecognised_blocker "lane_capacity_withdrawn"))
+
 let test_decode_fleet_safety_with_nothing_missing () =
   match Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()) with
   | Error err -> Alcotest.fail err
@@ -1167,6 +1202,7 @@ let metrics_common_fields ~kind ~channel =
 
 type usage_fixture =
   | Usage_trusted
+  | Usage_unpriced
   | Usage_untrusted
   | Usage_missing
   | Usage_mixed
@@ -1215,6 +1251,20 @@ let usage_fields = function
           ]
       , `Null
       , "missing"
+      , [] )
+  | Usage_unpriced ->
+      ( `Assoc
+          [ "input_tokens", `Int 10
+          ; "output_tokens", `Int 12
+          ; "cache_creation_tokens", `Int 3
+          ; "cache_read_tokens", `Int 4
+          ; "total_tokens", `Int 22
+          ; "usage_trust", `String "trusted"
+          ; "usage_anomaly", `Bool false
+          ; "usage_anomaly_reasons", `List []
+          ]
+      , `Null
+      , "trusted"
       , [] )
   | Usage_mixed ->
       ( `Assoc
@@ -1316,6 +1366,39 @@ let test_decode_current_turn_metrics () =
         entry.le_work_kind
   | Error err -> Alcotest.fail err
 
+(* Every turn row a live keeper wrote on 2026-09-23 carries the five counters
+   and no cost: the providers behind them price nothing, and the producer
+   writes the cost only where the provider's sample carried one
+   ([Keeper_unified_metrics_snapshot]'s [cost_json]). Read as a half-written
+   observation, those rows are dropped, and the Keeper pane's day reads as no
+   turns at all. *)
+let test_a_turn_priced_by_no_provider_is_still_a_turn () =
+  match
+    Tui_decode.decode_log_entry (current_turn_metrics ~usage:Usage_unpriced ())
+  with
+  | Error err -> Alcotest.failf "the live row shape was refused: %s" err
+  | Ok entry ->
+      Alcotest.(check bool) "turn kind" true
+        (entry.le_kind = Tui_decode.Log_turn);
+      Alcotest.(check (option int)) "input tokens" (Some 10)
+        entry.le_input_tokens;
+      Alcotest.(check (option int)) "output tokens" (Some 12)
+        entry.le_output_tokens;
+      Alcotest.(check (option (float 0.001))) "no cost was reported" None
+        entry.le_cost_usd
+
+(* The other way round is a row no producer writes: the cost comes off the
+   same sample as the counters. *)
+let test_a_cost_without_counters_is_refused () =
+  let priced_without_counters =
+    set_field "cost_usd" (`Float 0.25) (current_turn_metrics ~usage:Usage_missing ())
+  in
+  match Tui_decode.decode_log_entry priced_without_counters with
+  | Ok _ -> Alcotest.fail "a cost with no counters to price has to be refused"
+  | Error detail ->
+      Alcotest.(check string) "the refusal says what is missing"
+        "usage cost_usd without the counters it would price" detail
+
 let test_decode_current_turn_variants () =
   List.iter
     (fun (channel, expected_channel) ->
@@ -1363,10 +1446,9 @@ let test_decode_current_turn_variants () =
         (Some 12) entry.le_output_tokens
   | Error err -> Alcotest.fail err
 
-(* The six values are required fields carrying nullable values, so a row can
-   arrive with some of them null and the rest filled -- which is the branch 75
-   of 200 rows in a live keeper's log landed on, 37% of the window. The refusal
-   now says which side of the line each value fell on. *)
+(* The five counters are required fields carrying nullable values, so a row
+   can arrive with some of them null and the rest filled. The refusal says
+   which side of the line each value fell on. *)
 let test_a_row_with_some_values_null_names_them () =
   let null_in_usage key json =
     match json with
@@ -1387,8 +1469,8 @@ let test_a_row_with_some_values_null_names_them () =
    | Error detail ->
        Alcotest.(check string) "the refusal names the one that is null first"
          "usage unset=[total_tokens] set=[input_tokens, output_tokens, \
-          cache_creation_tokens, cache_read_tokens, cost_usd] is not one \
-          current atomic observation"
+          cache_creation_tokens, cache_read_tokens] is not one current atomic \
+          observation"
          detail);
   match
     Tui_decode.decode_log_entry
@@ -1981,13 +2063,14 @@ let system_log_snapshot_json entries =
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
 let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
-    ?(evidence_error = `Null) () =
+    ?(evidence_error = `Null) ?(intent = `String "complete") () =
   `Assoc
     [ ("request_id", `String "vr-1")
     ; ("task_id", `String "task-470")
     ; ("task_title", `String "wire the approval gate")
     ; ("created_at", `String "2026-08-23T09:00:00Z")
     ; ("submitted_by", `String "keeper.one")
+    ; ("intent", intent)
     ; ("completion_contract", `List [ `String "tests pass" ])
     ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
     ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
@@ -3346,22 +3429,29 @@ let test_authenticated_name_page_enriches_connector () =
   | Ok _, Ok _ -> Alcotest.fail "expected one connector"
 
 (* Repositories. Shape is [repository_json] in the repositories route. *)
-let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true) () =
+let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true)
+    ?(status = "active") ?error_message () =
+  let cause =
+    match error_message with
+    | None -> []
+    | Some message -> [ ("error_message", `String message) ]
+  in
   `Assoc
-    [ ("id", `String "repo-1")
-    ; ("name", `String "masc")
-    ; ("url", `String "https://github.com/jeong-sik/masc")
-    ; ("local_path", `String "workspace/yousleepwhen/masc")
-    ; ( "resolved_local_path"
-      , `String "/Users/dancer/me/workspace/yousleepwhen/masc" )
-    ; ("aliases", `List [])
-    ; ("default_branch", `String "main")
-    ; ("keepers", `List (List.map (fun k -> `String k) keepers))
-    ; ("status", `String "ready")
-    ; ("auto_sync", auto_sync)
-    ; ("sync_interval", `Int 300)
-    ; ("created_at", `String "2026-08-01T00:00:00Z")
-    ]
+    ([ ("id", `String "repo-1")
+     ; ("name", `String "masc")
+     ; ("url", `String "https://github.com/jeong-sik/masc")
+     ; ("local_path", `String "workspace/yousleepwhen/masc")
+     ; ( "resolved_local_path"
+       , `String "/Users/dancer/me/workspace/yousleepwhen/masc" )
+     ; ("aliases", `List [])
+     ; ("default_branch", `String "main")
+     ; ("keepers", `List (List.map (fun k -> `String k) keepers))
+     ; ("status", `String status)
+     ; ("auto_sync", auto_sync)
+     ; ("sync_interval", `Int 300)
+     ; ("created_at", `String "2026-08-01T00:00:00Z")
+     ]
+    @ cause)
 
 let repository_snapshot_json repos =
   `Assoc [ ("repositories", `List repos); ("total", `Int (List.length repos)) ]
@@ -3388,6 +3478,62 @@ let test_decode_repository_snapshot_reads_the_live_shape () =
              r.Tui_decode.rp_keepers;
            Alcotest.(check bool) "auto sync" true r.Tui_decode.rp_auto_sync
        | rs -> Alcotest.failf "expected one repository, got %d" (List.length rs))
+
+(* A repository whose clone or fetch failed keeps the cause in its status, and
+   the route writes that cause beside the word. The reading took the word and
+   left the cause on the wire, so the Workspace surface said "error" and the
+   screen held nothing that said what went wrong. *)
+let test_decode_repository_failure_keeps_its_cause () =
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json
+         [ repository_json ~status:"error"
+             ~error_message:"fatal: could not read from remote repository" () ])
+  with
+  | Ok { Tui_decode.rs_repositories = [ r ]; _ } ->
+      Alcotest.(check string) "the word the column draws" "error"
+        (Tui_decode.repository_status_word r.Tui_decode.rp_status);
+      Alcotest.(check (option string)) "and the cause behind it"
+        (Some "fatal: could not read from remote repository")
+        (Tui_decode.repository_status_reason r.Tui_decode.rp_status)
+  | Ok _ -> Alcotest.fail "expected one repository"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* Every other status has no cause to give. *)
+let test_decode_repository_active_has_no_cause () =
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json [ repository_json () ])
+  with
+  | Ok { Tui_decode.rs_repositories = [ r ]; _ } ->
+      Alcotest.(check string) "the word" "active"
+        (Tui_decode.repository_status_word r.Tui_decode.rp_status);
+      Alcotest.(check (option string)) "nothing to add" None
+        (Tui_decode.repository_status_reason r.Tui_decode.rp_status)
+  | Ok _ -> Alcotest.fail "expected one repository"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* A word this build does not know is drawn as it arrived rather than folded
+   into one of the four, and a failure that names no cause is one of those:
+   the reading cannot complete it, so the row says the word and adds nothing
+   it does not have. *)
+let test_decode_repository_keeps_a_word_it_cannot_place () =
+  let word json =
+    match Tui_decode.decode_repository_snapshot (repository_snapshot_json [ json ]) with
+    | Ok { Tui_decode.rs_repositories = [ r ]; _ } -> r.Tui_decode.rp_status
+    | Ok _ -> Alcotest.fail "expected one repository"
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  let unknown = word (repository_json ~status:"archived" ()) in
+  Alcotest.(check string) "drawn as it arrived" "archived"
+    (Tui_decode.repository_status_word unknown);
+  Alcotest.(check (option string)) "with no cause invented" None
+    (Tui_decode.repository_status_reason unknown);
+  let causeless = word (repository_json ~status:"error" ()) in
+  Alcotest.(check string) "a failure still says so" "error"
+    (Tui_decode.repository_status_word causeless);
+  Alcotest.(check (option string)) "and claims no cause" None
+    (Tui_decode.repository_status_reason causeless)
 
 let test_decode_repository_absent_auto_sync_is_off () =
   (* A repository that does not declare auto-sync is not syncing. Reading a
@@ -4432,17 +4578,24 @@ let test_decode_project_changes_keeps_project_scope () =
 
 (* Keeper lane rows. Shape is the light projection the TUI reads from
    [GET /api/v1/keepers/composite]. *)
+let lane_conditions_json ?(launch_pending = false) ?(heartbeat_healthy = true)
+    ?(turn_healthy = true) () =
+  `Assoc
+    [ "launch_pending", `Bool launch_pending
+    ; "heartbeat_healthy", `Bool heartbeat_healthy
+    ; "turn_healthy", `Bool turn_healthy
+    ]
+
 let keeper_lane_json ?(phase = "running") ?(turn_phase = "executing")
     ?(idle_seconds = 75) ?(last_outcome = `Null)
-    ?(diagnosis = `String "running_fiber_alive") keeper =
+    ?(conditions = lane_conditions_json ()) keeper =
   `Assoc
     [ "keeper", `String keeper
     ; "phase", `String phase
     ; "turn_phase", `String turn_phase
     ; "idle_seconds", `Int idle_seconds
     ; "last_outcome", last_outcome
-    ; ( "phase_diagnosis"
-      , `Assoc [ "determining_condition", diagnosis ] )
+    ; "phase_diagnosis", `Assoc [ "conditions", conditions ]
     ]
 
 let keeper_lanes_json lanes =
@@ -4520,7 +4673,7 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
       (keeper_lanes_json
          [ keeper_lane_json ~last_outcome "alpha"
          ; keeper_lane_json ~phase:"future_phase" ~turn_phase:"future_turn"
-             ~diagnosis:`Null "beta"
+             ~conditions:(lane_conditions_json ~turn_healthy:false ()) "beta"
          ])
   with
   | Error err -> Alcotest.failf "decode failed: %s" err
@@ -4549,8 +4702,12 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
             | Tui_decode.Lane_turn_unknown raw ->
                 Alcotest.(check string) "unknown turn" "future_turn" raw
             | _ -> Alcotest.fail "future turn was folded into a known turn");
-           Alcotest.(check (option string)) "no determining condition" None
-             beta.kl_diagnosis
+           Alcotest.(check bool) "alpha's last turn is healthy" true
+             alpha.kl_conditions.Tui_decode.klc_turn_healthy;
+           Alcotest.(check bool) "beta's last turn failed" false
+             beta.kl_conditions.Tui_decode.klc_turn_healthy;
+           Alcotest.(check bool) "beta's heartbeat is healthy" true
+             beta.kl_conditions.Tui_decode.klc_heartbeat_healthy
        | lanes ->
            Alcotest.failf "expected two lane rows, got %d" (List.length lanes))
 
@@ -4561,7 +4718,7 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
       ; "phase", `String "running"
       ; "turn_phase", `String "idle"
       ; "last_outcome", `Null
-      ; "phase_diagnosis", `Assoc [ "determining_condition", `Null ]
+      ; "phase_diagnosis", `Assoc [ "conditions", lane_conditions_json () ]
       ]
   in
   match
@@ -4571,6 +4728,29 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
   | Error detail ->
       Alcotest.(check bool) "error names the missing field" true
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
+
+(* A reading of no conditions is not a healthy keeper. Each of the three
+   decides what the operations line says about the phase, so a lane without
+   one is refused rather than drawn as if the keeper were fine. *)
+let test_decode_keeper_lanes_requires_the_phase_conditions () =
+  List.iter
+    (fun field ->
+      let conditions =
+        match lane_conditions_json () with
+        | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+        | json -> json
+      in
+      match
+        Tui_decode.decode_keeper_lanes_snapshot
+          (keeper_lanes_json [ keeper_lane_json ~conditions "alpha" ])
+      with
+      | Ok _ -> Alcotest.failf "a lane without %s decoded" field
+      | Error detail ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%S names %s" detail field)
+            true
+            (Astring.String.is_infix ~affix:field detail))
+    [ "launch_pending"; "heartbeat_healthy"; "turn_healthy" ]
 
 let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
@@ -6201,6 +6381,45 @@ let test_decode_verification_separates_a_stale_queue_from_a_failed_one () =
       Alcotest.(check (option string)) "but the queue says where it came from"
         (Some "read from backlog.json.last-good")
         snapshot.Tui_decode.vs_backlog_recovery
+
+(* The row says which verdict it waits on. A cancellation is cleared only by
+   an operator, so reading it as a completion hid the one row that needed
+   the operator most. [null] is the history view, and a name outside the
+   pair is refused rather than read as either. *)
+let test_decode_verification_reads_which_verdict_the_row_waits_on () =
+  let decode json =
+    match Tui_decode.decode_verification_snapshot json with
+    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> Ok r
+    | Ok _ -> Alcotest.fail "expected one request"
+    | Error err -> Error err
+  in
+  let intent_of json =
+    match decode json with
+    | Ok r -> r.Tui_decode.vr_intent
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  Alcotest.(check bool) "a cancel row waits on a cancel verdict" true
+    (intent_of
+       (verification_snapshot_json
+          [ verification_request_json ~intent:(`String "cancel") () ])
+     = Some Masc_domain.Cancel_task);
+  Alcotest.(check bool) "a complete row waits on a completion" true
+    (intent_of
+       (verification_snapshot_json [ verification_request_json () ])
+     = Some Masc_domain.Complete_task);
+  Alcotest.(check bool) "the history view carries no intent" true
+    (intent_of
+       (verification_snapshot_json
+          [ verification_request_json ~intent:`Null () ])
+     = None);
+  Alcotest.(check bool) "a name outside the pair is refused" true
+    (match
+       decode
+         (verification_snapshot_json
+            [ verification_request_json ~intent:(`String "stop") () ])
+     with
+     | Error _ -> true
+     | Ok _ -> false)
 
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could
@@ -10197,6 +10416,12 @@ let () =
           test_decode_repository_snapshot_reads_the_live_shape;
         Alcotest.test_case "absent auto-sync is off" `Quick
           test_decode_repository_absent_auto_sync_is_off;
+        Alcotest.test_case "a failure keeps its cause" `Quick
+          test_decode_repository_failure_keeps_its_cause;
+        Alcotest.test_case "active has no cause" `Quick
+          test_decode_repository_active_has_no_cause;
+        Alcotest.test_case "a word it cannot place is kept" `Quick
+          test_decode_repository_keeps_a_word_it_cannot_place;
         Alcotest.test_case "a repository with no keepers" `Quick
           test_decode_repository_with_no_keepers;
         Alcotest.test_case "resolved path is required" `Quick
@@ -10233,6 +10458,8 @@ let () =
           test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
         Alcotest.test_case "requires the table fields" `Quick
           test_decode_keeper_lanes_requires_the_table_fields;
+        Alcotest.test_case "a lane without its phase conditions is refused" `Quick
+          test_decode_keeper_lanes_requires_the_phase_conditions;
         Alcotest.test_case "every known phase decodes to its own constructor"
           `Quick
           test_every_known_phase_decodes_to_its_own_constructor;
@@ -10350,6 +10577,8 @@ let () =
           test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
+        Alcotest.test_case "the row says which verdict it waits on" `Quick
+          test_decode_verification_reads_which_verdict_the_row_waits_on;
       ] );
     ( "decode_system_logs",
       [
@@ -10437,8 +10666,12 @@ let () =
       [
         Alcotest.test_case "carries both name lists" `Quick
           test_decode_fleet_safety_carries_both_name_lists;
+        Alcotest.test_case "fleet safety carries the scan shortfall" `Quick
+          test_decode_fleet_safety_carries_the_scan_shortfall;
         Alcotest.test_case "session recovery fields are required" `Quick
           test_decode_fleet_safety_requires_session_recovery_fields;
+        Alcotest.test_case "an unknown blocker is kept by name" `Quick
+          test_decode_fleet_safety_keeps_an_unknown_blocker_by_name;
         Alcotest.test_case "a full fleet leaves the difference empty" `Quick
           test_decode_fleet_safety_with_nothing_missing;
         Alcotest.test_case "a body without the section is refused" `Quick
@@ -10483,6 +10716,10 @@ let () =
           test_decode_current_turn_variants;
         Alcotest.test_case "current heartbeat contract" `Quick
           test_decode_current_heartbeat_metrics;
+        Alcotest.test_case "a turn priced by no provider is still a turn" `Quick
+          test_a_turn_priced_by_no_provider_is_still_a_turn;
+        Alcotest.test_case "a cost without counters is refused" `Quick
+          test_a_cost_without_counters_is_refused;
         Alcotest.test_case "a row with some values null names them" `Quick
           test_a_row_with_some_values_null_names_them;
         Alcotest.test_case "retired and unknown rows fail closed" `Quick

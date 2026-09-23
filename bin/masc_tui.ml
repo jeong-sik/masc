@@ -71,6 +71,66 @@ let scrolled_surface state surface =
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
+(* Why this session ended, written once at exit. The per-PID stderr log held
+   only the boot lines, so a session that ended left no reason behind: the
+   operator saw roughly a hundred files a day and none said why. Set at each
+   way out and written by the [at_exit] below, which runs after the terminal
+   is restored. *)
+let exit_reason : Masc_tui_exit_reason.t option ref = ref None
+
+let note_exit_reason reason =
+  match !exit_reason with
+  | Some _ -> ()
+  | None -> exit_reason := Some reason
+;;
+
+(* Written once. [at_exit] stops at the first callback that raises and OCaml
+   may retry the remaining ones while it reports the exception, so a writer
+   with no guard can leave two [exit:] rows for one session -- and a reader
+   counting rows by cause would count that session twice. *)
+let exit_reason_written = ref false
+
+let write_exit_reason () =
+  if not !exit_reason_written then begin
+    exit_reason_written := true;
+    let reason =
+      match !exit_reason with
+      | Some reason -> reason
+      | None -> Masc_tui_exit_reason.Unrecorded
+    in
+    let row = "[masc-tui] " ^ Masc_tui_exit_reason.line reason ^ "\n" in
+    (* Two attempts through different layers, because this row is the whole
+       point of the change: a session that ends without it is unexplained
+       again. [output_string] goes through the buffered channel, which can
+       raise on a channel an earlier [at_exit] callback already closed; the
+       raw write on the descriptor skips that layer, so it fails for
+       different reasons rather than the same one. stderr is the per-PID log
+       file by now ([redirect_stderr_off_terminal]), and neither attempt is
+       queued behind the console mirror's thread, so the row is on disk
+       before the process returns.
+
+       If both fail the failure is dropped on purpose, not by oversight: the
+       descriptor this function would report on is the one that just refused,
+       and raising here would take the remaining [at_exit] callbacks down
+       with it. *)
+    try
+      output_string stderr row;
+      flush stderr
+    with _ -> (
+      (* fire-and-forget: the note above says why this failure is dropped. *)
+      try ignore (Unix.write_substring Unix.stderr row 0 (String.length row))
+      with _ -> ())
+  end
+;;
+
+(* The name of the signal that asked the session to end, for the exit line. *)
+let signal_name signal =
+  if signal = Sys.sigterm then "SIGTERM"
+  else if signal = Sys.sighup then "SIGHUP"
+  else if signal = Sys.sigquit then "SIGQUIT"
+  else Printf.sprintf "signal %d" signal
+;;
+
 let json_assoc_member_opt = Masc_tui_json.member_opt
 
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
@@ -343,6 +403,8 @@ let move_identity_cursor (state : state) ~delta =
               Masc_tui_scroll.ensure_visible
                 ~cursor:
                   (Masc_tui_types.identity_provider_line
+                     ~summary:
+                       (Masc_tui_types.identity_summary ~providers ~query)
                      ~notice:
                        (Masc_tui_types.identity_notice
                           ~cols:(identity_pane_columns state)
@@ -10928,7 +10990,10 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        | Disconnected | Connecting | Reconnecting -> Masc_tui_types.Connecting);
     let needs =
       Masc_tui_types.full_refresh_needs
-        ~scoped_refresh_inflight:!scoped_refresh_inflight state.view
+        ~scoped_refresh_inflight:!scoped_refresh_inflight
+        ~keeper_pane_drawn:
+          (not (Masc_tui_render.acting_pane_suppressed state))
+        state.view
     in
     (* The chat pane's history comes down its own generation-guarded path, not
        in the surface bundle, so the tick asks for it here. Without this the
@@ -13141,6 +13206,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _
                | Masc_tui_observer.Fusion_run_status _
+               | Masc_tui_observer.Internal_agent_runs_changed
+               | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
               (match event with
@@ -13159,6 +13226,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                | Masc_tui_observer.Keeper_chat_appended _
                | Masc_tui_observer.Keeper_chat_stream_frame _
                | Masc_tui_observer.Keeper_waiting_inventory_changed _
+               | Masc_tui_observer.Internal_agent_runs_changed
+               | Masc_tui_observer.Lane_resource _
                | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Other _ ->
                    ());
               state.acting <-
@@ -15813,7 +15882,10 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
   (* [at_exit] runs its callbacks in the reverse of this order. Restore first
      so an error writing the frame summary cannot prevent the first restore
      attempt. An exception interrupts that cleanup pass; OCaml may retry
-     remaining callbacks while reporting an uncaught exception. *)
+     remaining callbacks while reporting an uncaught exception. The exit
+     reason is registered first so it is written last, after the terminal is
+     back. *)
+  at_exit write_exit_reason;
   at_exit Masc_tui_frame_timing.report;
   at_exit cleanup;
   (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
@@ -16030,7 +16102,10 @@ let main
      it runs at the next poll point, inside whatever the loop was doing, an
      Eio wait included. *)
   let exit_signals = Masc_tui_exit_signals.create () in
-  let terminate _ = Masc_tui_exit_signals.request_terminate exit_signals in
+  let terminate signal =
+    Masc_tui_exit_signals.request_terminate exit_signals
+      ~signal:(signal_name signal)
+  in
   (* Ctrl-C used to reach [terminate] and the session ended mid-sentence, with
      whatever was in the composer gone. It is one key away from Ctrl-V and
      Ctrl-X on the same hand, and the footer never listed it, so the first
@@ -16297,7 +16372,12 @@ let main
      surfaces that read the same things -- a keeper list and a keeper's detail --
      costs no request. Watching from the loop catches every way the surface can
      change, rather than asking each of the places that change it to remember. *)
-  let drawn_needs = ref (Masc_tui_types.surface_needs state.view) in
+  let drawn_needs =
+    ref
+      (Masc_tui_types.surface_needs
+         ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state))
+         state.view)
+  in
   let input_reader = create_input_reader () in
   (* Palette and graphics share one bounded startup probe because both replies
      arrive on the key stream. The probe removes only replies to these exact
@@ -17460,7 +17540,12 @@ and is loaded on demand through keeper_skill.
          switch release that stops a server this TUI started runs for every
          way out. *)
       (match Masc_tui_exit_signals.poll exit_signals with
-       | Masc_tui_exit_signals.Quit -> raise Break
+       | Masc_tui_exit_signals.Quit ->
+           note_exit_reason
+             (match Masc_tui_exit_signals.terminate_signal exit_signals with
+              | Some signal -> Masc_tui_exit_reason.Terminate signal
+              | None -> Masc_tui_exit_reason.Interrupt);
+           raise Break
        | Masc_tui_exit_signals.Interrupt_armed ->
            state.quit_armed <- false;
            add_event state "system"
@@ -18605,7 +18690,10 @@ and is loaded on demand through keeper_skill.
                     && not
                          (state.view = Board
                          && state.board_mode = Board_compose))) ->
-           if state.quit_armed then raise Break
+           if state.quit_armed then begin
+             note_exit_reason Masc_tui_exit_reason.Quit_key;
+             raise Break
+           end
            else begin
              state.quit_armed <- true;
              add_event state "system"
@@ -24569,7 +24657,12 @@ and is loaded on demand through keeper_skill.
          it for every Tab made an Overview -> Tools walk spend those requests
          once per distinct [surface_needs] record. A scoped refresh neither
          repeats them nor changes connection status. *)
-      let needed = Masc_tui_types.surface_needs state.view in
+      let needed =
+        Masc_tui_types.surface_needs
+          ~keeper_pane_drawn:
+            (not (Masc_tui_render.acting_pane_suppressed state))
+          state.view
+      in
       if
         needed <> !drawn_needs
         && not !http_refresh_inflight
@@ -24863,7 +24956,13 @@ let run_with_eio_context f =
             Eio_context.set_clock (Eio.Stdenv.clock env);
             Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
             f ()))
-  with Break -> ()
+  with
+  | Break -> ()
+  | exn ->
+      (* An uncaught exception is the abnormal end the exit line exists to
+         name; the [at_exit] writer still runs while the exception unwinds. *)
+      note_exit_reason (Masc_tui_exit_reason.Exception (Printexc.to_string exn));
+      raise exn
 
 let () =
   (* Informational flags terminate during parsing, before base-path

@@ -279,7 +279,7 @@ def run(executable: str) -> None:
         mark = mark_output(fd, output)
         h.send_and_wait(
             process, fd, output, b"e",
-            f"adding a failover candidate to {NEW_LANE}".encode(),
+            f"adding a candidate to the candidate order of {NEW_LANE}".encode(),
         )
         # The lane's own runtime ranks last; the other four come by id.
         h.wait_for_output(process, fd, output, b"> runtime-b", start=mark, timeout=5.0)
@@ -354,7 +354,7 @@ def run(executable: str) -> None:
         # adds a candidate. Opening it refreshes only the catalog. Enter must
         # refuse locally too, without restoring runtime-a beside the new id.
         mark = mark_output(fd, output)
-        h.send_and_wait(process, fd, output, b"e", b"adding a failover candidate to primary")
+        h.send_and_wait(process, fd, output, b"e", b"adding a candidate to the candidate order of primary")
         h.wait_for_output(process, fd, output, b"> runtime-c", start=mark, timeout=5.0)
         h.send_and_wait(
             process, fd, output, b"\r",
@@ -428,7 +428,7 @@ def run_exact(executable: str) -> None:
     fixtures[h.STANDALONE_LANES_PATH] = store.standalone_lanes
     fixtures[ROUTING_PATH] = h.RequestHttpResponse(store.route)
     requests: h.HttpRequests = []
-    picker = f"adding a failover candidate to {EXACT_LANE}".encode()
+    picker = f"adding a candidate to the candidate order of {EXACT_LANE}".encode()
 
     def exact_posts() -> list[object]:
         return [json.loads(body) for path, body in requests if path == ROUTING_PATH]

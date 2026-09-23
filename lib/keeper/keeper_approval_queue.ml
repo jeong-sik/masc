@@ -4324,9 +4324,53 @@ let remember_rule_for_delivery delivery =
   | Decision.Reject _, true -> Ok (None, [])
 ;;
 
-let complete_delivery delivery =
+(* Why a delivery is being completed. The first commit is the operator's
+   decision, and that is what the audit ledger records as [Resolved]. A boot
+   replay or a same-request resubmission sends the wake for that decision
+   again; recording [Resolved] again counted one click as many decisions --
+   nineteen rows for one approval on 2026-09-22 while its keeper was offline
+   across twenty-one boots (#37964). The wake is re-sent on every occasion;
+   only the ledger row and the operator-facing announcement are not. *)
+type delivery_occasion =
+  | First_commit
+  | Boot_replay
+  | Same_request_resubmitted
+
+let delivery_occasion_to_string = function
+  | First_commit -> "first_commit"
+  | Boot_replay -> "boot_replay"
+  | Same_request_resubmitted -> "same_request_resubmitted"
+;;
+
+let complete_delivery ~(occasion : delivery_occasion) delivery =
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
+  let actor =
+    match delivery.created_by with
+    | Some actor when String.trim actor <> "" -> Some actor
+    | Some _ | None -> None
+  in
+  (* The ledger row for the decision, written once. A redelivery says so in
+     the log and returns no receipt: there is no new evidence to hand back. *)
+  let record_resolution ~project_chat =
+    match occasion with
+    | First_commit ->
+      [ resolve_entry
+          ~project_chat
+          ~base_path
+          delivery.entry
+          ~source:delivery.source
+          ?actor
+          delivery.decision
+      ]
+    | Boot_replay | Same_request_resubmitted ->
+      Log.Keeper.info
+        ~keeper_name:delivery.entry.keeper_name
+        "hitl resolution redelivered approval=%s occasion=%s"
+        id
+        (delivery_occasion_to_string occasion);
+      []
+  in
   match resolve_store_readiness_error ~base_path ~approval_id:id with
   | Error _ as error -> error
   | Ok () ->
@@ -4348,23 +4392,9 @@ let complete_delivery delivery =
               ~keeper_name:delivery.entry.keeper_name
               "hitl delivery retired: no such keeper approval=%s"
               id;
-            let actor =
-              match delivery.created_by with
-              | Some actor when String.trim actor <> "" -> Some actor
-              | Some _ | None -> None
-            in
-            let resolution_audit_receipt =
-              resolve_entry
-                ~project_chat:false
-                ~base_path
-                delivery.entry
-                ~source:delivery.source
-                ?actor
-                delivery.decision
-            in
             Ok
               { remembered_rule = None
-              ; audit_receipts = [ resolution_audit_receipt ]
+              ; audit_receipts = record_resolution ~project_chat:false
               })
        | Error (Keeper_registry_event_queue.Hitl_enqueue_failed reason) ->
          Error (Delivery_failed { approval_id = id; reason })
@@ -4374,18 +4404,8 @@ let complete_delivery delivery =
             Error (Persistence_failed { approval_id = id; storage_error })
           | Ok (remembered_rule, rule_audit_receipts) ->
             let finish () =
-              let actor =
-                match delivery.created_by with
-                | Some actor when String.trim actor <> "" -> Some actor
-                | Some _ | None -> None
-              in
-              let resolution_audit_receipt =
-                resolve_entry
-                  ~base_path
-                  delivery.entry
-                  ~source:delivery.source
-                  ?actor
-                  delivery.decision
+              let resolution_audit_receipts =
+                record_resolution ~project_chat:true
               in
               signal_resolution_after_commit
                 ~base_path
@@ -4394,7 +4414,7 @@ let complete_delivery delivery =
               Ok
                 { remembered_rule
                 ; audit_receipts =
-                    rule_audit_receipts @ [ resolution_audit_receipt ]
+                    rule_audit_receipts @ resolution_audit_receipts
                 }
             in
             (* Both decisions remain authoritative after their wake is sent.
@@ -4583,7 +4603,7 @@ let install_persistence_internal ~after_load ~base_path =
         else if delivery_wake_was_observed delivery
         then replay count failures rest
         else
-          (match complete_delivery delivery with
+          (match complete_delivery ~occasion:Boot_replay delivery with
            | Ok _ -> replay (count + 1) failures rest
            | Error error ->
              let failure =
@@ -4729,7 +4749,7 @@ let resolve_with_policy
               | Error Journal_not_found -> Error (Not_found id)
               | Error (Journal_storage storage_error) ->
                 Error (Persistence_failed { approval_id = id; storage_error })
-              | Ok delivery -> complete_delivery delivery)
+              | Ok delivery -> complete_delivery ~occasion:First_commit delivery)
            | None ->
              (match SMap.find_opt id (Atomic.get deliveries) with
               | None -> Error (Not_found id)
@@ -4742,7 +4762,7 @@ let resolve_with_policy
                   && created_by = delivery.created_by
                 in
                 if same_request
-                then complete_delivery delivery
+                then complete_delivery ~occasion:Same_request_resubmitted delivery
                 else Error (Already_resolved id)))
 ;;
 

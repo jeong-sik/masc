@@ -1,6 +1,6 @@
 type skill_tone =
   | Skill_live
-  | Skill_used
+  | Skill_settled
   | Skill_attention
   | Skill_failure
 
@@ -32,7 +32,7 @@ let all_styles =
   ; Tool
   ; Thinking
   ; Skill Skill_live
-  ; Skill Skill_used
+  ; Skill Skill_settled
   ; Skill Skill_attention
   ; Skill Skill_failure
   ]
@@ -864,7 +864,7 @@ let speaker_mark : style -> string = function
   | Error -> "\xe2\x9c\x97"
   | Tool -> "\xe2\x96\xa0"
   | Skill Skill_live -> "\xe2\x97\x87"
-  | Skill Skill_used -> "\xe2\x97\x86"
+  | Skill Skill_settled -> "\xe2\x97\x86"
   | Skill Skill_attention -> "\xe2\x96\xb3"
   | Skill Skill_failure -> "\xe2\x9c\x97"
   | Thinking -> "\xc2\xb7"

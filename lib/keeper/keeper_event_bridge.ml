@@ -217,6 +217,14 @@ let invocation_payload_fields invocation =
   @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
 ;;
 
+(* Custom event names use dots internally, per the AGENT_CORE Custom
+   convention. On the SSE wire a [masc.*] name uses the public separator, and
+   every dot is translated so a multi-segment name stays intact. *)
+let public_custom_event_type name =
+  if String.length name > 5 && String.starts_with ~prefix:"masc." name then
+    String.map (fun c -> if c = '.' then ':' else c) name
+  else name
+
 let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t option =
   let
     { Agent_core.Event_envelope.event_id
@@ -404,15 +412,7 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     Some (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
   | Agent_core.Event_bus.ElicitationCompleted _ -> None (* Internal; no SSE relay needed *)
   | Agent_core.Event_bus.Custom (name, payload) ->
-    (* Custom event names use dots internally.
-         Translate dots to the public SSE separator for [masc.*] events.
-         Internally MASC emits dot-separated names per AGENT_CORE Custom convention.
-         Translate every dot so multi-segment names remain intact. *)
-    let event_type =
-      if String.length name > 5 && String.starts_with ~prefix:"masc." name
-      then String.map (fun c -> if c = '.' then ':' else c) name
-      else name
-    in
+    let event_type = public_custom_event_type name in
     Some
       (wrap
          ~event_type

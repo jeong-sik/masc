@@ -19,17 +19,32 @@ let agent_completed_frame =
   "data: {\"type\":\"agent_core:agent_completed\",\"event_type\":\"agent_completed\",\
    \"event_id\":\"evt-completed\",\"ts_unix\":1787505650.0,\
    \"correlation_id\":\"trace-1\",\"run_id\":\"run-1\",\
-   \"agent_name\":\"analyst\",\"task_id\":\"task-1\",\
-   \"payload\":{\"agent_name\":\"analyst\",\"task_id\":\"task-1\",\
+   \"agent_name\":\"analyst\",\"task_id\":\"evt-f50d1cc0\",\
+   \"payload\":{\"agent_name\":\"analyst\",\"task_id\":\"evt-f50d1cc0\",\
    \"elapsed_s\":1.25,\"success\":true,\"result\":\"ok\"}}\n\n"
 
+(* The payload the bridge writes for a failed run, from the contract's own
+   builder, so the fixture cannot drift from the shape on the wire. *)
 let agent_failed_frame =
-  "data: {\"type\":\"agent_core:agent_failed\",\"event_type\":\"agent_failed\",\
-   \"event_id\":\"evt-failed\",\"ts_unix\":1787505651.0,\
-   \"correlation_id\":\"trace-2\",\"run_id\":\"run-2\",\
-   \"agent_name\":\"analyst\",\"task_id\":\"task-2\",\
-   \"payload\":{\"agent_name\":\"analyst\",\"task_id\":\"task-2\",\
-   \"elapsed_s\":0.5,\"error\":\"boom\"}}\n\n"
+  let payload =
+    Sse_event.agent_failed_payload ~agent_name:"analyst" ~task_id:"evt-9565f12c"
+      ~elapsed_s:0.5 ~error:"rate limited" ~error_domain:"provider"
+      ~error_code:"provider_error" ~error_retryable:true ~error_detail:`Null
+  in
+  "data: "
+  ^ Yojson.Safe.to_string
+      (`Assoc
+        [ ("type", `String "agent_core:agent_failed")
+        ; ("event_type", `String "agent_failed")
+        ; ("event_id", `String "evt-failed")
+        ; ("ts_unix", `Float 1787505651.0)
+        ; ("correlation_id", `String "trace-2")
+        ; ("run_id", `String "run-2")
+        ; ("agent_name", `String "analyst")
+        ; ("task_id", `String "evt-9565f12c")
+        ; ("payload", payload)
+        ])
+  ^ "\n\n"
 
 let heartbeat_frame =
   "data: {\"type\":\"keeper_heartbeat\",\"name\":\"bandleader\",\
@@ -58,9 +73,10 @@ let summary = function
          | Observer.Turn_ready -> "turn_ready"
          | Observer.Turn_completed -> "turn_completed"
          | Observer.Agent_started -> "agent_started"
-         | Observer.Agent_completed -> "agent_completed"
-         | Observer.Agent_failed -> "agent_failed"
-         | Observer.Agent_yielded -> "agent_yielded"
+         | Observer.Agent_completed _ -> "agent_completed"
+         | Observer.Agent_failed _ -> "agent_failed"
+         | Observer.Agent_yielded _ -> "agent_yielded"
+         | Observer.Agent_input_required _ -> "agent_input_required"
          | Observer.Tool_approval_completed -> "tool_approval_completed"
          | Observer.Telemetry -> "telemetry"
          | Observer.Agent_core_other name -> "other:" ^ name)
@@ -108,6 +124,11 @@ let summary = function
       Printf.sprintf "waiting(%s,%s)" keeper (Option.value ~default:"-" queue_kind)
   | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
+  | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
+  | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
+    ->
+      Printf.sprintf "lane_resource(%s,%s,%s)" lr_package lr_instance
+        (Option.value ~default:"-" lr_detail)
   | Observer.Event (Observer.Snapshot name) -> "snapshot:" ^ name
   | Observer.Event (Observer.Other name) -> "other:" ^ name
   | Observer.Undecodable detail -> "undecodable:" ^ detail
@@ -391,16 +412,112 @@ let untaught_agent_core_frame =
   "data: {\"type\":\"agent_core:relay_dropped\",\"event_type\":\"relay_dropped\",\
    \"agent_name\":\"lane-smith\",\"ts_unix\":1.0}\n\n"
 
+(* The run registries' change push is read by the name the server broadcasts
+   it under, so the two cannot drift apart. *)
+let test_the_internal_runs_push_is_read_by_the_servers_name () =
+  check (list string) "the frame the server broadcasts decodes to the push"
+    [ "internal_runs" ]
+    (List.map summary
+       (decode_all
+          [ "data: "
+            ^ Yojson.Safe.to_string (Masc.Internal_agent_runs_event.to_json ())
+            ^ "\n\n"
+          ]))
+
+(* The frame the bridge makes of the event the lane runtime publishes, so the
+   test reads what the wire carries rather than a hand-built copy of it. *)
+module Lane_events = Masc.Lane_addon_resource_events
+
+let lane_resource_frame ?detail lifecycle =
+  let resource =
+    { Lane_events.instance_id = "inst-7"
+    ; run_id = "run-7"
+    ; package_id = "masc-dos"
+    ; package_revision = "rev-1"
+    ; container_id = None
+    ; detail
+    }
+  in
+  match
+    Masc.Keeper_event_bridge.native_event_to_json
+      (Lane_events.event lifecycle resource)
+  with
+  | Some json -> "data: " ^ Yojson.Safe.to_string json ^ "\n\n"
+  | None -> fail "the bridge relays no frame for a lane resource event"
+
+(* Every lifecycle the lane runtime publishes is read as what it is, with the
+   package, the instance and the failure reason the payload carries. *)
+let test_every_lane_resource_lifecycle_is_read_with_its_payload () =
+  List.iter
+    (fun lifecycle ->
+      let name = Lane_events.wire_name lifecycle in
+      match decode_all [ lane_resource_frame ~detail:"image not found" lifecycle ] with
+      | [ Observer.Event (Observer.Lane_resource resource) ] ->
+          check bool (name ^ " keeps its lifecycle") true
+            (resource.Observer.lr_lifecycle = lifecycle);
+          check string (name ^ " names its package") "masc-dos"
+            resource.Observer.lr_package;
+          check string (name ^ " names its instance") "inst-7"
+            resource.Observer.lr_instance;
+          check (option string) (name ^ " keeps the reason") (Some "image not found")
+            resource.Observer.lr_detail
+      | decoded ->
+          failf "%s decoded as %s" name
+            (String.concat "; " (List.map summary decoded)))
+    Lane_events.all
+
+let test_a_lane_resource_without_a_reason_says_so () =
+  check (list string) "an acquisition carries no reason"
+    [ "lane_resource(masc-dos,inst-7,-)" ]
+    (List.map summary (decode_all [ lane_resource_frame Lane_events.Acquired ]))
+(* A run that ended says how long it ran, and a failed one why, read from
+   the payload the bridge writes. *)
+let test_an_ended_run_carries_its_elapsed_and_error () =
+  (match decode_all [ agent_completed_frame ] with
+   | [ Observer.Event
+         (Observer.Agent_core
+            { Observer.kind = Observer.Agent_completed { elapsed_s }; _ }) ] ->
+       check (float 0.) "a completed run's elapsed" 1.25 elapsed_s
+   | _ -> fail "expected one completed run");
+  match decode_all [ agent_failed_frame ] with
+  | [ Observer.Event
+        (Observer.Agent_core
+           { Observer.kind = Observer.Agent_failed { elapsed_s; error_code; error }; _ }) ] ->
+      check (float 0.) "a failed run's elapsed" 0.5 elapsed_s;
+      check string "its code" "provider_error" error_code;
+      check string "its error" "rate limited" error
+  | _ -> fail "expected one failed run"
+
+(* A failure whose payload does not satisfy the contract is a frame this
+   build cannot read, said with the reason, not a failure drawn without its
+   cause. *)
+let test_a_failed_run_without_its_error_is_undecodable () =
+  let frame =
+    "data: {\"type\":\"agent_core:agent_failed\",\"event_type\":\"agent_failed\",\
+     \"ts_unix\":1.0,\"agent_name\":\"analyst\",\
+     \"payload\":{\"agent_name\":\"analyst\",\"task_id\":\"evt-1\",\
+     \"elapsed_s\":0.5}}\n\n"
+  in
+  match decode_all [ frame ] with
+  | [ Observer.Undecodable reason ] ->
+      check bool
+        (Printf.sprintf "the reason names the payload: %s" reason)
+        true
+        (String.starts_with ~prefix:"agent_failed payload" reason)
+  | decoded ->
+      failf "expected an undecodable frame, got %s"
+        (String.concat "; " (List.map summary decoded))
+
 let test_what_this_build_was_not_taught_keeps_its_name () =
   check (list string) "snapshots are named, not retained; unknown types are named"
     [ "snapshot:execution_snapshot"
-    ; "other:internal_agent_runs_changed"
+    ; "other:brand_new_push"
     ; "agent_core(lane-smith,other:relay_dropped,-,turn=-,batch=-)"
     ]
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"execution_snapshot\",\"payload\":{\"keepers\":[]}}\n\n"
-          ; "data: {\"type\":\"internal_agent_runs_changed\"}\n\n"
+          ; "data: {\"type\":\"brand_new_push\"}\n\n"
           ; untaught_agent_core_frame
           ]));
   match decode_all [ untaught_agent_core_frame ] with
@@ -593,6 +710,16 @@ let () =
             test_multiline_frame_preserves_payload_and_cursor
         ; test_case "a line cut by the chunk boundary is held" `Quick
             test_a_line_cut_by_the_chunk_boundary_is_held
+        ; test_case "the internal runs push is read by the server's name" `Quick
+            test_the_internal_runs_push_is_read_by_the_servers_name
+        ; test_case "every lane resource lifecycle is read with its payload"
+            `Quick test_every_lane_resource_lifecycle_is_read_with_its_payload
+        ; test_case "a lane resource without a reason says so" `Quick
+            test_a_lane_resource_without_a_reason_says_so
+        ; test_case "an ended run carries its elapsed and error" `Quick
+            test_an_ended_run_carries_its_elapsed_and_error
+        ; test_case "a failed run without its error is undecodable" `Quick
+            test_a_failed_run_without_its_error_is_undecodable
         ; test_case "what this build was not taught keeps its name" `Quick
             test_what_this_build_was_not_taught_keeps_its_name
         ; test_case "streaming telemetry names no agent" `Quick

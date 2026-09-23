@@ -619,8 +619,18 @@ let render_overview (state : state) =
           if run > 1 then Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
           else ""
         in
-        Printf.sprintf "%s[%s]%s %s%s"
+        (* After the clock, so the clock column stays one column down the
+           panel and only the rows that carry a mark give up its two cells. *)
+        let mark =
+          match Masc_tui_types.overview_event_mark e with
+          | None -> ""
+          | Some glyph ->
+              Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph
+                Ansi.reset
+        in
+        Printf.sprintf "%s[%s]%s %s%s%s"
           Ansi.dim e.timestamp Ansi.reset
+          mark
           (Terminal_text.single_line e.content)
           tail
     in
@@ -1129,10 +1139,9 @@ let draw_ask_questions buf cols (state : state) ~budget =
     | Ask_answering { aam_ask_id } -> Some aam_ask_id
     | Ask_browsing -> None
   in
-  match state.asks_snapshot with
+  match Masc_tui_types.approvals_open_questions state with
   | None -> ()
-  | Some snapshot -> (
-      let open_rows = Ask_projection.open_rows snapshot in
+  | Some open_rows -> (
       box_divider buf cols;
       box_line buf cols
         (Printf.sprintf "  %s%s[?] Questions waiting on you (%d) · a:open answers%s" Ansi.bold (Theme.warn ())
@@ -1376,7 +1385,12 @@ let render_approvals (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let count = List.length approvals in
+  (* The same population the tab badge and the Overview row count: the
+     approval rows plus the open questions. This title counted the approval
+     rows alone, so an operator who came here from a badge of 1 was met with
+     "(0)" and had to find the question block further down to learn what the
+     badge had been counting. *)
+  let count = Masc_tui_types.approvals_surface_pending state in
   (* The count is what is on screen. It used to be the pending-confirm queue's
      own visible/total pair, and that queue is one of the three lists this
      screen draws: with seven Gate rows waiting and no confirm entries, the
@@ -1412,6 +1426,10 @@ let render_approvals (state : state) =
      with nothing in them, a bracket inside the parenthesis, and a total the
      one kind that did have rows had already said. With one kind its count is
      the total; with more, the total leads and the kinds follow it. *)
+  (* The questions a Keeper is waiting on are the fourth kind this surface
+     answers, and the only one whose word takes a plural, so it is built
+     beside the three rather than inside their format. *)
+  let question_count = Masc_tui_types.approvals_open_question_count state in
   let count_text =
     let kinds =
       [ (Theme.warn (), List.length state.keeper_tool_approvals, "held")
@@ -1423,6 +1441,15 @@ let render_approvals (state : state) =
              else
                Some
                  (Printf.sprintf "%s%d %s%s" style kind_count word Ansi.reset))
+    in
+    let kinds =
+      if question_count = 0 then kinds
+      else
+        kinds
+        @ [ Printf.sprintf "%s%s%s" (Theme.warn ())
+              (Masc_tui_message_layout.count_noun question_count "question")
+              Ansi.reset
+          ]
     in
     match kinds with
     | [] -> string_of_int count
@@ -2027,10 +2054,24 @@ let render_board_list (state : state) =
      read that failed, "(0)" read as a board with nothing on it. A count
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
+  (* What the board holds behind this page: the census over the whole board,
+     or over the hearth being read when one is narrowed, since the listing
+     itself is narrowed server-side. A hearth the census has not counted
+     leaves the page to speak for itself. *)
+  let holding =
+    match state.board_hearth with
+    | Some hearth -> List.assoc_opt hearth state.board_hearths
+    | None ->
+        (match state.board_hearths with
+         | [] -> None
+         | census ->
+             Some (List.fold_left (fun sum (_, count) -> sum + count) 0 census))
+  in
   let header = Printf.sprintf "%s %s%s  %s  %s"
     (screen_title " MASC Board")
     (match state.board_posts, board_list_page state ~error:board_list_error with
-     | _ :: _, _ | [], Page_empty -> Printf.sprintf "(%d)" count
+     | _ :: _, _ | [], Page_empty ->
+         board_list_count_text ~loaded:count ~holding
      | [], (Page_unread | Page_failed) ->
          title_missing_reading ~error:board_list_error)
     hearth timestamp
@@ -2766,7 +2807,7 @@ let render_planning_list (state : state) =
   box_bottom tail cols;
   Buffer.add_string tail
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
@@ -3393,7 +3434,7 @@ let render_planning_detail (state : state)
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints state.view));
+         (Masc_tui_keys.footer_hints ~detail_open:true state.view));
   finish_surface state ~clamped:(Planning_detail_scroll scroll)
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
 
@@ -3510,7 +3551,7 @@ let render_schedule_list (state : state) =
     (connection_badge state) in
 
   surface_chrome state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
-    ~hints:(Masc_tui_keys.footer_hints Schedules)
+    ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Schedules)
     ~body:(fun ~budget c ->
   (match state.schedules with
    | None ->
@@ -4063,7 +4104,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints Schedules));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true Schedules));
   finish_surface state ~clamped:(Schedule_detail_scroll scroll)
     ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols buf
 
@@ -4182,44 +4223,46 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
 let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ~now ~frame ~yolo ~paused ~health ~turn ~next_action ~keeper ~runtime =
   let status_color = keeper_action_color next_action in
-  (* A running turn takes the cell whole -- both the mark and the word.
-     Split, the mark and the word can answer from different readings and
-     the row argues with itself.
+  (* A keeper with an open turn draws the turn's mark in the HEALTH cell. The
+     mark moves while the turn is being worked: it is the one thing on the
+     screen that is changing as the reader looks at it.
 
-     The word is the elapsed time rather than "answering". The mark already
-     says it is answering, and it says so by moving; spending eight columns
-     to repeat that leaves no room for the fact the mark cannot carry, which
-     is how long. Eight seconds and forty minutes are different situations
-     and they used to be the same row. It also ends the truncation: this
-     column is cut for "healthy", and "answering" never fit in it.
+     The word beside it is how long the turn has run. The moving mark already
+     says the keeper is answering, and eight seconds and forty minutes are
+     different situations. It also fits: this column is cut for "healthy",
+     and "answering" does not.
+
+     A failing keeper keeps its health word. Its keepalive is running the
+     next attempt, so the mark still moves, but the roster header counts it
+     as failing and its row is where the reader looks for it. Beside the
+     elapsed time it would draw exactly what a working keeper draws. The
+     colour stays the one its next action gives it, as on its idle row.
+
+     A turn whose keeper the health reading calls offline was never closed
+     and nothing works it: the mark stops, the elapsed stays -- how long it
+     has been open is the fact -- and the cell takes the failure colour.
 
      Idle and unavailable rows keep the health word -- unavailable is the
      owner lookup failing, which the health column describes better than a
      blank would. *)
-  (* A turn record that outlives the process it belongs to. The summary above
-     this table read "2 offline / not running" while
-     one listed keeper's own row drew a turning mark and a climbing clock: its turn
-     had started and never been closed, and the process behind it had gone.
-     The row that most needed reading looked like the healthiest kind.
-
-     The elapsed stays -- a turn open two minutes is the fact -- but the mark
-     stops. Motion here means work is progressing, and for a keeper the health
-     reading calls offline, nothing is. A failing keeper's keepalive still runs
-     its turns, so its open turn is being worked; whether it fails is known
-     only when it ends. *)
-  let turn_is_being_worked =
-    match Option.map Tui_decode.keeper_health_reading health with
-    | Some Tui_decode.Health_offline -> false
-    | Some (Tui_decode.Health_running | Tui_decode.Health_idle | Tui_decode.Health_failing)
-    | None -> true
-  in
   let glyph, status_word, status_color =
     match (turn : Tui_decode.keeper_turn_state option) with
-    | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) ->
-      ( Masc_tui_answering.running_glyph
-          ~frame:(if turn_is_being_worked then frame else -1)
-      , Masc_tui_answering.elapsed_text ~now started_at_unix
-      , if turn_is_being_worked then (Theme.info ()) else (Theme.bad ()) )
+    | Some (Tui_decode.Keeper_turn_running { started_at_unix; _ }) -> (
+        let elapsed = Masc_tui_answering.elapsed_text ~now started_at_unix in
+        match
+          Masc_tui_keeper_mark.open_turn
+            (Option.map Tui_decode.keeper_health_reading health)
+        with
+        | Masc_tui_keeper_mark.Worked ->
+            (Masc_tui_answering.running_glyph ~frame, elapsed, Theme.info ())
+        | Masc_tui_keeper_mark.Worked_while_failing ->
+            ( Masc_tui_answering.running_glyph ~frame
+            , keeper_health_deviation_word health
+            , status_color )
+        | Masc_tui_keeper_mark.Left_open ->
+            ( Masc_tui_answering.running_glyph ~frame:(-1)
+            , elapsed
+            , Theme.bad () ))
     | Some Tui_decode.Keeper_turn_idle
     | Some (Tui_decode.Keeper_turn_unavailable _)
     | None ->
@@ -4346,6 +4389,26 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
     ]
 
 
+(* The conditions that share a phase with another: either health reading
+   makes a keeper failing, and a pending launch is one of the ways it is
+   offline. Each of the other conditions has a phase of its own, which the
+   lifecycle word already says, so naming it again would add nothing. *)
+let keeper_lane_phase_causes (conditions : Tui_decode.keeper_lane_conditions) =
+  List.filter_map
+    (fun (holds, words) -> if holds then Some words else None)
+    [ (not conditions.klc_turn_healthy, "last turn failed")
+    ; (not conditions.klc_heartbeat_healthy, "heartbeat failed")
+    ; (conditions.klc_launch_pending, "launch pending")
+    ]
+
+let keeper_lane_lifecycle_text (lane : Tui_decode.keeper_lane) =
+  let phase =
+    Terminal_text.single_line (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+  in
+  match keeper_lane_phase_causes lane.kl_conditions with
+  | [] -> phase
+  | causes -> Printf.sprintf "%s (%s)" phase (String.concat ", " causes)
+
 let keeper_operations_outcome_text = function
   | None -> "—"
   | Some (outcome : Tui_decode.keeper_lane_last_outcome) ->
@@ -4392,8 +4455,7 @@ let keeper_operations_preview (state : state) =
                   ; "  OPERATIONS"
                   ; Ansi.reset
                   ; "  lifecycle "
-                  ; Terminal_text.single_line
-                      (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
+                  ; keeper_lane_lifecycle_text lane
                   ; " · turn "
                   ; Terminal_text.single_line
                       (Tui_decode.keeper_lane_turn_phase_to_string
@@ -4402,9 +4464,6 @@ let keeper_operations_preview (state : state) =
                   ; keeper_lane_idle_text lane.kl_idle_seconds
                   ; " · last "
                   ; keeper_operations_outcome_text lane.kl_last_outcome
-                  ; " · "
-                  ; Terminal_text.single_line_or ~default:"no diagnosis"
-                      lane.kl_diagnosis
                   ; target_note
                   ]
             | None ->
@@ -4489,7 +4548,9 @@ let render_keeper_list (state : state) =
          else (Theme.warn ())
        in
        let blocker =
-         match fleet.fs_blocker with None -> "" | Some b -> "   blocker: " ^ b
+         match Masc_tui_fleet_line.blocker_text fleet with
+         | None -> ""
+         | Some text -> "   " ^ text
        in
        box_line buf cols
          (Printf.sprintf
@@ -4499,30 +4560,20 @@ let render_keeper_list (state : state) =
             (fleet.fs_target_reaction_capacity
             - fleet.fs_reaction_capacity_shortfall)
             fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
-       (* The phase snapshot partitions failing keepers into recovering,
-          configuration errors and explicit official-client session recovery.
-          Every failing Keeper belongs to exactly one class, so these three
-          counts sum to the displayed failing count. The latter two require
-          action beyond repeating the same turn. *)
        let failing_entry =
-         if fleet.fs_failing_count = 0 then []
-         else
-           [ Printf.sprintf "failing %d (retrying %d · config-blocked %d · session-recovery-required %d)"
-               fleet.fs_failing_count
-               fleet.fs_recovering_count
-               fleet.fs_turn_configuration_error_count
-               fleet.fs_official_client_recovery_required_count
-           ]
+         Option.to_list (Masc_tui_fleet_line.failing_text fleet)
        in
+       let entry label n =
+         if n > 0 then [ Printf.sprintf "%s %d" label n ] else []
+       in
+       (* The owner count keeps its place in the row and brings its own
+          shortfall, which is the only reading that says the scan came up
+          short: an unread Keeper does not move the fleet status. *)
        let counts =
          failing_entry
-         @ (List.filter (fun (_, n) -> n > 0)
-              [ ("paused", fleet.fs_paused_count)
-              ; ( "task owner without fiber"
-                , fleet.fs_active_task_owner_without_fiber_count )
-              ; ("awaiting verdict", fleet.fs_completion_authority_pending_count)
-              ]
-            |> List.map (fun (label, n) -> Printf.sprintf "%s %d" label n))
+         @ entry "paused" fleet.fs_paused_count
+         @ Option.to_list (Masc_tui_fleet_line.owner_scan_text fleet)
+         @ entry "awaiting verdict" fleet.fs_completion_authority_pending_count
        in
        if counts <> [] then
          box_line buf cols
@@ -5198,7 +5249,7 @@ let render_lanes_overview (state : state) =
    | Some picker ->
        box_line_styled buf cols ~style:(Theme.info ())
          (Printf.sprintf
-            "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+            "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
             (Terminal_text.single_line picker.Masc_tui_types.rlp_lane));
        if picker.Masc_tui_types.rlp_choices = [] then
          box_line_styled buf cols ~style:(Theme.recede ())
@@ -6332,16 +6383,6 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
      row it says the coverage, and on an unattached one it says the service
      is already in use somewhere, which is the row an operator is most likely
      to have lost track of. *)
-  let switch_of id =
-    List.find_map
-      (function
-        | Masc_tui_types.Identity_declared
-            { idp_id; idp_enabled; idp_switch_problem; _ }
-          when String.equal idp_id id -> Some (idp_enabled, idp_switch_problem)
-        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _
-          -> None)
-      providers
-  in
   let also_on id =
     List.find_map
       (function
@@ -6356,24 +6397,22 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     List.mapi
       (fun index (id, label) ->
         (* Attached-and-offering-nothing is a third state. Reading it as "not
-           attached" would tell an operator to consent again for no reason. *)
+           attached" would tell an operator to consent again for no reason.
+           The reading itself is [Masc_tui_types.identity_row_state], which
+           is also what the summary above the list counts, so the line and
+           the rows cannot disagree about what this Keeper holds. *)
         let row_state =
-          match tools_of id with
-          | None -> Ansi.dim ^ "not attached" ^ Ansi.reset
-          | Some [] -> Ansi.dim ^ "attached, no tools" ^ Ansi.reset
-          | Some names -> (
-              (* The switch outranks the tool count: a service an operator
-                 turned off is handing this keeper nothing, however many
-                 tools its catalog names, and an unreadable switch store
-                 must not render as on. *)
-              match switch_of id with
-              | Some (_, Some _) ->
-                  (Theme.bad ()) ^ "switch unreadable" ^ Ansi.reset
-              | Some (Some false, None) ->
-                  (Theme.warn ()) ^ "off" ^ Ansi.reset
-              | Some ((Some true | None), None) | None ->
-                  Printf.sprintf "%s%s%s" (Theme.ok ())
-                    (Masc_tui_message_layout.count_noun (List.length names) "tool") Ansi.reset)
+          match Masc_tui_types.identity_row_state ~providers ~id with
+          | Masc_tui_types.Identity_not_attached ->
+              Ansi.dim ^ "not attached" ^ Ansi.reset
+          | Identity_attached_without_tools ->
+              Ansi.dim ^ "attached, no tools" ^ Ansi.reset
+          | Identity_switch_unreadable ->
+              (Theme.bad ()) ^ "switch unreadable" ^ Ansi.reset
+          | Identity_switched_off -> (Theme.warn ()) ^ "off" ^ Ansi.reset
+          | Identity_attached tools ->
+              Printf.sprintf "%s%s%s" (Theme.ok ())
+                (Masc_tui_message_layout.count_noun tools "tool") Ansi.reset
         in
         (* The row the arrows are on is marked rather than merely numbered:
            past nine the number is no longer a key an operator can press,
@@ -6490,7 +6529,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   in
   if numbered = [] && rejected = [] && state.identity_filter <> None then
     Masc_tui_types.identity_preamble
-      ~keeper:(Terminal_text.single_line k.k_name)
+      ~summary:(Masc_tui_types.identity_summary ~providers ~query)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
@@ -6499,7 +6538,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
     Masc_tui_types.identity_preamble
-      ~keeper:(Terminal_text.single_line k.k_name)
+      ~summary:(Masc_tui_types.identity_summary ~providers ~query)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
@@ -6728,7 +6767,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                         | _ -> id)
                      lane.rrl_runtime_ids)
               in
-              add_row "Failover Chain:" hops;
+              add_row "Candidate Chain:" hops;
               (match lane.rrl_runtime_ids with
                | first :: _ -> add_row "Head Candidate:" first
                | [] -> ())
@@ -6801,7 +6840,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
          (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_input_tokens
             activity.Keeper_activity.aw_output_tokens);
        add_row "Cost:"
-         (Printf.sprintf "$%.4f" activity.Keeper_activity.aw_cost_usd);
+         (match activity.Keeper_activity.aw_cost_usd with
+          | Some cost -> Printf.sprintf "$%.4f" cost
+          | None -> Ansi.dim ^ "not priced by the provider" ^ Ansi.reset);
        add_row "Tool Calls:"
          (string_of_int activity.Keeper_activity.aw_tool_calls);
        add_row "Top Tools:"
@@ -6886,15 +6927,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             | Connector_stale -> "STALE"
           in
           let connection_label (connector : Tui_decode.connector) =
+            let word =
+              Masc_tui_connector_state.badge_word connector.cn_connection
+            in
             match connector.cn_connection with
             | Tui_decode.Connector_connected ->
-                (Theme.ok ()) ^ "● CONNECTED" ^ Ansi.reset
+                (Theme.ok ()) ^ "● " ^ word ^ Ansi.reset
             | Connector_connected_unavailable ->
-                (Theme.warn ()) ^ "● CONNECTED / UNAVAILABLE" ^ Ansi.reset
-            | Connector_disconnected ->
-                (Theme.bad ()) ^ "● DISCONNECTED" ^ Ansi.reset
-            | Connector_offline -> Ansi.dim ^ "○ UNAVAILABLE" ^ Ansi.reset
-            | Connector_stale -> (Theme.warn ()) ^ "● STALE" ^ Ansi.reset
+                (Theme.warn ()) ^ "● " ^ word ^ Ansi.reset
+            | Connector_disconnected -> (Theme.bad ()) ^ "● " ^ word ^ Ansi.reset
+            | Connector_offline -> Ansi.dim ^ "○ " ^ word ^ Ansi.reset
+            | Connector_stale -> (Theme.warn ()) ^ "● " ^ word ^ Ansi.reset
           in
           let transport_rows =
             List.mapi
@@ -7001,16 +7044,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                     (match selected_binding with
                      | None -> "(no binding selected)"
                      | Some binding -> binding_reference binding)
-                ; Printf.sprintf "  %-18s %s · %s" "Connection"
+                  (* The badge is read from the status the row would print
+                     beside it ([decode_connector_connection] takes status,
+                     available and connected), so the word never differs from
+                     the badge and the row said the same thing twice. *)
+                ; Printf.sprintf "  %-18s %s" "Connection"
                     (connection_label connector)
-                    (Terminal_text.single_line connector.cn_status)
                 ; Printf.sprintf "  %-18s %s" "MASC API"
                     (Printf.sprintf "%s:%d"
                        Masc_network_defaults.masc_http_loopback_peer state.port)
                 ; Printf.sprintf "  %-18s %s" "Channel type"
                     (Terminal_text.single_line_or ~default:"-" connector.cn_channel)
                 ]
-                @ optional_row "Runtime state" runtime_state
+                @ optional_row "Runtime state"
+                    (Masc_tui_connector_state.runtime_state_to_draw
+                       ~connection:connector.cn_connection runtime_state)
                 @ optional_row "Status source" connector.cn_status_source
                 @ optional_row "Remote endpoint" connector.cn_endpoint
                 @ optional_row "Status file" connector.cn_status_path
@@ -8007,6 +8055,11 @@ let render_verification_list (state : state) =
             ^ Render_schedule.verification_row ~submitter_width ~title_width
                 { Render_schedule.vrow_task =
                     Terminal_text.single_line r.vr_task_id
+                ; vrow_verdict =
+                    (match r.vr_intent with
+                     | Some intent ->
+                         Masc_domain.verification_intent_to_string intent
+                     | None -> "")
                 ; vrow_submitted_by =
                     Terminal_text.single_line r.vr_submitted_by
                 ; vrow_evidence = evidence
@@ -8108,7 +8161,7 @@ let render_verification_list (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
 let verification_detail_lines ~width
@@ -8141,6 +8194,12 @@ let verification_detail_lines ~width
   ; field "Task" request.vr_task_id
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
+  ; field "Waits on"
+      (match request.vr_intent with
+       | Some Masc_domain.Cancel_task ->
+           "cancel -- only an operator's verdict clears it"
+       | Some Masc_domain.Complete_task -> "complete"
+       | None -> "not joined (history view)")
     (* In the terminal's zone, like every other Created on a detail. This
        one printed the server's RFC 3339 text, offset and all, under a header
        clock in local time. *)
@@ -8292,7 +8351,9 @@ let render_verification_detail (state : state) request =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf "%s  %s" (Masc_tui_keys.footer_hints state.view) position));
+         (Printf.sprintf "%s  %s"
+            (Masc_tui_keys.footer_hints ~detail_open:true state.view)
+            position));
   finish_surface state
     ~clamped:(Verification_detail_scroll scroll)
     ~surface_key:"verification-detail" ~rows:terminal_rows ~cols buf
@@ -8565,7 +8626,8 @@ let render_harness_list (state : state) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view ^ link_hint));
+       ~hints:
+         (Masc_tui_keys.footer_hints ~detail_open:false state.view ^ link_hint));
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
 (* Which goals the judged task serves, and what those goals are aiming at.
@@ -8751,10 +8813,14 @@ let render_harness_detail (state : state) verdict =
     end
   in
   Buffer.add_string buf
+    (* The key table, not a literal. This row was written out here, and what
+       it left out was the pair that answers a ruling -- [y / x] -- on the one
+       screen that exists for reading a ruling in full. It also left out
+       [[ / ]], which the dispatcher answers here and only here. *)
     (footer_line state ~max_cells:cols
        ~hints:
-         (Printf.sprintf
-            "j/k:scroll  PgUp/PgDn:page  Left / Esc:list  Y:copy task  r:refresh  %s"
+         (Printf.sprintf "%s  %s"
+            (Masc_tui_keys.footer_hints ~detail_open:true Masc_tui_types.Harness)
             position));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
@@ -8772,19 +8838,6 @@ let render_harness (state : state) =
        | Some verdict -> render_harness_detail state verdict
        | None -> render_harness_list state)
   | Some _, None | None, _ -> render_harness_list state
-
-let fusion_run_stage_compact = function
-  | Fusion_stage_accepted -> "accepted"
-  | Fusion_stage_panel { frs_expected } ->
-      Printf.sprintf "panel(%d)" frs_expected
-  | Fusion_stage_judge { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "judge(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_computed { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "computed(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_recording_evidence { frs_answered; frs_failed; _ } ->
-      Printf.sprintf "recording(%d/%d)" frs_answered frs_failed
-  | Fusion_stage_completed -> "completed"
-  | Fusion_stage_failed -> "failed"
 
 (* What became of the selected run, in one row under the list. It opened
    with "Flow: Question → Panel → Judge → Evidence" on every run: the four
@@ -8955,11 +9008,8 @@ let render_fusion_list (state : state) =
               Ansi.reverse ^ ">" ^ Ansi.reset else " " in
           box_line buf cols (marker ^ " " ^ line)
       | Some (Tui_decode.Fusion_retained_run run) ->
-          let status = fusion_run_status_to_string run.fur_status in
           let state_text =
-            match run.fur_status with
-            | Fusion_running -> fusion_run_stage_compact run.fur_stage
-            | Fusion_completed | Fusion_failed _ -> status
+            fusion_run_state_text ~status:run.fur_status ~stage:run.fur_stage
           in
           let line =
             Render_schedule.fusion_row columns
@@ -9701,9 +9751,19 @@ let repository_context_lines ~width (repo : Masc.Tui_decode.repository) =
     | [] -> "none assigned"
     | names -> String.concat ", " names
   in
+  (* The status column has room for the word and not for the cause, and a
+     repository whose clone or fetch failed keeps that cause in its status.
+     The row says "error" and this says what it was; every other status has
+     nothing here to add. *)
+  let failure =
+    match Masc.Tui_decode.repository_status_reason repo.rp_status with
+    | None -> []
+    | Some reason -> wrap "Error" reason
+  in
   wrap "Path" repo.rp_resolved_local_path
   @ stored_path
   @ wrap "Keepers" keepers
+  @ failure
 
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
@@ -9843,7 +9903,9 @@ let render_repository_list (state : state) =
                         Terminal_text.single_line r.rp_name
                     ; wrow_branch =
                         Terminal_text.single_line r.rp_default_branch
-                    ; wrow_status = Terminal_text.single_line r.rp_status
+                    ; wrow_status =
+                        Terminal_text.single_line
+                          (Masc.Tui_decode.repository_status_word r.rp_status)
                     ; wrow_sync = (if r.rp_auto_sync then "auto" else "manual")
                     ; wrow_path =
                         Terminal_text.single_line r.rp_resolved_local_path
@@ -11449,7 +11511,7 @@ let render_runtime (state : state) =
    | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
    | Some ({ se_target = Masc_tui_types.Media_failover_slots; _ } as editor) ->
        c.push_styled ~style:(Theme.info ())
-         "  [runtime].media_failover — the order the vision fleet is called in";
+         "  [runtime].media_failover — the Runtime Candidate Order for the vision fleet";
        let entries = Masc_tui_types.slot_editor_rows state in
        if entries = [] then
          c.push_styled ~style:(Theme.recede ())
@@ -11475,10 +11537,10 @@ let render_runtime (state : state) =
               Printf.sprintf "  first runtime of new lane %s — j/k move, Enter create, e cancel"
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_conversation_lane lane | Masc_tui_types.Pick_exact_lane lane ->
-              Printf.sprintf "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+              Printf.sprintf "  adding a candidate to the candidate order of %s — j/k move, Enter append, e cancel"
                 (Terminal_text.single_line lane)
           | Masc_tui_types.Pick_media_failover ->
-              "  adding to the vision fleet [runtime].media_failover — j/k move, Enter append, e cancel"
+              "  adding to [runtime].media_failover, the Runtime Candidate Order for the vision fleet — j/k move, Enter append, e cancel"
           | Masc_tui_types.Pick_route_default ->
               (* Replaces rather than appends, and the row it replaces is
                  marked "(already a candidate)" in the choices below. *)
@@ -11518,7 +11580,7 @@ let render_runtime (state : state) =
       | Page_unread -> page_unread_note
       | Page_empty ->
           (match state.runtime_mode with
-           | Masc_tui_types.Runtime_lanes -> "  (no runtime lanes configured)"
+           | Masc_tui_types.Runtime_lanes -> "  (no runtime candidate orders configured)"
            | Masc_tui_types.Runtime_all -> "  (no runtimes configured)")
     in
     c.push_styled ~style:(Theme.recede ()) empty;
@@ -12114,6 +12176,8 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_chat_stream_frame _
       | Masc_tui_observer.Keeper_waiting_inventory_changed _
       | Masc_tui_observer.Fusion_run_status _
+      | Masc_tui_observer.Internal_agent_runs_changed
+      | Masc_tui_observer.Lane_resource _
       | Masc_tui_observer.Snapshot _
       | Masc_tui_observer.Other _ ->
           None
@@ -14261,24 +14325,11 @@ let render_themes (state : state) =
        ~hints:(Masc_tui_keys.footer_hints_config ~pane:state.config_pane));
   finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
 
-(* The model knobs sit in different tables -- [reasoning-effort] and
-   [temperature] under [models.NAME], [max-tokens] under
-   [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
-   bottom never puts them side by side. On 2026-08-29 nine of ten
-   ollama_cloud bindings carried neither; a request with no reasoning_effort
-   has Ollama turn thinking on by itself, and one keeper spent a turn
-   producing 2,000 characters of reasoning and no answer. This pane is the
-   same source the runtime.toml pane shows, arranged so a missing knob is a
-   column and not an absence.
-
-   Read-only. Editing lands in the runtime.toml pane next door, which already
-   has the preview-checked write path. *)
 (* Where the config file being read lives, for the title row beside the strip
-   that already names the file. Said from the server's masc root: the prefix is
-   the same for every screen in the session, the Config pane's identity row
-   names it, and spending it here cut the reading in the middle -- the row read
-   "/Users/d\xe2\x80\xa6onfig/runtime.toml". Until the server has said where
-   its root is, the whole path is the only honest reading. *)
+   that already names the file. Said from the server's masc root, which is the
+   same for every screen in the session and named on the Config pane's identity
+   row. Until the server has said where its root is, the whole path is the only
+   honest reading. *)
 let config_path_note (state : state) =
   match state.runtime_config_view with
   | Some reading ->
@@ -14293,6 +14344,18 @@ let config_path_note (state : state) =
   | None ->
       Ansi.dim ^ title_missing_reading ~error:state.runtime_config_view_error ^ Ansi.reset
 
+(* The model knobs sit in different tables -- [reasoning-effort] and
+   [temperature] under [models.NAME], [max-tokens] under
+   [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
+   bottom never puts them side by side. On 2026-08-29 nine of ten
+   ollama_cloud bindings carried neither; a request with no reasoning_effort
+   has Ollama turn thinking on by itself, and one keeper spent a turn
+   producing 2,000 characters of reasoning and no answer. This pane is the
+   same source the runtime.toml pane shows, arranged so a missing knob is a
+   column and not an absence.
+
+   Read-only. Editing lands in the runtime.toml pane next door, which already
+   has the preview-checked write path. *)
 let render_config_models (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in

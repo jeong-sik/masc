@@ -56,7 +56,13 @@ let test_one_mark_means_one_stage_across_the_two_rows () =
   in
   let backlog =
     Masc_tui_render_prim.planning_backlog_counts
-      { pb_todo = 1; pb_claimed = 1; pb_running = 1; pb_done = 1; pb_cancelled = 1 }
+      { pb_todo = 1
+      ; pb_claimed = 1
+      ; pb_running = 1
+      ; pb_awaiting_verification = 1
+      ; pb_done = 1
+      ; pb_cancelled = 1
+      }
   in
   let backlog_label key =
     match List.find_opt (fun (k, _, _) -> String.equal k key) backlog with
@@ -104,7 +110,13 @@ let test_the_row_names_the_goals_with_no_outcome () =
 let test_the_backlog_spells_a_state_as_a_task_row_does () =
   let backlog =
     Masc_tui_render_prim.planning_backlog_counts
-      { pb_todo = 0; pb_claimed = 1; pb_running = 1; pb_done = 0; pb_cancelled = 0 }
+      { pb_todo = 0
+      ; pb_claimed = 1
+      ; pb_running = 1
+      ; pb_awaiting_verification = 1
+      ; pb_done = 0
+      ; pb_cancelled = 0
+      }
   in
   let label key =
     match List.find_opt (fun (k, _, _) -> String.equal k key) backlog with
@@ -120,6 +132,14 @@ let test_the_backlog_spells_a_state_as_a_task_row_does () =
          (label key))
     [ ("claimed", Masc_domain.Claimed { assignee = "a"; claimed_at = "t" })
     ; ("in_progress", Masc_domain.InProgress { assignee = "a"; started_at = "t" })
+    ; ( "awaiting_verification"
+      , Masc_domain.AwaitingVerification
+          { assignee = "a"
+          ; started_at = "t"
+          ; submitted_at = "t"
+          ; intent = Masc_domain.Complete_task
+          ; verification_id = "v-1"
+          } )
     ]
 
 let () =

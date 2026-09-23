@@ -15,10 +15,12 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
   let h2_respond_auth_error error =
-    let status = Server_auth.http_status_of_auth_error error in
+    let status, body =
+      Server_auth.auth_refusal_response ~protocol:"h2" ~path error
+    in
     h2_respond_json
       h2_reqd
-      (Server_auth.auth_error_json error)
+      body
       ~status:(status :> H2.Status.t)
       ~extra_headers:(Server_auth.auth_error_headers ~status ~cors)
   in
@@ -245,7 +247,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            let response = H2.Response.create ~headers `OK in
            let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
            H2.Body.Writer.write_string writer body;
-           H2.Body.Writer.close writer
+           h2_close_after_flush writer
        | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
@@ -259,7 +261,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            let response = H2.Response.create ~headers `OK in
            let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
            H2.Body.Writer.write_string writer body;
-           H2.Body.Writer.close writer
+           h2_close_after_flush writer
        | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
@@ -298,7 +300,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
              let response = H2.Response.create ~headers `OK in
              let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
              H2.Body.Writer.write_string writer final_body;
-             H2.Body.Writer.close writer
+             h2_close_after_flush writer
          | Error error ->
            (match Web_dashboard.asset_error_http_status error with
             | `Not_found ->

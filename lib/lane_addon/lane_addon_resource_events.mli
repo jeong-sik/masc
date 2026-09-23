@@ -35,9 +35,18 @@ type resource = {
       (** Failure reason for the failed/incomplete variants. *)
 }
 
+val all : lifecycle list
+(** Every lifecycle, once each. A reader of the wire recognises an event by
+    walking this list through {!wire_name} rather than by holding its own copy
+    of the four names. *)
+
 val wire_name : lifecycle -> string
 (** Closed mapping to the four [masc.lane.resource.*] wire names. Subscribers
     rely on the exact strings; tests pin them. *)
+
+val event : lifecycle -> resource -> Agent_core.Event_bus.event
+(** The occurrence {!publish} puts on the bus. Exposed so a reader of the wire
+    can be tested against the frame the bridge makes of it. *)
 
 val publish : lifecycle -> resource -> unit
 (** Publish on the MASC-owned bus with [correlation_id = instance_id] and

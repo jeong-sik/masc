@@ -128,6 +128,7 @@ type planning_backlog = {
   pb_todo : int;
   pb_claimed : int;
   pb_running : int;
+  pb_awaiting_verification : int;
   pb_done : int;
   pb_cancelled : int;
 }
@@ -814,6 +815,19 @@ val runtime_probe_status_to_string : runtime_probe_status -> string
 val runtime_provider_status_to_string : runtime_provider_status -> string
 
 (** A repository the workspace tracks. *)
+type repository_status =
+  | Repository_status of Repo_manager_types.repository_status
+  | Unrecognised_repository_status of string
+(** What the server said a repository's status is. [Repo_manager_types] owns
+    the four words and the reason [Error] carries; an unrecognised word is the
+    reading of a server newer than this build. *)
+
+val repository_status_word : repository_status -> string
+(** The word to draw for this status. *)
+
+val repository_status_reason : repository_status -> string option
+(** The cause behind the word, which only [Error] has. *)
+
 type repository = {
   rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
@@ -829,7 +843,7 @@ type repository = {
           operations; clients display this value instead of guessing against
           their own cwd *)
   rp_default_branch : string;
-  rp_status : string;
+  rp_status : repository_status;
   rp_keepers : string list;  (** Which keepers work in it. *)
   rp_auto_sync : bool;
 }
@@ -1129,6 +1143,11 @@ type verification_request = {
   vr_task_title : string;
       (** What would move it forward, when the server can say. *)
   vr_submitted_by : string;
+  vr_intent : Masc_domain.verification_intent option;
+      (** Which verdict the row waits on, when the server joined the backlog
+          (the awaiting view): a completion, or a cancellation that only an
+          operator's verdict clears. [None] in the history view, which has
+          no join, and drawn as nothing rather than as [complete]. *)
   vr_created_at : string;
   vr_required_artifacts : string list;
   vr_submitted_evidence : string list;
@@ -1276,15 +1295,23 @@ type keeper_lane_last_outcome = {
   klo_selected_model : string option;
 }
 
+(** The phase conditions that can each put a keeper in the same phase:
+    either health reading makes it failing, and a pending launch is one of
+    the ways it is offline. The other conditions each have a phase of their
+    own, which [kl_phase] already names. *)
+type keeper_lane_conditions = {
+  klc_launch_pending : bool;
+  klc_heartbeat_healthy : bool;
+  klc_turn_healthy : bool;  (** [false] once a turn fails, until one succeeds. *)
+}
+
 type keeper_lane = {
   kl_keeper : string;
   kl_phase : keeper_lane_phase;
   kl_turn_phase : keeper_lane_turn_phase;
   kl_idle_seconds : int;
   kl_last_outcome : keeper_lane_last_outcome option;
-  kl_diagnosis : string option;
-      (** The producer's determining condition, or [None] when no condition
-          currently determines the phase. *)
+  kl_conditions : keeper_lane_conditions;
 }
 
 type keeper_lanes_snapshot = {
@@ -2005,9 +2032,16 @@ val decode_runtime_resolved :
 (** Decode the shared resolved-runtime document once, then project its runtime
     catalogue and keeper assignments for the picker, both in server order. *)
 
+(** The fleet scan's [blocker], read as the reason it names. A name this
+    build does not know is kept by name: a newer server's reason is still a
+    reason, and is drawn as the server wrote it rather than dropped. *)
+type fleet_blocker =
+  | Blocker of Keeper_fleet_blocker.t
+  | Unrecognised_blocker of string
+
 type fleet_safety = {
   fs_status : string;
-  fs_blocker : string option;
+  fs_blocker : fleet_blocker option;
   fs_operator_action_required : bool;
   fs_bootable_count : int;
   fs_running_count : int;
@@ -2026,6 +2060,9 @@ type fleet_safety = {
   fs_official_client_recovery_required_names : string list;
   fs_active_task_owner_without_fiber_count : int;
   fs_completion_authority_pending_count : int;
+  fs_active_task_owner_scan_error_count : int;
+      (** Sources the task-owner scan could not read, so the count above is
+          short by whatever they held. *)
 }
 (** The operator reading of the keeper fleet, as [/health?full=1] reports it.
 

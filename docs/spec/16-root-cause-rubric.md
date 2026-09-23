@@ -90,7 +90,7 @@ The rubric is applied two ways:
 |-------|---------|
 | Label | `root/ndt` |
 | Marker | A step whose outcome is not deterministic (provider call, network, scheduler) is treated as if it were: no retry, no fallback lane, no jitter, so one unlucky outcome becomes a stuck state |
-| Example | A single-candidate runtime lane makes failover a no-op; a keeper turn that ends on the first provider error |
+| Example | A single-candidate runtime candidate order makes the fallback a no-op; a keeper turn that ends on the first provider error |
 | Issue body triggers | "no retry", "no fallback", "single candidate", "stuck after one failure", "jitter" |
 
 ## Mapping from Prior Categorizations

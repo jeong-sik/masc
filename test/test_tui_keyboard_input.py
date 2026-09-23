@@ -1273,6 +1273,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
                     "todo": 0,
                     "claimed": 0,
                     "in_progress": 0,
+                    "awaiting_verification": 0,
                     "done": 0,
                     "cancelled": 0,
                 },
@@ -1395,6 +1396,7 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
                 "todo": 0,
                 "claimed": 0,
                 "in_progress": 0,
+                "awaiting_verification": 0,
                 "done": 0,
                 "cancelled": 0,
             },
@@ -2951,6 +2953,51 @@ def first_install_waits_for_its_workspace_interaction(
     if b"masc login" in screen:
         raise AssertionError(
             f"a first install was handed the login command: {screen!r}"
+        )
+    # The pending workspace is the ordinary path, so its row carries no error
+    # mark: the clock's bracket is followed straight by the sentence.
+    if b"] no operator token yet" not in screen:
+        raise AssertionError(
+            f"the pending workspace row is marked as an error: {screen!r}"
+        )
+    os.write(master_fd, b"q")
+
+
+def seed_a_workspace_that_refuses_a_credential(base_path: str) -> None:
+    """A workspace that is here and cannot take a credential.
+
+    ``.masc/auth`` exists, so the boot decision is to mint; ``agents`` beside
+    it is a file where the credential store is a directory, so the mint's
+    write fails. A file rather than a read-only directory because a runner
+    that tests as root writes through a mode bit, and would mint.
+    """
+    auth = Path(base_path) / ".masc" / "auth"
+    auth.mkdir(parents=True)
+    (auth / "agents").write_text("not a directory\n", encoding="utf-8")
+
+
+def failed_mint_is_marked_as_an_error_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A mint that failed reads as an error on the Overview events pane.
+
+    Its row carries the chat pane's failure glyph after the clock, which a
+    pending workspace's row does not; the mark is a shape, so it holds under
+    NO_COLOR as well. The pane trims the sentence at its width, so the needle
+    is the mark and the notice's opening.
+    """
+    wait_for_output(
+        process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+    )
+    drain_until_quiet(process, master_fd, output)
+    screen = screen_text(bytes(output))
+    if b"\xe2\x9c\x97 no operator token, and" not in screen:
+        raise AssertionError(
+            f"a failed mint did not read as a marked error: {screen!r}"
         )
     os.write(master_fd, b"q")
 
@@ -8580,13 +8627,19 @@ def skills_usage_clarity_interaction(
         ]
         expected.extend(f"Unavailable: {reason}".encode() for reason in unavailable)
         if observed:
-            expected.extend((b"work-intake", b"alpha 12/12/9", b"2026-08-28T03:04:05Z"))
+            expected.extend((b"work-intake", b"alpha"))
         for needle in expected:
             if needle not in rendered:
                 raise AssertionError(f"Skill usage did not show {needle!r}: {usage!r}")
+        # One keeper, one row, counts in their own columns (#37830). The time is
+        # the terminal's zone, so only the date's shape is pinned.
+        if observed and not re.search(rb"alpha\s+12\s+12\s+9\s+\d{4}-", rendered):
+            raise AssertionError(
+                f"the keeper's counts are not in their own columns: {usage!r}"
+            )
         if b"never invoked" in rendered:
             raise AssertionError(f"Unknown historical usage was called never invoked: {usage!r}")
-        if not observed and b"alpha 12/12/9" in rendered:
+        if not observed and re.search(rb"alpha\s+12\s+12\s+9", rendered):
             raise AssertionError(f"Unobserved usage inherited a previous count: {usage!r}")
         os.write(master_fd, b"q")
 
@@ -8641,7 +8694,7 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
             if initial_error:
                 if b"unavailable (no catalog reading)" not in rendered:
                     raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
-            elif b"alpha 12/12/9" not in rendered:
+            elif not re.search(rb"alpha\s+12\s+12\s+9\s+\d{4}-", rendered):
                 raise AssertionError(f"Refresh failure lost the previous known counts: {frame!r}")
             os.write(master_fd, b"q")
 
@@ -10678,7 +10731,7 @@ def keeper_lane_row(
     idle_seconds: int,
     runtime_state: str | None,
     selected_model: str | None,
-    diagnosis: str | None,
+    turn_healthy: bool = True,
 ) -> dict[str, object]:
     last_outcome: object = None
     if runtime_state is not None:
@@ -10692,7 +10745,13 @@ def keeper_lane_row(
         "turn_phase": turn_phase,
         "idle_seconds": idle_seconds,
         "last_outcome": last_outcome,
-        "phase_diagnosis": {"determining_condition": diagnosis},
+        "phase_diagnosis": {
+            "conditions": {
+                "launch_pending": False,
+                "heartbeat_healthy": True,
+                "turn_healthy": turn_healthy,
+            }
+        },
     }
 
 
@@ -10725,11 +10784,10 @@ def keeper_lanes_ia_interaction(
         keepers_plain = CSI_RE.sub(b"", keepers).decode("utf-8")
         for needle in (
             "OPERATIONS",
-            "lifecycle failing",
+            "lifecycle failing (last turn failed)",
             "turn executing",
             "idle 59m",
             "last done",
-            "failing_unhealthy",
         ):
             if needle not in keepers_plain:
                 raise AssertionError(
@@ -13058,7 +13116,7 @@ def fusion_list_detail_interaction(
         send_and_wait(process, master_fd, output, b"\r", b"EVALUATOR VERDICT")
         # The heading precedes asynchronous task/goal enrichment. Inspect one
         # completed screen after both the linked goal and footer are present.
-        observed = (b"masc://planning/goal-ssim-501", b"Left / Esc:list")
+        observed = (b"masc://planning/goal-ssim-501", b"Left / Esc:back")
         for needle in observed:
             wait_for_output(process, master_fd, output, needle,
                             start=verdict_start, timeout=10.0)
@@ -13081,8 +13139,16 @@ def fusion_list_detail_interaction(
             b"masc://planning/goal-ssim-501",
             # #35734 spells hint keys the way the key table does: "Left", not
             # "left"; and with the table's spaces, which is the spelling the
-            # footer's pin reads.
-            b"Left / Esc:list",
+            # footer's pin reads. The label is the table's own ("back") now
+            # that this footer is read from the table rather than written out
+            # in the renderer, where it read "list".
+            b"Left / Esc:back",
+            # #36652: the hand-written row left these two out. [ / ] is
+            # answered here and only here, and the pair that answers a ruling
+            # was missing from the one screen that exists for reading a ruling
+            # in full. The pair is pinned, so a narrow footer keeps it.
+            b"[ / ]:previous / next",
+            b"y / x:agree / overrule",
         ):
             if needle not in verdict_plain:
                 raise AssertionError(
@@ -14074,7 +14140,6 @@ def run_keyboard_regression(executable: str) -> None:
                     idle_seconds=75,
                     runtime_state="done",
                     selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
                 ),
                 keeper_lane_row(
                     "beta",
@@ -14083,7 +14148,7 @@ def run_keyboard_regression(executable: str) -> None:
                     idle_seconds=3599,
                     runtime_state="done",
                     selected_model=None,
-                    diagnosis="failing_unhealthy",
+                    turn_healthy=False,
                 ),
             ]
         )
@@ -14782,6 +14847,104 @@ def run_ctrl_y_regression(executable: str) -> None:
     )
 
 
+def exit_reason_log(base_path: str) -> str:
+    """Everything the TUI wrote to its own per-PID stderr log, or "".
+
+    The TUI redirects stderr to ``.masc/logs/masc-tui-<pid>.log`` at boot, so
+    the exit line lands there. The pid is the TUI's, not the launcher shell's,
+    so the file is found by glob rather than by name.
+    """
+    logs = sorted(Path(base_path, ".masc", "logs").glob("masc-tui-*.log"))
+    if not logs:
+        return ""
+    return logs[-1].read_text(encoding="utf-8", errors="replace")
+
+
+def wait_for_exit_reason(base_path: str, needle: str, timeout: float = 10.0) -> str:
+    """The log text once it carries [needle], or an assertion naming what it held.
+
+    The line is written as the process exits, so the read races the write; the
+    poll is what makes the scenario wait for the fact rather than for a sleep.
+    """
+    deadline = time.monotonic() + timeout
+    text = ""
+    while time.monotonic() < deadline:
+        text = exit_reason_log(base_path)
+        if needle in text:
+            return text
+        time.sleep(0.05)
+    raise AssertionError(
+        f"no exit reason {needle!r} in {base_path}/.masc/logs/masc-tui-*.log; "
+        f"the log held:\n{text}"
+    )
+
+
+def quit_writes_its_reason_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    base_path: str,
+) -> None:
+    """Leave with q and read the reason back from the log the TUI wrote.
+
+    The per-PID log held only the boot lines, so a session that ended left no
+    reason behind. The first q arms, the second leaves; the exit line is
+    written as the process returns.
+    """
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+    os.write(master_fd, b"q")
+    # The prefix is part of the contract: the guide tells operators to collect
+    # these rows with `grep '[masc-tui] exit:'`, so the test asks for what that
+    # grep asks for rather than for the bare reason.
+    text = wait_for_exit_reason(base_path, "[masc-tui] exit: normal (quit key)")
+    if "exit: abnormal" in text:
+        raise AssertionError(f"a q quit read as abnormal:\n{text}")
+    # One row per session. at_exit stops at the first callback that raises and
+    # OCaml may retry the rest, so a writer with no guard can leave two -- and
+    # a reader counting a day's ends by cause would count this session twice.
+    rows = text.count("[masc-tui] exit:")
+    if rows != 1:
+        raise AssertionError(
+            f"the session wrote {rows} exit rows, not one:\n{text}"
+        )
+
+
+def sigterm_writes_its_reason_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    slave_fd: int,
+    output: bytearray,
+    base_path: str,
+) -> None:
+    """A terminate signal leaves the same record, naming the signal.
+
+    A service manager's SIGTERM is not the operator's q, and the log has to
+    tell them apart, so the reason carries the signal's name.
+    """
+    terminate_with_sigterm(process, master_fd, slave_fd, output, base_path)
+    wait_for_exit_reason(base_path, "[masc-tui] exit: normal (signal SIGTERM)")
+
+
+def run_exit_reason_regression(executable: str) -> None:
+    # #37813's sibling: the per-PID log held only the boot lines, so a session
+    # that ended left no reason behind. These read the reason back from the log
+    # the process wrote, one per way out.
+    run_terminal_scenario(
+        executable,
+        description="a q quit writes its reason to the session log",
+        interact=quit_writes_its_reason_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="a SIGTERM writes its reason to the session log",
+        interact=sigterm_writes_its_reason_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        confirm_exit=b"",
+    )
+
+
 def run_first_install_credential_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -14789,6 +14952,26 @@ def run_first_install_credential_regression(executable: str) -> None:
         interact=first_install_waits_for_its_workspace_interaction,
         http_fixtures=overview_event_http_fixtures(),
         omit_operator_token=True,
+    )
+    run_terminal_scenario(
+        executable,
+        description="a mint that failed is marked as an error on the events pane",
+        interact=failed_mint_is_marked_as_an_error_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=seed_a_workspace_that_refuses_a_credential,
+        omit_operator_token=True,
+    )
+    # The mark is a shape, not a colour, so the same row must read the same
+    # with colour off -- the case the task names. The harness clears NO_COLOR
+    # for every other scenario, so this one sets it back.
+    run_terminal_scenario(
+        executable,
+        description="a mint that failed is marked as an error under NO_COLOR",
+        interact=failed_mint_is_marked_as_an_error_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=seed_a_workspace_that_refuses_a_credential,
+        omit_operator_token=True,
+        extra_env={"NO_COLOR": "1"},
     )
 
 
@@ -16646,6 +16829,133 @@ def run_resources_regression(executable: str) -> None:
     )
 
 
+def open_turn_roster_http_fixtures(started_at_unix: float) -> HttpFixtures:
+    """alpha healthy and beta failing, each with a turn open.
+
+    A failing keeper's keepalive runs the next attempt, so its turn is open
+    while the roster header counts it failing; alpha is the working keeper
+    its row must not look like.
+    """
+    fixtures = keeper_runtime_http_fixtures()
+    status, roster = fixtures["/api/v1/gate/keepers?detailed=true"]
+    alpha, beta = roster["keepers"]
+    beta = {
+        **beta,
+        "status": "active",
+        "health": "failing",
+        "paused": False,
+        "phase": "failing",
+        "activation_mode": "autonomous",
+    }
+    fixtures["/api/v1/gate/keepers?detailed=true"] = (
+        status,
+        {**roster, "keepers": [alpha, beta]},
+    )
+    fixtures["/api/v1/keepers/turns"] = (
+        200,
+        {
+            "schema": "masc.keeper_turns.v1",
+            "keepers": [
+                {
+                    "keeper_name": name,
+                    "status": "ok",
+                    "chat_control_token": f"control-{name}",
+                    "turn": {
+                        "lane": "autonomous",
+                        "started_at_unix": started_at_unix,
+                        "interrupt_token": token,
+                        "preview": None,
+                    },
+                }
+                for name, token in (
+                    ("alpha", "4f3c2a10-5b6d-4e7f-8a9b-0c1d2e3f4a5b"),
+                    ("beta", "7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d"),
+                )
+            ],
+        },
+    )
+    return fixtures
+
+
+def a_failing_keepers_open_turn_reads_failing(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    working = re.compile(rb"\d+s +alpha\b")
+    failing = re.compile(rb"\bfailing +beta\b")
+    deadline = time.monotonic() + 10.0
+    screen = b""
+    while time.monotonic() < deadline:
+        read_available(master_fd, output)
+        screen = screen_text(bytes(output))
+        if working.search(screen) and failing.search(screen):
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError(
+            "the roster did not draw alpha's turn with its elapsed time and "
+            f"beta's with its failing word: {screen!r}"
+        )
+    if not re.search(rb"\b1 failing\b", screen):
+        raise AssertionError(f"the header did not count beta failing: {screen!r}")
+    os.write(master_fd, b"q")
+
+
+def lanes_press_selects_the_lane_under_the_pointer(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A press lands on the lane drawn under it.
+
+    The hit test turns a terminal row into a lane index by subtracting the
+    rows drawn above the list. That count and the unit test holding it were
+    each written by hand, agreed with each other, and both said five while
+    seven were drawn -- so a press on the first lane opened the third. Here
+    the row comes off the screen the binary just painted, which is the only
+    reading that cannot drift from it.
+
+    The pointer goes to the last lane rather than the first: the cursor
+    starts on the first, so selecting it again would pass without the press
+    doing anything."""
+    palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=220,
+        needle=b"Standalone LLM lanes",
+        controls=(FULL_REDRAW,),
+    )
+    drain_until_quiet(process, master_fd, output)
+    drawn = bytes(output)
+    row = screen_row_of(screen_rows(drawn), b"Verifier")
+    if row < 0:
+        raise AssertionError(
+            f"Lanes drew no Verifier row: {screen_text(drawn).decode('utf-8')!r}"
+        )
+    # SGR reports carry the column before the row, and both count from one --
+    # the same numbering [screen_rows] keys by.
+    press = b"\x1b[<0;6;%dM" % row
+    release = b"\x1b[<0;6;%dm" % row
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        press + release,
+        b"Reviews Task completion and Goal proof evidence.",
+    )
+    # Exit is armed: the first press asks, and the harness sends the second.
+    os.write(master_fd, b"q")
+
+
 def run_keeper_lanes_regression(executable: str) -> None:
     fixtures = keeper_runtime_http_fixtures()
     gate = GatedHttpResponse(
@@ -16658,7 +16968,6 @@ def run_keeper_lanes_regression(executable: str) -> None:
                     idle_seconds=75,
                     runtime_state="done",
                     selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
                 ),
                 keeper_lane_row(
                     "beta",
@@ -16667,7 +16976,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
                     idle_seconds=3599,
                     runtime_state="done",
                     selected_model=None,
-                    diagnosis="failing_unhealthy",
+                    turn_healthy=False,
                 ),
             ]
         )
@@ -16685,9 +16994,26 @@ def run_keeper_lanes_regression(executable: str) -> None:
     fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
     run_terminal_scenario(
         executable,
+        description="a failing keeper's open turn reads failing",
+        interact=a_failing_keepers_open_turn_reads_failing,
+        http_fixtures=open_turn_roster_http_fixtures(time.time() - 42),
+    )
+    run_terminal_scenario(
+        executable,
         description="Keepers operations and Standalone-only Lanes",
         interact=keeper_lanes_ia_interaction(gate, fixtures),
         http_fixtures=fixtures,
+    )
+    # Its own copy, with the gate replaced by a plain answer: this walk reads
+    # Standalone rows only, and a gate another scenario has to release would
+    # make it depend on running after that one.
+    pointer_fixtures = dict(fixtures)
+    pointer_fixtures[KEEPER_LANES_PATH] = keeper_lanes_response([])
+    run_terminal_scenario(
+        executable,
+        description="a press on a Standalone lane row selects that lane",
+        interact=lanes_press_selects_the_lane_under_the_pointer,
+        http_fixtures=pointer_fixtures,
     )
 
 
@@ -17542,6 +17868,11 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
         "first-install-credential",
         "first install credential regression",
         (run_first_install_credential_regression,),
+    ),
+    ScenarioFamily(
+        "exit-reason",
+        "exit reason regression",
+        (run_exit_reason_regression,),
     ),
     ScenarioFamily("planning-review", "Planning Task Review regression", (run_planning_review_regression,)),
     ScenarioFamily("repositories", "Repositories regression", (run_repositories_regression,)),

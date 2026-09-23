@@ -1,3 +1,6 @@
+module Types = Sse_event_t
+module Json = Sse_event_j
+
 (* RFC-0004 Phase A0.1 PR-1 — typed SSE event wrapper.
 
    Bridges atd-generated payload types (see [Sse_event_t],

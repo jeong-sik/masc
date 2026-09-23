@@ -281,6 +281,11 @@ val bracketed : max_cells:int -> string -> string
 (** [\[text\]], with [text] folded in the middle only when it runs past
     [max_cells]. Never padded inside the brackets. *)
 
+val board_list_count_text : loaded:int -> holding:int option -> string
+(** [(loaded of holding)] when the board holds more than the listing page
+    carries, and [(loaded)] otherwise. [holding] is the census count for the
+    whole board, or for the hearth being read when one is narrowed. *)
+
 val board_read_title :
   screen:string -> id:string -> hearth:string option -> votes:int -> replies:int ->
   string
@@ -362,6 +367,18 @@ val system_log_category_text : Masc.Tui_decode.system_log_entry -> string
 
 val fusion_run_status_color :
   Masc_tui_types.Tui_decode.fusion_run_status -> string
+
+val fusion_run_stage_compact :
+  Masc_tui_types.Tui_decode.fusion_run_stage -> string
+(** A running run's stage, short enough for the table's STATE cell. *)
+
+val fusion_run_state_text :
+  status:Masc_tui_types.Tui_decode.fusion_run_status ->
+  stage:Masc_tui_types.Tui_decode.fusion_run_stage ->
+  string
+(** What the Fusion table's STATE cell says: the stage while the run is
+    running, [completed] once it has, and the server's failure code for a run
+    that failed. *)
 
 val fusion_run_progress_text :
   Masc_tui_types.Tui_decode.fusion_run_stage -> string

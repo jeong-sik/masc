@@ -4198,6 +4198,58 @@ let test_replay_sidecar_rejects_raw_output_wire () =
            |> to_string))
 ;;
 
+(* One click is one decision. The keeper is not running, so the delivery
+   stays journaled and every boot replays it; the ledger must still hold one
+   [resolved] row for the approval, not one per boot (#37964). *)
+let test_boot_replay_does_not_record_the_decision_again () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-replay-ledger" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "ledger" ])
+       in
+       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let resolved_rows_for_id () =
+         let history =
+           Keeper_approval.Audit.list_recent_resolved
+             ~base_path
+             ~now_ts:(Unix.gettimeofday ())
+             ~window_minutes:60
+             ()
+           |> resolved_history_exn
+         in
+         let open Yojson.Safe.Util in
+         List.length
+           (List.filter
+              (fun row -> String.equal (row |> member "id" |> to_string) id)
+              history.resolved_rows)
+       in
+       Alcotest.(check int) "the decision is on the ledger once" 1
+         (resolved_rows_for_id ());
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "the boot replayed the delivery" 1
+         report.replayed_deliveries;
+       Alcotest.(check int) "the replay did not record a second decision" 1
+         (resolved_rows_for_id ());
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "a second boot replays it again" 1
+         report.replayed_deliveries;
+       Alcotest.(check int) "and still records nothing new" 1
+         (resolved_rows_for_id ()))
+;;
+
 let test_persisted_delivery_replays_before_origin_wake () =
   let base_path = temp_dir () in
   let keeper_name = "queue-replay-origin" in
@@ -5727,6 +5779,10 @@ let () =
             "delivery journal replays"
             `Quick
             test_persisted_delivery_replays_before_origin_wake
+        ; Alcotest.test_case
+            "a boot replay does not record the decision again"
+            `Quick
+            test_boot_replay_does_not_record_the_decision_again
         ; Alcotest.test_case
             "observed delivery preserves grant without replaying wake"
             `Quick

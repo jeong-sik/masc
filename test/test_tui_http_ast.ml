@@ -2479,6 +2479,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          for the call here would ask the renderer to sanitize a constructor. *)
     ];
   check_fields "overview_layout" [ "tasks_error" ];
+  (* The Team block prints Keeper names and task text that producers wrote. *)
+  check_fields "overview_team_lines" [ "okp_name"; "id"; "title" ];
   (* [ap_summary] is not in this list: the press-again line and the row
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)

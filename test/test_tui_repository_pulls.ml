@@ -167,6 +167,12 @@ let test_keeper_tag () =
   let author = strip (tag "k-author") in
   check bool "the Keeper's first PR is tagged" true (contains "#6" author);
   check bool "its second PR is counted" true (contains "+1" author);
+  (* The glyph is the first PR's check state, not a fixed mark: k-author's
+     first PR (6) passes and its second (8) fails, so the tag carries the
+     passing glyph and not the failing one. *)
+  check bool "the first PR's passing checks are drawn" true (contains "\xe2\x9c\x93" author);
+  check bool "a later failing PR does not change the first glyph" false
+    (contains "\xe2\x9c\x97" author);
   check string "a Keeper with no PR gets no tag" "" (tag "k-idle");
   check string "a PR author who is no Keeper is on no row" "" (tag "someone");
   let unread =

@@ -9275,23 +9275,56 @@ let decode_lane_run_detail json =
                   | Exact_lane_run_registry.Unavailable _) -> Ok None
   in
   let* lrd_answer_source =
-    let board_attention_lane =
-      Exact_lane_run_registry.lane_key Exact_lane_run_registry.Board_attention
+    (* The lane key is read into the registry's lane once; the answer-source
+       rule below is about the Board-attention lane, and a key no registered
+       lane spells is not that lane. *)
+    let lane =
+      List.find_opt
+        (fun lane ->
+          String.equal (Exact_lane_run_registry.lane_key lane) summary.lrs_lane)
+        Exact_lane_run_registry.all_lanes
     in
-    let is_board_attention = String.equal summary.lrs_lane board_attention_lane in
+    let is_board_attention =
+      match lane with
+      | Some Exact_lane_run_registry.Board_attention -> true
+      | Some
+          ( Exact_lane_run_registry.Librarian
+          | Exact_lane_run_registry.Hitl_auto_judge
+          | Exact_lane_run_registry.Workspace_curator )
+      | None ->
+        false
+    in
     let* answer_succeeded =
       match summary.lrs_status with
       | Lane_run_succeeded -> Ok true
       | (Lane_run_completion_persistence_failed
         | Lane_run_completion_durability_unknown)
         when is_board_attention ->
-        let* intended_status = required_string_field run "intended_status" in
-        (match intended_status with
-         | "succeeded" -> Ok true
-         | "cancelled" | "failed" -> Ok false
-         | other ->
-           Error (Printf.sprintf "unknown intended lane run status %S" other))
-      | _ -> Ok false
+        (* The run's intended outcome, read with the same decoder as its
+           status. Only a run that meant to succeed, fail or be cancelled
+           reaches this record; any other word is a producer the reader does
+           not know, and says so. *)
+        let* intended = required_string_field run "intended_status" in
+        (match lane_run_status_of_string intended with
+         | Lane_run_succeeded -> Ok true
+         | Lane_run_cancelled | Lane_run_failed -> Ok false
+         | Lane_run_running | Lane_run_completion_persistence_failed
+         | Lane_run_completion_durability_unknown | Lane_run_approved
+         | Lane_run_reviewed | Lane_run_committed | Lane_run_superseded
+         | Lane_run_rejected | Lane_run_deferred | Lane_run_review_cancelled
+         | Lane_run_infrastructure_unavailable | Lane_run_not_reviewed
+         | Lane_run_commit_failed | Lane_run_raised | Lane_run_operator_routed
+         | Lane_run_other _ ->
+           Error (Printf.sprintf "unknown intended lane run status %S" intended))
+      | Lane_run_completion_persistence_failed
+      | Lane_run_completion_durability_unknown
+      | Lane_run_running | Lane_run_cancelled | Lane_run_failed
+      | Lane_run_approved | Lane_run_reviewed | Lane_run_committed
+      | Lane_run_superseded | Lane_run_rejected | Lane_run_deferred
+      | Lane_run_review_cancelled | Lane_run_infrastructure_unavailable
+      | Lane_run_not_reviewed | Lane_run_commit_failed | Lane_run_raised
+      | Lane_run_operator_routed | Lane_run_other _ ->
+        Ok false
     in
     match is_board_attention, answer_succeeded, lrd_output with
     | true, true, Some output ->

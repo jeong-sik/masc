@@ -85,6 +85,11 @@ val extract_input_required
   :  Agent_core.Error.t
   -> Agent_core.Error.input_required option
 
+(** [true] when an autonomous turn yielded to a queued person before its
+    provider produced anything (RFC-0441, #38094). Not a failure and not a
+    success: the turn did no work and its source stays pending. *)
+val is_preempted_before_first_token : Agent_core.Error.t -> bool
+
 (** [true] when an error represents terminal runtime exhaustion. *)
 val is_runtime_exhausted_error : Agent_core.Error.t -> bool
 

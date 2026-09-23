@@ -49,6 +49,17 @@
   renamed concept.
 
 ### Fixed
+- An autonomous turn that yields to a queued person before its provider's first
+  event (RFC-0441) is no longer a failed keeper cycle. The preemption used to
+  return a synthesized zero-turn run result that the keeper could only read as
+  `Internal error: successful Agent.run returned without an AfterTurn ordinal`,
+  so every preemption since #36344 raised the failure count. It is now a typed
+  `Preempted_before_first_token` stop: the lane walk ends on it without rotating
+  or noting a rest against the candidate, the turn FSM ends as
+  `Cancelled preempted_by_person`, and the unified turn settles it as
+  `Turn_skipped`, which leaves the admitted source pending and acknowledges no
+  message. `Runtime_agent.yielded_pre_first_token` is removed, and the
+  preemption now writes one INFO line (#38094).
 
 - Bare `masc` opens a workspace whose Keepers already have history even when none of them is `imp`. The onboarding `keeper_persistence` check read only `keepers/imp.json`, so a workspace whose Keepers were declared by hand (measured: sixteen persisted Keepers, no imp) reported `opening = needs_journey` and was sent back into the setup journey every time. The check now lists every Keeper metadata file and judges each with `validate_current_meta_file_result`, the check the server's boot reconcile applies: satisfied when all pass, invalid naming the files that fail, since the server refuses to boot on them (#38129).
 - On the Agent Core lane a turn whose Librarian has no point yet (`Without_snapshot`: Librarian off, unconfigured, or with no snapshot or read position) starts its request at the seed — the working ledger's front, or the range the newest turn record joined to a response — when one is valid for this history, and at the last completed turn boundary only without one (RFC keeper-context-window-in-tokens §13.4). It used to drop the seed and start at the turn boundary, so after the first turn such a keeper sent only the current turn's atoms and forgot the earlier ones. When the provider refuses a seed range as too large (context overflow, a refused request body, or an unmodelled invalid request — the refusals the no-continuity ladder moves the front for), the turn boundary becomes the turn's front (`Turn_start_after_seed_refusal`) and the same candidate is asked once more from it; later candidates and the official-client lanes in that turn open there too instead of resending the refused range, and a candidate that already opens at the boundary is not asked twice. The accepted request is what the ledger and the turn record keep, so the next turn's seed is that boundary instead of the refused range, and a turn-boundary request that is also refused ends the turn with that refusal. Without this a keeper with its Librarian off grew its range every turn until the provider refused it, and since a refusal records nothing every later turn was refused the same way. A seed range also demotes the aged tool results of earlier turns at the turn boundary, as the no-continuity path does, instead of sending them raw. The range is never halved on this path (#38046).

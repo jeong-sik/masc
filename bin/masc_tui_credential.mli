@@ -36,11 +36,27 @@ val refusal : credential_sent:bool -> string
 
 (** {1 Where the bearer comes from} *)
 
+type stored_token =
+  | Stored of string
+      (** A bearer [masc login] persisted that the workspace has not ruled
+          expired. Any other objection is the server's to make, and its
+          refusal names the remedy. *)
+  | Stored_expired
+      (** A bearer was persisted and its credential record says it has
+          expired. Carrying it would be refused on every read. *)
+  | Not_stored
+      (** Nothing was persisted for this client. *)
+
+type mint_reason =
+  | First_token  (** This client held no bearer at all. *)
+  | Replaces_expired  (** The bearer it held had expired. *)
+
 type plan =
   | Use of string
       (** A bearer is already available. *)
-  | Mint
-      (** The workspace is here, demands a bearer, and this client has none. *)
+  | Mint of mint_reason
+      (** The workspace is here, demands a bearer, and this client has none
+          it can use. *)
   | Go_without
       (** The workspace admits requests without one. *)
   | No_workspace
@@ -48,20 +64,20 @@ type plan =
 
 val plan :
   env_token:string option ->
-  workspace_token:string option ->
+  workspace_token:stored_token ->
   workspace_requires_token:bool ->
   workspace_initialized:bool ->
   plan
 (** Which bearer to carry, from three facts and nothing else. The environment
     wins so one run can be pointed at a different credential; the file
-    [masc login] wrote is next. With neither, a workspace that demands a bearer
-    gets one minted, and a workspace that does not is left alone -- minting
+    [masc login] wrote is next, unless it has expired. With no usable bearer, a
+    workspace that demands one gets one minted, and a workspace that does not is left alone -- minting
     there would add a durable secret nobody asked for and would not be needed
     to reach anything. *)
 
 type outcome =
   | Held
-  | Minted
+  | Minted of mint_reason
   | Not_required
   | Workspace_pending
       (** This base path holds no workspace to mint into. A server answering

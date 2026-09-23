@@ -23,6 +23,10 @@ type input_rejection_reason = Keeper_internal_error.official_client_input_reject
   | Bootstrap_floor_exceeded
   | Effect_fenced
 
+type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
+  | No_activity_observed
+  | Activity_observed
+
 type recovery_failure =
   | Transient_spawn_failed
   | Owner_stopped_turn
@@ -33,6 +37,14 @@ type recovery_failure =
   | Host_hook_failed
   | State_persistence_failed
   | Process_restarted
+  | Vendor_session_full of vendor_session_activity
+      (** A Gate continuation resumed its original session and the vendor
+          refused it as full; the argument says whether a response or tool
+          effect was observed first. Only that
+          session may carry the continuation, so the continuation is over:
+          {!validate_continuation} refuses it, [Retry_previous] is
+          unavailable, and, like every failure other than [Input_rejected],
+          the next claim supersedes it with a fresh session. *)
 
 type failure_disposition =
   | Transient
@@ -375,6 +387,8 @@ val resolve_recovery :
 (** Resolve one exact recovery claim with compare-and-swap authority.
     [Retry_previous] restores the last settled session and drops only the turn
     that failed, so the next claim re-attempts the same ordinal against it.
+    A [Vendor_session_full] recovery has no [Retry_previous]: the same
+    resume would be refused again.
     [Restart_fresh] abandons the conversation, so the ordinal restarts with it
     and the next claim asks for ordinal 1 -- the same reset an automatic
     supersede performs. Repeating the same recovery id and decision returns the

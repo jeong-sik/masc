@@ -401,7 +401,8 @@ type credential =
   ; token : string
   }
 
-let reader_of_declaration ~base_path keeper =
+let reader_of_declaration ~(config : Workspace.config) keeper =
+  let base_path = config.base_path in
   let keeper = String.trim keeper in
   if not (Keeper_config.validate_name keeper)
   then Error (Reader_declaration_invalid (Keeper_config.invalid_name_error keeper))
@@ -411,7 +412,7 @@ let reader_of_declaration ~base_path keeper =
     | Some _ ->
       (match
          Keeper_github_identity.stored_token
-           ~base_path
+           ~config
            ~keeper_name:keeper
            ~hostname:github_hostname
        with
@@ -420,17 +421,18 @@ let reader_of_declaration ~base_path keeper =
 
 let declaration_invalid fmt = Printf.ksprintf (fun m -> Error (Reader_declaration_invalid m)) fmt
 
-let reader_of_table ~base_path entries =
+let reader_of_table ~config entries =
   match List.find_opt (fun (key, _) -> not (String.equal key pr_reader_key)) entries with
   | Some (key, _) -> declaration_invalid "[%s] has unknown key %S" repositories_table key
   | None ->
     (match List.assoc_opt pr_reader_key entries with
      | None -> Error Reader_not_declared
-     | Some (Otoml.TomlString keeper) -> reader_of_declaration ~base_path keeper
+     | Some (Otoml.TomlString keeper) -> reader_of_declaration ~config keeper
      | Some _ ->
        declaration_invalid "[%s] %s must be a Keeper name string" repositories_table pr_reader_key)
 
-let resolve_reader ~base_path =
+let resolve_reader ~(config : Workspace.config) =
+  let base_path = config.base_path in
   let path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
   if not (Sys.file_exists path)
   then Error Reader_not_declared
@@ -444,7 +446,7 @@ let resolve_reader ~base_path =
          (match Otoml.find_opt toml Fun.id [ repositories_table ] with
           | None -> Error Reader_not_declared
           | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
-            reader_of_table ~base_path entries
+            reader_of_table ~config entries
           | Some _ -> declaration_invalid "[%s] must be a table" repositories_table)))
 
 (* A digest, so the snapshot can tell a new token from the refused one without
@@ -466,9 +468,10 @@ let is_token_rejected = function
   | Pulls_failed { failure = Token_rejected; _ } -> true
   | Pulls_not_read | Pulls_not_github | Pulls_read _ | Pulls_failed _ -> false
 
-let refresh ~now ~http_post ~base_path ~previous =
+let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
+  let base_path = config.base_path in
   let now_s = now () in
-  let credential = resolve_reader ~base_path in
+  let credential = resolve_reader ~config in
   let reader =
     match credential with
     | Ok { keeper; token = _ } -> Reader_ready { keeper }
@@ -623,7 +626,7 @@ let current () = Atomic.get projection
    5000 GraphQL points an hour. *)
 let poll_interval_s = 60.0
 
-let start ~sw ~clock ~base_path =
+let start ~sw ~clock ~config =
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
@@ -631,16 +634,22 @@ let start ~sw ~clock ~base_path =
            refresh
              ~now:(fun () -> Eio.Time.now clock)
              ~http_post:default_http_post
-             ~base_path
+             ~config
              ~previous:(current ())
          in
          Atomic.set projection next
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         Log.Server.warn
-           "repository_pulls: refresh raised %s; keeping the previous projection"
-           (Printexc.to_string exn));
+         let error = "refresh raised " ^ Printexc.to_string exn in
+         Log.Server.warn "repository_pulls: %s; keeping the previous rows" error;
+         (* The previous rows stay, but not as a current reading: a refresh
+            that raises on every tick would otherwise show the last good
+            counts indefinitely with nothing saying they stopped updating.
+            [repositories_error] is what readers already treat as "these
+            rows may be old". *)
+         let previous = current () in
+         Atomic.set projection { previous with repositories_error = Some error });
       Eio.Time.sleep clock poll_interval_s;
       loop ()
     in

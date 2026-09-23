@@ -49,6 +49,14 @@
   renamed concept.
 
 ### Fixed
+- `transcript_tail_recovery: keeper=<name> canonical checkpoint unavailable`
+  now names its cause (for example `checkpoint version 10 is superseded by
+  11` for a keeper whose checkpoint predates the version hard cut). The line
+  dropped the typed load error, so a stopped keeper's per-boot ERROR could not
+  be told apart from a lock or read failure. The rendering of
+  `checkpoint_ref_load_error` moves next to its type in
+  `Keeper_checkpoint_store`; the dashboard checkpoint API uses the same
+  functions instead of its own copies.
 - An autonomous turn that yields to a queued person before its provider's first
   event (RFC-0441) is no longer a failed keeper cycle. The preemption used to
   return a synthesized zero-turn run result that the keeper could only read as

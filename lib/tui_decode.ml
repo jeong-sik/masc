@@ -3272,12 +3272,18 @@ type skill_usage_coverage = {
   suc_unavailable : string list;
 }
 
+type skill_catalog_shadow = {
+  scsh_winner : Skill_reference.identity;
+  scsh_shadowed : Skill_reference.identity;
+}
+
 type skills_catalog =
   { sc_state : skills_catalog_state
   ; sc_config : skill_catalog_config option
   ; sc_sources : skill_catalog_source list
   ; sc_surfaces : skills_catalog_surface list
   ; sc_rejections : skill_catalog_rejection list
+  ; sc_shadows : skill_catalog_shadow list
   ; sc_usage_coverage : skill_usage_coverage option
   }
 
@@ -3610,7 +3616,26 @@ let decode_skill_catalog_rejection json =
     ; scr_reason
     }
 
-let decode_skill_snapshot_rejections json =
+let decode_skill_catalog_shadow json =
+  let* () =
+    validate_closed_object
+      ~label:"skill snapshot shadow"
+      ~allowed:[ "winner"; "shadowed" ]
+      json
+  in
+  let identity field =
+    let* value = required_object_field json field in
+    Skill_reference.identity_of_yojson value
+    |> Result.map_error (fun _ ->
+      Printf.sprintf "skill snapshot shadow %s is not an exact identity" field)
+  in
+  let* scsh_winner = identity "winner" in
+  let* scsh_shadowed = identity "shadowed" in
+  Ok { scsh_winner; scsh_shadowed }
+
+(* Shadows and rejections are the two ways a declared Skill stays out of what
+   Keeper turns see, and both are read from the same closed snapshot object. *)
+let decode_skill_snapshot_shadows_and_rejections json =
   let* () =
     validate_closed_object
       ~label:"skills snapshot"
@@ -3636,12 +3661,18 @@ let decode_skill_snapshot_rejections json =
   let* _sources = required_list_field json "sources" in
   let* _skills = required_list_field json "skills" in
   let* _effective_skills = required_list_field json "effective_skills" in
-  let* _shadows = required_list_field json "shadows" in
+  let* shadows_json = required_list_field json "shadows" in
   let* rejections_json = required_list_field json "rejections" in
-  decode_list
-    "snapshot.rejections"
-    decode_skill_catalog_rejection
-    rejections_json
+  let* shadows =
+    decode_list "snapshot.shadows" decode_skill_catalog_shadow shadows_json
+  in
+  let* rejections =
+    decode_list
+      "snapshot.rejections"
+      decode_skill_catalog_rejection
+      rejections_json
+  in
+  Ok (shadows, rejections)
 
 (* One discovery source, as [/api/v1/skills] publishes it. The endpoint that
    the Skill editor calls answers a different question -- it filters to the
@@ -3760,7 +3791,9 @@ let decode_skills_catalog json =
       in
       let* coverage = decode_skill_usage_coverage json in
       let* snapshot = required_object_field json "snapshot" in
-      let* sc_rejections = decode_skill_snapshot_rejections snapshot in
+      let* sc_shadows, sc_rejections =
+        decode_skill_snapshot_shadows_and_rejections snapshot
+      in
       let* config_json = required_object_field snapshot "config" in
       let* config = decode_skill_catalog_config config_json in
       let* sources_json = optional_list_field snapshot "sources" in
@@ -3777,6 +3810,7 @@ let decode_skills_catalog json =
         ; sc_sources
         ; sc_surfaces
         ; sc_rejections
+        ; sc_shadows
         ; sc_usage_coverage = Some coverage
         }
     | "not_registered" ->
@@ -3792,6 +3826,7 @@ let decode_skills_catalog json =
         ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
+        ; sc_shadows = []
         ; sc_usage_coverage = None
         }
     | "uninitialized" ->
@@ -3807,6 +3842,7 @@ let decode_skills_catalog json =
         ; sc_sources = []
         ; sc_surfaces = []
         ; sc_rejections = []
+        ; sc_shadows = []
         ; sc_usage_coverage = None
         }
     | "invalid_workspace" ->
@@ -3833,6 +3869,7 @@ let decode_skills_catalog json =
           ; sc_sources = []
           ; sc_surfaces = []
           ; sc_rejections = []
+          ; sc_shadows = []
           ; sc_usage_coverage = None
           }
     | unknown ->

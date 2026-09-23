@@ -2201,7 +2201,7 @@ let test_decode_tool_snapshot_reads_the_live_shape () =
              t.Tui_decode.tl_direct_call
        | ts -> Alcotest.failf "expected one tool, got %d" (List.length ts))
 
-let skill_snapshot_json ?(rejections = []) () =
+let skill_snapshot_json ?(rejections = []) ?(shadows = []) () =
   `Assoc
     [ "snapshot_revision", `String "snapshot-rev1"
     ; "catalog_revision", `String "catalog-rev1"
@@ -2209,7 +2209,7 @@ let skill_snapshot_json ?(rejections = []) () =
     ; "sources", `List []
     ; "skills", `List []
     ; "effective_skills", `List []
-    ; "shadows", `List []
+    ; "shadows", `List shadows
     ; "rejections", `List rejections
     ]
 
@@ -2535,6 +2535,60 @@ let test_decode_skills_catalog_keeps_invalid_only_rejections () =
        ; Alcotest.(check string) "directory" "broken" directory
      | _ -> Alcotest.fail "typed name-mismatch diagnostic was not retained")
   | Ok _ -> Alcotest.fail "invalid-only rejection was dropped"
+
+(* The snapshot names every package another source's package shadows (RFC
+   keeper-self-authored-skills). The decoder used to require the list and
+   throw it away, so the screen could not say which copy Keepers see. *)
+let test_decode_skills_catalog_keeps_shadows () =
+  let identity ~source_id name =
+    `Assoc
+      [ "source_id", `String source_id
+      ; "package_id", `String name
+      ; "name", `String name
+      ]
+  in
+  let winner = identity ~source_id:"project-masc" "shared" in
+  let shadowed = identity ~source_id:"project-agents" "shared" in
+  let payload shadows =
+    `Assoc
+      [ "schema", `String "masc.skill-snapshot/v1"
+      ; "state", `String "ready"
+      ; "usage_coverage", skill_usage_coverage_json ()
+      ; "snapshot", skill_snapshot_json ~shadows ()
+      ; "surfaces", `List []
+      ]
+  in
+  (match
+     Tui_decode.decode_skills_catalog
+       (payload [ `Assoc [ "winner", winner; "shadowed", shadowed ] ])
+   with
+   | Error error -> Alcotest.failf "a catalog with a shadow was refused: %s" error
+   | Ok { Tui_decode.sc_shadows = [ shadow ]; _ } ->
+     Alcotest.(check string) "winner source" "project-masc"
+       (Skill_reference.identity_source_id_to_string shadow.scsh_winner);
+     Alcotest.(check string) "shadowed source" "project-agents"
+       (Skill_reference.identity_source_id_to_string shadow.scsh_shadowed);
+     Alcotest.(check string) "shadowed package" "shared"
+       (Skill_reference.identity_package_id_to_string shadow.scsh_shadowed)
+   | Ok { sc_shadows; _ } ->
+     Alcotest.failf "expected one shadow, got %d" (List.length sc_shadows));
+  (* A shadow the reader cannot parse is a contract break, not an empty
+     list: dropping it would hide the one fact the list exists to show. *)
+  List.iter
+    (fun (label, shadow) ->
+       match Tui_decode.decode_skills_catalog (payload [ shadow ]) with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.failf "%s must be refused" label)
+    [ ( "a winner without its package"
+      , `Assoc
+          [ ( "winner"
+            , `Assoc
+                [ "source_id", `String "project-masc"; "name", `String "shared" ] )
+          ; "shadowed", shadowed
+          ] )
+    ; ( "a shadow with a field the server never sends"
+      , `Assoc [ "winner", winner; "shadowed", shadowed; "reason", `String "x" ] )
+    ]
 
 let test_decode_skills_catalog_keeps_empty_invalid_identifiers () =
   let rejection =
@@ -11465,6 +11519,8 @@ let () =
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
         Alcotest.test_case "keeps invalid-only typed rejections" `Quick
           test_decode_skills_catalog_keeps_invalid_only_rejections;
+        Alcotest.test_case "keeps which package shadows which" `Quick
+          test_decode_skills_catalog_keeps_shadows;
         Alcotest.test_case "keeps empty invalid identifiers" `Quick
           test_decode_skills_catalog_keeps_empty_invalid_identifiers;
         Alcotest.test_case "closes schema and state" `Quick

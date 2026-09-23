@@ -83,6 +83,12 @@ val equal_identity : identity -> identity -> bool
 val equal : t -> t -> bool
 
 val identity_to_yojson : identity -> Yojson.Safe.t
+
+val identity_of_yojson : Yojson.Safe.t -> (identity, decode_error) result
+(** The strict inverse of {!identity_to_yojson}: exactly [source_id],
+    [package_id] and [name], with the source id and package id validated as
+    {!of_yojson} validates them inside a reference. *)
+
 val to_yojson : t -> Yojson.Safe.t
 val pp : Format.formatter -> t -> unit
 (** Canonical exact JSON printer used by enclosing derived domain printers. *)

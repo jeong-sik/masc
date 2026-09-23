@@ -1219,7 +1219,14 @@ let tools_display_lines (state : state) =
             (Terminal_text.single_line
                (Masc.Tui_decode.skills_catalog_state_to_string sc_state)) ]
     | Some
-        { Masc.Tui_decode.sc_surfaces; sc_rejections; sc_sources; sc_config; sc_usage_coverage; _ }
+        { Masc.Tui_decode.sc_surfaces
+        ; sc_rejections
+        ; sc_shadows
+        ; sc_sources
+        ; sc_config
+        ; sc_usage_coverage
+        ; _
+        }
       ->
         let used =
           List.filter
@@ -1351,7 +1358,31 @@ let tools_display_lines (state : state) =
                     :: diagnostics)
                  rejections
         in
-        heading @ rows @ rejection_rows
+        (* When two sources declare one name the earlier one wins, and the
+           package it shadows is published but listed to no Keeper turn by
+           that name (RFC keeper-self-authored-skills). The operator settles
+           it by removing one, and this list is where that is visible. *)
+        let shadow_rows =
+          let identity_text identity =
+            Skill_reference.identity_source_id_to_string identity
+            ^ "/"
+            ^ Skill_reference.identity_package_id_to_string identity
+          in
+          match sc_shadows with
+          | [] -> []
+          | shadows ->
+            ( Ansi.bold,
+              Printf.sprintf " Shadowed Skills — %d" (List.length shadows) )
+            :: List.map
+                 (fun (shadow : Masc.Tui_decode.skill_catalog_shadow) ->
+                    ( Theme.warn (),
+                      Printf.sprintf
+                        "   %s · shadowed by %s"
+                        (Terminal_text.single_line (identity_text shadow.scsh_shadowed))
+                        (Terminal_text.single_line (identity_text shadow.scsh_winner)) ))
+                 shadows
+        in
+        heading @ rows @ rejection_rows @ shadow_rows
     in
     error_lines @ reading_lines
     end

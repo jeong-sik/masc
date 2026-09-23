@@ -450,6 +450,15 @@ type skill_usage_coverage = {
   suc_unavailable : string list;
 }
 
+(** One name two sources declare. The earlier source wins
+    (RFC keeper-self-authored-skills): Keeper turns list Skills by name and
+    see [scsh_winner]. [scsh_shadowed] is published, but reaches a turn only
+    when a Task names its exact reference. *)
+type skill_catalog_shadow = {
+  scsh_winner : Skill_reference.identity;
+  scsh_shadowed : Skill_reference.identity;
+}
+
 type skills_catalog = {
   sc_state : skills_catalog_state;
   sc_config : skill_catalog_config option;
@@ -458,6 +467,7 @@ type skills_catalog = {
   sc_sources : skill_catalog_source list;
   sc_surfaces : skills_catalog_surface list;
   sc_rejections : skill_catalog_rejection list;
+  sc_shadows : skill_catalog_shadow list;
   sc_usage_coverage : skill_usage_coverage option;
 }
 

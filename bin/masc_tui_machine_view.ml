@@ -149,7 +149,14 @@ let draw ~(write : string -> unit) ~title ?notice ~footer ~retain
   end;
   Buffer.add_string buf (fit_line cols title);
   Buffer.add_string buf "\027[0K\r\n";
-  Option.iter (fun message -> Buffer.add_string buf (fit_line cols (" " ^ message)); Buffer.add_string buf "\027[0K\r\n") notice;
+  (* A notice carries text from the server or the transport -- an HTML error
+     body, an exception -- so it is made one clean line before it is drawn. *)
+  Option.iter
+    (fun message ->
+      Buffer.add_string buf
+        (fit_line cols (" " ^ Masc_tui_ansi.Terminal_text.single_line message));
+      Buffer.add_string buf "\027[0K\r\n")
+    notice;
   let blank_row () = Buffer.add_string buf "\027[0K\r\n" in
   (match dims with
    | Some (width, height, rgb) when kitty ->

@@ -176,7 +176,23 @@ val capture : unit -> (observation * frame, error) result
     vision reads: a VGA game's Korean menus are glyphs in pixels, which
     [frame_ascii]'s luminance cells cannot spell. *)
 
+type identity = {
+  id_incarnation : string;
+  id_steps : int;
+  id_program : string;
+  id_controller : string option;
+  id_video_mode : int;
+  id_width : int;
+  id_height : int;
+}
+
+val identify : unit -> (identity, error) result
+(** Which machine, at which step, held by whom -- without rendering the
+    frame. A watcher that already holds the frame for this incarnation and
+    step asks only this: the picture changes only when the machine steps. *)
+
 type identified_capture = {
+  identity : identity;  (** read under the same lock as the frame *)
   incarnation : string;
       (** Fresh on every load. Reads and time leave it alone. *)
   observation : observation;

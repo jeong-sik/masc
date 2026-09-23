@@ -67,7 +67,7 @@ let steps_now () =
 
 let test_no_machine_is_loaded_false () =
   eject_held ();
-  let status, json = Route.frame_response ~incarnation:None ~steps:None in
+  let status, json = Route.frame_response ~incarnation:None ~steps:None () in
   check bool "a successful answer" true (status = `OK);
   check bool "says nothing is loaded" true (member "loaded" json = Some (`Bool false));
   check bool "and carries no pixels" true (member "rgb_base64" json = None)
@@ -76,7 +76,7 @@ let test_no_machine_is_loaded_false () =
 let test_a_loaded_com_image_is_served_without_moving_time () =
   with_machine (fun () ->
     let before = steps_now () in
-    let status, json = Route.frame_response ~incarnation:None ~steps:None in
+    let status, json = Route.frame_response ~incarnation:None ~steps:None () in
     check bool "a successful answer" true (status = `OK);
     check bool "loaded" true (member "loaded" json = Some (`Bool true));
     let width = int_member "width" json and height = int_member "height" json in
@@ -93,7 +93,7 @@ let test_a_loaded_com_image_is_served_without_moving_time () =
       (match member "video_mode" json with Some (`Int _) -> true | _ -> false);
     (* Spectating must not move time: DOS time moves only by tool calls. *)
     for _ = 1 to 5 do
-      ignore (Route.frame_response ~incarnation:None ~steps:None)
+      ignore (Route.frame_response ~incarnation:None ~steps:None ())
     done;
     check int "six reads later the machine has not advanced" before (steps_now ());
     check int "and the ledger holds no input" 0 (List.length (Dos_lane.ledger ())))
@@ -101,12 +101,14 @@ let test_a_loaded_com_image_is_served_without_moving_time () =
 
 let test_a_known_frame_is_answered_without_pixels () =
   with_machine (fun () ->
-    let _, first = Route.frame_response ~incarnation:None ~steps:None in
+    let _, first = Route.frame_response ~incarnation:None ~steps:None () in
     let incarnation = string_member "incarnation" first in
     let steps = int_member "steps" first in
     let status, again =
       Route.frame_response ~incarnation:(Some incarnation)
         ~steps:(Some (string_of_int steps))
+        ~capture:(fun () -> fail "an unchanged frame must not be rendered")
+        ()
     in
     check bool "a successful answer" true (status = `OK);
     check string "the held frame is still current" "unchanged"
@@ -122,6 +124,7 @@ let test_a_known_frame_is_answered_without_pixels () =
     let _, moved =
       Route.frame_response ~incarnation:(Some incarnation)
         ~steps:(Some (string_of_int steps))
+        ()
     in
     check string "a moved machine sends its frame" "inline" (string_member "pixels" moved);
     check bool "with the step it reached" true (int_member "steps" moved > steps);
@@ -129,6 +132,7 @@ let test_a_known_frame_is_answered_without_pixels () =
     let _, other =
       Route.frame_response ~incarnation:(Some "another-incarnation")
         ~steps:(Some (string_of_int (int_member "steps" moved)))
+        ()
     in
     check string "another incarnation sends its frame" "inline"
       (string_member "pixels" other))
@@ -137,7 +141,7 @@ let test_a_known_frame_is_answered_without_pixels () =
 let test_a_half_named_frame_is_refused () =
   List.iter
     (fun (label, incarnation, steps) ->
-      let status, json = Route.frame_response ~incarnation ~steps in
+      let status, json = Route.frame_response ~incarnation ~steps () in
       check bool (label ^ ": 400") true (status = `Bad_request);
       check bool (label ^ ": says why") true
         (match member "message" json with Some (`String _) -> true | _ -> false))

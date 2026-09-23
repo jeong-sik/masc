@@ -8876,9 +8876,9 @@ let render_dos (state : Masc_tui_types.state) =
 
 (* The DOS door (#38424): a spectator over the server's DOS machine. There is
    no menu -- loading a program is a Keeper's masc_dos_load -- so it opens
-   straight onto the frame. The first read is done here so the screen opens
-   on a picture; the poll keeps it current after that. [%] and the palette's
-   "go DOS" both land here. *)
+   straight onto whatever frame it last held, and the next tick reads the
+   server in the background: a read on the UI loop would freeze input for as
+   long as the request takes. [%] and the palette's "go DOS" both land here. *)
 let open_dos_screen (state : Masc_tui_types.state) =
   invalidate_dos_poll ();
   state.image_request_generation <- state.image_request_generation + 1;
@@ -8889,15 +8889,8 @@ let open_dos_screen (state : Masc_tui_types.state) =
     state.image_open <- false
   end;
   Masc_tui_machine_view.invalidate ();
-  (match
-     Masc_tui_http.fetch_dos_frame ~host:server_peer_host ~port:state.port
-       ~held:state.dos_frame
-   with
-   | Ok frame ->
-     state.dos_frame <- frame;
-     state.dos_notice <- None
-   | Error message -> state.dos_notice <- Some ("frame read failed: " ^ message));
-  state.dos_last_poll_ns <- Mtime_clock.elapsed_ns ();
+  (* Zero makes the next tick's poll due at once. *)
+  state.dos_last_poll_ns <- 0L;
   state.dos_open <- true;
   render_dos state
 
@@ -14811,12 +14804,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (* A read for a view closed or reopened since is dropped: its frame was
          decoded against pixels this view no longer holds. *)
       if view == !dos_poll_view && state.dos_open then begin
+        let before_frame = state.dos_frame and before_notice = state.dos_notice in
         (match result with
          | Ok frame ->
              state.dos_frame <- frame;
              state.dos_notice <- None
          | Error detail -> state.dos_notice <- Some ("frame read failed: " ^ detail));
-        render_dos state
+        (* The machine moves only when a tool call moves it, so most polls
+           bring back what is already drawn. Redrawing that anyway clears
+           and repaints the text-block screen twice a second. *)
+        let same_frame =
+          match before_frame, state.dos_frame with
+          | None, None -> true
+          | Some a, Some b ->
+            String.equal a.dos_incarnation b.dos_incarnation
+            && a.dos_steps = b.dos_steps
+            && Option.equal String.equal a.dos_controller b.dos_controller
+            && Option.equal String.equal a.dos_program b.dos_program
+          | Some _, None | None, Some _ -> false
+        in
+        if not (same_frame && Option.equal String.equal before_notice state.dos_notice)
+        then render_dos state
       end
   | Keeper_chat_control_received (keeper_name, generation, token) ->
       if generation = keeper_chat_control_generation state keeper_name then begin

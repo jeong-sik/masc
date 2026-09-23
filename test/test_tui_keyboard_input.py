@@ -18033,9 +18033,14 @@ def run_dos_spectator_regression(executable: str) -> None:
         start = len(output)
         os.write(master_fd, b":go dos\r")
         # The spectator paints past the frame presenter, so the wait is on the
-        # raw output; the footer is the last thing it writes. Its tail is the
-        # needle, because "Esc: back" is also on screens the palette passes.
-        wait_for_output(process, master_fd, output, DOS_FOOTER_TAIL, start=start,
+        # raw output. It opens on an empty screen and the first background poll
+        # brings the frame, so wait for the program's name, then for the footer
+        # that screen ends with. The footer tail is the needle, because
+        # "Esc: back" is also on screens the palette passes.
+        wait_for_output(process, master_fd, output, DOS_TITLE_PROGRAM, start=start,
+                        timeout=5.0)
+        framed = bytes(output).rfind(DOS_TITLE_PROGRAM)
+        wait_for_output(process, master_fd, output, DOS_FOOTER_TAIL, start=framed,
                         timeout=5.0)
         watching = bytes(output)[start:]
         watching = watching[watching.rfind(b"\x1b[2J"):]

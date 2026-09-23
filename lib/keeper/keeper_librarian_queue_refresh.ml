@@ -395,6 +395,22 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
   | exn -> observe O.Not_committed; raise exn
 ;;
 
+(* The queue pass organizes the inputs pending now, with no turn range, so
+   the Keeper's current task is the task these inputs belong to. The durable
+   and continuity passes read turns that may predate that task, and a turn
+   boundary does not record its task, so they stay [No_task]. *)
+let queue_input ~config ~(meta : Keeper_meta_contract.keeper_meta) ~current ~working_context
+  : Keeper_librarian.input =
+  { turn_ref = Ids.Turn_ref.make
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~absolute_turn:meta.runtime.usage.total_turns
+  ; goal_context = Domain_pool_ref.submit_io_or_inline (fun () ->
+      Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
+  ; keeper_instructions = meta.instructions
+  ; current
+  ; working_context
+  ; messages = []; tool_observations = []; counterpart_observations = [] }
+
 let run ~base_path ~keeper_name =
   run_durable ~base_path ~keeper_name;
   run_continuity ~base_path ~keeper_name ();
@@ -419,19 +435,8 @@ let run ~base_path ~keeper_name =
       | Ok current ->
         let current_selection = Option.map (fun (s : Keeper_memory_os_current.t) ->
           {Keeper_librarian.facts = s.facts}) current in
-        let inp : Keeper_librarian.input =
-          { turn_ref = Ids.Turn_ref.make
-              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-              ~absolute_turn:meta.runtime.usage.total_turns
-          ; goal_context = (match meta.current_task_id with
-              | None -> Keeper_librarian.No_task
-              | Some task_id -> Keeper_librarian.Task_goals
-                  {task_id = Keeper_id.Task_id.to_string task_id;
-                   criteria = Error "goal context not observed before first completed turn"})
-          ; keeper_instructions = meta.instructions
-          ; current = current_selection
-          ; working_context
-          ; messages = []; tool_observations = []; counterpart_observations = [] } in
+        let inp = queue_input ~config:(Workspace.default_config base_path) ~meta
+            ~current:current_selection ~working_context in
         Keeper_librarian_runtime.run_best_effort
           ~write_scope:Keeper_librarian_runtime.Context_only
           ~base_path ~keepers_dir ~keeper_id:keeper_name
@@ -477,4 +482,5 @@ module For_testing = struct
   let merge_not_committed = merge_not_committed
   let run_continuity = run_continuity
   let run_durable_with_commit = run_durable_with_commit
+  let queue_input = queue_input
 end

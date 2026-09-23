@@ -81,4 +81,12 @@ module For_testing : sig
           -> bool)
     -> unit
   (** The production durable reader with a controlled Memory commit edge. *)
+
+  val queue_input
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> current:Keeper_librarian.current_selection option
+    -> working_context:Keeper_librarian_context.input
+    -> Keeper_librarian.input
+  (** The input the queue pass hands the Librarian. *)
 end

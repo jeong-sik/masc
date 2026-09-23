@@ -21,15 +21,18 @@
     ahead of the restart:
 
     - [masc_keeper_clear] empties a history, not as part of a turn, and appends
-      the line once the emptied checkpoint is saved.
+      the line once the emptied checkpoint is saved. A checkpoint it cannot
+      read is moved aside instead, which leaves the store with none; the next
+      turn then writes the line as below.
     - A turn that starts from no atom, and knows the saved history holds none
       (it loaded an empty one, or the store has none), appends the line before
       it runs. Nothing can be saved ahead of it, so the record is there even
       if the turn saves and then dies before its own line.
-    - A turn that starts from no atom because its checkpoint could not be
-      loaded (a version cut, a read or parse error) has not seen the saved
-      history, which may still hold atoms. It appends the line after the first
-      stage save the store accepts, the save that replaces what was there.
+    - A turn that starts from no atom because its checkpoint was written by an
+      earlier version has not seen the saved history, which may still hold
+      atoms. It appends the line after the first stage save the store accepts,
+      the save that replaces what was there. A checkpoint that cannot be read
+      or parsed does not start a turn at all: the turn fails before it runs.
 
     {2 What a reader may rely on}
 

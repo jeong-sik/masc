@@ -113,8 +113,12 @@ let encode_checkpoint_string_off_scheduler (ckpt : Agent_core.Checkpoint.t) :
     string =
   offload_checkpoint_cpu (fun () -> Agent_core.Checkpoint.to_string ckpt)
 
+(* Store file names carry a time as whole epoch milliseconds, from the same
+   [Time_compat.now] seconds a checkpoint's [created_at] holds. *)
+let epoch_ms_of_seconds (seconds : float) : int = max 0 (int_of_float (seconds *. 1000.0))
+
 let agent_core_history_snapshot_id_of_checkpoint (ckpt : Agent_core.Checkpoint.t) : string =
-  let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
+  let created_ms = epoch_ms_of_seconds ckpt.created_at in
   Printf.sprintf "%s%013d%s"
     agent_core_history_prefix created_ms agent_core_history_suffix
 
@@ -732,6 +736,72 @@ let known_watermark ~canonical_path
     |> Result.map
          (Option.map (fun (existing : Agent_core.Checkpoint.t) ->
             { session_id = existing.session_id; turn_count = existing.turn_count }))
+
+(* ── Moving an unreadable canonical aside ([masc_keeper_clear]) ──────
+   A canonical no turn can read fails every turn (#37089), and nothing the
+   store writes may replace it. The operator's clear moves it to a sibling
+   name so the bytes stay on disk and the next turn finds no checkpoint. The
+   name does not end in [.json], so neither the history listing nor its prune
+   ever sees it. *)
+
+let unreadable_archive_infix = ".unreadable-"
+
+let unreadable_archive_path ~canonical_path ~archived_at =
+  canonical_path ^ unreadable_archive_infix
+  ^ string_of_int (epoch_ms_of_seconds archived_at)
+
+type unreadable_archive_outcome =
+  | Archived of { archive_path : string; unreadable : checkpoint_load_error }
+  | Canonical_absent
+  | Canonical_loadable
+
+type unreadable_archive_error =
+  | Archive_not_moved of string
+  | Archive_durability_unknown of { archive_path : string; detail : string }
+
+let unreadable_archive_error_to_string = function
+  | Archive_not_moved detail -> "unreadable checkpoint was not moved: " ^ detail
+  | Archive_durability_unknown { archive_path; detail } ->
+    Printf.sprintf
+      "unreadable checkpoint was moved to %s, but the directory sync failed: %s"
+      archive_path detail
+
+let archive_unreadable_canonical ~(session_dir : string) ~(session_id : string)
+  : (unreadable_archive_outcome, unreadable_archive_error) result =
+  if not (leaf_is_real_segment session_id) then
+    Error (Archive_not_moved "session_id is not a real path segment")
+  else
+    let locked =
+      with_session_lock ~session_dir (fun session_dir ->
+        let canonical_path = agent_core_checkpoint_path ~session_dir ~session_id in
+        (* Read again under the lock: only what is unreadable now is moved. *)
+        match load_canonical_strict canonical_path with
+        | Ok None | Error Not_found -> Ok Canonical_absent
+        | Ok (Some _) | Error (Superseded_version _) -> Ok Canonical_loadable
+        | Error ((Store_error _ | Parse_error _ | Io_error _ | Agent_core_error _) as unreadable) ->
+          let archive_path =
+            unreadable_archive_path ~canonical_path ~archived_at:(Time_compat.now ())
+          in
+          let move () =
+            match Unix.lstat archive_path with
+            | _ -> Error (Archive_not_moved ("archive name is taken: " ^ archive_path))
+            | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+              Unix.rename canonical_path archive_path;
+              (match Keeper_fs_durable_directory.fsync_directory session_dir with
+               | () -> Ok (Archived { archive_path; unreadable })
+               | exception ((Unix.Unix_error _ | Fun.Finally_raised _) as exn) ->
+                 Error (Archive_durability_unknown
+                          { archive_path; detail = Printexc.to_string exn }))
+          in
+          (match Eio_guard.run_in_systhread ~label:"keeper.checkpoint.archive-unreadable" move with
+           | result -> result
+           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+           | exception (Unix.Unix_error _ as exn) ->
+             Error (Archive_not_moved (Printexc.to_string exn))))
+    in
+    match locked with
+    | Ok result -> result
+    | Error detail -> Error (Archive_not_moved detail)
 
 type checkpoint_identity_error =
   | Session_id_invalid of string

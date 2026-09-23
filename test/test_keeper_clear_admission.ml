@@ -197,47 +197,74 @@ let checkpoint_path config (meta : Keeper_meta_contract.keeper_meta) =
     ~session_id:trace_id
 ;;
 
-let test_checkpoint_read_failure fault () =
+(* A checkpoint no turn can read fails every turn, so the operator's clear
+   moves it aside: the bytes stay on disk under the archive name, the
+   canonical is gone, and the next turn starts from no checkpoint. *)
+let test_unreadable_checkpoint_is_archived fault () =
   with_keeper ~paused:false ~install_owner:true
-  @@ fun ~config ~meta ~saved ~save:_ ~load ~clear ~official_session ->
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
   let path = checkpoint_path config meta in
-  let original = Fs_compat.load_file path in
-  let backup = path ^ ".test-original" in
   let missing_target = path ^ ".missing" in
-  let invalid_json = "{broken-checkpoint" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
-  let boundaries () = Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:meta.name |> require_ok in
-  let before_boundaries = boundaries () in
-  let before_failures = Keeper_turn_failure_streak.increment
-    ~base_path:config.base_path ~keeper_name:meta.name in
-  Unix.rename path backup;
+  let unreadable_bytes =
+    match fault with
+    | `Malformed -> "{broken-checkpoint"
+    | `Newer_version ->
+      (match Yojson.Safe.from_string (Fs_compat.load_file path) with
+       | `Assoc fields ->
+         Yojson.Safe.to_string
+           (`Assoc
+             (List.map
+                (fun (key, value) ->
+                   if String.equal key "version"
+                   then key, `Int (Agent_core.Checkpoint.checkpoint_version + 1)
+                   else key, value)
+                fields))
+       | _ -> fail "checkpoint is not a JSON object")
+    | `Unreadable_path -> missing_target
+  in
+  Unix.unlink path;
   (match fault with
-   | `Malformed -> Fs_compat.save_file path invalid_json
+   | `Malformed | `Newer_version -> Fs_compat.save_file path unreadable_bytes
    | `Unreadable_path -> Unix.symlink missing_target path);
-  Fun.protect
-    ~finally:(fun () -> Unix.unlink path; Unix.rename backup path)
-    (fun () ->
-      let result = clear () in
-      check_refused result;
-      check string "failure identifies the checkpoint" path
-        (Tool_result.data result |> Yojson.Safe.Util.member "checkpoint_path"
-         |> Yojson.Safe.Util.to_string);
-      (match fault with
-       | `Malformed ->
-         check string "malformed original is not overwritten" invalid_json (Fs_compat.load_file path)
-       | `Unreadable_path ->
-         check string "unreadable path is not replaced" missing_target (Unix.readlink path));
-      check bool "failed clear appends no restart marker" true (before_boundaries = boundaries ());
-      check int "process failure streak is preserved" before_failures
-        (Keeper_registry.get_turn_failures ~base_path:config.base_path meta.name);
-      check bool "checkpoint refusal keeps the official session" true
-        (Option.is_some (official_session ()));
-      match Keeper_turn_failure_streak_store.load ~base_path:config.base_path ~keeper_name:meta.name with
-      | Ok count -> check (option int) "durable failure streak is preserved" (Some before_failures) count
-      | Error error -> fail (Keeper_turn_failure_streak_store.error_to_string error));
-  check string "original bytes remain available after read recovery" original (Fs_compat.load_file path);
-  check bool "next load continues the original conversation" true
-    (Context.messages_of_context saved = Context.messages_of_context (load ()))
+  ignore (Keeper_turn_failure_streak.increment
+    ~base_path:config.base_path ~keeper_name:meta.name);
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  let archived =
+    Tool_result.data result |> Yojson.Safe.Util.member "unreadable_checkpoint_archived"
+  in
+  let field name = Yojson.Safe.Util.(member name archived |> to_string) in
+  check string "result names the checkpoint it moved" path (field "checkpoint_path");
+  let archive_path = field "archive_path" in
+  check string "archive sits beside the checkpoint"
+    (Unix.realpath (Filename.dirname path)) (Filename.dirname archive_path);
+  (match fault with
+   | `Malformed | `Newer_version ->
+     check string "archive holds the original bytes" unreadable_bytes
+       (Fs_compat.load_file archive_path)
+   | `Unreadable_path ->
+     check string "archive is the original link" unreadable_bytes
+       (Unix.readlink archive_path));
+  check bool "the canonical checkpoint is gone" true
+    (match Unix.lstat path with
+     | _ -> false
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true);
+  check_official_session_cleared official_session;
+  check int "clear resets the failure streak" 0
+    (Keeper_registry.get_turn_failures ~base_path:config.base_path meta.name);
+  let base_dir = Keeper_types_profile.session_base_dir config in
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  match Keeper_owner_registry.run_autonomous_if_idle
+    ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
+      match Context.load_context_from_checkpoint_classified ~trace_id ~base_dir with
+      | _, Context.Checkpoint_absent -> ()
+      | _, Context.Checkpoint_loaded _ -> fail "next turn loaded a checkpoint"
+      | _, Context.Checkpoint_unread error ->
+        fail ("next turn still cannot read its checkpoint: "
+              ^ Keeper_checkpoint_store.checkpoint_load_error_to_string error)) with
+  | Ok (`Ran ()) -> ()
+  | Ok (`Busy _ | `Interrupted) -> fail "next turn did not run"
+  | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
 ;;
 
 let test_absent_checkpoint_is_a_noop () =
@@ -300,10 +327,12 @@ let () =
     [ "owner", [ test_case "active turn, clear, next turn" `Quick test_clear_does_not_race_the_active_turn
                ; test_case "paused keeper remains paused" `Quick test_paused_keeper_can_clear_without_resuming
                ; test_case "missing owner leaves history" `Quick test_missing_owner_does_not_clear
-               ; test_case "parse failure preserves history and failure state" `Quick
-                   (test_checkpoint_read_failure `Malformed)
-               ; test_case "unreadable path is not absence" `Quick
-                   (test_checkpoint_read_failure `Unreadable_path)
+               ; test_case "malformed checkpoint is moved aside" `Quick
+                   (test_unreadable_checkpoint_is_archived `Malformed)
+               ; test_case "newer-version checkpoint is moved aside" `Quick
+                   (test_unreadable_checkpoint_is_archived `Newer_version)
+               ; test_case "unreadable path is moved aside" `Quick
+                   (test_unreadable_checkpoint_is_archived `Unreadable_path)
                ; test_case "absent checkpoint clears only the official session" `Quick
                    test_absent_checkpoint_is_a_noop
                ; test_case "superseded checkpoint clears like an absent one" `Quick

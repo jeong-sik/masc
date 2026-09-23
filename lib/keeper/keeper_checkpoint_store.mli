@@ -163,6 +163,38 @@ val canonical_byte_count :
   session_id:string ->
   (int option, checkpoint_load_error) result
 
+(** What {!archive_unreadable_canonical} found under the session lock. *)
+type unreadable_archive_outcome =
+  | Archived of { archive_path : string; unreadable : checkpoint_load_error }
+      (** The canonical could not be read and now sits at [archive_path], its
+          bytes unchanged. [unreadable] is the error the read gave. *)
+  | Canonical_absent
+  | Canonical_loadable
+      (** The canonical decodes, or was written by an earlier version: a
+          turn can start from it, so nothing was moved. *)
+
+type unreadable_archive_error =
+  | Archive_not_moved of string
+      (** The canonical was left where it was. *)
+  | Archive_durability_unknown of { archive_path : string; detail : string }
+      (** The rename happened, but the directory sync that makes it durable
+          failed. *)
+
+val unreadable_archive_error_to_string : unreadable_archive_error -> string
+
+(** Move a canonical checkpoint no turn can read to
+    [<canonical>.unreadable-<epoch ms>] in the same directory, for the
+    operator's [masc_keeper_clear]. The file is renamed, never rewritten or
+    deleted. The read and the rename run under the same session lock the
+    writers take, and a name already taken is refused rather than
+    overwritten. A later-version checkpoint is unreadable here too; an
+    earlier-version one is not, since a turn replaces it. The archive name
+    does not end in [.json], so history listing and pruning skip it. *)
+val archive_unreadable_canonical :
+  session_dir:string ->
+  session_id:string ->
+  (unreadable_archive_outcome, unreadable_archive_error) result
+
 type checkpoint_identity_error =
   | Session_id_invalid of string
   | Ref_create_failed of Keeper_checkpoint_ref.create_error

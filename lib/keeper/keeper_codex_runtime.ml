@@ -1352,16 +1352,10 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
     Atomic.set successful_tool_completion Successful_tool_completion
   in
   let observed_next_shrink_capacity_bytes = ref None in
-  let starting_capacity_bytes =
-    Keeper_context_overflow_shrink_state.starting_capacity
-      ~keeper_name
-      ~runtime_id
-      ~max_capacity:unbounded_model_input_capacity_bytes
-  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-      ~starting_capacity:starting_capacity_bytes
+      ~starting_capacity:unbounded_model_input_capacity_bytes
       ~same_run_retry_authorized:(fun () ->
         Keeper_provider_attempt_effect.allows_same_turn_retry
           (Atomic.get effect_disposition)
@@ -1376,13 +1370,6 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
          against that size. There is no local account that could rule the
          next size out, so the provider's own target stands. *)
       ~shrink_admits_history:(fun ~capacity:_ -> true)
-      ~record_success:(fun ~capacity ->
-        if capacity <> unbounded_model_input_capacity_bytes
-        then
-          Keeper_context_overflow_shrink_state.record_success
-            ~keeper_name
-            ~runtime_id
-            ~capacity)
       ~on_shrink_retry:
         (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
           resolve_input_rejected_for_shrink_retry ~official_client_continuation

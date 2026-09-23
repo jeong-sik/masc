@@ -64,11 +64,42 @@ type revision =
   ; superseded_by : string
   }
 
+(** A claim field that a restatement states differently from the fields kept.
+    [origin] is not compared: every librarian claim is [Injected], so a
+    keeper-authored memory would differ there on every restatement. *)
+type claim_field =
+  | Claim_category
+  | Claim_basis
+
+(** Whose fields a restatement keeps: the stored memory's, or those of the
+    first of several same-text claims in one answer. *)
+type kept_fields_from =
+  | Current_memory
+  | First_claim
+
+(** One restatement whose differing fields were discarded. *)
+type ignored_fields =
+  { restated_id : string
+  ; kept_from : kept_fields_from
+  ; differing : claim_field list  (** Never empty. *)
+  }
+
+val claim_field_to_string : claim_field -> string
+val kept_fields_from_to_string : kept_fields_from -> string
+
 type selection =
   { new_claims : Keeper_memory_os_types.fact list
     (** The memories the answer adds. A claim that writes a current memory
         again as it stands adds nothing and is not here; two claims with the
         same text are one. *)
+  ; restated : Keeper_memory_os_types.fact list
+    (** The current memories the answer wrote again word for word and keeps,
+        as stored. A restatement of a memory the same answer drops or another
+        of its claims absorbs is not here: it adds nothing, so the drop or the
+        absorption wins, and the restatement's own [absorbs] are not applied. *)
+  ; ignored_fields : ignored_fields list
+    (** Restatements and same-text claims whose category or basis differed
+        from the fields kept. Evidence only; nothing is refused for it. *)
   ; dropped : Keeper_memory_os_types.dropped_statement list
     (** One statement per retired memory. The librarian names only what
         changes; a current memory it does not name here stays, which is what
@@ -111,13 +142,10 @@ type parse_error =
   | Missing_required_fields
   | Claim_schema_mismatch
   | Dropped_schema_mismatch
-  | Dropped_memory_id_recreated of string
-      (** A claim's text is a memory the same answer drops, directly or as the
-          target of its own [supersedes]: the answer says both "gone" and
-          "kept". A claim that writes a kept current memory again as it stands
-          is that memory unchanged, not this error. *)
-  | Absorbed_memory_id_restated of string
-      (** A claim's text is a memory another claim of the same answer absorbs. *)
+  | Supersedes_with_same_text of string
+      (** A claim's [supersedes] names the memory whose text it repeats. It
+          corrects nothing, and the two readings conflict: the drop deletes the
+          memory the claim keeps. *)
   | Unknown_dropped_memory_id of string
   | Duplicate_dropped_memory_id of string
   | Supersedes_unknown_memory_id of string
@@ -134,6 +162,17 @@ type parse_error =
       (** Two [absorbs] lists, or one list twice, named the same memory. *)
 
 val parse_error_to_string : parse_error -> string
+
+(** The facts to hand {!Keeper_memory_os_current.apply_disposition} as
+    [new_claims]: [selection.new_claims], and each [selection.restated] memory
+    that an applied absorption in [absorbed] goes into. The store skips an id
+    it still holds, so such a memory comes back only if the keeper retracted it
+    during the pass, and the absorbed memories never point into an id no
+    snapshot has. A restatement nothing goes into is not re-added. *)
+val claims_to_apply
+  :  selection
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> Keeper_memory_os_types.fact list
 
 val selection_of_json_result
   :  ?now:float

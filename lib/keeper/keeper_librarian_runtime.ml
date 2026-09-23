@@ -1126,6 +1126,19 @@ let run_best_effort
                 one fact of its own in that window ended the pass (masc
                 #32859). The decision itself has no such requirement: a fact it
                 never mentions is one it never saw. *)
+             (* A restatement keeps the stored memory's fields; what it said
+                differently is not refused, only named once here. *)
+             List.iter
+               (fun (ignored : Keeper_librarian.ignored_fields) ->
+                  Log.Keeper.info
+                    ~keeper_name:keeper_id
+                    "memory os librarian restated memory_id=%s kept=%s ignored differing %s"
+                    ignored.restated_id
+                    (Keeper_librarian.kept_fields_from_to_string ignored.kept_from)
+                    (String.concat
+                       ","
+                       (List.map Keeper_librarian.claim_field_to_string ignored.differing)))
+               selection.ignored_fields;
              (* An absorption the merged claim does not convey is not applied:
                 that memory stays current (RFC-librarian-absorb-gate). The
                 gate only narrows the list. A gate switched off, or an
@@ -1144,6 +1157,7 @@ let run_best_effort
                  ~absorbed:selection.absorbed
                  ()
              in
+             let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in
              let+ snapshot =
                Keeper_memory_os_current.apply_disposition
                  ~on_committed:(fun snapshot ->
@@ -1153,7 +1167,7 @@ let run_best_effort
                  ~dropped_statements:selection.dropped
                  ?durable_range_id
                  ?official_range_id
-                 ~absorbed:(Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate)
+                 ~absorbed:applied_absorbed
                ~keepers_dir
                ~keeper_id
                ~now:(Time_compat.now ())
@@ -1161,7 +1175,8 @@ let run_best_effort
                  { kind = Keeper_memory_os_current.Librarian
                  ; trace_id = input_trace_id inp
                  }
-               ~new_claims:selection.new_claims
+               ~new_claims:
+                 (Keeper_librarian.claims_to_apply selection ~absorbed:applied_absorbed)
                ()
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })

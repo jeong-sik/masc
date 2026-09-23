@@ -57,7 +57,7 @@ Measured from `<base>/.masc/keepers/*.memory-journal.jsonl` and `<base>/.masc/ex
 
 - **D2 — a new claim whose identity already exists is already remembered, not an error.** `memory_id` is the SHA-256 of the exact claim bytes, so an identical claim denotes the same memory. Adding a member to a set that contains it is a no-op; the resulting snapshot is byte-identical either way. This is not deduplication as damage control — it is the identity relation the schema already declares (`docs/spec/12-memory-systems.md`, Write Contract). The stored fact keeps its original `first_seen`; the restated claim contributes nothing to drop.
 
-- **D3 — dropping a memory and restating it in the same pass stays an explicit error, under its own name.** `Dropped_memory_id_recreated` replaces the overloaded `Duplicate_selected_memory_id`. Here the two readings — forget it, remember it — produce opposite snapshots, so no silent resolution is admissible. Keeping it typed and separate is what makes D2 safe to relax: the benign shapes stop consuming passes while the one genuine contradiction stays loud and countable.
+- **D3 — dropping a memory and restating it in the same pass is the drop.** A restatement adds nothing (D2), so the one change the answer states is the drop, and it applies; the same holds for restating a memory another claim of the answer absorbs. A common answer restates every current memory and then drops or merges some; refusing that shape would bring back the whole-pass loss D1 removes. The one shape that stays an error is a claim whose `supersedes` names the memory whose text it repeats (`Supersedes_with_same_text`): it corrects nothing, and applying the drop would delete what the claim keeps (#38048).
 
 - **D4 — a failed pass records the model's output.** `failed_output` carries the parsed JSON the lane received. Without it, no future decision about this contract can be evidence-based, and the operator cannot see which memory a rejection names. The failure detail additionally carries the first 80 bytes of the offending claim alongside the digest.
 
@@ -76,7 +76,7 @@ Deleted from the `parse_error` type, i.e. made unrepresentable rather than handl
 | `Dropped_memory_id_also_retained` | 2 | there is no retained list to contradict |
 | `Duplicate_retained_memory_id` | 0 | same |
 
-`Duplicate_selected_memory_id` (33) splits: the retained-collision and new-claim-collision shapes become no-ops under D2; the dropped-collision shape becomes `Dropped_memory_id_recreated`.
+`Duplicate_selected_memory_id` (33) splits: the retained-collision and new-claim-collision shapes become no-ops under D2; the dropped-collision shape becomes the drop (D3).
 
 `Unknown_dropped_memory_id` (47) survives — a drop must still name its target. Its error surface shrinks from the full roster to the few ids actually dropped.
 
@@ -87,6 +87,6 @@ Retention becomes free, so a lazy pass grows the store. The counter-pressure is 
 ## Verification
 
 1. `parse_error` loses four constructors; every match site becomes exhaustive against the smaller type. The compiler, not a test, proves classes 1, 4 and 5 gone.
-2. `test/test_keeper_librarian_retry.ml` — `test_new_claim_cannot_collide_with_retained_identity` (:234) inverts to assert the pass succeeds and the snapshot is unchanged; `test_new_claim_cannot_recreate_dropped_current_identity` (:249) keeps rejecting, now expecting `Dropped_memory_id_recreated`; `test_totality_rejects_unaccounted_current_id` is deleted with the rule.
+2. `test/test_keeper_librarian_retry.ml` — `test_new_claim_cannot_collide_with_retained_identity` (:234) inverts to assert the pass succeeds and the snapshot is unchanged; `test_a_restated_memory_the_answer_drops_is_dropped` asserts the drop applies; `test_totality_rejects_unaccounted_current_id` is deleted with the rule.
 3. New test: a pass naming no drops and no new claims leaves the snapshot byte-identical.
 4. Live: `domain_output_invalid` in the keeper journals over a week after merge, against the 08-25..08-29 baseline (1, 4, 1, 9, 29). Also counted: snapshot fact growth per keeper, which D5 is answerable for.

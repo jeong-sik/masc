@@ -4055,7 +4055,8 @@ supports_response_format_json = false
 supports_structured_output = false
 supports_native_streaming = true
 
-# api.kimi.com takes temperature 0.6 only at effort=none and 1.0 otherwise.
+# api.kimi.com takes temperature 0.6 only at effort=none and 1.0 otherwise,
+# so AGENT_CORE leaves temperature out and the endpoint picks it.
 # Only the none/not-none difference (reasoning_content present or absent) is
 # verified. The stream carries reasoning text on delta.reasoning_content
 # (raw chunk 2026-09-16T14:53Z: `"delta":{"reasoning_content":"Let"}`). Left
@@ -4075,6 +4076,7 @@ accepted_reasoning_efforts = ["none"]
 supports_image_input = true
 supports_multimodal_inputs = true
 supports_native_streaming = true
+ignored_sampling_parameters = ["temperature"]
 
 # The 256K variant of k3. GET /coding/v1/models on 2026-09-22 lists it with
 # context_length 262144 and otherwise the same metadata as k3 (reasoning,
@@ -4097,12 +4099,16 @@ accepted_reasoning_efforts = ["none"]
 supports_image_input = true
 supports_multimodal_inputs = true
 supports_native_streaming = true
+ignored_sampling_parameters = ["temperature"]
 
 # api.kimi.com/coding's kimi-for-coding. The alias follows whatever model the
 # plan currently serves: GET /coding/v1/models on 2026-09-22 names it
 # "K2.8 Preview" with context_length 1048576, up from the 262144 this row
 # carried for K2.7 Code. Output ceiling from the endpoint; no tool_choice on
-# this wire.
+# this wire. Temperature and top_p are fixed as on the unscoped row: the
+# keeper default temperature 0.4 answered 400 "invalid temperature: only 1
+# is allowed for this model" (Terminal-Bench trial 2026-09-23T19:15Z), so
+# AGENT_CORE leaves both out.
 [[models]]
 id_prefix = "kimi-for-coding"
 provider_name = "kimi_coding"
@@ -4115,6 +4121,7 @@ supports_reasoning = true
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
+ignored_sampling_parameters = ["temperature", "top_p"]
 
 # Local Ollama Gemma 4 QAT build, probed 2026-06-12. Reads images and audio.
 [[models]]

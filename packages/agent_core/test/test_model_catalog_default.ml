@@ -498,6 +498,49 @@ let test_glm_vision_rows_reach_a_runtime_lookup () =
       [ "glm-coding"; "glm" ])
 ;;
 
+(* A Terminal-Bench trial on kimi_coding.kimi-for-coding (2026-09-23T19:15Z)
+   ended its first turn on HTTP 400 "invalid temperature: only 1 is allowed
+   for this model": the keeper default 0.4 reached the wire because the
+   provider-scoped row, which a runtime lookup reads instead of the bare row,
+   declared no fixed sampling. The endpoint fixes temperature for every model
+   on this plan, so the request must leave it out, thinking on or off. *)
+let test_kimi_coding_rows_leave_temperature_out () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"kimi coding sampling"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter
+      (fun model_id ->
+        match
+          Capabilities.for_provider_model_id
+            ~wire:None
+            ~allow_bare_fallback:false
+            ~provider_label:"kimi_coding"
+            ~model_id
+        with
+        | None -> fail ("kimi_coding resolves no capabilities for " ^ model_id)
+        | Some caps ->
+          let dialect = Llm_provider.Reasoning_dialect.of_capabilities caps in
+          List.iter
+            (fun enable_thinking ->
+              check
+                bool
+                (Printf.sprintf
+                   "kimi_coding.%s omits temperature (enable_thinking=%s)"
+                   model_id
+                   (match enable_thinking with
+                    | None -> "unset"
+                    | Some b -> string_of_bool b))
+                true
+                (Llm_provider.Reasoning_dialect.ignores_sampling_param
+                   dialect
+                   ~enable_thinking
+                   Capabilities.Temperature))
+            [ None; Some true; Some false ])
+      [ "kimi-for-coding"; "k3"; "k3-256k" ])
+;;
+
 (* The bare row and its two provider-scoped twins are three catalog keys
    ((provider_name, id_prefix) is the duplicate check), so nothing in the
    loader keeps them in step. They describe one Z.AI model; pin the limits
@@ -850,6 +893,10 @@ let () =
             "glm vision rows reach a runtime lookup"
             `Quick
             test_glm_vision_rows_reach_a_runtime_lookup
+        ; test_case
+            "kimi coding rows leave temperature out"
+            `Quick
+            test_kimi_coding_rows_leave_temperature_out
         ; test_case
             "glm vision rows agree"
             `Quick

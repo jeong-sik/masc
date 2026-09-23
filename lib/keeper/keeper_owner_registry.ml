@@ -766,7 +766,7 @@ let schedule_deferred_retry_wake ~base_path ~keeper_name
                  (Printexc.to_string exn));
             `Stop_daemon)
         with
-        | exn ->
+        | exn -> (* cancel-guard-ok: fork_daemon registration is synchronous; a cancelled switch fails before the daemon body runs *)
           (* The defer already committed durably; losing the wake must not
              surface as a defer failure, but it must not be silent either. *)
           Log.Keeper.warn

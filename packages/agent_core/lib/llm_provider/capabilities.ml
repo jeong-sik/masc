@@ -1463,6 +1463,18 @@ let for_provider_label_base ~wire ~(provider_label : string) =
       capabilities_for_provider_label
 ;;
 
+(* Whether the [[providers]] entry [provider_label] names declares
+   [serves_bare_rows]: it is the vendor's own endpoint for the models the bare
+   rows describe. A label the catalog does not know serves none. *)
+let provider_serves_bare_rows ~(provider_label : string) =
+  match Model_catalog.global () with
+  | None -> false
+  | Some catalog ->
+    (match Model_catalog.provider_entry_for_label catalog provider_label with
+     | Some provider -> provider.Model_catalog.serves_bare_rows
+     | None -> false)
+;;
+
 (* [wire] is the caller's resolved provider kind, passed when it knows one. It
    selects the base a matched row is laid over for labels whose two wires
    differ; the row lookup itself is unaffected. Callers that omit it get the
@@ -1492,8 +1504,22 @@ let for_provider_model_id
 
        Gated on [allow_bare_fallback], so this reorders nothing for a config
        that declared a [provider_id]: a bare row must not answer for a scoped
-       provider whose base deliberately differs. *)
-       (match (if allow_bare_fallback then for_model_id model_id else None) with
+       provider whose base deliberately differs.
+
+       A provider that declares [serves_bare_rows] is the vendor's own
+       endpoint for those models, so the bare rows answer for it too, matched
+       by prefix like any bare lookup. Without it the native Claude provider
+       read no Claude row, fell to the Anthropic preset, which declares no
+       effort ladder, and refused every reasoning effort (#37849). Only the
+       catalog is read on this path, not the capability manifest: the
+       declaration is about this file's bare rows. *)
+       (match
+          if allow_bare_fallback
+          then for_model_id model_id
+          else if provider_serves_bare_rows ~provider_label
+          then for_model_id_catalog model_id
+          else None
+        with
         | Some _ as caps -> caps
         | None -> for_provider_label_base ~wire ~provider_label))
 ;;

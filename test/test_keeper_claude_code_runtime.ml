@@ -2422,6 +2422,51 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
    message the window itself would put back, not an atom of the range.
    Charged twice, a range that fit loses atoms at its front, and the reading
    names a later front that the next turn's seed then holds. *)
+(* The live warning this pins: a Claude Code request that carried a working
+   state and the turn's own context carrier failed the composition check as a
+   repeated carrier, because both wore the carrier's tag. *)
+let test_a_working_state_beside_the_turn_carrier_passes_the_composition_check () =
+  let messages = start_seed_history () in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let snapshot =
+    snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
+  in
+  let capacity_bytes =
+    List.fold_left (fun total message -> total + measure message) 0 messages * 2
+  in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes
+      ~librarian_front:(fun _ ->
+        Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok sent ->
+    let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+    check int "the working state is sent" 1
+      (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
+    let carrier : Agent_core.Types.message =
+      { role = System
+      ; content = [ Text "turn context" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+      }
+    in
+    (match
+       Keeper_agent_prompt_metrics.provider_content_of_transmitted
+         ~prompt_context_present:true
+         ~messages:(sent @ [ carrier ])
+     with
+     | Ok retained ->
+       check int "only the carrier is removed" (List.length sent) (List.length retained)
+     | Error _ -> fail "the working state was read as a second carrier")
+;;
+
 let test_a_range_the_ceiling_fits_goes_as_cut () =
   (* One ask in front of the fixture puts an assistant turn at atom 60, the
      first multiple the window's quantized cut tries, and leaves 61 atoms
@@ -2515,7 +2560,7 @@ let test_a_working_state_that_displaces_nothing_goes () =
     ; content = [ Text working_state ]
     ; name = None
     ; tool_call_id = None
-    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    ; metadata = Runtime_model_input_tail_window.working_state_metadata
     }
   in
   (* Exactly the working state, the preamble and the twenty atoms from 100. *)
@@ -2703,6 +2748,10 @@ let () =
             "a working state that displaces nothing goes"
             `Quick
             test_a_working_state_that_displaces_nothing_goes
+        ; test_case
+            "a working state beside the turn carrier passes the composition check"
+            `Quick
+            test_a_working_state_beside_the_turn_carrier_passes_the_composition_check
         ; test_case
             "a range the ceiling fits goes as cut"
             `Quick

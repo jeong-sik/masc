@@ -3768,7 +3768,7 @@ let test_link_cards_use_actual_message_body_width () =
   List.iter (fun style ->
     let excluded = { entry with Layout.style } in
     check (list string) "tool and skill remain plain" (render `Off excluded) (render `Rich excluded))
-    [Layout.Tool; Skill Layout.Skill_used];
+    [Layout.Tool; Skill Layout.Skill_settled];
   List.iter (fun markdown_source ->
     let growing = { entry with Layout.markdown_source } in
     check (list string) "unsettled source retains original rendering"
@@ -3782,6 +3782,66 @@ let test_link_cards_use_actual_message_body_width () =
   let before = entries () in
   Preview.cache_store { preview with title = Some "Another metadata update" };
   check bool "metadata invalidates layout identity" false (before == entries ())
+
+(* The words on a Skill row and the mark beside it answer different
+   questions: the words say how far the skill got, the mark says whether the
+   reader is looking at something still moving. [Skill_delivered] -- a
+   finished life that ended without a tool call -- was mapped to the live
+   tone, so a settled history line wore the hollow diamond and read as a turn
+   still working. It weighed more once #36870 took the SKILL word off the row
+   and left the mark alone on that axis.
+
+   Both names are spelled out by an exhaustive match, so a new state or a new
+   tone stops compiling here rather than inheriting a mark by accident. *)
+let skill_state_name (state : Keeper_chat_transcript.skill_state) =
+  match state with
+  | Keeper_chat_transcript.Skill_calling -> "calling"
+  | Keeper_chat_transcript.Skill_served_pending -> "served_pending"
+  | Keeper_chat_transcript.Skill_served_only -> "served_only"
+  | Keeper_chat_transcript.Skill_delivered -> "delivered"
+  | Keeper_chat_transcript.Skill_used -> "used"
+  | Keeper_chat_transcript.Skill_failed -> "failed"
+  | Keeper_chat_transcript.Skill_evidence_missing -> "evidence_missing"
+  | Keeper_chat_transcript.Skill_evidence_unavailable -> "evidence_unavailable"
+
+let skill_tone_name (tone : Masc_tui_message_layout.skill_tone) =
+  match tone with
+  | Masc_tui_message_layout.Skill_live -> "live"
+  | Masc_tui_message_layout.Skill_settled -> "settled"
+  | Masc_tui_message_layout.Skill_attention -> "attention"
+  | Masc_tui_message_layout.Skill_failure -> "failure"
+
+let test_every_skill_state_chooses_its_tone () =
+  check (list string) "one tone per state, in the order of the skill's life"
+    [ "calling -> live"
+    ; "served_pending -> live"
+    ; "served_only -> attention"
+    ; "delivered -> settled"
+    ; "used -> settled"
+    ; "failed -> failure"
+    ; "evidence_missing -> attention"
+    ; "evidence_unavailable -> failure"
+    ]
+    (List.map
+       (fun state ->
+         skill_state_name state ^ " -> "
+         ^ skill_tone_name (Masc_tui_render_chat.skill_tone_of_state state))
+       Keeper_chat_transcript.all_skill_states)
+
+(* The rule the table above has to keep. Said on its own because the table is
+   a list of values and this is the reason behind them -- a state moved to
+   some other settled tone would still be wrong, but differently. *)
+let test_only_a_moving_skill_wears_the_live_mark () =
+  check (list string) "the read and the delivery check; nothing else"
+    [ "calling"; "served_pending" ]
+    (List.filter_map
+       (fun state ->
+         match Masc_tui_render_chat.skill_tone_of_state state with
+         | Masc_tui_message_layout.Skill_live -> Some (skill_state_name state)
+         | Masc_tui_message_layout.Skill_settled
+         | Masc_tui_message_layout.Skill_attention
+         | Masc_tui_message_layout.Skill_failure -> None)
+       Keeper_chat_transcript.all_skill_states)
 
 let () =
   run
@@ -4012,6 +4072,12 @@ let () =
             test_take_newest_returns_last_and_keeps_order
         ; test_case "pending preview is bounded" `Quick
             test_pending_preview_is_bounded_and_keeps_the_newest_submission
+        ] )
+    ; ( "skill marks"
+      , [ test_case "every state chooses its tone" `Quick
+            test_every_skill_state_chooses_its_tone
+        ; test_case "only a moving skill wears the live mark" `Quick
+            test_only_a_moving_skill_wears_the_live_mark
         ] )
     ]
 ;;

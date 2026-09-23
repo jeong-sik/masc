@@ -17,7 +17,7 @@ implementation_prs: []
 
 `RFC-librarian-absorb-gate` 가 켜진 뒤, 묶기가 거의 성사되지 않는다.
 
-`~/me/.masc/logs/*.log` 의 관문 로그(`[Keeper/<이름>] librarian absorb gate: A absorbed,
+라이브 store(`MASC_BASE_PATH` 로 지정)의 `<base-path>/.masc/logs/*.log` 에 남은 관문 로그(`[Keeper/<이름>] librarian absorb gate: A absorbed,
 K kept current (S statement(s) not conveyed), U unjudged, T too large`)를 2026-09-23 에
 전수 집계한 값이다.
 

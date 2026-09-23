@@ -97,9 +97,10 @@ type origin =
       (** A Librarian point at [librarian_end_atom], and a later start the
           provider accepted on this history ([source]: the newest
           response-observed turn record, or this turn's boundary after a
-          size refusal). The range opens at that start; the atoms from the
-          point up to it are in neither the request nor memory (RFC
-          librarian-lifecycle §4.10, rules 2 and 3). *)
+          size refusal). The range opens at that start (RFC
+          librarian-lifecycle §4.10, rule 2). The atoms from the point up to
+          it are not sent; which of them are also not in memory is
+          {!librarian_gap}'s answer, which weighs the read position too. *)
   | Turn_start of { end_atom : int }
       (** No absorbed point and no seed: the range begins where the last
           completed turn on this history ended, so only this turn's own
@@ -268,3 +269,26 @@ val origin_to_json : origin -> Yojson.Safe.t
     [librarian_end_atom] and [front], the {!Carried} object of its source;
     [turn_start] with [end_atom]; or
     [turn_start_unknown] with [reason]. *)
+
+(** The atoms that are in neither the request nor memory while a request
+    starts at [gap_end_atom], past everything the Librarian covers (RFC
+    librarian-lifecycle §4.10, rule 3). [gap_end_atom] is excluded. *)
+type librarian_gap =
+  { gap_start_atom : int
+  ; gap_end_atom : int
+  }
+
+val librarian_gap
+  :  snapshot_cut:int option
+  -> read_position:int option
+  -> accepted_start:int
+  -> librarian_gap option
+(** The one rule for the gap. What the Librarian covers ends at the later of
+    its continuity snapshot's cut and its durable read position: the atoms
+    before the cut are summarized, the atoms before the read position are
+    in memory. The gap runs from there to just before [accepted_start], the
+    start the provider last accepted. [None] when [accepted_start] is at or
+    before that end, or when neither position is known. A request that
+    starts past its Librarian point therefore need not leave a gap: a
+    snapshot cut S behind a read position R, with the request starting at R,
+    skips only atoms the Librarian has already read. *)

@@ -26,8 +26,7 @@ let rec origin_sentence = function
       "the range from the Librarian's point was refused: front moved to where this turn began"
   | Inspector.Carried_past_librarian_point { librarian_end_atom; front } ->
       Printf.sprintf
-        "the Librarian stands at atom %d; the range opens where the provider last accepted it, \
-         so the atoms between are in neither this request nor memory (%s)"
+        "the Librarian point is atom %d; the range opens later, where the provider last accepted it (%s)"
         librarian_end_atom (origin_sentence front)
   | Inspector.Carried_turn_start { end_atom } ->
       (* The fact line ahead of this sentence already says which atom the

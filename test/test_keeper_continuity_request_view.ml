@@ -480,7 +480,23 @@ let test_a_start_past_the_snapshot_keeps_the_working_state () =
   let sent = without_working_state (wire projected) in
   check bool "the skipped atom is not sent" false (List.mem skipped sent);
   check bool "the accepted atom is sent" true (List.mem accepted_atom sent);
-  check bool "this turn's input is sent" true (List.mem current sent)
+  check bool "this turn's input is sent" true (List.mem current sent);
+  (* The review's case: the last turn had no fitting snapshot and started at
+     the read position R, which was accepted; this turn a snapshot with the
+     earlier cut S fits. The request starts at R, and the atoms from S to R
+     are ones the Librarian has read, so there is no gap. *)
+  let gap ~read_position =
+    Option.map
+      (fun (g : Front.librarian_gap) -> g.gap_start_atom, g.gap_end_atom)
+      (Front.librarian_gap ~snapshot_cut:(Some snapshot.Snapshot.end_atom)
+         ~read_position ~accepted_start:accepted.first_atom)
+  in
+  check (option (pair int int)) "a read position at the accepted start leaves no gap" None
+    (gap ~read_position:(Some 3));
+  check (option (pair int int)) "a read position behind the cut leaves the cut to the start"
+    (Some (snapshot.Snapshot.end_atom, 3)) (gap ~read_position:(Some 1));
+  check (option (pair int int)) "no read position leaves the cut to the start"
+    (Some (snapshot.Snapshot.end_atom, 3)) (gap ~read_position:None)
 ;;
 
 let exchange id body =

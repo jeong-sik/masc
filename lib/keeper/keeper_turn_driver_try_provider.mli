@@ -246,8 +246,9 @@ type range_start =
       (** A Librarian point, and a later start the provider accepted on this
           history, at most this turn's boundary: the range opens at
           [accepted]. A snapshot's working state still rides ahead of it.
-          The atoms from the point up to [accepted] are the gap: in neither
-          the request nor memory until the Librarian reads them. *)
+          The atoms from the point up to [accepted] are not sent; the part
+          of them the Librarian has not read either is
+          {!Keeper_carried_front.librarian_gap}. *)
   | From_seed of Keeper_carried_front.seed
       (** No Librarian point, and a seed this history opens with the same
           message ({!Keeper_carried_front.for_history}). *)
@@ -601,10 +602,10 @@ val boundary_resend_on : Agent_core.Error.t -> bool
     refusal ([ContextOverflow], [Request_body_refused_by_provider]) and a
     refusal whose reason agent core does not model
     ([Unknown_invalid_request]), which is how live size refusals arrive.
-    Its own set, not the one the cutting ladders answer: a refusal that was
-    not about size is refused again from the boundary and records no
-    accepted start, and one that was leaves a gap the Librarian still
-    reads. *)
+    Today the same set as [refusal_evicts], kept separate so it keeps all
+    three when that one narrows to the typed two (#38286). A refusal that
+    was not about size is refused again from the boundary and records no
+    accepted start; one that was leaves atoms the Librarian still reads. *)
 
 val turn_boundary_resend_sequence :
   same_run_retry_authorized:(unit -> bool) ->

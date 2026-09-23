@@ -2534,9 +2534,9 @@ let eviction_retry_to_json = function
    agent core does not model: every live size refusal measured so far
    arrives that way -- ollama_cloud's "The prompt is too long" with a null
    code, glm's "Prompt exceeds max length" -- and reading the sentence
-   would be a string classifier. This set is its own and is not
-   [refusal_evicts]: the ladders that cut, halve or demote answer only a
-   typed size refusal, and this one resend does not follow them.
+   would be a string classifier. Today this is the same set as
+   [refusal_evicts]. It is kept separate so that this check keeps all three
+   when [refusal_evicts] narrows to the two typed size refusals (#38286).
    - A refusal that was not about size draws the same refusal from the
      boundary. No accepted start is recorded, and the turn ends on it.
    - A refusal that was about size leaves a gap the Librarian still reads.

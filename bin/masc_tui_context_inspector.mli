@@ -158,9 +158,8 @@ type forecast_carried_origin =
             (** One of the carried constructors above: where the start the
                 provider accepted came from. *)
       }
-      (** The Librarian stands at [librarian_end_atom] and the range opens at
-          a later start the provider accepted; the atoms between are in
-          neither the request nor memory. *)
+      (** The Librarian point is [librarian_end_atom] and the range opens at
+          a later start the provider accepted. *)
 
 type forecast_carried =
   { first_atom : int

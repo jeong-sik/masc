@@ -333,3 +333,22 @@ let rec origin_to_json = function
   | Turn_start_unknown { reason } ->
     `Assoc [ "kind", `String "turn_start_unknown"; "reason", `String reason ]
 ;;
+
+type librarian_gap =
+  { gap_start_atom : int
+  ; gap_end_atom : int
+  }
+
+let librarian_gap ~snapshot_cut ~read_position ~accepted_start =
+  let covered =
+    match snapshot_cut, read_position with
+    | Some cut, Some read -> Some (max cut read)
+    | Some cut, None -> Some cut
+    | None, Some read -> Some read
+    | None, None -> None
+  in
+  match covered with
+  | Some covered when accepted_start > covered ->
+    Some { gap_start_atom = covered; gap_end_atom = accepted_start }
+  | Some _ | None -> None
+;;

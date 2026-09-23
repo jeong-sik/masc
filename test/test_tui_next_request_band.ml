@@ -267,7 +267,7 @@ let test_the_turn_start_and_refusal_fronts_say_why () =
     (says "the range from the Librarian's point was refused: front moved to where this turn began"
        (with_origin Inspector.Carried_turn_start_after_librarian_refusal));
   Alcotest.(check bool) "a start past the Librarian point names the point and its source" true
-    (says "the Librarian stands at atom 2; the range opens where the provider last accepted it, so the atoms between are in neither this request nor memory (front from turn #7's record; nothing counted since the server started)"
+    (says "the Librarian point is atom 2; the range opens later, where the provider last accepted it (front from turn #7's record; nothing counted since the server started)"
        (with_origin
           (Inspector.Carried_past_librarian_point
              { librarian_end_atom = 2; front = Inspector.Carried_from_turn_record { turn = 7 } })));

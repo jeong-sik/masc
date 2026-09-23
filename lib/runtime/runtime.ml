@@ -740,13 +740,8 @@ type dropped_runtime_lane =
 type startup_degradation =
   { report : missing_catalog_report
   ; configured_default_runtime_id : string
-  ; effective_default_runtime_id : string
   ; disabled_runtime_ids : string list
   ; unavailable_assignments : unavailable_runtime_assignment list
-  ; dropped_routes : dropped_runtime_route list
-  ; dropped_media_failover : string list
-  ; dropped_lane_candidates : dropped_runtime_lane list
-  ; dropped_lanes : dropped_runtime_lane list
   }
 
 type init_default_outcome =
@@ -783,10 +778,9 @@ let strict_init_error_to_string = function
 let startup_degradation_to_string (degradation : startup_degradation) =
   Printf.sprintf
     "runtime catalog degraded boot: disabled %d uncatalogued runtime(s); \
-     configured default %S -> effective default %S; unavailable configured routes: %s"
+     default %S; unavailable configured routes: %s"
     (List.length degradation.disabled_runtime_ids)
     degradation.configured_default_runtime_id
-    degradation.effective_default_runtime_id
     (String.concat ", "
        (List.map missing_catalog_model_to_string degradation.report.missing_models))
 ;;
@@ -795,17 +789,6 @@ let unavailable_assignment_to_yojson (entry : unavailable_runtime_assignment) =
   `Assoc
     [ "keeper_name", `String entry.keeper_name
     ; "runtime_id", `String entry.runtime_id
-    ]
-;;
-
-let dropped_route_to_yojson (entry : dropped_runtime_route) =
-  `Assoc [ "route_name", `String entry.route_name; "runtime_id", `String entry.runtime_id ]
-;;
-
-let dropped_lane_to_yojson (entry : dropped_runtime_lane) =
-  `Assoc
-    [ "lane_id", `String entry.lane_id
-    ; "runtime_ids", `List (List.map (fun id -> `String id) entry.runtime_ids)
     ]
 ;;
 
@@ -840,7 +823,6 @@ let startup_degradation_to_yojson = function
       ; "config_path", `String degradation.report.config_path
       ; "configured_default_runtime_id"
         , `String degradation.configured_default_runtime_id
-      ; "effective_default_runtime_id", `String degradation.effective_default_runtime_id
       ; "missing_catalog_model_count", `Int (List.length degradation.report.missing_models)
       ; ( "missing_catalog_models"
         , `List (List.map missing_catalog_model_to_yojson degradation.report.missing_models)
@@ -851,14 +833,6 @@ let startup_degradation_to_yojson = function
       ; ( "unavailable_assignments"
         , `List (List.map unavailable_assignment_to_yojson degradation.unavailable_assignments)
         )
-      ; "dropped_routes", `List (List.map dropped_route_to_yojson degradation.dropped_routes)
-      ; ( "dropped_media_failover"
-        , `List (List.map (fun id -> `String id) degradation.dropped_media_failover)
-        )
-      ; ( "dropped_lane_candidates"
-        , `List (List.map dropped_lane_to_yojson degradation.dropped_lane_candidates)
-        )
-      ; "dropped_lanes", `List (List.map dropped_lane_to_yojson degradation.dropped_lanes)
       ; ( "next_action"
         , `String
             "Inspect the unavailable configured runtime IDs and their capability catalog entries. \
@@ -1282,13 +1256,8 @@ let degrade_loaded_for_missing_catalog
     let degradation =
       { report
       ; configured_default_runtime_id = configured_default.id
-      ; effective_default_runtime_id = configured_default.id
       ; disabled_runtime_ids
       ; unavailable_assignments
-      ; dropped_routes
-      ; dropped_media_failover
-      ; dropped_lane_candidates
-      ; dropped_lanes
       }
     in
     Ok

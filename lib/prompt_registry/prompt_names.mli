@@ -84,6 +84,11 @@ val librarian_continuity : string
     alone. *)
 val librarian_working_context : string
 
+(** The [working_contexts] writing rule that [librarian] and
+    [librarian.working_context] both render into their
+    [working_contexts_rule] variable, so the rule has one text. *)
+val librarian_working_contexts_rule : string
+
 val workspace_memory_curator : string
 
 val fusion_judge : string

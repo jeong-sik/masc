@@ -80,6 +80,7 @@ let keeper_skills_unavailable_diagnostic = "keeper.skills.unavailable_diagnostic
 let librarian = "librarian"
 let librarian_continuity = "librarian.continuity"
 let librarian_working_context = "librarian.working_context"
+let librarian_working_contexts_rule = "librarian.working_contexts_rule"
 let workspace_memory_curator = "workspace_memory_curator"
 
 (* Runtime-owned instruction assets.  A caller may supply data to these

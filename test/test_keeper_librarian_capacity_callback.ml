@@ -171,6 +171,9 @@ let test_prefit_real_continuity ~base_path () =
     let input = {input with Keeper_librarian.working_context=Context.empty} in
     let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json prepared))
       :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input) in
+    let rule = Prompt_registry.render_prompt_template
+      Prompt_names.librarian_working_contexts_rule [] |> get |> String.trim in
+    let variables = ("working_contexts_rule", rule) :: variables in
     let _, prompt = Prompt_registry.resolve_and_render_prompt_template
       Prompt_names.librarian variables |> get in
     let requirement = Agent_core.Exact_output.make_output_requirement

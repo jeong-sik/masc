@@ -247,6 +247,7 @@ max-concurrent = 1
       ~model_input_window:(Some window) ~response_observed_model_input
       ~raw_trace_run_ref:None
       ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+      ~turn_output_tokens:None
       ~usage:
         { input_tokens = None
         ; output_tokens = None

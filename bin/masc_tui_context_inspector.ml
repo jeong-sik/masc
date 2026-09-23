@@ -34,6 +34,7 @@ type recent_turn =
   ; input_tokens : int option
   ; cache_read : int option
   ; output_tokens : int option
+  ; turn_output_tokens : int option
   ; scope : Runtime_usage_scope.t
   }
 
@@ -218,6 +219,7 @@ let decode_turn_records = function
                       ; input_tokens = per_request_tokens record
                       ; cache_read = record.usage.cache_read_input_tokens
                       ; output_tokens = record.usage.output_tokens
+                      ; turn_output_tokens = record.turn_output_tokens
                       ; scope = record.usage.scope
                       })
                     newest_first

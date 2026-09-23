@@ -55,6 +55,7 @@ let write
     ; raw_trace_run_ref
     ; sampling
     ; usage
+    ; turn_output_tokens
     ; ts = Time_compat.now ()
     }
   in

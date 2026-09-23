@@ -78,6 +78,42 @@ let tool_pair () =
        outcome = T.Tool_succeeded; json = None; content_blocks = None}]) with tool_call_id = Some "read-1" }]
 ;;
 
+(* A seed range reaches behind this turn, so an earlier turn's tool body in
+   it goes out as a marker at the turn boundary, as it does with no
+   continuity. Before, a turn with no Librarian point sent those bodies raw
+   every time its range grew back over them. *)
+let test_without_snapshot_seed_demotes_earlier_tool_bodies () =
+  let earlier_body = String.make 4_000 'o' in
+  let earlier =
+    [ pinned; text T.User "Read the old log.";
+      message T.Assistant [T.ToolUse {id = "old-1"; name = "read_file"; input = `Assoc []}];
+      { (message T.Tool [T.ToolResult {tool_use_id = "old-1"; content = earlier_body;
+          outcome = T.Tool_succeeded; json = None; content_blocks = None}])
+        with tool_call_id = Some "old-1" };
+      text T.Assistant "Read the log." ] in
+  let this_turn = [text T.User "Continue from the log."] in
+  let messages = earlier @ this_turn in
+  let completed_end = snd (Window.annotate earlier) in
+  let history_digest_at = Window.atom_opening_digest messages in
+  let front_digest = history_digest_at 0 |> Option.get in
+  let front : Front.seed = {first_atom = 0; front_digest; source = Front.Ledger} in
+  let planned = ref 0 in
+  let seeded =
+    Driver.For_testing.request_view ~continuity:Driver.without_snapshot
+      ~provider_config ~measure_message_bytes:measure ~front:(Some front)
+      ~history_digest_at ~last_resort:false
+      ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end
+      ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
+      ~materialize:(fun ~pending messages -> planned := List.length pending; messages)
+      messages in
+  (match seeded.composed.origin with
+   | Front.Carried Front.Ledger -> ()
+   | _ -> fail "the range did not open on the seed");
+  check int "the seed range demotes at the turn boundary" completed_end
+    seeded.composed.demote_before;
+  check int "the earlier turn's tool body is planned as a marker" 1 !planned
+;;
+
 let test_actual_wire_and_tool_append () =
   let snapshot = snapshot () in
   let current = text T.User "Inspect the unpublished patch." in
@@ -157,7 +193,7 @@ let test_without_snapshot_starts_at_the_turn_start () =
     Driver.For_testing.request_view ~continuity:Driver.without_snapshot
       ~provider_config ~measure_message_bytes:measure ~front
       ~history_digest_at:(Window.atom_opening_digest messages) ~last_resort:true
-      ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int ~turn_boundary
+      ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end ~turn_boundary
       ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered demotion") messages in
   (* A seed older than the turn boundary: the earlier turn's assistant atom
      goes out with this turn, and the origin names the seed's source. *)
@@ -171,7 +207,8 @@ let test_without_snapshot_starts_at_the_turn_start () =
   check string "the earlier turn's atom reaches the wire with this turn"
     (encode (pinned :: text T.Assistant "The build passed." :: this_turn))
     (encode (without_preamble (wire seeded)));
-  check int "last resort cannot demote unsummarized history" 0 seeded.composed.demote_before;
+  check int "a seed range demotes at the turn boundary, not past it" completed_end
+    seeded.composed.demote_before;
   (match seeded.composed.origin with
    | Front.Carried Front.Ledger -> ()
    | _ -> fail "the origin does not name the seed's source");
@@ -689,6 +726,7 @@ let () = run "continuity request projection"
                test_case "all covered" `Quick test_all_covered_keeps_only_working_and_pinned;
                test_case "covered prefix validation per request" `Quick test_each_request_validates_frozen_covered_messages;
                test_case "without a snapshot the range starts at the seed, else the turn start" `Quick test_without_snapshot_starts_at_the_turn_start;
+               test_case "without a snapshot a seed range demotes earlier tool bodies" `Quick test_without_snapshot_seed_demotes_earlier_tool_bodies;
                test_case "the reader says unknown when the boundary store is unreadable" `Quick test_turn_start_reader_says_unknown_when_the_store_is_unreadable;
                test_case "absorbed history starts at the Librarian's position" `Quick
                  test_absorbed_history_starts_at_the_librarians_position;

@@ -46,7 +46,8 @@ val without_snapshot : continuity
     starts at the seed -- the working ledger's front, or the range the newest
     turn record joined to a response -- when one is valid for this history
     ({!Keeper_carried_front.for_history}), and otherwise at the turn's own
-    boundary ({!Keeper_carried_front.Turn_start}). *)
+    boundary ({!Keeper_carried_front.Turn_start}). A size refusal of the seed
+    range is answered once from that boundary ({!seed_refusal_sequence}). *)
 
 type continuity_choice =
   | Chose_no_point
@@ -488,6 +489,34 @@ val carried_range_eviction_sequence :
     that was refused. Every other error ends it at once, as does a refusal
     once [same_run_retry_authorized] is [false]. *)
 
+(** Where a request with no Librarian point ({!without_snapshot}) opens its
+    range on one attempt (RFC keeper-context-window-in-tokens §13.4). *)
+type range_start =
+  | Seed_when_valid
+      (** At the seed when one is valid for this history, and at the turn
+          boundary otherwise. *)
+  | Turn_start_after_seed_refusal
+      (** At the turn boundary: the provider refused the range the carried
+          seed opened as too large. *)
+
+val seed_refusal_sequence :
+  same_run_retry_authorized:(unit -> bool) ->
+  last_origin:(unit -> Keeper_carried_front.origin option) ->
+  on_turn_start:(Agent_core.Error.t -> unit) ->
+  attempt:(range_start -> ('ok, Agent_core.Error.t) result) ->
+  unit ->
+  ('ok, Agent_core.Error.t) result
+(** The retry policy of a turn with no Librarian point, over an injected
+    [attempt]. The attempt runs from {!Seed_when_valid}. When it fails with a
+    refusal {!carried_range_eviction_sequence} would move the front for, the
+    range [last_origin] reports opened on a carried seed
+    ({!Keeper_carried_front.Carried}), and [same_run_retry_authorized] holds,
+    [on_turn_start] is told the refusal and the same attempt runs once more
+    from {!Turn_start_after_seed_refusal}; its result is returned as it is.
+    Every other failure is returned at once. The range is never halved: an
+    accepted turn-boundary request is what the ledger records, so the next
+    turn's seed is that boundary. *)
+
 val run_try_provider_with_carried_range_eviction :
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
@@ -499,7 +528,9 @@ val run_try_provider_with_carried_range_eviction :
     marks are judged against the pair's ledger once for the turn: the
     eviction moves the pair's ledger front, the halving holds a seed for the
     rest of this attempt, and each retry is recorded on the runtime
-    manifest. *)
+    manifest. A turn with no Librarian point runs under
+    {!seed_refusal_sequence} instead, and a turn with an absorbed point or a
+    recovery view runs one attempt. *)
 
 val run_try_provider_with_truncation_recovery :
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
@@ -635,6 +666,11 @@ module For_testing : sig
     turn_boundary:Keeper_carried_front.turn_start ->
     Agent_core.Types.message list ->
     composed
+
+  (** Whether a request of the attempt reads the seed: with no continuity or
+      with no Librarian point, from {!Seed_when_valid}; never with an
+      absorbed point or from {!Turn_start_after_seed_refusal}. *)
+  val reads_seed : continuity option -> range_start -> bool
 
   val request_view :
     ?input_policy:Keeper_input_policy.t ->

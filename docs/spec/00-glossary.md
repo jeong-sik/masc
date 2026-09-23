@@ -941,7 +941,9 @@ status: reference
   끝난 turn이 끝난 자리에서 시작한다), `Turn_start_unknown`(그 경계마저 못 읽음:
   가장 새 Atom 하나에서 시작한다). Agent Core는 맞는 저장본 → Librarian이 읽은
   위치 → 이 History에 맞는 원장·씨앗 → 마지막으로 끝난 turn의 경계 순으로 고른다.
-  Librarian 지점이 있으면 원장·씨앗은 읽지 않는다. 공식 클라이언트 레인은 씨앗이
+  Librarian 지점이 있으면 원장·씨앗은 읽지 않는다. Librarian 지점이 없는 turn에서
+  provider가 씨앗 범위를 크기 때문에 거절하면 같은 후보에 turn 경계부터 한 번 더
+  보낸다. 받아들여진 요청이 원장에 남으므로 다음 turn의 씨앗은 그 경계가 된다. 공식 클라이언트 레인은 씨앗이
   레인 자체의 자르기와 같거나 그 뒤에 있으면 씨앗에서 시작한다(마지막으로 끝난 turn의
   경계보다 오래돼도 그렇다). 씨앗이 없으면 레인의 자르기와 turn 경계 중 뒤쪽에서
   시작한다 (`RFC-keeper-context-window-in-tokens` §13.4·§13.6).

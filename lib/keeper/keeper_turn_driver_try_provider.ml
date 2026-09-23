@@ -896,7 +896,26 @@ type composed =
 type sent_request =
   { request : Keeper_model_input_ledger.request
   ; digest_at : int -> string option
+  ; origin : Keeper_carried_front.origin
+        (* Where the range the request carried started: a refusal of a
+           carried seed is answered from the turn boundary
+           ([seed_refusal_sequence]); a refusal of any other range is not. *)
   }
+
+(* Where a request with no Librarian point opens its range on this attempt
+   (RFC keeper-context-window-in-tokens §13.4). One step, taken at most once
+   per attempt, and only after the provider refused a range that opened on a
+   carried seed. *)
+type range_start =
+  | Seed_when_valid
+      (* The seed -- the ledger's front, or the range the newest turn record
+         joined to a response -- when one is valid for this history, and the
+         turn boundary otherwise. *)
+  | Turn_start_after_seed_refusal
+      (* The provider refused the range the seed opened as too large; this
+         attempt opens at the turn boundary. The request accepted from there
+         is what the ledger and the turn record keep, so the next turn's seed
+         is that boundary. *)
 
 (* What one provider attempt carries between its requests and the retry
    policy around it: its working ledger, the range the last request composed,
@@ -907,6 +926,7 @@ type attempt_state =
   ; ledger : Keeper_model_input_ledger.t option ref
   ; last_resort_armed : bool ref
   ; last_resort_probe : (unit -> bool) option ref
+  ; range_start : range_start ref
   }
 
 (* The ledger's session: the history the carried positions belong to. The
@@ -931,6 +951,7 @@ let new_attempt_state (ctx : try_provider_ctx) =
            ~session_id:(ledger_session ctx))
   ; last_resort_armed = ref false
   ; last_resort_probe = ref None
+  ; range_start = ref Seed_when_valid
   }
 ;;
 
@@ -997,10 +1018,18 @@ let compose_carried_model_input
        | Error dropped -> None, Some (seed, dropped))
     | (None | Some Without_snapshot), None -> None, None
   in
+  (* A range that opens on a seed reaches behind this turn, so its aged tool
+     results are demoted at the turn boundary on either path that carries
+     one. A range that opens at the turn boundary or at a Librarian point
+     carries no atom behind it that demotion could shorten. *)
   let demote_before =
     match input_policy, continuity with
     | Keeper_input_policy.Small, _ -> demote_before
-    | Keeper_input_policy.Wide, Some _ -> 0
+    | Keeper_input_policy.Wide, Some (Summarized _ | Absorbed _) -> 0
+    | Wide, Some Without_snapshot ->
+      (match front with
+       | Some (_ : Keeper_carried_front.seed) -> demote_before
+       | None -> 0)
     | Wide, None -> if last_resort then history_atom_count else demote_before in
   let planned =
     demotion_plan ~measure_message_bytes ~base_path ~demote_before messages
@@ -1043,8 +1072,10 @@ let compose_carried_model_input
       in
       (* A response-observed persisted seed is evidence for the range it names.
          Composition consumes that evidence; it does not reinterpret the prior
-         outcome as a size refusal. The next refusal is answered by the in-turn
-         ladder, which owns any further move toward the newest atom. *)
+         outcome as a size refusal. A size refusal of this range is answered
+         after the attempt: with no continuity by the in-turn ladder, which
+         owns any further move toward the newest atom; with no Librarian point
+         by one resend from the turn boundary ([seed_refusal_sequence]). *)
       let projection, transmitted_bytes =
         Runtime_model_input_tail_window.project_from_atom
           ~measure_message_bytes
@@ -1204,6 +1235,16 @@ let carried_front ~ledger ~keeper_name ~runtime_id ~session_id ~digest_at ~after
   | None -> without_ledger (), dropped
 ;;
 
+(* Whether a request reads the seed at all. An absorbed point replaces it,
+   and after a refusal of the range it opened the attempt starts at the turn
+   boundary ([seed_refusal_sequence]). *)
+let reads_seed continuity range_start =
+  match continuity, range_start with
+  | Some (Summarized _ | Absorbed _), (Seed_when_valid | Turn_start_after_seed_refusal)
+  | (None | Some Without_snapshot), Turn_start_after_seed_refusal -> false
+  | (None | Some Without_snapshot), Seed_when_valid -> true
+;;
+
 (* The carried range runs here rather than in the caller because its front
    belongs to the (keeper, runtime) pair: the ledger the previous response on
    this very attempt may have just moved. A caller that composed the range
@@ -1313,11 +1354,11 @@ let bounded_model_input_projection
     (* A turn with no Librarian point still carries the seed: the ledger's
        front, or the range the newest turn record joined to a response
        (RFC keeper-context-window-in-tokens §13.4). Only an absorbed point
-       replaces it. *)
+       replaces it, and a refusal of the range it opened moves this attempt
+       to the turn boundary ([reads_seed]). *)
     let front, dropped_ledger =
-      match ctx.continuity with
-      | Some (Summarized _ | Absorbed _) -> None, None
-      | None | Some Without_snapshot -> carried_front
+      if not (reads_seed ctx.continuity !(state.range_start)) then None, None
+      else carried_front
         ~ledger:state.ledger
         ~keeper_name:ctx.keeper_name
         ~runtime_id:ctx.runtime_id
@@ -1558,6 +1599,7 @@ let bounded_model_input_projection
               ; demote_before = view.composed.demote_before
               }
           ; digest_at = history_digest_at
+          ; origin = view.composed.origin
           });
     match ctx.model_input_projection with
     | None -> Ok windowed
@@ -2293,6 +2335,41 @@ let eviction_retry_to_json = function
    rotating candidates: a retry here is a same-run retry too, so it must not
    fire once AGENT_CORE has mutated agent state at a durable checkpoint
    stage. *)
+(* The one answer a turn with no Librarian point has to a size refusal
+   (RFC keeper-context-window-in-tokens §13.4). The attempt opens on the seed
+   when one is valid. When the provider refuses the range a carried seed
+   opened with a refusal the ladder would move the front for
+   ([refusal_evicts]), the same candidate is asked once more from the turn
+   boundary. An accepted request is what the ledger and the turn record keep,
+   so the next turn's seed is that boundary; the range grows back only
+   through responses. A refused turn-boundary request, a refusal of a range
+   that did not open on a seed, and every other error end the sequence with
+   the error in hand. The range is never halved on this path. *)
+let seed_refusal_sequence
+      ~same_run_retry_authorized
+      ~(last_origin : unit -> Keeper_carried_front.origin option)
+      ~(on_turn_start : Agent_core.Error.t -> unit)
+      ~(attempt : range_start -> ('ok, Agent_core.Error.t) result)
+      ()
+  : ('ok, Agent_core.Error.t) result
+  =
+  match attempt Seed_when_valid with
+  | Ok _ as ok -> ok
+  | Error error as failed ->
+    (match last_origin () with
+     | Some (Keeper_carried_front.Carried _)
+       when refusal_evicts error && same_run_retry_authorized () ->
+       on_turn_start error;
+       attempt Turn_start_after_seed_refusal
+     | Some
+         ( Keeper_carried_front.Carried _
+         | Keeper_carried_front.Librarian_snapshot _
+         | Keeper_carried_front.Librarian_progress _
+         | Keeper_carried_front.Turn_start _
+         | Keeper_carried_front.Turn_start_unknown _ )
+     | None -> failed)
+;;
+
 let carried_range_eviction_sequence
       ~same_run_retry_authorized
       ~(ledger : unit -> Keeper_model_input_ledger.t option)
@@ -2434,11 +2511,38 @@ let run_try_provider_with_carried_range_eviction
       ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
       ~context_marks:ctx.context_marks state.ledger;
   match ctx.recovery_view, ctx.continuity with
-  | Some _, _ | None, Some _ ->
+  | Some _, _ | None, Some (Summarized _ | Absorbed _) ->
     (* The validated semantic view owns retained source obligations. Retrying
        the same view with a shorter range cannot recover it. Final serialized
        request admission still enforces the request-body cap. *)
     run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
+  | None, Some Without_snapshot ->
+    let checkpoint_after = ref None in
+    let success_sample = ref None in
+    let result =
+      seed_refusal_sequence
+        ~same_run_retry_authorized:(fun () ->
+          same_run_retry_allowed ctx.checkpoint_progress)
+        ~last_origin:(fun () ->
+          Option.map (fun (sent : sent_request) -> sent.origin) !(state.last_request))
+        ~on_turn_start:(fun error ->
+          Log.Keeper.info
+            ~keeper_name:ctx.keeper_name
+            "model input carried seed refused runtime=%s: the same candidate is asked \
+             again from the turn boundary error=%s"
+            ctx.runtime_id
+            (Agent_core.Error.to_string error))
+        ~attempt:(fun range_start ->
+          state.range_start := range_start;
+          let attempt_result, attempt_checkpoint_after, attempt_success_sample =
+            run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
+          in
+          checkpoint_after := attempt_checkpoint_after;
+          success_sample := attempt_success_sample;
+          attempt_result)
+        ()
+    in
+    result, !checkpoint_after, !success_sample
   | None, None ->
     (* An uncapped runtime retries like any other. #36817 kept such a
        runtime out of the token halving because that walk invented a seed
@@ -2765,6 +2869,7 @@ module For_testing = struct
   let message_measurement_hash = Agent_core.Types.Message_value.hash
   let compose_carried_model_input = compose_carried_model_input
   let request_view = request_view
+  let reads_seed = reads_seed
   let last_resort_demotes = last_resort_demotes
   let offload_model_input_cpu = offload_model_input_cpu
 end

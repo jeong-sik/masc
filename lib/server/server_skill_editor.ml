@@ -545,7 +545,24 @@ let with_missing_source_root_created ~base_path ~refresh snapshot source_id =
         reason;
       Error Source_not_ready
     in
-    (match Fs_compat.mkdir_p resolved_path with
+    (* Each folder that did not exist is fsynced through its parent, as the
+       package directory is below, so a crash cannot drop the new source
+       folder with a durable SKILL.md inside it. A symlinked ancestor is
+       followed, the same as a source root the write path already accepts. *)
+    let rec create_missing path =
+      if not (Sys.file_exists path)
+      then (
+        let parent = Filename.dirname path in
+        if not (String.equal parent path) then create_missing parent;
+        (try Unix.mkdir path 0o755 with
+         | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+        Keeper_fs_durable_directory.fsync_directory parent)
+    in
+    (match
+       Eio_guard.run_in_systhread ~label:"skill-editor-create-source-root" (fun () ->
+         create_missing resolved_path);
+       Eio_guard.check_if_ready ()
+     with
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception exn -> not_ready ("creating the folder failed: " ^ Printexc.to_string exn)
      | () ->

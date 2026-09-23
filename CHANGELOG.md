@@ -4,7 +4,7 @@
 
 ### Added
 
-- `keeper_memory_write` takes an optional `supersedes` memory_id: the keeper's own current authored fact is removed and the new claim written in one locked Memory OS commit, journaled with a `superseded_by` reason and recorded as a `Revised` event. Unknown, non-current, Librarian-injected and self ids, and `supersedes` with `source_path`, are refused with typed errors and nothing written. The tool description tells keepers to supersede a progress or position snapshot instead of writing another copy (#38122).
+- `keeper_memory_write` takes an optional `supersedes` memory_id: the keeper's own current authored fact is removed and the new claim written in one locked Memory OS commit, journaled with a `superseded_by` reason and recorded as a `Revised` event. The receipt reports `removed_memory_ids` and `support_invalidations` the way a retraction does. Unknown, non-current, Librarian-injected and self ids, a derived claim resting on the fact it replaces, and `supersedes` with `source_path`, are refused with typed errors and nothing written. The tool description tells keepers to supersede a progress or position snapshot instead of writing another copy (#38122).
 
 ### Changed
 

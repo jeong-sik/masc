@@ -38,9 +38,10 @@ val is_empty : candidate_backpressure -> bool
 val note_rate_limit :
   noted_at:float -> retry_after:float option ->
   candidate_backpressure -> candidate_backpressure
-(** Record the rate limit unless a newer one is already held. A delay that is
-    not a finite non-negative number is kept as no hint. The failed attempt, if
-    any, is kept. *)
+(** Record the rate limit unless a newer one is already held. The delay is
+    read by {!Keeper_runtime_failure_route.usable_retry_after}: one that names
+    no wait, zero included, is kept as no hint, so only an observed success
+    ends that rate limit. The failed attempt, if any, is kept. *)
 
 val note_failed_attempt :
   noted_at:float -> failure:attempt_failure ->

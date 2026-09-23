@@ -949,7 +949,7 @@ let test_response_received_error_evidence_matrix () =
     | Ok _ | Error _ -> fail (label ^ " lost response-received evidence")
   in
   let completion_failed = function
-    | EO.Completion_failed -> true
+    | EO.Completion_failed _ -> true
     | _ -> false
   in
   let invalid_json = function
@@ -1019,7 +1019,7 @@ let test_public_receipt_phase_matrix () =
   in
   check int "abort observes one POST" 1 abort_posts;
   (match abort_result with
-   | Error { EO.receipt; cause = EO.Completion_failed; raw_response = None; _ } ->
+   | Error { EO.receipt; cause = EO.Completion_failed _; raw_response = None; _ } ->
      check_receipt
        "abort"
        ~phase:EO.Dispatch_started

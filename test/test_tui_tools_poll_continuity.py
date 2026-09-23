@@ -90,14 +90,14 @@ def delayed_reads(binary):
 
     def interact(process, master, _slave, output, _base):
         h.tab_until(process, master, output, b"MASC Config")
-        h.send_and_wait(process, master, output, b"t", b"MASC Tools")
+        h.send_and_wait(process, master, output, b"t", b"MASC Config / Tools")
         h.wait_for_output(process, master, output, b"keeper_poll_result_1", start=0, timeout=10.0)
         # Inventory must be visible while the independently owned async read
         # is still pending. Its late error must be applied, not starved by ticks.
         h.send_and_wait(process, master, output, b"p", b"Async broker")
         h.wait_for_output(process, master, output, "Async broker — 읽기 실패:".encode(), start=0, timeout=10.0)
         for _ in range(4):
-            h.send_and_wait(process, master, output, b"p", b"MASC Tools")
+            h.send_and_wait(process, master, output, b"p", b"MASC Config / Tools")
         h.wait_for_output(process, master, output, b"keeper_poll_result_2", start=0, timeout=10.0)
         with lock:
             observations = {"inventory_started_s": list(started),

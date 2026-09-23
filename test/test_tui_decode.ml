@@ -2741,7 +2741,14 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "skill_body_bytes", `Int 4981
       ; "skills_left_out", `List []
       ; "skill_resource_read_max_bytes", `Int 65536
-      ; "count", `Int 1
+      ; "count", `Int 2
+        (* The origin shape here mirrors what
+           Keeper_effective_tool_surface.origin_to_yojson actually emits, and
+           the values are the ones test_keeper_effective_tool_surface pins on
+           the producer side. The second tool splits the two branches: a
+           descriptor origin carries no skill_provenance at all, so its
+           source id must read as None rather than inheriting the first
+           tool's. *)
       ; ( "tools"
         , `List
             [ `Assoc
@@ -2749,9 +2756,26 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                 ; ( "origin"
                   , `Assoc
                       [ "kind", `String "composition_skill"
-                      ; "skill_source"
-                        , `String "skills/work-intake/SKILL.md"
+                      ; ( "skill_provenance"
+                        , `Assoc
+                            [ ( "identity"
+                              , `Assoc
+                                  [ "source_id", `String "shared-catalog"
+                                  ; "package_id", `String "work-intake"
+                                  ; "name", `String "work-intake"
+                                  ] )
+                            ; ( "directory"
+                              , `String "/srv/shared-agent-skills/work-intake" )
+                            ; ( "source"
+                              , `Assoc
+                                  [ "path", `String "/srv/shared-agent-skills" ]
+                              )
+                            ] )
                       ] )
+                ]
+            ; `Assoc
+                [ "name", `String "Read"
+                ; "origin", `Assoc [ "kind", `String "descriptor" ]
                 ] ] )
       ; "tool_surface_sha256", `String (String.make 64 'a')
       ]
@@ -2772,7 +2796,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                  ets_skill_discovery_bytes;
                  ets_skill_eager_body_bytes;
                  ets_skill_body_bytes;
-                 ets_tools = [ tool ];
+                 ets_tools = [ tool; bare_tool ];
                  ets_tool_surface_sha256 = Some digest;
                  _
                });
@@ -2786,6 +2810,17 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         (Skill_reference.list_to_yojson ets_instruction_skills
          |> Yojson.Safe.to_string);
       Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
+      (* Without this the Tools screen prints a bare "composition_skill" for
+         every skill tool: the decoder used to read origin.skill_source,
+         which no producer has emitted since the surface moved to
+         skill_provenance. *)
+      Alcotest.(check (option string))
+        "composition tool names its configured skill source"
+        (Some "shared-catalog") tool.et_skill_source_id;
+      Alcotest.(check string) "plain tool origin" "descriptor" bare_tool.et_origin;
+      Alcotest.(check (option string))
+        "a tool with no skill behind it names no source"
+        None bare_tool.et_skill_source_id;
       Alcotest.(check string) "profile name" "work-intake" profile.esp_name;
       Alcotest.(check string)
         "profile keeps the exact editable reference"
@@ -2810,8 +2845,10 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check int) "Skill discovery bytes" 369 ets_skill_discovery_bytes;
       Alcotest.(check int) "Skill eager bytes" 0 ets_skill_eager_body_bytes;
       Alcotest.(check int) "Skill body bytes" 4981 ets_skill_body_bytes;
-      Alcotest.(check (option string)) "SKILL.md source"
-        (Some "skills/work-intake/SKILL.md") tool.et_skill_source;
+      (* The skill source is asserted above, against the shape the producer
+         emits. This used to pin a SKILL.md path that no producer has sent
+         since the surface moved to skill_provenance -- the fixture was the
+         only thing still producing it. *)
       Alcotest.(check int) "digest length" 64 (String.length digest)
   | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
 
@@ -3206,6 +3243,7 @@ let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
    are the ones every connector emits. *)
 let connector_json ?(id = "slack") ?(available = `Bool true)
     ?(connected = `Bool true) ?(status = "connected")
+    ?(gateway_state = `String "connected") ?(poll_state = `Null)
     ?(channel = `String "#release-deployment")
     ?(pid = `Int 4242)
     ?(bindings =
@@ -3226,7 +3264,8 @@ let connector_json ?(id = "slack") ?(available = `Bool true)
     ; ("capabilities", `List [ `String "post" ])
     ; ("error", `String "")
     ; ("status_source", `String "in_process_gateway")
-    ; ("gateway_state", `String "connected")
+    ; ("gateway_state", gateway_state)
+    ; ("poll_state", poll_state)
     ; ("trigger_policy", `String "mention_only")
     ; ("gate_base_url", `Null)
     ; ("binding_store_path", `String ".gate/runtime/slack/bindings.json")
@@ -3280,6 +3319,11 @@ let test_decode_connector_snapshot_reads_the_live_shape () =
              c.Tui_decode.cn_bot_token_present;
            Alcotest.(check (option int)) "server pid" (Some 4242)
              c.Tui_decode.cn_pid;
+           Alcotest.(check bool) "typed gateway state" true
+             (c.Tui_decode.cn_gateway_state
+              = Some Tui_decode.Connector_gateway_connected);
+           Alcotest.(check bool) "no poll state" true
+             (c.Tui_decode.cn_poll_state = None);
            Alcotest.(check bool) "typed directory state" true
              (c.Tui_decode.cn_directory_state
               = Some Tui_decode.Connector_directory_partial);
@@ -3315,6 +3359,55 @@ let test_decode_connector_configured_but_unreachable () =
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+let test_decode_connector_reads_a_poll_state () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json ~gateway_state:`Null
+             ~poll_state:(`String "degraded") ()
+         ])
+  with
+  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "typed poll state" true
+        (c.Tui_decode.cn_poll_state = Some Tui_decode.Connector_poll_degraded);
+      Alcotest.(check bool) "no gateway state" true
+        (c.Tui_decode.cn_gateway_state = None)
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* A gateway or poll state the server's state machines never produce is not
+   read as some nearby state. The row that carries it is refused on its own:
+   the transports beside it still decode, and the refusal names the row. *)
+let test_decode_connector_refuses_only_the_row_with_an_unknown_state () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json ~id:"discord" ~gateway_state:(`String "half_open") ()
+         ; connector_json ~id:"imessage" ~gateway_state:`Null
+             ~poll_state:(`String "idle") ()
+         ; connector_json ~id:"slack" ()
+         ])
+  with
+  | Error err -> Alcotest.failf "one bad row failed the snapshot: %s" err
+  | Ok snapshot ->
+      Alcotest.(check (list string)) "the readable row still decodes"
+        [ "slack" ]
+        (List.map
+           (fun (c : Tui_decode.connector) -> c.cn_id)
+           snapshot.Tui_decode.cs_connectors);
+      Alcotest.(check (list (pair (option string) int)))
+        "each unreadable row is refused by name and position"
+        [ (Some "discord", 0); (Some "imessage", 1) ]
+        (List.map
+           (fun (r : Tui_decode.connector_refusal) ->
+              (r.cr_connector_id, r.cr_row))
+           snapshot.Tui_decode.cs_refused);
+      List.iter
+        (fun (r : Tui_decode.connector_refusal) ->
+           Alcotest.(check bool) "the refusal carries its reason" true
+             (String.length r.cr_reason > 0))
+        snapshot.Tui_decode.cs_refused
+
 let test_decode_connector_hides_nonpositive_pid () =
   match
     Tui_decode.decode_connector_snapshot
@@ -3343,14 +3436,21 @@ let test_decode_connector_absent_flags_are_off () =
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+(* A row the TUI cannot read is refused as that row, never drawn as a
+   connector and never dropped without a trace. *)
+let expect_only_row_refused label result =
+  match result with
+  | Error err -> Alcotest.failf "%s: one bad row failed the snapshot: %s" label err
+  | Ok { Tui_decode.cs_connectors = []; cs_refused = [ refusal ]; _ } ->
+      Alcotest.(check (option string)) (label ^ ": refusal names the row")
+        (Some "slack") refusal.Tui_decode.cr_connector_id
+  | Ok _ -> Alcotest.failf "%s: the row was not refused" label
+
 let test_decode_connector_rejects_contradictory_connection () =
-  match
-    Tui_decode.decode_connector_snapshot
-      (connector_snapshot_json
-         [ connector_json ~available:(`Bool false) ~connected:(`Bool true) () ])
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "connected while unavailable must be rejected"
+  expect_only_row_refused "connected while unavailable"
+    (Tui_decode.decode_connector_snapshot
+       (connector_snapshot_json
+          [ connector_json ~available:(`Bool false) ~connected:(`Bool true) () ]))
 
 let test_decode_connector_keeps_connected_but_unavailable_distinct () =
   match
@@ -3367,20 +3467,17 @@ let test_decode_connector_keeps_connected_but_unavailable_distinct () =
   | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_connector_rejects_a_malformed_binding () =
-  match
-    Tui_decode.decode_connector_snapshot
-      (connector_snapshot_json
-         [ connector_json
-             ~bindings:
-               (`List
-                 [ `Assoc
-                     [ ("keeper_name", `String "pinewood-pr-jira-checker") ]
-                 ])
-             ()
-         ])
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "a binding without channel_id must not disappear"
+  expect_only_row_refused "a binding without channel_id"
+    (Tui_decode.decode_connector_snapshot
+       (connector_snapshot_json
+          [ connector_json
+              ~bindings:
+                (`List
+                  [ `Assoc
+                      [ ("keeper_name", `String "pinewood-pr-jira-checker") ]
+                  ])
+              ()
+          ]))
 
 let test_decode_connector_order_is_stable () =
   match
@@ -10453,6 +10550,10 @@ let () =
           test_decode_connector_snapshot_reads_the_live_shape;
         Alcotest.test_case "configured is not reachable" `Quick
           test_decode_connector_configured_but_unreachable;
+        Alcotest.test_case "poll state is typed" `Quick
+          test_decode_connector_reads_a_poll_state;
+        Alcotest.test_case "unknown runtime state refuses only its row" `Quick
+          test_decode_connector_refuses_only_the_row_with_an_unknown_state;
         Alcotest.test_case "nonpositive pid is omitted" `Quick
           test_decode_connector_hides_nonpositive_pid;
         Alcotest.test_case "absent flags are off" `Quick

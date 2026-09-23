@@ -404,6 +404,9 @@ val sub_boards_path : unit -> string
 
 val sub_board_access_to_string : sub_board_access -> string
 val sub_board_access_of_string_opt : string -> sub_board_access option
+val sub_board_access_field_of_yojson
+  :  Yojson.Safe.t
+  -> (sub_board_access option, board_error) Result.t
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 

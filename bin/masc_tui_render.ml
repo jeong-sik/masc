@@ -611,27 +611,57 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
 
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows =
-  let attention_items =
+  let all_attention =
     match state.overview with
     | None -> []
     | Some overview -> overview.ov_attention_items
   in
+  (* An item about a Keeper the Team block lists is that Keeper's row there:
+     a stuck Keeper carries the item's sentence, a paused one sits on the
+     parked line. Drawn in both places, the same stop took two rows and read
+     as two problems. The Attention panel keeps what the Team block cannot
+     say -- items about anything else, and about Keepers the briefing did
+     not list. When the viewport is too short for a Team block, the panel
+     keeps every item: an item nothing draws is an item lost. *)
+  let beside_team =
+    match state.overview with
+    | None -> all_attention
+    | Some overview ->
+        List.filter
+          (fun (item : attention_item) ->
+            match item.ai_target with
+            | Attention_keeper name ->
+                not
+                  (List.exists
+                     (fun (keeper : overview_keeper) ->
+                       String.equal keeper.okp_name name)
+                     overview.ov_keeper_rows)
+            | Attention_other _ -> true)
+          all_attention
+  in
   let tasks_error = Terminal_text.optional_single_line state.tasks_error in
-  let row_budget =
+  let team_count =
+    match overview_team state with
+    | None -> 0
+    | Some team ->
+        Overview_team.drawn_rows team
+        + Option.fold ~none:0 ~some:(fun _ -> 1)
+            (overview_quota_line state ~now:(Unix.gettimeofday ()))
+        + List.length (overview_pulls_lines state)
+  in
+  let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
       ~has_cluster:(Option.is_some state.overview)
       ~attention_count:(List.length attention_items)
       ~event_count:(List.length state.events)
-      ~team_count:
-        (match overview_team state with
-         | None -> 0
-         | Some team ->
-             Overview_team.drawn_rows team
-             + Option.fold ~none:0 ~some:(fun _ -> 1)
-                 (overview_quota_line state ~now:(Unix.gettimeofday ()))
-             + List.length (overview_pulls_lines state))
+      ~team_count
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
+  in
+  let attention_items, row_budget =
+    let with_team = allocate beside_team in
+    if with_team.team_rows > 0 then (beside_team, with_team)
+    else (all_attention, allocate all_attention)
   in
   attention_items, tasks_error, row_budget
 
@@ -870,8 +900,18 @@ let render_overview (state : state) =
      note sat two cells right of the rows it replaces and of the title above
      them, while the Events panel beside it put its title and its rows on one
      column. *)
+  (* Items about Keepers the Team block lists are drawn there, not here
+     ([overview_layout]). An empty panel with such items is not "nothing
+     needs attention", so it says where they went. *)
+  let on_team_rows =
+    match ov with
+    | None -> 0
+    | Some o -> List.length o.ov_attention_items - attention_count
+  in
   let attention_empty_note =
     match empty_page_of ~snapshot:state.overview ~error:overview_error with
+    | Page_empty when on_team_rows > 0 ->
+        Some (Printf.sprintf "(%d on Team rows below)" on_team_rows)
     | Page_empty -> Some "(nothing needs attention)"
     | Page_unread -> Some (String.trim page_unread_note)
     | Page_failed -> None

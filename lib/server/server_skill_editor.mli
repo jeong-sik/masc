@@ -85,12 +85,47 @@ type delete_outcome =
       ; disposition : recovery_disposition
       }
 
+(** Why a source could not take the request. Each case names the folder it
+    looked at, so the caller can tell a missing folder from a declaration that
+    never reached the catalog. *)
+type source_not_ready =
+  | Source_not_in_catalog
+      (** The published catalog snapshot has no source with this id. *)
+  | Source_root_missing of { resolved_path : string }
+  | Source_root_not_directory of
+      { resolved_path : string
+      ; kind : Unix.file_kind
+      }
+  | Source_root_unavailable of
+      { resolved_path : string
+      ; operation : Skill_catalog_snapshot.source_operation
+      ; detail : string
+      }
+  | Source_root_unresolved of Skill_source_config.resolution
+  | Source_root_create_failed of
+      { resolved_path : string
+      ; detail : string
+      }
+      (** The declared folder was missing and making it raised. *)
+  | Source_root_refresh_failed of
+      { resolved_path : string
+      ; detail : string
+      }
+      (** The folder was made, but the catalog refresh that would let a
+          package land in it failed. *)
+  | Source_root_moved of
+      { before : string
+      ; after : string
+      }
+      (** The source resolved to a different folder under the write lock. *)
+  | Recovery_directory_missing of { path : string }
+
 type error =
   | Invalid_workspace
   | Snapshot_not_registered
   | Snapshot_uninitialized
   | Reference_not_current
-  | Source_not_ready
+  | Source_not_ready of source_not_ready
   | Source_file_missing
   | Source_read_failed
   | Source_path_rejected of path_rejection

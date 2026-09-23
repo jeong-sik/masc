@@ -97,8 +97,8 @@ type live_tool_call =
   ; attempt : int
       (** The runtime attempt that opened this call. The trail keeps every
           attempt's calls as evidence, so a question about what is open *now*
-          has to say which attempt it means: a call left open on the runtime
-          failover walked away from is never going to return, and counting it
+          has to say which attempt it means: a call left open on a runtime
+          candidate the walk moved past is never going to return, and counting it
           as running says the new attempt is waiting on something it is not. *)
   ; occurrence : Live.tool_occurrence
   ; call_id : string option
@@ -1462,9 +1462,8 @@ let phase_text ~now t =
       (* Counted from 0 internally, shown from 1 -- the superseded blocks on
          the same screen label themselves [attempt + 1] (render.ml), so a
          0-based number here put "attempt 1" on screen twice for two
-         different attempts: once on the block the failover left behind, and
-         once on the one now running. The word "failover" used to be the only
-         thing telling them apart, and it is no longer on this row. *)
+         different attempts: once on the block the walk left behind, and
+         once on the one now running. *)
       let attempt_shown = t.attempt + 1 in
       (* It used to say "connecting to [rid]", which the screen cannot know.
          All it observes is that a runtime was named and nothing has come back
@@ -1488,7 +1487,7 @@ let phase_text ~now t =
           | Some age -> Printf.sprintf ", nothing back for %s" age)
       in
       (* The runtime and the attempt, as one tag. The heading above this row
-         already says IN PROGRESS or FAILOVER IN PROGRESS (render.ml); the tag
+         already says IN PROGRESS or IN PROGRESS ON NEXT CANDIDATE (render_chat.ml); the tag
          carries only what the heading cannot. *)
       let runtime_tag =
         match t.current_runtime_id with

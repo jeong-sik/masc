@@ -1389,7 +1389,7 @@ let interrupt_current_turn_exact observed_entry =
              ; detail = "live turn switch exists without a turn observation"
              }
        with
-       | exn ->
+       | exn -> (* cancel-guard-ok: Eio.Switch.fail is a synchronous cancel, no suspension *)
          Exact_turn_cancel_failed
            { turn_id = observed_turn_id
            ; detail = Printexc.to_string exn

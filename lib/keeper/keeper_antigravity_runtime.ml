@@ -82,11 +82,7 @@ let render_messages messages =
 ;;
 
 let extra_system_context_messages messages =
-  List.filter
-    (fun (message : Agent_core.Types.message) ->
-      Agent_core.Types.Extra_system_context_provenance.classify message.metadata
-      = Agent_core.Types.Extra_system_context_provenance.Present)
-    messages
+  List.filter Host.is_composed_system_context messages
 ;;
 
 (* A keeper turn cannot start without its labels; the missing asset is a

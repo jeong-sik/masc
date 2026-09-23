@@ -338,7 +338,7 @@ let release ~completion owned =
           owned);
       Ok ()
     with
-    | exn -> Error (exn, Printexc.get_raw_backtrace ())
+    | exn -> Error (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: with_prepare_lock runs in a systhread, no Eio suspension *)
   in
   List.iter (fun (_, preparation) -> finish preparation completion) owned;
   removal

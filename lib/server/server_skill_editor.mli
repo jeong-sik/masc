@@ -85,12 +85,17 @@ type delete_outcome =
       ; disposition : recovery_disposition
       }
 
-(** Why a source could not take the request. Each case names the folder it
-    looked at, so the caller can tell a missing folder from a declaration that
-    never reached the catalog. *)
+(** Why a source could not take the request. Each case carries what was
+    looked at (source id, catalog position, or resolved folder), so the caller
+    can tell a missing folder from a declaration that never reached the
+    catalog. *)
 type source_not_ready =
-  | Source_not_in_catalog
-      (** The published catalog snapshot has no source with this id. *)
+  | Source_not_in_catalog of { source_id : string }
+      (** The published catalog snapshot has no source with this id, for
+          example because runtime.toml does not declare it. *)
+  | Source_index_out_of_range of { index : int }
+      (** A catalog entry points at a source position the same snapshot does
+          not have. *)
   | Source_root_missing of { resolved_path : string }
   | Source_root_not_directory of
       { resolved_path : string

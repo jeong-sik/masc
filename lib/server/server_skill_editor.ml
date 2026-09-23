@@ -79,7 +79,8 @@ type delete_outcome =
       }
 
 type source_not_ready =
-  | Source_not_in_catalog
+  | Source_not_in_catalog of { source_id : string }
+  | Source_index_out_of_range of { index : int }
   | Source_root_missing of { resolved_path : string }
   | Source_root_not_directory of
       { resolved_path : string
@@ -222,7 +223,8 @@ let resolution_to_string = function
 ;;
 
 let source_not_ready_kind = function
-  | Source_not_in_catalog -> "not_in_catalog"
+  | Source_not_in_catalog _ -> "not_in_catalog"
+  | Source_index_out_of_range _ -> "index_out_of_range"
   | Source_root_missing _ -> "missing"
   | Source_root_not_directory _ -> "not_directory"
   | Source_root_unavailable _ -> "unavailable"
@@ -234,7 +236,10 @@ let source_not_ready_kind = function
 ;;
 
 let source_not_ready_to_string = function
-  | Source_not_in_catalog -> "the published Skill catalog has no source with this id"
+  | Source_not_in_catalog { source_id } ->
+    "the published Skill catalog has no source " ^ source_id
+  | Source_index_out_of_range { index } ->
+    Printf.sprintf "the catalog entry points at source #%d, which the snapshot does not have" index
   | Source_root_missing { resolved_path } -> "folder does not exist: " ^ resolved_path
   | Source_root_not_directory { resolved_path; kind } ->
     Printf.sprintf
@@ -266,7 +271,8 @@ let source_not_ready_to_yojson reason =
     (("kind", `String (source_not_ready_kind reason))
      ::
      (match reason with
-      | Source_not_in_catalog -> []
+      | Source_not_in_catalog { source_id } -> [ "source_id", `String source_id ]
+      | Source_index_out_of_range { index } -> [ "index", `Int index ]
       | Source_root_missing { resolved_path } -> [ "resolved_path", `String resolved_path ]
       | Source_root_not_directory { resolved_path; kind } ->
         [ "resolved_path", `String resolved_path
@@ -396,7 +402,8 @@ let resolve_target ~base_path reference =
   let* source_scan =
     match List.nth_opt (Skill_catalog_snapshot.sources snapshot) entry.source_index with
     | Some source -> Ok source
-    | None -> Error (Source_not_ready Source_not_in_catalog)
+    | None ->
+      Error (Source_not_ready (Source_index_out_of_range { index = entry.source_index }))
   in
   let* source_root =
     source_not_ready_of_observation source_scan.observation
@@ -581,7 +588,7 @@ let find_writable_source snapshot source_id =
       (Skill_source_config.source_id_to_string source_scan.source.source.id)
       source_id_text)
   |> function
-  | None -> Error (Source_not_ready Source_not_in_catalog)
+  | None -> Error (Source_not_ready (Source_not_in_catalog { source_id = source_id_text }))
   | Some source_scan ->
     (match source_scan.source.source.access with
      | Skill_source_config.Read_only -> Error Source_read_only

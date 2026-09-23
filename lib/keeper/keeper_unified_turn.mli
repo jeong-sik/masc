@@ -139,6 +139,9 @@ type turn_success =
 (** Typed non-error result of the unified turn boundary. Only
     [Turn_completed] proves that the requested action path finished.
     [Turn_checkpointed] and [Turn_input_required] are healthy runtime exits.
+    [Turn_skipped] is a turn that did no work: a non-executable phase, or an
+    autonomous turn that yielded to a queued person before its provider
+    produced anything (#38094). Its source stays pending.
     The checkpoint reason lets the heartbeat retire an admitted attention
     batch when a newer durable source caused the yield or the typed
     repeated-assistant loop guard durably preserved the already-projected

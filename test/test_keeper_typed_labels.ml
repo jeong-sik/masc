@@ -47,6 +47,7 @@ let all_cancel_reasons : Keeper_turn_fsm.cancel_reason list =
     Cancelled_provider_timeout;
     Cancelled_fleet_shutdown;
     Cancelled_input_required;
+    Cancelled_preempted_by_person;
   ]
 
 let test_cancel_reason_labels_unique () =

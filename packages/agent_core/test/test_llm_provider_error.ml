@@ -185,7 +185,7 @@ let test_provider_terminal () =
     (Error.to_string
        (Error.ProviderTerminal
           { provider = "claude_code"
-          ; reason = "session_conflict"
+          ; kind = Http_client.Session_conflict
           ; detail = "session lease lost"
           }))
 ;;
@@ -305,9 +305,9 @@ let test_http_terminal_mapping () =
          { kind = Http_client.Session_conflict; message = "session lease lost" })
   in
   match err with
-  | Error.ProviderTerminal { provider; reason; detail } ->
+  | Error.ProviderTerminal { provider; kind; detail } ->
     check string "provider" "claude_code" provider;
-    check string "reason" "session_conflict" reason;
+    check bool "kind" true (kind = Http_client.Session_conflict);
     check string "detail" "session lease lost" detail
   | _ -> fail "expected ProviderTerminal"
 ;;
@@ -617,8 +617,8 @@ let test_http_boundary_remaining_variants_mapping () =
          { kind = Http_client.Other "cancelled"; message = "operator cancelled" })
   in
   match terminal_other with
-  | Error.ProviderTerminal { reason; detail; _ } ->
-    check string "terminal reason" "cancelled" reason;
+  | Error.ProviderTerminal { kind; detail; _ } ->
+    check bool "terminal kind" true (kind = Http_client.Other "cancelled");
     check string "terminal detail" "operator cancelled" detail
   | _ -> fail "expected ProviderTerminal Other"
 ;;

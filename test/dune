@@ -5307,7 +5307,10 @@
 (test
  (name test_tui_connector_state)
  (modules test_tui_connector_state)
- (libraries alcotest masc masc_tui_connector_state))
+ (libraries alcotest ast_grep compiler-libs.common masc
+   masc_tui_connector_state)
+ (deps
+  (source_tree ../bin)))
 
 (test
  (name test_tui_fleet_line)

@@ -6949,14 +6949,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           let selected_index =
             max 0 (min state.connectors_cursor (List.length connectors - 1))
           in
-          let connection_text (connector : Tui_decode.connector) =
-            match connector.cn_connection with
-            | Tui_decode.Connector_connected -> "CONNECTED"
-            | Connector_connected_unavailable -> "CONNECTED / UNAVAILABLE"
-            | Connector_disconnected -> "DISCONNECTED"
-            | Connector_offline -> "UNAVAILABLE"
-            | Connector_stale -> "STALE"
-          in
+          (* The list row and the detail badge spell the same connection, so
+             they read the same table. This pane kept a byte-identical copy of
+             it, which meant a change to the vocabulary could land in one
+             place and leave the omission rule in [Masc_tui_connector_state]
+             judging against the other. *)
           let connection_label (connector : Tui_decode.connector) =
             let word =
               Masc_tui_connector_state.badge_word connector.cn_connection
@@ -6985,7 +6982,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                    ^ fit_width
                        (Terminal_text.single_line connector.cn_display_name)
                        14
-                   ^ "  " ^ fit_width (connection_text connector) 12
+                   ^ "  "
+                   ^ fit_width
+                       (Masc_tui_connector_state.badge_word
+                          connector.cn_connection)
+                       12
                    ^ Printf.sprintf "  %d here / %d total" here_count
                        (List.length connector.cn_bindings)
                  in

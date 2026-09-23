@@ -1832,7 +1832,9 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
      under [<provider>.<model>] is refused, a nested table included -- a
      misspelled [context-high-water-token] would otherwise load as a binding
      without marks, and the provider's overflow refusal would then have
-     nothing declared to evict against. *)
+     nothing declared to evict against. So every read below stays
+     unconditional and bound before the check at the top of the [let*] chain:
+     a read placed after it, or only in one branch, would refuse its own key. *)
   let read_keys = ref [] in
   let typed_find kind path tbl key getter =
     read_keys := key :: !read_keys;

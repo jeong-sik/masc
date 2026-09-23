@@ -3071,9 +3071,8 @@ let test_runtime_toml_rejects_an_unknown_binding_key () =
 ;;
 
 (* The accepted keys are the keys the binding parser reads, so a binding that
-   declares every one of them loads and each value lands in its field. A key
-   the parser reads but refuses as unknown, or accepts but never reads, fails
-   here. *)
+   declares every one of them loads and each value lands in its field. A read
+   placed after the unknown-key check would refuse its own key and fail here. *)
 let test_runtime_toml_accepts_every_binding_key_it_reads () =
   let extra =
     "enabled = true\n\
@@ -3103,7 +3102,11 @@ let test_runtime_toml_accepts_every_binding_key_it_reads () =
        check bool "wizard-default" false b.wizard_default;
        check (option int) "max-concurrent" (Some 2) b.max_concurrent;
        check bool "disable-parallel-tool-use" true b.disable_parallel_tool_use;
-       check bool "context marks" true (Option.is_some b.context_marks);
+       (match b.context_marks with
+        | Some { Runtime_schema.high_water_tokens; low_water_tokens } ->
+          check int "context-high-water-tokens" 900 high_water_tokens;
+          check int "context-low-water-tokens" 300 low_water_tokens
+        | None -> fail "context marks must parse");
        check (option int) "max-tokens" (Some 128) b.max_tokens;
        check (option (float 1e-9)) "price-input" (Some 0.5) b.price_input;
        check (option (float 1e-9)) "price-output" (Some 1.5) b.price_output;

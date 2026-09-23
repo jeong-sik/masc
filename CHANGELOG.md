@@ -4,6 +4,7 @@
 
 ### Changed
 
+- The Overview Team title draws the last 14 UTC days of task completions as a sparkline scaled from zero, with today's count and the peak beside it. The task flow snapshot already counted them per day and only the Metrics screen showed them, as numbers (#38080).
 - The Overview draws a Team block: one row per Keeper, answering who is working on what and who is stuck. The briefing already sent a row per Keeper and the Overview only counted them, so seeing which Keeper held which task, or which one had stopped, meant crossing to the Keepers screen and the task list. Stuck Keepers come first with the attention sentence that names them and how many tasks they hold, then working Keepers with their first held task, then idle ones; paused Keepers share one line, and tasks held by assignees outside the fleet (such as an MCP client) are counted on another. Attention targets are parsed once into `Attention_keeper | Attention_other`, so the join is a constructor match rather than a comparison of the wire word (#38078).
 - The runtime failover concept is now named the **Runtime Candidate Order** in
   the TUI: the lane key help and status strings say "candidate order" where

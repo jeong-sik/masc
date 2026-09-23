@@ -487,6 +487,7 @@ let failure_category_of_reason = function
   | Partition.Exact_setup_unavailable _ -> Candidate.Exact_setup_unavailable
   | Partition.Exact_flow_replayed -> Candidate.Exact_flow_replayed
   | Partition.Exact_execution_terminal -> Candidate.Exact_execution_terminal
+  | Partition.Exact_execution_failed _ -> Candidate.Exact_execution_failed
   | Partition.Domain_output_invalid _ -> Candidate.Domain_output_invalid
   | Partition.Execution_provenance_mismatch _ ->
     Candidate.Execution_provenance_mismatch
@@ -494,6 +495,8 @@ let failure_category_of_reason = function
     Candidate.Unexpected_worker_failure
   | Partition.Exact_execution_quarantined _ ->
     Candidate.Exact_execution_quarantined
+  | Partition.Exact_execution_interrupted _ ->
+    Candidate.Exact_execution_interrupted
 ;;
 
 let candidate_provenance (provenance : Partition.exact_provenance) :
@@ -520,14 +523,18 @@ let attempt_provenance_of_progress = function
 
 let attempt_provenance_of_reason = function
   | Partition.Exact_execution_quarantined progress
+  | Partition.Exact_execution_failed { progress = Some progress; _ }
   | Partition.Domain_output_invalid { progress = Some progress; _ }
   | Partition.Execution_provenance_mismatch { progress = Some progress; _ } ->
+    attempt_provenance_of_progress progress
+  | Partition.Exact_execution_interrupted progress ->
     attempt_provenance_of_progress progress
   | Partition.Candidate_membership_conflict _
   | Partition.Durable_partition_invariant _
   | Partition.Exact_setup_unavailable _
   | Partition.Exact_flow_replayed
   | Partition.Exact_execution_terminal
+  | Partition.Exact_execution_failed { progress = None; _ }
   | Partition.Domain_output_invalid { progress = None; _ }
   | Partition.Execution_provenance_mismatch { progress = None; _ }
   | Partition.Unexpected_worker_failure _ -> None
@@ -632,13 +639,6 @@ let running_progress partition =
   | Partition.Blocked _ -> None
 ;;
 
-let preserve_durable_progress partition fallback =
-  match running_progress partition with
-  | Some ((Partition.Bound _ | Partition.Advancing _) as progress) ->
-    Partition.Exact_execution_quarantined progress
-  | Some Partition.Unbound | None -> fallback
-;;
-
 let classified_progress partition =
   match running_progress partition with
   | Some ((Partition.Bound _ | Partition.Advancing _) as progress) -> Some progress
@@ -683,11 +683,15 @@ let complete_projection
          ("exact completion lost its registered owner before projection: "
           ^ completed.keeper_name))
   | Error detail ->
+    (* The completion callback failed on durable persistence, not on the
+       judgment: keep the typed invariant cause AND the durable progress
+       in one reason instead of overwriting one with the other, so this
+       row reads apart from a provider refusal and from a restart cut. *)
     let reason =
-      preserve_durable_progress
-        !latest_partition
-        (Partition.Durable_partition_invariant
-           ("exact completion failed: " ^ detail))
+      Partition.Exact_execution_failed
+        { detail = "exact completion failed: " ^ detail
+        ; progress = classified_progress !latest_partition
+        }
     in
     blocked_step
       ~now
@@ -930,8 +934,13 @@ type execution_disposition =
 
 let execution_disposition partition = function
   | Exact_flow.Flow_already_started _ ->
+    (* A replayed flow keeps its typed replay cause AND its durable progress
+       in one reason instead of overwriting the cause with the progress. *)
     Execution_blocked
-      (preserve_durable_progress partition Partition.Exact_flow_replayed)
+      (Partition.Exact_execution_failed
+         { detail = "exact flow replayed (concurrent duplicate)"
+         ; progress = classified_progress partition
+         })
   | Exact_flow.Before_dispatch_persistence_failed
       { cause; current; evidence = _ } ->
     Execution_blocked
@@ -954,11 +963,33 @@ let execution_disposition partition = function
     Execution_blocked
       (Partition.Execution_provenance_mismatch
          { detail; progress = classified_progress partition })
-  | Exact_flow.Providers_exhausted _
-  | Exact_flow.Cli_slots_exhausted _
-  | Exact_flow.Flow_bookkeeping_failed _ ->
+  | Exact_flow.Providers_exhausted { detail; _ } ->
+    (* The lane exhausted every HTTP slot and the CLI tail declared none
+       (or also refused). This is a lane-level exhaustion, not a terminal
+       judgment failure about this candidate, so the Blocked reason keeps
+       the typed cause detail AND the durable progress instead of
+       overwriting one with the other: the operator reading the row can
+       tell "provider refused on quota" apart from "restart cut a bound
+       execution" ([Exact_execution_interrupted]). *)
     Execution_blocked
-      (preserve_durable_progress partition Partition.Exact_execution_terminal)
+      (Partition.Exact_execution_failed
+         { detail; progress = classified_progress partition })
+  | Exact_flow.Cli_slots_exhausted
+      { prior_error = _; failures = _ } as exhausted ->
+    (* The CLI tail ran and refused too: same lane-level exhaustion shape,
+       with the tail's own sentence joined into the detail the flow
+       already assembled. *)
+    Execution_blocked
+      (Partition.Exact_execution_failed
+         { detail = Exact_flow.error_detail exhausted
+         ; progress = classified_progress partition
+         })
+  | Exact_flow.Flow_bookkeeping_failed _ ->
+    (* Persistence/bookkeeping failures are worker-infrastructure, not a
+       judgment about the candidate. *)
+    Execution_blocked
+      (Partition.Exact_execution_failed
+         { detail = "flow_bookkeeping_failed"; progress = classified_progress partition })
   | Exact_flow.Provenance_mismatch detail ->
     Execution_blocked
       (Partition.Execution_provenance_mismatch
@@ -1604,11 +1635,16 @@ let process_next_with_claim_ready_exact_current
         keeper_name
         (!latest_partition).partition_id
         (Printexc.to_string exn);
+      (* An unexpected raise is worker-infrastructure failure, not a
+         judgment about this candidate: keep the typed cause AND the
+         durable progress instead of one overwriting the other. *)
       let reason =
-        preserve_durable_progress
-          !latest_partition
-          (Partition.Unexpected_worker_failure
-             "Board attention worker raised unexpectedly")
+        Partition.Exact_execution_failed
+          { detail =
+              "unexpected worker raise: "
+              ^ Printexc.to_string exn
+          ; progress = classified_progress !latest_partition
+          }
       in
       blocked_step
         ~now:(now ())

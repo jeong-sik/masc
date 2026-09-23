@@ -927,9 +927,9 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
       | _ -> Alcotest.fail "Unbound Running did not return Ready");
      (match second.state with
       | P.Blocked
-          { reason = P.Exact_execution_quarantined (P.Bound durable); _ } ->
-        Alcotest.(check bool) "Bound proof retained in quarantine" true (durable = bound_proof)
-      | _ -> Alcotest.fail "Bound Running was not quarantined");
+          { reason = P.Exact_execution_interrupted (P.Bound durable); _ } ->
+        Alcotest.(check bool) "Bound proof retained in recovery block" true (durable = bound_proof)
+      | _ -> Alcotest.fail "Bound Running was not blocked requeueably");
      let settled_blocked =
        ok "settle terminal Blocked" (P.settle ~now:21.0 ~base_path ~partition:second)
      in

@@ -64,6 +64,16 @@ type blocked_reason =
   | Exact_setup_unavailable of string
   | Exact_flow_replayed
   | Exact_execution_terminal
+  | Exact_execution_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** The lane ended on a classified execution failure (e.g. every HTTP
+          slot refused on account or capacity grounds and the CLI tail had
+          none to walk). The durable record keeps the typed cause's detail
+          AND the execution progress separately, so an operator reading a
+          quarantined row can tell a provider-side exhaustion from a restart
+          cut or a terminal judgment failure. *)
   | Domain_output_invalid of
       { detail : string
       ; progress : running_progress option
@@ -74,6 +84,15 @@ type blocked_reason =
       }
   | Unexpected_worker_failure of string
   | Exact_execution_quarantined of running_progress
+  | Exact_execution_interrupted of running_progress
+      (** A process restart cut a bound execution. Not a judgment about the
+          candidate: the judgment lane is a read-only model call (see
+          [Keeper_board_attention_exact_flow.execute] — idempotent up to
+          token spend, no side effects to double-apply), so the partition is
+          blocked requeueably: [Blocked -> Ready] is legal and both the
+          operator requeue tool and [ensure_roots] reopening can reach it
+          again. Distinguishable from provider refusals in
+          [Exact_execution_failed] on purpose. *)
 
 type running_state =
   { worker_epoch : Worker_epoch.t
@@ -147,9 +166,11 @@ val ensure_roots :
 val recover_for_process_start :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result
 (** Canonically compact the append ledger. Only [Running Unbound] returns to
-    [Ready]. [Bound] executions become terminal
-    [Blocked (Exact_execution_quarantined _)] and can never be redispatched.
-    The return value is the number of Running roots terminalized or released.
+    [Ready]. [Bound] executions become
+    [Blocked (Exact_execution_interrupted _)] — requeueable, not terminal:
+    the judgment lane is a read-only model call, so redispatch spends tokens
+    and nothing else (see [execute]'s doc). The return value is the number of
+    Running roots terminalized or released.
     Old schema rows and non-tail malformed JSON are rejected without migration.
     A torn final append is truncated under the ledger lock. *)
 

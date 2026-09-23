@@ -98,6 +98,13 @@ val terminal_of_flow_error
     transport may run. The closed input and output variants make a new flow
     terminal a compile-time classification request. *)
 
+val error_detail : 'callback_error execution_error -> string
+(** The durable-record sentence for a lane terminal: the run record's
+    [detail] field and the Blocked partition reason quote the same words.
+    Idempotent pure formatting — the judgment lane itself is a read-only
+    model call with no side effects to double-apply, which is why a blocked
+    partition can be requeued and re-judged safely. *)
+
 (** Snapshot only an effective resumable pending candidate. Quarantined and
     requeue-requested candidates are not executable; a durably requeued pending
     candidate is executable through the same exact flow as a normal pending one. *)

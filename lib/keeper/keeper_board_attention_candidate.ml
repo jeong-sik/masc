@@ -66,10 +66,12 @@ type quarantine_failure_category =
   | Exact_setup_unavailable
   | Exact_flow_replayed
   | Exact_execution_terminal
+  | Exact_execution_failed
   | Domain_output_invalid
   | Execution_provenance_mismatch
   | Unexpected_worker_failure
   | Exact_execution_quarantined
+  | Exact_execution_interrupted
 
 type attempt_provenance =
   { slot_id : string
@@ -157,10 +159,12 @@ let quarantine_failure_category_to_string = function
   | Exact_setup_unavailable -> "exact_setup_unavailable"
   | Exact_flow_replayed -> "exact_flow_replayed"
   | Exact_execution_terminal -> "exact_execution_terminal"
+  | Exact_execution_failed -> "exact_execution_failed"
   | Domain_output_invalid -> "domain_output_invalid"
   | Execution_provenance_mismatch -> "execution_provenance_mismatch"
   | Unexpected_worker_failure -> "unexpected_worker_failure"
   | Exact_execution_quarantined -> "exact_execution_quarantined"
+  | Exact_execution_interrupted -> "exact_execution_interrupted"
 ;;
 
 let quarantine_failure_category_of_string = function
@@ -169,10 +173,12 @@ let quarantine_failure_category_of_string = function
   | "exact_setup_unavailable" -> Some Exact_setup_unavailable
   | "exact_flow_replayed" -> Some Exact_flow_replayed
   | "exact_execution_terminal" -> Some Exact_execution_terminal
+  | "exact_execution_failed" -> Some Exact_execution_failed
   | "domain_output_invalid" -> Some Domain_output_invalid
   | "execution_provenance_mismatch" -> Some Execution_provenance_mismatch
   | "unexpected_worker_failure" -> Some Unexpected_worker_failure
   | "exact_execution_quarantined" -> Some Exact_execution_quarantined
+  | "exact_execution_interrupted" -> Some Exact_execution_interrupted
   | _ -> None
 ;;
 

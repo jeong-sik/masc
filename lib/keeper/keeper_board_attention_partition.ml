@@ -74,6 +74,10 @@ type blocked_reason =
   | Exact_setup_unavailable of string
   | Exact_flow_replayed
   | Exact_execution_terminal
+  | Exact_execution_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
   | Domain_output_invalid of
       { detail : string
       ; progress : running_progress option
@@ -84,6 +88,7 @@ type blocked_reason =
       }
   | Unexpected_worker_failure of string
   | Exact_execution_quarantined of running_progress
+  | Exact_execution_interrupted of running_progress
 
 type running_state =
   { worker_epoch : Worker_epoch.t
@@ -193,6 +198,15 @@ let blocked_reason_to_yojson = function
   | Exact_flow_replayed -> `Assoc [ "kind", `String "exact_flow_replayed" ]
   | Exact_execution_terminal ->
     `Assoc [ "kind", `String "exact_execution_terminal" ]
+  | Exact_execution_failed { detail; progress } ->
+    `Assoc
+      [ "kind", `String "exact_execution_failed"
+      ; "detail", `String detail
+      ; ( "progress"
+        , match progress with
+          | Some progress -> running_progress_to_yojson progress
+          | None -> `Null )
+      ]
   | Domain_output_invalid { detail; progress } ->
     `Assoc
       [ "kind", `String "domain_output_invalid"
@@ -216,6 +230,11 @@ let blocked_reason_to_yojson = function
   | Exact_execution_quarantined progress ->
     `Assoc
       [ "kind", `String "exact_execution_quarantined"
+      ; "progress", running_progress_to_yojson progress
+      ]
+  | Exact_execution_interrupted progress ->
+    `Assoc
+      [ "kind", `String "exact_execution_interrupted"
       ; "progress", running_progress_to_yojson progress
       ]
 ;;
@@ -436,6 +455,20 @@ let blocked_reason_of_yojson json =
   | "exact_execution_terminal" ->
     let* () = exact_fields ~context [ "kind" ] fields in
     Ok Exact_execution_terminal
+  | "exact_execution_failed" ->
+    let* () = exact_fields ~context [ "kind"; "detail"; "progress" ] fields in
+    let* detail_json = field ~context "detail" fields in
+    let* detail = string_json ~context:(context ^ ".detail") detail_json in
+    let* progress_json = field ~context "progress" fields in
+    let* progress =
+      match progress_json with
+      | `Null -> Ok None
+      | json -> running_progress_of_yojson json |> Result.map Option.some
+    in
+    (match progress with
+     | Some Unbound -> Error "classified execution failure cannot retain unbound progress"
+     | Some (Bound _ | Advancing _) | None ->
+       Ok (Exact_execution_failed { detail; progress }))
   | "domain_output_invalid" ->
     let* () = exact_fields ~context [ "kind"; "detail"; "progress" ] fields in
     let* detail_json = field ~context "detail" fields in
@@ -476,6 +509,13 @@ let blocked_reason_of_yojson json =
     (match progress with
      | Bound _ | Advancing _ -> Ok (Exact_execution_quarantined progress)
      | Unbound -> Error "unbound execution cannot be quarantined")
+  | "exact_execution_interrupted" ->
+    let* () = exact_fields ~context [ "kind"; "progress" ] fields in
+    let* progress_json = field ~context "progress" fields in
+    let* progress = running_progress_of_yojson progress_json in
+    (match progress with
+     | Bound _ | Advancing _ -> Ok (Exact_execution_interrupted progress)
+     | Unbound -> Error "unbound execution cannot be interrupted")
   | value -> Error (Printf.sprintf "unknown Board attention blocked reason %S" value)
 ;;
 
@@ -1191,6 +1231,8 @@ let validate_blocked_reason = function
     nonempty "exact setup unavailable detail" detail
   | Exact_flow_replayed -> Ok ()
   | Exact_execution_terminal -> Ok ()
+  | Exact_execution_failed { detail; progress } ->
+    validate_classified_failure detail progress
   | Domain_output_invalid { detail; progress } ->
     validate_classified_failure detail progress
   | Execution_provenance_mismatch { detail; progress } ->
@@ -1198,6 +1240,7 @@ let validate_blocked_reason = function
   | Unexpected_worker_failure detail ->
     nonempty "unexpected worker failure detail" detail
   | Exact_execution_quarantined progress -> validate_durable_progress progress
+  | Exact_execution_interrupted progress -> validate_durable_progress progress
 ;;
 
 let advance_state partition state =
@@ -1329,15 +1372,23 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
                     let* released = advance_state partition Ready in
                     Ok (recovered + 1, released :: latest)
                   | Running ({ progress = (Bound _ | Advancing _) as progress; _ }) ->
-                    let* quarantined =
+                    (* A restart interrupting a bound execution is not a
+                       judgment about this candidate: the judgment lane is a
+                       read-only model call, so re-running it after recovery
+                       spends tokens and nothing else. Blocking as
+                       [Exact_execution_interrupted] keeps the provenance as
+                       evidence while staying requeueable — [Blocked -> Ready]
+                       is a legal transition, so the operator requeue tool
+                       and [ensure_roots] reopening can both reach it again. *)
+                    let* blocked =
                       advance_state
                         partition
                         (Blocked
-                           { reason = Exact_execution_quarantined progress
+                           { reason = Exact_execution_interrupted progress
                            ; blocked_at = now
                            })
                     in
-                    Ok (recovered + 1, quarantined :: latest)
+                    Ok (recovered + 1, blocked :: latest)
                   | Ready | Completed _ | Settled _ | Blocked _ ->
                     Ok (recovered, partition :: latest))
                (Ok (0, []))

@@ -21,26 +21,56 @@ val self_mint_expiry_hours : int
     session left running overnight; shorter than forever, which would leave an
     admin secret on disk that nothing retires. *)
 
-val refusal_cause : credential_sent:bool -> string
+type server_reason =
+  | Expired  (** The bearer was known and has expired. *)
+  | Insufficient_role
+      (** The bearer was accepted but is not allowed to make this request.
+          Usually its role, though the server sends the same code for every
+          Forbidden. *)
+  | Rejected  (** Any other refusal, including one whose body names no code. *)
+
+val server_reason_of_body : string -> server_reason
+(** The server's reason, read from the [auth_error_code] of a 401/403 body --
+    at the top of a REST body, or under [error.data] of a JSON-RPC one -- and
+    decoded with [Masc_error.Auth_error_code.of_string]. A body that is not
+    JSON, or carries no code this client acts on, is {!Rejected}. *)
+
+val refusal_cause : credential_sent:bool -> server_reason -> string
 (** Why the server refused, as a lowercase clause a caller can place in its own
     sentence. [credential_sent] is whether the request carried a bearer at all:
-    without one the operator has none to present, with one the server rejected
-    what it was given. Only the first is fixed by providing a token. *)
+    without one the operator has none to present and the reason is not
+    consulted; with one, the clause says what the server found wrong with it. *)
 
 val remedy : string
-(** The action that clears either refusal, as a lowercase clause. *)
+(** The action that clears any of these refusals, as a lowercase clause. *)
 
-val refusal : credential_sent:bool -> string
+val refusal : credential_sent:bool -> server_reason -> string
 (** {!refusal_cause} and {!remedy} as one clause, for callers with no context
     of their own to add. *)
 
 (** {1 Where the bearer comes from} *)
 
+type stored_token =
+  | Stored of string
+      (** A bearer [masc login] persisted that the workspace has not ruled
+          expired. Any other objection is the server's to make, and its
+          refusal names the remedy. *)
+  | Stored_expired
+      (** A bearer was persisted and its credential record says it has
+          expired. Carrying it would be refused on every read. *)
+  | Not_stored
+      (** Nothing was persisted for this client. *)
+
+type mint_reason =
+  | First_token  (** This client held no bearer at all. *)
+  | Replaces_expired  (** The bearer it held had expired. *)
+
 type plan =
   | Use of string
       (** A bearer is already available. *)
-  | Mint
-      (** The workspace is here, demands a bearer, and this client has none. *)
+  | Mint of mint_reason
+      (** The workspace is here, demands a bearer, and this client has none
+          it can use. *)
   | Go_without
       (** The workspace admits requests without one. *)
   | No_workspace
@@ -48,20 +78,20 @@ type plan =
 
 val plan :
   env_token:string option ->
-  workspace_token:string option ->
+  workspace_token:stored_token ->
   workspace_requires_token:bool ->
   workspace_initialized:bool ->
   plan
 (** Which bearer to carry, from three facts and nothing else. The environment
     wins so one run can be pointed at a different credential; the file
-    [masc login] wrote is next. With neither, a workspace that demands a bearer
-    gets one minted, and a workspace that does not is left alone -- minting
+    [masc login] wrote is next, unless it has expired. With no usable bearer, a
+    workspace that demands one gets one minted, and a workspace that does not is left alone -- minting
     there would add a durable secret nobody asked for and would not be needed
     to reach anything. *)
 
 type outcome =
   | Held
-  | Minted
+  | Minted of mint_reason
   | Not_required
   | Workspace_pending
       (** This base path holds no workspace to mint into. A server answering

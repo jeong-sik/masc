@@ -98,7 +98,13 @@ let stub_main () =
   | Ok (request, _stdin) ->
     let record tag = save (frame_path ~dir tag) frame in
     (match request.argv with
-     | argv when List.equal String.equal argv (Keeper_github_identity.login_argv ~hostname)
+     | argv
+       when List.equal
+              String.equal
+              argv
+              (Keeper_github_identity.login_argv
+                 ~hostname
+                 ~scopes:[ Keeper_github_identity.Workflow ])
        ->
        record "login";
        (* stderr, not stdout: measured 2026-09-03, [gh auth login] with no
@@ -423,6 +429,7 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
     let streamed = Buffer.create 128 in
     let status, _stdout, _stderr =
       lane.Keeper_github_identity.run_login
+        ~scopes:[ Keeper_github_identity.Workflow ]
         ~on_stdout_chunk:(fun _chunk -> ())
         ~on_stderr_chunk:(fun chunk ->
           Buffer.add_string streamed chunk;
@@ -438,8 +445,10 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
     let login = decoded_request (frame_path ~dir "login") in
     check
       (list string)
-      "the endpoint runs masc's own login argv"
-      (Keeper_github_identity.login_argv ~hostname)
+      "the endpoint runs masc's own login argv, with the chosen scope"
+      (Keeper_github_identity.login_argv
+         ~hostname
+         ~scopes:[ Keeper_github_identity.Workflow ])
       login.argv;
     check
       bool

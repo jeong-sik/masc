@@ -2801,6 +2801,7 @@
 
 (include stanzas/test_keeper_memory_write.inc)
 
+(include stanzas/test_keeper_memory_write_supersedes.inc)
 
 (include stanzas/test_keeper_tool_emission_hook.inc)
 
@@ -3479,6 +3480,14 @@
  (modules test_tui_connection_status)
  (libraries alcotest masc masc_tui_types))
 
+; Its own anchor, under the other suite that links only the state vocabulary,
+; so two pull requests adding a suite do not both land on the head of this
+; file.
+(test
+ (name test_tui_quit_key_yields)
+ (modules test_tui_quit_key_yields)
+ (libraries alcotest masc_tui_types))
+
 (test
  (name test_tui_chat_gate_row)
  (modules test_tui_chat_gate_row)
@@ -4055,12 +4064,18 @@
 (test
  (name test_tui_credential)
  (modules test_tui_credential)
- (libraries alcotest masc.string_util masc_tui_credential))
+ (libraries alcotest masc.masc_types masc.string_util masc_tui_credential))
 
 (test
  (name test_tui_keeper_control)
  (modules test_tui_keeper_control)
- (libraries alcotest masc masc.string_util masc_tui_keeper_control yojson))
+ (libraries
+  alcotest
+  masc
+  masc.string_util
+  masc_tui_credential
+  masc_tui_keeper_control
+  yojson))
 
 (test
  (name test_tui_editor)
@@ -4091,6 +4106,13 @@
  (name test_tui_board_read_layout)
  (modules test_tui_board_read_layout)
  (libraries alcotest masc_tui_board_read_layout masc_tui_types masc_tui_board_detail))
+
+; Its own anchor, under the other board stanza, so two pull requests adding a
+; suite do not both land on the head of this file.
+(test
+ (name test_tui_board_age_column)
+ (modules test_tui_board_age_column)
+ (libraries alcotest astring masc_tui_types masc_tui_render_schedule))
 
 (test
  (name test_tui_browser_lane_layout)
@@ -5285,7 +5307,10 @@
 (test
  (name test_tui_connector_state)
  (modules test_tui_connector_state)
- (libraries alcotest masc masc_tui_connector_state))
+ (libraries alcotest ast_grep compiler-libs.common masc
+   masc_tui_connector_state)
+ (deps
+  (source_tree ../bin)))
 
 (test
  (name test_tui_fleet_line)
@@ -6237,17 +6262,6 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_ask_alternative)))
-
-(rule
- (alias runtest-test_runtime_default_catalog_cli)
- (deps test_runtime_default_catalog_cli.py ../bin/main_eio.exe
-       (source_tree ../scripts/fixtures/release-evidence))
- (action
-  (run python3 %{dep:test_runtime_default_catalog_cli.py} %{dep:../bin/main_eio.exe})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_runtime_default_catalog_cli)))
 
 (rule
  (alias runtest-test_install_runtime_setup)

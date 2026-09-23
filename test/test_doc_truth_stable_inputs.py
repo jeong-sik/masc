@@ -81,6 +81,9 @@ class StableDocumentationInputs(unittest.TestCase):
             self.assertFalse(fragment.exists())
             self.assertIn("- Fixture fragment (#999999).",
                           (repo / "CHANGELOG.md").read_text())
+            # The version stub sits under [Unreleased], which stays first.
+            headings = re.findall(r"(?m)^## \[([^]]+)\]", (repo / "CHANGELOG.md").read_text())
+            self.assertEqual(headings[:2], ["Unreleased", candidate])
 
             for name in INSTALL_DOCS:
                 pins = re.findall(r"(?m)^TAG=v(.+)$", (repo / name).read_text())

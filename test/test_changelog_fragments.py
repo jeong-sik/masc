@@ -74,6 +74,11 @@ class Check(Fixture):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(needle, result.stderr)
 
+    def test_a_wrapped_line_starting_with_a_pr_number_is_not_a_heading(self):
+        self.fragment("8.md", "### Fixed\n\n- The fix from\n#8 lands here.\n")
+        result = self.check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_refuses_a_name_that_is_not_a_pr_number(self):
         self.refused("fix-thing.md", "### Fixed\n\n- x (#1).\n", "<PR number>.md")
 
@@ -202,12 +207,51 @@ class PrGuard(Fixture):
         self.commit()
         self.assertEqual(self.guard().returncode, 0)
 
-    def test_accepts_a_release_that_promoted_unreleased(self):
+    def promote(self):
         self.changelog.write_text(CHANGELOG.replace(
             "## [Unreleased]\n\n### Added", "## [1.0.1] - 2026-02-01\n\n### Added", 1))
+
+    def test_accepts_a_release_that_promoted_unreleased(self):
+        (self.root / "dune-project").write_text("(lang dune 3.0)\n(version 1.0.1)\n")
+        self.promote()
         self.commit()
         self.assertEqual(self.guard().returncode, 0)
 
+    def test_refuses_losing_unreleased_without_a_release(self):
+        self.promote()
+        self.commit()
+        result = self.guard()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("first release heading", result.stderr)
+
+    def branch_then_move_main(self, main_change):
+        """Branch at base, then commit main_change on a main that moves on."""
+        self.git("checkout", "-q", "-b", "main-line")
+        main_change()
+        self.commit()
+        self.git("tag", "-f", "main-now")
+        self.git("checkout", "-q", "base")
+        self.git("checkout", "-q", "-b", "pr")
+
+    def guard_against_main(self):
+        return run("pr-guard", "--base", "main-now", "--head", "HEAD", cwd=self.root)
+
+    def test_a_fragment_merged_on_main_later_is_not_this_prs_deletion(self):
+        self.branch_then_move_main(
+            lambda: self.fragment("150.md", "### Fixed\n\n- Main (#150).\n"))
+        self.changelog.write_text(CHANGELOG.replace(
+            "- An entry already merged (#100).",
+            "- An entry already merged (#100).\n- New (#400)."))
+        self.commit()
+        self.assertNotEqual(self.guard_against_main().returncode, 0)
+
+    def test_a_bullet_main_dropped_later_is_not_this_prs_addition(self):
+        self.branch_then_move_main(lambda: self.changelog.write_text(
+            CHANGELOG.replace("- An entry already merged (#100).\n", "")))
+        (self.root / "unrelated.txt").write_text("x\n")
+        self.commit()
+        result = self.guard_against_main()
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 if __name__ == "__main__":
     unittest.main()

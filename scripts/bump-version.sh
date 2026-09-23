@@ -30,6 +30,9 @@ sedi() {
 
 echo "Bumping release version to $NEW_VERSION"
 
+# A malformed changelog fragment stops the bump before any file changes.
+python3 "$ROOT_DIR/scripts/changelog-fragments.py" check --dir "$ROOT_DIR/changelog.d"
+
 # 1) SSOT: dune-project
 sedi -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
   "$ROOT_DIR/dune-project"
@@ -57,11 +60,10 @@ python3 "$ROOT_DIR/scripts/changelog-fragments.py" assemble \
   --dir "$ROOT_DIR/changelog.d" --changelog "$ROOT_DIR/CHANGELOG.md"
 if ! grep -q "^## \[$NEW_VERSION\]" "$ROOT_DIR/CHANGELOG.md"; then
   tmp_file="$(mktemp)"
+  # The stub goes under [Unreleased], above the newest release, so
+  # [Unreleased] stays the first section changelog-fragments.py reads.
   awk -v ver="$NEW_VERSION" -v d="$TODAY" '
-    NR == 1 { print; next }
-    NR == 2 {
-      print;
-      print "";
+    !done && /^## \[[0-9]/ {
       print "## [" ver "] - " d;
       print "";
       print "### Changed";
@@ -69,7 +71,8 @@ if ! grep -q "^## \[$NEW_VERSION\]" "$ROOT_DIR/CHANGELOG.md"; then
       print "";
       print "### Deprecated";
       print "- TBD";
-      next
+      print "";
+      done = 1
     }
     { print }
   ' "$ROOT_DIR/CHANGELOG.md" > "$tmp_file"

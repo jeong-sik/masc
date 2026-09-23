@@ -713,6 +713,19 @@
   drew. Both now read the same list. Requests are matched by execution id, so a
   second message to the same keeper keeps its own row and another keeper's
   request is never swallowed (#38018).
+- The Activity table sizes its KEEPER and EVENT columns from the rows it holds. Both were literals of 16 cells, in three places that had to agree, and the agent_core family names its runtime lane as the agent -- `agent_core-glm-coding.glm-5-turbo` is thirty cells -- so those rows drew a cut name at every width, live at 200 columns with the detail column beside them empty. The EVENT column had the same trouble, which the renderer already worked around by giving an untaught label the detail column when the row has no detail. `Acting.columns` measures both from the rows the filter keeps; neither goes under what it drew before, so a narrow frame draws the table it drew yesterday, and the two together take at most half of what the frame leaves because detail is the column that carries sentences (#38325).
+- The Overview's Attention panel draws its age column when some item has an age. The cell answers "why is this still here", and a producer that puts no time on its evidence leaves it an em dash; on the live fleet that is every item -- of the nine the briefing queues, eight carry no timestamp at all and the ninth writes one under a name this surface does not read (#38225) -- so the panel drew a column of dashes and spent four cells of a row it shares with the events beside it. Summaries still start on one edge, which is what the fixed three cells were for: the column is there or not there for the whole panel, never per row (#38333).
+- An Antigravity keeper whose system prompt or canonical history changed no
+  longer fails every cycle. The retained vendor session was refused with
+  `canonical_context_changed` before anything changed in the session store, so
+  the next cycle was refused the same way; a prompt update at restart stopped
+  every Antigravity keeper. The claim plan now becomes a fresh session, as a
+  changed tool surface already did, and the superseded session id is logged.
+  Conversation that lived only inside the superseded vendor session is not
+  carried over. A retained session with no acknowledged frontier, which
+  cannot show what it settled against, also starts fresh instead of being
+  refused every cycle. A Gate continuation still refuses before dispatch,
+  since it must settle in its original session (#38336).
 
 ### Documentation
 
@@ -736,6 +749,7 @@
 - The Channels pane no longer keeps its own copy of the connection badge vocabulary; the list row and the detail badge read the one table, and a test counts badge words spelled inside the pane and requires none. Screen output is unchanged, because the two tables agreed (#38193).
 - A header row can now be broken at its clause mark (` · `) instead of at any space, so a row ends where a clause ends and a count is never separated from the words that qualify it. A clause too wide for a row on its own is still wrapped at spaces; nothing is dropped and nothing is cut (#38241).
 - The fleet totals a screen shows were folded twice: `masc_tui_render.ml`'s `aggregate_keeper_stats` and the types module's `fleet_total_cost_usd` each walked the same keeper list with its own copy of the folds, so the head row and the Runtime permissions row could name different task and cost totals for the same fleet while both kept compiling. The definitions moved into `masc_tui_types`, render's copies are gone, the five call sites are unchanged through the module a test can link, and the count is the same fold in the same order -- so a rule changed in one place is changed everywhere it is counted (#38319).
+- The keeper-costs aggregate suite checks that cost and token readings (reported, unreported, unread) add up to `sample_count` in every case (#38330).
 
 ## [0.36.0] - 2026-09-22
 

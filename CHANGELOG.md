@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `keeper_memory_write` takes an optional `supersedes` memory_id: the keeper's own current authored fact is removed and the new claim written in one locked Memory OS commit, journaled with a `superseded_by` reason and recorded as a `Revised` event. Unknown, non-current, Librarian-injected and self ids, and `supersedes` with `source_path`, are refused with typed errors and nothing written. The tool description tells keepers to supersede a progress or position snapshot instead of writing another copy (#38122).
+
 ### Changed
 
 - The runtime startup degradation record no longer carries fields that were always empty. It is built only when no default, media-failover or lane reference names a missing runtime, so `dropped_routes`, `dropped_media_failover`, `dropped_lane_candidates` and `dropped_lanes` were always `[]` and `effective_default_runtime_id` always equaled `configured_default_runtime_id`. They leave the record, its JSON and the dashboard decoder; the log line names the default once instead of `configured default "x" -> effective default "x"`, and the dashboard alert reads `default:` (#38074).

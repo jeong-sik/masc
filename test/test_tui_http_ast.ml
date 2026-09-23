@@ -1074,7 +1074,7 @@ let test_operator_approvals_use_current_contract () =
   check int "approval payload uses its terminal projection" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_approvals"
+       ~binding_name:"approval_metadata_lines"
        ~callee:
          "Masc_tui_operator_projection.approval_payload_for_terminal");
   check int "approval payload projection serializes once" 1

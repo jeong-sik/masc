@@ -273,6 +273,63 @@ let test_line_count_matches_what_is_drawn () =
     false
     (List.exists (fun line -> String.equal line "   ") lines)
 
+(* #38354: the effective system prompt is a closed union on the wire. A
+   prompt the server could not build is drawn with its reason, path and
+   detail, never as "(not declared)", and a shape this reader does not know is
+   drawn as a decode failure. Fetched strings go through the sanitizer. *)
+let prompt_view system_prompt =
+  view_lines
+    ~sanitize:(fun text -> String.concat "<esc>" (String.split_on_char '\027' text))
+    (`Assoc
+      [ "prompt", `Assoc [ "instructions", `String "be exact"; "system_prompt", system_prompt ] ])
+  |> String.concat "\n"
+
+let test_system_prompt_states_are_drawn () =
+  let available =
+    prompt_view
+      (`Assoc
+        [ "state", `String "available"
+        ; "effective", `String "line one\nline two\n"
+        ; "assembled", `String "unused"
+        ])
+  in
+  Alcotest.(check bool) "available prompt is drawn" true
+    (contains available "   line two");
+  Alcotest.(check bool) "available heading counts lines" true
+    (contains available "read-only \xc2\xb7 2 lines");
+  let unavailable =
+    prompt_view
+      (`Assoc
+        [ "state", `String "unavailable"
+        ; "reason", `String "constitution_unreadable"
+        ; "path", `String "/base/.masc/constitution/articles.jsonl"
+        ; "detail", `String "Is a directory\027[31m"
+        ])
+  in
+  List.iter
+    (fun needle ->
+      Alcotest.(check bool) needle true (contains unavailable needle))
+    [ "read-only \xc2\xb7 unavailable"
+    ; "the world constitution ledger could not be read"
+    ; "path: /base/.masc/constitution/articles.jsonl"
+    ; "detail: Is a directory<esc>[31m"
+    ];
+  Alcotest.(check bool) "unavailable is not drawn as undeclared" false
+    (contains unavailable "(not declared)");
+  let unknown_reason =
+    prompt_view
+      (`Assoc
+        [ "state", `String "unavailable"
+        ; "reason", `String "something_else"
+        ; "path", `String "/p"
+        ; "detail", `String "d"
+        ])
+  in
+  Alcotest.(check bool) "unknown reason is a decode failure" true
+    (contains unknown_reason "read-only \xc2\xb7 decode failed");
+  Alcotest.(check bool) "decode failure names the reason" true
+    (contains unknown_reason "something_else")
+
 (* Fetched text reaches the frame through the caller's sanitizer; the frame's
    own styling must not go through it. *)
 let test_fetched_text_is_sanitized_but_the_frame_is_not () =
@@ -644,6 +701,8 @@ let () =
             test_heading_counts_what_the_editor_opens
         ; Alcotest.test_case "line count matches what is drawn" `Quick
             test_line_count_matches_what_is_drawn
+        ; Alcotest.test_case "system prompt states are drawn" `Quick
+            test_system_prompt_states_are_drawn
         ; Alcotest.test_case "fetched text sanitized, frame not" `Quick
             test_fetched_text_is_sanitized_but_the_frame_is_not
         ; Alcotest.test_case "wrong-typed scalar is sanitized" `Quick

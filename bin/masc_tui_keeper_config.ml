@@ -431,6 +431,67 @@ let counted = function
   | [ _ ] -> "1 line"
   | lines -> Printf.sprintf "%d lines" (List.length lines)
 
+(* The system prompt a turn would send, as the endpoint states it: built, or
+   refused with a typed reason (#38354). A shape this reader does not know is
+   its own case, drawn as a decode failure, so it can never be mistaken for a
+   prompt that is simply not declared. *)
+type system_prompt_unavailable_reason = Constitution_unreadable
+
+type system_prompt_view =
+  | System_prompt_available of { effective : string }
+  | System_prompt_unavailable of
+      { reason : system_prompt_unavailable_reason
+      ; path : string
+      ; detail : string
+      }
+  | System_prompt_undecodable of string
+
+let system_prompt_view_of_json value =
+  let field fields key = List.assoc_opt key fields in
+  match value with
+  | None -> System_prompt_undecodable "prompt.system_prompt is absent"
+  | Some (`Assoc fields) ->
+    (match field fields "state" with
+     | Some (`String "available") ->
+       (match field fields "effective" with
+        | Some (`String effective) -> System_prompt_available { effective }
+        | Some other ->
+          System_prompt_undecodable
+            ("available prompt has no effective text: " ^ Yojson.Safe.to_string other)
+        | None -> System_prompt_undecodable "available prompt has no effective text")
+     | Some (`String "unavailable") ->
+       (match field fields "reason", field fields "path", field fields "detail" with
+        | Some (`String "constitution_unreadable"), Some (`String path), Some (`String detail) ->
+          System_prompt_unavailable { reason = Constitution_unreadable; path; detail }
+        | reason, path, detail ->
+          let show = function None -> "absent" | Some json -> Yojson.Safe.to_string json in
+          System_prompt_undecodable
+            (Printf.sprintf "unavailable prompt with reason=%s path=%s detail=%s"
+               (show reason) (show path) (show detail)))
+     | Some other ->
+       System_prompt_undecodable ("unknown prompt state " ^ Yojson.Safe.to_string other)
+     | None -> System_prompt_undecodable "prompt.system_prompt has no state")
+  | Some other ->
+    System_prompt_undecodable ("prompt.system_prompt is " ^ Yojson.Safe.to_string other)
+
+let system_prompt_reason_text = function
+  | Constitution_unreadable -> "the world constitution ledger could not be read"
+
+(* Heading annotation and body for the effective system prompt section. *)
+let system_prompt_lines ~sanitize = function
+  | System_prompt_available { effective } ->
+    let lines = free_text ~sanitize (Some (`String effective)) in
+    counted lines, lines
+  | System_prompt_unavailable { reason; path; detail } ->
+    ( "unavailable"
+    , [ "   unavailable: " ^ system_prompt_reason_text reason
+      ; "   no turn runs until it reads again"
+      ; "   path: " ^ sanitize path
+      ; "   detail: " ^ sanitize detail
+      ] )
+  | System_prompt_undecodable detail ->
+    "decode failed", [ "   could not decode: " ^ sanitize detail ]
+
 (* Total renderers over the parsed types: the JSON was judged once by the
    parser, so nothing here can fail or disagree with validation. *)
 let render_manifest_revision = function
@@ -478,7 +539,9 @@ let view_lines ~sanitize json =
   in
   let prompt key = at [ "prompt"; key ] in
   let instructions = free_text ~sanitize (prompt "instructions") in
-  let effective_prompt = free_text ~sanitize (prompt "effective_system_prompt") in
+  let effective_prompt_summary, effective_prompt =
+    system_prompt_lines ~sanitize (system_prompt_view_of_json (prompt "system_prompt"))
+  in
   [ Printf.sprintf " %s editable   %s read-only"
       (styled Masc_tui_theme.Sgr.cyan editable_glyph)
       (styled Masc_tui_theme.Sgr.dim read_only_glyph)
@@ -537,7 +600,7 @@ let view_lines ~sanitize json =
   @ instructions
   @ [ ""
     ; marked_section read_only_glyph Masc_tui_theme.Sgr.dim "effective system prompt"
-        (Printf.sprintf "read-only \xc2\xb7 %s" (counted effective_prompt))
+        (Printf.sprintf "read-only \xc2\xb7 %s" effective_prompt_summary)
     ]
   @ effective_prompt
   @ (match sources with

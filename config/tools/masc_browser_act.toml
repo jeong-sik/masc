@@ -1,6 +1,7 @@
 name = "masc_browser_act"
 description = """
-Firefox/Zen automation only. Read elements in the same tab/frame for selectors; preserve decoded CSS escapes exactly. After no match, re-read. Actions can change external state: observe again after success or failure before retrying."""
+Run one automation action in a Firefox/Zen tab.
+Read elements in the same tab/frame for selectors; preserve decoded CSS escapes exactly. After no match, re-read. Actions can change external state: observe again after success or failure before retrying."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
 # 1,981 B 를 매번 실었고, 09-17~23 7일간 이 도구를 부른 서로 다른

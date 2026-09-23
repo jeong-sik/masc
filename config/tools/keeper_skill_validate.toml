@@ -1,6 +1,7 @@
 name = "keeper_skill_validate"
 description = """
-Validate a proposed SKILL.md from an exported artifact against the Skill package and composition rules. Pass the exact artifact object returned by keeper_artifact_transfer and the proposed package directory identity. Returns static validation findings; it does not publish or execute the Skill."""
+Validate a proposed SKILL.md against the Skill package and composition rules.
+Pass the exact artifact object returned by keeper_artifact_transfer and the proposed package directory identity. Returns static validation findings; it does not publish or execute the Skill."""
 additional_properties = false
 # 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
 # 707 B 를 매번 실었고, 09-17~23 7일간 이 도구를 부른 서로 다른

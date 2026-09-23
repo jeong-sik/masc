@@ -77,6 +77,16 @@ status: reference
   담당자(MCP client 등)가 잡은 Task 는 "held outside the fleet" 한 줄로 센다.
   → [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli), RFC-0464
 
+**닫힌 quota 창 (Shut Quota Window)**
+: provider 계정이나 자격 증명 하나가 사용 한도에 걸려 요청을 받지 않는 상태. 런타임
+  카탈로그(`/api/v1/runtime/resolved`)는 런타임마다 `quota_exhausted`·`quota_resets_at`·
+  `quota_scope` 를 싣는데, 같은 계정을 쓰는 런타임은 같은 `quota_scope`(예:
+  `provider:claude_code`)를 공유한다. Team 블록은 창을 scope 마다 한 번만, 그 뒤에 선
+  런타임 수와 다시 열리는 시각으로 적는다. 남은 사용량은 provider 가 알려주지 않으므로
+  퍼센트로 말하지 않는다.
+  → [Runtime_quota_window](../../lib/runtime/runtime_quota_window.ml),
+  [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli)
+
 **Server Push (서버가 밀어 보내는 사건)**
 : 서버가 클라이언트로 밀어 보내는 사건으로, Keeper가 한 일이 아니라 서버가 보고하는
   상태 변화. Activity 화면은 이런 사건을 `everything` scope 아래 조용한 회색 행으로
@@ -196,6 +206,25 @@ status: reference
   게시물이고, 런타임 쪽(`Runtime_candidate_backpressure.candidate`)은 runtime 후보
   순서가 시도할 실행 후보다.
   → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli)
+
+**Board Attention Partition (Board 판정 구역)**
+: Board-attention 판정을 실행하고 추적하기 위한 durable 상태 머신 단위
+  (`Keeper_board_attention_partition`). 아직 할당되지 않은 비종단 Candidate마다 하나의
+  singleton 루트를 받는다. MASC가 Candidate 소유권과 이 상태 머신을 통제하고,
+  AGENT_CORE는 승인·디스패치·전진을 맡는다. 런타임 전이는 cursor-fenced 행을 추가하며
+  허용된 전이마다 `generation`이 정확히 한 번 증가한다.
+  - 상태는 `Ready`·`Running`·`Completed`·`Settled`·`Abandoned`·`Blocked`다.
+  - `Completed`: 판정 결과(`item : completed_item`)를 확보한 상태.
+  - `Settled`: **판정이 원장에 기록된 끝 상태**. `Settled`를 떠나는 전이는 없다.
+    판정 기록 없이는 이 상태에 올 수 없다.
+  - `Abandoned`: **판정 없이 끝난 상태**. `settle`로는 오지 않는다. 원장에서 사라진
+    후보를 가진 `Blocked` 루트를 `reconcile_quarantines`가 포기할 때 이 상태가 된다.
+    일치하는 후보가 아직 `Resumable_pending`이면 `ensure_roots`가 같은 결정론적 식별자의
+    다음 `generation`으로 `Ready`를 다시 연다. 후보가 `Resumable_judged`나
+    `Requeued_resumable`이면 `ensure_roots`는 이 루트를 건드리지 않는다.
+  - 경계: 이 상태 머신은 Candidate 생애주기(`Pending → Judged → Consumed`,
+    `Quarantined`)와 다른 층위다.
+  → [Keeper_board_attention_partition](../../lib/keeper/keeper_board_attention_partition.mli)
 
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의

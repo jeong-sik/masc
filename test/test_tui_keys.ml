@@ -1985,6 +1985,8 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_last_outcome = None
   ; sl_p50_elapsed_s = None
   ; sl_selected_slots = []
+  ; sl_runs_without_slot =
+      { Tui_decode.slws_vendor_system_one = 0; slws_server_restarted = 0; slws_no_slot = 0 }
   }
 
 (* The four lanes the projection fixes, in its order
@@ -2302,7 +2304,7 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_secrets, []
   ; Detail_github, [ "L"; "P"; "1"; "2" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
-  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u" ]
+  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u"; "U U" ]
   ; Detail_automation, []
   ; Detail_runs, []
   ]
@@ -2323,6 +2325,8 @@ let test_key_atoms_read_the_table_notation () =
        [ "s"; "o" ]);
   Alcotest.(check bool) "Channels takes e" true
     (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
+  Alcotest.(check bool) "Channels takes U for unbind all" true
+    (List.mem "U" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
   Alcotest.(check (list string)) "Info takes nothing" []
     (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
 

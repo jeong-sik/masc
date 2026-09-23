@@ -290,9 +290,7 @@ let resolve_catalog ~catalog ~origin =
   | Error error -> Catalog_unavailable error
   | Ok repositories ->
     (match canonical_url origin with
-     (* An origin that cannot be put in canonical form cannot equal any
-        catalog URL, which is compared in that form below. *)
-     | None -> Unregistered
+     | None -> Origin_unavailable "origin URL is not canonicalizable"
      | Some origin_id ->
        let matches =
          List.filter

@@ -320,10 +320,11 @@ let test_repository_checkout_projection_reports_typed_freshness () =
     (entry |> Json.member "freshness" |> Json.member "ahead" |> Json.to_int)
 ;;
 
-(* A checkout with no origin remote, and one whose origin is a local path,
-   name no catalog repository. Both are answers, so neither may read as an
-   origin that could not be looked up. *)
-let test_repository_checkout_without_catalog_origin_is_unregistered () =
+(* A checkout with no origin remote names no catalog repository: an answer,
+   not an origin that could not be looked up. An origin that is not a
+   comparable URL stays unavailable, since the catalog may hold that same
+   uncomparable URL. *)
+let test_repository_checkout_without_origin_is_unregistered () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   let init name =
@@ -347,7 +348,7 @@ let test_repository_checkout_without_catalog_origin_is_unregistered () =
   in
   Alcotest.(check (list (pair string string)))
     "catalog state"
-    [ "local-origin", "unregistered"; "no-origin", "unregistered" ]
+    [ "local-origin", "origin_unavailable"; "no-origin", "unregistered" ]
     states
 ;;
 
@@ -945,9 +946,9 @@ let () =
             `Quick
             test_repository_checkout_projection_reports_typed_freshness
         ; Alcotest.test_case
-            "a checkout without a catalog origin is unregistered"
+            "a checkout without an origin is unregistered"
             `Quick
-            test_repository_checkout_without_catalog_origin_is_unregistered
+            test_repository_checkout_without_origin_is_unregistered
         ; Alcotest.test_case
             "ignores symlinked checkout directories"
             `Quick

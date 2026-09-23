@@ -49,7 +49,7 @@
   renamed concept.
 
 ### Fixed
-- A Keeper's repository checkout with no `origin` remote, or with an origin that is not a URL (a local path), now reads `catalog.state = "unregistered"` in keeper status instead of `origin_unavailable`. Both name no catalog repository; `origin_unavailable` stays for a lookup that timed out or failed and for an exhausted inspection budget (#38161).
+- A shared-mount Keeper's repository checkout with no `origin` remote now reads `catalog.state = "unregistered"` in keeper status instead of `origin_unavailable`: it names no catalog repository. `origin_unavailable` stays for a lookup that timed out or failed, an exhausted inspection budget, an origin that is not a comparable URL, and every endpoint-owned (remote sandbox) checkout without an origin, whose probe cannot tell a missing origin from a failed read (#38161).
 - An autonomous turn that yields to a queued person before its provider's first
   event (RFC-0441) is no longer a failed keeper cycle. The preemption used to
   return a synthesized zero-turn run result that the keeper could only read as

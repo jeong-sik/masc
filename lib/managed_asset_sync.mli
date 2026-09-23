@@ -4,13 +4,14 @@
 
     The binary embeds the repo's [config/] tree ([Embedded_config]); the
     runtime copies under [<config-root>/prompts], [<config-root>/tools] and
-    [<config-root>/mcp] are derived distribution state. Prompt customization
-    lives in [prompt_overrides.json], and tool definitions have no runtime
-    edit layer at all. A runtime copy that differs from its embedded asset is
-    stale when it still holds the bytes the previous pass wrote (the manifest
-    records their SHA-256), and is overwritten. When it holds other bytes an
-    operator edited it: the edit is moved into the domain's edit layer, or
-    kept, or overwritten, and reported either way (see {!operator_edit}).
+    [<config-root>/mcp] are derived distribution state: every pass converges
+    each one onto its embedded asset. Prompt customization lives in one
+    place, [prompt_overrides.json]; tool definitions have no runtime edit
+    layer at all. A runtime copy that still holds the bytes the previous pass
+    wrote (the manifest records their SHA-256) is simply stale. One that
+    holds other bytes was edited by an operator: before it is overwritten
+    the edit becomes a prompt override or is kept in a file beside it, and
+    it is reported either way (see {!operator_edit}).
     A file in those directories that the distribution never shipped is the
     operator's and the sync leaves it alone: under [prompts/] the registry
     reads it like any other prompt file; under [tools/] and [mcp/] it is
@@ -48,12 +49,19 @@ type operator_edit_outcome =
       (** The edit is saved as [key]'s override but the file could not be
           reset; it still holds the edit, and the next pass, finding the same
           text saved, resets it. *)
-  | Kept_override_exists of { key : string }
-      (** [key] already has a saved override, so the file is left as edited
-          and the embedded copy is not installed. *)
-  | Kept_not_promotable of { reason : string }
+  | Preserved_override_exists of
+      { key : string
+      ; preserved_at : string
+      }
+      (** [key] already has a saved override, which stays in force. The edit
+          is written to [preserved_at] and the file is reset. *)
+  | Preserved_not_promotable of
+      { reason : string
+      ; preserved_at : string
+      }
       (** The edit maps to no single override (or the override file could
-          not be used); the file is left as edited. *)
+          not be used). The edit is written to [preserved_at] and the file is
+          reset. *)
   | Discarded
       (** No edit layer: the file is overwritten with the embedded copy. *)
 
@@ -62,9 +70,12 @@ type operator_edit =
   ; outcome : operator_edit_outcome
   }
 (** A runtime file whose bytes differ from both the embedded copy and the
-    digest the previous pass recorded for it. A kept edit keeps its old
-    digest, so it is reported again every pass until the file is deleted,
-    reset, or its override removed. *)
+    digest the previous pass recorded for it. A preserved edit lives in
+    [<file>.operator-edit-<first 8 hex of its SHA-256>] beside the managed
+    file: the registry reads no such name as a prompt, no manifest lists it,
+    and a pass that finds it already holding the same edit leaves it as it
+    is. If the edit cannot be written there, the file is left as edited and
+    the failure is reported in [failed]. *)
 
 type sync_result =
   { copied : string list

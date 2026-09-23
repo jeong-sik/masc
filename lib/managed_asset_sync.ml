@@ -48,8 +48,14 @@ type operator_edit_outcome =
       { key : string
       ; reason : string
       }
-  | Kept_override_exists of { key : string }
-  | Kept_not_promotable of { reason : string }
+  | Preserved_override_exists of
+      { key : string
+      ; preserved_at : string
+      }
+  | Preserved_not_promotable of
+      { reason : string
+      ; preserved_at : string
+      }
   | Discarded
 
 type operator_edit =
@@ -66,6 +72,18 @@ type sync_result =
   }
 
 let sha256_hex content = Digestif.SHA256.(digest_string content |> to_hex)
+
+(* Where an edit that cannot become an override is kept: beside the managed
+   file, named by the edit's digest. The name does not end in [.md], so the
+   prompt registry never reads it as a prompt, and no manifest lists it, so
+   no pass retires it. *)
+let preserved_edit_path dest current =
+  let digest_prefix_length = 8 in
+  Printf.sprintf
+    "%s.operator-edit-%s"
+    dest
+    (String.sub (sha256_hex current) 0 digest_prefix_length)
+;;
 
 let read_file_opt = Fs_compat.load_file_opt
 
@@ -399,6 +417,28 @@ let sync_current_asset
                    ~written:{ acc with overwritten = embedded_rel :: acc.overwritten }
                    ~unwritten:acc
                | Some current ->
+                 (* The edit is written beside the file before the file is
+                    reset, so the edit is never in no place. A copy already
+                    there under the same name is this edit preserved by an
+                    earlier pass and is left as it is. *)
+                 let preserve_then_install outcome =
+                   let preserved_at = preserved_edit_path dest current in
+                   let preserved =
+                     match read_file_opt preserved_at with
+                     | Some existing when String.equal existing current -> Ok ()
+                     | Some _ ->
+                       Error
+                         (Printf.sprintf
+                            "%s already holds different bytes; the edit was not \
+                             preserved and the file is left as edited"
+                            preserved_at)
+                     | None -> Fs_compat.save_file_atomic preserved_at current
+                   in
+                   match preserved with
+                   | Error msg -> fail acc msg
+                   | Ok () ->
+                     install ~written:(with_edit (outcome preserved_at) acc) ~unwritten:acc
+                 in
                  (match edit_layer with
                   | No_edit_layer ->
                     install ~written:(with_edit Discarded acc) ~unwritten:acc
@@ -417,9 +457,11 @@ let sync_current_asset
                           ( with_edit (Promoted_reset_failed { key; reason }) acc
                           , record previous ))
                      | Prompt_registry.Override_exists { key } ->
-                       with_edit (Kept_override_exists { key }) acc, record previous
+                       preserve_then_install (fun preserved_at ->
+                         Preserved_override_exists { key; preserved_at })
                      | Prompt_registry.Not_promotable { reason } ->
-                       with_edit (Kept_not_promotable { reason }) acc, record previous))))
+                       preserve_then_install (fun preserved_at ->
+                         Preserved_not_promotable { reason; preserved_at })))))
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | Sys_error msg -> fail acc msg
@@ -591,22 +633,25 @@ let operator_edit_line ~label { path; outcome } =
       path
       key
       reason
-  | Kept_override_exists { key } ->
+  | Preserved_override_exists { key; preserved_at } ->
     Printf.sprintf
       "%s asset %s was edited after the last sync, and prompt %s already has a \
-       saved override; the file is left as edited and the distribution copy is \
-       not installed until the file is deleted or matches it"
+       saved override, which stays in force. The edit is kept at %s and the \
+       file is back to the distribution copy; move what you want from the edit \
+       into the override"
       label
       path
       key
-  | Kept_not_promotable { reason } ->
+      preserved_at
+  | Preserved_not_promotable { reason; preserved_at } ->
     Printf.sprintf
       "%s asset %s was edited after the last sync and cannot become a prompt \
-       override (%s); the file is left as edited and the distribution copy is \
-       not installed until the file is deleted or matches it"
+       override (%s). The edit is kept at %s and the file is back to the \
+       distribution copy; save what you want from the edit as a prompt override"
       label
       path
       reason
+      preserved_at
   | Discarded ->
     Printf.sprintf
       "%s asset %s was edited after the last sync; %s definitions have no \

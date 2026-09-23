@@ -61,7 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- The Librarian's queue pass hands it the Keeper's current task and that task's linked Goal criteria again. The lookup (`goal_context_for_task`) lost its only production caller when the post-turn closure was retired (#37527), and the queue pass had passed a fixed `Error` since #36142. It now lives in `Keeper_librarian_input_sources` and runs off the main domain. The durable and continuity passes still pass `No_task`, because a turn boundary does not record its task (#38114).
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result

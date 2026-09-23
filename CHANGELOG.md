@@ -61,7 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- The Overview Tasks header no longer draws a `done` count that is always zero. The list it heads holds only open tasks, so a count of finished tasks folded over it read `0 done` on every frame. The header now reads the last 24 hours of completions from the task flow snapshot the same refresh builds from the whole backlog (`5 done 24h`), and leaves the segment out until that snapshot exists (#38057).
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result

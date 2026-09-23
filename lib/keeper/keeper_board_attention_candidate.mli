@@ -93,15 +93,11 @@ type quarantine_failure_category =
   | Durable_partition_invariant
   | Exact_setup_unavailable
   | Exact_flow_replayed
-  | Exact_execution_terminal
-  | Exact_execution_failed
-      (** The judgment lane ended on a classified execution failure — every
-          HTTP slot refused on account/capacity grounds and the CLI tail had
-          none to walk (or also refused). Distinct from
-          [Exact_execution_terminal] (a terminal failure about this
-          candidate's judgment) and from [Exact_execution_interrupted] (a
-          restart cut a bound execution), so operator tooling can count the
-          three apart. *)
+  | Exact_lane_exhausted
+      (** Every HTTP slot refused and the CLI tail had none to walk, or
+          refused too. *)
+  | Exact_flow_bookkeeping_failed
+  | Exact_completion_failed
   | Domain_output_invalid
   | Execution_provenance_mismatch
   | Unexpected_worker_failure

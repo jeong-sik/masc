@@ -100,10 +100,7 @@ val terminal_of_flow_error
 
 val error_detail : 'callback_error execution_error -> string
 (** The durable-record sentence for a lane terminal: the run record's
-    [detail] field and the Blocked partition reason quote the same words.
-    Idempotent pure formatting — the judgment lane itself is a read-only
-    model call with no side effects to double-apply, which is why a blocked
-    partition can be requeued and re-judged safely. *)
+    [detail] field and the Blocked partition reason quote the same words. *)
 
 (** Snapshot only an effective resumable pending candidate. Quarantined and
     requeue-requested candidates are not executable; a durably requeued pending

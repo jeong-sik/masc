@@ -1840,9 +1840,12 @@ let execution_failure_may_advance (error : execution_error) =
        it — a 429 arrived here as [Completion_failed] and ended the flow. *)
     receipt_dispatch_count error.receipt = 1
   | Provider_response_refused { refusal = Payment_required; _ }, Response_received ->
-    (* A 402 names the binding's account, not the request: no generation ran
-       and the successor carries its own account, so the frozen lane walks its
-       next candidate instead of ending. The one-dispatch receipt stays as
+    (* A 402 is a refusal before any generation ran, and the successor bills a
+       different account, so the frozen lane walks its next candidate instead
+       of ending. It is not always the account alone: OpenRouter compares
+       [max_tokens] times price against the balance, so a smaller request
+       could pass on the same account — either way the successor is a fresh
+       chance. The one-dispatch receipt stays as
        evidence. Same shape as [Rate_limited] — this promotion is what lets a
        lane whose last HTTP slot is out of paid quota fall through to its CLI
        tail instead of recording a permanent failure. *)
@@ -1868,8 +1871,8 @@ let execution_failure_may_advance (error : execution_error) =
   | Missing_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The remaining refusals do not advance, as before this classification
-     existed ([Payment_required] was promoted above: the account refusing is
-     the binding's, and the successor brings its own). Promoting any other one
+     existed ([Payment_required] was promoted above: the successor bills a
+     different account). Promoting any other one
      needs its own argument about whether the successor can serve the same
      input, which this change does not make. *)
   | ( Provider_response_refused

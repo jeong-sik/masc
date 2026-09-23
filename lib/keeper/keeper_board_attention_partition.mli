@@ -58,22 +58,32 @@ type running_progress =
       ; next : candidate_visit
       }
 
+(** Each cause is its own constructor and carries the durable progress it
+    had, so the cause is never overwritten by the progress and a reader
+    tells the causes apart by constructor, not by [detail] text. *)
 type blocked_reason =
   | Candidate_membership_conflict of string
   | Durable_partition_invariant of string
   | Exact_setup_unavailable of string
-  | Exact_flow_replayed
-  | Exact_execution_terminal
-  | Exact_execution_failed of
+  | Exact_flow_replayed of running_progress option
+      (** The exact flow for this partition had already started: a
+          concurrent duplicate reached it. *)
+  | Exact_lane_exhausted of
       { detail : string
       ; progress : running_progress option
       }
-      (** The lane ended on a classified execution failure (e.g. every HTTP
-          slot refused on account or capacity grounds and the CLI tail had
-          none to walk). The durable record keeps the typed cause's detail
-          AND the execution progress separately, so an operator reading a
-          quarantined row can tell a provider-side exhaustion from a restart
-          cut or a terminal judgment failure. *)
+      (** Every HTTP slot refused and the CLI tail had none to walk, or
+          refused too. [detail] is the flow's own sentence. *)
+  | Exact_flow_bookkeeping_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** The flow could not record its own run bookkeeping. *)
+  | Exact_completion_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** The judgment arrived but persisting the completion failed. *)
   | Domain_output_invalid of
       { detail : string
       ; progress : running_progress option
@@ -82,17 +92,17 @@ type blocked_reason =
       { detail : string
       ; progress : running_progress option
       }
-  | Unexpected_worker_failure of string
+  | Unexpected_worker_failure of
+      { detail : string
+      ; progress : running_progress option
+      }
   | Exact_execution_quarantined of running_progress
   | Exact_execution_interrupted of running_progress
       (** A process restart cut a bound execution. Not a judgment about the
-          candidate: the judgment lane is a read-only model call (see
-          [Keeper_board_attention_exact_flow.execute] — idempotent up to
-          token spend, no side effects to double-apply), so the partition is
-          blocked requeueably: [Blocked -> Ready] is legal and both the
-          operator requeue tool and [ensure_roots] reopening can reach it
-          again. Distinguishable from provider refusals in
-          [Exact_execution_failed] on purpose. *)
+          candidate: the judgment lane is a read-only model call, so
+          redispatch spends tokens and nothing else. [Blocked -> Ready] is
+          legal, so the operator requeue reaches it; nothing reopens it
+          automatically. *)
 
 type running_state =
   { worker_epoch : Worker_epoch.t

@@ -1154,7 +1154,7 @@ let test_execution_error_preserves_bound_progress_without_hot_retry () =
    | W.Partition_blocked
        { candidate_id
        ; reason =
-           P.Exact_execution_failed
+           P.Exact_lane_exhausted
              { detail; progress = Some (P.Bound durable) }
        }
      when String.equal candidate_id persisted.candidate_id
@@ -1169,6 +1169,41 @@ let test_execution_error_preserves_bound_progress_without_hot_retry () =
    | W.Idle -> ()
    | _ -> Alcotest.fail "terminal exact execution became claimable");
   Alcotest.(check int) "one exact execution" 1 !calls
+;;
+
+let test_bookkeeping_failure_keeps_its_cause_and_the_flow_sentence () =
+  with_temp_base "board-attention-worker-bookkeeping-failure" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let exact = provenance "bookkeeping" in
+  let flow_sentence = "attempt receipt could not reach its durable boundary" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind bookkeeping attempt" (before_dispatch exact);
+    Error (E.Flow_bookkeeping_failed { attempts = [ exact ]; detail = flow_sentence })
+  in
+  (match
+     ok
+       "bookkeeping failure"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id
+       ; reason =
+           P.Exact_flow_bookkeeping_failed
+             { detail; progress = Some (P.Bound durable) }
+       }
+     when String.equal candidate_id persisted.candidate_id
+          && same_provenance durable exact
+          && String.equal detail flow_sentence -> ()
+   | _ ->
+     Alcotest.fail
+       "bookkeeping failure lost its own cause, the flow sentence, or its progress");
+  match (load_one_candidate ~base_path).status with
+  | A.Quarantine
+      { quarantine = { failure_category = A.Exact_flow_bookkeeping_failed; _ }
+      ; _
+      } -> ()
+  | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+    Alcotest.fail "bookkeeping failure did not read as its own category"
 ;;
 
 let test_completion_failure_preserves_bound_provenance () =
@@ -1188,7 +1223,7 @@ let test_completion_failure_preserves_bound_provenance () =
    | W.Partition_blocked
        { candidate_id
        ; reason =
-           P.Exact_execution_failed
+           P.Exact_completion_failed
              { detail; progress = Some (P.Bound durable) }
        }
      when String.equal candidate_id persisted.candidate_id
@@ -1198,7 +1233,7 @@ let test_completion_failure_preserves_bound_provenance () =
   (match (load_one_partition ~base_path).state with
    | P.Blocked
        { reason =
-           P.Exact_execution_failed
+           P.Exact_completion_failed
              { progress = Some (P.Bound durable); _ }
        ; _
        }
@@ -1207,7 +1242,7 @@ let test_completion_failure_preserves_bound_provenance () =
   match (load_one_candidate ~base_path).status with
   | A.Quarantine
       { quarantine =
-          { failure_category = A.Exact_execution_failed
+          { failure_category = A.Exact_completion_failed
           ; attempt_provenance = Some _
           ; _
           }
@@ -1233,11 +1268,9 @@ let test_flow_already_started_blocks_unbound_without_hot_retry () =
    with
    | W.Partition_blocked
        { candidate_id
-       ; reason =
-           P.Exact_execution_failed { detail; progress = None }
+       ; reason = P.Exact_flow_replayed None
        }
-     when String.equal candidate_id persisted.candidate_id
-          && String.length detail > 0 -> ()
+     when String.equal candidate_id persisted.candidate_id -> ()
    | _ -> Alcotest.fail "Unbound affine-flow replay was not durably blocked");
   (match
      ok
@@ -1312,7 +1345,7 @@ let test_payment_refusal_exhaustion_reads_apart_from_interrupt () =
    | W.Partition_blocked
        { candidate_id
        ; reason =
-           P.Exact_execution_failed
+           P.Exact_lane_exhausted
              { detail; progress = Some (P.Bound durable) }
        }
      when String.equal candidate_id persisted.candidate_id
@@ -1321,7 +1354,7 @@ let test_payment_refusal_exhaustion_reads_apart_from_interrupt () =
    | _ -> Alcotest.fail "payment refusal lost its typed cause or bound progress");
   (match (load_one_candidate ~base_path).status with
    | A.Quarantine
-       { quarantine = { failure_category = A.Exact_execution_failed; _ }; _ } ->
+       { quarantine = { failure_category = A.Exact_lane_exhausted; _ }; _ } ->
      (* Distinct kinds: a restart cut reads [Exact_execution_interrupted]
         instead, so the two are countable apart. *)
      ()
@@ -1731,7 +1764,7 @@ let test_terminal_root_does_not_strand_ready_sibling () =
    | Some
        (P.Blocked
           { reason =
-              P.Exact_execution_failed { detail = "provider exhausted"; _ }
+              P.Exact_lane_exhausted { detail = "provider exhausted"; _ }
           ; _
           }) -> ()
    | Some _ | None -> Alcotest.fail "first terminal root did not remain Blocked");
@@ -1969,11 +2002,12 @@ let test_unexpected_exception_is_terminal_without_hot_retry () =
    with
    | W.Partition_blocked
        { candidate_id
-       ; reason =
-           P.Exact_execution_failed { detail; progress = None }
+       ; reason = P.Unexpected_worker_failure { detail; progress = None }
        }
      when String.equal candidate_id persisted.candidate_id
-          && String.length detail > 0 -> ()
+          && String.equal
+               detail
+               (Printexc.to_string (Failure "injected exact worker exception")) -> ()
    | _ -> Alcotest.fail "unexpected exception was not durably terminalized");
   (match
      ok
@@ -2601,7 +2635,8 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
                 ~worker_epoch:owner
                 ~base_path
                 ~partition:running
-                (P.Unexpected_worker_failure "newer exact worker failure"))
+                (P.Unexpected_worker_failure
+                   { detail = "newer exact worker failure"; progress = None }))
          in
          match newer.write_outcome with
          | P.Fsync_completed -> ()
@@ -2633,7 +2668,9 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
   match durable.state with
   | P.Blocked
       { blocked_at
-      ; reason = P.Unexpected_worker_failure "newer exact worker failure"
+      ; reason =
+          P.Unexpected_worker_failure
+            { detail = "newer exact worker failure"; progress = None }
       } ->
     Alcotest.(check (float 0.0))
       "same timestamp cannot collapse distinct generations"
@@ -3009,6 +3046,10 @@ let () =
             "execution error preserves bound progress"
             `Quick
             test_execution_error_preserves_bound_progress_without_hot_retry
+        ; Alcotest.test_case
+            "bookkeeping failure keeps its cause and the flow sentence"
+            `Quick
+            test_bookkeeping_failure_keeps_its_cause_and_the_flow_sentence
         ; Alcotest.test_case
             "payment refusal exhaustion reads apart from interrupt"
             `Quick

@@ -65,8 +65,9 @@ type quarantine_failure_category =
   | Durable_partition_invariant
   | Exact_setup_unavailable
   | Exact_flow_replayed
-  | Exact_execution_terminal
-  | Exact_execution_failed
+  | Exact_lane_exhausted
+  | Exact_flow_bookkeeping_failed
+  | Exact_completion_failed
   | Domain_output_invalid
   | Execution_provenance_mismatch
   | Unexpected_worker_failure
@@ -167,8 +168,9 @@ let quarantine_failure_category_to_string = function
   | Durable_partition_invariant -> "durable_partition_invariant"
   | Exact_setup_unavailable -> "exact_setup_unavailable"
   | Exact_flow_replayed -> "exact_flow_replayed"
-  | Exact_execution_terminal -> "exact_execution_terminal"
-  | Exact_execution_failed -> "exact_execution_failed"
+  | Exact_lane_exhausted -> "exact_lane_exhausted"
+  | Exact_flow_bookkeeping_failed -> "exact_flow_bookkeeping_failed"
+  | Exact_completion_failed -> "exact_completion_failed"
   | Domain_output_invalid -> "domain_output_invalid"
   | Execution_provenance_mismatch -> "execution_provenance_mismatch"
   | Unexpected_worker_failure -> "unexpected_worker_failure"
@@ -181,8 +183,9 @@ let quarantine_failure_category_of_string = function
   | "durable_partition_invariant" -> Some Durable_partition_invariant
   | "exact_setup_unavailable" -> Some Exact_setup_unavailable
   | "exact_flow_replayed" -> Some Exact_flow_replayed
-  | "exact_execution_terminal" -> Some Exact_execution_terminal
-  | "exact_execution_failed" -> Some Exact_execution_failed
+  | "exact_lane_exhausted" -> Some Exact_lane_exhausted
+  | "exact_flow_bookkeeping_failed" -> Some Exact_flow_bookkeeping_failed
+  | "exact_completion_failed" -> Some Exact_completion_failed
   | "domain_output_invalid" -> Some Domain_output_invalid
   | "execution_provenance_mismatch" -> Some Execution_provenance_mismatch
   | "unexpected_worker_failure" -> Some Unexpected_worker_failure

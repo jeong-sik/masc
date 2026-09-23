@@ -8,6 +8,7 @@
 
 ### Changed
 
+- A Memory row's first cell spells the category the store holds. It was answered by a table of eleven spellings that decided both the word and its colour from the word itself: nine of them (`rule`, `rules`, `persona`, `identity`, `user`, `architecture`, `system`, and the two the callers passed as literals) match nothing any keeper writes, and of the fleet's 1768 facts it recognised 749 while 1019 fell through its catch-all. So `blocker` drew receded, like every word the table did not know, and `lesson` drew in the colour of something going right; `preference` was renamed to `PREF` on the row while the detail under it and the category strip above it both read `preference`. The two words that are the pane's own rather than a producer's -- `SOURCE` and `DROPPED` -- are now passed as values instead of strings to be recognised, and keep their colour. Three test fixtures used the category `persona`, which no keeper in the fleet has ever written (#38141).
 - The Librarian reads a new claim that repeats a current memory word for word
   as that memory instead of refusing the whole pass as
   `duplicate_selected_memory_id`: the stored fact keeps its first sighting and

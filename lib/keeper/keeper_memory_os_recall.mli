@@ -5,9 +5,10 @@
     changed or unavailable sources contribute a typed invalidation instead of
     their old claim. Recall never truncates, ranks, or partially injects facts.
 
-    An oversized combined payload produces no recall block. A source-store read
-    error falls back to ordinary recall after recording the operator-visible
-    failure. An empty ordinary store still produces a block when a pending
+    The block has no size limit: every current fact goes into it, and the
+    store stays small only through Librarian drops and absorbs and Keeper
+    retractions. A source-store read error falls back to ordinary recall after
+    recording the operator-visible failure. An empty ordinary store still produces a block when a pending
     source invalidation exists. *)
 
 (** Render only the ordinary snapshot. Kept as the focused ordinary-store

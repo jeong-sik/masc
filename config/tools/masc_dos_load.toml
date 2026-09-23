@@ -17,3 +17,8 @@ defer_loading = true
 name = "program"
 type = "string"
 description = "Name in the programs inventory. Omit to list what is there."
+
+[[params]]
+name = "boot"
+type = "string"
+description = "The file to boot inside a game directory, when the directory holds several programs (a loader such as KOEI.COM beside the game's own EXEs). A file name, not a path. Omit for a single-file program."

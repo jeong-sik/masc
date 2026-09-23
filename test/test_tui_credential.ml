@@ -73,12 +73,12 @@ let test_the_server_reason_comes_from_the_typed_code () =
       (body (Masc_error.Auth_error_code.to_string code))
   in
   check bool "an expired code is Expired" true
-    (of_code Masc_error.Auth_error_code.Token_expired = Credential.Expired);
+    (of_code Masc_error.Auth_error_code.Token_expired = Some Credential.Expired);
   check bool "an insufficient role is its own reason" true
     (of_code Masc_error.Auth_error_code.Insufficient_role
-     = Credential.Insufficient_role);
+     = Some Credential.Insufficient_role);
   check bool "an invalid token is a plain refusal" true
-    (of_code Masc_error.Auth_error_code.Invalid_token = Credential.Rejected);
+    (of_code Masc_error.Auth_error_code.Invalid_token = Some Credential.Rejected);
   (* An /mcp refusal is a JSON-RPC error with the code under error.data. *)
   check bool "a JSON-RPC refusal is read from error.data" true
     (Credential.server_reason_of_body
@@ -86,14 +86,21 @@ let test_the_server_reason_comes_from_the_typed_code () =
           {|{"jsonrpc":"2.0","id":null,"error":{"code":-32001,"message":"x","data":{"auth_error_code":%S}}}|}
           (Masc_error.Auth_error_code.to_string
              Masc_error.Auth_error_code.Token_expired))
-     = Credential.Expired);
+     = Some Credential.Expired);
   List.iter
     (fun (label, raw) ->
       check bool (label ^ " is a plain refusal") true
-        (Credential.server_reason_of_body raw = Credential.Rejected))
+        (Credential.server_reason_of_body raw = Some Credential.Rejected))
     [ ("a code the server never writes", body "brand_new_code")
-    ; ("no code", {|{"error":"x"}|})
     ; ("a code that is not a string", {|{"auth_error_code":1}|})
+    ];
+  (* No code at all is not a credential refusal: the auth layer writes one on
+     every refusal, so these came from a handler refusing the request. *)
+  List.iter
+    (fun (label, raw) ->
+      check bool (label ^ " is not about the credential") true
+        (Credential.server_reason_of_body raw = None))
+    [ ("a handler's own refusal", {|{"error":"only your own queued message can be prioritized"}|})
     ; ("a body that is not JSON", "forbidden")
     ; ("a JSON value that is not an object", {|"token_expired"|})
     ]

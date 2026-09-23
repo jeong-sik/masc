@@ -119,6 +119,9 @@ type events_error =
   | Events_refused of string
       (** 401/403: this client's credential, not the journal. One sentence
           for the operator; the pane stops asking for journals this session. *)
+  | Events_denied of string
+      (** A 401/403 that names no auth code: the handler refused this read.
+          The status and the server's own sentence. *)
   | Events_undecodable of string
       (** A body this build cannot read, an error with no known code (the
           status and what came back), or a page that claimed more without

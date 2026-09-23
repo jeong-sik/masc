@@ -210,31 +210,65 @@ let count_calls_inside_for ~module_path ~callee =
   !count
 ;;
 
-let count_expressions_outside_calls_in_value_binding
+(* [unsanitised_arguments] names, per callee, the labelled arguments that call
+   does {i not} sanitise. Without it a callee in [callees] protects its whole
+   argument list, which is right for a call that sanitises everything it is
+   given and wrong for one that sanitises a single argument: [box_wrapped_field
+   buf cols ~head ~style body] escapes [body] line by line and concatenates
+   [head] raw, so naming it here made every wire field in a [~head] invisible
+   to the guard. *)
+let count_expressions_outside_sanitised_calls_in_value_binding
       ~module_path
       ~binding_name
       ~callees
+      ~unsanitised_arguments
       ~matches
   =
   let structure = parse_implementation_or_fail module_path in
   let count_in_expr expression =
     let protected_depth = ref 0 in
     let count = ref 0 in
+    let raw_labels_of_call (node : Parsetree.expression) =
+      match node.pexp_desc with
+      | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) ->
+        let name = longident_to_string txt in
+        if List.mem name callees then
+          Some (Option.value ~default:[] (List.assoc_opt name unsanitised_arguments))
+        else None
+      | _ -> None
+    in
     let iter =
       { Ast_iterator.default_iterator with
         expr =
           (fun self node ->
-             let enters_protected_call =
-               match node.pexp_desc with
-               | Pexp_apply
-                   ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) ->
-                 List.mem (longident_to_string txt) callees
-               | _ -> false
-             in
-             if enters_protected_call then incr protected_depth;
-             if !protected_depth = 0 && matches node then incr count;
-             Ast_iterator.default_iterator.expr self node;
-             if enters_protected_call then decr protected_depth)
+             match raw_labels_of_call node, node.pexp_desc with
+             | Some (_ :: _ as raw_labels), Pexp_apply (callee, arguments) ->
+               (* The call protects what it sanitises; the arguments it names
+                  as raw are walked at the depth the call was reached at, so a
+                  wire field in one of them still counts. *)
+               incr protected_depth;
+               self.expr self callee;
+               List.iter
+                 (fun (label, argument) ->
+                    let raw =
+                      match label with
+                      | Asttypes.Labelled name -> List.mem name raw_labels
+                      | Asttypes.Nolabel | Asttypes.Optional _ -> false
+                    in
+                    if raw then begin
+                      decr protected_depth;
+                      self.expr self argument;
+                      incr protected_depth
+                    end
+                    else self.expr self argument)
+                 arguments;
+               decr protected_depth
+             | protection, _ ->
+               let enters_protected_call = Option.is_some protection in
+               if enters_protected_call then incr protected_depth;
+               if !protected_depth = 0 && matches node then incr count;
+               Ast_iterator.default_iterator.expr self node;
+               if enters_protected_call then decr protected_depth)
       }
     in
     iter.expr iter expression;
@@ -256,19 +290,43 @@ let count_expressions_outside_calls_in_value_binding
   !total
 ;;
 
+(* The same, for a callee list whose calls sanitise every argument. *)
+let count_expressions_outside_calls_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callees
+      ~matches
+  =
+  count_expressions_outside_sanitised_calls_in_value_binding ~module_path
+    ~binding_name ~callees ~unsanitised_arguments:[] ~matches
+;;
+
+let count_field_accesses_outside_sanitised_calls_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callees
+      ~unsanitised_arguments
+      ~fields
+  =
+  count_expressions_outside_sanitised_calls_in_value_binding ~module_path
+    ~binding_name ~callees ~unsanitised_arguments
+    ~matches:(fun expression ->
+      match expression.pexp_desc with
+      | Pexp_field (_, { txt; _ }) ->
+        List.mem (longident_leaf txt) fields
+      | _ -> false)
+;;
+
+(* The same, for a callee list whose calls sanitise everything they are
+   given. *)
 let count_field_accesses_outside_calls_in_value_binding
       ~module_path
       ~binding_name
       ~callees
       ~fields
   =
-  count_expressions_outside_calls_in_value_binding ~module_path ~binding_name
-    ~callees
-    ~matches:(fun expression ->
-      match expression.pexp_desc with
-      | Pexp_field (_, { txt; _ }) ->
-        List.mem (longident_leaf txt) fields
-      | _ -> false)
+  count_field_accesses_outside_sanitised_calls_in_value_binding ~module_path
+    ~binding_name ~callees ~unsanitised_arguments:[] ~fields
 ;;
 
 (* Reads of [fields] taken off something other than the identifier [record].

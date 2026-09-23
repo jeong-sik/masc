@@ -278,6 +278,18 @@ val validate_unchanged_context : expected:t option -> snapshot_sha256:string ->
   (unit, context_admission_error) result
 val context_admission_error_to_string : context_admission_error -> string
 
+val reconcile_context : claim_plan -> expected:t option -> snapshot_sha256:string -> claim_plan
+(** Fold an unproven canonical source into the plan, as
+    {!reconcile_tool_surface} does for a moved tool surface. A settled session
+    resumes only when its acknowledged frontier matches the prepared canonical
+    history and system prompt. When it differs, or no frontier was
+    acknowledged so nothing shows what the session settled against, the plan
+    becomes the fresh-session plan instead of refusing every later turn; what
+    lived only in the superseded vendor conversation is not carried over.
+    [claim_with_context_frontier] applies this again for
+    [Canonical_source_guard]. A Gate continuation, bound to its original
+    session, does not use this: it refuses with {!validate_unchanged_context}. *)
+
 val claim_with_context_frontier :
   context_frontier:context_frontier option ->
   base_path:string ->

@@ -502,7 +502,7 @@
  (modules masc_tui_acting)
  ; masc for the call log's disposition vocabulary, which the observer types
  ; the live rows with and the fold carries through unchanged.
- (libraries masc masc_tui_observer agent_core))
+ (libraries masc masc_tui_message_layout masc_tui_observer agent_core))
 
 (library
  (name masc_tui_keeper_chat_queue)

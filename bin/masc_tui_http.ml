@@ -449,13 +449,17 @@ let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
 let refusal ~status_code ~body =
   match status_code with
   | 401 | 403 -> (
-      let said =
-        Masc_tui_credential.refusal ~credential_sent:(operator_token_present ())
-          (Masc_tui_credential.server_reason_of_body body)
-      in
-      match refresh_failure () with
-      | None -> said
-      | Some why -> said ^ " (this client could not replace it: " ^ why ^ ")")
+      match Masc_tui_credential.server_reason_of_body body with
+      | Some reason ->
+          let said =
+            Masc_tui_credential.refusal
+              ~credential_sent:(operator_token_present ())
+              reason
+          in
+          (match refresh_failure () with
+          | None -> said
+          | Some why -> said ^ " (this client could not replace it: " ^ why ^ ")")
+      | None -> Masc.Tui_decode.http_status_error ~status_code ~body)
   | _ -> Masc.Tui_decode.http_status_error ~status_code ~body
 
 let decode_json ~allow_empty ~status_code ~body =

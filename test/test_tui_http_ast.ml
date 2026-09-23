@@ -2416,8 +2416,13 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* Most of the drawing is still the godfile, so that is the default; the
      rows every surface shares are drawn by the primitives and name their
      own file. *)
+  (* [unsanitised_arguments] names the arguments a listed call does not
+     escape. [box_wrapped_field buf cols ~head ~style body] reads [body] line
+     by line through [Message_layout.wrap_body ~sanitize] and concatenates
+     [head] raw, so without naming [head] the call would cover a wire field
+     put straight into it. *)
   let check_fields ?(module_path = render_path) ?(non_rendering_calls = [])
-      binding fields =
+      ?(unsanitised_arguments = []) binding fields =
     check_binding module_path binding;
     let allowed_calls = sanitizer_calls @ non_rendering_calls in
     List.iter
@@ -2430,9 +2435,9 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
         if total = 0 then
           failf "%s no longer accesses expected untrusted field %s" binding field;
         let outside =
-          Ast_grep.count_field_accesses_outside_calls_in_value_binding
-            ~module_path ~binding_name:binding
-            ~callees:allowed_calls ~fields:[ field ]
+          Ast_grep.count_field_accesses_outside_sanitised_calls_in_value_binding
+            ~module_path ~binding_name:binding ~callees:allowed_calls
+            ~unsanitised_arguments ~fields:[ field ]
         in
         if outside <> 0 then
           failf
@@ -2462,6 +2467,31 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
             outside identifier)
       identifiers
   in
+  (* The ask pane draws what a Keeper wrote, and none of its fields were on
+     this list. They are safe today because every one of them goes through
+     [box_wrapped_field], which escapes the body it wraps -- but the head it
+     concatenates is raw, so the pane is exactly where the argument-level
+     exemption has to be stated rather than assumed (#38275). *)
+  check_fields ~module_path:"bin/masc_tui_render_prim.ml"
+    (* [String.equal]: the chosen-choice test reads an id to compare it, which
+       is not drawing it. *)
+    ~non_rendering_calls:[ "box_wrapped_field"; "String.equal" ]
+    ~unsanitised_arguments:[ ("box_wrapped_field", [ "head" ]) ]
+    "draw_ask_question"
+    [ "ar_keeper"; "aq_prompt"; "ac_id"; "ac_label" ];
+  (* The description is matched out of its option before it is drawn, so what
+     reaches the row is the bound name rather than the field. *)
+  check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
+    ~binding:"draw_ask_question"
+    ~callees:(sanitizer_calls @ [ "box_wrapped_field" ])
+    [ "description" ];
+  (* The context is matched out of its option the same way, so the guard is
+     on the name the row draws. *)
+  check_binding "bin/masc_tui_render_prim.ml" "draw_ask_context";
+  check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
+    ~binding:"draw_ask_context"
+    ~callees:(sanitizer_calls @ [ "box_wrapped_field" ])
+    [ "context" ];
   check_fields "task_line" [ "id"; "title" ];
   check_identifiers ~module_path:render_path ~binding:"task_line"
     ~callees:sanitizer_calls [ "name" ];

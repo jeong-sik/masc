@@ -71,18 +71,26 @@ let auth_error_code_field fields =
           | Some _ | None -> None)
       | Some _ | None -> None)
 
+(* [None] is a refusal that is not about the credential at all. Every
+   refusal the auth layer writes carries [auth_error_code]
+   ([Masc_error.dashboard_auth_error_code] answers for every error); a 401 or
+   403 without one came from a handler refusing the request itself -- run-next
+   declining another Keeper's queued message, a Board reaction that is not the
+   caller's. Reading those as a refused token sent the operator to
+   [masc login] for something a new token does not change. *)
 let server_reason_of_body body =
   match Yojson.Safe.from_string body with
   | `Assoc fields -> (
       match auth_error_code_field fields with
       | Some (`String code) -> (
           match Masc_error.Auth_error_code.of_string code with
-          | Some code -> server_reason_of_code code
-          | None -> Rejected)
-      | Some _ | None -> Rejected)
+          | Some code -> Some (server_reason_of_code code)
+          | None -> Some Rejected)
+      | Some _ -> Some Rejected
+      | None -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-      Rejected
-  | exception Yojson.Json_error _ -> Rejected
+      None
+  | exception Yojson.Json_error _ -> None
 
 (* A refusal names two situations and only one of them is fixed by providing a
    token. This client finds the bearer masc login left in the workspace, so it

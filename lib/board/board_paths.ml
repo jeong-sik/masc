@@ -1,4 +1,4 @@
-(* Board persistence path resolvers and JSONL rotation policy.
+(* Board persistence path resolvers.
 
    Extracted from [Board_core] to shrink the godfile. Pure
    path-string + filesystem-side-effect helpers. *)

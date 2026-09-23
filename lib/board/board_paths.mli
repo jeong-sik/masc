@@ -1,4 +1,4 @@
-(** Board persistence paths and JSONL rotation policy.
+(** Board persistence paths.
 
     Unbound path helpers are derived from [Env_config_core.base_path] +
     [Env_config_core.cluster_name] via [Workspace_utils.masc_root_dir_from],

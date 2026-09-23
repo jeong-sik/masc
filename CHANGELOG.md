@@ -2,9 +2,35 @@
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-09-23
+
+> Before you upgrade: read **Upgrade notes**. HTTP callers of the verification verdict, sub-board, schedule and keeper-cost routes, and readers of the startup degradation record, have to change what they send or read. The server, TUI and dashboard have to move together because of the memory health payload (#37856).
+
+### Upgrade notes
+
+- A prompt file under `<config-root>/prompts` that was edited by hand
+  before this version is overwritten on the first boot, because no digest
+  was recorded for it yet. Move such an edit into a prompt override before
+  upgrading. When rolling back to an earlier binary and then forward again,
+  delete `<config-root>/prompts/managed-assets.json` first, so the returning
+  version overwrites the earlier binary's copies instead of reading them as
+  operator edits (#38204).
+- `POST /api/v1/verification/verdict` requires `verification_id`, the submission the operator read. A request without it, or with unknown or duplicate fields, is refused, and a stale one is answered 409. The TUI and dashboard of this version already send it (#38073).
+- A sub-board `access` value outside `open`, `members_only` and `owner_only` is answered 400 / `Validation_error` on create and update, over HTTP and `masc_board_sub_board_create`, instead of becoming `Open` (#38076).
+- Schedule tools record the authenticated caller as the actor. `requested_by_*`, `scheduled_by_*`, `cancelled_by_*` and `author_*` are gone from the `masc_schedule_create`, `masc_schedule_update`, `masc_schedule_cancel` and `masc_schedule_note_add` schemas, and there is no `operator` default any more. A call that still sends an actor field naming someone other than the caller is refused with `actor_mismatch`, a caller the endpoint cannot name with `caller_unidentified`, and a Keeper changing a schedule it does not own with `not_schedule_owner` (#38054, #38087, #38053).
+- The runtime startup degradation record and its JSON no longer carry `dropped_routes`, `dropped_media_failover`, `dropped_lane_candidates`, `dropped_lanes` or `effective_default_runtime_id`. A reader of that payload has to stop expecting them (#38074).
+- The keeper failure route labels a provider 400/413 refusal, a malformed or oversized wire payload and a non-transient 5xx as `request_refused`, `provider_wire_defect` and `server_error_not_transient`, which rotate within the turn. Log or metric queries on the old terminal labels see the new ones (#38045).
+- `/api/v1/dashboard/keeper-costs` reports `total_cost_usd` as `null` when no turn in the window reported a cost, adds `cost_reported_samples` and `cost_unreported_samples`, and drops `model_breakdown` (#38105).
+- The TUI says "candidate order" where it said "failover", and the runtime detail panel's `Failover Chain:` label reads `Candidate Chain:`. A script that reads the TUI screen for those words has to follow (#37918).
+- The keeper memory health payload (`/api/v1/dashboard/keeper-memory-health`) carries the Librarian's continuity lag: `continuity_unread_atoms` on each keeper's `librarian` object, and `librarian_continuity_unread_atoms` with `librarian_continuity_unmeasured` in `totals`. The TUI and the dashboard check the payload's key set exactly, so a server and a TUI or dashboard from different sides of this change do not draw the Memory screen, in either direction: the TUI shows the Memory header as failed and the dashboard shows the health panel's error. Upgrade the server together with the TUI and the dashboard, and roll them back together (#37856, #37863).
+
 ### Added
 
 - The model catalog and the seed runtime config carry the three models released on 2026-09-22. `claude-opus-5-5` gets its own catalog row (1M/128K, $4/$20, cache read 0.05x, forced tool use refused) — without it the id lands on the `claude-opus-5` row and bills cache reads at double the real rate — plus Claude Code subscription bindings at low..max. `gpt-6-sol` and `gpt-6-luna` get bare catalog rows (efforts `none`,`low`..`max`, from a /v1/responses parameter probe) and Codex subscription bindings at low..max. Release evidence entries for all three (#38118).
+- `keeper_memory_write` takes an optional `supersedes` memory_id: the keeper's own current authored fact is removed and the new claim written in one locked Memory OS commit, journaled with a `superseded_by` reason and recorded as a `Revised` event. The receipt reports `removed_memory_ids` and `support_invalidations` the way a retraction does. Unknown, non-current, Librarian-injected and self ids, a derived claim resting on the fact it replaces, and `supersedes` with `source_path`, are refused with typed errors and nothing written. The tool description tells keepers to supersede a progress or position snapshot instead of writing another copy (#38122).
+- A Keeper's GitHub CLI login can ask for the `workflow` scope. The login used to run `gh auth login --web` with no `--scopes`, so every token carried only gh's minimum (`repo`, `read:org`, `gist`) and a push touching `.github/workflows` was refused. `POST /api/v1/keepers/:name/github-login` takes `?scopes=workflow` beside `?hostname=`, on HTTP/1 and h2, and refuses a scope it does not offer with 400. The TUI's Keeper GitHub tab lists the scopes with a digit that ticks each one, and `L` logs in with the ticked ones; none is ticked by default, because a workflow runs with the repository's secrets (#38198).
+- The dashboard's Keeper GitHub CLI panel offers the login scopes as checkboxes, none ticked, and GitHub 로그인 asks for the ticked ones. `workflow` is the one offered: it lets the token change `.github/workflows`, which run with the repository's secrets (#38202).
+- The Memory screen shows how far each keeper's continuity snapshot trails the Librarian's read position, beside the durable drain's unread count: the TUI keeper line says `continuity behind N`, the Memory header and the dashboard totals strip sum it over the fleet. A lag that could not be taken, because there is no snapshot, the file does not read, the snapshot names another trace or it sits ahead of the position, reads as `?` and is counted as unmeasured rather than as zero, and the fleet sum covers only the keepers it was taken for (#37856).
 
 ### Changed
 
@@ -47,8 +73,40 @@
   different mechanism, is unchanged — its screen strings keep the key name,
   and the glossary now carries a `media_failover` entry fencing it from the
   renamed concept.
+- The TUI reads a connector's `gateway_state` and `poll_state` as closed
+  variants instead of strings. A connector row the TUI cannot read, such as
+  one carrying a state the server's state machines never produce, is refused
+  on its own and drawn as one line naming the connector and the reason; the
+  other rows still load. The TUI decides whether the Channels pane's Runtime
+  state row repeats the connection badge by matching constructors rather than comparing
+  lowercased words. The runtime picker's kind badge width is measured from
+  the badge strings instead of being written as 7 in three places (#38050).
+- The Board list's age column holds the time the sort ordered by, and its header names that time: `AGE` under the four orders that rank or break ties on when the post appeared (`hot`, `trending`, `recent`, `discussed`), `MOVED` under `updated`, which ranks on the last change. The column drew the last change under every sort, so under `recent` -- "newest post first" -- a post made 24 minutes ago with a reply 24 seconds ago sat sixth reading `25s`, a smaller number than the five rows above it, and the order looked broken. The sort is read once per draw, so the header word and every row's number name the same time (#38127).
+- A field taking typed text keeps every printable key it is handed, `q` among them. The quit key named three of the thirteen text fields and let the other ten through a catch-all, so a `q` typed into the command palette armed the exit instead of landing in the query, and a second one ended the process -- from inside a field drawing its own cursor. The same held for a preset name, a runtime lane name or parameter, the voice wizard, the identity app form and filter, and the GitHub token. The row search and the Board draft were caught a second time by a condition spelled at the quit branch itself, which a compact viewport overrode, so on a narrow screen a `q` could not be typed into a row search either. The thirteen are now written out with no catch-all, so a field added later has to be walked past this decision; on a viewport too small to draw any of them the quit key keeps its meaning, because there the compact fallback owns every key and no field is taking one. The `[` and `]` that walk the ask cursor on the Approvals surface make the same check, so a palette query with a bracket in it -- a task title like `[#31874]` -- no longer arrives with the brackets gone and the cursor moved behind the overlay (#38137).
+- Changelog entries arrive as `changelog.d/<PR number>.md` fragments instead
+  of lines under `## [Unreleased]`, so parallel pull requests no longer
+  conflict on `CHANGELOG.md`. `scripts/changelog-fragments.py` checks them in
+  CI, refuses a pull request that adds an `[Unreleased]` bullet, and
+  `scripts/bump-version.sh` folds them into `[Unreleased]` at release (#38151).
+- The boot asset sync records the SHA-256 of every file it writes in
+  `managed-assets.json` (schema `v2`) and tells a stale distribution copy
+  from an operator's edit. An edited prompt file becomes that prompt's
+  override in `prompt_overrides.json` and the file is reset. Tool and MCP
+  edits are still overwritten. Every edit gets a WARN boot line naming the
+  path and what was done. A manifest under another schema reads as none:
+  nothing is retired that boot. The capability and lane probes no longer
+  write the runtime prompt directory; they read the binary's own prompts
+  from a private temporary one (#38162).
+- A broken `imp.toml` no longer sends a workspace with Keeper history back into setup. The server skips a Keeper whose declaration it cannot load and boots every other one, so imp's declaration, sandbox and model binding are now advisory onboarding checks: bare `masc` prints the reason and opens the workspace. What every Keeper shares still keeps the setup journey: a `runtime.toml` the server cannot load or cannot find (it then boots with no runtime, and the journey's model step is the repair) is reported by a new `runtime_configuration` check in `masc doctor --json` and `/api/v1/setup/status`, and a missing file now keeps the journey too instead of opening a workspace no Keeper can run in. A stale imp assignment is a `runtime.toml` load failure, so it still goes to the journey (#38196).
+- A prompt edit the boot sync cannot turn into an override (the key already
+  has one, or the file maps to no single key) is kept beside the file as
+  `<file>.operator-edit-<first 8 hex of its SHA-256>`, and the file goes
+  back to the distribution copy, so later releases still reach it. The
+  registry never reads the kept copy as a prompt and no sync retires it; the
+  WARN boot line names where it is (#38204).
 
 ### Fixed
+
 - An autonomous turn that yields to a queued person before its provider's first
   event (RFC-0441) is no longer a failed keeper cycle. The preemption used to
   return a synthesized zero-turn run result that the keeper could only read as
@@ -60,7 +118,6 @@
   `Turn_skipped`, which leaves the admitted source pending and acknowledges no
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
-
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result
@@ -95,11 +152,69 @@
 - The verification queue (`GET /api/v1/verification/requests?view=awaiting`) says which verdict each row waits on: `intent` is `complete` or `cancel`, read from the task the row names, and `null` in the history view, which has no backlog join. A cancellation waits on the same queue as a completion and only an operator's verdict clears it, so a reader could not tell the seven cancel requests waiting since 2026-09-19 from completion requests (#37965).
 - The TUI's Task Review list draws a `VERDICT` column (`complete` or `cancel`) between the task id and the submitter, and the request detail says `Waits on: cancel -- only an operator's verdict clears it` for a cancellation. The list used to draw a cancellation request and a completion request as the same row, so the one row only an operator could clear looked like every other (#37965).
 - A boot replay of a durable HITL delivery, and an operator resubmitting the same decision, no longer write a second `resolved` row to the approval audit ledger or announce the decision again. Both send the wake again and log `hitl resolution redelivered approval=… occasion=boot_replay|same_request_resubmitted`. One approval for an offline keeper had nineteen `resolved` rows across twenty-one boots on 2026-09-22, so a count of the ledger read as nineteen decisions for one click (#37964).
+- `keeper_memory_search` absorbed results: `into` now follows a claim that a
+  later librarian pass absorbed to the claim holding it now, and `into_current`
+  judges that claim; under `source=all`, rows whose claim already answers the
+  query are dropped before `limit` is taken, so they no longer hide rows that
+  reach a different claim (#38040).
+- An approval whose first delivery failed still has its decision on the ledger. The `Resolved` row and the SSE `resolved` event went out only after the first wake was enqueued, so when that enqueue failed, the operator's second press and every boot replay found no pending entry, sent the wake and wrote no row; a grant the keeper consumed in between skipped it entirely, and the trust timeline kept showing the approval as waiting for an operator decision. The row and the event now go out once, as soon as the decision is journaled and before any wake is tried; a boot replay or a second press only sends the wake again. A failed append leaves the decision in force and is reported as an audit append failure, as other audit writes are. The chat's decision row is written once, when the wake reaches a live keeper (#38043).
+- An operator can drop or reopen a Goal in `Verifying`. Both were invalid there, so a Goal whose verifier lane never produced a verdict could not leave: `request_complete` only re-armed the same request. `drop` now moves it to `Dropped` and `reopen` returns it to `Executing` and clears the pending proof request; `confirm_completion` stays invalid. A verdict that arrives afterwards is refused and is not recorded, and a review still running for the Goal is cancelled so it no longer holds one of the verifier's four review slots or blocks the Goal's next request. The TUI Goal detail lights `[x]` and `[o]` on a verifying Goal, and the `masc_goal_transition` description lists the verifying transitions (#38047).
+- The Memory health Librarian row no longer loses track of the Librarian when
+  a keeper writes its own memory. The last success is the newest journal line
+  the Librarian committed and the failure shown is the newest Librarian
+  failure after it, so a `keeper_memory_write` or retraction neither blanks
+  "Memory saved" nor hides a failed pass
+  (`server_dashboard_http_keeper_memory_health.ml`). The TUI decodes the pass
+  ending and the failure kind as closed variants, refuses a value it does not
+  know, draws both in plain words ("caught up", "last pass saved nothing",
+  "model call failed") instead of the wire words, and draws the cause of a
+  stopped or crashed pass on its own `Librarian cause` row. A keeper row the
+  TUI cannot decode is refused on its own and drawn as one line naming the
+  keeper and the reason, so a value from a newer server no longer blanks the
+  whole Memory pane (#38049).
+- Schedule: `masc_schedule_create`, `masc_schedule_update`, `masc_schedule_cancel` and `masc_schedule_note_add` take the actor's kind as well as its id from the authenticated caller, building on #38054; `requested_by_*`, `scheduled_by_*`, `cancelled_by_*` and `author_*` are removed from the tool schemas, a caller the endpoint cannot name is refused instead of naming the actor in its arguments, and an actor field a call still sends that names someone other than the caller is refused with `actor_mismatch` (#38087), the kind included; a Keeper is recorded as `automated_actor`, and `human_operator` is recorded only for an HTTP request whose bearer is an `Admin` credential such as the TUI's, not for a token-less request or the internal keeper token. A Keeper may update or cancel only the schedules `owner=self` lists for it (scheduled by it or waking it), an update may not point the row at another Keeper, and an update keeps the row's requester and scheduler; any other change is refused with `error_kind: "not_schedule_owner"`, and a caller with no name is refused with `caller_unidentified` (#38053).
+- A resumed Claude Code turn now reaches the model with its current turn context. Claude Code resends the system prompt it recorded at the session's first launch until the conversation is compacted (`--system-prompt-snapshot`, default on), so the temporal line, memory, world state and Librarian working state masc wrote into `--system-prompt-file` on every resume never arrived: one Keeper's model read memory revision 808 and a 13.5-hour-old temporal line while masc had prepared revision 903, across 55 resumes under one recorded prompt hash. The resume prompt now carries that composed context and the operation's historical task reference in front of the goal, as the Antigravity resume does, and the resume system file no longer carries the canonical conversation snapshot the vendor session already holds. The session record says `held_by_vendor_session` instead of `replaced_configuration`, and the turn's input report says the client session held the history; a resume records no window reading for a range it did not send. A context overflow on a resume no longer respawns the same refused input at every shrink step: without a Gate continuation the retry starts fresh with the shrunk range, and a Gate resume ends on the typed overflow (#38075).
+- An access refusal (HTTP 401 or 403) on a lane's head no longer demotes it. The refusal was held as candidate evidence that has no expiry and that only the candidate's own answer clears, so while a sibling answered the head was never dispatched again, and a key restored through the environment did not bring it back before a restart. The refusal now rotates to the next candidate within the turn and leaves no evidence, and every new turn tries the head first (RFC-0458 §3.4, §6) (#38096).
+- The keeper cost view no longer shows an unknown cost as $0. Subscription runtimes report no cost, so their turn rows carry `cost_usd: null`, and `/api/v1/dashboard/keeper-costs` folded that null into `0.0`: every keeper read `total_cost_usd: 0.0` beside tens of millions of tokens. The feed now sums only reported costs and says how many turns reported one (`cost_reported_samples`) and how many did not (`cost_unreported_samples`); `total_cost_usd` is `null` when no turn in the window reported a cost. `model_breakdown` always held a single redacted `runtime` bucket equal to the total and is removed. The dashboard's Keeper cost table and Total Cost tile say `미보고` and the unreported turn count instead of `$0` (#38105).
+- A Gate continuation whose Claude Code session is full now ends instead of holding the Keeper. When the vendor refused the continuation's resume as a context overflow before any response or tool activity, the session stayed `Recovery_required(Input_rejected Bootstrap_floor_exceeded)`: the next turn was refused until an operator acted, `Retry_previous` resent the same refused resume, and `Restart_fresh` made the Gate's `validate_continuation` fail on every later attempt. A resume that overflowed after a tool effect was held the same way as `Input_rejected Effect_fenced`. The session now records `vendor_session_full_no_activity` or `vendor_session_full_after_activity` (Codex only after a tool effect, since its observation-free overflow still shrink-retries in the same thread), which offers no `Retry_previous` and is superseded by the next ordinary turn with a fresh session; the dashboard no longer offers retry for it. The Gate operation fails with the typed cause `Gate_session_full` naming the approval, runtime, session, recovery record and whether activity was observed, and only when the record is that Gate's own resume (#38111).
+- `masc start` reclaims a PID lock whose recorded process is a zombie. `kill(pid, 0)` succeeds for an unreaped process, so the takeover treated it as a live holder, the liveness probe failed, `ps` printed `<defunct>`, and every start refused with "alive but does not look like a masc server" while nothing listened on the port. The recorded PID is now read as running, zombie or gone from the `ps` state letter; a zombie is reclaimed like a gone process without a signal, and a live non-masc holder still refuses (#38119).
+- A Codex Gate continuation whose same-thread shrink retries ran out now ends instead of holding the Keeper. A resume that overflowed with no tool effect is retried smaller in the same thread; when nothing smaller was left, the session stayed `Recovery_required(Input_rejected Bootstrap_floor_exceeded)` and its `Retry_previous` resent into the same full thread. Once the shrink sequence returns an error, that record is now re-recorded as `vendor_session_full_no_activity` under the same recovery id, so the Gate operation fails with `Gate_session_full` and the next ordinary turn starts a fresh session (#38128).
+- masc-tui replaces its stored operator token once it has expired instead of carrying it. It read only `auth/masc-tui.token`, never the credential record that holds the expiry, so after its self-minted 30-day token ran out every start found the same file and every admin read — the Keeper GitHub identity view among them — came back `401 token_expired`, shown as "the operator token this masc-tui presented was refused". The stored token is now checked with `Auth.verify_token`; an expired one is re-minted at startup and the notice says the old one expired. A token that expires while masc-tui is running still needs a restart (#38136).
+- masc-tui says why the server refused its operator token. Every 401/403 read "the operator token this masc-tui presented was refused", so an expired bearer looked like any other failure — a Keeper's GitHub identity view read as a GitHub account problem. The TUI now reads the refusal body's typed `auth_error_code`: `token_expired` says the token has expired, `insufficient_role` says it is not allowed to make the request, and any other code keeps the old sentence. The code is read at the top of a REST refusal and under `error.data` of an `/mcp` JSON-RPC refusal. The code is now a closed type, `Masc_error.Auth_error_code.t`, which the server writes with `to_string` and the TUI reads with `of_string` and matches in full, so a new code fails the TUI's build instead of falling through. The JSON reads, the keeper roster, the chat events journal and the chat reconciliation read all use it (#38144).
+- A Remote_ssh Keeper's GitHub identity is now read where its login was
+  written (#38152). The GitHub tab status and `masc keeper-github status` run
+  one `gh` probe on the Keeper's endpoint instead of reading this host's
+  `hosts.yml`, so a successful endpoint login no longer shows as "not
+  configured". Attaching the GitHub MCP identity to a Remote_ssh Keeper is
+  refused with `remote_ssh_github_token_not_on_host` rather than "log it in
+  from the GitHub tab first", since masc does not copy an endpoint token back
+  to the host. Under a non-default cluster, the GitHub MCP token read and the
+  chat-store redaction of `hosts.yml` now use the cluster directory the login
+  writes to.
+- `transcript_tail_recovery: keeper=<name> canonical checkpoint unavailable`
+  now names its cause (for example `checkpoint version 10 is superseded by
+  11` for a keeper whose checkpoint predates the version hard cut). The line
+  dropped the typed load error, so a stopped keeper's per-boot ERROR could not
+  be told apart from a lock or read failure. The rendering of
+  `checkpoint_ref_load_error` moves next to its type in
+  `Keeper_checkpoint_store`; the dashboard checkpoint API uses it instead of
+  its own copies (#38164).
+- Over h2c, `GET /api/v1/board/sub-boards/<id>` is served by the sub-board
+  handler HTTP/1 uses instead of the post-detail arm, and the h2 Board list,
+  post detail, and sub-board detail reads take the public-read gate, so strict
+  auth refuses them without a token as HTTP/1 does (#38189).
 
+### Internal
+
+- The `tui-chat-design` Skill's `Origin_row` density row now matches the header
+  the TUI draws: the speaker's whole name, a receding clock at the right edge
+  and a rule between them; a row whose time cell is empty draws no clock and no
+  `--:--:--` placeholder, and a row continuing the same speaker draws only the
+  rule and clock (#37892). (#37946)
 
 ## [0.36.0] - 2026-09-22
 
-> Before you upgrade: read the five items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), the removed `--dup-threshold` purge option (#37751), the new Fusion `deliberation_evidence` shape that earlier run records do not read as (#37783), the required `--keeper` argument of `masc-checkpoint-purge` (#37802), and the continuity-lag keys the keeper memory health payload now carries, which a TUI or dashboard from the other side of that change refuses (#37856).
+> Before you upgrade: read the four items under **Upgrade notes** — the keeper system prompt's new worldview slot and role tags (#37753), the removed `--dup-threshold` purge option (#37751), the new Fusion `deliberation_evidence` shape that earlier run records do not read as (#37783), and the required `--keeper` argument of `masc-checkpoint-purge` (#37802).
 
 ### Upgrade notes
 
@@ -107,7 +222,6 @@
 - `masc-checkpoint-purge` no longer takes `--dup-threshold`; a call that still passes it fails with `unknown argument`. The purge report no longer has `duplicates_dropped` or `reasoning_messages_dropped`, and the dashboard purge table drops the matching column, because a purge no longer removes messages (#37751).
 - Fusion run records saved before this version do not read as the new `deliberation_evidence` shape, which now carries `seat_routes`; there is no compatibility reader for them (#37783).
 - `masc-checkpoint-purge` now takes `--keeper <name>`; the keeper's meta names the trace and `--trace` only cross-checks it. A call with `--trace` alone exits 1. The tool used to look for the keeper's Librarian position, boundary log and continuity snapshot under the checkpoint's `agent_name`, which on a live keeper is the agent's runtime id, so it never found them and `--apply` moved no position (#37770).
-- The keeper memory health payload (`/api/v1/dashboard/keeper-memory-health`) carries the Librarian's continuity lag: `continuity_unread_atoms` on each keeper's `librarian` object, and `librarian_continuity_unread_atoms` with `librarian_continuity_unmeasured` in `totals`. The TUI and the dashboard check the payload's key set exactly, so a server and a TUI or dashboard from different sides of this change do not draw the Memory screen, in either direction: the TUI shows the Memory header as failed and the dashboard shows the health panel's error. Upgrade the server together with the TUI and the dashboard, and roll them back together (#37856, #37863).
 
 ### Added
 
@@ -127,7 +241,6 @@
 - An official-client keeper request (Claude Code, Antigravity) starts where the Librarian read to, as an Agent-Core request already did, and carries the working state in place of the atoms that position covers, instead of resending the conversation the keeper's memory already holds. The latest of the three positions wins: the Librarian's, the lane's own cut and the last turn's seed (#37619).
 - The TUI Fusion screen can start a run: `a` opens a form for the Keeper, preset, topology, prompt and web tools, posts it, and selects the new run once the list carries it. A preset the topology cannot run comes back as the server's own sentence (#37823).
 - A Fusion run's detail lists its seat routes: the route each panel and judge seat was given, the runtime that answered it, and every candidate that failed before that one. Runs recorded without routes draw no block (#37823).
-- The Memory screen shows how far each keeper's continuity snapshot trails the Librarian's read position, beside the durable drain's unread count: the TUI keeper line says `continuity behind N`, the Memory header and the dashboard totals strip sum it over the fleet. A lag that could not be taken, because there is no snapshot, the file does not read, the snapshot names another trace or it sits ahead of the position, reads as `?` and is counted as unmeasured rather than as zero, and the fleet sum covers only the keepers it was taken for (#37856).
 - The TUI writes why a session ended to its own log, one line per session in `.masc/logs/masc-tui-<pid>.log`: `[masc-tui] exit: normal (quit key)`, `[masc-tui] exit: normal (signal SIGTERM)` or `[masc-tui] exit: abnormal (exception ...)` — grep the `[masc-tui] exit:` prefix to collect them and nothing else. A normal end is the operator or the session's owner asking for it — the `q` key, a second `Ctrl-C`, or a terminate signal — and an abnormal one is an uncaught exception, or `no cause was recorded` if a session somehow leaves without naming one. A cause longer than 200 bytes is cut on a character boundary and the row ends in `[+N bytes]`, so one runaway backtrace cannot make the line unreadable. The per-PID log held only the boot lines, so a session that ended left no reason behind: roughly a hundred files a day and none said why (task-754).
 
 ### Changed

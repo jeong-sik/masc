@@ -274,10 +274,15 @@ type execution_error_cause =
   | Attempt_already_started
   | Clock_required_for_timeout
   | Frozen_request_mismatch
-  | Completion_failed
-      (** A failure without a more specific Exact cause. The receipt may
-          already contain response headers, for example when provider parsing
-          fails. This cause alone does not authorize a dispatched retry. *)
+  | Completion_failed of Http_client.http_error
+      (** A provider failure without a more specific Exact cause, carrying the
+          typed transport error that produced it: a network failure, a
+          deadline, a rejected wiring, a provider terminal or a classified
+          provider failure such as a hard quota or an empty completion. An
+          HTTP refusal is {!Provider_response_refused} and never arrives here.
+          The receipt may already contain response headers, for example when
+          provider parsing fails. This cause alone does not authorize a
+          dispatched retry. *)
   | Response_body_deadline_exceeded
       (** Successful HTTP response headers arrived, but the explicitly declared
           total deadline expired before its body completed. No complete body,

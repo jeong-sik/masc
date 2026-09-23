@@ -121,7 +121,7 @@ type execution_error_cause =
   | Attempt_already_started
   | Clock_required_for_timeout
   | Frozen_request_mismatch
-  | Completion_failed
+  | Completion_failed of Http_client.http_error
   | Response_body_deadline_exceeded
   | Provider_response_refused of
       { http_status : int
@@ -1167,7 +1167,7 @@ let evidence_attempt
 let evidence_transport_failure ~ordinal = function
   | Flow_advance_candidate_rejected _ ->
     Ok (Validated_flow_evidence.Candidate_rejected, None)
-  | Flow_advance_execution_failed { cause = Completion_failed; raw_response_sha256; _ } ->
+  | Flow_advance_execution_failed { cause = Completion_failed _; raw_response_sha256; _ } ->
     Ok (Validated_flow_evidence.Completion_failed_before_dispatch, raw_response_sha256)
   | Flow_advance_execution_failed
       { cause = Response_body_deadline_exceeded; raw_response_sha256; _ } ->
@@ -1202,7 +1202,7 @@ let evidence_transport_failure ~ordinal = function
       | Attempt_already_started -> "attempt_already_started"
       | Clock_required_for_timeout -> "clock_required_for_timeout"
       | Frozen_request_mismatch -> "frozen_request_mismatch"
-      | Completion_failed -> "completion_failed"
+      | Completion_failed _ -> "completion_failed"
       | Response_body_deadline_exceeded -> "response_body_deadline_exceeded"
       | Provider_response_refused { http_status; refusal } ->
         Printf.sprintf
@@ -1698,13 +1698,18 @@ let execution_error_cause ~http_status = function
             (Retry.classify_refusal ~retry_after_header ~status:code ~body)
       }
   | Exec.Provider_error
-      (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ }) ->
+      (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ } as error) ->
     (match http_status with
      | Some http_status -> Provider_response_refused { http_status; refusal = Context_overflow }
-     | None -> Completion_failed)
+     | None -> Completion_failed error)
   (* Other transport, provider parsing or observer failures remain distinct
-     from an owned body deadline, even when their receipt has headers. *)
-  | Exec.Provider_error _ -> Completion_failed
+     from an owned body deadline, even when their receipt has headers. The
+     typed transport error travels with the cause so a consumer can tell a
+     dropped connection from a hard quota or an empty completion. *)
+  | Exec.Provider_error
+      (( Http_client.NetworkError _ | Http_client.TimeoutError _
+       | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _
+       | Http_client.ProviderFailure _ ) as error) -> Completion_failed error
   | Exec.Output_normalization_failed (Exec.Incomplete_structured_response _) ->
     Incomplete_output
   | Exec.Output_normalization_failed Exec.Missing_structured_text -> Missing_output
@@ -1803,7 +1808,7 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
 
 let execution_failure_may_advance (error : execution_error) =
   match error.cause, receipt_phase error.receipt with
-  | Completion_failed, Before_dispatch -> receipt_dispatch_count error.receipt = 0
+  | Completion_failed _, Before_dispatch -> receipt_dispatch_count error.receipt = 0
   | Response_body_deadline_exceeded, Response_received ->
     (* No domain validator ran for this incomplete response. Advance through
        the caller's existing settlement callback, retaining the dispatched
@@ -1865,7 +1870,7 @@ let execution_failure_may_advance (error : execution_error) =
         ; _
         }
     , (Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal) )
-  | Completion_failed, (Not_started | Dispatch_started | Response_received | Terminal)
+  | Completion_failed _, (Not_started | Dispatch_started | Response_received | Terminal)
   | Response_body_deadline_exceeded,
       (Not_started | Before_dispatch | Dispatch_started | Terminal)
   | ( Provider_response_refused

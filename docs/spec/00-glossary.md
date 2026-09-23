@@ -1563,9 +1563,12 @@ status: reference
     흡수되지 않은 claim이 기존 기억의 사본이면 역방향 사본 판정(Reverse Copy Judgment)을
     거쳐 저장하지 않고 버린다(#38056·#38243). 흡수 대상(`into`)이 잠근 시점의 스냅숏에도,
     이번 답의 새 claim에도 없으면(회차 도중 Keeper가 그 Fact를 철회하거나 `supersedes`로
-    대체한 경우) 그 흡수는 적용하지 않는다. 원문은 현재 Fact로 남고, 지워진 대상은
-    되살아나지 않으며, Librarian 실행 기록(`run` 출력)에 실제로 적용된 흡수와 미적용
-    흡수를 구분해 남긴다(#38231·#38267).
+    대체한 경우) 그 흡수는 적용하지 않는다. 원문은 현재 Fact로 남고 지워진 대상은
+    되살아나지 않으며, 회차 도중 없어진 기억을 이어붙이는(supersedes 또는 absorbs) 새
+    claim은 저장하지 않고 실행 기록(`run` 출력)에 `claims_not_applied`로 남긴다.
+    원장의 `Revised` 이벤트는 커밋이 실제로 수행한 `supersedes`에만 기록되어 대체된
+    기억은 Keeper가 직접 준 후계자 하나만 보존하며, 후계자 중 어느 것도 스냅숏에 남지
+    않은 대체 대상 기억은 퇴역하지 않고 현재 Fact로 남는다(#38231·#38267·#38317).
   - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
     적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
     커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고

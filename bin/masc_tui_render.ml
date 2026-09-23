@@ -330,13 +330,19 @@ let overview_team (state : state) =
    are stuck, and when it reopens is what the operator waits on. Nothing is
    drawn while every window is open or before the first read -- a line saying
    "all open" on every frame would be texture. A failed read says so. *)
-let overview_quota_line (state : state) ~now =
+(* A failed quota read is said, but as a detail line: it explains no stuck
+   row, so it takes only rows the Overview had spare. *)
+let overview_quota_unread_line (state : state) =
   match state.overview_quota with
-  | Quota_unread -> None
   | Quota_failed err ->
       Some
         (Printf.sprintf "%squota windows unread: %s%s" Ansi.dim
            (Terminal_text.single_line err) Ansi.reset)
+  | Quota_unread | Quota_read _ -> None
+
+let overview_quota_line (state : state) ~now =
+  match state.overview_quota with
+  | Quota_unread | Quota_failed _ -> None
   | Quota_read options -> (
       match Overview_team.shut_windows options with
       | [] -> None
@@ -445,12 +451,17 @@ let overview_pulls_lines (state : state) =
       | [] -> [ dim "\xe2\x87\x85 pull requests: no registered GitHub repository" ]
       | lines -> lines
 
+(* Lines under the Team block that explain no Keeper row: an unread quota
+   and the pull request summary. *)
+let overview_team_detail_lines (state : state) =
+  Option.to_list (overview_quota_unread_line state) @ overview_pulls_lines state
+
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line ~pulls_lines =
+    ~quota_line ~detail_lines =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -543,9 +554,11 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       (fun (row : Overview_team.row) -> row.group = Overview_team.Needs_you)
       team.rows
   in
+  (* Detail lines come last: the layout gives them only rows nothing else
+     wanted, so a short viewport cuts them before any Keeper. *)
   let rows =
-    List.map keeper_line stuck @ Option.to_list quota_line @ pulls_lines
-    @ List.map keeper_line others @ parked_line @ holders_line
+    List.map keeper_line stuck @ Option.to_list quota_line
+    @ List.map keeper_line others @ parked_line @ holders_line @ detail_lines
   in
   let total = List.length rows in
   let counts =
@@ -628,10 +641,16 @@ let overview_layout (state : state) ~terminal_rows =
          | Some team ->
              Overview_team.drawn_rows team
              + Option.fold ~none:0 ~some:(fun _ -> 1)
-                 (overview_quota_line state ~now:(Unix.gettimeofday ()))
-             + List.length (overview_pulls_lines state))
+                 (overview_quota_line state ~now:(Unix.gettimeofday ())))
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
+  in
+  let row_budget =
+    match overview_team state with
+    | None -> row_budget
+    | Some _ ->
+        Render_schedule.spend_spare_rows_on_team row_budget
+          ~extra:(List.length (overview_team_detail_lines state))
   in
   attention_items, tasks_error, row_budget
 
@@ -954,7 +973,7 @@ let render_overview (state : state) =
          overview_team_lines team ~team_rows:row_budget.team_rows
            ~flow:state.task_flow ~cols
            ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
-           ~pulls_lines:(overview_pulls_lines state)
+           ~detail_lines:(overview_team_detail_lines state)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;
@@ -8560,7 +8579,11 @@ let render_verification_list (state : state) =
         | [] -> ()
         | ids ->
             let named = List.filteri (fun i _ -> i < 3) ids in
-            let rest = List.length ids - List.length named in
+            (* The list is one page; the total counts them all. *)
+            let rest =
+              snapshot.Masc.Tui_decode.vs_awaiting_unresolved_total
+              - List.length named
+            in
             box_line_styled buf cols ~style:(Theme.warn ())
               (Printf.sprintf "  waiting on a record this store does not hold: %s%s"
                  (String.concat ", " named)

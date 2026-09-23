@@ -1978,7 +1978,6 @@ type overview_snapshot = {
       (** Every [keeper_briefs] row with a name, in the briefing's order. *)
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
-  ov_top_attention: attention_item option;
   ov_generated_at: string;
 }
 
@@ -8655,10 +8654,22 @@ let memory_fact_search_text = function
   | Memory_row_invalidation f ->
       f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
 
+(* The filter the Memory surface is narrowed by: the text being typed while a
+   search is open, and the applied one otherwise. Every count, every list and
+   every banner on the surface reads it here, so the number beside a filter is
+   a count of what that filter left. The rule was written out twice -- once
+   for the keeper table, once inside [memory_fact_rows] -- and the facts
+   banner read a third value, [search_last], so with a filter already applied
+   it quoted the old word over a count of the new one. *)
+let memory_search_query (state : state) =
+  match state.search with
+  | Some q -> surface_search_query Memory q
+  | None -> surface_search_query Memory state.search_last
+
+(* The keeper table matches case-folded, so its own reading is folded. Same
+   filter, one normalisation. *)
 let memory_overview_query (state : state) =
-    match state.search with
-    | Some q -> String.lowercase_ascii (surface_search_query Memory q)
-    | None -> String.lowercase_ascii (surface_search_query Memory state.search_last)
+  String.lowercase_ascii (memory_search_query state)
 
 
 (* What Esc does on Memory, nearest layer first: a filter, then the fact
@@ -8852,11 +8863,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
             (src, inv)
       in
       let all_rows = ordinary @ source_rows @ invalidation_rows in
-      let query =
-        match state.search with
-        | Some q -> surface_search_query Memory q
-        | None -> surface_search_query Memory state.search_last
-      in
+      let query = memory_search_query state in
       let filtered_rows =
         if query = "" then all_rows
         else

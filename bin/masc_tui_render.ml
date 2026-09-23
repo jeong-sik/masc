@@ -1475,7 +1475,17 @@ let draw_ask_questions buf cols (state : state) ~budget =
                  Ansi.dim plan.Ask_layout.questions_hidden
                  (if plan.Ask_layout.questions_hidden = 1 then "" else "s")
                  Ansi.reset);
-          if plan.Ask_layout.context_shown then Buffer.add_string buf why_text;
+          if plan.Ask_layout.context_shown then Buffer.add_string buf why_text
+          else if why_rows > 0 then
+            (* The questions are the ask and the reason explains it, so the
+               reason is what the plan drops first. It used to drop without a
+               word: hidden questions are counted on a line of their own and
+               folded asks are too, and only this one left no trace, so a
+               reader had nothing to tell them there was a reason to go and
+               read. The answering view draws it whole and scrolls. *)
+            box_line buf cols
+              (Printf.sprintf "    %sthe reason did not fit -- a opens it%s"
+                 Ansi.dim Ansi.reset);
           let printed = ref 0 in
           List.iteri
             (fun index row ->

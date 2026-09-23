@@ -176,3 +176,8 @@ let list ~base_path = io (fun () ->
       let* t = read ~base_path ~id:proposal_id |> Result.map_error (function Invalid s -> Unavailable s | e -> e) in
       match t with Some t -> Ok (proposal_id,t) | None -> Error (Unavailable (name ^ ": disappeared during listing"))) names
   | Some _ -> Error (Unavailable (dir ^ ": not a directory")))
+let discard ~base_path ~id =
+  if not (valid_id id) then Error (Invalid "Invalid proposal id") else io (fun () ->
+    match Unix.unlink (file ~base_path id) with
+    | () -> Ok ()
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ())

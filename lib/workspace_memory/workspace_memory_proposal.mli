@@ -16,3 +16,7 @@ val list : base_path:string -> ((string * t) list, error) result
 (** Missing storage is empty. Corrupt or unreadable storage is an error, never
     an empty result. Proposals remain model-proposed and do not change any
     Keeper memory. Submission validates reference structure, not truth. *)
+val discard : base_path:string -> id:string -> (unit, error) result
+(** Remove one saved proposal. An absent file is already discarded; any other
+    failure is returned. The curator discards its own superseded proposals
+    after publishing a new one, so storage holds what something still reads. *)

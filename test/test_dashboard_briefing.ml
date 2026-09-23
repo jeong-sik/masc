@@ -769,16 +769,48 @@ let test_enrich_leaves_a_declaration_row_without_runtime_fields () =
    above build their fixture with a [diagnostic] the operator snapshot never
    wrote. This case goes through the real producer: stored metadata, a
    registry phase, and the briefing render. *)
+(* The snapshot row reads each keeper's runtime identity, which asks for the
+   default runtime. Without one every fixture keeper's row fails and the
+   snapshot drops it, so the briefing never sees the keepers at all. *)
+let briefing_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
 let test_briefing_ranks_a_failing_keeper_first () =
   let dir = test_dir () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
       Lib.Keeper_registry.For_testing.clear ();
       cleanup_dir dir)
     (fun () ->
       with_test_env @@ fun ~clock ~sw ->
       let config = Workspace_utils.default_config dir in
       ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+      let runtime_path = Filename.concat dir "runtime.toml" in
+      Out_channel.with_open_bin runtime_path (fun out ->
+        output_string out briefing_runtime_toml);
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error error -> failf "Runtime.init_default failed: %s" error);
       Lib.Keeper_registry.For_testing.clear ();
       let store fields =
         let meta =

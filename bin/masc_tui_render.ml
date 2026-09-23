@@ -643,21 +643,28 @@ let render_overview (state : state) =
   box_divider buf cols;
 
   (* Tasks section *)
+  (* [state.tasks] holds only open tasks, so a done count folded over it was
+     zero on every frame. Completions come from the flow snapshot the same
+     refresh built from the whole backlog; without one the segment says
+     nothing rather than a zero it never measured. *)
+  let done_segment =
+    match state.task_flow with
+    | None -> ""
+    | Some flow ->
+        Printf.sprintf " · %s%d done 24h%s" (Theme.ok ())
+          flow.Masc_tui_task_flow.recent.completed Ansi.reset
+  in
   let task_header =
-    if List.is_empty state.tasks then Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset
+    (* A backlog with nothing open is when the completions are the whole
+       story, so the empty header keeps them. *)
+    if List.is_empty state.tasks then
+      match state.task_flow with
+      | None -> Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset
+      | Some _ ->
+          Printf.sprintf " %sTasks%s (0 open%s)\n" Ansi.bold Ansi.reset
+            done_segment
     else
       let count = List.length state.tasks in
-      (* [state.tasks] holds only open tasks, so a done count folded over it
-         was zero on every frame. Completions come from the flow snapshot the
-         same refresh built from the whole backlog; without one the segment
-         says nothing rather than a zero it never measured. *)
-      let done_segment =
-        match state.task_flow with
-        | None -> ""
-        | Some flow ->
-            Printf.sprintf " · %s%d done 24h%s" (Theme.ok ())
-              flow.Masc_tui_task_flow.recent.completed Ansi.reset
-      in
       let active_c =
         List.fold_left
           (fun acc (t : task) -> match t.status with InProgress _ | Claimed _ -> acc + 1 | _ -> acc)

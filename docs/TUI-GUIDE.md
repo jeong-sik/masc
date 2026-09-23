@@ -1627,7 +1627,7 @@ metadata reachability reading by exact `runtime_id`.
 
 ```
  MASC Runtime (43 lanes, 46 candidates)  degraded / stale  19:20:04  [connected]
-   SSOT: runtime.toml  projections: resolved + probe  2 reachable / 16 failed / 28 skipped
+   SSOT: /workspace/config/runtime.toml  projections: resolved + probe  2 reachable / 16 failed / 28 skipped
    LANE           CANDIDATE                  PROVIDER / MODEL         ROUTE / PROBE
    primary        1/3 anthropic.opus         Anthropic / claude-opus ready / reachable
    local          1/1 local.codex            Codex / codex           ready / CLI not probed

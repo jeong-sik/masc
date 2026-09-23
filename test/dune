@@ -6105,7 +6105,7 @@
  ; without it the test reads a cached verdict and stays green while the
  ; wiring it asserts is gone.
  (deps %{workspace_root}/bin/masc_tui.ml)
- (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc.string_util masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 
 (rule

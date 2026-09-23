@@ -1397,6 +1397,27 @@ let schedule_json_int field = function
        | Some _ | None -> None)
   | _ -> None
 
+(** The Config / Runtime screen's authority line.
+
+    The line is about one file, and that file's path was the last reading on
+    it. What stood in front was the label "SSOT: runtime.toml" -- a name
+    spelled in this binary, not the one the server answered with -- then the
+    probe's tally, then the whole fleet's keeper totals. Live, the line ran to
+    189 cells in a pane 145 wide, so the path never drew and the spelled name
+    was all that stood for it. The fleet totals in the middle are the
+    Overview's subject.
+
+    So the readings go in the order they belong to this screen: the file, what
+    the probe made of it, and last the fleet, which is what the width takes
+    first. Each reading that may be absent is absent, not an empty string with
+    a separator already on it. *)
+let runtime_authority_line ~config ~probe_summary ~probe_only ~probe_error
+    ~fleet =
+  let part = function None -> "" | Some reading -> "  " ^ reading in
+  Printf.sprintf "  SSOT: %s  projections: resolved + probe  %s%s%s%s" config
+    probe_summary (part probe_only) (part probe_error) (part fleet)
+;;
+
 let schedule_payload_body = function
   | `Assoc fields ->
       (match List.assoc_opt "body" fields with

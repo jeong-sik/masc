@@ -738,6 +738,77 @@ let test_the_route_editor_keeps_an_unresolved_entry_in_place () =
     "[runtime].media_failover order [a; b] gone.model, cursor stays"
     (slot_plan_text (plan_slot_edit state Drop_slot))
 
+
+(* The Config / Runtime line is about one file, so the file has to be on it.
+
+   It was not. The path came last, behind the probe tally and the fleet's
+   keeper totals, and in front of them all stood the name "runtime.toml"
+   spelled in this binary. Live the line ran to 189 cells in a pane 145 wide,
+   so the path and the probe-only count were both cut and the spelled name was
+   all a reader got.
+
+   Order is what these check, not the wording: each reading sits ahead of the
+   one that matters less to this screen, because the right edge decides who
+   draws. *)
+let at needle line = String_util.find_substring line needle
+
+let position label needle line =
+  match at needle line with
+  | Some index -> index
+  | None -> Alcotest.failf "%s is not on the line: %S" label line
+;;
+
+let test_the_authority_line_names_the_file_it_is_about () =
+  let line =
+    runtime_authority_line ~config:"/workspace/config/runtime.toml"
+      ~probe_summary:"2 reachable / 0 failed / 1 skipped" ~probe_only:None
+      ~probe_error:None ~fleet:(Some "fleet: 3 keepers")
+  in
+  let path = position "the config path" "/workspace/config/runtime.toml" line in
+  let fleet = position "the fleet totals" "fleet:" line in
+  Alcotest.(check bool) "the file comes before the fleet totals" true
+    (path < fleet);
+  (* And what draws is the file the server answered with, not a name this
+     binary carries: a config that ends in another file still draws. *)
+  let other =
+    runtime_authority_line ~config:"/workspace/config/fleet-b.toml"
+      ~probe_summary:"probe unavailable" ~probe_only:None ~probe_error:None
+      ~fleet:None
+  in
+  Alcotest.(check bool) "a differently named config draws its own name" true
+    (Option.is_some (at "/workspace/config/fleet-b.toml" other))
+;;
+
+let test_what_the_probe_found_outranks_the_fleet_totals () =
+  let line =
+    runtime_authority_line ~config:"/workspace/config/runtime.toml"
+      ~probe_summary:"0 reachable / 2 failed / 1 skipped"
+      ~probe_only:(Some "111 probe-only")
+      ~probe_error:(Some "probe: endpoint not found")
+      ~fleet:(Some "fleet: 3 keepers")
+  in
+  let probe_only = position "the probe-only count" "111 probe-only" line in
+  let probe_error = position "the probe error" "probe: endpoint" line in
+  let fleet = position "the fleet totals" "fleet:" line in
+  Alcotest.(check bool) "the probe-only count comes before the fleet totals"
+    true (probe_only < fleet);
+  Alcotest.(check bool) "the probe error comes before the fleet totals" true
+    (probe_error < fleet)
+;;
+
+let test_a_reading_the_screen_has_not_got_leaves_no_gap () =
+  let line =
+    runtime_authority_line ~config:"/workspace/config/runtime.toml"
+      ~probe_summary:"2 reachable / 0 failed / 1 skipped" ~probe_only:None
+      ~probe_error:None ~fleet:None
+  in
+  (* An absent reading used to be an empty string carrying its own separator,
+     which drew as a run of spaces where a reading had been. *)
+  Alcotest.(check string) "the line ends at the last reading it has"
+    "  SSOT: /workspace/config/runtime.toml  projections: resolved + probe  2 reachable / 0 failed / 1 skipped"
+    line
+;;
+
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [
       Alcotest.test_case "picker and failures reserve footer space" `Quick test_picker_and_refusal_keep_footer_space;
@@ -785,4 +856,10 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "the pick dispatch asks the same question" `Quick
         test_the_pick_dispatch_asks_the_same_question;
       Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
-        test_the_route_editor_keeps_an_unresolved_entry_in_place]]
+        test_the_route_editor_keeps_an_unresolved_entry_in_place;
+      Alcotest.test_case "the authority line names the file it is about"
+        `Quick test_the_authority_line_names_the_file_it_is_about;
+      Alcotest.test_case "what the probe found outranks the fleet totals"
+        `Quick test_what_the_probe_found_outranks_the_fleet_totals;
+      Alcotest.test_case "a reading the screen has not got leaves no gap"
+        `Quick test_a_reading_the_screen_has_not_got_leaves_no_gap]]

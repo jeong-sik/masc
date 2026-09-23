@@ -11863,29 +11863,33 @@ let render_runtime (state : state) =
         in
         let probe_note =
           match snapshot.rss_probe_error, snapshot.rss_probe with
-          | Some detail, _ -> "  probe: " ^ Terminal_text.single_line detail
+          | Some detail, _ ->
+              Some ("probe: " ^ Terminal_text.single_line detail)
           | None, Some probe ->
               (match probe.rps_errors with
-               | detail :: _ -> "  probe: " ^ Terminal_text.single_line detail
-               | [] -> "")
-          | None, None -> ""
+               | detail :: _ ->
+                   Some ("probe: " ^ Terminal_text.single_line detail)
+               | [] -> None)
+          | None, None -> None
         in
         let probe_only_note =
           match snapshot.rss_unassigned_probe_count with
-          | 0 -> ""
-          | count -> Printf.sprintf "  %d probe-only" count
+          | 0 -> None
+          | count -> Some (Printf.sprintf "%d probe-only" count)
         in
         let fleet_note =
           let total_keepers = List.length state.keepers in
           if total_keepers > 0 then
             let turns, tokens, cost = aggregate_keeper_stats state.keepers in
-            Printf.sprintf "  fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
-              total_keepers turns (format_context_tokens tokens) cost
-          else ""
+            Some
+              (Printf.sprintf
+                 "fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
+                 total_keepers turns (format_context_tokens tokens) cost)
+          else None
         in
-        Printf.sprintf
-          "  SSOT: runtime.toml  projections: resolved + probe  %s%s  %s%s%s"
-          summary_text fleet_note config probe_only_note probe_note
+        Masc_tui_types.runtime_authority_line ~config
+          ~probe_summary:summary_text ~probe_only:probe_only_note
+          ~probe_error:probe_note ~fleet:fleet_note
   in
   let chrome_rows = runtime_surface_listing_chrome state in
   let content_height = max 0 (rows - chrome_rows) in

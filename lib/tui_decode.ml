@@ -955,7 +955,10 @@ let escape_invisible text =
         then false
         else if Uucp.Emoji.is_extended_pictographic scalar
         then true
-        else if continues_pictograph scalar || code = zero_width_joiner
+        (* Only a joiner that actually joined carries the state: an escaped
+           one has been written out as text, so what follows it no longer sits
+           inside an emoji and a second joiner cannot ride through on it. *)
+        else if continues_pictograph scalar || joins_two_pictographs
         then after_pictograph
         else false
       in

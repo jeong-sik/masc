@@ -340,6 +340,12 @@ let test_terminal_text_keeps_the_joiner_inside_an_emoji () =
   Alcotest.(check string) "a joiner before an emoji but after a letter is escaped"
     ("a\\u200D" ^ shrug)
     (Tui_decode.escape_invisible ("a" ^ zwj ^ shrug));
+  (* A joiner that was escaped is text now, so the next one is not inside an
+     emoji either: carrying the state through an escaped joiner would let the
+     second one through raw. *)
+  Alcotest.(check string) "a doubled joiner does not smuggle one through"
+    (shrug ^ "\\u200D\\u200D" ^ laptop)
+    (Tui_decode.escape_invisible (shrug ^ zwj ^ zwj ^ laptop));
   Alcotest.(check string) "only the joiner is spared, not every zero width"
     (shrug ^ "\\u200B" ^ laptop)
     (Tui_decode.escape_invisible (shrug ^ zwsp ^ laptop));

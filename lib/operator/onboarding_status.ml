@@ -51,11 +51,11 @@ let check_id_name = function
   | Keeper_persistence -> "keeper_persistence"
   | Browser_lane -> "browser_lane"
 
-(* imp's history opens on what imp itself needs: a readable workspace, model
-   binding, declaration and persisted record. A browser lane is a separate
-   surface; a launcher aimed at an old port says nothing about whether imp's
-   conversation can be read, so its drift is reported beside the conversation
-   instead of sending the operator back to "choose a workspace". *)
+(* Existing history opens on a readable workspace, model binding, declaration
+   and persisted record. A browser lane is a separate surface; a launcher aimed
+   at an old port says nothing about whether a conversation can be read, so its
+   drift is reported beside it instead of sending the operator back to "choose
+   a workspace". *)
 let role = function
   | Workspace | Model_connection | Keeper_declaration | Sandbox | Keeper_persistence ->
     Required_to_open
@@ -109,20 +109,60 @@ let model_checks config_path =
          "A model is configured. Check its current sign-in, response and tool access."
          [Configure_models; Start_imp]]
 
+type persisted_record = Readable of string | Unreadable of string
+
+(* A metadata file counts as history only when it decodes strictly and names
+   the Keeper its file is named for. [None] is a file that vanished between the
+   listing and the read. *)
+let persisted_record ~base_path dir entry =
+  match Keeper_runtime_root_entry.metadata_keeper_name entry with
+  | Some name when Keeper_config.validate_name name ->
+    (match Keeper_meta_store.read_meta_file_path_read_only ~ownership_root:base_path
+             (Filename.concat dir entry) with
+     | Ok None -> None
+     | Ok (Some meta) when String.equal meta.name name -> Some (Readable name)
+     | Ok (Some _) | Error _ -> Some (Unreadable name))
+  | Some _ | None -> None
+
+(* The front door opens a workspace that already holds Keeper history, whoever
+   those Keepers are. imp is the Keeper the setup journey creates; a workspace
+   whose Keepers were declared by hand persists other names and never imp, so
+   judging history by imp alone sent it back into setup on every bare `masc`. *)
 let persistence_check base_path =
   let root = Workspace_utils.masc_root_dir_from ~base_path
     ~cluster_name:(Env_config_core.cluster_name ()) in
-  let path = Filename.concat (Filename.concat root Common.keepers_runtime_dirname)
-    (Keeper_runtime_root_entry.keeper_basename ~keeper_name:"imp" Keeper_runtime_root_entry.Metadata) in
-  match Keeper_meta_store.read_meta_file_path_read_only ~ownership_root:base_path path with
-  | Ok None -> check Keeper_persistence Needs_setup
-      "imp has no persisted history yet. Prepare imp before opening its conversation." [Start_imp]
-  | Ok (Some meta) when String.equal meta.name "imp" ->
-    check Keeper_persistence Satisfied
-      "imp has persisted history. This does not verify that it is running or that its model and sandbox are ready." [Start_imp]
-  | Ok (Some _) | Error _ -> check Keeper_persistence Invalid
-      "imp's persisted history cannot be read as its current metadata. Inspect configuration before proceeding."
+  let dir = Filename.concat root Common.keepers_runtime_dirname in
+  let listed =
+    if not (directory_exists dir) then Ok []
+    else match Sys.readdir dir with
+      | entries -> Ok (List.sort String.compare (Array.to_list entries))
+      | exception Sys_error detail -> Error detail
+  in
+  match listed with
+  | Error detail -> check Keeper_persistence Invalid
+      ("Keeper history cannot be listed: " ^ detail ^ ". Inspect configuration before proceeding.")
       [Inspect_configuration]
+  | Ok entries ->
+    let records = List.filter_map (persisted_record ~base_path dir) entries in
+    let readable = List.filter_map (function Readable n -> Some n | Unreadable _ -> None) records in
+    let unreadable = List.filter_map (function Unreadable n -> Some n | Readable _ -> None) records in
+    let names = String.concat ", " in
+    match readable, unreadable with
+    | [], [] -> check Keeper_persistence Needs_setup
+        "No Keeper has persisted history yet. Prepare imp before opening its conversation." [Start_imp]
+    | [], _ :: _ -> check Keeper_persistence Invalid
+        ("No Keeper history can be read as current metadata (" ^ names unreadable
+         ^ "). Inspect configuration before proceeding.")
+        [Inspect_configuration]
+    | _ :: _, [] -> check Keeper_persistence Satisfied
+        ("Persisted Keeper history: " ^ names readable
+         ^ ". This does not verify that any of them is running or that its model and sandbox are ready.")
+        []
+    | _ :: _, _ :: _ -> check Keeper_persistence Satisfied
+        ("Persisted Keeper history: " ^ names readable
+         ^ ". Metadata that cannot be read as current, left unopened: " ^ names unreadable
+         ^ ". This does not verify that any Keeper is running or that its model and sandbox are ready.")
+        [Inspect_configuration]
 
 let keeper_checks base_path =
   let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in

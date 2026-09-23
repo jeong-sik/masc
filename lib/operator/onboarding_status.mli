@@ -14,12 +14,12 @@ type check_id =
   | Keeper_persistence
   | Browser_lane
 
-(** Whether an [Invalid] check keeps imp's existing conversation from opening.
+(** Whether an [Invalid] check keeps the workspace's existing history from opening.
     [Advisory] checks are reported but never send the operator back into setup. *)
 type role = Required_to_open | Advisory
 
-(** What a bare [masc] does with this observation: open imp's persisted
-    conversation, or walk the setup journey. *)
+(** What a bare [masc] does with this observation: open the workspace's
+    persisted Keeper history, or walk the setup journey. *)
 type opening = Open_existing_history | Needs_journey
 
 type check =
@@ -36,9 +36,10 @@ type t =
   ; selected_model : string option
   }
 
-(** [keeper_persistence] is Satisfied only for strictly decoded current imp
-    metadata. Absence is Needs_setup; unreadable or noncurrent metadata is
-    Invalid. Persistence does not establish model, sandbox or running health. *)
+(** [keeper_persistence] is Satisfied when at least one Keeper's metadata
+    decodes strictly as current and names its own file, whichever Keeper that
+    is. No metadata is Needs_setup; metadata of which none reads is Invalid.
+    Persistence does not establish model, sandbox or running health. *)
 val inspect : base_path:string option -> t
 
 (** The wire name of a check, as serialized in [id]. *)
@@ -48,7 +49,7 @@ val role : check_id -> role
 
 (** [Open_existing_history] needs a workspace, [keeper_persistence] Satisfied,
     and no [Required_to_open] check Invalid. It is a statement about readable
-    history, never about a running imp, model or sandbox. *)
+    history, never about a running Keeper, model or sandbox. *)
 val opening : t -> opening
 val to_json : t -> Yojson.Safe.t
 val to_text : t -> string

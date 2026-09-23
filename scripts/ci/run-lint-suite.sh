@@ -135,8 +135,10 @@ blocking_lints() {
     bash scripts/lint/test-suites-are-declared-as-tests.sh
 
   # A test/*.ml no stanza names is silently skipped by dune: the file stays in
-  # the tree, CI stays green, and the suite never runs. The baseline is 0
-  # orphans, so this is strict rather than a ratchet.
+  # the tree, CI stays green, and the suite never runs. The reverse -- a stanza
+  # naming a .py/.sh/.cjs/.mjs script that was deleted -- fails only root @runtest,
+  # which no PR check runs. The baseline is 0 of either, so this is strict
+  # rather than a ratchet.
   run_self_test_when_changed "Test modules are wired self-test" \
     scripts/lint/test-modules-are-wired.py \
     python3 scripts/lint/test-modules-are-wired.py --self-test

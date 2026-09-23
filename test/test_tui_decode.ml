@@ -3687,6 +3687,14 @@ let test_decode_repository_requires_resolved_local_path () =
    failed Librarian with no ordinary snapshot may still have source evidence;
    the decoder must keep both axes instead of collapsing that row to
    memoryless. *)
+(* A keeper row that does not decode is refused on its own and the others
+   still decode, so "the payload is not accepted" is either a whole-snapshot
+   error or at least one refused row. *)
+let memory_health_rejects json =
+  match Tui_decode.decode_memory_health_snapshot json with
+  | Error _ -> true
+  | Ok snapshot -> snapshot.Tui_decode.mhs_refused_keepers <> []
+
 let empty_memory_context_cycle =
   `Assoc ["saved", `Null; "saved_read_error", `Null; "read_position", `Null;
     "read_position_read_error", `Null; "rewriting_through", `Null;
@@ -3840,7 +3848,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       | _ -> Alcotest.fail "synthesis stop or atom frontier lost")
    | Error detail -> Alcotest.fail detail);
   List.iter (fun invalid -> Alcotest.(check bool) "invalid synthesis cannot look caught up" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects (
       (context_payload (replace_field "synthesis" invalid cycle)))))
     [replace_field "state" (`String "drained") synthesis;
      replace_field "trace_id" `Null synthesis;
@@ -3861,7 +3869,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       | _ -> Alcotest.fail "absorbed position lost")
    | Error detail -> Alcotest.fail detail);
   List.iter (fun invalid -> Alcotest.(check bool) "invalid context observation rejected" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot (context_payload invalid))))
+    (memory_health_rejects ((context_payload invalid))))
     [ replace_field "prepared" (replace_field "input" (replace_field "frontier" frontier absorbed) prepared) cycle
     ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null absorbed) prepared) cycle
     ; replace_field "prepared" (replace_field "input" (replace_field "frontier" position input) prepared) cycle
@@ -3874,6 +3882,70 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     ; replace_field "prepared" (replace_field "input" (replace_field "kind" (`String "accepted") input) prepared) cycle
     ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null input) prepared) cycle
     ];
+  (* How the last Librarian pass ended is a closed set on both sides: a
+     stopped or crashed pass keeps the server's cause on its constructor, and
+     a spelling this build does not know fails the decode instead of reaching
+     the screen as a raw word. *)
+  let with_librarian ~stopped_keepers updates =
+    let with_row =
+      map_keeper 0
+        (fun keeper -> match keeper with
+         | `Assoc fields ->
+           `Assoc (List.map (fun (key, value) -> key,
+             if key = "librarian"
+             then List.fold_left (fun row (name, v) -> replace_field name v row) value updates
+             else value) fields)
+         | _ -> keeper)
+        json
+    in
+    match with_row with
+    | `Assoc fields ->
+      `Assoc (List.map (fun (key, value) -> key,
+        if key = "alert_summary"
+        then replace_field "librarian_stopped_keepers" (`Int stopped_keepers) value
+        else value) fields)
+    | other -> other
+  in
+  (match Tui_decode.decode_memory_health_snapshot
+           (with_librarian ~stopped_keepers:1
+              [ "state", `String "stopped"
+              ; "detail", `String "the range could not be read"
+              ; "last_failure_kind", `String "exact_execution_failure"
+              ]) with
+   | Ok snapshot ->
+     let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
+     Alcotest.(check bool) "a stopped pass keeps its cause" true
+       (librarian.mlh_state = Some (Tui_decode.Pass_stopped "the range could not be read"));
+     Alcotest.(check bool) "the failure kind is decoded" true
+       (librarian.mlh_last_failure_kind = Some Tui_decode.Failure_exact_execution)
+   | Error detail -> Alcotest.fail detail);
+  (* A row this build cannot read is refused on its own: the other keeper
+     still decodes and the refusal names the keeper and the reason, so a newer
+     server does not blank the pane. *)
+  List.iter
+    (fun (label, stopped_keepers, updates, reason) ->
+       match
+         Tui_decode.decode_memory_health_snapshot (with_librarian ~stopped_keepers updates)
+       with
+       | Error detail -> Alcotest.failf "%s: the whole snapshot was refused: %s" label detail
+       | Ok snapshot ->
+         Alcotest.(check (list string)) (label ^ ": the other keeper still decodes")
+           [ "healthy" ]
+           (List.map (fun keeper -> keeper.Tui_decode.mkh_keeper_id) snapshot.mhs_keepers);
+         (match snapshot.mhs_refused_keepers with
+          | [ { Tui_decode.mkr_keeper_id = Some "source-only"; mkr_reason } ] ->
+            Alcotest.(check bool) (label ^ ": the refusal says why") true
+              (String_util.contains_substring mkr_reason reason)
+          | _ -> Alcotest.failf "%s: expected one refusal naming source-only" label))
+    [ "a state this build does not know is refused", 1, [ "state", `String "paused" ],
+      "unsupported librarian state: paused"
+    ; "a stopped pass without its cause is refused", 1, [ "state", `String "stopped" ],
+      "missing its detail"
+    ; "a caught-up pass with a cause is refused", 0, [ "detail", `String "stray" ],
+      "carries a detail"
+    ; "a failure kind this build does not know is refused", 0,
+      [ "last_failure_kind", `String "quota" ], "unsupported librarian failure kind: quota"
+    ];
   let unknown_unread = map_keeper 0
       (fun keeper -> match keeper with
        | `Assoc fields ->
@@ -3881,7 +3953,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            if key = "librarian" then replace_field "unread_atom_turns" `Null value else value) fields)
        | _ -> keeper) json in
   Alcotest.(check bool) "unknown unread cannot report a zero fleet total" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot unknown_unread));
+    (memory_health_rejects (unknown_unread));
   let unknown_total = match unknown_unread with
     | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key,
         if key = "totals" then replace_field "librarian_unread_turns" `Null value else value) fields)
@@ -3907,7 +3979,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
         else value) fields)
     | json -> json in
   Alcotest.(check bool) "an unmeasured continuity lag cannot leave the fleet count at zero" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot (with_continuity `Null)));
+    (memory_health_rejects ((with_continuity `Null)));
   (match Tui_decode.decode_memory_health_snapshot
            (with_continuity_totals ~behind:0 ~unmeasured:1 (with_continuity `Null)) with
    | Ok snapshot ->
@@ -3927,9 +3999,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
        snapshot.mhs_total_librarian_continuity_unread_atoms
    | Error detail -> Alcotest.fail detail);
   Alcotest.(check bool) "a continuity sum that disagrees with the rows is refused" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot (with_continuity (`Int 4))));
+    (memory_health_rejects ((with_continuity (`Int 4))));
   Alcotest.(check bool) "a negative continuity lag is refused" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects (
        (with_continuity_totals ~behind:(-1) ~unmeasured:0 (with_continuity (`Int (-1))))));
   let mismatched_totals =
     match json with
@@ -4030,7 +4102,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   List.iter
     (fun (label, invalid) ->
        Alcotest.(check bool) label true
-         (Result.is_error (Tui_decode.decode_memory_health_snapshot invalid)))
+         (memory_health_rejects (invalid)))
     [ "fleet total mismatch rejects", mismatched_totals
     ; "negative unread turn count rejects", negative_unread
     ; "unknown librarian state rejects", unknown_librarian_state
@@ -4219,7 +4291,7 @@ let test_decode_memory_alert_keeps_the_code_contract () =
    | Error err -> Alcotest.failf "a well-formed alert failed to decode: %s" err);
   let rejected label json =
     Alcotest.(check bool) label true
-      (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
+      (memory_health_rejects (json))
   in
   rejected "an unknown code has no variant to decode into"
     (memory_alert_snapshot ~code:"librarian_on_fire" ~severity:"error"
@@ -4367,20 +4439,20 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
   (* Both halves of the disagreement: a marker with a number, and a rewrite
      target the cut already reached. *)
   Alcotest.(check bool) "a read error beside a position is refused" true
-    (Result.is_error
-       (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects
+       (
           (snapshot_with
              (cycle ~read_position:(Some 12887) ~read_error:(Some "progress_unreadable")
                 ~rewriting_through:None ()))));
   Alcotest.(check bool) "a rewrite target at the cut is refused" true
-    (Result.is_error
-       (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects
+       (
           (snapshot_with
              (cycle ~read_position:(Some 12887) ~read_error:None
                 ~rewriting_through:(Some 7694) ()))));
   Alcotest.(check bool) "a rewrite target without a cut is refused" true
-    (Result.is_error
-       (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects
+       (
           (snapshot_with
              (cycle ~saved:false ~read_position:(Some 12887) ~read_error:None
                 ~rewriting_through:(Some 12888) ()))))
@@ -4396,7 +4468,7 @@ let test_decode_memory_health_rejects_stale_schema () =
       ]
   in
   Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
+    (memory_health_rejects (json))
 
 let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound () =
   `Assoc
@@ -4492,6 +4564,60 @@ let test_decode_memory_fact_reads_the_use_record () =
           Alcotest.fail "a row without events must be rejected"
       | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
 
+(* The server writes a fact's category through [category_to_string], so a
+   word outside the eight is a wire error -- not a ninth category for the
+   renderer to guess a colour for. *)
+let test_decode_memory_fact_refuses_an_unknown_category () =
+  let snapshot category =
+    Tui_decode.decode_memory_fact_snapshot
+      (memory_fact_snapshot_json
+         ~ordinary:
+           (`Assoc
+              [ "present", `Bool true
+              ; "revision", `Int 7
+              ; "updated_at", `Float 1_775_000_100.0
+              ; ( "facts"
+                , `List
+                    [ `Assoc
+                        [ "claim", `String "the deploy needs assets"
+                        ; "category", `String category
+                        ; "origin", `String "authored"
+                        ; "first_seen", `Float 1_775_000_000.0
+                        ; "last_seen", `Float 1_775_000_050.0
+                        ; "memory_id", `String "mem-1"
+                        ; "events", memory_fact_events_json ()
+                        ]
+                    ] )
+              ])
+         ~source_bound:(`Assoc [ "present", `Bool false ]) ())
+  in
+  let contains_substring text needle =
+    let n = String.length needle and h = String.length text in
+    let rec go i = i + n <= h && (String.sub text i n = needle || go (i + 1)) in
+    go 0
+  in
+  let refused_naming word = function
+    | Error error -> contains_substring error word
+    | Ok snapshot -> (
+        match snapshot.Tui_decode.mfs_ordinary with
+        | Tui_decode.Memory_store_read_error error ->
+            contains_substring error word
+        | Tui_decode.Memory_store_present _ | Tui_decode.Memory_store_absent ->
+            false)
+  in
+  Alcotest.(check bool) "a word the producer never writes is refused" true
+    (refused_naming "rule" (snapshot "rule"));
+  List.iter
+    (fun category ->
+      let word = Masc.Keeper_memory_os_types.category_to_string category in
+      match snapshot word with
+      | Ok { Tui_decode.mfs_ordinary = Tui_decode.Memory_store_present
+               { Tui_decode.mos_facts = [ fact ]; _ }; _ } ->
+          Alcotest.(check bool) (word ^ " round-trips") true
+            (fact.Tui_decode.mf_category = category)
+      | Ok _ | Error _ -> Alcotest.failf "%s did not decode" word)
+    Masc.Keeper_memory_os_types.all_categories
+
 let test_decode_memory_facts_keeps_both_stores () =
   let ordinary =
     `Assoc
@@ -4549,7 +4675,9 @@ let test_decode_memory_facts_keeps_both_stores () =
            (match store.Tui_decode.mos_facts with
             | [ fact ] ->
                 Alcotest.(check string) "category as the server spelled it"
-                  "lesson" fact.Tui_decode.mf_category;
+                  "lesson"
+                  (Masc.Keeper_memory_os_types.category_to_string
+                     fact.Tui_decode.mf_category);
                 Alcotest.(check string) "origin" "authored"
                   fact.Tui_decode.mf_origin
             | facts ->
@@ -10599,6 +10727,8 @@ let () =
           test_decode_standalone_lane_configuration_is_a_closed_set;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
+        Alcotest.test_case "memory fact refuses an unknown category" `Quick
+          test_decode_memory_fact_refuses_an_unknown_category;
         Alcotest.test_case "memory fact row carries the use record" `Quick
           test_decode_memory_fact_reads_the_use_record;
         Alcotest.test_case "memory facts keep store states apart" `Quick

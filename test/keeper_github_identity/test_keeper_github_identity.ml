@@ -165,7 +165,7 @@ let test_fake_gh_login_and_effective_identity () =
         | Error message -> Alcotest.fail message
         | Ok lane ->
           Alcotest.(check int) "fake login exits successfully" 0
-            (Github.run_cli_login ~lane));
+            (Github.run_cli_login ~lane ~scopes:[]));
        let keeper_config = Github.config_dir ~config ~keeper_name in
        let login_args = read_file (Filename.concat keeper_config "login-args") in
        Alcotest.(check bool) "web login argv reached fake gh" true
@@ -285,32 +285,16 @@ let test_config_dir_rejects_credential_symlink () =
   | Ok _ -> Alcotest.fail "symbolic-link GitHub credential file was accepted"
 ;;
 
+let docker_projection ~config ~keeper_name =
+  Github.docker_args_for_tool
+    ~config
+    ~keeper_name
+    ~container_masc_dir:"/tmp/masc-runtime/.masc"
+;;
+
 let test_tool_projection_is_nonblocking_without_identity () =
-  with_temp_base @@ fun base_path config ->
+  with_temp_base @@ fun _base_path config ->
   let keeper_name = "missing-identity" in
-  let env, state, cleanup =
-    match
-      Github.runtime_env_for_tool
-        ~config
-        ~keeper_name
-        [| "KEEP=value"; "GH_CONFIG_DIR=/host/account" |]
-    with
-    | Error message -> Alcotest.fail message
-    | Ok projection -> projection
-  in
-  (match state with
-   | Github.Unconfigured -> ()
-   | Configured _ -> Alcotest.fail "missing identity reported configured");
-  let projected_dir = env_value "GH_CONFIG_DIR" env |> Option.get in
-  Alcotest.(check bool) "host account is not reused" true
-    (not (String.equal projected_dir (Github.config_dir ~config ~keeper_name)));
-  Alcotest.(check bool) "empty local projection exists" true
-    (Sys.file_exists projected_dir);
-  Alcotest.(check (option string)) "unrelated env survives" (Some "value")
-    (env_value "KEEP" env);
-  cleanup ();
-  Alcotest.(check bool) "empty local projection is cleaned" false
-    (Sys.file_exists projected_dir);
   let docker_projection =
     match
       Github.docker_args_for_tool
@@ -388,13 +372,13 @@ let test_empty_existing_identity_remains_unconfigured () =
   let assert_unconfigured label content =
     write_file hosts content;
     Unix.chmod hosts 0o600;
-    let _env, state, cleanup =
-      match Github.runtime_env_for_tool ~config ~keeper_name [||] with
+    let projection =
+      match docker_projection ~config ~keeper_name with
       | Error message -> Alcotest.fail message
       | Ok projection -> projection
     in
-    Fun.protect ~finally:cleanup @@ fun () ->
-    match state with
+    Fun.protect ~finally:projection.Github.cleanup @@ fun () ->
+    match projection.Github.identity_state with
     | Github.Unconfigured -> ()
     | Configured _ -> Alcotest.fail (label ^ " reported configured")
   in
@@ -419,21 +403,22 @@ let test_malformed_hosts_yaml_is_rejected () =
   let hosts = Filename.concat host_dir "hosts.yml" in
   write_file hosts "github.com\n";
   Unix.chmod hosts 0o600;
-  match Github.runtime_env_for_tool ~config ~keeper_name [||] with
+  match docker_projection ~config ~keeper_name with
   | Error _ -> ()
-  | Ok (_, _, cleanup) ->
-    cleanup ();
+  | Ok projection ->
+    projection.Github.cleanup ();
     Alcotest.fail "malformed hosts.yml was collapsed into unconfigured state"
 ;;
 
 let test_local_snapshot_cleanup_does_not_follow_replacement_symlink () =
   with_temp_base @@ fun base_path config ->
-  let env, _state, cleanup =
-    match Github.runtime_env_for_tool ~config ~keeper_name:"cleanup-symlink" [||] with
+  let projection =
+    match docker_projection ~config ~keeper_name:"cleanup-symlink" with
     | Error message -> Alcotest.fail message
     | Ok projection -> projection
   in
-  let snapshot = env_value "GH_CONFIG_DIR" env |> Option.get in
+  let cleanup = projection.Github.cleanup in
+  let snapshot = projection.Github.host_snapshot_dir in
   let target = Filename.concat base_path "cleanup-target" in
   Unix.mkdir target 0o755;
   Unix.chmod snapshot 0o700;
@@ -477,24 +462,6 @@ let test_tool_projection_uses_safe_existing_identity () =
     hosts
     "github.com:\n  user: stored-user\n  users:\n    stored-user:\n      oauth_token: stored-token\n";
   Unix.chmod hosts 0o600;
-  let env, state, cleanup =
-    match Github.runtime_env_for_tool ~config ~keeper_name [| "KEEP=value" |] with
-    | Error message -> Alcotest.fail message
-    | Ok projection -> projection
-  in
-  (match state with
-   | Github.Configured path -> Alcotest.(check string) "configured path" host_dir path
-   | Unconfigured -> Alcotest.fail "existing identity reported unconfigured");
-  let projected_dir = env_value "GH_CONFIG_DIR" env |> Option.get in
-  Alcotest.(check bool) "local tool never receives operator-owned path" true
-    (not (String.equal projected_dir host_dir));
-  let projected_hosts = Filename.concat projected_dir "hosts.yml" in
-  Unix.chmod projected_hosts 0o600;
-  write_file projected_hosts "locally mutated\n";
-  Alcotest.(check string) "local mutation cannot rewrite operator identity"
-    "github.com:\n  user: stored-user\n  users:\n    stored-user:\n      oauth_token: stored-token\n"
-    (read_file hosts);
-  cleanup ();
   let container_masc_dir = "/tmp/masc-runtime/.masc" in
   let container_dir = Github.container_config_dir ~container_masc_dir ~keeper_name in
   let docker_projection =
@@ -546,14 +513,6 @@ let test_tool_projection_rejects_malformed_identity () =
   let target = Filename.concat base_path "redirected-tool-config" in
   mkdir_p target;
   Unix.symlink target (Github.config_dir ~config ~keeper_name);
-  (match
-     Github.runtime_env_for_tool
-       ~config
-       ~keeper_name
-       [| "GH_CONFIG_DIR=/host/account" |]
-   with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "malformed local identity was collapsed into absence");
   match
     Github.docker_args_for_tool
       ~config
@@ -573,9 +532,11 @@ let test_tool_projection_rejects_permissive_identity () =
     | Ok path -> path
   in
   Unix.chmod config_dir 0o755;
-  (match Github.runtime_env_for_tool ~config ~keeper_name [||] with
+  (match docker_projection ~config ~keeper_name with
    | Error _ -> ()
-   | Ok _ -> Alcotest.fail "world-readable config directory was accepted");
+   | Ok projection ->
+     projection.Github.cleanup ();
+     Alcotest.fail "world-readable config directory was accepted");
   Unix.chmod config_dir 0o700;
   let hosts = Filename.concat config_dir "hosts.yml" in
   write_file hosts "github.com:\n  oauth_token: fixture\n";
@@ -607,7 +568,7 @@ let test_stored_token_reads_the_host_scalar () =
   with_temp_base @@ fun base_path config ->
   let keeper_name = "token-host" in
   write_hosts ~config ~keeper_name "github.com:\n  oauth_token: gho_fixture\n";
-  match Github.stored_token ~base_path ~keeper_name ~hostname:"github.com" with
+  match Github.stored_token ~config ~keeper_name ~hostname:"github.com" with
   | Error message -> Alcotest.fail message
   | Ok token -> Alcotest.(check string) "host scalar is the token" "gho_fixture" token
 ;;
@@ -615,13 +576,13 @@ let test_stored_token_reads_the_host_scalar () =
 (* The other shape the decoder admits: the token under the host's [users]
    mapping. Both are gh's, so both have to answer. *)
 let test_stored_token_reads_the_users_scalar () =
-  with_temp_base @@ fun base_path config ->
+  with_temp_base @@ fun _base_path config ->
   let keeper_name = "token-users" in
   write_hosts
     ~config
     ~keeper_name
     "github.com:\n  users:\n    anyang-keepers:\n      oauth_token: gho_nested\n";
-  match Github.stored_token ~base_path ~keeper_name ~hostname:"github.com" with
+  match Github.stored_token ~config ~keeper_name ~hostname:"github.com" with
   | Error message -> Alcotest.fail message
   | Ok token -> Alcotest.(check string) "nested scalar is the token" "gho_nested" token
 ;;
@@ -629,17 +590,17 @@ let test_stored_token_reads_the_users_scalar () =
 (* Two hosts in one file is ordinary once an enterprise remote is added. The
    caller named one, so the other must not answer for it. *)
 let test_stored_token_is_scoped_to_the_named_host () =
-  with_temp_base @@ fun base_path config ->
+  with_temp_base @@ fun _base_path config ->
   let keeper_name = "token-two-hosts" in
   write_hosts
     ~config
     ~keeper_name
     "github.com:\n  oauth_token: gho_public\n\
      ghe.example.com:\n  oauth_token: gho_enterprise\n";
-  (match Github.stored_token ~base_path ~keeper_name ~hostname:"ghe.example.com" with
+  (match Github.stored_token ~config ~keeper_name ~hostname:"ghe.example.com" with
    | Error message -> Alcotest.fail message
    | Ok token -> Alcotest.(check string) "enterprise host" "gho_enterprise" token);
-  match Github.stored_token ~base_path ~keeper_name ~hostname:"unlisted.example" with
+  match Github.stored_token ~config ~keeper_name ~hostname:"unlisted.example" with
   | Ok token -> Alcotest.fail ("an unlisted host answered with " ^ token)
   | Error _ -> ()
 ;;
@@ -647,17 +608,17 @@ let test_stored_token_is_scoped_to_the_named_host () =
 (* Logged out, gh leaves `{}`. Reading that as a credential would send an
    empty bearer and read the provider's 401 as the provider being down. *)
 let test_stored_token_refuses_a_logged_out_identity () =
-  with_temp_base @@ fun base_path config ->
+  with_temp_base @@ fun _base_path config ->
   let keeper_name = "token-logged-out" in
   write_hosts ~config ~keeper_name "{}\n";
-  match Github.stored_token ~base_path ~keeper_name ~hostname:"github.com" with
+  match Github.stored_token ~config ~keeper_name ~hostname:"github.com" with
   | Ok token -> Alcotest.fail ("a logged-out identity answered with " ^ token)
   | Error _ -> ()
 ;;
 
 let test_stored_token_refuses_a_keeper_with_no_identity () =
-  with_temp_base @@ fun base_path _config ->
-  match Github.stored_token ~base_path ~keeper_name:"never-logged-in" ~hostname:"github.com" with
+  with_temp_base @@ fun _base_path config ->
+  match Github.stored_token ~config ~keeper_name:"never-logged-in" ~hostname:"github.com" with
   | Ok token -> Alcotest.fail ("a keeper with no identity answered with " ^ token)
   | Error _ -> ()
 ;;
@@ -665,16 +626,41 @@ let test_stored_token_refuses_a_keeper_with_no_identity () =
 (* The reason masc keeps no copy: gh rewrites this file, and the next read has
    to be the new token rather than the one that was current at attach time. *)
 let test_stored_token_follows_a_relogin () =
-  with_temp_base @@ fun base_path config ->
+  with_temp_base @@ fun _base_path config ->
   let keeper_name = "token-relogin" in
   write_hosts ~config ~keeper_name "github.com:\n  oauth_token: gho_first\n";
-  (match Github.stored_token ~base_path ~keeper_name ~hostname:"github.com" with
+  (match Github.stored_token ~config ~keeper_name ~hostname:"github.com" with
    | Error message -> Alcotest.fail message
    | Ok token -> Alcotest.(check string) "first login" "gho_first" token);
   write_hosts ~config ~keeper_name "github.com:\n  oauth_token: gho_second\n";
-  match Github.stored_token ~base_path ~keeper_name ~hostname:"github.com" with
+  match Github.stored_token ~config ~keeper_name ~hostname:"github.com" with
   | Error message -> Alcotest.fail message
   | Ok token -> Alcotest.(check string) "second login is what is read" "gho_second" token
+;;
+
+(* The login writes through the cluster-aware [config_dir]. The token read and
+   the redaction file list have to name that same directory, or a non-default
+   cluster's login reads as absent and its token goes unredacted. *)
+let test_stored_token_reads_the_cluster_directory () =
+  with_temp_base @@ fun base_path default_config ->
+  let cluster_name = "token-cluster" in
+  let config =
+    { default_config with backend_config = { Workspace.cluster_name } }
+  in
+  mkdir_p (Workspace.keepers_runtime_dir config);
+  let keeper_name = "token-cluster-keeper" in
+  write_hosts ~config ~keeper_name "github.com:\n  oauth_token: gho_cluster\n";
+  (match Github.stored_token ~config ~keeper_name ~hostname:"github.com" with
+   | Error message -> Alcotest.fail message
+   | Ok token -> Alcotest.(check string) "the cluster's login is read" "gho_cluster" token);
+  (match Github.stored_token ~config:default_config ~keeper_name ~hostname:"github.com" with
+   | Ok token -> Alcotest.fail ("the default cluster answered with " ^ token)
+   | Error _ -> ());
+  Unix.putenv "MASC_CLUSTER_NAME" cluster_name;
+  Fun.protect ~finally:(fun () -> Unix.putenv "MASC_CLUSTER_NAME" "") @@ fun () ->
+  Alcotest.(check (list string)) "the redaction file is the one the login wrote"
+    [ Filename.concat (Github.config_dir ~config ~keeper_name) "hosts.yml" ]
+    (Github.secret_files_of_base_path ~base_path ~keeper_name)
 ;;
 
 let test_run_inherited_returns_child_exit_status () =
@@ -698,11 +684,74 @@ let test_run_inherited_empty_argv_is_127 () =
     "empty argv yields 127" (Unix.WEXITED 127) status
 ;;
 
+(* Without a chosen scope the argv is the one every login ran before scopes
+   existed, so gh asks for its own minimum. A chosen scope becomes one
+   [--scopes] argument, named once however often it was asked for. *)
+let test_login_argv_carries_only_chosen_scopes () =
+  let has_scopes argv = List.mem "--scopes" argv in
+  Alcotest.(check bool)
+    "no scope asks gh for nothing extra"
+    false
+    (has_scopes (Github.login_argv ~hostname:"github.com" ~scopes:[]));
+  let argv =
+    Github.login_argv ~hostname:"github.com" ~scopes:[ Github.Workflow; Github.Workflow ]
+  in
+  let rec after = function
+    | "--scopes" :: value :: _ -> Some value
+    | _ :: rest -> after rest
+    | [] -> None
+  in
+  Alcotest.(check (option string)) "workflow is named once" (Some "workflow") (after argv)
+;;
+
+(* The request names scopes by string. Every offered scope reads back as
+   itself, and a name nobody offered is refused rather than dropped, so a
+   surface that asked for it is told. *)
+let test_login_scopes_of_query () =
+  let names = function
+    | Ok scopes -> Ok (List.map Github.login_scope_to_string scopes)
+    | Error _ as e -> e
+  in
+  let result = Alcotest.(result (list string) string) in
+  Alcotest.check result "absent is none" (Ok []) (names (Github.login_scopes_of_query None));
+  Alcotest.check result "empty is none" (Ok []) (names (Github.login_scopes_of_query (Some "")));
+  Alcotest.check
+    result
+    "workflow"
+    (Ok [ "workflow" ])
+    (names (Github.login_scopes_of_query (Some " workflow ")));
+  List.iter
+    (fun scope ->
+      Alcotest.(check bool)
+        "an offered scope reads back as itself"
+        true
+        (Github.login_scope_of_string (Github.login_scope_to_string scope) = Some scope))
+    Github.all_login_scopes;
+  match Github.login_scopes_of_query (Some "workflow,admin:org") with
+  | Ok _ -> Alcotest.fail "an unoffered scope must be refused"
+  | Error message ->
+    Alcotest.(check bool)
+      "the refusal names the scope"
+      true
+      (let needle = "admin:org" in
+       let n = String.length needle in
+       let rec go i =
+         i + n <= String.length message
+         && (String.equal (String.sub message i n) needle || go (i + 1))
+       in
+       go 0)
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
     [ ( "contract"
       , [ Alcotest.test_case "environment isolation" `Quick test_pure_environment_contract
+        ; Alcotest.test_case
+            "login argv carries only chosen scopes"
+            `Quick
+            test_login_argv_carries_only_chosen_scopes
+        ; Alcotest.test_case "login scopes from the query" `Quick test_login_scopes_of_query
         ; Alcotest.test_case
             "fake gh login and effective identity"
             `Quick
@@ -795,6 +844,10 @@ let () =
             "stored_token follows a relogin"
             `Quick
             test_stored_token_follows_a_relogin
+        ; Alcotest.test_case
+            "stored_token reads the cluster directory"
+            `Quick
+            test_stored_token_reads_the_cluster_directory
         ] )
     ]
 ;;

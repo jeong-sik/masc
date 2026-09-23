@@ -245,7 +245,8 @@ let provider_runtime_surface_exn
       ; reason
       }
   in
-  match KSB.runtime_blocker_surface_of_failure_reason failure_reason with
+  match (KSB.runtime_blocker_surface_of_failure_reason
+      ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) failure_reason with
   | Some surface -> surface
   | None ->
     fail "runtime_blocker_surface_of_failure_reason returned None for Provider_runtime_error"
@@ -296,7 +297,7 @@ let test_typed_provider_code_summary_is_the_record () =
   check string "class" "provider_runtime_error" surface.KSB.blocker_class;
   check string "the summary is the record's code and detail"
     (Printf.sprintf "Provider runtime error (%s): %s" code detail)
-    surface.KSB.summary
+    (Lazy.force surface.KSB.summary)
 ;;
 
 let test_provider_timeout_catch_all_stays_provider_runtime_error () =

@@ -476,24 +476,39 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
    stays durable and waits for an explicit completion request or another
    committed review. No wall-clock expiry or retry timer. *)
 
+(* One claimed review. [requested] retains a wake that arrived while the
+   review ran. [abandon] is resolved when the Goal leaves [Verifying] through
+   an operator Drop or Reopen: the review is cancelled and its claim released,
+   so a verifier lane that never answers does not keep a slot or block the
+   Goal's next request. A Promise is used because the operator's transition
+   can run on another domain; resolving one is domain-safe. *)
+type claim =
+  { work : pending_work
+  ; requested : bool
+  ; abandoned : unit Eio.Promise.t
+  ; abandon : unit Eio.Promise.u
+  }
+
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
   ; wake : Eio.Condition.t
   ; pending : bool Atomic.t
-  ; in_flight : (pending_work * bool) list Atomic.t
+  ; in_flight : claim list Atomic.t
   }
 
 let active_runtime : runtime option Atomic.t = Atomic.make None
 let max_concurrent_reviews = 4
 
 let claim_review (runtime : runtime) work =
+  let abandoned, abandon = Eio.Promise.create () in
+  let claim = { work; requested = false; abandoned; abandon } in
   let rec loop () =
     let current = Atomic.get runtime.in_flight in
-    if List.exists (fun (candidate, _) -> pending_work_same_goal work candidate) current
-    then false
-    else if Atomic.compare_and_set runtime.in_flight current ((work, false) :: current)
-    then true
+    if List.exists (fun candidate -> pending_work_same_goal work candidate.work) current
+    then None
+    else if Atomic.compare_and_set runtime.in_flight current (claim :: current)
+    then Some claim
     else loop ()
   in
   loop ()
@@ -505,8 +520,9 @@ let claim_review (runtime : runtime) work =
 let retain_active_wake (runtime : runtime) ~goal_id =
   let rec loop () =
     let current = Atomic.get runtime.in_flight in
-    let next = List.map (fun (work, requested) ->
-      work, (requested || String.equal work.goal_id goal_id)) current in
+    let next = List.map (fun claim ->
+      { claim with requested = claim.requested || String.equal claim.work.goal_id goal_id })
+      current in
     if Atomic.compare_and_set runtime.in_flight current next then () else loop ()
   in loop ()
 ;;
@@ -514,10 +530,10 @@ let retain_active_wake (runtime : runtime) ~goal_id =
 let release_review (runtime : runtime) work =
   let rec loop () =
     let current = Atomic.get runtime.in_flight in
-    let retained = List.exists (fun (candidate, requested) ->
-      pending_work_same_goal candidate work && requested) current in
-    let next = List.filter (fun (candidate, _) ->
-      not (pending_work_same_goal candidate work)) current in
+    let retained = List.exists (fun candidate ->
+      pending_work_same_goal candidate.work work && candidate.requested) current in
+    let next = List.filter (fun candidate ->
+      not (pending_work_same_goal candidate.work work)) current in
     if Atomic.compare_and_set runtime.in_flight current next then retained else loop ()
   in loop ()
 ;;
@@ -527,41 +543,66 @@ let request_scan (runtime : runtime) =
   Eio.Condition.broadcast runtime.wake
 ;;
 
+(* Resolve the abandon promise of the Goal's claimed review, if one runs.
+   A Goal with no claimed review has nothing to cancel. *)
+let abandon_review (runtime : runtime) ~goal_id =
+  Atomic.get runtime.in_flight
+  |> List.iter (fun claim ->
+    if String.equal claim.work.goal_id goal_id
+    then (
+      if Eio.Promise.try_resolve claim.abandon ()
+      then
+        Log.Misc.info
+          "goal verifier abandoning in-flight review goal_id=%s: the Goal left verifying"
+          goal_id))
+;;
+
 (* Rescanning is driven by what happened, not by a clock. A committed verdict
    changes the ledger, so whatever else was queued deserves another look, and
    the worker slot this fiber held has just come free. A run that committed
    nothing changes nothing: scanning again would read the same rows and defer
    them again, so it stops and waits for a real wake — a Keeper requesting
    completion, or another worker committing. *)
-let process_goal_work (runtime : runtime) work =
+let process_goal_work (runtime : runtime) (claim : claim) work =
   match work with
   | [] -> ()
   | representative :: _ ->
     let committed_any =
-      Eio.Switch.run (fun work_sw ->
-        Eio.Switch.on_release work_sw (fun () ->
+      Eio.Switch.run (fun release_sw ->
+        Eio.Switch.on_release release_sw (fun () ->
           if release_review runtime representative then request_scan runtime);
-        Cancel_safe.protect
-          ~on_exn:(fun exn ->
-            Log.Misc.error
-              "goal verifier isolated unexpected worker failure goal_id=%s detail=%s"
-              representative.goal_id
-              (Printexc.to_string exn);
-            false)
+        (* The review runs in its own switch inside the first branch, so an
+           abandon cancels the review and every fiber it forked before the
+           claim is released. The cancelled review records Review_cancelled
+           on the run registry; any verdict it would have delivered is
+           refused by the commit, since the Goal is no longer verifying. *)
+        Eio.Fiber.first
           (fun () ->
-             let rec loop committed = function
-               | [] -> committed
-               | item :: rest ->
-                 (match
-                    process_pending_work
-                      ~sw:(Some work_sw)
-                      runtime.config
-                      item
-                  with
-                  | Committed | Superseded -> loop true rest
-                  | Deferred _ -> committed)
-             in
-             loop false work))
+             Eio.Switch.run (fun work_sw ->
+               Cancel_safe.protect
+                 ~on_exn:(fun exn ->
+                   Log.Misc.error
+                     "goal verifier isolated unexpected worker failure goal_id=%s detail=%s"
+                     representative.goal_id
+                     (Printexc.to_string exn);
+                   false)
+                 (fun () ->
+                    let rec loop committed = function
+                      | [] -> committed
+                      | item :: rest ->
+                        (match
+                           process_pending_work
+                             ~sw:(Some work_sw)
+                             runtime.config
+                             item
+                         with
+                         | Committed | Superseded -> loop true rest
+                         | Deferred _ -> committed)
+                    in
+                    loop false work)))
+          (fun () ->
+             Eio.Promise.await claim.abandoned;
+             false))
     in
     if committed_any then request_scan runtime
 ;;
@@ -591,17 +632,18 @@ let process_pending (runtime : runtime) =
       |> List.filter (function
         | [] -> false
         | representative :: _ ->
-          not (List.exists (fun (candidate, _) -> pending_work_same_goal representative candidate) active))
+          not (List.exists (fun candidate -> pending_work_same_goal representative candidate.work) active))
     in
     let selected = take_items available eligible in
     List.iter
       (function
         | [] -> ()
         | representative :: _ as goal_work ->
-          if claim_review runtime representative
-          then
+          match claim_review runtime representative with
+          | Some claim ->
             Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-              process_goal_work runtime goal_work))
+              process_goal_work runtime claim goal_work)
+          | None -> ())
       selected
 ;;
 
@@ -632,7 +674,15 @@ let install_callback (runtime : runtime) =
        else (
          retain_active_wake runtime ~goal_id;
          request_scan runtime;
-         Log.Misc.info "goal verifier scheduled goal_id=%s" goal_id))
+         Log.Misc.info "goal verifier scheduled goal_id=%s" goal_id));
+  Atomic.set Workspace_hooks.goal_verification_abandoned_fn
+    (fun config ~goal_id ->
+       if String.equal config.base_path runtime.config.base_path
+       then abandon_review runtime ~goal_id
+       else
+         Log.Misc.error
+           "goal verifier rejected an abandon from another base path goal_id=%s"
+           goal_id)
 ;;
 
 let start ~sw ~(config : Workspace_utils_backend_setup.config) =
@@ -667,13 +717,19 @@ let start ~sw ~(config : Workspace_utils_backend_setup.config) =
     let previous_pending_hook =
       Atomic.get Workspace_hooks.goal_verification_pending_fn
     in
+    let previous_abandoned_hook =
+      Atomic.get Workspace_hooks.goal_verification_abandoned_fn
+    in
     install_callback runtime;
     Eio.Switch.on_release sw (fun () ->
       if Atomic.compare_and_set active_runtime owner None
-      then
+      then (
         Atomic.set
           Workspace_hooks.goal_verification_pending_fn
-          previous_pending_hook);
+          previous_pending_hook;
+        Atomic.set
+          Workspace_hooks.goal_verification_abandoned_fn
+          previous_abandoned_hook));
     Eio.Fiber.fork_daemon ~sw (fun () -> run runtime)
 ;;
 

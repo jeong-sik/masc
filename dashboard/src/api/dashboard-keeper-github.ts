@@ -47,17 +47,45 @@ function decodeSseFrame(rawFrame: string): { event: string; data: string } | nul
   return data.length === 0 ? null : { event, data: data.join('\n') }
 }
 
+// The scopes a login may ask for beyond gh's minimum (repo, read:org, gist).
+// The server's list is Keeper_github_identity.all_login_scopes; it refuses a
+// name it does not offer with 400, so a scope missing here is only unoffered,
+// and one added here that the server lacks fails loudly.
+export type KeeperGithubLoginScope = 'workflow'
+
+export const KEEPER_GITHUB_LOGIN_SCOPES: readonly {
+  scope: KeeperGithubLoginScope
+  note: string
+}[] = [
+  {
+    scope: 'workflow',
+    note: '.github/workflows 를 바꿀 수 있어요. workflow 는 저장소 secrets 로 돌아요.',
+  },
+]
+
+export function keeperGithubLoginPath(
+  keeperName: string,
+  hostname: string,
+  scopes: readonly KeeperGithubLoginScope[],
+): string {
+  const params = new URLSearchParams({ hostname })
+  if (scopes.length > 0) params.set('scopes', scopes.join(','))
+  return `/api/v1/keepers/${encodeURIComponent(keeperName)}/github-login?${params.toString()}`
+}
+
 export async function streamKeeperGithubLogin(
   keeperName: string,
   hostname: string,
+  scopes: readonly KeeperGithubLoginScope[],
   onEvent: (event: KeeperGithubLoginEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {
   await ensureDevToken()
-  const response = await fetch(
-    `/api/v1/keepers/${encodeURIComponent(keeperName)}/github-login?hostname=${encodeURIComponent(hostname)}`,
-    { method: 'POST', headers: authHeaders(), signal },
-  )
+  const response = await fetch(keeperGithubLoginPath(keeperName, hostname, scopes), {
+    method: 'POST',
+    headers: authHeaders(),
+    signal,
+  })
   if (!response.ok) {
     throw new Error((await response.text()) || `GitHub login failed (${response.status})`)
   }

@@ -590,6 +590,7 @@
  ; draw in their first column; the sheet this module builds is where a
  ; reader looks up what one means.
  (libraries
+  masc
   masc_tui_types
   masc_tui_keeper_mark
   masc_tui_board_kind_mark
@@ -1189,7 +1190,8 @@
 
 (library
  (name masc_tui_credential)
- (modules masc_tui_credential))
+ (modules masc_tui_credential)
+ (libraries masc.masc_types yojson))
 
 ; Carved out so a test can read it. surface_needs decides what a refresh tick
 ; fetches for the surface on screen, and the chat pane having no field there

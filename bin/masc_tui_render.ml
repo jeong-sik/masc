@@ -643,15 +643,28 @@ let render_overview (state : state) =
   box_divider buf cols;
 
   (* Tasks section *)
+  (* [state.tasks] holds only open tasks, so a done count folded over it was
+     zero on every frame. Completions come from the flow snapshot the same
+     refresh built from the whole backlog; without one the segment says
+     nothing rather than a zero it never measured. *)
+  let done_segment =
+    match state.task_flow with
+    | None -> ""
+    | Some flow ->
+        Printf.sprintf " · %s%d done 24h%s" (Theme.ok ())
+          flow.Masc_tui_task_flow.recent.completed Ansi.reset
+  in
   let task_header =
-    if List.is_empty state.tasks then Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset
+    (* A backlog with nothing open is when the completions are the whole
+       story, so the empty header keeps them. *)
+    if List.is_empty state.tasks then
+      match state.task_flow with
+      | None -> Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset
+      | Some _ ->
+          Printf.sprintf " %sTasks%s (0 open%s)\n" Ansi.bold Ansi.reset
+            done_segment
     else
       let count = List.length state.tasks in
-      let done_c =
-        List.fold_left
-          (fun acc (t : task) -> match t.status with Done _ -> acc + 1 | _ -> acc)
-          0 state.tasks
-      in
       let active_c =
         List.fold_left
           (fun acc (t : task) -> match t.status with InProgress _ | Claimed _ -> acc + 1 | _ -> acc)
@@ -667,10 +680,10 @@ let render_overview (state : state) =
           (fun acc (t : task) -> match t.status with Todo -> acc + 1 | _ -> acc)
           0 state.tasks
       in
-      Printf.sprintf " %sTasks%s (%d · %s%d done%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)\n"
+      Printf.sprintf " %sTasks%s (%d open%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)\n"
         Ansi.bold Ansi.reset
         count
-        (Theme.ok ()) done_c Ansi.reset
+        done_segment
         (Theme.info ()) active_c Ansi.reset
         (Theme.warn ()) awaiting_c Ansi.reset
         Ansi.dim todo_c Ansi.reset
@@ -2032,6 +2045,11 @@ let render_board_list (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let count = List.length state.board_posts in
+  (* Read once for the whole list: the header word and every row's number name
+     the same time, and they would drift the moment two readings of the sort
+     disagreed. *)
+  let age_time = board_sort_time state.board_sort in
+  let age_header = board_age_header age_time in
   (* Which sub-board is being read. Said only when the list is narrowed: "all
      hearths" is what a reader assumes, and 24 of them share this board with
      1550 of 2171 posts in one, so a narrowed list that did not say so would
@@ -2118,7 +2136,8 @@ let render_board_list (state : state) =
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
               (String.make board_table_lead ' '
-               ^ Render_schedule.board_header_row ~title_width:title_w))
+               ^ Render_schedule.board_header_row ~age_header
+                   ~title_width:title_w))
         ; c.push_divider
         ]
       in
@@ -2182,7 +2201,15 @@ let render_board_list (state : state) =
               ; brow_author = Terminal_text.single_line p.bp_author
               ; brow_title = Terminal_text.single_line p.bp_title
               ; brow_age =
-                  Render_schedule.board_age_text ~now:now_unix p.bp_updated_at
+                  (* The time the sort ordered by, not always the last move:
+                     four of the five orders rank or break ties on the moment
+                     the post appeared, and under those a column of last-move
+                     spans did not climb with the rows. A post replied to a
+                     minute ago sat sixth under "newest post first" reading
+                     "25s". *)
+                  Render_schedule.board_age_text ~now:now_unix
+                    (board_age_source ~time:age_time
+                       ~posted:p.bp_created_at_unix ~changed:p.bp_updated_at)
               ; brow_score = score_text
               ; brow_replies = replies_text
               }
@@ -2201,7 +2228,8 @@ let render_board_list (state : state) =
             in
             let content =
               String.make board_table_lead ' '
-              ^ Render_schedule.board_row ~styles ~title_width:title_w values
+              ^ Render_schedule.board_row ~styles ~age_header
+                  ~title_width:title_w values
             in
             if is_selected then
               c.push_selected (Masc_tui_theme.strip_sgr content)
@@ -2728,7 +2756,7 @@ let planning_next_step (goal : planning_goal) =
     , "work the linked tasks, then [c] to submit it for verification" )
   | Goal_phase.Verifying, _ ->
     ( (Theme.warn ())
-    , "with the completion judge - nothing to press; [c] re-arms the request" )
+    , "with the completion judge - [c] re-arms the request; [o] takes it back, [x] drops it" )
   | Goal_phase.Awaiting_confirmation, _ ->
     (Theme.warn (), "proof passed - [a] reads the proof for your final confirmation")
   | Goal_phase.Completed, _ -> (Ansi.dim, "reached its target - [o] reopens it")
@@ -3208,9 +3236,8 @@ let planning_detail_pane (state : state)
   box_line buf cols
     (Printf.sprintf "  Target:  %s   Due: %s   Priority: %sP%d%s"
        metric_text due_text prio_color goal.pg_priority Ansi.reset);
-  (* Lit only where the key moves the goal. All three were drawn in colour on
-     every phase, so a verifying goal offered [x] and [o] that the server
-     refuses. A dim key is still pressable: [Already] is accepted -- [c] on a
+  (* Lit only where the key moves the goal, as the transition matrix answers
+     it for this phase. A dim key is still pressable: [Already] is accepted -- [c] on a
      verifying goal re-arms the judge, as its Next line says -- it just does
      not change the stage. *)
   let action_item action =
@@ -6935,14 +6962,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           let selected_index =
             max 0 (min state.connectors_cursor (List.length connectors - 1))
           in
-          let connection_text (connector : Tui_decode.connector) =
-            match connector.cn_connection with
-            | Tui_decode.Connector_connected -> "CONNECTED"
-            | Connector_connected_unavailable -> "CONNECTED / UNAVAILABLE"
-            | Connector_disconnected -> "DISCONNECTED"
-            | Connector_offline -> "UNAVAILABLE"
-            | Connector_stale -> "STALE"
-          in
+          (* The list row and the detail badge spell the same connection, so
+             they read the same table. This pane kept a byte-identical copy of
+             it, which meant a change to the vocabulary could land in one
+             place and leave the omission rule in [Masc_tui_connector_state]
+             judging against the other. *)
           let connection_label (connector : Tui_decode.connector) =
             let word =
               Masc_tui_connector_state.badge_word connector.cn_connection
@@ -6971,7 +6995,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                    ^ fit_width
                        (Terminal_text.single_line connector.cn_display_name)
                        14
-                   ^ "  " ^ fit_width (connection_text connector) 12
+                   ^ "  "
+                   ^ fit_width
+                       (Masc_tui_connector_state.badge_word
+                          connector.cn_connection)
+                       12
                    ^ Printf.sprintf "  %d here / %d total" here_count
                        (List.length connector.cn_bindings)
                  in
@@ -7334,7 +7362,28 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             | Some status -> [ "  " ^ status; "" ]
             | None -> []
           in
-          input_lines @ status_lines @ base
+          (* What the next [L] asks for, ticked with the digit printed beside
+             it. Drawn from the server's own list so the number and the scope
+             the key toggles cannot disagree. *)
+          let scope_lines =
+            (Ansi.dim ^ "  Login scopes (digit toggles, L logs in with them)"
+             ^ Ansi.reset)
+            :: List.mapi
+                 (fun index scope ->
+                   let ticked = List.mem scope state.github_login_scopes in
+                   let note =
+                     match scope with
+                     | Masc.Keeper_github_identity.Workflow ->
+                         "may change .github/workflows, which run with repo secrets"
+                   in
+                   Printf.sprintf "  %d %s %s %s— %s%s" (index + 1)
+                     (if ticked then "[x]" else "[ ]")
+                     (Masc.Keeper_github_identity.login_scope_to_string scope)
+                     Ansi.dim note Ansi.reset)
+                 Masc.Keeper_github_identity.all_login_scopes
+            @ [ "" ]
+          in
+          input_lines @ status_lines @ scope_lines @ base
       | Detail_identity ->
           stamped_or
             (Option.map
@@ -11130,9 +11179,17 @@ let runtime_detail_lines state target ~width =
                String.equal row.rcr_lane_id lane_id
                && String.equal row.rcr_runtime.ro_id runtime_id)
         |> Option.map (fun row ->
+               (* Not [[ row.rcr_lane_id ]]: that is the lane the reader came
+                  through, which the header already names, and the field is
+                  labelled "Used by lanes". A runtime several lanes fall back
+                  to answered this door with one lane and the catalog door
+                  with all of them. *)
                ( row.rcr_runtime
-               , [ row.rcr_lane_id ]
-               , Some (row.rcr_position, row.rcr_candidate_count)
+               , runtime_lanes_using snapshot ~runtime_id:row.rcr_runtime.ro_id
+               , Some
+                   ( row.rcr_lane_id
+                   , row.rcr_position
+                   , row.rcr_candidate_count )
                , row.rcr_probe ))
     | Some snapshot, Runtime_catalog_entry { runtime_id } ->
         runtime_all_rows snapshot
@@ -11171,9 +11228,12 @@ let runtime_detail_lines state target ~width =
       let candidate =
         match position with
         | None -> []
-        | Some (at, total) ->
+        | Some (lane, at, total) ->
+            (* The lane is named because "Used by lanes" above can now hold
+               several, and a position without its lane is a place in an
+               unnamed list. *)
             runtime_detail_field ~width ~style:Ansi.reset "Lane position"
-              (Printf.sprintf "%d of %d" at total)
+              (Printf.sprintf "%d of %d in %s" at total lane)
       in
       let quota =
         match runtime_quota_badge runtime with

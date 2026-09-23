@@ -7,6 +7,7 @@ module Message_layout = Masc_tui_message_layout
 module Terminal_text = Masc_tui_ansi.Terminal_text
 module Theme = Masc_tui_ansi.Theme
 module Rows = Masc_tui_rows
+module Memory_category = Masc.Keeper_memory_os_types
 
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
@@ -14,6 +15,27 @@ let keeper_lane_idle_text seconds =
   else if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
   else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
   else Printf.sprintf "%dd" (seconds / 86400)
+
+(* What the operator reads for how the last Librarian pass ended. The wire
+   words name code paths ("not_committed"); these say what happened. *)
+let librarian_pass_end_words = function
+  | Pass_off -> "switched off"
+  | Pass_lane_unconfigured -> "no model lane set up"
+  | Pass_drained -> "caught up"
+  | Pass_not_committed -> "last pass saved nothing"
+  | Pass_stopped _ -> "stopped on an error"
+  | Pass_raised _ -> "crashed"
+
+let librarian_failure_words = function
+  | Failure_prompt_render -> "prompt could not be built"
+  | Failure_execution_clock_unavailable -> "no clock to run on"
+  | Failure_exact_setup -> "model call could not be set up"
+  | Failure_exact_execution -> "model call failed"
+  | Failure_domain_output_invalid -> "model answer was not usable"
+  | Failure_memory_snapshot_write -> "Memory could not be saved"
+  | Failure_runtime_context_unavailable -> "no runtime context"
+  | Failure_lane_cancelled -> "cancelled before saving"
+  | Failure_unhandled_exception -> "unexpected crash"
 
 (* How the facts title reads its own keeper. "*" is how the fleet view is asked
    for, not how it should be read, so the title reads it as a phrase. The title
@@ -128,14 +150,23 @@ let memory_context_lines (k : memory_keeper_health) =
     Printf.sprintf
       "  Librarian · %s · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
       (match librarian.mlh_state with
-       | Some state -> state
+       | Some state -> librarian_pass_end_words state
        | None -> "not measured")
       unread
       continuity
       (memory_updated_text librarian.mlh_measured_at)
       (memory_updated_text librarian.mlh_last_success_at)
-      (Option.value librarian.mlh_last_failure_kind ~default:"-")
+      (match librarian.mlh_last_failure_kind with
+       | Some kind -> librarian_failure_words kind
+       | None -> "-")
       k.mkh_librarian_failures
+  in
+  let librarian_cause_lines =
+    (* The cause is drawn on its own row because it is the part of the
+       Librarian row an operator acts on. *)
+    match Option.bind k.mkh_librarian.mlh_state memory_librarian_pass_end_cause with
+    | Some cause -> [ "  Librarian cause · " ^ Terminal_text.preview_line cause ]
+    | None -> []
   in
   let context_lines =
     let cycle = k.mkh_context_cycle in
@@ -236,7 +267,7 @@ let memory_context_lines (k : memory_keeper_health) =
           k.mkh_source_read_error
       ]
   in
-  [current_line; facts_line; source_line; librarian_line] @ context_lines
+  [current_line; facts_line; source_line; librarian_line] @ librarian_cause_lines @ context_lines
   @ (vision_line :: (read_error_lines @ alert_lines))
 
 type memory_state = Masc_tui_types.memory_state =
@@ -302,18 +333,47 @@ let memory_row_line columns (k : memory_keeper_health) =
       ; mrow_delta = delta
       }
 
-let format_cat_badge cat =
-  let raw_cat = Terminal_text.single_line (String.trim cat) in
+(* What a row wears in its first cell. The category is the librarian
+   taxonomy, a closed sum the producer writes and the model's schema enum is
+   built from ([Keeper_memory_os_types.category]); the other two are this
+   pane's own words for rows that are not ordinary facts, and the call sites
+   know which they are drawing, so they say so rather than handing over a
+   string to be recognised. *)
+type memory_row_badge =
+  | Badge_category of Memory_category.category
+  | Badge_source
+  | Badge_dropped
+
+(* The word comes from [category_to_string], the one place that spells the
+   taxonomy, so the badge, the category strip and the detail all read one
+   value. A table used to answer both the word and its colour by matching the
+   string: across the fleet's 1768 facts it recognised 749 and let 1019 fall
+   through a catch-all, nine of its eleven spellings matched nothing any
+   keeper writes, and [preference] was renamed to PREF on the row while the
+   detail under it read "preference".
+
+   Only [Blocker] is dressed, because it is the one category whose name is an
+   alarm; the table used to draw it in the same receded style as every word it
+   did not know. The rest share one style: which of them matters is the
+   reader's question, not this cell's. *)
+let format_row_badge badge =
   let cat_style, label =
-    match String.lowercase_ascii raw_cat with
-    | "rule" | "rules" -> (Theme.warn (), "RULE")
-    | "persona" | "identity" -> (Theme.info (), "IDENTITY")
-    | "preference" | "user" -> (Theme.ok (), "PREF")
-    | "architecture" | "system" -> (Theme.info (), "ARCH")
-    | "lesson" -> (Theme.ok (), "LESSON")
-    | "source" -> (Theme.info (), "SOURCE")
-    | "dropped" -> (Theme.bad (), "DROPPED")
-    | other -> (Theme.recede (), String.uppercase_ascii other)
+    match badge with
+    | Badge_source -> (Theme.info (), "SOURCE")
+    | Badge_dropped -> (Theme.bad (), "DROPPED")
+    | Badge_category category ->
+        let style =
+          match category with
+          | Memory_category.Blocker -> Theme.warn ()
+          | Memory_category.Code_change | Memory_category.Fact
+          | Memory_category.Preference | Memory_category.Goal
+          | Memory_category.Constraint | Memory_category.Validated_approach
+          | Memory_category.Lesson ->
+              Theme.recede ()
+        in
+        ( style
+        , String.uppercase_ascii
+            (Memory_category.category_to_string category) )
   in
   let cat_str =
     if Message_layout.display_width label > 10 then
@@ -355,7 +415,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
   let keeper_cells = if is_fleet then 11 else 0 in
   match row with
   | Memory_row_fact fact ->
-      let cat_badge = format_cat_badge fact.mf_category in
+      let cat_badge = format_row_badge (Badge_category fact.mf_category) in
       let age = memory_fact_age_label fact.mf_last_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let prefix = Printf.sprintf "  %s%s %s " keeper_prefix cat_badge age_badge in
@@ -371,7 +431,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
       in
       prefix ^ claim_display
   | Memory_row_source_fact fact ->
-      let cat_badge = format_cat_badge "source" in
+      let cat_badge = format_row_badge Badge_source in
       let age = memory_fact_age_label fact.msf_first_seen in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let raw_path =
@@ -403,7 +463,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
       in
       prefix ^ claim_display
   | Memory_row_invalidation row ->
-      let cat_badge = format_cat_badge "dropped" in
+      let cat_badge = format_row_badge Badge_dropped in
       let age = memory_fact_age_label row.mi_invalidated_at in
       let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
       let raw_path =
@@ -488,7 +548,8 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
       in
       [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
-      @ [ detail_field "Category:" fact.mf_category
+      @ [ detail_field "Category:"
+            (Memory_category.category_to_string fact.mf_category)
         ; detail_field "Origin:"
             (Printf.sprintf "%-15s %sTimeline:%s   First: %s · Last: %s"
                fact.mf_origin (Theme.recede ()) Ansi.reset
@@ -584,6 +645,21 @@ let render_memory_body ~cols ~budget (state : state)
    | Some detail ->
        push_styled ~style:(Theme.bad ())
          ("  " ^ Terminal_text.single_line detail);
+       push_divider ());
+  (* A keeper row the decoder refused is drawn as one line naming the keeper
+     and the reason; the rows that decoded are drawn below as usual. *)
+  (match state.memory_health with
+   | Some { mhs_refused_keepers = []; _ } | None -> ()
+   | Some { mhs_refused_keepers = refused; _ } ->
+       List.iter
+         (fun refusal ->
+           push_styled ~style:(Theme.bad ())
+             (Printf.sprintf "  %s · row not read: %s"
+                (match refusal.mkr_keeper_id with
+                 | Some keeper_id -> Terminal_text.single_line keeper_id
+                 | None -> "(keeper id not read)")
+                (Terminal_text.single_line refusal.mkr_reason)))
+         refused;
        push_divider ());
   let cursor =
     if shown = 0 then 0 else max 0 (min state.memory_health_cursor (shown - 1))

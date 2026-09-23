@@ -101,6 +101,7 @@ let tag_of_runtime_handler
   | Tool_peer_artifact
   | Tool_artifact_read
   | Tool_skill_validate
+  | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_retract

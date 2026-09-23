@@ -48,6 +48,23 @@ type retract_error =
   | Retract_fact_not_found of string
   | Retract_persistence_failed of string
 
+type supersede_error =
+  | Supersede_memory_id_invalid
+  | Supersede_self
+      (** The incoming claim has the superseded fact's exact bytes, so it
+          would name itself as its own successor. *)
+  | Supersede_target_not_current of string
+  | Supersede_target_not_authored of string
+      (** The target is current but was not written by this keeper through
+          [keeper_memory_write]; a Librarian copy is the Librarian's to
+          revise. *)
+  | Supersede_successor_rests_on_target of support_invalidation
+      (** The successor is derived and, once the target is gone, has no
+          complete support path left; the target is among its missing
+          premises. A claim cannot rest on the fact it replaces. *)
+  | Supersede_unsupported_derivation of support_invalidation
+  | Supersede_persistence_failed of string
+
 type retraction =
   { memory_id : string
   ; reason : string
@@ -384,6 +401,24 @@ val retract_fact
     reason are written to the same journal commit as the resulting snapshot;
     cascaded removals are represented by [change.invalidated]. Invalid input
     and a missing target fail before any snapshot or journal write. *)
+
+val supersede_fact
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> now:float
+  -> source:source
+  -> superseded_memory_id:string
+  -> Keeper_memory_os_types.fact
+  -> (t, supersede_error) result
+(** Atomically remove one current keeper-authored fact and insert its
+    successor in the same locked update. The successor is added under the
+    same rules as {!upsert_fact}: new claim bytes get the incoming
+    [first_seen]; bytes already current under another identity are a
+    re-observation of that fact. Derived facts that lose their support with
+    the target are removed as in {!retract_fact}. The removal is journaled
+    with a [superseded_by] reason in the same commit. Every refusal writes no
+    snapshot and no journal line. *)
 
 val retract_facts
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

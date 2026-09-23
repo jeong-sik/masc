@@ -138,7 +138,16 @@ let turn_start ~config ~keeper_name ~trace_id ~messages =
      | Ok end_atom -> Keeper_carried_front.Turn_boundary { end_atom }
      | Error Librarian_continuity_snapshot.Uncovered_history ->
        Keeper_carried_front.Turn_boundary { end_atom = 0 }
-     | Error error -> unknown (Librarian_continuity_snapshot.error_to_string error))
+     | Error
+         ((Librarian_continuity_snapshot.Unmatched_history
+          | Librarian_continuity_snapshot.Range_stopped _
+          | Librarian_continuity_snapshot.Trace_mismatch
+          | Librarian_continuity_snapshot.History_changed
+          | Librarian_continuity_snapshot.Prefix_changed
+          | Librarian_continuity_snapshot.Invalid_snapshot _
+          | Librarian_continuity_snapshot.Read_failed _
+          | Librarian_continuity_snapshot.Write_failed _) as error) ->
+       unknown (Librarian_continuity_snapshot.error_to_string error))
 ;;
 
 let prepare_continuity ~trace_id ~lines ~messages snapshot =
@@ -299,7 +308,8 @@ let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~pr
         | Error
             ((Librarian_continuity_snapshot.Trace_mismatch
              | Librarian_continuity_snapshot.History_changed
-             | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
+             | Librarian_continuity_snapshot.Uncovered_history
+             | Librarian_continuity_snapshot.Unmatched_history) as mismatch) ->
           (* The history moved on from the snapshot. The Librarian's durable
              position may still fit: goo-yang-bong's did on 2026-09-22 while
              its snapshot did not, and the keeper sent its 12,720 atoms,
@@ -340,7 +350,7 @@ type try_provider_ctx =
   ; (* Where a front moved after a refusal is kept for the rest of the
        turn. The position is a fact about the history, not about the
        candidate that was refused, so the lane's next candidate composes
-       from it instead of starting at the whole history again. *)
+       from it instead of starting over from the turn start. *)
     hold_carried_front : Keeper_carried_front.seed -> unit
   ; base_path : string
   ; keeper_name : string
@@ -1114,7 +1124,7 @@ let compose_carried_model_input
    the carried range rather than the whole checkpoint. Projecting first
    would make the atom count a property of the dialect, so a front read from
    another runtime's record could fall under
-   [Keeper_carried_front.for_history] and start the whole history over. *)
+   [Keeper_carried_front.for_history] and start over from the turn start. *)
 type request_view =
   { composed : composed
   ; carried : Agent_core.Types.message list
@@ -2201,8 +2211,7 @@ let context_overflow_shrink_sequence
            on a live keeper: a 469638-byte reserve against capacities of
            131072 then 65536, three refusals per turn, none of which could
            have succeeded. Returning the original failure here hands the turn
-           to the declared-lane walk, where a candidate with a larger
-           request-body cap is the thing that can actually carry it. *)
+           to the declared-lane walk. *)
         if shrunk_capacity >= capacity
            || not (shrink_admits_history ~capacity:shrunk_capacity)
         then failed
@@ -2220,8 +2229,7 @@ let context_overflow_shrink_sequence
 ;;
 
 (* The refusals that say the request outgrew what carries it: the provider's
-   context overflow, and the two size refusals on the byte axis, masc's own
-   against the declared request-body cap and the provider's without a bound.
+   context overflow and the provider's refusal of the request body.
    Each is answered by moving the carried front, never by rotating first: a
    shorter range of the SAME conversation can still answer the same turn.
    Enumerated so a new variant forces a decision here instead of a silent
@@ -2501,8 +2509,7 @@ let run_try_provider_with_carried_range_eviction
   match ctx.recovery_view, ctx.continuity with
   | Some _, _ | None, Some (Summarized _ | Absorbed _) ->
     (* The validated semantic view owns retained source obligations. Retrying
-       the same view with a shorter range cannot recover it. Final serialized
-       request admission still enforces the request-body cap. *)
+       the same view with a shorter range cannot recover it. *)
     run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
   | None, Some Without_snapshot ->
     let checkpoint_after = ref None in

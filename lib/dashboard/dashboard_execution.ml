@@ -856,6 +856,13 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       ; (* pipeline_stage is now included in the snapshot keepers_json,
              so no redundant read_meta is needed here. *)
         "keepers", `List keepers
+      ; (* Keepers the snapshot listed but could not build a row for, carried
+           beside the rows so the execution screen does not count them as
+           absent (#38090). *)
+        ( "keepers_unread"
+        , match Keeper_snapshot_unread.of_snapshot snapshot_json with
+          | Ok unread -> `List (List.map Keeper_snapshot_unread.to_json unread)
+          | Error detail -> invalid_arg ("dashboard execution: " ^ detail) )
       ]
     in
     let now = Time_compat.now () in

@@ -27,31 +27,116 @@ let login_command =
    goes the other way and leaves an admin secret on disk that nothing retires.
    A month outlasts any single sitting and still stops answering for a
    workspace nobody returns to -- and this client mints a replacement on the
-   next start, so crossing it costs the operator nothing. *)
+   next start once the stored one has expired ([Stored_expired] below), so
+   crossing it costs the operator a restart and nothing else. *)
 let self_mint_expiry_hours = 24 * 30
+
+(* What the server said about the bearer it refused, read from the typed
+   [auth_error_code] its 401/403 body carries. One sentence for every refusal
+   sent an operator whose token had simply expired to look for a broken
+   credential elsewhere -- on 2026-09-23 a Keeper's GitHub identity view read
+   as a GitHub account problem. Only the two codes that change what the
+   operator should believe are told apart; every other code, and a body with
+   none, is the plain refusal it always was. The code is the server's closed
+   type, matched in full, so a code added there has to be placed here. *)
+type server_reason =
+  | Expired
+  | Insufficient_role
+  | Rejected
+
+let server_reason_of_code : Masc_error.Auth_error_code.t -> server_reason =
+  function
+  | Masc_error.Auth_error_code.Token_expired -> Expired
+  | Masc_error.Auth_error_code.Insufficient_role -> Insufficient_role
+  | Masc_error.Auth_error_code.Invalid_token
+  | Masc_error.Auth_error_code.Same_origin_blocked
+  | Masc_error.Auth_error_code.Actor_mismatch
+  | Masc_error.Auth_error_code.Missing_token
+  | Masc_error.Auth_error_code.Unknown ->
+      Rejected
+
+(* The server writes the code in one of two places. The REST refusal
+   ([Server_auth.auth_error_json]) puts it at the top of the body; an /mcp
+   refusal is a JSON-RPC error and carries it in [error.data]
+   ([Server_mcp_transport_http_respond.error_body]). The TUI reads both kinds
+   of route, so reading only the first left every /mcp refusal generic. *)
+let auth_error_code_field fields =
+  match List.assoc_opt "auth_error_code" fields with
+  | Some _ as code -> code
+  | None -> (
+      match List.assoc_opt "error" fields with
+      | Some (`Assoc error) -> (
+          match List.assoc_opt "data" error with
+          | Some (`Assoc data) -> List.assoc_opt "auth_error_code" data
+          | Some _ | None -> None)
+      | Some _ | None -> None)
+
+let server_reason_of_body body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> (
+      match auth_error_code_field fields with
+      | Some (`String code) -> (
+          match Masc_error.Auth_error_code.of_string code with
+          | Some code -> server_reason_of_code code
+          | None -> Rejected)
+      | Some _ | None -> Rejected)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Rejected
+  | exception Yojson.Json_error _ -> Rejected
 
 (* A refusal names two situations and only one of them is fixed by providing a
    token. This client finds the bearer masc login left in the workspace, so it
    usually does present one, and then "you have no token" is both false and
-   advice the operator has already followed. *)
-let refusal_cause ~credential_sent =
-  if credential_sent then
-    Printf.sprintf
-      "the operator token this %s presented was refused" agent_name
-  else Printf.sprintf "this %s holds no operator token" agent_name
+   advice the operator has already followed. The server's reason only means
+   something when a bearer was sent: with none there is nothing for it to have
+   judged. *)
+let refusal_cause ~credential_sent reason =
+  if not credential_sent then
+    Printf.sprintf "this %s holds no operator token" agent_name
+  else
+    match reason with
+    | Expired ->
+        Printf.sprintf "the operator token this %s presented has expired"
+          agent_name
+    (* Not "lacks the role": the server sends this code for every Forbidden,
+       and some of those are not about the role at all. *)
+    | Insufficient_role ->
+        Printf.sprintf
+          "the operator token this %s presented is not allowed to make this \
+           request"
+          agent_name
+    | Rejected ->
+        Printf.sprintf "the operator token this %s presented was refused"
+          agent_name
 
 let remedy =
   Printf.sprintf "run '%s' and restart %s" login_command agent_name
 
-let refusal ~credential_sent =
-  Printf.sprintf "%s — %s" (refusal_cause ~credential_sent) remedy
+let refusal ~credential_sent reason =
+  Printf.sprintf "%s — %s" (refusal_cause ~credential_sent reason) remedy
+
+(* What the workspace holds for this client, judged the way the server judges
+   it. The file [masc login] writes carries only the bearer; its expiry lives
+   in the credential record beside it. Reading the file alone kept an expired
+   bearer in use forever: every start found it, carried it, and was refused,
+   while the comment above promised a replacement. *)
+type stored_token =
+  | Stored of string
+  | Stored_expired
+  | Not_stored
+
+(* Why a mint happens. The two are different news for the operator: the first
+   is a first start, the second is a credential that ran out. *)
+type mint_reason =
+  | First_token
+  | Replaces_expired
 
 (* Which bearer this client should carry, decided from three facts and nothing
    else, so the decision can be read and tested apart from the file and network
    work that carries it out. *)
 type plan =
   | Use of string
-  | Mint
+  | Mint of mint_reason
   | Go_without
   | No_workspace
 
@@ -64,12 +149,15 @@ type plan =
    from creating one. *)
 let plan ~env_token ~workspace_token ~workspace_requires_token
     ~workspace_initialized =
+  let without_a_usable_token reason =
+    if not workspace_requires_token then Go_without
+    else if workspace_initialized then Mint reason
+    else No_workspace
+  in
   match (env_token, workspace_token) with
-  | Some token, _ | None, Some token -> Use token
-  | None, None ->
-      if not workspace_requires_token then Go_without
-      else if workspace_initialized then Mint
-      else No_workspace
+  | Some token, _ | None, Stored token -> Use token
+  | None, Stored_expired -> without_a_usable_token Replaces_expired
+  | None, Not_stored -> without_a_usable_token First_token
 
 (* What came of carrying the plan out. Returned rather than logged in place so
    the surface decides how loudly to say it.
@@ -87,21 +175,26 @@ let plan ~env_token ~workspace_token ~workspace_requires_token
    itself a second or two later. *)
 type outcome =
   | Held
-  | Minted
+  | Minted of mint_reason
   | Not_required
   | Workspace_pending
   | Mint_failed of string
 
 let outcome_notice = function
   | Held | Not_required -> None
-  | Minted ->
+  | Minted reason ->
+      let what_was_there =
+        match reason with
+        | First_token -> "no operator token was present"
+        | Replaces_expired -> "the stored operator token had expired"
+      in
       Some
         (Printf.sprintf
-           "no operator token was present, so this %s minted one for this \
-            workspace and stored it; it lasts %d days. A server that is \
-            already running rebuilds its credential index on a timer, so the \
-            first reads may still be refused."
-           agent_name
+           "%s, so this %s minted one for this workspace and stored it; it \
+            lasts %d days. A server that is already running rebuilds its \
+            credential index on a timer, so the first reads may still be \
+            refused."
+           what_was_there agent_name
            (self_mint_expiry_hours / 24))
   | Workspace_pending ->
       (* No remedy: none is owed. The operator learns what is missing and
@@ -122,7 +215,7 @@ let outcome_notice = function
    here fails the same way after the server is up. *)
 let outcome_needs_retry = function
   | Workspace_pending -> true
-  | Held | Minted | Not_required | Mint_failed _ -> false
+  | Held | Minted _ | Not_required | Mint_failed _ -> false
 
 (* How loudly the notice is said. A mint and a failure are not the same news:
    both were reported as errors, which reads a working first start as a broken
@@ -132,4 +225,4 @@ let outcome_needs_retry = function
    credential is a fault the operator has to act on. *)
 let outcome_level = function
   | Mint_failed _ -> "error"
-  | Held | Minted | Not_required | Workspace_pending -> "system"
+  | Held | Minted _ | Not_required | Workspace_pending -> "system"

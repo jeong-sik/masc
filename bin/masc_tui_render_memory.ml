@@ -147,31 +147,30 @@ let memory_context_lines (k : memory_keeper_health) =
       | Some atoms -> Printf.sprintf "continuity behind %d" atoms
       | None -> "continuity behind ?"
     in
-    (* RFC librarian-lifecycle §4.10: the atoms requests skip while the
-       Librarian stands behind the start the provider last accepted. Drawn
-       beside the lags because it is the same kind of reading: an alarm, not
-       a state anything waits on. *)
-    let stalled =
-      match librarian.mlh_stalled with
-      | Some { mls_gap_start_atom; mls_gap_end_atom } ->
-        Printf.sprintf " · stalled: atoms %d-%d are in neither the request nor memory"
-          mls_gap_start_atom (mls_gap_end_atom - 1)
-      | None -> ""
-    in
     Printf.sprintf
-      "  Librarian · %s · %s · %s%s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
+      "  Librarian · %s · %s · %s · measured %s · Memory saved %s · last failure %s · failed %d since server start"
       (match librarian.mlh_state with
        | Some state -> librarian_pass_end_words state
        | None -> "not measured")
       unread
       continuity
-      stalled
       (memory_updated_text librarian.mlh_measured_at)
       (memory_updated_text librarian.mlh_last_success_at)
       (match librarian.mlh_last_failure_kind with
        | Some kind -> librarian_failure_words kind
        | None -> "-")
       k.mkh_librarian_failures
+  in
+  (* RFC librarian-lifecycle §4.10: the atoms requests skip while the
+     Librarian stands behind the start the provider last accepted. An alarm,
+     not a state anything waits on. On its own row, under the Librarian line,
+     so the frame cutting a long Librarian line never cuts its atom numbers. *)
+  let librarian_stalled_lines =
+    match k.mkh_librarian.mlh_stalled with
+    | Some { mls_gap_start_atom; mls_gap_end_atom } ->
+      [ Printf.sprintf "  Librarian stalled · atoms %d-%d are in neither the request nor memory"
+          mls_gap_start_atom (mls_gap_end_atom - 1) ]
+    | None -> []
   in
   let librarian_cause_lines =
     (* The cause is drawn on its own row because it is the part of the
@@ -282,7 +281,8 @@ let memory_context_lines (k : memory_keeper_health) =
           k.mkh_source_read_error
       ]
   in
-  [current_line; facts_line; source_line; librarian_line] @ librarian_cause_lines @ context_lines
+  [current_line; facts_line; source_line; librarian_line] @ librarian_stalled_lines
+  @ librarian_cause_lines @ context_lines
   @ (vision_line :: (read_error_lines @ alert_lines))
 
 type memory_state = Masc_tui_types.memory_state =

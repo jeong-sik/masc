@@ -665,8 +665,8 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
     (contains "3 atoms behind" both)
 ;;
 
-(* RFC librarian-lifecycle §4.10: the Librarian_stalled gap prints on the
-   Librarian line beside the lags, as the atoms it covers, and a keeper with
+(* RFC librarian-lifecycle §4.10: the Librarian_stalled gap prints on its
+   own row under the Librarian line, as the atoms it covers, and a keeper with
    no gap prints nothing for it. *)
 let test_the_librarian_line_names_a_stalled_gap () =
   let stalled =
@@ -689,7 +689,7 @@ let test_the_librarian_line_names_a_stalled_gap () =
     state.memory_health <- Some stalled;
     state.memory_health_cursor <- cursor;
     let lines = ref [] in
-    Render_memory.render_memory_body ~cols:400 ~budget:20 state
+    Render_memory.render_memory_body ~cols:100 ~budget:20 state
       ~push:(fun line -> lines := line :: !lines)
       ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
       ~push_selected:(fun line -> lines := line :: !lines)
@@ -697,9 +697,17 @@ let test_the_librarian_line_names_a_stalled_gap () =
       ~push_empty:(fun () -> ());
     String.concat "\n" (List.rev !lines)
   in
+  let row = "Librarian stalled · atoms 2-7 are in neither the request nor memory" in
   check bool "the stalled keeper names the atoms its requests skip" true
-    (contains "stalled: atoms 2-7 are in neither the request nor memory" (render 1));
-  check bool "a keeper with no gap prints none" false (contains "stalled:" (render 0))
+    (contains row (render 1));
+  check bool "a keeper with no gap prints none" false (contains "Librarian stalled" (render 0));
+  (* The row is its own line, and at the 100 columns the PTY harness opens it
+     fits whole: the frame cuts long lines, and a cut atom number is a wrong
+     one. *)
+  check bool "the row fits the frame at 100 columns" true
+    (List.exists
+       (fun line -> contains row line && String.length line <= 96)
+       (String.split_on_char '\n' (render 1)))
 ;;
 
 (* #36497. The fleet header is the block above the sort row, and it used to be

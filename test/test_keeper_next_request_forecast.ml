@@ -286,6 +286,162 @@ max-concurrent = 1
              Keeper_carried_front.Carried (Keeper_carried_front.Turn_record { turn = 1 })))
      | _ -> Alcotest.fail "one configured runtime must produce one forecast candidate")
 
+(* RFC librarian-lifecycle §4.10: the Librarian_stalled gap, from the files a
+   server that just started holds -- the keeper's meta, checkpoint, turn
+   boundaries, Librarian position and turn records -- through the driver's
+   own choice of where the next request starts. *)
+let test_the_librarian_gap_is_the_drivers_choice_from_files () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.on_release sw (fun () ->
+    match previous_fs with
+    | Some fs -> Fs_compat.set_fs fs
+    | None -> Fs_compat.clear_fs ());
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace base_path);
+  let config = Workspace.default_config base_path in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "librarian-gap" ])
+    with
+    | Ok meta -> meta
+    | Error detail -> Alcotest.fail detail
+  in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let keeper_name = meta.name in
+  let gap () =
+    match Keeper_next_request_forecast.librarian_gap ~config ~keeper_name with
+    | Ok gap ->
+      Option.map
+        (fun (g : Keeper_next_request_forecast.librarian_gap) -> g.gap_start_atom, g.gap_end_atom)
+        gap
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check (option (pair int int))) "no files, no gap" None (gap ());
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let persisted = history ~exchanges:5 ~text_bytes:100 in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = trace_id
+    ; agent_name = meta.name
+    ; model = "librarian-gap-model"
+    ; system_prompt = None
+    ; messages = persisted
+    ; usage = Agent_core.Types.empty_usage
+    ; turn_count = 1
+    ; created_at = 0.
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = None
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; reasoning_effort = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_core.Types.Off
+    ; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0
+       checkpoint
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  let position =
+    match Keeper_turn_boundaries.position_of_messages persisted with
+    | Ok position -> position
+    | Error detail -> Alcotest.fail detail
+  in
+  (match
+     Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:keeper_name
+       { Keeper_turn_boundaries.recorded_at = 1.
+       ; event =
+           Keeper_turn_boundaries.Turn_ended
+             { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+             ; history_at_start = Keeper_turn_boundaries.Fresh_history
+             ; position
+             }
+       }
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Keeper_turn_boundaries.append_error_to_string error));
+  let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
+  Eio.Switch.on_release sw (fun () -> Dated_jsonl.prepare_for_directory_removal store);
+  let _, total_atoms = Runtime_model_input_tail_window.annotate persisted in
+  let accepted_at ~turn first_atom =
+    let window : Turn_record.model_input_window =
+      { transmitted_atoms = total_atoms - first_atom
+      ; total_atoms
+      ; measurement = Turn_record.Wire_shape
+      ; front_atom_digest = (seed ~messages:persisted first_atom).front_digest
+      }
+    in
+    Keeper_turn_record_writer.write
+      ~config ~keeper_name ~agent_name:keeper_name ~turn_kind:Turn_record.Direct
+      ~trace_id ~absolute_turn:turn ~runtime_profile:"librarian-gap"
+      ~selected_model:None ~finish_reason:None ~context_window:None
+      ~price_input_per_million:None ~price_output_per_million:None
+      ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
+      ~model_input_window:(Some window)
+      ~response_observed_model_input:(Some { Turn_record.runtime_profile = "librarian-gap"; window })
+      ~raw_trace_run_ref:None
+      ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+      ~usage:
+        { input_tokens = None
+        ; output_tokens = None
+        ; cache_creation_input_tokens = None
+        ; cache_read_input_tokens = None
+        ; scope = Runtime_usage_scope.Usage_scope_unavailable
+        }
+      ~execution_ids:[] ~blocks:[] ~input_components:None ~tool_surface_ref:None ()
+  in
+  let digest_at = Runtime_model_input_tail_window.atom_opening_digest persisted in
+  let read_to ?last_atom_digest end_atom =
+    let last_atom_digest =
+      match last_atom_digest with
+      | Some digest -> digest
+      | None -> Option.get (digest_at (end_atom - 1))
+    in
+    match
+      Keeper_librarian_progress.write ~keepers_dir ~keeper_id:keeper_name
+        { Keeper_librarian_progress.position = { trace_id; end_atom; last_atom_digest }
+        ; boundary_lines_seen = 1
+        }
+    with
+    | Ok () -> ()
+    | Error error -> Alcotest.fail (Keeper_librarian_progress.write_error_to_string error)
+  in
+  read_to 2;
+  accepted_at ~turn:1 2;
+  Alcotest.(check (option (pair int int))) "a request from the Librarian point is no gap" None
+    (gap ());
+  accepted_at ~turn:2 8;
+  Alcotest.(check (option (pair int int))) "an accepted start past the point is the gap"
+    (Some (2, 8)) (gap ());
+  (* A position this history does not open with the recorded message is no
+     Librarian point for the driver: it starts without one, and there is no
+     gap to name. *)
+  read_to ~last_atom_digest:"not-the-opening-message" 2;
+  Alcotest.(check (option (pair int int))) "a position that does not fit is no point" None
+    (gap ());
+  read_to 8;
+  Alcotest.(check (option (pair int int))) "the Librarian at the accepted start closes it" None
+    (gap ());
+  read_to 9;
+  Alcotest.(check (option (pair int int))) "and past it" None (gap ())
+
 let component component bytes : Turn_record.input_component = { component; bytes }
 
 (* lane-smith turn 3646 on 2026-09-16: memory recall and dynamic context
@@ -867,5 +1023,7 @@ let () =
     ; ( "store"
       , [ Alcotest.test_case "forecast finds a response beyond unobserved rows" `Quick
             test_forecast_reads_an_observed_front_beyond_unobserved_rows
+        ; Alcotest.test_case "the Librarian gap is the driver's choice from files" `Quick
+            test_the_librarian_gap_is_the_drivers_choice_from_files
         ] )
     ]

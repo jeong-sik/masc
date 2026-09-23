@@ -214,3 +214,24 @@ val assembly : wake_bytes:int -> history_atoms:int -> measured_parts -> carried 
 (** The pure layout, for tests: the slots in travel order for one carried
     range. [history_atoms] counts the wake line, as {!candidate.history_atoms}
     does, and the range always carries it as its newest atom. *)
+
+(** RFC librarian-lifecycle §4.10, rule 3: the atoms the next request skips
+    because the Librarian point stands behind the start the provider last
+    accepted. [gap_end_atom] is that start; the gap ends just before it. *)
+type librarian_gap =
+  { gap_start_atom : int
+  ; gap_end_atom : int
+  }
+
+val librarian_gap
+  :  config:Workspace.config
+  -> keeper_name:string
+  -> (librarian_gap option, string) result
+(** The gap {!Keeper_turn_driver_try_provider.choose_range_start} opens on
+    this keeper's current trace, from files alone: the keeper's meta, its
+    snapshot and read position, its turn records and, only when the accepted
+    start lies past one of those positions, its checkpoint -- the choice
+    checks the snapshot and the position against that history as the turn
+    driver does. [Ok None] when the request would start at the Librarian
+    point, has none, or the keeper has no meta yet. [Error] when the meta
+    or the checkpoint cannot be read. Reads no ledger and no measurement held in memory. *)

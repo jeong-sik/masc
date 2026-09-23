@@ -274,38 +274,26 @@ let librarian_journal_outcome ~keepers_dir ~keeper_id =
 ;;
 
 (* The gap, from files alone, so a server that just started shows it before
-   any drain has run here. The Librarian point is where a request starts
-   when the Librarian is used: the snapshot's cut unless the snapshot is
-   being rewritten from atom 0, else the read position -- the order the turn
-   driver takes (Keeper_turn_driver_try_provider.choose_continuity), without
-   the check against the checkpoint history this handler does not read. The
-   accepted start is the newest response-observed turn record on that trace
-   (Keeper_carried_front.read_seed), whichever lane recorded it: an official
-   client's byte window cut counts the same way. A size refusal records no
-   accepted start, so a turn that ended on one never raises this alarm. *)
-let librarian_stalled ~config ~keeper_id (cycle : context_cycle) =
-  let point =
-    match cycle.saved, cycle.rewriting_through with
-    | Some frontier, None ->
-      Some (frontier.Keeper_continuity_observation.trace_id, frontier.end_atom)
-    | Some _, Some _ | None, (Some _ | None) ->
-      (match
-         Keeper_librarian_progress.read
-           ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id
-       with
-       | Ok (Some { Keeper_librarian_progress.position = { trace_id; end_atom; _ }; _ }) ->
-         Some (trace_id, end_atom)
-       | Ok None | Error _ -> None)
-  in
-  Option.bind point (fun (trace_id, point) ->
-    match (Keeper_carried_front.read_seed ~config ~keeper_name:keeper_id ~trace_id).seed with
-    | Some { Keeper_carried_front.first_atom; _ } when first_atom > point ->
-      Some { gap_start_atom = point; gap_end_atom = first_atom }
-    | Some _ | None -> None)
+   any drain has run here: the turn driver's own choice of where the next
+   request starts ({!Keeper_next_request_forecast.librarian_gap}), which
+   checks the snapshot and the read position against the checkpoint as the
+   driver does. The accepted start is the newest response-observed turn
+   record, whichever lane recorded it: an official client's byte window cut
+   counts the same way. A size refusal records no accepted start, so a turn
+   that ended on one never raises this alarm. A keeper whose files cannot be
+   read shows no alarm and says why on its log. *)
+let librarian_stalled ~config ~keeper_id =
+  match Keeper_next_request_forecast.librarian_gap ~config ~keeper_name:keeper_id with
+  | Ok (Some { Keeper_next_request_forecast.gap_start_atom; gap_end_atom }) ->
+    Some { gap_start_atom; gap_end_atom }
+  | Ok None -> None
+  | Error detail ->
+    Log.Keeper.warn ~keeper_name:keeper_id
+      "Librarian_stalled alarm not computed: %s" detail;
+    None
 ;;
 
-let librarian_health ~config ~keepers_dir keeper_id ~context_cycle =
-  let continuity_saved = context_cycle.saved in
+let librarian_health ~config ~keepers_dir keeper_id ~continuity_saved =
   let measurement = Keeper_librarian_queue_refresh.last_measurement ~config ~keeper_name:keeper_id in
   let last_success_at, last_failure =
     librarian_journal_outcome ~keepers_dir ~keeper_id
@@ -329,7 +317,7 @@ let librarian_health ~config ~keepers_dir keeper_id ~context_cycle =
         continuity_saved
   ; last_success_at
   ; last_failure_kind
-  ; stalled = librarian_stalled ~config ~keeper_id context_cycle
+  ; stalled = librarian_stalled ~config ~keeper_id
   }
 ;;
 
@@ -451,7 +439,8 @@ let keeper_health ~config ~keepers_dir keeper_id =
   let source_health = source_health ~keepers_dir keeper_id in
   let context_cycle = context_cycle ~config ~keeper_name:keeper_id in
   let librarian =
-    librarian_health ~config ~keepers_dir keeper_id ~context_cycle
+    librarian_health ~config ~keepers_dir keeper_id
+      ~continuity_saved:context_cycle.saved
   in
   match
     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id

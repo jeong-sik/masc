@@ -89,7 +89,7 @@ let stub_verification_request config ~task ~assignee ~verification_id ~claim =
   | D.Cancellation_reason { reason } ->
     Masc.Verification.create_request
       ~base_path:config.Workspace.base_path
-      ~task_id:task.D.id
+      ~task_id:task.id
       ~output:
         (`Assoc
           [ Workspace_verification_store.cancellation_reason_field, `String reason ])

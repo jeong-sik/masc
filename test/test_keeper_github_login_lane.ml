@@ -521,6 +521,89 @@ let test_remote_login_runs_and_is_observed_on_the_endpoint () =
       identity_check.remote_root
 ;;
 
+(* The GitHub tab reads status through [observe]. For a Remote_ssh Keeper the
+   login lives on the endpoint, so a host read answered "not configured" right
+   after a successful login. The read has to be the endpoint's probe, and it
+   must not create anything there: the directories are the login's to make. *)
+let test_remote_observe_reads_the_endpoint_and_writes_nothing () =
+  with_eio
+  @@ fun () ->
+  let base_path = temp_dir () in
+  let dir = temp_dir () in
+  write_runtime_toml ~base_path;
+  write_keeper_toml ~base_path;
+  with_stub_ssh ~dir
+  @@ fun () ->
+  let config = workspace ~base_path in
+  (match
+     Keeper_github_login_lane.observe
+       ~config
+       ~meta:(meta ~sandbox:Keeper_types_profile_sandbox.Remote_ssh)
+       ~hostname
+   with
+   | Error error -> failf "observing the endpoint identity failed: %s" error
+   | Ok observation ->
+     check
+       string
+       "the observation names the endpoint directory"
+       expected_gh_dir
+       observation.Keeper_github_identity.config_dir;
+     check
+       (option string)
+       "stored identity is the endpoint's login"
+       (Some probe_login)
+       observation.Keeper_github_identity.stored.Keeper_github_identity.login;
+     check
+       string
+       "the probe is endpoint-scoped"
+       "endpoint_process_only"
+       (match observation.Keeper_github_identity.effective_probe_scope with
+        | `Host_process_credential_only -> "host_process_credential_only"
+        | `Endpoint_process_only -> "endpoint_process_only"));
+  check
+    (list string)
+    "the endpoint ran masc's probe argv"
+    (Keeper_github_identity.auth_probe_argv ~hostname)
+    (decoded_request (frame_path ~dir "probe")).argv;
+  List.iter
+    (fun tag ->
+      check bool ("a status read ran no " ^ tag) false
+        (Sys.file_exists (frame_path ~dir tag)))
+    [ "mkdir"; "mkdir-root"; "chmod-0700"; "login" ];
+  check bool "no host identity directory was created" false
+    (Sys.file_exists (Keeper_github_identity.config_dir ~config ~keeper_name))
+;;
+
+(* The GitHub MCP identity sends the token from this host. A Remote_ssh
+   Keeper's token is on its endpoint, so the read is refused by name instead
+   of telling the operator to log in from the GitHub tab, which they did. *)
+let test_remote_stored_token_is_refused_by_name () =
+  with_eio
+  @@ fun () ->
+  let base_path = temp_dir () in
+  write_runtime_toml ~base_path;
+  write_keeper_toml ~base_path;
+  let config = workspace ~base_path in
+  (match
+     Keeper_meta_store.replace_snapshot
+       config
+       (meta ~sandbox:Keeper_types_profile_sandbox.Remote_ssh)
+   with
+   | Ok () -> ()
+   | Error detail -> failf "keeper meta persistence failed: %s" detail);
+  match Keeper_github_login_lane.stored_token ~config ~keeper_name ~hostname with
+  | Ok _ -> fail "a Remote_ssh Keeper's token was answered from this host"
+  | Error (Keeper_github_login_lane.Remote_ssh_identity_on_endpoint { keeper_name = named })
+    ->
+    check string "the refusal names the keeper" keeper_name named
+  | Error
+      ((Keeper_github_login_lane.Keeper_meta_unavailable _
+       | Keeper_github_login_lane.Host_identity_unavailable _) as other) ->
+    failf
+      "expected the Remote_ssh refusal, got: %s"
+      (Keeper_github_login_lane.stored_token_error_to_string other)
+;;
+
 let () =
   if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--ssh-stub"
   then stub_main ()
@@ -533,6 +616,14 @@ let () =
               "remote login runs and is observed on the endpoint"
               `Quick
               test_remote_login_runs_and_is_observed_on_the_endpoint
+          ; test_case
+              "remote observe reads the endpoint and writes nothing"
+              `Quick
+              test_remote_observe_reads_the_endpoint_and_writes_nothing
+          ; test_case
+              "remote stored token is refused by name"
+              `Quick
+              test_remote_stored_token_is_refused_by_name
           ] )
       ]
 ;;

@@ -158,21 +158,30 @@ let set_client ~base_path ~provider_id ~client_id ~client_secret ~scopes =
         ])
 ;;
 
-let start ~clock ~base_path ~keeper ~provider_id ~now =
+let start ~clock ~(config : Workspace.config) ~keeper ~provider_id ~now =
+  let base_path = config.Workspace.base_path in
   let* provider = provider_of_id provider_id in
   let transports = Keeper_identity_tools.http_transports ~clock in
   match provider.Provider.credential_source with
   | Provider.Github_cli { hostname } ->
-    (match Keeper_github_identity.stored_token ~base_path ~keeper_name:keeper ~hostname with
-     | Error problem ->
+    (match Keeper_github_login_lane.stored_token ~config ~keeper_name:keeper ~hostname with
+     (* Logging in again from the GitHub tab changes nothing here: that login
+        is written on the endpoint, which is exactly why this read refused. *)
+     | Error
+         (Keeper_github_login_lane.Remote_ssh_identity_on_endpoint _ as refusal) ->
+       Error (Keeper_github_login_lane.stored_token_error_to_string refusal)
+     | Error
+         (( Keeper_github_login_lane.Keeper_meta_unavailable _
+          | Keeper_github_login_lane.Host_identity_unavailable _ ) as problem) ->
        Error
          (Printf.sprintf
             "GitHub uses %s's GitHub CLI token (%s). Please switch to the GitHub tab or run 'gh auth login' to authenticate this keeper."
-            keeper problem)
+            keeper
+            (Keeper_github_login_lane.stored_token_error_to_string problem))
      | Ok _ ->
        let* catalog =
          Keeper_identity_tools.refresh ~mcp_post:transports.Keeper_identity_tools.mcp_post
-           ~base_path ~keeper_name:keeper ~provider ~now ()
+           ~config ~keeper_name:keeper ~provider ~now ()
        in
        Ok
          (`Assoc
@@ -214,12 +223,12 @@ let start ~clock ~base_path ~keeper ~provider_id ~now =
         ])
 ;;
 
-let refresh_tools ~clock ~base_path ~keeper ~provider_id ~now =
+let refresh_tools ~clock ~config ~keeper ~provider_id ~now =
   let* provider = provider_of_id provider_id in
   let* catalog =
     Keeper_identity_tools.refresh
       ~mcp_post:(Keeper_identity_tools.http_transports ~clock).Keeper_identity_tools.mcp_post
-      ~base_path ~keeper_name:keeper ~provider ~now ()
+      ~config ~keeper_name:keeper ~provider ~now ()
   in
   Ok
     (`Assoc
@@ -310,7 +319,8 @@ type attached = {
   tool_discovery : (int, string) result;
 }
 
-let finish ~clock ~base_path ~state ~code ~now =
+let finish ~clock ~(config : Workspace.config) ~state ~code ~now =
+  let base_path = config.Workspace.base_path in
   let* finished =
     Result.map_error Session.finish_error_to_string
       (Session.finish
@@ -369,7 +379,7 @@ let finish ~clock ~base_path ~state ~code ~now =
       (fun catalog -> List.length catalog.Keeper_identity_tools.tools)
       (Keeper_identity_tools.refresh
          ~mcp_post:(Keeper_identity_tools.http_transports ~clock).Keeper_identity_tools.mcp_post
-         ~base_path ~keeper_name ~provider ~now ())
+         ~config ~keeper_name ~provider ~now ())
   in
   Ok
     { keeper = keeper_name

@@ -1,4 +1,5 @@
-(** Which machine a Keeper's GitHub device-flow login is written to.
+(** Which machine a Keeper's GitHub device-flow login is written to, and so
+    which machine its status and its token are read from.
 
     A Docker or Micro_vm Keeper's identity lives in the host directory
     [<base>/.masc/keepers/<name>/github-cli] -- Docker bind-mounts it, a guest
@@ -115,6 +116,37 @@ let secure_config_files ~redaction endpoint ~gh_dir =
     Ok ()
 ;;
 
+(* One [gh] probe on the endpoint, read as an observation. It writes nothing
+   there: a status read must not stand up the directories a login creates.
+
+   masc projects no GitHub token onto an endpoint: the runner drops every
+   caller env name outside the endpoint allowlist, and this lane supplies none.
+   So the probe with the config directory alone is the whole story, and
+   [stored] and [effective] are one reading rather than two. *)
+let remote_observation ~base_path ~keeper_name ~hostname endpoint
+  : Keeper_github_identity.observation
+  =
+  let run =
+    Masc_exec.Sandbox_target.status_tuple
+      (run_remote
+         endpoint
+         ~timeout_sec:step_timeout_sec
+         ~on_stdout_chunk:None
+         ~on_stderr_chunk:None
+         ~argv:(Keeper_github_identity.auth_probe_argv ~hostname))
+  in
+  let result = Keeper_github_identity.auth_result_of_probe ~base_path ~keeper_name run in
+  { keeper = keeper_name
+  ; hostname
+  ; config_dir = Keeper_sandbox_remote.gh_config_dir endpoint
+  ; projected_token_env_names = []
+  ; stored = result
+  ; effective = result
+  ; effective_probe_scope = `Endpoint_process_only
+  ; checked_at_unix = Time_compat.now ()
+  }
+;;
+
 let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
   let base_path = config.Workspace.base_path in
   let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
@@ -160,33 +192,8 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
     ; secure_after_login = (fun () -> secure_config_files ~redaction endpoint ~gh_dir)
     ; observe_after_login =
         (fun () ->
-          let run =
-            Masc_exec.Sandbox_target.status_tuple
-              (run_remote
-                 endpoint
-                 ~timeout_sec:step_timeout_sec
-                 ~on_stdout_chunk:None
-                 ~on_stderr_chunk:None
-                 ~argv:(Keeper_github_identity.auth_probe_argv ~hostname))
-          in
-          let result =
-            Keeper_github_identity.auth_result_of_probe ~base_path ~keeper_name run
-          in
-          (* masc projects no GitHub token onto an endpoint: the runner drops
-             every caller env name outside the endpoint allowlist, and this
-             lane supplies none. So the probe with the config directory alone
-             is the whole story, and [stored] and [effective] are one reading
-             rather than two. *)
-          let observation : Keeper_github_identity.observation =
-            { keeper = keeper_name
-            ; hostname
-            ; config_dir = gh_dir
-            ; projected_token_env_names = []
-            ; stored = result
-            ; effective = result
-            ; effective_probe_scope = `Endpoint_process_only
-            ; checked_at_unix = Time_compat.now ()
-            }
+          let observation =
+            remote_observation ~base_path ~keeper_name ~hostname endpoint
           in
           (* Login changes identity state, so the next payload pays for the
              complete tool/disk/identity preflight. Its unrelated readiness
@@ -209,4 +216,60 @@ let for_keeper ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname =
   | Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Micro_vm ->
     Keeper_github_identity.local_lane ~config ~keeper_name ~hostname
   | Keeper_types_profile_sandbox.Remote_ssh -> remote_lane ~config ~keeper_name ~hostname
+;;
+
+let observe ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname =
+  let keeper_name = meta.Keeper_meta_contract.name in
+  match
+    (meta.Keeper_meta_contract.sandbox_profile
+      : Keeper_types_profile_sandbox.sandbox_profile)
+  with
+  | Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Micro_vm ->
+    Keeper_github_identity.observe ~config ~keeper_name ~hostname
+  | Keeper_types_profile_sandbox.Remote_ssh ->
+    let hostname = String.trim hostname in
+    if String.equal hostname ""
+    then Error "GitHub hostname must not be empty"
+    else
+      let* endpoint = resolve ~config ~keeper_name in
+      Ok
+        (remote_observation
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+           ~hostname
+           endpoint)
+;;
+
+type stored_token_error =
+  | Keeper_meta_unavailable of string
+  | Remote_ssh_identity_on_endpoint of { keeper_name : string }
+  | Host_identity_unavailable of string
+
+let stored_token_error_to_string = function
+  | Keeper_meta_unavailable message -> message
+  | Remote_ssh_identity_on_endpoint { keeper_name } ->
+    Printf.sprintf
+      "remote_ssh_github_token_not_on_host: keeper %S is a Remote_ssh Keeper; its \
+       GitHub CLI login lives on its endpoint and masc does not copy that token \
+       back to this host, so a GitHub identity that calls from this host cannot \
+       use it"
+      keeper_name
+  | Host_identity_unavailable message -> message
+;;
+
+let stored_token ~config ~keeper_name ~hostname =
+  match Keeper_meta_store.read_effective_meta config keeper_name with
+  | Error message -> Error (Keeper_meta_unavailable message)
+  | Ok None ->
+    Error (Keeper_meta_unavailable (Printf.sprintf "keeper %S not found" keeper_name))
+  | Ok (Some meta) ->
+    (match
+       (meta.Keeper_meta_contract.sandbox_profile
+         : Keeper_types_profile_sandbox.sandbox_profile)
+     with
+     | Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Micro_vm ->
+       Keeper_github_identity.stored_token ~config ~keeper_name ~hostname
+       |> Result.map_error (fun message -> Host_identity_unavailable message)
+     | Keeper_types_profile_sandbox.Remote_ssh ->
+       Error (Remote_ssh_identity_on_endpoint { keeper_name }))
 ;;

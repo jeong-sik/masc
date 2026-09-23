@@ -70,7 +70,7 @@ let discord_fixture : Store.chat_message list =
   ]
 
 let test_lane_filter_excludes_other_surfaces_and_unscoped () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false ~notes:[] discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   check int "lane rows" 4 (to_int (member "lane_row_count" json));
   check int "returned" 4 (to_int (member "returned" json));
   let contents =
@@ -87,7 +87,7 @@ let test_lane_filter_excludes_other_surfaces_and_unscoped () =
     contents
 
 let test_roster_groups_by_id_latest_name_wins () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false ~notes:[] discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   let participants = to_list (member "participants" json) in
   check int "two participants" 2 (List.length participants);
   let find id =
@@ -110,7 +110,7 @@ let test_roster_groups_by_id_latest_name_wins () =
     (to_string_j (member "id" (List.hd participants)))
 
 let test_limit_truncates_messages_not_roster () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:2 ~has_more:false ~notes:[] discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:2 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   check int "returned capped" 2 (to_int (member "returned" json));
   check int "lane count still full" 4 (to_int (member "lane_row_count" json));
   check int "roster still full" 2
@@ -124,7 +124,7 @@ let test_limit_truncates_messages_not_roster () =
     contents
 
 let test_keeper_own_lines_are_not_participants () =
-  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:false ~notes:[] discord_fixture) in
+  let json = parse (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   let ids =
     to_list (member "participants" json)
     |> List.map (fun p -> to_string_j (member "id" p))
@@ -133,11 +133,11 @@ let test_keeper_own_lines_are_not_participants () =
     (List.exists (fun id -> String.equal id "keeper") ids)
 
 let test_blank_surface_is_error () =
-  let json = parse (SR.respond ~surface:"  " ~limit:10 ~has_more:false ~notes:[] discord_fixture) in
+  let json = parse (SR.respond ~surface:"  " ~limit:10 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   check bool "error field present" true (member "error" json <> `Null)
 
 let test_empty_lane_is_success_with_zero_rows () =
-  let json = parse (SR.respond ~surface:"slack" ~limit:10 ~has_more:false ~notes:[] discord_fixture) in
+  let json = parse (SR.respond ~surface:"slack" ~limit:10 ~before:None ~has_more:false ~notes:[] discord_fixture) in
   check int "lane empty" 0 (to_int (member "lane_row_count" json));
   check int "no participants" 0
     (List.length (to_list (member "participants" json)))
@@ -147,7 +147,7 @@ let test_empty_lane_is_success_with_zero_rows () =
    progress through pages that hold no rows for the requested lane. *)
 let test_paging_fields_reflect_page_not_lane () =
   let json =
-    parse (SR.respond ~surface:"discord" ~limit:50 ~has_more:true ~notes:[] discord_fixture)
+    parse (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:true ~notes:[] discord_fixture)
   in
   check bool "has_more passthrough" true
     (Yojson.Safe.Util.to_bool (member "has_more" json));
@@ -161,7 +161,7 @@ let test_notes_annotate_and_resurrect_participants () =
   in
   let json =
     parse
-      (SR.respond ~surface:"discord" ~limit:50 ~has_more:false ~notes
+      (SR.respond ~surface:"discord" ~limit:50 ~before:None ~has_more:false ~notes
          discord_fixture)
   in
   let participants = to_list (member "participants" json) in
@@ -182,7 +182,7 @@ let test_notes_annotate_and_resurrect_participants () =
 
 let test_oldest_ts_absent_when_page_empty () =
   let json =
-    parse (SR.respond ~surface:"discord" ~limit:10 ~has_more:false ~notes:[] [])
+    parse (SR.respond ~surface:"discord" ~limit:10 ~before:None ~has_more:false ~notes:[] [])
   in
   check bool "oldest_ts omitted" true (member "oldest_ts" json = `Null)
 
@@ -202,7 +202,7 @@ let contains s sub =
 let test_unbound_connector_label_is_error () =
   let json =
     parse
-      (SR.respond ~bindings ~surface:"slack" ~limit:10 ~has_more:false ~notes:[]
+      (SR.respond ~bindings ~surface:"slack" ~limit:10 ~before:None ~has_more:false ~notes:[]
          discord_fixture)
   in
   check bool "unbound slack is an error" true (member "error" json <> `Null);
@@ -214,7 +214,7 @@ let test_unbound_connector_label_is_error () =
 let test_unknown_label_is_error_with_page_labels () =
   let json =
     parse
-      (SR.respond ~bindings ~surface:"dicsord" ~limit:10 ~has_more:false
+      (SR.respond ~bindings ~surface:"dicsord" ~limit:10 ~before:None ~has_more:false
          ~notes:[] discord_fixture)
   in
   check bool "typo label is an error" true (member "error" json <> `Null);
@@ -228,7 +228,7 @@ let test_gate_label_present_on_page_reads () =
   in
   let json =
     parse
-      (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~has_more:false
+      (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~before:None ~has_more:false
          ~notes:[] gate_fixture)
   in
   check int "gate label present on the page is a legitimate lane" 1
@@ -237,23 +237,50 @@ let test_gate_label_present_on_page_reads () =
 let test_gate_label_absent_from_page_is_error () =
   let json =
     parse
-      (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~has_more:false
+      (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~before:None ~has_more:false
          ~notes:[] discord_fixture)
   in
   check bool "gate label with no rows anywhere is refused" true
     (member "error" json <> `Null)
 
+(* The page is the newest window. A gate lane whose rows are all older reads
+   as an empty page with the cursor the caller pages back with. *)
+let test_gate_label_behind_the_page_reads_with_a_cursor () =
+  let json =
+    parse
+      (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~before:None ~has_more:true
+         ~notes:[] discord_fixture)
+  in
+  check bool "not refused while older rows remain" true (member "error" json = `Null);
+  check int "no rows of it on this page" 0 (to_int (member "lane_row_count" json));
+  check bool "the cursor to page back is there" true
+    (Yojson.Safe.Util.to_bool (member "has_more" json)
+     && member "oldest_ts" json <> `Null)
+
+(* Paging back with [before] until [has_more] is false ends on the oldest
+   page. That page is not the whole history either: the lane the caller just
+   read may sit on a newer page, so its absence here is an empty page. *)
+let test_gate_label_absent_from_the_oldest_page_reads () =
+  let json =
+    parse
+      (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~before:(Some 100.0)
+         ~has_more:false ~notes:[] discord_fixture)
+  in
+  check bool "not refused on a page reached with a cursor" true
+    (member "error" json = `Null);
+  check int "no rows of it on this page" 0 (to_int (member "lane_row_count" json))
+
 let test_known_lanes_still_read_with_bindings () =
   let json =
     parse
-      (SR.respond ~bindings ~surface:"discord" ~limit:50 ~has_more:false
+      (SR.respond ~bindings ~surface:"discord" ~limit:50 ~before:None ~has_more:false
          ~notes:[] discord_fixture)
   in
   check int "bound connector lane reads as before" 4
     (to_int (member "lane_row_count" json));
   let json =
     parse
-      (SR.respond ~bindings ~surface:"dashboard" ~limit:50 ~has_more:false
+      (SR.respond ~bindings ~surface:"dashboard" ~limit:50 ~before:None ~has_more:false
          ~notes:[] discord_fixture)
   in
   check int "core lane reads as before" 1
@@ -297,6 +324,10 @@ let () =
             test_unknown_label_is_error_with_page_labels;
           test_case "gate label present on the page reads" `Quick
             test_gate_label_present_on_page_reads;
+          test_case "gate label behind the page reads with a cursor" `Quick
+            test_gate_label_behind_the_page_reads_with_a_cursor;
+          test_case "gate label absent from the oldest page reads" `Quick
+            test_gate_label_absent_from_the_oldest_page_reads;
           test_case "gate label absent from the page is refused" `Quick
             test_gate_label_absent_from_page_is_error;
           test_case "known lanes still read with bindings" `Quick

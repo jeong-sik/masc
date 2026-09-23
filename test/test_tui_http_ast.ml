@@ -2483,6 +2483,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* pulls_of_keeper looks the name up; it does not draw it. *)
   check_fields ~non_rendering_calls:[ "pulls_of_keeper" ] "overview_team_lines"
     [ "okp_name"; "id"; "title" ];
+  (* The pull request lines print repository ids and failure text the server
+     relayed from GitHub. *)
+  check_fields ~module_path:"bin/masc_tui_repository_pulls.ml" "lines"
+    [ "rp_repository" ];
   (* [ap_summary] is not in this list: the press-again line and the row
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)
@@ -2551,6 +2555,29 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
   check_fields "render_keeper_list" [ "keepers_error" ];
+  (* The Memory pane draws from its own file. The guard reaches other files
+     by name -- the primitives and the chat pane each have entries -- but no
+     binding in this one was ever named, so its detail handed seven wire
+     fields straight to the terminal: the
+     category, the origin, the memory id, a bound path and its file hash, and
+     a dropped row's reason and path. A keeper writes those, and an escape in
+     one of them reached the screen as an escape. The claim beside them was
+     always escaped, because it goes through [detail_claim_lines], which hands
+     the sanitiser to [Message_layout.wrap_body] a line at a time -- a body
+     cannot be escaped whole. *)
+  check_fields ~module_path:"bin/masc_tui_render_memory.ml"
+    ~non_rendering_calls:[ "detail_claim_lines" ] "memory_fact_detail_lines"
+    (* [mf_category] is not on this list. It stopped being wire text: the
+       decoder turns it into [Keeper_memory_os_types.category], so the pane
+       prints a word this build spells, not one a keeper sent. *)
+    [ "mf_claim"
+    ; "mf_origin"
+    ; "mf_memory_id"
+    ; "msf_path"
+    ; "msf_sha256"
+    ; "mi_reason"
+    ; "mi_source_path"
+    ];
   (* The roster's last-seen clock went out as a slice of the wire text. *)
   check_fields "render_clients" [ "cr_name"; "cr_agent_type"; "cr_last_seen" ];
   (* #29626 moved the row itself into [keeper_row_content] so the list could

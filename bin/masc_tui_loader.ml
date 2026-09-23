@@ -8,6 +8,7 @@ module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
 module Keeper_selection = Masc_tui_keeper_selection
+module Repository_pulls = Masc_tui_repository_pulls
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
 module Render_schedule = Masc_tui_render_schedule
@@ -1201,157 +1202,11 @@ let overview_keeper_rows_of_briefs briefs =
 (* RFC-0465 pull request snapshot. A row whose check or review word, number,
    title, branch or draft flag cannot be read is counted with the server's
    own undecodable rows instead of being drawn with a guessed state. *)
-let decode_open_pull json =
-  let* op_number = required_int_field json "number" in
-  let* op_title = required_string_field json "title" in
-  let* op_head_branch = required_string_field json "head_branch" in
-  let* op_draft =
-    match Yojson.Safe.Util.member "draft" json with
-    | `Bool draft -> Ok draft
-    | _ -> Error "draft is not a boolean"
-  in
-  let* checks = required_string_field json "checks" in
-  let* op_checks =
-    match checks with
-    | "passing" -> Ok Pull_checks_passing
-    | "failing" -> Ok Pull_checks_failing
-    | "running" -> Ok Pull_checks_running
-    | "none" -> Ok Pull_checks_none
-    | other -> Error ("unknown checks " ^ other)
-  in
-  let* review = required_string_field json "review" in
-  let* op_review =
-    match review with
-    | "approved" -> Ok Pull_review_approved
-    | "changes_requested" -> Ok Pull_review_changes_requested
-    | "waiting" -> Ok Pull_review_waiting
-    | "none" -> Ok Pull_review_none
-    | other -> Error ("unknown review " ^ other)
-  in
-  let* mergeable = required_string_field json "mergeable" in
-  let* op_mergeable =
-    match mergeable with
-    | "mergeable" -> Ok Pull_mergeable
-    | "conflicting" -> Ok Pull_conflicting
-    | "unknown" -> Ok Pull_mergeable_unknown
-    | other -> Error ("unknown mergeable " ^ other)
-  in
-  let* op_keeper =
-    match Yojson.Safe.Util.member "keeper" json with
-    | `Null -> Ok None
-    | `String name -> Ok (Some name)
-    | _ -> Error "keeper is neither a string nor null"
-  in
-  Ok
-    { op_number; op_title; op_head_branch; op_draft; op_checks; op_review
-    ; op_mergeable; op_keeper
-    }
-
-let decode_repository_pulls json =
-  let* rp_repository = required_string_field json "repository_id" in
-  let* pulls = required_object_field json "pulls" in
-  let* state = required_string_field pulls "state" in
-  let* rp_state =
-    match state with
-    | "not_read" -> Ok Repo_pulls_not_read
-    | "not_github" -> Ok Repo_not_github
-    | "read" ->
-        let* rows = required_list_field pulls "pulls" in
-        let* server_undecodable = required_int_field pulls "undecodable" in
-        let decoded, undecodable =
-          List.fold_right
-            (fun row (decoded, undecodable) ->
-              match decode_open_pull row with
-              | Ok pull -> (pull :: decoded, undecodable)
-              | Error _ -> (decoded, undecodable + 1))
-            rows ([], server_undecodable)
-        in
-        Ok (Repo_pulls_read { pulls = decoded; undecodable })
-    | "failed" ->
-        let* failure = required_object_field pulls "failure" in
-        let* kind = required_string_field failure "kind" in
-        (* The detail each kind carries: when a rate limit lifts, the HTTP
-           status, the first GraphQL message, or a transport message. *)
-        let member key = Yojson.Safe.Util.member key failure in
-        let reset_at =
-          match member "reset_at" with
-          | `Float at -> Some at
-          | `Int seconds -> Some (float_of_int seconds)
-          | _ -> None
-        in
-        let detail =
-          match (reset_at, member "status", member "messages", member "message") with
-          | Some at, _, _, _ ->
-              let tm = Unix.gmtime at in
-              Some (Printf.sprintf "resets %02d:%02dZ" tm.Unix.tm_hour tm.Unix.tm_min)
-          | None, `Int status, _, _ -> Some (Printf.sprintf "HTTP %d" status)
-          | None, _, `List (`String first :: _), _ -> Some first
-          | None, _, _, `String message -> Some message
-          | None, _, _, _ -> None
-        in
-        Ok
-          (Repo_pulls_failed
-             (match detail with Some d -> kind ^ ": " ^ d | None -> kind))
-    | other -> Error ("unknown repository pulls state " ^ other)
-  in
-  Ok { rp_repository; rp_state }
-
 let load_repository_pulls ~(host : string) ~(port : int) :
     (overview_pulls_reading, string) result =
   match Masc_tui_http.fetch_repository_pulls ~host ~port with
   | Error err -> Error ("pull requests load failed: " ^ err)
-  | Ok json ->
-      let* reader_json = required_object_field json "reader" in
-      let* reader_state = required_string_field reader_json "state" in
-      let* reader =
-        match reader_state with
-        | "ready" ->
-            let* keeper = required_string_field reader_json "keeper" in
-            Ok (Pulls_reader_ready keeper)
-        | "not_declared" ->
-            Ok
-              (Pulls_reader_not_ready
-                 "not_declared (no [repositories] pr_reader read yet)")
-        | "declaration_invalid" | "keeper_missing" | "token_unavailable" ->
-            let* reason = optional_string_field reader_json "reason" in
-            let* keeper = optional_string_field reader_json "keeper" in
-            Ok
-              (Pulls_reader_not_ready
-                 (String.concat " "
-                    (List.filter_map Fun.id
-                       [ Some reader_state; keeper; reason ])))
-        | other -> Error ("unknown pull request reader state " ^ other)
-      in
-      let* keepers_json = required_object_field json "keepers" in
-      let* keepers_state = required_string_field keepers_json "state" in
-      let* keepers =
-        match keepers_state with
-        | "not_listed" -> Ok Pulls_keepers_not_listed
-        | "listed" -> Ok Pulls_keepers_listed
-        | "list_failed" ->
-            let* reason = required_string_field keepers_json "reason" in
-            Ok (Pulls_keepers_failed reason)
-        | other -> Error ("unknown Keeper list state " ^ other)
-      in
-      let* rows = required_list_field json "repositories" in
-      (* Row by row: one repository this build cannot read says so on its own
-         line instead of blanking every other repository's line. *)
-      let repositories =
-        List.mapi
-          (fun index row ->
-            match decode_repository_pulls row with
-            | Ok decoded -> decoded
-            | Error err ->
-                let rp_repository =
-                  match Yojson.Safe.Util.member "repository_id" row with
-                  | `String id -> id
-                  | _ -> Printf.sprintf "repository #%d" (index + 1)
-                in
-                { rp_repository; rp_state = Repo_pulls_failed ("unreadable: " ^ err) })
-          rows
-      in
-      let* repositories_error = optional_string_field json "repositories_error" in
-      Ok (Overview_pulls_read { reader; keepers; repositories_error; repositories })
+  | Ok json -> Repository_pulls.decode_reading json
 
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
@@ -1360,7 +1215,6 @@ let load_overview ~(host : string) ~(port : int) :
   | Error err -> Error ("overview load failed: " ^ err)
   | Ok json ->
       let* summary = required_object_field json "summary" in
-      let* command_focus = optional_object_field json "command_focus" in
       let* incidents =
         let* items = optional_list_field json "incidents" in
         decode_attention_items items
@@ -1377,20 +1231,6 @@ let load_overview ~(host : string) ~(port : int) :
       let* keepers_unread =
         let* items = required_list_field json "keepers_unread" in
         Keeper_snapshot_unread.list_of_json (`List items)
-      in
-      let* top_attention =
-        let fallback =
-          match incidents with
-          | first :: _ -> Some first
-          | [] -> None
-        in
-        match command_focus with
-        | None -> Ok fallback
-        | Some command_focus -> (
-            match Yojson.Safe.Util.member "top_attention" command_focus with
-            | `Null -> Ok fallback
-            | value ->
-                Result.map (fun item -> Some item) (decode_attention_item value))
       in
       let* ov_workspace_health =
         let* workspace_health = required_string_field summary "workspace_health" in
@@ -1456,7 +1296,6 @@ let load_overview ~(host : string) ~(port : int) :
                    if List.mem item kept then kept else item :: kept)
                  []
             |> List.rev);
-          ov_top_attention = top_attention;
           ov_generated_at;
         }
 

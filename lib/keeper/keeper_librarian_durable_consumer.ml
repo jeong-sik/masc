@@ -155,8 +155,10 @@ let started_trace (written : B.record) =
   | B.History_restarted { trace_id } -> Some trace_id
   | B.Turn_ended { turn_ref; history_at_start = B.Fresh_history; position = _ } ->
     Some (Ids.Turn_ref.trace_id turn_ref)
-  | B.Turn_ended { turn_ref = _; history_at_start = B.Continued_history; position = _ } ->
-    None
+  | B.Turn_ended
+      { turn_ref = _
+      ; history_at_start = B.Continued_history | B.Continued_history_from _; position = _
+      } -> None
 ;;
 
 (* Row 1b (#37362). The traces that started after [trace_id], in the order

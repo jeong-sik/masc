@@ -1293,7 +1293,10 @@ status: reference
   끝났을 때 저장된 History가 몇 Atom인지와 마지막 Atom의 digest를 적는다.
   History 안에는 turn의 경계가 없으므로, turn이라는 사건을 History 안의 위치로
   옮겨 적는 유일한 기록이다. turn이 Atom이 없는 History에서 시작했는지
-  (`fresh`/`continued`)도 같이 적는다. Checkpoint 파일이 있었는지가 아니라 Atom이
+  (`fresh`/`continued`)도 같이 적는다. 이어지는 History로 시작한 turn은 자기 시작
+  위치(`continued_from`, 시작 Atom 수와 그 Atom을 여는 메시지의 digest)도 적는다.
+  그래야 못 읽는 줄 하나가 회차를 영구히 세우지 않는다 — 뒤따르는 줄이 자기 시작
+  상태를 실어 그 줄의 정체를 가른다. Checkpoint 파일이 있었는지가 아니라 Atom이
   있었는지로 정한다. Keeper는 빈 Checkpoint를 갖고 만들어지기 때문이다. 읽는 쪽은
   같은 재시작 구간 안의 줄을 Atom 수로 줄 세운다.
   같은 파일에 `history_restarted` 줄도 쌓인다. "이 trace의 Atom 번호가 이 줄부터

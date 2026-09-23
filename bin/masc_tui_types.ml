@@ -1914,6 +1914,12 @@ type overview_keeper = {
   okp_phase: overview_keeper_phase;
   okp_last_turn_ago_s: float option;
       (** [None] when the Keeper has not finished a turn this process saw. *)
+  okp_paused: bool option;
+      (** The brief's [paused]: an operator paused this Keeper. It is read
+          apart from [okp_phase] because a paused Keeper is left out of
+          autoboot, so after a server restart it has no registry entry and
+          its phase is [null] while [paused] still says [true]. [None] when
+          the brief carried no boolean there. *)
 }
 
 type overview_snapshot = {

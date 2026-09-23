@@ -73,7 +73,7 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
   let seeded = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None ~now:100.
       ~source:{kind = Current.Librarian; trace_id = keeper_id} ~facts:[fact] () |> require in
   let seeded = if scenario = Context_only then
-      Current.apply_disposition ~keepers_dir ~keeper_id ~now:101.
+      Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:101.
         ~source:{kind = Current.Librarian; trace_id = keeper_id}
         ~official_range_id:{receipt_scope = keepers_dir; after_boundary_line = 0;
           turns = [1, Ids.Turn_ref.make ~trace_id:keeper_id ~absolute_turn:1]}

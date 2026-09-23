@@ -171,12 +171,6 @@ let keepers_for_runtime (state : state) (runtime_id : string) : Tui_decode.keepe
            | Some def -> String.equal def runtime_id
            | None -> false)
 
-let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
-  let turns = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc + k.k_total_turns) 0 keepers in
-  let tokens = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc + k.k_total_tokens) 0 keepers in
-  let cost = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc +. k.k_total_cost_usd) 0.0 keepers in
-  turns, tokens, cost
-
 (* Pure preparation shared with the loop. Terminal dimensions are the raw
    cached measurement, before the surface strip and composer reserve rows. *)
 let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols =
@@ -2315,6 +2309,10 @@ let board_heading_with_tail ~cols head tail =
    The page is one listing of fifty and the hearth it belongs to may hold
    hundreds; a count taken from it would understate every hearth and
    understate the crowded ones most. *)
+(* Between two hearths on the census row. Its width is what the row budgets
+   with, so the two cannot drift apart. *)
+let census_separator = "  \xc2\xb7  "
+
 let board_hearth_census_line ~cols (state : state) =
   match state.board_hearths with
   | [] ->
@@ -2345,27 +2343,46 @@ let board_hearth_census_line ~cols (state : state) =
       in
       (* What fits, then how many it could not carry. The board here holds
          eleven hearths and a narrow pane holds four of them; a row sized by
-         how many exist is a row that runs off the edge on the next one. *)
+         how many exist is a row that runs off the edge on the next one.
+
+         Every piece is measured where it is drawn. The budget used to count
+         three cells for the separator this row draws five wide, and to leave
+         a fixed 26 for a lead and a tail it never measured: live, eight
+         hearths ran past the frame and "198 posts" -- the reading the row
+         ends on -- was cut to "19". *)
+      let cells = Message_layout.display_width in
+      let label = "hearths" in
+      let lead = "  " ^ label ^ " " in
+      let tail =
+        Printf.sprintf "   %s" (Masc_tui_message_layout.count_noun total "post")
+      in
+      let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
+      (* Room for the widest note the row could end on: any hearth but the
+         first may be the one that does not fit. *)
+      let room =
+        max 8
+          (framed_inner_width cols - cells lead - cells tail
+          - cells (dropped_note (List.length census)))
+      in
       let rec take kept used = function
         | [] -> (List.rev kept, 0)
         | ((name, count, _) as banded_entry) :: rest ->
             let width =
-              Message_layout.display_width
-                (Printf.sprintf "%s %d" name count)
-              + if kept = [] then 0 else 3
+              cells (Printf.sprintf "%s %d" name count)
+              + if kept = [] then 0 else cells census_separator
             in
-            if used + width > max 8 (cols - 26) then
-              (List.rev kept, 1 + List.length rest)
+            if used + width > room then (List.rev kept, 1 + List.length rest)
             else take (banded_entry :: kept) (used + width) rest
       in
       let kept, dropped = take [] 0 banded in
       let shown =
-        List.map entry kept |> String.concat (Ansi.dim ^ "  \xc2\xb7  " ^ Ansi.reset)
+        List.map entry kept
+        |> String.concat (Ansi.dim ^ census_separator ^ Ansi.reset)
       in
-      Printf.sprintf "  %shearths%s %s%s%s" Ansi.dim Ansi.reset shown
+      Printf.sprintf "  %s%s%s %s%s%s" Ansi.dim label Ansi.reset shown
         (if dropped = 0 then ""
-         else Printf.sprintf "%s  \xc2\xb7  +%d%s" Ansi.dim dropped Ansi.reset)
-        (Printf.sprintf "%s   %s%s" Ansi.dim (Masc_tui_message_layout.count_noun total "post") Ansi.reset)
+         else Printf.sprintf "%s%s%s" Ansi.dim (dropped_note dropped) Ansi.reset)
+        (Printf.sprintf "%s%s%s" Ansi.dim tail Ansi.reset)
 
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -4537,6 +4554,26 @@ let keeper_runtime_label (runtime : keeper_runtime option) =
         (Tui_decode.keeper_phase_to_string row.kr_phase)
         (Terminal_text.single_line row.kr_runtime_id)
 
+(* The two halves of the runtime cell, so the column that has to be wide
+   enough for them is measured from the same strings that get drawn. *)
+let keeper_runtime_parts (row : keeper_runtime) =
+  let phase =
+    if row.kr_paused then "paused "
+    else if Tui_decode.keeper_phase_is_running row.kr_phase then ""
+    else Tui_decode.keeper_phase_to_string row.kr_phase ^ " "
+  in
+  (phase, Terminal_text.single_line row.kr_runtime_id)
+
+(* What the widest row would spend on this cell. A keeper the roster cannot
+   see draws an em dash, which is one cell. *)
+let keeper_runtime_cells (runtime : keeper_runtime option) =
+  match runtime with
+  | None -> 1
+  | Some row ->
+      let phase, runtime_id = keeper_runtime_parts row in
+      Message_layout.display_width phase
+      + Message_layout.display_width runtime_id
+
 let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
   match runtime with
   | None -> fit_width "\xe2\x80\x94" width
@@ -4552,12 +4589,7 @@ let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
          operator acts on -- a person stopped that one, so nothing is wrong
          with it. The phase this replaces is still on the chat header, which
          draws [kr_phase] unconditionally. *)
-      let phase =
-        if row.kr_paused then "paused "
-        else if Tui_decode.keeper_phase_is_running row.kr_phase then ""
-        else Tui_decode.keeper_phase_to_string row.kr_phase ^ " "
-      in
-      let runtime_id = Terminal_text.single_line row.kr_runtime_id in
+      let phase, runtime_id = keeper_runtime_parts row in
       let phase_width = Message_layout.display_width phase in
       if phase_width >= width then fit_width (keeper_runtime_label runtime) width
       else
@@ -5000,7 +5032,23 @@ let render_keeper_list (state : state) =
             (Theme.warn ()) (List.length observed) (Masc_tui_message_layout.count_noun total "keeper") Ansi.reset)
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
-  let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
+  (* Measured over every reading rather than the rows on screen, so the
+     columns do not move while a reader scrolls. *)
+  let widest_runtime =
+    List.fold_left
+      (fun widest (reading : Keeper_control.reading) ->
+        let runtime =
+          match reading.Keeper_control.liveness with
+          | Keeper_control.Present row -> Some row
+          | Keeper_control.Absent | Keeper_control.Unobserved
+          | Keeper_control.Invalid _ -> None
+        in
+        max widest (keeper_runtime_cells runtime))
+      0 readings
+  in
+  let columns =
+    Render_schedule.allocate_keeper_columns ~inner_width:inner ~widest_runtime
+  in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);

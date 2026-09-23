@@ -1066,6 +1066,11 @@ let completed_output
           [ "applied", absorbed_statements_json disposition.absorbed_applied
           ; "not_applied", absorbed_statements_json disposition.absorbed_not_applied
           ] )
+    ; ( "claims_not_applied"
+      , `List
+          (List.map
+             (fun fact -> `String (Keeper_memory_os_types.memory_id fact))
+             disposition.claims_not_applied) )
     ; "exact_output", exact_output
     ; "before", current_selection_registry_summary inp.current
     ; ( "after"
@@ -1382,6 +1387,7 @@ let run_best_effort
                  ?durable_range_id
                  ?official_range_id
                  ~absorbed:applied_absorbed
+                 ~revisions:selection.revisions
                ~keepers_dir
                ~keeper_id
                ~now:(Time_compat.now ())
@@ -1403,9 +1409,12 @@ let run_best_effort
               | Memory_only -> ()
               | Continuity { prepared; working_state } ->
                 publish_continuity prepared working_state);
-             (* The snapshot is committed; each supersede the answer stated is
-                now a Revised event on the old id (RFC-0418). A sidecar that
-                cannot be written is said here and does not undo the pass. *)
+             (* The snapshot is committed; each supersede it carried out is now
+                a Revised event on the old id (RFC-0418). A supersede of a
+                memory the keeper removed during the pass was not carried out
+                and gets no event, so the old id keeps the one successor the
+                keeper gave it. A sidecar that cannot be written is said here
+                and does not undo the pass. *)
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Keeper_memory_os_events.append_all
                  ~keepers_dir
@@ -1419,7 +1428,7 @@ let run_best_effort
                            Keeper_memory_os_events.Revised
                              { superseded_by = revision.superseded_by }
                        })
-                    selection.revisions))
+                    disposition.revisions_applied))
              |> List.iter (fun error ->
                Log.Keeper.warn
                  ~keeper_name:keeper_id

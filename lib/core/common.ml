@@ -136,6 +136,7 @@ type keeper_runtime_store_placement =
   | Keeper_scoped_dated
   | Keeper_scoped_versioned
   | Keeper_scoped_rotated
+  | Keepers_root_scoped
   | Workspace_scoped
 
 let keeper_runtime_store_placement = function
@@ -146,7 +147,8 @@ let keeper_runtime_store_placement = function
   | Keeper_crash_events -> Keeper_scoped_dated
   | Keeper_reaction_ledger -> Keeper_scoped_versioned
   | Keeper_runtime_manifests -> Keeper_scoped_rotated
-  | Keeper_tool_usage | Keeper_trajectories -> Workspace_scoped
+  | Keeper_tool_usage -> Keepers_root_scoped
+  | Keeper_trajectories -> Workspace_scoped
 let auth_dir_from_base_path ~base_path =
   Filename.concat (masc_dir_from_base_path ~base_path) "auth"
 

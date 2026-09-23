@@ -85,6 +85,7 @@ val keeper_cost_aggregates_json :
   config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   window_minutes:int ->
+  now_ts:float ->
   Yojson.Safe.t
 (** Renders per-keeper cost and latency aggregates for the provider dashboard. *)
 

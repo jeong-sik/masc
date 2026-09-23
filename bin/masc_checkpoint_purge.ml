@@ -97,6 +97,7 @@ let load_error_text = function
   | Store.Store_error detail -> "store error: " ^ detail
   | Store.Parse_error detail -> "parse error: " ^ detail
   | Store.Io_error detail -> "io error: " ^ detail
+  | Store.Read_failed { detail; _ } -> "read failed: " ^ detail
   | Store.Agent_core_error detail -> "sdk error: " ^ detail
 
 let read_file_bytes path =

@@ -233,6 +233,7 @@ let retired_checkpoint_never_becomes_readable = function
   | Keeper_checkpoint_store.Store_error _
   | Keeper_checkpoint_store.Parse_error _
   | Keeper_checkpoint_store.Io_error _
+  | Keeper_checkpoint_store.Read_failed _
   | Keeper_checkpoint_store.Agent_core_error _ -> false
 ;;
 

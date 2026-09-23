@@ -175,7 +175,7 @@ let load_context_from_checkpoint_classified ~trace_id ~base_dir =
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_store))]
          ();
        Log.Keeper.error "keeper:%s AGENT_CORE checkpoint store error: %s" trace_id detail
-   | Error (Io_error detail) ->
+   | Error (Io_error detail | Read_failed { detail; _ }) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_io))]
@@ -198,6 +198,7 @@ let load_context_from_checkpoint_classified ~trace_id ~base_dir =
       | Parse_error _
       | Store_error _
       | Io_error _
+      | Read_failed _
       | Agent_core_error _ as error ) ->
     (* Each was logged above with its own diagnostics. *)
     Log.Keeper.warn

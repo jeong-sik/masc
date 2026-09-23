@@ -44,7 +44,8 @@ let write_heartbeat_snapshot
     | Error (Keeper_checkpoint_store.Superseded_version _) -> None
     | Error
         Keeper_checkpoint_store.(
-          Store_error detail | Parse_error detail | Io_error detail | Agent_core_error detail)
+          Store_error detail | Parse_error detail | Io_error detail
+          | Read_failed { detail; _ } | Agent_core_error detail)
       ->
       Log.Keeper.warn
         "keeper:%s heartbeat message count unavailable: %s"

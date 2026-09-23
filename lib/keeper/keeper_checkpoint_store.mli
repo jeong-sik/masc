@@ -97,6 +97,13 @@ val with_session_lock :
 
 (** Load failure classification used by callers to distinguish
     cold-start absence from real I/O / parse / agent-core errors. *)
+(** Why reading the bytes failed, when the failure says nothing about what
+    the file holds. *)
+type checkpoint_read_failure =
+  | Os_error of Unix.error  (** An open, stat or read syscall failed. *)
+  | Changed_while_read  (** The file or its directory changed during the read. *)
+  | Read_raised  (** The read or decode raised an exception. *)
+
 type checkpoint_load_error =
   | Not_found
   | Store_error of string
@@ -109,6 +116,10 @@ type checkpoint_load_error =
       newer binary can still read. *)
   | Superseded_version of { expected : int; got : int }
   | Io_error of string
+      (** The file is where it may not be read from: not a regular file, or
+          outside the owned directory chain. *)
+  | Read_failed of { cause : checkpoint_read_failure; detail : string }
+      (** The read itself failed; the same bytes may read fine next time. *)
   | Agent_core_error of string
 
 val checkpoint_load_error_to_string : checkpoint_load_error -> string
@@ -174,6 +185,9 @@ type unreadable_archive_outcome =
           turn can start from it, so nothing was moved. *)
 
 type unreadable_archive_error =
+  | Archive_read_failed of { cause : checkpoint_read_failure; detail : string }
+      (** The read under the lock failed at the OS level, so nothing is known
+          about the bytes and they were not moved. *)
   | Archive_not_moved of string
       (** The canonical was left where it was. *)
   | Archive_durability_unknown of { archive_path : string; detail : string }
@@ -183,16 +197,19 @@ type unreadable_archive_error =
 val unreadable_archive_error_to_string : unreadable_archive_error -> string
 
 (** Move a canonical checkpoint no turn can read to
-    [<canonical>.unreadable-<epoch ms>] in the same directory, for the
+    [<canonical>.unreadable-<epoch ms>] in the same directory, the
+    milliseconds of [archived_at] (epoch seconds from [Time_compat.now], the
+    clock a checkpoint's [created_at] comes from), for the
     operator's [masc_keeper_clear]. The file is renamed, never rewritten or
-    deleted. The read and the rename run under the same session lock the
-    writers take, and a name already taken is refused rather than
+    deleted. The read ({!load_agent_core}, the reader a turn uses) and the
+    rename run under the same session lock the writers take, and a name already taken is refused rather than
     overwritten. A later-version checkpoint is unreadable here too; an
     earlier-version one is not, since a turn replaces it. The archive name
     does not end in [.json], so history listing and pruning skip it. *)
 val archive_unreadable_canonical :
   session_dir:string ->
   session_id:string ->
+  archived_at:float ->
   (unreadable_archive_outcome, unreadable_archive_error) result
 
 type checkpoint_identity_error =

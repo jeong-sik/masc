@@ -54,7 +54,8 @@ let checkpoint_load_error_fields
       , `Assoc [ "expected", `Int expected; "found", `Int got ] )
     | Store_error detail -> "unavailable", "store_error", `String detail
     | Parse_error detail -> "unavailable", "parse_error", `String detail
-    | Io_error detail -> "unavailable", "io_error", `String detail
+    | Io_error detail | Read_failed { detail; _ } ->
+      "unavailable", "io_error", `String detail
     | Agent_core_error detail ->
       "unavailable", "agent_core_error", `String detail
   in
@@ -85,7 +86,7 @@ let current_checkpoint_error_json
     `Assoc [ "kind", `String "store_error"; "detail", `String detail ]
   | Parse_error detail ->
     `Assoc [ "kind", `String "parse_error"; "detail", `String detail ]
-  | Io_error detail ->
+  | Io_error detail | Read_failed { detail; _ } ->
     `Assoc [ "kind", `String "io_error"; "detail", `String detail ]
   | Agent_core_error detail ->
     `Assoc [ "kind", `String "agent_core_error"; "detail", `String detail ]
@@ -141,7 +142,8 @@ let inventory_json (config : Workspace.config) (name : string)
           match error with
           | Keeper_checkpoint_store.Not_found
           | Superseded_version _ -> "missing"
-          | Store_error _ | Parse_error _ | Io_error _ | Agent_core_error _ ->
+          | Store_error _ | Parse_error _ | Io_error _ | Read_failed _
+          | Agent_core_error _ ->
             "unavailable"
         in
         None, "", status, current_checkpoint_error_json error

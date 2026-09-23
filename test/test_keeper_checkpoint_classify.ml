@@ -35,6 +35,7 @@ let pp_err fmt = function
   | Store.Store_error s -> Format.fprintf fmt "Store_error(%s)" s
   | Store.Parse_error s -> Format.fprintf fmt "Parse_error(%s)" s
   | Store.Io_error s -> Format.fprintf fmt "Io_error(%s)" s
+  | Store.Read_failed { detail; _ } -> Format.fprintf fmt "Read_failed(%s)" detail
   | Store.Agent_core_error s -> Format.fprintf fmt "Agent_core_error(%s)" s
 
 let load_err = Alcotest.testable pp_err ( = )

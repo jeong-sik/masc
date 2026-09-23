@@ -235,6 +235,11 @@ let delete_agent_core_history_files ~(session_dir : string) ~(snapshot_ids : str
 (* Delta Checkpoint Shadow-Apply removed: Agent_core.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)
 
+type checkpoint_read_failure =
+  | Os_error of Unix.error
+  | Changed_while_read
+  | Read_raised
+
 type checkpoint_load_error =
   | Not_found
   | Store_error of string
@@ -247,6 +252,7 @@ type checkpoint_load_error =
       newer binary can still read. *)
   | Superseded_version of { expected : int; got : int }
   | Io_error of string
+  | Read_failed of { cause : checkpoint_read_failure; detail : string }
   (** Catch-all for agent-core errors outside the Io / Serialization families
       (Api / Agent / Mcp / Config / Orchestration / Internal).
       Distinct from Io_error so observers can tell a local
@@ -310,7 +316,16 @@ let read_checkpoint_bytes ~(session_dir : string) path : (string, checkpoint_loa
   | Ok (Some bytes) -> Ok bytes
   | Ok None -> Error Not_found
   | Error error ->
-    Error (Io_error (Fs_compat.owned_regular_file_read_error_to_string error))
+    let detail = Fs_compat.owned_regular_file_read_error_to_string error in
+    (match error.failure with
+     | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _ ->
+       Error (Io_error detail)
+     | Fs_compat.Filesystem_identity_changed _ ->
+       Error (Read_failed { cause = Changed_while_read; detail })
+     | Fs_compat.Owned_file_operation_failed { cause = Unix.Unix_error (errno, _, _); _ } ->
+       Error (Read_failed { cause = Os_error errno; detail })
+     | Fs_compat.Owned_file_operation_failed _ ->
+       Error (Read_failed { cause = Read_raised; detail }))
 
 let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string) :
     (Agent_core.Checkpoint.t, checkpoint_load_error) result =
@@ -456,7 +471,9 @@ let load_agent_core ~(session_dir : string) ~(session_id : string) :
          | Error e -> Error (classify_core_error e))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> Error (Io_error (Printexc.to_string exn))
+    | Unix.Unix_error (errno, _, _) as exn ->
+      Error (Read_failed { cause = Os_error errno; detail = Printexc.to_string exn })
+    | exn -> Error (Read_failed { cause = Read_raised; detail = Printexc.to_string exn })
 
 (** Message count of the canonical checkpoint. Answered from the canonical
     summary while the file on disk is the one the summary was taken from;
@@ -547,6 +564,7 @@ let checkpoint_load_error_to_string = function
   | Store_error detail
   | Parse_error detail
   | Io_error detail
+  | Read_failed { detail; _ }
   | Agent_core_error detail -> detail
 
 let save_agent_core_error_to_string = function
@@ -756,10 +774,13 @@ type unreadable_archive_outcome =
   | Canonical_loadable
 
 type unreadable_archive_error =
+  | Archive_read_failed of { cause : checkpoint_read_failure; detail : string }
   | Archive_not_moved of string
   | Archive_durability_unknown of { archive_path : string; detail : string }
 
 let unreadable_archive_error_to_string = function
+  | Archive_read_failed { detail; _ } ->
+    "the checkpoint read failed at the OS level, so it was not moved: " ^ detail
   | Archive_not_moved detail -> "unreadable checkpoint was not moved: " ^ detail
   | Archive_durability_unknown { archive_path; detail } ->
     Printf.sprintf
@@ -767,6 +788,7 @@ let unreadable_archive_error_to_string = function
       archive_path detail
 
 let archive_unreadable_canonical ~(session_dir : string) ~(session_id : string)
+    ~(archived_at : float)
   : (unreadable_archive_outcome, unreadable_archive_error) result =
   if not (leaf_is_real_segment session_id) then
     Error (Archive_not_moved "session_id is not a real path segment")
@@ -774,13 +796,16 @@ let archive_unreadable_canonical ~(session_dir : string) ~(session_id : string)
     let locked =
       with_session_lock ~session_dir (fun session_dir ->
         let canonical_path = agent_core_checkpoint_path ~session_dir ~session_id in
-        (* Read again under the lock: only what is unreadable now is moved. *)
-        match load_canonical_strict canonical_path with
-        | Ok None | Error Not_found -> Ok Canonical_absent
-        | Ok (Some _) | Error (Superseded_version _) -> Ok Canonical_loadable
+        (* Read again under the lock, with the reader and classification a
+           turn uses: only what a turn cannot read now is moved, and an OS
+           read failure says nothing about the bytes. *)
+        match load_agent_core ~session_dir ~session_id with
+        | Error Not_found -> Ok Canonical_absent
+        | Ok _ | Error (Superseded_version _) -> Ok Canonical_loadable
+        | Error (Read_failed { cause; detail }) -> Error (Archive_read_failed { cause; detail })
         | Error ((Store_error _ | Parse_error _ | Io_error _ | Agent_core_error _) as unreadable) ->
           let archive_path =
-            unreadable_archive_path ~canonical_path ~archived_at:(Time_compat.now ())
+            unreadable_archive_path ~canonical_path ~archived_at
           in
           let move () =
             match Unix.lstat archive_path with

@@ -219,7 +219,8 @@ let handle_keeper_reset ctx args : tool_result =
    keeper meta that cannot be read is not a keeper with nothing to clear. A
    checkpoint that cannot be read fails every turn, so the clear moves it
    aside ([Keeper_checkpoint_store.archive_unreadable_canonical]) instead of
-   refusing. *)
+   refusing. A read that failed at the OS level says nothing about the bytes,
+   so that clear is refused and nothing moves. *)
 type keeper_clear_report =
   | Clear_meta_unreadable of string
   | Clear_meta_missing
@@ -227,6 +228,11 @@ type keeper_clear_report =
       { path : string
       ; error : Keeper_checkpoint_store.checkpoint_load_error
       ; session : session_context
+      }
+  | Clear_checkpoint_read_failed of
+      { path : string
+      ; cause : Keeper_checkpoint_store.checkpoint_read_failure
+      ; detail : string
       }
   | Clear_no_checkpoint
   | Clear_checkpoint_loaded of
@@ -304,7 +310,13 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
               way, so a version bump does not leave the keeper uncleanable
               with its official-client session still in place. *)
            | Error (Superseded_version _) -> Clear_no_checkpoint
-           | Error error ->
+           | Error (Read_failed { cause; detail }) ->
+             Clear_checkpoint_read_failed
+               { path = Keeper_checkpoint_store.agent_core_checkpoint_path
+                   ~session_dir:session.session_dir ~session_id:trace_id
+               ; cause
+               ; detail }
+           | Error ((Store_error _ | Parse_error _ | Io_error _ | Agent_core_error _) as error) ->
              Clear_checkpoint_unreadable
                { path = Keeper_checkpoint_store.agent_core_checkpoint_path
                    ~session_dir:session.session_dir ~session_id:trace_id
@@ -320,6 +332,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         | ( Clear_meta_unreadable _
           | Clear_meta_missing
           | Clear_checkpoint_unreadable _
+          | Clear_checkpoint_read_failed _
           | Clear_no_checkpoint ) ->
           false
       in
@@ -420,6 +433,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             match
               Keeper_checkpoint_store.archive_unreadable_canonical
                 ~session_dir:session.session_dir ~session_id:session.session_id
+                ~archived_at:(Time_compat.now ())
             with
             | Ok (Keeper_checkpoint_store.Archived { archive_path; unreadable }) ->
               Log.Keeper.warn
@@ -433,7 +447,9 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
               not_moved ~class_:Tool_result.Workflow_rejection
                 ~effect_disposition:Tool_result.Proven_post_effect ~code:Tool_args.Conflict
                 "it was readable when read again under the lock, so history was left unchanged" []
-            | Error (Keeper_checkpoint_store.Archive_not_moved _ as archive_error) ->
+            | Error
+                (( Keeper_checkpoint_store.Archive_read_failed _
+                 | Keeper_checkpoint_store.Archive_not_moved _ ) as archive_error) ->
               not_moved ~class_:Tool_result.Runtime_failure
                 ~effect_disposition:Tool_result.Proven_post_effect ~code:Tool_args.Internal_error
                 (Keeper_checkpoint_store.unreadable_archive_error_to_string archive_error) []
@@ -444,6 +460,27 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                 ~effect_disposition:Tool_result.Effect_outcome_unknown ~code:Tool_args.Internal_error
                 (Keeper_checkpoint_store.unreadable_archive_error_to_string archive_error)
                 [ "archive_path", `String archive_path ])
+        | Clear_checkpoint_read_failed { path; cause; detail } ->
+          Log.Keeper.error
+            "%s: history not cleared: the checkpoint read at %s failed at the OS level (reason=%s): %s"
+            name path reason detail;
+          keeper_clear_failure
+            ~class_:Tool_result.Runtime_failure
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ~code:Tool_args.Internal_error
+            ~message:
+              (Printf.sprintf
+                 "history not cleared: reading the checkpoint at %s failed at the OS level, which says nothing about its bytes, so it was not moved: %s. Fix the cause and run masc_keeper_clear again."
+                 path detail)
+            [ "name", `String name
+            ; "checkpoint_path", `String path
+            ; ( "read_failure"
+              , `String
+                  (match cause with
+                   | Keeper_checkpoint_store.Os_error errno -> "os_error: " ^ Unix.error_message errno
+                   | Keeper_checkpoint_store.Changed_while_read -> "changed_while_read"
+                   | Keeper_checkpoint_store.Read_raised -> "read_raised") )
+            ]
         | Clear_meta_unreadable detail ->
           Log.Keeper.error
             "%s: operator clear did not look for a checkpoint (reason=%s): keeper meta \

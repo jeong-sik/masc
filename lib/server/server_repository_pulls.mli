@@ -47,9 +47,11 @@ type pull_request =
   ; review : review_state
   ; mergeable : mergeable
   ; author : string option
-      (** The git author name of the head commit. [None] when the pull
-          request reports no commit, or GitHub gives the author or its name
-          as [null]. *)
+      (** The git author name of the most recent commit with one parent
+          (RFC-0465 §2.1). A merge commit does not say who wrote the pull
+          request, so it is skipped. [None] when the window holds no such
+          commit, the pull request reports no commit, or GitHub gives the
+          author or its name as [null]. *)
   ; updated_at : float
   }
 
@@ -204,12 +206,12 @@ val refresh :
     itself cannot be read. *)
 
 val keeper_of_author : keepers:string list -> pull_request -> string option
-(** [Some author] when the head commit's author name is exactly one of
-    [keepers] (case counts); [None] otherwise. A Keeper leaves the branch
-    after opening a pull request, so the join is by who wrote the last
-    commit, not by which checkout has the branch. The result is for display
-    only and is not an identity for authority: any committer can set the
-    author name. *)
+(** [Some author] when the author name read from the most recent single-parent
+    commit is exactly one of [keepers] (case counts); [None] otherwise. A
+    Keeper leaves the branch after opening a pull request, so the join is by
+    who wrote the last commit, not by which checkout has the branch. The
+    result is for display only and is not an identity for authority: any
+    committer can set the author name. *)
 
 val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 (** Each pull carries ["author"] and ["keeper"] (string or [null]) and

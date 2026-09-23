@@ -35,6 +35,7 @@ let ok_response body =
 
 let pull_node
       ?(author = {|{"name":"edgar"}|})
+      ?(parents = 1)
       ?(mergeable = {|"mergeable":"MERGEABLE",|})
       ~number
       ~branch
@@ -46,13 +47,14 @@ let pull_node
   Printf.sprintf
     {|{"number":%d,"title":"PR %d","headRefName":"%s","isDraft":%b,
        "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":%s,%s
-       "commits":{"nodes":[{"commit":{"author":%s,"statusCheckRollup":%s}}]}}|}
+       "commits":{"nodes":[{"commit":{"parents":{"totalCount":%d},"author":%s,"statusCheckRollup":%s}}]}}|}
     number
     number
     branch
     draft
     review
     mergeable
+    parents
     author
     rollup
 
@@ -597,6 +599,42 @@ let test_unknown_mergeable_or_missing_author_is_counted () =
   Alcotest.(check (list int)) "none of them is shown as a known state" [ 5 ]
     (List.map (fun (p : Pulls.pull_request) -> p.number) pulls)
 
+(* A merge commit at the head does not say who wrote the pull request: its
+   author is whoever brought the base in (GitHub's "Update branch",
+   pr-updater's update-branch, a local [git merge origin/main]). The author is
+   the most recent commit with one parent; the CI state still comes from the
+   head. A window that is all merge commits reads no author rather than the
+   merger. *)
+let test_merge_commit_head_does_not_own_the_pull_request () =
+  let body =
+    page
+      ~has_next:false
+      ~cursor:None
+      [ {|{"number":1,"title":"PR 1","headRefName":"feat/x","isDraft":false,
+          "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+          "commits":{"nodes":[
+            {"commit":{"parents":{"totalCount":1},"author":{"name":"ocaml-agent-ic"},"statusCheckRollup":{"state":"SUCCESS"}}},
+            {"commit":{"parents":{"totalCount":2},"author":{"name":"pr-updater"},"statusCheckRollup":{"state":"FAILURE"}}}]}}|}
+      ; {|{"number":2,"title":"PR 2","headRefName":"feat/y","isDraft":false,
+          "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,"mergeable":"MERGEABLE",
+          "commits":{"nodes":[
+            {"commit":{"parents":{"totalCount":2},"author":{"name":"pr-updater"},"statusCheckRollup":{"state":"SUCCESS"}}}]}}|}
+      ]
+  in
+  let http_post, _ = recording_stub [ ok_response body ] in
+  let pulls, undecodable = Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> read_or_fail in
+  Alcotest.(check int) "both rows decode" 0 undecodable;
+  match pulls with
+  | [ with_merge; all_merge ] ->
+    Alcotest.(check (option string))
+      "the author is the last single-parent commit, not the merger"
+      (Some "ocaml-agent-ic") with_merge.author;
+    Alcotest.(check bool) "the CI state is still the head's" true
+      (with_merge.checks = Pulls.Checks_failing);
+    Alcotest.(check (option string)) "a window of only merge commits reads no author"
+      None all_merge.author
+  | _ -> failf "expected two pull requests"
+
 let pull ~number ~author =
   { Pulls.repo_slug = "jeong-sik/masc"
   ; number
@@ -834,6 +872,10 @@ let () =
             "unknown mergeable or missing author is counted"
             `Quick
             test_unknown_mergeable_or_missing_author_is_counted
+        ; Alcotest.test_case
+            "a merge commit at the head does not own the pull request"
+            `Quick
+            test_merge_commit_head_does_not_own_the_pull_request
         ; Alcotest.test_case
             "not visible is a failure"
             `Quick

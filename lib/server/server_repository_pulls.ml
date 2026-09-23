@@ -224,7 +224,7 @@ let query =
       pageInfo { hasNextPage endCursor }
       nodes {
         number title headRefName isDraft updatedAt reviewDecision mergeable
-        commits(last: 1) { nodes { commit { author { name } statusCheckRollup { state } } } }
+        commits(last: 10) { nodes { commit { parents { totalCount } author { name } statusCheckRollup { state } } } }
       }
     }
   }
@@ -270,16 +270,21 @@ let mergeable_of_wire = function
 let decode_checks node =
   match Option.bind (field "commits" node) (field "nodes") with
   | Some (`List []) -> Some Checks_none
-  | Some (`List (last :: _)) ->
-    (* The query asks for [statusCheckRollup], so only an explicit [null]
-       means "no checks"; a missing key is a shape this reader does not know. *)
-    (match Option.bind (field "commit" last) (field "statusCheckRollup") with
-     | None -> None
-     | Some `Null -> Some Checks_none
-     | Some rollup ->
-       (match field "state" rollup with
-        | Some (`String state) -> check_state_of_wire state
-        | _ -> None))
+  | Some (`List nodes) ->
+    (* [commits(last: N)] returns its window oldest first, so the head commit
+       is the last node. The query asks for [statusCheckRollup], so only an
+       explicit [null] means "no checks"; a missing key is a shape this reader
+       does not know. *)
+    (match List.rev nodes with
+     | [] -> Some Checks_none
+     | head :: _ ->
+       (match Option.bind (field "commit" head) (field "statusCheckRollup") with
+        | None -> None
+        | Some `Null -> Some Checks_none
+        | Some rollup ->
+          (match field "state" rollup with
+           | Some (`String state) -> check_state_of_wire state
+           | _ -> None)))
   | _ -> None
 
 let decode_review node =
@@ -294,21 +299,41 @@ let decode_mergeable node =
   | Some (`String state) -> mergeable_of_wire state
   | _ -> None
 
-(* [Some None] is GitHub saying there is no author name: no commit, a
-   [null] author, or a [null] name. The query asks for [author { name }], so
-   a missing key is a shape this reader does not know and reads [None]. *)
+(* [Some None] is GitHub saying there is no author name to read: no commit,
+   a [null] author, or a [null] name. The query asks for
+   [parents { totalCount }] and [author { name }], so a missing key is a shape
+   this reader does not know and reads [None].
+
+   A merge commit (two or more parents) does not say who wrote the pull
+   request: GitHub's "Update branch", pr-updater's update-branch and a local
+   [git merge origin/main] all make one, and its author is whoever brought the
+   base in. The author is the most recent commit with one parent. A window
+   that is all merge commits reads [Some None]: the pull request is counted as
+   no Keeper's rather than attached to the wrong one. *)
 let decode_author node =
   match Option.bind (field "commits" node) (field "nodes") with
   | Some (`List []) -> Some None
-  | Some (`List (last :: _)) ->
-    (match Option.bind (field "commit" last) (field "author") with
-     | None -> None
-     | Some `Null -> Some None
-     | Some author ->
-       (match field "name" author with
-        | Some `Null -> Some None
-        | Some (`String name) -> Some (Some name)
-        | _ -> None))
+  | Some (`List nodes) ->
+    let rec newest_single_parent = function
+      | [] -> Some None
+      | node :: rest ->
+        (match Option.bind (field "commit" node) (field "parents") with
+         | None -> None
+         | Some parents ->
+           (match field "totalCount" parents with
+            | Some (`Int 1) ->
+              (match Option.bind (field "commit" node) (field "author") with
+               | None -> None
+               | Some `Null -> Some None
+               | Some author ->
+                 (match field "name" author with
+                  | Some `Null -> Some None
+                  | Some (`String name) -> Some (Some name)
+                  | _ -> None))
+            | Some (`Int _) -> newest_single_parent rest
+            | _ -> None))
+    in
+    newest_single_parent (List.rev nodes)
   | _ -> None
 
 let decode_pull ~repo_slug node =

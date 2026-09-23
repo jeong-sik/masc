@@ -14061,6 +14061,15 @@ def unread_keeper_counted_interaction() -> Interaction:
             start=0,
             timeout=10.0,
         )
+        # The Team block names the same Keeper, with why its row was unread.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"k-unread",
+            start=0,
+            timeout=10.0,
+        )
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
 

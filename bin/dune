@@ -647,6 +647,15 @@
  (wrapped false)
  (modules masc_tui_file_icon))
 
+;; How long ago a row was last seen. Own library so the span and its three
+;; refusals (empty, unparseable, ahead of the clock) have a test that does not
+;; go through a screen.
+(library
+ (name masc_tui_wire_age)
+ (wrapped false)
+ (modules masc_tui_wire_age)
+ (libraries masc masc.time_codec masc_tui_message_layout))
+
 (library
  (name masc_tui_config)
  (wrapped false)
@@ -1504,6 +1513,14 @@
   masc_tui_types
   unix))
 
+;; The Overview Team block's projection (RFC-0464): pure, so a test can read
+;; it without the renderer.
+(library
+ (name masc_tui_overview_team)
+ (wrapped false)
+ (modules masc_tui_overview_team)
+ (libraries masc masc_types masc_tui_types))
+
 (executable
  (name masc_tui)
  (modules
@@ -1537,6 +1554,7 @@
   masc.build_commit
   masc.sse_wire
   masc_tui_task_flow
+  masc_tui_overview_team
   masc.masc_tool_blob_store
   masc_tui_agenda
   masc_tui_ansi
@@ -1625,6 +1643,7 @@
   masc_tui_acting
   masc_tui_command
   masc_tui_gate_text
+  masc_tui_wire_age
   masc_tui_text_block
   masc_tui_preset_text
   masc_tui_mcp

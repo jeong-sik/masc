@@ -39,6 +39,7 @@ let keeper_scoped_dated_stores =
          Some (Common.keeper_runtime_store_dirname store)
        | Common.Keeper_scoped_versioned
        | Common.Keeper_scoped_rotated
+       | Common.Keepers_root_scoped
        | Common.Workspace_scoped -> None)
     Common.keeper_runtime_stores
 
@@ -186,6 +187,7 @@ let keeper_scoped_versioned_stores =
          Some (Common.keeper_runtime_store_dirname store)
        | Common.Keeper_scoped_dated
        | Common.Keeper_scoped_rotated
+       | Common.Keepers_root_scoped
        | Common.Workspace_scoped -> None)
     Common.keeper_runtime_stores
 

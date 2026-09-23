@@ -6,6 +6,10 @@
 type auth_result =
   { authenticated : bool
   ; login : string option
+  ; scopes : string list option
+      (** The OAuth scopes GitHub listed for the token in [X-OAuth-Scopes].
+          [None] when it listed none, which is what a fine-grained PAT or an
+          App token answers, and when the probe failed. *)
   ; error : string option
   }
 
@@ -36,11 +40,14 @@ type observation =
   ; checked_at_unix : float
   }
 
-type login_scope = Workflow
+type login_scope =
+  | Workflow
+  | Write_packages
 (** A scope a login may ask for beyond gh's own minimum ([repo], [read:org],
     [gist]). [Workflow] lets the token push changes under [.github/workflows];
-    a workflow runs with the repository's secrets, so no login asks for it
-    unless the operator chose it. *)
+    a workflow runs with the repository's secrets. [Write_packages] lets it
+    publish to GitHub Packages, ghcr.io images among them, and includes
+    [read:packages]. No login asks for either unless the operator chose it. *)
 
 val login_scope_to_string : login_scope -> string
 (** The name [gh auth login --scopes] and the login request body use. *)

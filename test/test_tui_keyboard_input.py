@@ -4178,13 +4178,13 @@ def gate_mode_picker_interaction(requests: HttpRequests) -> Interaction:
 BLOCKED_GATE_REASON_PREFIX = b"Auto Judge exact attempt quarantined after provider"
 BLOCKED_GATE_REASON_TAIL = b"operator must retain this terminal explanation"
 
-# The whole-input pane is the same screen the concealing escape would aim at:
-# a value carrying ESC [ 8 m hides the ask behind the first words and shows
-# only what the attacker wants shown. The pane draws values through
-# terminal_safe_text, which keeps newline (0x0A) and replaces the rest of
-# C0/C1, so the escape must arrive as visible text, never as its byte.
+# ESC [ 8 m is the conceal: a terminal honouring it stops drawing what comes
+# after, so the first words stand for the whole ask. The three constants name
+# the three things the screen owes the operator - the body's opening, the part
+# the escape would have hidden, and the escape itself.
 CONCEAL_ATTACK_CONTENT = "공유합니다 \x1b[8m @everyone https://evil.example/x \x1b[0m"
 CONCEAL_ATTACK_VISIBLE = "공유합니다".encode("utf-8")
+CONCEAL_ATTACK_TAIL = b"evil.example/x"
 
 
 def blocked_gate_detail_http_fixtures() -> HttpFixtures:
@@ -4279,7 +4279,7 @@ def concealed_input_http_fixtures() -> HttpFixtures:
     row = fixtures["/api/v1/dashboard/gate"][1]["approval_queue"][0]
     row["input"] = {
         "connector": "discord",
-        "content": "공유합니다 \x1b[8m @everyone https://evil.example/x \x1b[0m",
+        "content": CONCEAL_ATTACK_CONTENT,
     }
     row["tool_name"] = "connector_post"
     row["input_preview"] = '{"connector":"discord","content'
@@ -4303,19 +4303,36 @@ def concealed_input_detail_interaction() -> Interaction:
             needle=b"MASC Overview",
         )
         tab_until(process, master_fd, output, b"MASC Approvals")
+        # The row names the operation the producer sent, verbatim: the decoder
+        # passes [tool_name] through for every operation but identity_call.
         wait_for_output(
-            process, master_fd, output, b"CONNECTOR POST", start=0, timeout=5.0
+            process, master_fd, output, b"connector_post", start=0, timeout=5.0
         )
-        detail = send_and_wait(process, master_fd, output, b"\r", b"content")
-        frame = frame_containing(detail, b"content")
+        # The queue row's preview stops before the body, so these bytes can
+        # only come from the detail pane this scenario is about.
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", CONCEAL_ATTACK_VISIBLE
+        )
+        frame = frame_containing(detail, CONCEAL_ATTACK_VISIBLE)
         plain = CSI_RE.sub(b"", frame)
+        # The pane labels the value it drew, key by key.
+        if b"content" not in plain:
+            raise AssertionError(f"conceal input key missing from detail: {frame!r}")
         # The body rides whole: the ask's first words are on the screen.
-        if "공유합니다".encode("utf-8") not in plain:
+        if CONCEAL_ATTACK_VISIBLE not in plain:
             raise AssertionError(
                 f"conceal input body missing from detail: {frame!r}"
             )
-        # ...as visible text, not as the escape that hides what follows it.
-        if b"\x1b[8m" in plain:
+        # ...and so does the part the escape was placed to hide.
+        if CONCEAL_ATTACK_TAIL not in plain:
+            raise AssertionError(
+                f"conceal input tail missing from detail: {frame!r}"
+            )
+        # Asked of the raw frame, not of [plain]: CSI_RE strips exactly the
+        # sequence under test, so this assertion could never fail if it read
+        # the stripped copy. No renderer here emits SGR 8 (grep: 0 hits), so
+        # any occurrence came from the value.
+        if b"\x1b[8m" in frame:
             raise AssertionError(
                 "the detail pane drew a raw ESC: the input value reached the"
                 f" terminal unsanitized: {frame!r}"

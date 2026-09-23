@@ -38,6 +38,21 @@ status: reference
 : Claude Code, Codex, Antigravity 같은 공식 클라이언트가 자기 프로세스에서
   provider 요청을 보내고, MASC는 새 turn과 결과를 조율·관찰하는 실행 경로.
 
+**Clients (TUI 클라이언트 표)**
+: `GET /api/v1/dashboard/clients` 한 읽기를 그리는 TUI 표. 한 워크스페이스에 붙은
+  모두를 한 번에 보여준다 — directory agent, state-backed session, runtime fiber.
+  행의 `cr_status`는 닫힌 `client_status` 넷(`Client_active`·`Client_busy`·
+  `Client_listening`·`Client_inactive`)이고, `cr_keeper_name`은 Keeper에 묶인 행만
+  이름을 갖는다(비-Keeper MCP 클라이언트는 `None` — 이 표가 보여주려는 행이다).
+  - **ACTING FOR** 열: 어떤 클라이언트가 **제 이름으로** Keeper의 세션에 묶였을 때
+    그 Keeper를 적는다. Keeper 자신의 세션은 Keeper 이름으로 접수되므로 그 행에서는
+    이름을 되풀이하지 않는다(`client_acting_for`가 `keeper_name = name`이면 `None`).
+    그런 행이 하나도 없으면 열 자체를 그리지 않는다(`clients_act_for_others`) — 빈 열이
+    행 끝 시계를 잘라 먹기 때문이다. **그래서 열이 안 보이는 것은 결함이 아니라 정보이다
+    — 남을 대신하는 클라이언트가 없다는 뜻이다.**
+  → [Tui_decode.client_row](../../lib/tui_decode.mli),
+  [Masc_tui_types.client_acting_for](../../bin/masc_tui_types.ml)
+
 **MCP**
 : Model Context Protocol의 약어. MASC는 양쪽으로 쓴다. 자기 도구와 협업 상태를
   MCP 서버로 내보내고(`masc_*` 도구), Agent는 `mcp_clients`로 바깥 MCP 서버에

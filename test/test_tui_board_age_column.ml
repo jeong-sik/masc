@@ -78,6 +78,22 @@ let test_a_replied_post_is_as_old_as_its_posting_under_the_post_orders () =
   Alcotest.(check string) "latest changed first measures from the last move"
     "24s" (text Board_updated)
 
+(* A post that carries the one time the sort did not order by draws a dash,
+   not that other time. Drawing the last move under a header that says AGE is
+   the reading this whole change exists to stop, and a server that sends
+   [updated_at] without a numeric [created_at] is the case where the two come
+   apart. The column then says it has no age rather than showing the wrong
+   one. *)
+let test_the_time_the_sort_did_not_order_by_is_not_borrowed () =
+  let text time =
+    Schedule.board_age_text ~now:10_000.
+      (board_age_source ~time ~posted:None ~changed:(Some 9_000.))
+  in
+  Alcotest.(check string) "the posting side has no time to measure from"
+    "\xe2\x80\x94" (text Board_time_posted);
+  Alcotest.(check string) "the last-move side has one" "16m40s"
+    (text Board_time_changed)
+
 (* A post that carried no numeric time at all draws a dash rather than an age
    measured from the epoch. *)
 let test_a_post_with_no_time_draws_a_dash () =
@@ -105,6 +121,9 @@ let () =
             "a replied post is as old as its posting under the post orders"
             `Quick
             test_a_replied_post_is_as_old_as_its_posting_under_the_post_orders
+        ; Alcotest.test_case
+            "the time the sort did not order by is not borrowed" `Quick
+            test_the_time_the_sort_did_not_order_by_is_not_borrowed
         ; Alcotest.test_case "a post with no time draws a dash" `Quick
             test_a_post_with_no_time_draws_a_dash
         ] )

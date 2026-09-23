@@ -18103,7 +18103,12 @@ and is loaded on demand through keeper_skill.
       let quit_key =
         match key with
         | Some k ->
-            quit_key_allowed_for (text_input_target state ~compact_viewport)
+            (* On a viewport too small to draw them, no field is taking keys:
+               the compact fallback further down owns every remaining one, so
+               yielding there would leave the operator on a terminal they
+               cannot read with no way out but Ctrl-C. *)
+            (compact_viewport
+            || quit_key_allowed_for (text_input_target state ~compact_viewport))
             && Render_schedule.Input_shortcut.is_quit ~message_mode k
         | None -> false
       in
@@ -18852,8 +18857,14 @@ and is loaded on demand through keeper_skill.
           move at all -- [a] opened whichever ask the cursor had been left on,
           and with more than one waiting there was no way to reach the rest
           without answering the first. *)
+       (* The text check is the one the Activity pane above already makes.
+          Without it these two keys were taken from the command palette while
+          it was open over this surface, so a query with a bracket in it --
+          a task title, [#31874] -- arrived with the brackets missing and the
+          ask cursor moved behind the overlay. *)
        | Some ("[" | "]" as k)
          when state.view = Approvals
+              && Option.is_none (text_input_target state ~compact_viewport)
               && (match state.ask_answer_mode with
                   | Ask_browsing -> true
                   | Ask_answering _ -> false)

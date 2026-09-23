@@ -4146,6 +4146,20 @@ def gate_mode_picker_interaction(requests: HttpRequests) -> Interaction:
         expected.append(("/api/v1/dashboard/gate/external-mode", {"mode": "manual"}))
         if mode_requests() != expected:
             raise AssertionError(f"Outside services choice used the wrong lane or mode: {requests!r}")
+        # [ and ] walk the ask cursor on this surface, and the walk used to
+        # take them from the command palette drawn over it: a query with a
+        # bracket in it, a task title like [#31874], arrived with the brackets
+        # gone and the cursor moved behind the overlay.
+        send_and_wait(process, master_fd, output, b":", b"MASC Command palette")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"a[b]c",
+            # The prompt is styled, then a plain space, then the query.
+            re.compile(rb":(?:" + CSI_RE.pattern + rb")* a\[b\]c"),
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Approvals")
         os.write(master_fd, b"q")
 
     return interact

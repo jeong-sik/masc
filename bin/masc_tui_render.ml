@@ -964,9 +964,9 @@ let render_overview (state : state) =
        story, so the empty header keeps them. *)
     if List.is_empty state.tasks then
       match state.task_flow with
-      | None -> Printf.sprintf " %sTasks%s\n" Ansi.bold Ansi.reset
+      | None -> Printf.sprintf " %sTasks%s" Ansi.bold Ansi.reset
       | Some _ ->
-          Printf.sprintf " %sTasks%s (0 open%s)\n" Ansi.bold Ansi.reset
+          Printf.sprintf " %sTasks%s (0 open%s)" Ansi.bold Ansi.reset
             done_segment
     else
       let count = List.length state.tasks in
@@ -985,7 +985,7 @@ let render_overview (state : state) =
           (fun acc (t : task) -> match t.status with Todo -> acc + 1 | _ -> acc)
           0 state.tasks
       in
-      Printf.sprintf " %sTasks%s (%d open%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)\n"
+      Printf.sprintf " %sTasks%s (%d open%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)"
         Ansi.bold Ansi.reset
         count
         done_segment
@@ -993,7 +993,12 @@ let render_overview (state : state) =
         (Theme.warn ()) awaiting_c Ansi.reset
         Ansi.dim todo_c Ansi.reset
   in
-  Buffer.add_string buf task_header;
+  (* Fitted to the frame, the way the Team title above it is. This title is
+     the longest thing the surface writes and it went in raw: at sixty columns
+     it read seven cells past the box edge while every other row stopped at
+     it. The segments are ordered so the one a fit gives up last is the one a
+     reader can work out -- todo is open less active less awaiting. *)
+  Buffer.add_string buf (fit_width task_header cols ^ "\n");
 
   (match tasks_error with
    | Some err when row_budget.task_error_rows > 0 ->

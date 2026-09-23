@@ -291,4 +291,13 @@ val librarian_gap
     before that end, or when neither position is known. A request that
     starts past its Librarian point therefore need not leave a gap: a
     snapshot cut S behind a read position R, with the request starting at R,
-    skips only atoms the Librarian has already read. *)
+    skips only atoms the Librarian has already read.
+
+    [snapshot_cut] is taken as covered whether or not the snapshot fits the
+    current history. A snapshot that no longer fits stays in its file with
+    nothing on disk marking it: the turn driver finds the mismatch only by
+    comparing it with the checkpoint on each request, and then sends no
+    working state. So while such a snapshot remains, with its cut past the
+    read position, this counts the gap short: from the cut rather than from
+    the read position. Telling the two apart needs that history comparison,
+    and the alarm does not make it. *)

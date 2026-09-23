@@ -254,15 +254,13 @@ Task가 없다는 뜻입니다.
 ## 완료된 대화의 이어갈 상태
 
 다음 `continuity` 자료가 null이면 `working_state`는 null입니다. 자료가 있으면
-`previous_working_state`와 `completed_conversation` 전체를 읽고, 다음 턴이 이어갈
+`previous_working_state`와 위 대화 기록 전체를 읽고, 다음 턴이 이어갈
 작업·사용자 제약·결정과 근거·미해결 사항을 `working_state` 문자열로 정리하세요.
-대화 속 도구 결과와 아직 완료되지 않은 일을 구분하고, 이전 상태를 갱신하되
-유효한 제약과 남은 일을 지우지 마세요. 요약만 읽은 다음 턴도 올바르게 이어갈
-수 있어야 합니다. `completed_conversation`은 위 대화 기록과 같은 메시지입니다.
-다만 여기에는 대화 기록이 가린 도구 payload와 추론 블록이 그대로 들어 있습니다.
-Memory 판단은 위 대화 기록으로 하고, 이 자료의 payload·추론과
-`previous_working_state`는 기억의 근거로 쓰지 마세요. 같은 대화를 증거로 두 번
-세지도 마세요.
+대화 기록의 `[tool use omitted: …]` 줄은 호출한 도구 이름을, 같은 id 의
+`[tool result omitted: …]` 줄은 그 호출의 성공·실패(`is_error`)를 알려 줍니다.
+이것으로 이미 끝난 도구 호출과 아직 완료되지 않은 일을 구분하고, 이전 상태를
+갱신하되 유효한 제약과 남은 일을 지우지 마세요. 요약만 읽은 다음 턴도 올바르게
+이어갈 수 있어야 합니다. `previous_working_state`는 기억의 근거로 쓰지 마세요.
 큐 원본 정리인 `working_contexts`와는 별도이며, 새 실행이나 완료 선언이 아닙니다.
 
 {{continuity}}

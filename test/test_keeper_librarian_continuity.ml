@@ -49,7 +49,7 @@ let test_append_cas_and_restart () = with_source @@ fun _env config save append 
   let prepared=prepare config |> some in
   let input=P.prompt_json prepared in
   check bool "initial state has no invented predecessor" true (U.member "previous_working_state" input=`Null);
-  check int "first completed prefix supplied" 1 (U.member "completed_conversation" input |> U.to_list |> List.length);
+  check int "first completed prefix supplied" 1 (List.length (P.messages prepared));
   let saved=commit config prepared "Deployment is pending approval." in
   check int "coverage ends at provided completed prefix" 1 saved.end_atom;
   check bool "quiet wake requires no new summary" true (Option.is_none (prepare config));
@@ -61,8 +61,7 @@ let test_append_cas_and_restart () = with_source @@ fun _env config save append 
   let input=P.prompt_json next in
   check string "previous saved state feeds next summary" saved.working_state
     (U.member "previous_working_state" input |> U.to_string);
-  check int "only new complete suffix fed to model" 1
-    (U.member "completed_conversation" input |> U.to_list |> List.length);
+  check int "only new complete suffix fed to model" 1 (List.length (P.messages next));
   let newer=commit config next "Build passed; deployment is still awaiting approval." in
   check int "prefix frontier advances with saved working state" 2 newer.end_atom;
   check bool "late previous writer cannot replace newer pair" true
@@ -73,9 +72,10 @@ let test_append_cas_and_restart () = with_source @@ fun _env config save append 
       ~keeper_id:keeper_name |> get) ~messages:full current |> Result.map_error S.error_to_string |> get in
   check int "saved coverage excludes exactly represented atoms" 0 (List.length restored.messages);
   append (B.History_restarted {trace_id});boundary ~fresh:false 3 full;
-  let restarted=prepare config |> some |> P.prompt_json in
-  check bool "restart does not carry old state into new generation" true (U.member "previous_working_state" restarted=`Null);
-  check int "restart supplies full completed prefix" 2 (U.member "completed_conversation" restarted |> U.to_list |> List.length)
+  let restarted=prepare config |> some in
+  check bool "restart does not carry old state into new generation" true
+    (U.member "previous_working_state" (P.prompt_json restarted)=`Null);
+  check int "restart supplies full completed prefix" 2 (List.length (P.messages restarted))
 let test_failed_state_keeps_old_frontier () = with_source @@ fun _env config save _append boundary ->
   let prefix=[message "Unresolved request"] in save prefix;boundary ~fresh:true 1 prefix;
   let prepared=prepare config |> some in
@@ -264,7 +264,11 @@ let test_fit_splits_only_oversized_work_unit () = with_source @@ fun _env config
   let messages = List.init 8 (fun index -> message (String.make (index + 1) 'x')) in
   save messages; boundary ~fresh:true 1 messages;
   let prepared = prepare config |> some in
-  let original = P.prompt_json prepared |> Yojson.Safe.to_string in
+  (* A candidate as the pass reads it: the prior state and the exact source
+     atoms of its range. *)
+  let view candidate = Yojson.Safe.to_string (`List [ P.prompt_json candidate;
+    `List (List.map Agent_core.Checkpoint.message_to_json (P.messages candidate)) ]) in
+  let original = view prepared in
   let visited = ref [] in
   let whole = P.fit ~fits:(fun candidate ->
     visited := P.end_atom candidate :: !visited; Ok true) prepared |> get |> some in
@@ -273,7 +277,7 @@ let test_fit_splits_only_oversized_work_unit () = with_source @@ fun _env config
   let first = P.narrow prepared |> some in
   ignore (commit config first "Prior work preserved.");
   let suffix = prepare config |> some in
-  let exact_size candidate = P.prompt_json candidate |> Yojson.Safe.to_string |> String.length in
+  let exact_size candidate = view candidate |> String.length in
   let room_for_more = P.prepare ~end_atom:7 ~config ~keeper_name ~trace_id () |> get |> some in
   let limit = exact_size room_for_more in
   let expected = P.narrow suffix |> some in
@@ -283,9 +287,8 @@ let test_fit_splits_only_oversized_work_unit () = with_source @@ fun _env config
       Ok (exact_size candidate <= limit)) suffix |> get |> some in
   check int "split work unit stops below capacity even with room for another atom" 6 (P.end_atom fitted);
   check (list int) "no capacity-filling search after a fitting split" [8;6] !visited;
-  check string "exact suffix and prior state preserved" (P.prompt_json expected |> Yojson.Safe.to_string)
-    (P.prompt_json fitted |> Yojson.Safe.to_string);
-  check string "frozen original unaffected" original (P.prompt_json prepared |> Yojson.Safe.to_string);
+  check string "exact suffix and prior state preserved" (view expected) (view fitted);
+  check string "frozen original unaffected" original (view prepared);
   let minimum_seen = ref false in
   check bool "no indivisible atom fits" true
     (P.fit ~fits:(fun candidate ->
@@ -514,12 +517,30 @@ let test_rewrite_target_is_the_librarian_position () = with_source @@ fun _env c
 let narrowing_marks = [ 'a'; 'b'; 'c'; 'd'; 'e'; 'f'; 'g'; 'h' ]
 let narrowing_atom_count = List.length narrowing_marks
 
+(* The rendered prompt carries each atom once, as conversation_history, on top
+   of a fixed part T (template plus output schema), so a unit of n atoms sends
+   roughly n * narrowing_atom_chars + T. With 16,000 characters an atom and the
+   ceiling below at 65,000, four atoms (64 kB + T) land over the ceiling and
+   two (32 kB + T) under it for any T between 1 kB and 33 kB. The Memory pass
+   renders librarian.md, about 21.7 kB with its working_contexts rule spliced
+   in and before the schema, so the output schema and the request envelope
+   share the remaining 11 kB or so before two atoms stop fitting. That margin
+   is narrower than it looks. The context-only pass renders
+   librarian.continuity.md, about 2.7 kB. Eight atoms rather than four so that
+   six remain after the first committed unit: a pass that released the width
+   on a commit would offer those six and be refused, which four atoms could
+   not have shown. *)
+let narrowing_atom_chars = 16_000
+let narrowing_atom_text mark = String.make narrowing_atom_chars mark
+
 (* A Keeper whose continuity snapshot no longer fits its history prepares from
    atom 0, so one pass's source is the whole backlog. These cases pin what a
    refused pass carries to the next one and which refusals must not move it at
    all (#37793: one live Keeper walked 12756 -> 6378 -> 3189 ninety-six times
    in a day and committed nothing, because every pass started over). *)
-let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ~slot_count ~answer f =
+let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner
+    ?(atoms = List.map (fun mark -> message (narrowing_atom_text mark)) narrowing_marks)
+    ~slot_count ~answer f =
   let open Masc in
   let module F = Exact_output_fixture in
   let module Current = Masc.Keeper_memory_os_current in
@@ -562,17 +583,6 @@ let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ~slot_count ~answer f =
   ignore (F.publish_registry ~cli_slot_ids ~lane_id:"librarian_exact" ~slot_ids
     (F.resolver_snapshot ~source:"narrowing-fixture"
        (List.map (fun id -> { F.id; base_url = server.F.base_url }) slot_ids)));
-  (* The rendered prompt carries the same atoms twice -- once as
-     conversation_history and once inside the continuity block -- on top of a
-     17 kB template, so a unit of n atoms sends roughly 2n * atom + 17 kB.
-     These eight are sized so four atoms land well over the ceiling and two
-     well under it, with the template unable to decide either comparison.
-     Eight rather than four so that six remain after the first committed unit:
-     a pass that released the width on a commit would offer those six and be
-     refused, which four atoms could not have shown. *)
-  let atoms =
-    List.map (fun mark -> message (String.make 8_000 mark)) narrowing_marks
-  in
   save atoms;
   boundary ~fresh:true 1 atoms;
   ignore (Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1000.
@@ -608,11 +618,26 @@ let contains ~sub text =
   let rec at i = i + n <= m && (String.sub text i n = sub || at (i + 1)) in
   at 0
 
+(* Non-overlapping occurrences of [sub] in [text]. *)
+let occurrences ~sub text =
+  let n = String.length sub and m = String.length text in
+  let rec from i count =
+    if i + n > m then count
+    else if String.sub text i n = sub then from (i + n) (count + 1)
+    else from (i + 1) count in
+  from 0 0
+
+let check_each_atom_once body =
+  List.iter (fun mark ->
+    check int (Printf.sprintf "atom %c travels once" mark) 1
+      (occurrences ~sub:(narrowing_atom_text mark) body))
+    narrowing_marks
+
 (* A continuity range whose Memory the durable pass already committed is a
    Context-only pass (#38184). It asks for the working state alone: the
-   request names no Memory output field, the conversation travels once inside
-   the continuity block instead of also as conversation_history, and an answer
-   of the working state alone commits the range without touching Memory. *)
+   request names no Memory output field, the conversation travels once, and
+   an answer of the working state alone commits the range without touching
+   Memory. *)
 let test_a_committed_range_asks_for_the_working_state_alone () =
   let requests = ref [] in
   narrowing_fixture ~slot_count:1
@@ -635,13 +660,84 @@ let test_a_committed_range_asks_for_the_working_state_alone () =
   let body = List.hd !requests in
   check bool "the request names no Memory output field" false
     (contains ~sub:Masc.Keeper_librarian.wire_field_new_claims body);
-  (* Each atom is 8000 characters. Sent twice, as the Memory pass sends them,
-     the atoms alone reach twice their total. *)
-  check bool "the conversation is sent once" true
-    (String.length body < 2 * narrowing_atom_count * 8_000);
+  check_each_atom_once body;
   check (option int) "the working state alone commits the whole range"
     (Some narrowing_atom_count) (coverage ());
   check (option int) "Memory stays as the durable pass committed it" before (memory_revision ())
+
+(* #37857: a continuity pass carries the range once, folded. Tool calls and
+   results reach the request as their folded lines, which keep the tool name
+   and the outcome, and never as the call arguments or the result body. Both
+   passes that read a continuity range are checked: the Memory pass, and the
+   Context-only pass over a range whose Memory is already committed. *)
+let tool_argument_marker = "fixture-tool-argument-value"
+let tool_result_marker = "fixture-tool-result-body"
+let tool_name = "read_file"
+let tool_atom_indices = [ 1; 2; 3 ]
+let tool_atom_opening index = Printf.sprintf "tool-atom-%d-opening" index
+let tool_call_id index = Printf.sprintf "call-%d" index
+(* One call fails, so the folded result lines must carry both outcomes. *)
+let tool_call_fails index = index = 2
+let tool_atoms =
+  let open Agent_core.Types in
+  List.concat_map (fun index ->
+    let call_id = tool_call_id index in
+    [ message (tool_atom_opening index)
+    ; make_message ~role:Assistant
+        [ ToolUse { id = call_id; name = tool_name
+                  ; input = `Assoc [ "path", `String tool_argument_marker ] } ]
+    ; { (make_message ~role:Tool
+           [ ToolResult { tool_use_id = call_id; content = tool_result_marker
+                        ; outcome = (if tool_call_fails index
+                            then Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+                            else Tool_succeeded)
+                        ; json = None; content_blocks = None } ])
+        with tool_call_id = Some call_id } ])
+    tool_atom_indices
+
+let check_folded_tool_request body =
+  check int "no tool call argument reaches the request" 0
+    (occurrences ~sub:tool_argument_marker body);
+  check int "no tool result body reaches the request" 0
+    (occurrences ~sub:tool_result_marker body);
+  List.iter (fun index ->
+    check int (Printf.sprintf "user message %d travels once" index) 1
+      (occurrences ~sub:(tool_atom_opening index) body))
+    tool_atom_indices;
+  (* The folded lines are the host's own markers (Keeper_librarian
+     text_of_content): the call line names the tool, and the result line with
+     the same id states the outcome. *)
+  List.iter (fun index ->
+    let id = tool_call_id index in
+    check int (Printf.sprintf "call %s keeps its tool name" id) 1
+      (occurrences ~sub:(Printf.sprintf "[tool use omitted: id=%s name=%s]" id tool_name) body);
+    check int (Printf.sprintf "result %s keeps its outcome" id) 1
+      (occurrences
+         ~sub:(Printf.sprintf "[tool result omitted: id=%s is_error=%b]" id (tool_call_fails index))
+         body))
+    tool_atom_indices
+
+let test_a_continuity_pass_carries_tool_turns_folded_once () =
+  let run ~memory_committed ~answer =
+    let requests = ref [] in
+    narrowing_fixture ~atoms:tool_atoms ~slot_count:1
+      ~answer:(fun _index body ->
+        requests := !requests @ [ body ];
+        `OK, Exact_output_fixture.openai_response answer)
+    @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+    if memory_committed then record_memory config;
+    pass ();
+    check int "one request" 1 (List.length !requests);
+    check_folded_tool_request (List.hd !requests);
+    (* The user message and the assistant's call each open an atom; the tool
+       result joins the call's atom. *)
+    check (option int) "the folded range commits"
+      (Some (2 * List.length tool_atom_indices)) (coverage ())
+  in
+  run ~memory_committed:false
+    ~answer:(Yojson.Safe.from_string
+               {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|});
+  run ~memory_committed:true ~answer:(`Assoc [ "working_state", `String "s" ])
 
 let test_refused_width_carries_to_the_next_pass () =
   narrowing_fixture ~slot_count:1
@@ -891,6 +987,8 @@ let () = run "production continuity pair"
     test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;
     test_case "a committed range asks for the working state alone" `Quick
       test_a_committed_range_asks_for_the_working_state_alone;
+    test_case "a continuity pass carries tool turns folded once" `Quick
+      test_a_continuity_pass_carries_tool_turns_folded_once;
     test_case "an API commit releases the CLI limit" `Quick test_an_api_commit_releases_the_cli_limit;
     test_case "a refusal that is not about size keeps the width" `Quick test_a_refusal_that_is_not_about_size_keeps_the_width;
     test_case "a size refusal anywhere in the walk narrows" `Quick test_a_size_refusal_anywhere_in_the_walk_narrows;

@@ -177,9 +177,11 @@ val retry_after_of_route : route -> float option
 (** [Some hint] only for [Retry_after_observed] carrying a provider hint. *)
 
 val usable_retry_after : float option -> float option
-(** The provider hint that names a wait: present, a number, above zero. A
-    hint that is absent, zero, negative or NaN names none, and every reader of
-    a hint answers from this one rule — {!path_rest_sec} rests the class's own
+(** The provider hint that names a wait: present, finite, above zero. A
+    hint that is absent, zero, negative, infinite or NaN names none, and every
+    reader of a hint answers from this one rule — the candidate's rate limit
+    ([Runtime_candidate_backpressure_state.note_rate_limit]) stays until a
+    success, {!path_rest_sec} rests the class's own
     default for it, {!route_resumes_on_same_path} refuses to resume a quota on
     it, and the driver records a quota it cannot date as observed rather than
     planting a window that is already over. *)

@@ -142,11 +142,13 @@ Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청
   리더보드 비교에는 그쪽을 쓴다.
 - trial 결과에 후보가 남는다. harbor metadata 의 `candidates` 는 선언한 후보 순서(masc 가
   해소하는 id), `route` 는 keeper 가 배정받은 값(lane `bench` 또는 runtime 하나)이다.
-  `answered_by` 는 실제로 답한 runtime 별 turn 수이고, `turns_unanswered` 는 어느 후보도
-  답하기 전에 끝난 turn 수다. 둘은 keeper 의 decision log(`provider_context.executed_runtime_id`)
-  에서 센다(`driver/answered_by.sh`). 측정하지 못했으면 둘 다 `null` 이다.
-- `aggregate.py` CSV 끝에 `arm`, `candidates`(`a > b` 처럼 순서대로), `answered_by`
-  (`runtime=turn 수` 를 `;` 로), `turns_unanswered` 칸이 붙는다.
+  `answered_by` 는 실제로 답한 runtime 별 turn 수, `failed_on` 은 실패한 turn 을 마지막으로
+  보낸 runtime 별 수, `turns_unanswered` 는 어느 후보에도 보내지 못하고 실패한 turn 수다.
+  셋 다 keeper 의 decision log(`outcome`, `provider_context.executed_runtime_id`)에서 센다
+  (`driver/answered_by.sh`). 측정하지 못했으면 셋 다 `null` 이다. 타임아웃으로 중간에
+  취소된 turn 은 log 에 행이 남지 않아 어느 수에도 들어가지 않는다.
+- `aggregate.py` CSV 끝에 `arm`, `candidates`(`a > b` 처럼 순서대로), `answered_by`,
+  `failed_on`(둘 다 `runtime=turn 수` 를 `;` 로), `turns_unanswered` 칸이 붙는다.
 
 렌더만 확인할 때(모델 호출 없음, OpenRouter endpoint 목록은 읽는다):
 

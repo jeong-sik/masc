@@ -230,6 +230,7 @@ jq -n \
     cache_read_tokens:($usage.cache_read_tokens // null),
     endpoint_env_left_out:$endpoint_env_left_out,
     answered_by:($answers.answered_by // null),
+    failed_on:($answers.failed_on // null),
     turns_unanswered:($answers.turns_unanswered // null),
     final:($final_raw | map(select(type=="object")) | last // {})}' \
   > "$tmp_result"

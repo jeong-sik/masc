@@ -512,7 +512,8 @@ def test_the_image_variables_the_keepers_lacked_reach_harbor_metadata(tmp_path):
 def test_a_failover_trial_reports_its_candidate_order_and_who_answered(tmp_path):
     # #37952: a result has to say which candidates the trial declared and which
     # of them answered, or a failover run cannot be told from a single-model one.
-    write_result(tmp_path, answered_by={"kimi_coding.k3": 2}, turns_unanswered=1)
+    write_result(tmp_path, answered_by={"kimi_coding.k3": 2},
+                 failed_on={"kimi_coding.kimi-for-coding": 1}, turns_unanswered=0)
     agent = MascAgent(logs_dir=tmp_path, model_name="kimi_coding/kimi-for-coding",
                       arm="l", fallback_models="kimi_coding/k3")
     context = SimpleNamespace(metadata=None)
@@ -522,7 +523,8 @@ def test_a_failover_trial_reports_its_candidate_order_and_who_answered(tmp_path)
         "kimi_coding.kimi-for-coding", "kimi_coding.k3"]
     assert context.metadata["route"] == "bench"
     assert context.metadata["answered_by"] == {"kimi_coding.k3": 2}
-    assert context.metadata["turns_unanswered"] == 1
+    assert context.metadata["failed_on"] == {"kimi_coding.kimi-for-coding": 1}
+    assert context.metadata["turns_unanswered"] == 0
 
 
 def test_a_single_model_trial_reports_one_candidate_routed_by_itself(tmp_path):
@@ -533,6 +535,7 @@ def test_a_single_model_trial_reports_one_candidate_routed_by_itself(tmp_path):
     assert context.metadata["route"] == "claude.claude-fable-5"
     # collect_result.sh wrote no answer counts: unmeasured, not zero turns.
     assert context.metadata["answered_by"] is None
+    assert context.metadata["failed_on"] is None
     assert context.metadata["turns_unanswered"] is None
 
 

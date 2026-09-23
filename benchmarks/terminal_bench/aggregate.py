@@ -34,10 +34,11 @@ COLUMNS = [
     # Running 이 구분되지 않는다.
     "interrupted", "keepers_stopped",
     # 어느 arm 이었고 어떤 후보 순서를 선언했는지, 그중 누가 실제로 답했는지.
-    # arm l 만 후보가 둘 이상이다. answered_by 는 "runtime=turn 수" 를 ; 로
-    # 잇고, turns_unanswered 는 어느 후보도 답하기 전에 끝난 turn 수다.
-    # 둘 다 빈 칸이면 측정되지 않은 것이다(0 이 아니다).
-    "arm", "candidates", "answered_by", "turns_unanswered",
+    # arm l 만 후보가 둘 이상이다. answered_by 는 답한 turn 을, failed_on 은
+    # 실패한 turn 을 마지막으로 보낸 후보별로 "runtime=turn 수" 로 ; 로 잇는다.
+    # turns_unanswered 는 어느 후보에도 보내지 못하고 실패한 turn 수다.
+    # turns_unanswered 가 빈 칸이면 측정되지 않은 것이다(0 이 아니다).
+    "arm", "candidates", "answered_by", "failed_on", "turns_unanswered",
 ]
 
 # 후보 순서를 한 칸에 적을 때의 구분자. 순서가 곧 의미라 정렬하지 않는다.
@@ -72,13 +73,13 @@ def candidates_cell(candidates) -> str:
     return "" if candidates is None else CANDIDATE_SEPARATOR.join(candidates)
 
 
-def answered_by_cell(answered_by) -> str:
-    """답한 turn 이 없을 때({})와 미측정(None)은 둘 다 빈 칸이다. 둘은
+def turns_by_runtime_cell(turns_by_runtime) -> str:
+    """해당 turn 이 없을 때({})와 미측정(None)은 둘 다 빈 칸이다. 둘은
     turns_unanswered 칸으로 가른다: 측정했으면 숫자, 안 했으면 빈 칸이다."""
-    if answered_by is None:
+    if turns_by_runtime is None:
         return ""
     return ANSWER_SEPARATOR.join(
-        f"{runtime}={turns}" for runtime, turns in sorted(answered_by.items()))
+        f"{runtime}={turns}" for runtime, turns in sorted(turns_by_runtime.items()))
 
 
 def main() -> None:
@@ -96,7 +97,7 @@ def main() -> None:
                 trial_dir.parent.name, trial_dir.name.split("__")[0],
                 trial_dir.name, "", "", "", "", "", "", "", "",
                 read_error or "unreadable", "", "", "",
-                "", "", "", "",
+                "", "", "", "", "",
             ])
             continue
         verifier = data.get("verifier_result") or {}
@@ -120,7 +121,8 @@ def main() -> None:
             cell(meta.get("keepers_stopped")),
             cell(meta.get("arm")),
             candidates_cell(meta.get("candidates")),
-            answered_by_cell(meta.get("answered_by")),
+            turns_by_runtime_cell(meta.get("answered_by")),
+            turns_by_runtime_cell(meta.get("failed_on")),
             cell(meta.get("turns_unanswered")),
         ])
 

@@ -321,9 +321,11 @@ class MascAgent(BaseInstalledAgent):
             "duplicate_tool_calls": data.get("duplicate_tool_calls"),
             # The image variables its keepers ran without (driver/endpoint_env.sh).
             "endpoint_env_left_out": data.get("endpoint_env_left_out"),
-            # Which of the candidates answered, turn by turn (driver/
-            # answered_by.sh). null means unmeasured, not "no turns".
+            # Which candidate answered each turn, and which one a failed turn
+            # ended on (driver/answered_by.sh). null means unmeasured, not
+            # "no turns".
             "answered_by": data.get("answered_by"),
+            "failed_on": data.get("failed_on"),
             "turns_unanswered": data.get("turns_unanswered"),
             **self._arm_metadata(),
             **identity_metadata(self._dist_identity),

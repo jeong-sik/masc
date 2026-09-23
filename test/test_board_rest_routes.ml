@@ -343,6 +343,66 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
      |> to_string)
 ;;
 
+(* A bearer admitted by the tool route is not the operator unless its
+   credential is one: a Worker credential -- what a keeper shell could hold
+   -- is a named caller and cannot cancel a row it neither made nor is woken
+   by. *)
+let test_schedule_cancel_with_a_worker_credential_is_not_the_operator () =
+  with_authenticated_activity_router
+    ~prefix:"schedule-cancel-http-worker-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token:_ ->
+  let worker_token =
+    match
+      Auth.create_token base_path ~agent_name:"keeper-shell"
+        ~role:Masc_domain.Worker
+    with
+    | Ok (token, _) -> token
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let operator : Schedule_domain.actor =
+    { id = "credential-owner"
+    ; kind = Schedule_domain.Human_operator
+    ; display_name = None
+    }
+  in
+  let schedule =
+    match
+      Schedule_service.create config ~now:100.0 ~schedule_id:"sched-http-worker"
+        ~requested_at:100.0 ~requested_by:operator ~scheduled_by:operator
+        ~due_at:200.0
+        ~payload:
+          (`Assoc
+             [ "kind", `String "consumer.note"
+             ; "body", `Assoc [ "text", `String "keep me" ]
+             ])
+        ~source:Schedule_domain.Operator_request ()
+    with
+    | Ok schedule -> schedule
+    | Error error -> fail (Schedule_service.service_error_to_string error)
+  in
+  let status, _ =
+    dispatch_json ~router ~token:worker_token
+      ~path:"/api/v1/tools/masc_schedule_cancel"
+      ~extra_headers:[ "X-Masc-Agent", "credential-owner" ]
+      ~body:
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "schedule_id", `String schedule.schedule_id
+              ; "reason", `String "not mine"
+              ]))
+      ()
+  in
+  (* 400 is the tool's refusal; 401/403 would be the route refusing the
+     credential, which would prove nothing about the operator rule. *)
+  check int "the tool refuses the worker cancel" 400 status;
+  match (Schedule_store.read_state config).schedules with
+  | [ stored ] ->
+    check bool "the operator's schedule is not cancelled" false
+      (stored.Schedule_domain.status = Schedule_domain.Cancelled)
+  | rows -> failf "expected one stored schedule, got %d" (List.length rows)
+;;
+
 (* The operator surface records the credential's actor as requester and
    scheduler. The tool schema declares no actor field, so a body that names
    one is refused before anything is written. *)
@@ -1045,6 +1105,8 @@ let () =
             test_no_tools_route_drift
         ; test_case "schedule create actor comes from auth" `Quick
             test_schedule_create_actor_comes_from_auth
+        ; test_case "a worker credential cancelling is not the operator" `Quick
+            test_schedule_cancel_with_a_worker_credential_is_not_the_operator
         ; test_case "schedule cancel actor comes from auth" `Quick
             test_schedule_cancel_actor_is_stamped_from_auth
         ; test_case "goal transition actor comes from auth" `Quick

@@ -7,8 +7,9 @@ running and terminal requests are immutable. The editable fields and
 due and recurrence rules are the same as masc_schedule_create. A due time
 that changes and lands before the current second is refused with error_kind
 due_already_past; the stored due time sent back unchanged is accepted.
-You may update a schedule you made or one that wakes you; any other is
-refused with error_kind not_schedule_owner. You become its scheduler."""
+You may update a schedule you made or one that wakes you, and the
+replacement must still be one of those; any other is refused with error_kind
+not_schedule_owner. The requester and scheduler stay as they were."""
 additional_properties = false
 defer_loading = true
 

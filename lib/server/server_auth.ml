@@ -1075,6 +1075,24 @@ let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority r
   let* () = Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name in
   Ok agent_name
 
+type request_credential_standing =
+  | Operator_credential
+  | Agent_credential
+  | No_credential
+
+let request_credential_standing ~base_path request =
+  match token_of_request_auth_credential (request_auth_credential_from_request request) with
+  | None -> No_credential
+  | Some token when Auth.verify_internal_keeper_token base_path ~token -> (
+      match internal_keeper_agent_from_request request with
+      | Some _ -> Agent_credential
+      | None -> No_credential)
+  | Some token -> (
+      match Auth.find_credential_by_token base_path ~token with
+      | Ok { Masc_domain.role = Masc_domain.Admin; _ } -> Operator_credential
+      | Ok { Masc_domain.role = Masc_domain.Worker; _ } -> Agent_credential
+      | Error _ -> No_credential)
+
 let authorize_tool_request ~base_path ~tool_name ~request_authority request :
     (unit, Masc_domain.masc_error) result =
   authorize_tool_request_with_actor

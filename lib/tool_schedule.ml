@@ -1,16 +1,17 @@
 (* Who is calling, as the dispatch boundary that built the context knows it.
    Every schedule action that names an actor stands on it: [owner=self] lists
-   the caller's rows, create and update record the caller as both
-   [requested_by] and [scheduled_by], and cancel records the caller as the
-   canceller and decides which rows it may cancel. No call argument names
+   the caller's rows, create records the caller as both [requested_by] and
+   [scheduled_by], update and cancel decide from it which rows the caller may
+   change, and cancel records it as the canceller. No call argument names
    the actor: an argument is whatever the caller chose to write, and a Keeper
    that could write [human_operator] there could pass itself off as the
    operator. *)
 type caller =
   | Operator_caller of string
-  (* The operator surface: an HTTP route behind [with_tool_actor_auth], where
-     the name is the actor the credential resolved to. It records
-     [Human_operator] and may cancel any schedule. *)
+  (* The operator surface: an HTTP route whose request presented an operator
+     credential ([Server_auth.Operator_credential]), named by the actor that
+     credential resolved to. It records [Human_operator] and may change any
+     schedule. *)
   | Named_caller of string
   (* A Keeper turn's own name, or an MCP caller whose name the endpoint did
      not mint itself. It records [Automated_actor] and may cancel only the
@@ -602,53 +603,83 @@ let caller_holds_row ~name (request : Schedule_domain.schedule_request) =
       | None -> false)
 ;;
 
-(* Asked before update and cancel. A row this read does not find is left to
-   the store, which answers "not found" under its own lock. *)
+let not_schedule_owner ~schedule_id ~name ~scheduled_by_id ~wake_target =
+  Typed_refusal
+    { kind = Schedule_contract_values.Refusal_not_schedule_owner
+    ; message =
+        Printf.sprintf
+          "schedule %s was scheduled by %s and would not wake %s; a caller \
+           changes only the schedules it made or the ones that wake it"
+          schedule_id
+          scheduled_by_id
+          name
+    ; facts =
+        [ "schedule_id", `String schedule_id
+        ; "caller", `String name
+        ; "scheduled_by_id", `String scheduled_by_id
+        ; ( "wake_target"
+          , match wake_target with
+            | Some keeper_name -> `String keeper_name
+            | None -> `Null )
+        ]
+    }
+;;
+
+(* Asked before update and cancel. It answers the stored row, so update can
+   keep the row's actors. A row this read does not find is [None] and is left
+   to the store, which answers "not found" under its own lock. *)
 let authorize_row_change ctx ~schedule_id =
-  match ctx.caller with
-  | Operator_caller _ -> Ok ()
-  | Unnamed_caller ->
-    let* _name =
-      caller_name ctx ~instead:"only a named caller may change a schedule"
+  let* _name =
+    caller_name ctx ~instead:"only a named caller may change a schedule"
+  in
+  match Schedule_store.read_state_result ctx.config with
+  | Error err ->
+    Error
+      (Refusal
+         ("schedule store read failed: " ^ Schedule_store.read_error_to_string err))
+  | Ok state ->
+    let row =
+      List.find_opt
+        (fun (request : Schedule_domain.schedule_request) ->
+           String.equal request.schedule_id schedule_id)
+        state.schedules
     in
-    Ok ()
-  | Named_caller name ->
-    (match Schedule_store.read_state_result ctx.config with
-     | Error err ->
+    (match ctx.caller, row with
+     | (Operator_caller _ | Unnamed_caller), _ | Named_caller _, None -> Ok row
+     | Named_caller name, Some request when caller_holds_row ~name request -> Ok row
+     | Named_caller name, Some request ->
        Error
-         (Refusal
-            ("schedule store read failed: " ^ Schedule_store.read_error_to_string err))
-     | Ok state ->
-       (match
-          List.find_opt
-            (fun (request : Schedule_domain.schedule_request) ->
-               String.equal request.schedule_id schedule_id)
-            state.schedules
-        with
-        | None -> Ok ()
-        | Some request when caller_holds_row ~name request -> Ok ()
-        | Some request ->
-          Error
-            (Typed_refusal
-               { kind = Schedule_contract_values.Refusal_not_schedule_owner
-               ; message =
-                   Printf.sprintf
-                     "schedule %s was scheduled by %s and does not wake %s; a \
-                      caller changes only the schedules it made or the ones \
-                      that wake it"
-                     schedule_id
-                     request.scheduled_by.id
-                     name
-               ; facts =
-                   [ "schedule_id", `String schedule_id
-                   ; "caller", `String name
-                   ; "scheduled_by_id", `String request.scheduled_by.id
-                   ; ( "wake_target"
-                     , match Schedule_payload_projection.wake_keeper_name request with
-                       | Some keeper_name -> `String keeper_name
-                       | None -> `Null )
-                   ]
-               }))
+         (not_schedule_owner
+            ~schedule_id
+            ~name
+            ~scheduled_by_id:request.scheduled_by.id
+            ~wake_target:(Schedule_payload_projection.wake_keeper_name request)))
+;;
+
+(* An update replaces the whole definition, including whom it wakes, so the
+   replacement has to be one the caller would hold too: a Keeper the row
+   wakes cannot point it at another Keeper. The row keeps its actors; the
+   update does not make the caller its scheduler. *)
+let authorize_replacement ctx ~schedule_id ~(stored : Schedule_domain.schedule_request)
+      ~keeper_wake_target
+  =
+  match ctx.caller with
+  | Operator_caller _ | Unnamed_caller -> Ok ()
+  | Named_caller name ->
+    let wakes_caller =
+      match keeper_wake_target with
+      | Some keeper_name -> String.equal keeper_name name
+      | None -> false
+    in
+    if String.equal stored.scheduled_by.id name || wakes_caller
+    then Ok ()
+    else
+      Error
+        (not_schedule_owner
+           ~schedule_id
+           ~name
+           ~scheduled_by_id:stored.scheduled_by.id
+           ~wake_target:keeper_wake_target)
 ;;
 
 (* TEL-OK: schedule tools return [Tool_result.t] through the shared
@@ -678,21 +709,31 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       | Some requested_at -> Ok requested_at
     in
     let* due_at = resolve_due_at ~dispatched_at:start_time recurrence args in
-    let* scheduled_by =
-      caller_actor ctx
-        ~instead:"call with an agent name or a credential that names one"
-    in
-    let requested_by = scheduled_by in
     let* schedule_id =
       match action, string_opt args "schedule_id" with
       | Create_schedule, schedule_id -> Ok schedule_id
       | Update_schedule, Some schedule_id -> Ok (Some schedule_id)
       | Update_schedule, None -> Error (Refusal "schedule_id is required")
     in
-    let* () =
+    let caller_as_both () =
+      let* actor =
+        caller_actor ctx
+          ~instead:"call with an agent name or a credential that names one"
+      in
+      Ok (actor, actor)
+    in
+    let* requested_by, scheduled_by =
       match action, schedule_id with
-      | Update_schedule, Some schedule_id -> authorize_row_change ctx ~schedule_id
-      | Update_schedule, None | Create_schedule, _ -> Ok ()
+      | Update_schedule, Some schedule_id ->
+        let* stored = authorize_row_change ctx ~schedule_id in
+        (match stored with
+         | Some stored ->
+           let* () =
+             authorize_replacement ctx ~schedule_id ~stored ~keeper_wake_target
+           in
+           Ok (stored.requested_by, stored.scheduled_by)
+         | None -> caller_as_both ())
+      | Update_schedule, None | Create_schedule, _ -> caller_as_both ()
     in
     let* expires_at = strict_number args "expires_at_unix" in
     let write_request () =
@@ -1131,7 +1172,7 @@ let handle_cancel ~tool_name ~start_time ctx args =
       caller_actor ctx
         ~instead:"call with an agent name or a credential that names one"
     in
-    let* () = authorize_row_change ctx ~schedule_id in
+    let* _stored = authorize_row_change ctx ~schedule_id in
     Ok (schedule_id, reason, cancelled_by)
   in
   match result with

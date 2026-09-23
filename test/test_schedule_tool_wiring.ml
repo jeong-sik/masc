@@ -1435,6 +1435,45 @@ let test_a_keeper_cannot_cancel_another_keepers_schedule () =
           (`Assoc [ "schedule_id", `String schedule_id; "reason", `String "not needed" ])))
 ;;
 
+(* An update replaces the whole definition, whom it wakes included. The Keeper
+   a row wakes may update it, but not point it at another Keeper, and an
+   update does not make the updater the row's requester or scheduler. *)
+let test_an_update_keeps_the_rows_actors_and_its_target_rule () =
+  with_config
+  @@ fun config ->
+  let schedule_id = "sched-operator-row" in
+  ignore
+    (create_service_exn config ~schedule_id ~due_at:future_due_at
+       ~payload:(keeper_wake_payload "wake") ()
+     : Schedule_domain.schedule_request);
+  let woken = Tool_schedule.Named_caller "schedule-keeper" in
+  let update_args keeper_name =
+    `Assoc
+      [ "schedule_id", `String schedule_id
+      ; "keeper_name", `String keeper_name
+      ; "message", `String "moved"
+      ; "due_in_sec", `Int 120
+      ; "allow_unregistered_keeper", `Bool true
+      ]
+  in
+  check_refusal "the woken keeper retargets the row"
+    Schedule_contract_values.Refusal_not_schedule_owner
+    (dispatch_exn ~caller:woken config Tool_schemas_schedule.Update_request
+       (update_args "other-keeper"));
+  check bool "the woken keeper updates the row it keeps" true
+    (Tool_result.is_success
+       (dispatch_exn ~caller:woken config Tool_schemas_schedule.Update_request
+          (update_args "schedule-keeper")));
+  let stored = stored_schedule config schedule_id in
+  check string "the requester is kept" "operator"
+    stored.Schedule_domain.requested_by.Schedule_domain.id;
+  check bool "the requester kind is kept" true
+    (stored.Schedule_domain.requested_by.Schedule_domain.kind
+     = Schedule_domain.Human_operator);
+  check string "the scheduler is kept" "scheduler-agent"
+    stored.Schedule_domain.scheduled_by.Schedule_domain.id
+;;
+
 (* A call gives one due input, or none when a calendar recurrence derives
    it. Two inputs are refused with the names the call gave, and an input of
    the wrong JSON type is refused rather than read as absent. *)
@@ -1794,6 +1833,8 @@ let () =
             test_the_recorded_actor_is_the_caller_not_an_argument
         ; test_case "a keeper cannot cancel another keeper's schedule" `Quick
             test_a_keeper_cannot_cancel_another_keepers_schedule
+        ; test_case "an update keeps the row's actors and its target rule" `Quick
+            test_an_update_keeps_the_rows_actors_and_its_target_rule
         ; test_case "a call gives exactly one due input" `Quick
             test_a_call_gives_exactly_one_due_input
         ; test_case "due_in_sec counts from the dispatch clock" `Quick

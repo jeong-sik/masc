@@ -12217,9 +12217,15 @@ def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpRe
                     # in "primary", which is what gives the two doors into the
                     # runtime detail -- a lane's candidate row and the catalog
                     # row -- something to disagree about. It adds a row to the
-                    # lane listing, and the scenarios that walk that listing by
-                    # row count on its shape, so only the scenario making that
-                    # comparison asks for it.
+                    # lane listing, and other scripts walk that listing by row:
+                    # test_tui_runtime_lane_editor.py and
+                    # test_tui_selection_visibility.py both call this function
+                    # and count on its shape. The only caller that turns it on
+                    # is runtime_http_fixtures, which feeds nothing but
+                    # runtime_surface_interaction -- the interaction that makes
+                    # the comparison. Two runners register that interaction,
+                    # run_keyboard_regression and run_runtime_regression, and
+                    # both want the extra lane.
                     "runtime_ids": (
                         ["runtime-c", "runtime-a"]
                         if runtime_a_in_two_lanes

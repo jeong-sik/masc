@@ -4337,6 +4337,7 @@ def concealed_input_detail_interaction() -> Interaction:
                 "the detail pane drew a raw ESC: the input value reached the"
                 f" terminal unsanitized: {frame!r}"
             )
+        raise AssertionError(f"PROBE sanitized detail frame: {frame!r}")
         os.write(master_fd, b"q")
 
     return interact

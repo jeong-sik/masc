@@ -2,6 +2,12 @@ name = "masc_browser_interact"
 description = """
 Interact with an explicit Firefox/Zen tab; no arbitrary JavaScript. Read again after success or failure before retrying: page handlers can change external state. click/fill require one visible inspected element; fill targets text inputs/textarea and sends input/change without Enter or submit. scroll_at scrolls the pane under the point. drag uses trusted automation pointers. follow_link bypasses click handlers for observed same-tab HTTP(S) HTML/SVG anchors (_self/_top/_parent); rejects downloads, new-window targets, noreferrer and explicit referrerpolicy. destinationUrl is intent, not loaded-page evidence. activate_tab is live-only (extension >=0.6.0): verifies active=true without window focus or navigation."""
 additional_properties = false
+# 2026-09-24 측정: agent-core 레인 요청 5,047건(09-23)이 이 정의
+# 3,294 B 를 매번 실었고, 09-17~23 7일간 이 도구를 부른 서로 다른
+# Keeper 턴은 22개다. 지연의 손익은 호출 수가 아니라 필요했던 턴 수로
+# 가른다(masc #32062). 지연돼도 keeper_tool_search 목록에 이름과 한 줄
+# 요약이 남고, 부르면 그 턴에 붙는다.
+defer_loading = true
 
 [[params]]
 name = "lane"

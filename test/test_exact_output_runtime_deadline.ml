@@ -33,7 +33,7 @@ api-name = "gpt-5.6-luna"
 |}
     (String.concat "\n"
        (List.map
-          (fun lane -> Printf.sprintf "[runtime.exact_output_lanes.%s]\nslots = [\"openai-responses.probe\"]" lane)
+          (fun lane -> Printf.sprintf "[runtime.exact_output_lanes.%s]\nslots = [\"openai-responses.probe\"]\nmax_output_tokens = 4096" lane)
           (List.sort_uniq String.compare
              (lane_id :: Server_runtime_bootstrap.mandatory_exact_output_lane_ids))))
     (deadline Runtime_schema.connect_timeout_s_key connect)
@@ -73,6 +73,10 @@ let expected_plan ~connect ~body =
   in
   EO.admit_target_ref snapshot target.target_ref
   |> require_ok "expected admitted target"
+  (* The runtime bootstrap runs this target through a lane that declares
+     [max_output_tokens = 4096]; the expected plan must carry the same budget
+     or the fingerprints differ for a reason this test is not about. *)
+  |> fun admitted -> EO.admitted_target_with_max_tokens admitted 4096
   |> ready
 
 let with_runtime f =

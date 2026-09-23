@@ -3482,6 +3482,14 @@
  (modules test_tui_connection_status)
  (libraries alcotest masc masc_tui_types))
 
+; Its own anchor, under the other suite that links only the state vocabulary
+; and the wire types, so two pull requests adding a suite do not both land on
+; the head of this file.
+(test
+ (name test_tui_lane_slot_reach)
+ (modules test_tui_lane_slot_reach)
+ (libraries alcotest masc masc_tui_types))
+
 ; Its own anchor, under the other suite that links only the state vocabulary,
 ; so two pull requests adding a suite do not both land on the head of this
 ; file.
@@ -4165,6 +4173,17 @@
  (name test_tui_chart)
  (modules test_tui_chart)
  (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
+
+; RFC-0464: the Overview Team block's projection.
+(test
+ (name test_tui_overview_team)
+ (modules test_tui_overview_team)
+ (libraries
+  alcotest
+  masc
+  masc_types
+  masc_tui_types
+  masc_tui_overview_team))
 
 (test
  (name test_tui_render_metrics)
@@ -5335,6 +5354,11 @@
  (libraries alcotest masc_tui_message_layout masc_tui_table))
 
 (test
+ (name test_tui_wire_age)
+ (modules test_tui_wire_age)
+ (libraries alcotest masc_tui_wire_age))
+
+(test
  (name test_tui_text_block)
  (modules test_tui_text_block)
  (libraries alcotest astring masc_tui_text_block))
@@ -5765,6 +5789,10 @@
 (include stanzas/test_keeper_ask_answer_wake.inc)
 
 (include stanzas/test_server_keeper_oauth_client.inc)
+
+; RFC-0465: open pull requests of registered GitHub repositories.
+(include stanzas/test_server_repository_pulls.inc)
+
 (include stanzas/test_keeper_identity_declarations.inc)
 (include stanzas/test_keeper_oauth_identity.inc)
 
@@ -5968,7 +5996,7 @@
 (test
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
- (libraries alcotest masc yojson))
+ (libraries alcotest masc unix yojson))
 
 (test
  (name test_tui_image_mosaic)

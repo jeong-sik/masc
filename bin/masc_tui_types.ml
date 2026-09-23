@@ -1240,12 +1240,23 @@ type attention_severity =
   | Attention_warning
   | Attention_info
 
+(** What an attention item is about. Parsed once at the decode boundary so a
+    reader that joins items to Keepers matches a constructor instead of
+    comparing the wire word. A target the TUI does not join on keeps its wire
+    words as they came. *)
+type attention_target =
+  | Attention_keeper of string
+  | Attention_other of { target_type: string; target_id: string option }
+
 type attention_item = {
   ai_kind: string;
   ai_severity: attention_severity;
   ai_summary: string;
-  ai_target_type: string;
-  ai_target_id: string option;
+  ai_target: attention_target;
+  ai_blocker_summary: string option;
+      (** [evidence.runtime_blocker.runtime_blocker_summary] on a Keeper
+          runtime-blocker item: the cause alone, without the Keeper name and
+          class word [ai_summary] wraps it in. [None] on every other item. *)
   ai_evidence_ts: float option;
       (** Epoch seconds of the evidence's [log_ts], when the producer stamped
           one (tool-host failures do). The row's age is drawn from it; items
@@ -1392,6 +1403,35 @@ let schedule_payload_body = function
        | Some (`Assoc _ as body) -> body
        | Some _ | None -> `Assoc [])
   | _ -> `Assoc []
+
+(** Why the store would refuse a modify, read before the editor opens.
+
+    [Schedule_store.Transition_refused] names its own boundary: "the request
+    is [Running] or terminal", terminal being [Schedule_domain.is_terminal].
+    That sentence is the whole rule, so it is asked here rather than restated
+    as a word list -- a status the store adds later lands on the right side
+    of it without this file changing.
+
+    [None] is the answer for a word this build does not name. It is the same
+    promise [sch_status] makes by staying a string: an unrecognised status
+    renders as itself, and it is the server's call, not ours, whether it can
+    be modified. Refusing on a word we cannot read would turn forward
+    compatibility into a locked row. *)
+let schedule_modify_refusal (row : schedule_row) : string option =
+  match Schedule_domain.schedule_status_of_string row.sch_status with
+  | Error _ -> None
+  | Ok status ->
+      let refused =
+        match status with
+        | Schedule_domain.Running -> true
+        | other -> Schedule_domain.is_terminal other
+      in
+      if refused then
+        Some
+          (Printf.sprintf
+             "the store refuses a %s schedule; only scheduled and due rows change"
+             row.sch_status)
+      else None
 
 let schedule_update_form_json (row : schedule_row) =
   let body = schedule_payload_body row.sch_payload in
@@ -1885,15 +1925,47 @@ type keeper_liveness_counts = {
   klc_unreadable: int;
 }
 
+(** The Overview's reading of the runtime catalogue's quota windows. A failed
+    read is kept apart from one not made yet, and neither is drawn as "no
+    window is shut". *)
+type overview_quota_reading =
+  | Quota_unread
+  | Quota_read of Tui_decode.runtime_option list
+  | Quota_failed of string
+
+(** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
+    briefing writes [null] for a Keeper with no registry entry (an offline
+    Keeper that never booted this process), which is a different fact from a
+    word this build cannot name; neither is folded into a phase. *)
+type overview_keeper_phase =
+  | Keeper_phase of Tui_decode.keeper_phase
+  | Keeper_phase_absent
+  | Keeper_phase_unreadable of string
+
+(** One [keeper_briefs] row, as the Overview Team block reads it. *)
+type overview_keeper = {
+  okp_name: string;
+  okp_phase: overview_keeper_phase;
+  okp_last_turn_ago_s: float option;
+      (** [None] when the Keeper has not finished a turn this process saw. *)
+  okp_paused: bool option;
+      (** The brief's [paused]: an operator paused this Keeper. It is read
+          apart from [okp_phase] because a paused Keeper is left out of
+          autoboot, so after a server restart it has no registry entry and
+          its phase is [null] while [paused] still says [true]. [None] when
+          the brief carried no boolean there. *)
+}
+
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_liveness: keeper_liveness_counts;
+  ov_keeper_rows: overview_keeper list;
+      (** Every [keeper_briefs] row with a name, in the briefing's order. *)
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
-  ov_top_attention: attention_item option;
   ov_generated_at: string;
 }
 
@@ -2092,6 +2164,51 @@ let planning_visible_goals ~filter ~sort (goals : planning_goal list)
           planning_compare_due_asc left.pg_due_date right.pg_due_date
   in
   List.stable_sort compare (List.filter (planning_passes_filter filter) goals)
+
+(* How far a standalone lane's slot history is from its finished runs. The
+   server counts the slots and the runs without one from the same list of
+   finished runs, so the two add up and this is 0. Anything else means the
+   server's projection broke, and the detail draws the difference, positive
+   or negative, rather than rounding it away. Running rows are in neither
+   count: a run that has not finished has not chosen. *)
+let standalone_lane_slot_history_gap (lane : Tui_decode.standalone_lane) =
+  let named =
+    List.fold_left
+      (fun n (sc : Tui_decode.standalone_lane_slot_count) -> n + sc.slsc_count)
+      0 lane.sl_selected_slots
+  in
+  let without = lane.sl_runs_without_slot in
+  let accounted =
+    named + without.slws_vendor_system_one + without.slws_server_restarted
+    + without.slws_no_slot
+  in
+  lane.sl_succeeded_count + lane.sl_failed_count + lane.sl_cancelled_count
+  - accounted
+
+(* What the slot history line says after the slots: the finished runs that
+   named no slot, by the reason the server gives, and then any gap between
+   all the counts and the finished runs. Zero counts say nothing. *)
+let standalone_lane_runs_without_slot_parts (lane : Tui_decode.standalone_lane) =
+  let without = lane.sl_runs_without_slot in
+  let counted label count =
+    if count = 0 then [] else [ Printf.sprintf "%s: %d" label count ]
+  in
+  let no_slot =
+    if without.slws_no_slot = 0 then []
+    else
+      [ Masc_tui_message_layout.count_noun without.slws_no_slot "run" ^ " named no slot" ]
+  in
+  let gap =
+    match standalone_lane_slot_history_gap lane with
+    | 0 -> []
+    | gap when gap > 0 ->
+      [ Printf.sprintf "%s finished in no count"
+          (Masc_tui_message_layout.count_noun gap "run") ]
+    | gap -> [ Printf.sprintf "counts exceed finished runs by %d" (-gap) ]
+  in
+  counted "Vendor System One" without.slws_vendor_system_one
+  @ counted "closed by server restart" without.slws_server_restarted
+  @ no_slot @ gap
 
 type board_sort =
   | Board_hot
@@ -2669,6 +2786,7 @@ type surface_needs = {
   needs_keeper_chat : bool;
   needs_operator_approvals : bool;
   needs_asks : bool;
+  needs_runtime_quota : bool;
 }
 
 let nothing =
@@ -2681,6 +2799,7 @@ let nothing =
     needs_keeper_chat = false;
     needs_operator_approvals = false;
     needs_asks = false;
+    needs_runtime_quota = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2701,7 +2820,11 @@ let rec surface_needs ~keeper_pane_drawn surface =
   else needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  | Overview -> { nothing with needs_transport = true }
+  (* The Team block names the quota windows that are shut. The catalogue is
+     43 KB and answers in under two milliseconds on the live runtime, and
+     only this surface draws the windows beside the Keepers they stop. *)
+  | Overview ->
+      { nothing with needs_transport = true; needs_runtime_quota = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -2753,6 +2876,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_operator_approvals
       && not previous.needs_operator_approvals
   ; needs_asks = next.needs_asks && not previous.needs_asks
+  ; needs_runtime_quota =
+      next.needs_runtime_quota && not previous.needs_runtime_quota
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -5374,6 +5499,10 @@ type state = {
   mutable runtime_pick_keeper: string option;
   mutable runtime_pick_cursor: int;
   mutable runtime_catalog: Tui_decode.runtime_option list;
+  (* The Overview's own read of the same catalogue, kept apart from the
+     picker's [runtime_catalog] so a refresh behind the Overview never moves
+     the rows under an open picker's cursor. *)
+  mutable overview_quota: overview_quota_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -7505,6 +7634,7 @@ let create_state
   runtime_pick_keeper = None;
   runtime_pick_cursor = 0;
   runtime_catalog = [];
+  overview_quota = Quota_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;
@@ -8584,10 +8714,22 @@ let memory_fact_search_text = function
   | Memory_row_invalidation f ->
       f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
 
+(* The filter the Memory surface is narrowed by: the text being typed while a
+   search is open, and the applied one otherwise. Every count, every list and
+   every banner on the surface reads it here, so the number beside a filter is
+   a count of what that filter left. The rule was written out twice -- once
+   for the keeper table, once inside [memory_fact_rows] -- and the facts
+   banner read a third value, [search_last], so with a filter already applied
+   it quoted the old word over a count of the new one. *)
+let memory_search_query (state : state) =
+  match state.search with
+  | Some q -> surface_search_query Memory q
+  | None -> surface_search_query Memory state.search_last
+
+(* The keeper table matches case-folded, so its own reading is folded. Same
+   filter, one normalisation. *)
 let memory_overview_query (state : state) =
-    match state.search with
-    | Some q -> String.lowercase_ascii (surface_search_query Memory q)
-    | None -> String.lowercase_ascii (surface_search_query Memory state.search_last)
+  String.lowercase_ascii (memory_search_query state)
 
 
 (* What Esc does on Memory, nearest layer first: a filter, then the fact
@@ -8781,11 +8923,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
             (src, inv)
       in
       let all_rows = ordinary @ source_rows @ invalidation_rows in
-      let query =
-        match state.search with
-        | Some q -> surface_search_query Memory q
-        | None -> surface_search_query Memory state.search_last
-      in
+      let query = memory_search_query state in
       let filtered_rows =
         if query = "" then all_rows
         else

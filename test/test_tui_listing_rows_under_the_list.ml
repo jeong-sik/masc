@@ -25,6 +25,7 @@ let answered : Masc.Tui_decode.verification_snapshot =
   ; vs_offset = 0
   ; vs_truncated = false
   ; vs_awaiting_unresolved = []
+  ; vs_awaiting_unresolved_total = 0
   ; vs_backlog_error = None
   ; vs_backlog_recovery = None
   }

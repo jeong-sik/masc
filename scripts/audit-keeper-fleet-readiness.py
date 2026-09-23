@@ -573,9 +573,6 @@ def trace_session_ids_from_row(row: dict[str, Any]) -> set[str]:
 def pr_creation_scan_paths(base_path: Path, name: str) -> list[Path]:
     root = base_path / ".masc"
     paths: list[Path] = decision_log_paths(base_path, name)
-    history = root / "keepers" / name / ".playground_pr_history.jsonl"
-    if history.exists():
-        paths.append(history)
     for subdir in (
         store_dirname(_STORE_LAYOUT, "metrics"),
         store_dirname(_STORE_LAYOUT, "execution-receipts"),

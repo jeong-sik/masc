@@ -10515,6 +10515,7 @@ def standalone_lane_fixture(
         "last_outcome": "succeeded",
         "p50_elapsed_s": 8.0,
         "selected_slots": [{"slot_id": "glm-coding.glm-5-turbo", "count": 12}],
+        "runs_without_slot": {"vendor_system_one": 0, "server_restarted": 0, "no_slot": 0},
     }
     if lane_id == "board_attention_exact":
         row["jev"] = {"state": "off"}
@@ -14264,6 +14265,15 @@ def unread_keeper_counted_interaction() -> Interaction:
             start=0,
             timeout=10.0,
         )
+        # The Team block names the same Keeper, with why its row was unread.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"k-unread",
+            start=0,
+            timeout=10.0,
+        )
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
 
@@ -16749,10 +16759,14 @@ def run_schedule_source_status_regression(executable: str) -> None:
                     "pty": base64.b64encode(zlib.compress(captured[start:end])).decode(),
                 }), flush=True)
 
+            # Wait on "HTTP 503", the error the Schedules pane draws, not a bare
+            # "503": the palette footer prints the fixture server's random port,
+            # and RC run 35815189729 drew "Port: 35039", so the bare needle matched
+            # the palette frame before Schedules ever rendered.
             palette_go(process, master_fd, output, b"go schedules",
-                       b"503" if initial_error else b"status:running")
+                       b"HTTP 503" if initial_error else b"status:running")
             if initial_error:
-                screen = require("data unreliable:", "schedule load failed:", "503")
+                screen = require("data unreliable:", "schedule load failed:", "HTTP 503")
                 for absent in (b"Requests: 0", b"no scheduled automation", b"schedule-proof-701"):
                     if absent in screen:
                         raise AssertionError(f"Failed initial source invented data: {screen!r}")
@@ -16769,23 +16783,23 @@ def run_schedule_source_status_regression(executable: str) -> None:
                         f"the schedule count and its next wake split rows: {summary_row!r}"
                     )
                 fail_reads.set()
-                send_and_wait(process, master_fd, output, b"r", b"503")
-                require("이전 조회 유지 ·", "503", "schedule-proof-701",
+                send_and_wait(process, master_fd, output, b"r", b"HTTP 503")
+                require("이전 조회 유지 ·", "HTTP 503", "schedule-proof-701",
                         "status:running", "Requests: 1")
                 evidence("retained-list-refresh-failed")
                 send_and_wait(process, master_fd, output, b"\x1b[C", b"instance-proof-701")
-                require("이전 조회 유지 ·", "503", "instance-proof-701")
+                require("이전 조회 유지 ·", "HTTP 503", "instance-proof-701")
                 # The warning belongs to the source, so it remains visible
                 # while the retained detail body is scrolled.
                 send_and_wait(process, master_fd, output, b"\x1b[6~", b"DELIVERY EVIDENCE")
-                require("이전 조회 유지 ·", "503")
+                require("이전 조회 유지 ·", "HTTP 503")
                 send_and_wait(process, master_fd, output, b"\x1b[D", b"status:running")
 
             recovered_reads.set()
             fail_reads.clear()
             send_and_wait(process, master_fd, output, b"r", b"recovered-keeper")
             screen = require("status:scheduled", "Requests: 1", "schedule-proof-701")
-            for absent in ("조회 실패:", "갱신 실패:", "503", "status:running"):
+            for absent in ("조회 실패:", "갱신 실패:", "HTTP 503", "status:running"):
                 if absent.encode() in screen:
                     raise AssertionError(f"Recovered source retained old status: {screen!r}")
             evidence("source-recovered")

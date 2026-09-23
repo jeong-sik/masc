@@ -706,7 +706,11 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
   (let runtime_root =
      (Workspace.backend_config_for canonical_base_path).Backend_types.base_path
    in
+   (* Optional cleanup: an exception from it is logged, never a failed boot. *)
    match Masc.Keeper_retained_checkpoint_sweep.run ~runtime_root with
+   | exception exn ->
+     Log.Server.warn "[Startup] retained checkpoint sweep raised: %s"
+       (Printexc.to_string exn)
    | Error error ->
      Log.Server.warn "[Startup] retained checkpoint sweep skipped: %s"
        (Masc.Keeper_retained_checkpoint_sweep.error_to_string error)

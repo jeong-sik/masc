@@ -67,6 +67,21 @@ let defer_direct_retry store reference =
   ignore (Store.defer_direct_runtime_retry store ~now:12. ~operation_id
             ~execution_digest:operation.execution_digest ~continuation |> store_ok)
 
+let defer_direct_gate store reference =
+  let operation_id = Operation.Operation_id.of_string "sweep-gate" |> string_ok in
+  let input = match Operation.canonical_json (`Assoc ["message", `String "approve first"]) with
+    | Ok input -> input | Error _ -> fail "invalid canonical input fixture" in
+  ignore (Store.submit store ~now:10. ~operation_id
+            ~source:(`Assoc ["channel", `String "dashboard"]) ~input |> store_ok);
+  let operation = match Store.claim_next store ~now:11. |> store_ok with
+    | Some operation -> operation | None -> fail "gate operation was not queued" in
+  let obligation = Execution.gate_obligation ~approval_id:"approval" ~tool_name:"tool_execute"
+      ~input_hash:(Digestif.SHA256.(digest_string "tool input" |> to_hex)) |> string_ok in
+  let waiting = Execution.gate_wait ~checkpoint:reference
+      ~session_scope:(Execution.session_scope [] |> string_ok) ~obligations:[obligation] |> string_ok in
+  ignore (Store.defer_direct_gate store ~now:12. ~operation_id
+            ~execution_digest:operation.execution_digest ~waiting |> store_ok)
+
 let sweep root = match Sweep.run ~runtime_root:root with
   | Ok report -> report | Error error -> fail (Sweep.error_to_string error)
 
@@ -96,6 +111,43 @@ let test_removes_only_what_no_unsettled_execution_names () = with_root (fun root
   check bool "settled copy in another session removed" false (Sys.file_exists released_elsewhere);
   check bool "a file not named <sha>.json is left" true (Sys.file_exists other_file))
 
+let test_a_gate_wait_keeps_its_checkpoint () = with_root (fun root ->
+  let gated = checkpoint "gated" in
+  with_open (keeper_store root "gamma") (fun store -> defer_direct_gate store gated);
+  let path = retained root ~session:["sweep-trace"] gated in
+  write path "{}";
+  let report = sweep root in
+  check int "the gate's checkpoint is live" 1 report.live_references;
+  check int "nothing removed" 0 report.removed;
+  check bool "gated checkpoint kept" true (Sys.file_exists path))
+
+(* The runtime opens a keeper's store through a symlinked keepers directory
+   or keeper directory; the sweep must read the same store, not treat the
+   link as absent and release everything it names. *)
+let test_symlinked_keeper_directories_are_read () =
+  List.iter (fun link_keepers_dir -> with_root (fun root ->
+    let held = checkpoint "held" in
+    let elsewhere = Filename.concat root "elsewhere" in
+    let keepers_dir = Filename.concat root Common.keepers_runtime_dirname in
+    (if link_keepers_dir then begin
+       with_open (keeper_store elsewhere "delta") (fun store ->
+         ignore (apply store (running store 1) (Execution.Suspend held)));
+       Unix.symlink (Filename.concat elsewhere Common.keepers_runtime_dirname) keepers_dir
+     end else begin
+       with_open (keeper_store elsewhere "delta") (fun store ->
+         ignore (apply store (running store 1) (Execution.Suspend held)));
+       mkdir_p keepers_dir;
+       Unix.symlink
+         (Filename.concat (Filename.concat elsewhere Common.keepers_runtime_dirname) "delta")
+         (Filename.concat keepers_dir "delta")
+     end);
+    let path = retained root ~session:["sweep-trace"] held in
+    write path "{}";
+    let report = sweep root in
+    check int "the linked store's checkpoint is live" 1 report.live_references;
+    check bool "checkpoint named through a link kept" true (Sys.file_exists path)))
+    [true; false]
+
 let test_unreadable_store_removes_nothing () = with_root (fun root ->
   write (keeper_store root "broken") "not a sqlite database";
   let orphan = retained root ~session:["sweep-trace"] (checkpoint "orphan") in
@@ -115,6 +167,9 @@ let () =
     [ ( "sweep"
       , [ test_case "removes only what no unsettled execution names" `Quick
             test_removes_only_what_no_unsettled_execution_names
+        ; test_case "a gate wait keeps its checkpoint" `Quick test_a_gate_wait_keeps_its_checkpoint
+        ; test_case "symlinked keeper directories are read" `Quick
+            test_symlinked_keeper_directories_are_read
         ; test_case "an unreadable store removes nothing" `Quick test_unreadable_store_removes_nothing
         ; test_case "missing directories are an empty sweep" `Quick
             test_missing_directories_are_an_empty_sweep

@@ -22,11 +22,15 @@ type report =
 type error =
   | Store_unreadable of { path : string; detail : string }
       (** A keeper's operation store could not be read, so the live set is
-          unknown and nothing was removed. *)
+          unknown and nothing was removed. One unreadable store stops the
+          whole pass, including a store whose last transaction left a hot
+          journal that a read-only open cannot roll back; the next startup
+          after that store opens tries again. *)
 
 val error_to_string : error -> string
 
 (** [run ~runtime_root] reads every keeper's operation store under
-    [<runtime_root>/keepers] and removes the retained files under
-    [<runtime_root>/traces] that none of them names. *)
+    [<runtime_root>/keepers], following symlinks as the runtime does, and
+    removes the retained files under [<runtime_root>/traces] that none of them
+    names. The session tree is walked without following symlinks. *)
 val run : runtime_root:string -> (report, error) result

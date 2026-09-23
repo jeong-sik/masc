@@ -25,14 +25,17 @@ let sorted_entries dir =
     Ok (Array.to_list entries)
   | exception Sys_error detail -> Error detail
 
-let kind path =
-  match Unix.lstat path with
+(* [~follow:true] resolves symlinks the way the runtime does when it opens a
+   keeper's store; the session tree is walked without following them, so the
+   sweep never removes through a link. *)
+let kind ?(follow = false) path =
+  match (if follow then Unix.stat else Unix.lstat) path with
   | { Unix.st_kind; st_size; _ } -> Ok (Some (st_kind, st_size))
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
   | exception Unix.Unix_error (code, _, _) -> Error (path ^ ": " ^ Unix.error_message code)
 
-let is_directory path =
-  match kind path with
+let is_directory ?follow path =
+  match kind ?follow path with
   | Ok (Some (Unix.S_DIR, _)) -> Ok true
   | Ok (Some ((Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK), _))
   | Ok None -> Ok false
@@ -54,7 +57,7 @@ let live_references_of_store path =
 let live_references ~runtime_root =
   let keepers_dir = Filename.concat runtime_root Common.keepers_runtime_dirname in
   let unreadable detail = Store_unreadable { path = keepers_dir; detail } in
-  let* present = is_directory keepers_dir |> Result.map_error unreadable in
+  let* present = is_directory ~follow:true keepers_dir |> Result.map_error unreadable in
   if not present
   then Ok String_set.empty
   else
@@ -63,7 +66,8 @@ let live_references ~runtime_root =
       (fun acc keeper_name ->
          let* live = acc in
          let* keeper_dir =
-           is_directory (Filename.concat keepers_dir keeper_name) |> Result.map_error unreadable
+           is_directory ~follow:true (Filename.concat keepers_dir keeper_name)
+           |> Result.map_error unreadable
          in
          if not keeper_dir
          then Ok live

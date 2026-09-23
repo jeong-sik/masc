@@ -1381,6 +1381,10 @@ type schedule_row = {
   sch_reaction_quarantined: int option;
       (** Ledger records the projection could not match. Nonzero is why a
           status reads worse than the steps below it look. *)
+  sch_runner_hold: Tui_decode.schedule_runner_hold option;
+      (** The occurrence the schedule runner is holding back because the
+          target Keeper has not taken the previous one yet. A held occurrence
+          has no wake, so none of the fields above can say it (#38205). *)
 }
 
 let schedule_json_string field = function
@@ -1404,13 +1408,52 @@ let schedule_payload_body = function
        | Some _ | None -> `Assoc [])
   | _ -> `Assoc []
 
+(** What the Keeper's schedule store holds, in one line above its rows.
+
+    The tab drew the rows and nothing else, and a Keeper whose store has run
+    for weeks answers with a wall of closed work: on the live fleet
+    [code-reviewer] held 100 requests, 1 of them scheduled and the other 99
+    succeeded or cancelled. A reader had no way to learn that from the screen
+    without scrolling to the end of it.
+
+    Live and closed are split by [Schedule_domain.is_terminal], the same rule
+    the store itself uses, and a count of zero is left out -- a disposition
+    nothing is in is not a fact about this Keeper. *)
+let schedule_counts_line counts =
+  let spell statuses =
+    counts
+    |> List.filter (fun (status, count) -> count > 0 && List.mem status statuses)
+    |> List.map (fun (status, count) ->
+           Printf.sprintf "%d %s" count
+             (Schedule_domain.schedule_status_to_string status))
+  in
+  let live, closed =
+    List.partition
+      (fun status -> not (Schedule_domain.is_terminal status))
+      Schedule_domain.all_schedule_statuses
+  in
+  let live_text =
+    match spell live with
+    | [] -> "nothing live"
+    | parts -> String.concat ", " parts
+  in
+  let closed_total =
+    counts
+    |> List.filter (fun (status, _) -> List.mem status closed)
+    |> List.fold_left (fun total (_, count) -> total + count) 0
+  in
+  match spell closed with
+  | [] -> live_text
+  | parts ->
+      Printf.sprintf "%s \xc2\xb7 %s closed (%s)" live_text
+        (string_of_int closed_total) (String.concat ", " parts)
+
 (** Why the store would refuse a modify, read before the editor opens.
 
-    [Schedule_store.Transition_refused] names its own boundary: "the request
-    is [Running] or terminal", terminal being [Schedule_domain.is_terminal].
-    That sentence is the whole rule, so it is asked here rather than restated
-    as a word list -- a status the store adds later lands on the right side
-    of it without this file changing.
+    The rule is [Schedule_domain.modify_allowed], the same function
+    [Schedule_store.update_request] calls, so this file holds no copy of it.
+    The reason names only the status the row showed: the screen may be one
+    refresh behind a recurring schedule that has since finished running.
 
     [None] is the answer for a word this build does not name. It is the same
     promise [sch_status] makes by staying a string: an unrecognised status
@@ -1421,17 +1464,13 @@ let schedule_modify_refusal (row : schedule_row) : string option =
   match Schedule_domain.schedule_status_of_string row.sch_status with
   | Error _ -> None
   | Ok status ->
-      let refused =
-        match status with
-        | Schedule_domain.Running -> true
-        | other -> Schedule_domain.is_terminal other
-      in
-      if refused then
+      if Schedule_domain.modify_allowed status then None
+      else
         Some
           (Printf.sprintf
-             "the store refuses a %s schedule; only scheduled and due rows change"
+             "the store refuses to modify a %s schedule (status as last \
+              read; refresh if it has changed)"
              row.sch_status)
-      else None
 
 let schedule_update_form_json (row : schedule_row) =
   let body = schedule_payload_body row.sch_payload in
@@ -1504,6 +1543,11 @@ type schedule_snapshot = {
   scs_request_count: int option;
   scs_truncated: bool;
   scs_next_due_iso: string option;
+  (** Every status the store holds for this target, not only the page the
+      server sent, so the count stays right when the page is capped. [None]
+      exactly when the store read failed, which is the same fact
+      [scs_request_count = None] carries. *)
+  scs_counts: (Schedule_domain.schedule_status * int) list option;
   scs_rows: schedule_row list;
 }
 
@@ -1938,6 +1982,7 @@ type overview_quota_reading =
     build cannot name makes the row undecodable rather than a default. *)
 type pull_checks = Pull_checks_passing | Pull_checks_failing | Pull_checks_running | Pull_checks_none
 type pull_review = Pull_review_approved | Pull_review_changes_requested | Pull_review_waiting | Pull_review_none
+type pull_mergeable = Pull_mergeable | Pull_conflicting | Pull_mergeable_unknown
 
 type open_pull = {
   op_number: int;
@@ -1946,6 +1991,11 @@ type open_pull = {
   op_draft: bool;
   op_checks: pull_checks;
   op_review: pull_review;
+  op_mergeable: pull_mergeable;
+  op_keeper: string option;
+      (** The Keeper whose name is this PR's last commit author (RFC-0465
+          §2.1). Only meaningful while the snapshot's Keeper list was read;
+          see {!pulls_keepers}. *)
 }
 
 type repository_pulls_reading =
@@ -1963,10 +2013,18 @@ type pulls_reader =
       (** Why the server is not reading: not declared, the Keeper is missing,
           or its token cannot be read. *)
 
+(** Whether the server read the Keeper list it joined authors against. A PR
+    with no Keeper means "no Keeper wrote it" only under [Pulls_keepers_listed]. *)
+type pulls_keepers =
+  | Pulls_keepers_not_listed
+  | Pulls_keepers_listed
+  | Pulls_keepers_failed of string
+
 type overview_pulls_reading =
   | Overview_pulls_unread
   | Overview_pulls_read of {
       reader: pulls_reader;
+      keepers: pulls_keepers;
       repositories_error: string option;
           (** The server could not list the registered repositories; the rows
               are the last list it could, so they may be out of date. *)
@@ -5060,6 +5118,16 @@ let slot_editor_target_name = function
   | Media_failover_slots -> "[runtime].media_failover"
 ;;
 
+(* The slot editor's half of the same question the pick list asks. The media
+   failover route has no per-entry write, so a drop or a move sends the whole
+   order it read; an exact lane names the one slot and lets the writer read
+   the declared order under its lock. Exhaustive, so a target added later
+   says which side it is on. *)
+let slot_editor_target_sends_whole_order = function
+  | Media_failover_slots -> true
+  | Exact_lane_slots _ -> false
+;;
+
 (* A name being typed on the Runtime reading. [Renaming_lane] carries the name
    the lane has now, because the write names both and the prompt shows the
    one being replaced. *)
@@ -5429,6 +5497,13 @@ type state = {
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
+  (* The Info tab's Board-attention rows, keyed by the Keeper they were read
+     for. [requeue_board_quarantine_inflight] holds the partition a requeue
+     press is waiting on, so a second press before the answer is not a second
+     request against the same quarantine. *)
+  mutable keeper_board_quarantines:
+    (string, Masc_tui_board_quarantine.t) Masc_tui_fetched.t;
+  mutable board_quarantine_requeue_inflight: string option;
   mutable github_token_input: string option;
   mutable github_token_save_status: string option;
   (* The scopes the next [L] login asks for beyond gh's minimum. Off until the
@@ -7642,6 +7717,8 @@ let create_state
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;
+  keeper_board_quarantines = Masc_tui_fetched.initial;
+  board_quarantine_requeue_inflight = None;
   github_token_input = None;
   github_token_save_status = None;
   github_login_scopes = [];
@@ -9233,6 +9310,21 @@ let runtime_lane_write_busy (state : state) =
    the last write; sending it again could restore a candidate another writer
    removed. Keep the refusal typed by the list state rather than guessing
    freshness from elapsed time or the notice text. *)
+(* Whether the write this pick sends replaces the order the list last read,
+   in full. Those are the writes a stale list can undo: the server takes what
+   we send as the whole order, so an entry another writer removed comes back.
+   Appending one slot, or creating a lane out of the pick alone, cannot do
+   that -- the server joins those to the order it holds.
+
+   Exhaustive on purpose. The rule used to live in the dispatch as a list of
+   constructors beside a comment reading "only the conversation-lane arm
+   sends [existing] in full", and [Pick_media_failover] -- which sends
+   [existing @ [ pick ]] -- sat on the unguarded side of it. A pick added
+   later has to say which side it is on. *)
+let runtime_lane_pick_sends_whole_order = function
+  | Pick_conversation_lane _ | Pick_media_failover -> true
+  | Pick_exact_lane _ | Pick_new_lane _ | Pick_route_default -> false
+
 let runtime_lane_candidate_write_refusal (state : state) =
   if runtime_lane_write_busy state
   then Some Lane_write_pending
@@ -9478,6 +9570,17 @@ let plan_slot_edit (state : state) edit =
        if runtime_lane_write_busy state
        then Refuse_slot_edit Lane_write_pending
        else (
+         match
+           ( slot_editor_target_sends_whole_order target
+           , runtime_lane_candidate_write_refusal state )
+         with
+         | true, Some notice ->
+           (* The order under the cursor is the one the list last read, and
+              after a failed read-back that is evidence of the state before
+              the last write. The pick list refuses the same write for the
+              same reason. *)
+           Refuse_slot_edit notice
+         | true, None | false, (Some _ | None) ->
          match target, edit with
          | Exact_lane_slots _, Drop_slot when count <= 1 ->
            (* The writer refuses it too. Saying so here keeps the round trip
@@ -9990,9 +10093,17 @@ let approval_items (state : state) =
 let approvals_open_questions (state : state) =
   Option.map Masc_tui_ask_projection.open_rows state.asks_snapshot
 
+(* The questions themselves. One ask can carry several, and counting the asks
+   under the word "question" understated the work: the live surface read
+   "MASC Approvals (1 question)" and "Questions waiting on you (1)" over one
+   ask holding two, with "+2 more questions" three rows below saying so. *)
 let approvals_open_question_count (state : state) =
   match approvals_open_questions state with
-  | Some rows -> List.length rows
+  | Some rows ->
+      List.fold_left
+        (fun total (row : Tui_decode.ask_row) ->
+          total + List.length row.Tui_decode.ar_questions)
+        0 rows
   | None -> 0
 
 let approvals_surface_pending (state : state) =

@@ -2,9 +2,12 @@
    carry, computed from the same values a turn uses, without a turn.
 
    The arithmetic is the turn driver's (RFC keeper-context-window-in-tokens
-   §10.4): the carried range from the pair's front, over the durable history
-   with the wake line appended as the newest atom. The front, the marks and
-   the request-body cap are read live; R (tool schemas + keeper
+   §13.4, §13.6): the range starts where
+   [Keeper_turn_driver_try_provider.choose_range_start] says -- a fitting
+   Librarian snapshot, else the Librarian's read position, else the pair's
+   front, else the turn start -- over the durable history with the wake line
+   appended as the newest atom. The Librarian's files, the front and the
+   binding's marks are read live; R (tool schemas + keeper
    instructions) and the pinned blocks (memory recall, dynamic context, ...)
    are taken from the turn records of completed turns on the same runtime,
    because a turn measures them with the encoder the composition uses and
@@ -140,34 +143,29 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let carry ~measure ~front ~turn_start ~counted_tokens messages =
+let carry ~measure ~continuity ~front ~turn_start ~counted_tokens messages =
   let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
-  let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
-  let first_atom, origin, counted_tokens =
-    match Option.map (Keeper_carried_front.for_history ~digest_at) front with
-    | Some (Ok (seed : Keeper_carried_front.seed)) ->
-      ( Keeper_carried_front.clamp ~atom_count seed.first_atom
-      , Keeper_carried_front.Carried seed.source
-      , counted_tokens )
-    | Some (Error (Keeper_carried_front.Front_atom_missing | Keeper_carried_front.Front_message_differs))
-    | None ->
-      (* No front: this turn's own atoms, from the end of the last completed
-         turn on this history (RFC keeper-context-window-in-tokens §13.4);
-         the newest atom alone when that boundary could not be read. *)
-      (match turn_start with
-       | Keeper_carried_front.Turn_boundary { end_atom } ->
-         ( Keeper_carried_front.clamp ~atom_count end_atom
-         , Keeper_carried_front.Turn_start { end_atom }
-         , None )
-       | Keeper_carried_front.Turn_boundary_unknown { reason } ->
-         ( Keeper_carried_front.newest_atom ~atom_count
-         , Keeper_carried_front.Turn_start_unknown { reason }
-         , None ))
+  let { Keeper_turn_driver_try_provider.start; outlived_seed = _ } =
+    Keeper_turn_driver_try_provider.choose_range_start
+      ~continuity
+      ~front
+      ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+      ~turn_boundary:turn_start
+  in
+  (* The ledger's count describes the range its front opened; any other
+     start carries a range nothing has counted. *)
+  let counted_tokens =
+    match start with
+    | Keeper_turn_driver_try_provider.From_seed _ -> counted_tokens
+    | Keeper_turn_driver_try_provider.From_snapshot _
+    | Keeper_turn_driver_try_provider.From_read_position _
+    | Keeper_turn_driver_try_provider.From_turn_boundary _ -> None
   in
   let projection, transmitted_bytes =
-    Runtime_model_input_tail_window.project_from_atom
+    Keeper_turn_driver_try_provider.project_range_start
       ~measure_message_bytes:measure
-      ~first_atom
+      ~atom_count
+      start
       messages
   in
   (* The preamble is in the projected list only when the range opens on a
@@ -187,7 +185,7 @@ let carry ~measure ~front ~turn_start ~counted_tokens messages =
       - projection.Runtime_model_input_tail_window.dropped_atoms
   ; transmitted_bytes
   ; preamble_bytes
-  ; origin
+  ; origin = Keeper_turn_driver_try_provider.range_start_origin start
   ; counted_tokens
   }
 ;;
@@ -398,6 +396,7 @@ let candidate
       ~readings
       ~records_read
       ~seed
+      ~continuity
       ~turn_start
       ~place
       runtime_id
@@ -410,28 +409,25 @@ let candidate
     match lane with
     | Error _ -> None
     | Ok () ->
-      (* Apply the driver's boundary policy to a local value; the Table
-         remains the observation the next real turn will read. If this
-         history no longer holds its positions, use the seed the newest
-         response-observed record on the trace gives every candidate alike.
-         The forecast only reads: a ledger that does not hold is passed over
-         here and dropped by the turn driver's next composition. *)
+      (* The front the driver reads when the turn has no Librarian point:
+         the pair's ledger while this history holds its positions, else the
+         seed the newest response-observed record on the trace gives every
+         candidate alike. The forecast only reads: a ledger that does not
+         hold is passed over here and dropped by the turn driver's next
+         composition. Where the range starts is then the driver's own
+         choice ({!Keeper_turn_driver_try_provider.choose_range_start}). *)
       let front, counted_tokens =
         match
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
         with
         | Some ledger when Keeper_model_input_ledger.holds ~digest_at ledger ->
-          let projected =
-            match marks with
-            | None -> ledger
-            | Some marks -> fst (Keeper_carried_range.apply_turn_boundary ~marks ledger)
-          in
-          Keeper_carried_front.of_ledger projected, ledger.Keeper_model_input_ledger.total_tokens
+          Keeper_carried_front.of_ledger ledger, ledger.Keeper_model_input_ledger.total_tokens
         | Some _ | None -> Lazy.force seed, None
       in
       Some
         (carry
            ~measure:(Keeper_context_core.message_measurer ())
+           ~continuity:(Some continuity)
            ~front
            ~turn_start
            ~counted_tokens
@@ -484,6 +480,13 @@ let forecast ~config ~keeper_name =
          Keeper_turn_driver_try_provider.turn_start
            ~config ~keeper_name ~trace_id ~messages:history
        in
+       (* The Librarian point every candidate of the turn starts from, as
+          the driver chooses it once per turn. Its notes are the turn's to
+          log; a forecast only looks. *)
+       let continuity, (_ : Keeper_turn_driver_try_provider.continuity_note list) =
+         Keeper_turn_driver_try_provider.read_keeper_continuity
+           ~config ~keeper_name ~trace_id ~messages:history
+       in
        (* Stdlib lazy: private to this synchronous candidate walk, never
           shared across fibers. A valid warm ledger needs no store scan;
           cold candidates share the one read when they need it. *)
@@ -507,6 +510,7 @@ let forecast ~config ~keeper_name =
                     ~readings
                     ~records_read
                     ~seed
+                    ~continuity
                     ~turn_start
                     ~place:
                       { walks_at

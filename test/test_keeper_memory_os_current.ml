@@ -83,6 +83,7 @@ let apply_disposition
     ~source:(source Current.Librarian)
     ~new_claims
     ()
+  |> Result.map (fun (disposition : Current.disposition) -> disposition.snapshot)
 ;;
 
 let require_ok = function

@@ -1040,14 +1040,32 @@ let exact_input_payload
     ]
 ;;
 
+let absorbed_statements_json statements =
+  `List
+    (List.map
+       (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
+          `Assoc
+            [ "memory_id", `String statement.absorbed; "into", `String statement.into ])
+       statements)
+;;
+
+(* [absorb_gate] is what the gate let through; [absorption] is what the
+   commit did with it. They differ when a target left the snapshot during the
+   pass, and the run record has to say which absorptions actually happened. *)
 let completed_output
       ~(inp : Keeper_librarian.input)
       ~exact_output
       ~absorb_gate
-      (snapshot : Keeper_memory_os_current.t)
+      (disposition : Keeper_memory_os_current.disposition)
   =
+  let snapshot = disposition.snapshot in
   `Assoc
     [ "absorb_gate", Keeper_librarian_absorb_gate.run_result_to_yojson absorb_gate
+    ; ( "absorption"
+      , `Assoc
+          [ "applied", absorbed_statements_json disposition.absorbed_applied
+          ; "not_applied", absorbed_statements_json disposition.absorbed_not_applied
+          ] )
     ; "exact_output", exact_output
     ; "before", current_selection_registry_summary inp.current
     ; ( "after"
@@ -1333,7 +1351,10 @@ let run_best_effort
                 gate only narrows the list. A gate switched off, or an
                 excluded Keeper, leaves the answer unchanged; a gate that is
                 on but cannot be asked absorbs nothing; a failed judgment
-                retains unconfirmed originals. *)
+                retains unconfirmed originals. A new claim that absorbed
+                nothing, and whose every statement the memories it named
+                (still current) convey, is a copy of them and is not applied
+                (RFC-0463 section 2.8); any other claim applies as before. *)
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)
@@ -1343,14 +1364,18 @@ let run_best_effort
                    | None -> []
                    | Some current -> current.facts)
                  ~new_claims:selection.new_claims
+                 ~superseding:
+                   (List.map
+                      (fun (revision : Keeper_librarian.revision) -> revision.superseded_by)
+                      selection.revisions)
                  ~absorbed:selection.absorbed
                  ()
              in
              let applied_absorbed = Keeper_librarian_absorb_gate.absorbed_of_run absorb_gate in
-             let+ snapshot =
+             let+ disposition =
                Keeper_memory_os_current.apply_disposition
-                 ~on_committed:(fun snapshot ->
-                   committed_memory := Some (snapshot, exact_output, selected_slot, absorb_gate);
+                 ~on_committed:(fun disposition ->
+                   committed_memory := Some (disposition, exact_output, selected_slot, absorb_gate);
                    on_memory_committed ())
                  ~clock
                  ~dropped_statements:selection.dropped
@@ -1364,7 +1389,10 @@ let run_best_effort
                  { kind = Keeper_memory_os_current.Librarian
                  ; trace_id = input_trace_id inp
                  }
-               ~new_claims:selection.new_claims
+               ~new_claims:
+                 (Keeper_librarian_absorb_gate.without_copies
+                    absorb_gate
+                    selection.new_claims)
                ()
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })
@@ -1384,7 +1412,7 @@ let run_best_effort
                  ~keeper_id
                  (List.map
                     (fun (revision : Keeper_librarian.revision) : Keeper_memory_os_events.event ->
-                       { recorded_at = snapshot.updated_at
+                       { recorded_at = disposition.snapshot.updated_at
                        ; memory_id = revision.superseded
                        ; trace_id = input_trace_id inp
                        ; kind =
@@ -1397,7 +1425,7 @@ let run_best_effort
                  ~keeper_name:keeper_id
                  "%s"
                  (Keeper_memory_os_events.append_error_to_string error));
-             `Memory_committed (snapshot, exact_output, selected_slot, absorb_gate)
+             `Memory_committed (disposition, exact_output, selected_slot, absorb_gate)
            in
            match result with
            | Ok (`Context_organized (exact_output, selected_slot)) ->
@@ -1405,11 +1433,12 @@ let run_best_effort
                (`Assoc [ "memory_write", `String "skipped_context_only"
                        ; "exact_output", exact_output ]);
              Eio.Fiber.check ()
-           | Ok (`Memory_committed (snapshot, exact_output, selected_slot, absorb_gate)) ->
+           | Ok (`Memory_committed (disposition, exact_output, selected_slot, absorb_gate)) ->
+             let snapshot = disposition.snapshot in
              complete
                ~selected_slot
                Exact_lane_run_registry.Succeeded
-               (completed_output ~inp ~exact_output ~absorb_gate snapshot);
+               (completed_output ~inp ~exact_output ~absorb_gate disposition);
              Log.Keeper.info
                ~keeper_name:keeper_id
                "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
@@ -1492,14 +1521,14 @@ let run_best_effort
                  (Exact_lane_run_registry.list_runs registry)
              in
              match !committed_memory with
-             | Some (snapshot, exact_output, selected_slot, absorb_gate) ->
+             | Some (disposition, exact_output, selected_slot, absorb_gate) ->
                if not run_completed then
                  complete ~selected_slot Exact_lane_run_registry.Cancelled
-                   (completed_output ~inp ~exact_output ~absorb_gate snapshot);
+                   (completed_output ~inp ~exact_output ~absorb_gate disposition);
                Log.Keeper.warn
                  ~keeper_name:keeper_id
                  "memory os librarian cancelled after snapshot commit revision=%d; post-commit work may be incomplete"
-                 snapshot.revision
+                 disposition.snapshot.revision
              | None ->
                if not run_completed then
                  complete

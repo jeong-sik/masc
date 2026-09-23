@@ -712,3 +712,141 @@ let inventory_to_json inventory =
 let inventory_json ~base_path ~keeper_names =
   inventory ~base_path ~keeper_names |> inventory_to_json
 ;;
+
+(* The body [parse_request] accepts, built from the same fields. A client that
+   spelled the schema and the decision itself would be a second copy of them. *)
+let request_to_json (request : request) =
+  `Assoc
+    [ "schema", `String request_schema
+    ; "candidate_id", `String request.candidate_id
+    ; "expected_quarantine_id", `String request.expected_quarantine_id
+    ; ( "decision"
+      , `String
+          (match request.decision with
+           | Acknowledge_and_requeue -> "acknowledge_and_requeue") )
+    ]
+;;
+
+(* Readers of [inventory_item_to_json] and the error rows beside it. They sit
+   next to the writers so the two cannot drift: a field renamed on one side is
+   a failing round trip in this module's own suite. *)
+let inventory_phase_of_string = function
+  | "quarantined" -> Some Inventory_quarantined
+  | "requeue_requested" -> Some Inventory_requeue_requested
+  | "requeued" -> Some Inventory_requeued
+  | _ -> None
+;;
+
+let inventory_error_kind_of_string = function
+  | "candidate_ledger_unavailable" -> Some Inventory_candidate_ledger_unavailable
+  | _ -> None
+;;
+
+let json_field fields name =
+  match List.assoc_opt name fields with
+  | Some value -> Ok value
+  | None -> Error ("missing field " ^ name)
+;;
+
+let json_string fields name =
+  let* value = json_field fields name in
+  match value with
+  | `String text -> Ok text
+  | _ -> Error (name ^ " must be a string")
+;;
+
+let json_number = function
+  | `Float value -> Some value
+  | `Int value -> Some (Float.of_int value)
+  | _ -> None
+;;
+
+let json_float fields name =
+  let* value = json_field fields name in
+  match json_number value with
+  | Some number -> Ok number
+  | None -> Error (name ^ " must be a number")
+;;
+
+let json_float_opt fields name =
+  let* value = json_field fields name in
+  match value with
+  | `Null -> Ok None
+  | other ->
+    (match json_number other with
+     | Some number -> Ok (Some number)
+     | None -> Error (name ^ " must be a number or null"))
+;;
+
+let json_string_opt fields name =
+  let* value = json_field fields name in
+  match value with
+  | `Null -> Ok None
+  | `String text -> Ok (Some text)
+  | _ -> Error (name ^ " must be a string or null")
+;;
+
+let attempt_provenance_of_json = function
+  | `Null -> Ok None
+  | `Assoc fields ->
+    let* slot_id = json_string fields "slot_id" in
+    let* call_id = json_string fields "call_id" in
+    let* plan_fingerprint = json_string fields "plan_fingerprint" in
+    let* request_body_sha256 = json_string fields "request_body_sha256" in
+    Ok
+      (Some
+         ({ slot_id; call_id; plan_fingerprint; request_body_sha256 }
+          : Candidate.attempt_provenance))
+  | _ -> Error "attempt_provenance must be an object or null"
+;;
+
+let inventory_item_of_json = function
+  | `Assoc fields ->
+    let* keeper_name = json_string fields "keeper_name" in
+    let* partition_id = json_string fields "partition_id" in
+    let* candidate_id = json_string fields "candidate_id" in
+    let* quarantine_id = json_string fields "quarantine_id" in
+    let* phase_raw = json_string fields "phase" in
+    let* phase =
+      match inventory_phase_of_string phase_raw with
+      | Some phase -> Ok phase
+      | None -> Error ("unknown phase " ^ phase_raw)
+    in
+    let* category_raw = json_string fields "failure_category" in
+    let* failure_category =
+      match Candidate.quarantine_failure_category_of_string category_raw with
+      | Some category -> Ok category
+      | None -> Error ("unknown failure_category " ^ category_raw)
+    in
+    let* provenance_json = json_field fields "attempt_provenance" in
+    let* attempt_provenance = attempt_provenance_of_json provenance_json in
+    let* quarantined_at = json_float fields "quarantined_at" in
+    let* requested_at = json_float_opt fields "requested_at" in
+    let* requested_by = json_string_opt fields "requested_by" in
+    let* requeued_at = json_float_opt fields "requeued_at" in
+    Ok
+      ({ keeper_name
+       ; partition_id
+       ; candidate_id
+       ; quarantine_id
+       ; phase
+       ; failure_category
+       ; attempt_provenance
+       ; quarantined_at
+       ; requested_at
+       ; requested_by
+       ; requeued_at
+       }
+       : inventory_item)
+  | _ -> Error "inventory item must be an object"
+;;
+
+let inventory_error_of_json = function
+  | `Assoc fields ->
+    let* keeper_name = json_string fields "keeper_name" in
+    let* kind_raw = json_string fields "kind" in
+    (match inventory_error_kind_of_string kind_raw with
+     | Some kind -> Ok ({ keeper_name; kind } : inventory_error)
+     | None -> Error ("unknown inventory error kind " ^ kind_raw))
+  | _ -> Error "inventory error must be an object"
+;;

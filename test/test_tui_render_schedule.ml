@@ -1720,6 +1720,28 @@ let test_wake_readings_stay_four_separate_answers () =
      = Schedule.Wake_history_failed "boom")
 ;;
 
+(* A held schedule keeps [due] as its status and the previous occurrence's
+   wake as its last wake, so the hold reading is the only thing on the screen
+   saying it waits (#38205). It names the held due and says what it waits for
+   in words, not the wire's field name. *)
+let test_a_held_schedule_says_what_it_waits_for () =
+  let reading = Schedule.schedule_hold_reading ~due:"09-23 12:34" in
+  let has needle =
+    let n = String.length needle and m = String.length reading in
+    let rec go i = i + n <= m && (String.sub reading i n = needle || go (i + 1)) in
+    go 0
+  in
+  check bool "it opens with the word held" true
+    (String.length reading >= 4 && String.sub reading 0 4 = "held");
+  check bool "it names when the held occurrence came due" true (has "09-23 12:34");
+  check bool "it says the keeper has the previous wake" true (has "previous wake");
+  check bool "it does not print the wire field" false (has "runner_hold");
+  let tag = Schedule.schedule_hold_tag ~due:"09-23 12:34" in
+  check bool "the short tag leads the full reading" true
+    (String.length reading >= String.length tag
+     && String.sub reading 0 (String.length tag) = tag)
+;;
+
 (* Slack reaches the name and the runtime before the task id, and both stop at
    a cap so one very wide terminal does not spend eighty cells on a model
    name. *)
@@ -2198,5 +2220,7 @@ let () =
             test_wake_readings_stay_four_separate_answers
         ; test_case "a board post without a time has no age" `Quick
             test_a_board_post_without_a_time_has_no_age
+        ; test_case "a held schedule says what it waits for" `Quick
+            test_a_held_schedule_says_what_it_waits_for
         ] )
     ]

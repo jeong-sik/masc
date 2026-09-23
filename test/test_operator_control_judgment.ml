@@ -227,6 +227,36 @@ let test_operator_judgment_write_and_latest_roundtrip () =
         "Operator judge requests a human checkpoint."
         Yojson.Safe.Util.(latest |> member "judgment" |> member "summary" |> to_string))
 
+(* A body [keeper_name] used to become the judgment's writer, so any caller
+   could record a judgment as another keeper. The writer is the caller's
+   authenticated name whatever the body says. *)
+let test_operator_judgment_writer_is_the_caller () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator-judge"));
+      let ctx = operator_ctx env sw config "operator-judge" in
+      match
+        Operator_control.judgment_write_json ctx
+          (`Assoc
+            [ ("surface", `String "command.namespace")
+            ; ("target_type", `String "workspace")
+            ; ("summary", `String "Writer comes from the credential.")
+            ; ("confidence", `Float 0.7)
+            ; ("keeper_name", `String "someone-else")
+            ])
+      with
+      | Error err -> Alcotest.fail err
+      | Ok json ->
+        Alcotest.(check string) "writer is the authenticated caller"
+          "operator-judge"
+          Yojson.Safe.Util.(json |> member "judgment" |> member "keeper_name" |> to_string))
+
 let test_operator_judgment_rejects_retired_target_type_aliases () =
   Alcotest.(check bool)
     "namespace no longer parses"
@@ -341,6 +371,8 @@ let tests =
       test_judgment_freshness_default_is_per_surface;
     Alcotest.test_case "operator judgment write/latest roundtrip" `Quick
       test_operator_judgment_write_and_latest_roundtrip;
+    Alcotest.test_case "judgment writer is the caller" `Quick
+      test_operator_judgment_writer_is_the_caller;
     Alcotest.test_case "rejects retired target type aliases" `Quick
       test_operator_judgment_rejects_retired_target_type_aliases;
     Alcotest.test_case "requires numeric timestamps" `Quick

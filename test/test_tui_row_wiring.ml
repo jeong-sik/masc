@@ -264,6 +264,24 @@ let test_the_overview_load_stops_reading_a_field_no_screen_draws () =
    nearest state. *)
 let loader = "bin/masc_tui_loader.ml"
 
+(* The schedule store's dispositions are named once, by the shared contract
+   the server builds this object from. The decoder walks that list instead of
+   spelling the seven words again, so a status the contract gains is asked for
+   here without this file changing -- and cannot be quietly dropped from the
+   Automation tab's count line. *)
+let test_the_schedule_counts_are_read_from_the_shared_status_list () =
+  Alcotest.(check bool) "the decoder walks the contract's own list" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:loader
+       ~binding_name:"decode_schedule_snapshot"
+       ~callee:"Schedule_domain.schedule_status_to_string"
+     > 0);
+  Alcotest.(check int) "and spells no disposition of its own" 0
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:loader
+       ~binding_name:"decode_schedule_snapshot"
+       ~literals:
+         [ "scheduled"; "due"; "running"; "succeeded"; "failed"; "cancelled"
+         ; "expired" ])
+
 let test_the_fleet_row_reads_the_control_planes_own_word () =
   Alcotest.(check int) "the liveness word is parsed, not matched as text" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:loader
@@ -339,6 +357,32 @@ let test_the_schedule_detail_says_what_became_of_the_wake () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"schedule_detail_lines" ~callee:"schedule_turn_rows"
      > 0)
+
+(* #38205: [/health] reported which occurrence the schedule runner held back
+   and no screen read it. The schedule row carries the hold now; this pins
+   that the loader decodes it and that both the list's summary line and the
+   detail pane draw it through the one reading. *)
+let test_the_schedules_screen_draws_the_runner_hold () =
+  Alcotest.(check bool) "the loader decodes the row's hold" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:loader
+       ~binding_name:"decode_schedule_row"
+       ~callee:"Tui_decode.decode_schedule_runner_hold"
+     > 0);
+  List.iter
+    (fun (binding_name, callee) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s reads the hold" binding_name)
+        true
+        (reads ~binding_name ~fields:[ "sch_runner_hold" ] > 0);
+      Alcotest.(check bool)
+        (Printf.sprintf "%s words it through %s" binding_name callee)
+        true
+        (Ast_grep.count_calls_in_value_binding ~module_path:render ~binding_name
+           ~callee
+         > 0))
+    [ "schedule_delivery_summary", "Render_schedule.schedule_hold_tag"
+    ; "schedule_detail_lines", "Render_schedule.schedule_hold_reading"
+    ]
 
 let test_the_schedule_subject_is_measured_not_given_the_line () =
   (* Twice: once to measure the column, once to fill the cell. One call would
@@ -970,6 +1014,8 @@ let () =
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the load stops reading a field no screen draws"
             `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
+        ; Alcotest.test_case "the schedule counts read the shared status list"
+            `Quick test_the_schedule_counts_are_read_from_the_shared_status_list
         ; Alcotest.test_case "the fleet row reads the control plane's word"
             `Quick test_the_fleet_row_reads_the_control_planes_own_word
         ; Alcotest.test_case "the operation is compared before repeating"
@@ -1001,6 +1047,8 @@ let () =
             test_the_roster_title_says_whether_the_reading_is_live
         ; Alcotest.test_case "the schedule detail says what became of the wake"
             `Quick test_the_schedule_detail_says_what_became_of_the_wake
+        ; Alcotest.test_case "the Schedules screen draws the runner hold"
+            `Quick test_the_schedules_screen_draws_the_runner_hold
         ; Alcotest.test_case "Repositories show the server-resolved path"
             `Quick test_repositories_show_the_server_resolved_checkout_path
         ; Alcotest.test_case "Repository changes keep the Git axes" `Quick

@@ -353,7 +353,8 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
     String.make 1000 'c'; String.make 6000 'd'] in
   save source; boundary ~fresh:true 1 source;
   let current = Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1000.
-    ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[] () |> get in
+    ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[] () |> get
+    |> fun (d : Current.disposition) -> d.snapshot in
   let half = prepare config |> some |> P.narrow |> some in
   let input : K.input =
     {turn_ref=P.turn_ref half; goal_context=K.No_task; keeper_instructions=instructions;

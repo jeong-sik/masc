@@ -3198,6 +3198,7 @@ let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
    are the ones every connector emits. *)
 let connector_json ?(id = "slack") ?(available = `Bool true)
     ?(connected = `Bool true) ?(status = "connected")
+    ?(gateway_state = `String "connected") ?(poll_state = `Null)
     ?(channel = `String "#release-deployment")
     ?(pid = `Int 4242)
     ?(bindings =
@@ -3218,7 +3219,8 @@ let connector_json ?(id = "slack") ?(available = `Bool true)
     ; ("capabilities", `List [ `String "post" ])
     ; ("error", `String "")
     ; ("status_source", `String "in_process_gateway")
-    ; ("gateway_state", `String "connected")
+    ; ("gateway_state", gateway_state)
+    ; ("poll_state", poll_state)
     ; ("trigger_policy", `String "mention_only")
     ; ("gate_base_url", `Null)
     ; ("binding_store_path", `String ".gate/runtime/slack/bindings.json")
@@ -3272,6 +3274,11 @@ let test_decode_connector_snapshot_reads_the_live_shape () =
              c.Tui_decode.cn_bot_token_present;
            Alcotest.(check (option int)) "server pid" (Some 4242)
              c.Tui_decode.cn_pid;
+           Alcotest.(check bool) "typed gateway state" true
+             (c.Tui_decode.cn_gateway_state
+              = Some Tui_decode.Connector_gateway_connected);
+           Alcotest.(check bool) "no poll state" true
+             (c.Tui_decode.cn_poll_state = None);
            Alcotest.(check bool) "typed directory state" true
              (c.Tui_decode.cn_directory_state
               = Some Tui_decode.Connector_directory_partial);
@@ -3306,6 +3313,39 @@ let test_decode_connector_configured_but_unreachable () =
       Alcotest.(check bool) "but not reachable" false c.Tui_decode.cn_connected
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_connector_reads_a_poll_state () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json ~gateway_state:`Null
+             ~poll_state:(`String "degraded") ()
+         ])
+  with
+  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "typed poll state" true
+        (c.Tui_decode.cn_poll_state = Some Tui_decode.Connector_poll_degraded);
+      Alcotest.(check bool) "no gateway state" true
+        (c.Tui_decode.cn_gateway_state = None)
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* A gateway or poll state the server's state machines never produce is not
+   read as some nearby state. *)
+let test_decode_connector_rejects_an_unknown_runtime_state () =
+  List.iter
+    (fun (label, connector) ->
+      match
+        Tui_decode.decode_connector_snapshot
+          (connector_snapshot_json [ connector ])
+      with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.failf "%s was accepted" label)
+    [ ( "unknown gateway state"
+      , connector_json ~gateway_state:(`String "half_open") () )
+    ; ( "unknown poll state"
+      , connector_json ~gateway_state:`Null ~poll_state:(`String "idle") () )
+    ]
 
 let test_decode_connector_hides_nonpositive_pid () =
   match
@@ -10395,6 +10435,10 @@ let () =
           test_decode_connector_snapshot_reads_the_live_shape;
         Alcotest.test_case "configured is not reachable" `Quick
           test_decode_connector_configured_but_unreachable;
+        Alcotest.test_case "poll state is typed" `Quick
+          test_decode_connector_reads_a_poll_state;
+        Alcotest.test_case "unknown runtime state is rejected" `Quick
+          test_decode_connector_rejects_an_unknown_runtime_state;
         Alcotest.test_case "nonpositive pid is omitted" `Quick
           test_decode_connector_hides_nonpositive_pid;
         Alcotest.test_case "absent flags are off" `Quick

@@ -6998,11 +6998,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                         (Terminal_text.single_line name)
                         (Terminal_text.single_line binding.cb_channel_id)
                 in
-                let runtime_state =
-                  match connector.cn_gateway_state, connector.cn_poll_state with
-                  | Some value, _ | None, Some value -> Some value
-                  | None, None -> None
-                in
                 let store_state =
                   match connector.cn_binding_store_read_ok with
                   | Some true -> Some "readable"
@@ -7057,8 +7052,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                     (Terminal_text.single_line_or ~default:"-" connector.cn_channel)
                 ]
                 @ optional_row "Runtime state"
-                    (Masc_tui_connector_state.runtime_state_to_draw
-                       ~connection:connector.cn_connection runtime_state)
+                    (Masc_tui_connector_state.runtime_state_to_draw connector)
                 @ optional_row "Status source" connector.cn_status_source
                 @ optional_row "Remote endpoint" connector.cn_endpoint
                 @ optional_row "Status file" connector.cn_status_path
@@ -12427,11 +12421,12 @@ let render_runtime_pick (state : state) =
             c.push (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset);
             1
         | None ->
-            (* The kind badge is 7 cells ("[LANE] ", "[MODEL]"), so the
-               first header cell spans badge and target, as the rows do. *)
+            (* The first header cell spans badge and target, as the rows
+               do. *)
             let header =
               Printf.sprintf "  %s  %s  %s"
-                (fit_width "KIND   TARGET" (7 + target_width))
+                (fit_width "KIND   TARGET"
+                   (Masc_tui_types.runtime_pick_badge_cells + target_width))
                 (fit_width "CONFIGURED ROUTE / MODEL" route_width)
                 (fit_width "PROPERTIES / FAILOVER"
                    (Masc_tui_types.runtime_pick_properties_room ~cols
@@ -12467,11 +12462,17 @@ let render_runtime_pick (state : state) =
                               | _ -> id)
                            lane.rrl_runtime_ids)
                     in
-                    ( Ansi.cyan ^ "[LANE] " ^ Ansi.reset
+                    ( Ansi.cyan
+                      ^ fit_width Masc_tui_types.runtime_pick_lane_badge
+                          Masc_tui_types.runtime_pick_badge_cells
+                      ^ Ansi.reset
                     , Message_layout.fit_middle target_width (Terminal_text.single_line lane.rrl_id)
                     , fit_width (Terminal_text.single_line chain) route_width )
                 | Masc_tui_types.Pick_model option ->
-                    ( Ansi.dim ^ "[MODEL]" ^ Ansi.reset
+                    ( Ansi.dim
+                      ^ fit_width Masc_tui_types.runtime_pick_model_badge
+                          Masc_tui_types.runtime_pick_badge_cells
+                      ^ Ansi.reset
                     , Message_layout.fit_middle target_width (Terminal_text.single_line option.ro_id)
                     , fit_width
                         (Terminal_text.single_line

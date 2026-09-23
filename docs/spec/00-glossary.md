@@ -512,9 +512,13 @@ status: reference
   `Connector_connected_unavailable`·`Connector_disconnected`·`Connector_offline`·
   `Connector_stale`. 배지가 철자하는 단어는 `CONNECTED`·`CONNECTED / UNAVAILABLE`·
   `DISCONNECTED`·`UNAVAILABLE`·`STALE`(`Masc_tui_connector_state.badge_word`). 같은 판이
-  gateway·poll 상태를 따로 그리는데, 그 값이 배지가 이미 철자한 단어와 같으면(대소문자·
-  앞뒤 공백 무시) 그리지 않는다 — Discord 행이 `Connection ● CONNECTED` 위에
-  `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한 번만 그린다.
+  gateway 상태(`connector_gateway_state`, 닫힌 일곱 값)나 poll 상태
+  (`connector_poll_state`, 닫힌 세 값)를 따로 그린다. 서버가 모르는 값을 보내면 decode 가
+  실패한다. 배지가 이미 말한 상태는 그리지 않는다. 그 판정은 문자열 비교가 아니라 생성자
+  짝으로 한다: `Connector_connected` 아래 `Connector_gateway_connected`,
+  `Connector_disconnected` 아래 `Connector_gateway_disconnected` 두 짝뿐이다 — Discord 행이
+  `Connection ● CONNECTED` 위에 `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한
+  번만 그린다.
   → [Masc_tui_connector_state.mli](../../bin/masc_tui_connector_state.mli),
   [Tui_decode.connector_connection](../../lib/tui_decode.mli)
 

@@ -2687,7 +2687,9 @@ let test_read_window_line_one_is_a_byte_prefix () =
     | _, out -> Alcotest.fail ("prefix read failed: " ^ out))
 
 let test_read_window_missing_file_fails () =
-  let path = Filename.concat (Filename.get_temp_dir_name ()) "read-window-missing-file" in
+  (* A fresh name, removed, so the path is known to be absent. *)
+  let path = Filename.temp_file "read-window-missing-" ".txt" in
+  Sys.remove path;
   match run_read_window ~start_line:10 ~max_bytes:64 path with
   | Unix.WEXITED 0, _ -> Alcotest.fail "a missing file read as an empty window"
   | _, out -> Alcotest.(check string) "no bytes" "" out

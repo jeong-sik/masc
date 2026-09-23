@@ -465,7 +465,8 @@ let read_error_to_string = function
    the script. A pipeline's status is its last command's, so the script
    refuses a directory and opens the file with [exec <] first: a redirection
    error on a special built-in exits the non-interactive shell non-zero, as
-   [head -c] on a missing file did. *)
+   [head -c] on a missing file did; [|| exit 1] keeps that true for a shell
+   that does not follow POSIX there (bash not started as sh). *)
 let read_window_argv ~start_line ~max_bytes ~path =
   let bytes = string_of_int (max 0 max_bytes) in
   if start_line <= 1
@@ -473,7 +474,7 @@ let read_window_argv ~start_line ~max_bytes ~path =
   else
     [ "sh"
     ; "-c"
-    ; {|if [ -d "$2" ]; then echo "$2: is a directory" >&2; exit 1; fi; exec < "$2"; tail -n +"$1" | head -c "$3"|}
+    ; {|if [ -d "$2" ]; then echo "$2: is a directory" >&2; exit 1; fi; exec < "$2" || exit 1; tail -n +"$1" | head -c "$3"|}
     ; "sh"
     ; string_of_int start_line
     ; path

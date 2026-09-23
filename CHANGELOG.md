@@ -8,7 +8,6 @@
 
 ### Changed
 
-- The Board list's age column holds the time the sort ordered by, and its header names that time: `AGE` under the four orders that rank or break ties on when the post appeared (`hot`, `trending`, `recent`, `discussed`), `MOVED` under `updated`, which ranks on the last change. The column drew the last change under every sort, so under `recent` -- "newest post first" -- a post made 24 minutes ago with a reply 24 seconds ago sat sixth reading `25s`, a smaller number than the five rows above it, and the order looked broken. The sort is read once per draw, so the header word and every row's number name the same time (#38127).
 - The Librarian reads a new claim that repeats a current memory word for word
   as that memory instead of refusing the whole pass as
   `duplicate_selected_memory_id`: the stored fact keeps its first sighting and

@@ -1026,6 +1026,7 @@ let run_turn
       ~ctx
       ~build_turn_prompt
       ~user_message
+      ~input_metadata
       ~config
       ~meta
       ~turn_ref

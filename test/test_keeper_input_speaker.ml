@@ -32,6 +32,7 @@ let all_speakers =
   ; S.Person external_speaker
   ; S.Person (S.External { S.channel = "discord"; user_id = None; user_name = None })
   ; S.Host_prompt (S.Autonomous_wake { answered_asks = [] })
+  ; S.Host_prompt S.Official_client_resume
   ; S.Host_prompt
       (S.Autonomous_wake
          { answered_asks = [ S.Owner; S.Keeper (keeper_id "beta"); external_speaker ] })

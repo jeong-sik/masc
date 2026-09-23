@@ -1197,7 +1197,7 @@ let test_prompt_carries_keeper_instructions () =
 
 (* RFC-0468 §3.2: each User message's header names the speaker the host
    stamped when it created the message. A message from before the speaker
-   existed says unknown, and a broken entry is refused rather than shown. *)
+   existed says unknown, and a broken entry says it is broken. *)
 let test_conversation_headers_carry_the_stamped_speaker () =
   let module S = Masc.Keeper_input_speaker in
   let user ?speaker text =
@@ -1234,17 +1234,44 @@ let test_conversation_headers_carry_the_stamped_speaker () =
     ; "[turn=3 role=user speaker=owner] stop merging"
     ; "[turn=4 role=user speaker=unknown] from an old checkpoint"
     ];
+  (* A broken entry is shown as broken and the pass goes on, so one broken
+     message never holds the Librarian on the same range. *)
   let broken =
     Agent_core.Types.make_message
       ~metadata:[ Agent_core.Types.Input_speaker.entry (`String "owner") ]
       ~role:Agent_core.Types.User
       [ Agent_core.Types.Text "broken" ]
   in
-  match Librarian.prompt_variables { (input ()) with messages = [ broken ] } with
-  | variables ->
-    failf "an undecodable speaker was rendered: %s"
-      (List.assoc "conversation_history" variables)
-  | exception Invalid_argument _ -> ()
+  let repeated =
+    Agent_core.Types.make_message
+      ~metadata:(S.metadata (S.Person S.Owner) @ S.metadata (S.Person S.Owner))
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text "repeated" ]
+  in
+  let broken_input = { (input ()) with messages = [ broken; repeated ] } in
+  let history =
+    List.assoc "conversation_history" (Librarian.prompt_variables broken_input)
+  in
+  check bool "an undecodable entry renders as invalid" true
+    (String_util.contains_substring history "[turn=0 role=user speaker=invalid(");
+  check bool "a repeated entry renders as duplicate" true
+    (String_util.contains_substring history "[turn=1 role=user speaker=duplicate] repeated");
+  match Runtime.messages_for_librarian broken_input with
+  | Error detail -> failf "the pass could not build its request: %s" detail
+  | Ok messages ->
+    check bool "the pass request carries the whole conversation" true
+      (List.exists
+         (fun (message : Agent_core.Types.message) ->
+            List.exists
+              (function
+                | Agent_core.Types.Text text ->
+                  String_util.contains_substring text "speaker=duplicate] repeated"
+                | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+                | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+                | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+                | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> false)
+              message.content)
+         messages)
 ;;
 
 let user_text_of_messages messages =

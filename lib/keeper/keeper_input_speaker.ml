@@ -9,7 +9,9 @@ type person =
   | Keeper of Keeper_identity.Keeper_id.t
   | External of external_speaker
 
-type host_prompt = Autonomous_wake of { answered_asks : person list }
+type host_prompt =
+  | Autonomous_wake of { answered_asks : person list }
+  | Official_client_resume
 
 type t =
   | Host_prompt of host_prompt
@@ -40,6 +42,9 @@ let equal left right =
   | ( Host_prompt (Autonomous_wake { answered_asks = left })
     , Host_prompt (Autonomous_wake { answered_asks = right }) ) ->
     List.equal equal_person left right
+  | Host_prompt Official_client_resume, Host_prompt Official_client_resume -> true
+  | Host_prompt (Autonomous_wake _), Host_prompt Official_client_resume
+  | Host_prompt Official_client_resume, Host_prompt (Autonomous_wake _)
   | Person _, Host_prompt _ | Host_prompt _, Person _ -> false
 ;;
 
@@ -72,6 +77,9 @@ let to_json = function
       ; "host_prompt", `String "autonomous_wake"
       ; "answered_asks", `List (List.map person_to_json answered_asks)
       ]
+  | Host_prompt Official_client_resume ->
+    `Assoc
+      [ "kind", `String "host_prompt"; "host_prompt", `String "official_client_resume" ]
 ;;
 
 let ( let* ) = Result.bind
@@ -158,10 +166,18 @@ let of_json json =
   let* kind = kind_of json in
   match kind with
   | "host_prompt" ->
-    let* fields = fields_exactly [ "kind"; "host_prompt"; "answered_asks" ] json in
-    let* host_prompt = string_field "host_prompt" fields in
+    let* host_prompt =
+      match json with
+      | `Assoc fields -> string_field "host_prompt" fields
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        Error "input speaker must be a JSON object"
+    in
     (match host_prompt with
+     | "official_client_resume" ->
+       let* _ = fields_exactly [ "kind"; "host_prompt" ] json in
+       Ok (Host_prompt Official_client_resume)
      | "autonomous_wake" ->
+       let* fields = fields_exactly [ "kind"; "host_prompt"; "answered_asks" ] json in
        let* answered_asks = list_field "answered_asks" fields in
        let* answered_asks =
          List.fold_right
@@ -234,7 +250,7 @@ let header_value = function
     Printf.sprintf
       "host:autonomous_wake(answered_asks=%s)"
       (String.concat "," (List.map person_header_value answered_asks))
-  | Invalid detail ->
-    invalid_arg ("keeper_input_speaker: invalid input speaker metadata: " ^ detail)
-  | Duplicate -> invalid_arg "keeper_input_speaker: input speaker metadata repeated"
+  | Present (Host_prompt Official_client_resume) -> "host:official_client_resume"
+  | Invalid detail -> Printf.sprintf "invalid(%S)" detail
+  | Duplicate -> "duplicate"
 ;;

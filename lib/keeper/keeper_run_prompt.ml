@@ -99,6 +99,7 @@ let build_turn_context
         -> messages:Agent_core.Types.message list
         -> Keeper_agent_prompt_metrics.turn_prompt)
       ~(user_message : string)
+      ~(input_metadata : Agent_core.Types.metadata)
       ~config:(_ : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(turn_ref : Ids.Turn_ref.t)
@@ -155,7 +156,12 @@ let build_turn_context
      meta.name (start_turn_count + 1) user_seg.Keeper_agent_prompt_metrics.bytes
      (pick_hash16 user_seg) dyn_seg.Keeper_agent_prompt_metrics.bytes (pick_hash16 dyn_seg));
   (* 6. Append user message and persist. *)
-  let user_msg = Agent_core.Types.user_msg user_message in
+  (* The same speaker entry AGENT_CORE stamps on its own copy of this input
+     (RFC-0468 §3.2), so no copy of the turn's input exists without it. *)
+  let user_msg =
+    Agent_core.Types.make_message ~metadata:input_metadata ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text user_message ]
+  in
   let history_messages =
     Keeper_context_runtime.messages_of_context ctx_work
   in

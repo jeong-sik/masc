@@ -33,6 +33,10 @@ type host_prompt =
           message as a board row; [answered_asks] names who answered each
           quoted row, in the order the rows appear. The rows stay in the one
           message so the provider request keeps its shape. *)
+  | Official_client_resume
+      (** The host's cue that resumes an official-client turn from its
+          checkpoint ({!Keeper_direct_checkpoint_continuation.official_resume_message}).
+          The requester did not write it. *)
 
 type t =
   | Host_prompt of host_prompt
@@ -61,7 +65,8 @@ val of_ask_responder : Keeper_ask.responder -> person
 (** The value of a Librarian conversation header's [speaker=] field, e.g.
     [host:autonomous_wake], [owner], [keeper:"beta"]. Free text is quoted with
     OCaml string syntax so the header stays one line of space-separated
-    fields. [Absent] renders [unknown]. [Invalid] and [Duplicate] raise
-    [Invalid_argument]: only this module writes the entry, so either one is a
-    broken writer, not a speaker to show. *)
+    fields. [Absent] renders [unknown]. [Invalid] renders [invalid("<reason>")]
+    and [Duplicate] renders [duplicate]: the entry is shown as broken rather
+    than guessed or dropped, and the Librarian keeps reading the conversation
+    instead of stopping on one message. *)
 val header_value : classification -> string

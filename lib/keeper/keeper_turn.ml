@@ -832,7 +832,11 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~user_message:(match official_checkpoint_resume with
                                       | Some _ -> Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id
                                       | None -> message)
-		                                ~input_speaker
+		                                ~input_speaker:(match official_checkpoint_resume with
+                                      | Some _ ->
+                                        Keeper_input_speaker.Host_prompt
+                                          Keeper_input_speaker.Official_client_resume
+                                      | None -> input_speaker)
 		                                ~turn_kind:Turn_record.Direct
                                 ~repetition_execution
 		                                ~skill_snapshot

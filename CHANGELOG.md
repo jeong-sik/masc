@@ -339,6 +339,8 @@
 
 ### Fixed
 
+- A provider 400/422 whose cause agent core does not model (`Unknown_invalid_request`) no longer evicts, halves or demotes the Keeper's carried context. Only a typed size refusal (`ContextOverflow`, `Request_body_refused_by_provider`) moves the front, so a tool-schema or parameter error is asked once, returned as received, and the next turn composes the whole accepted range instead of a front cut by a retry that passed (#38286).
+- `/api/v1/dashboard/keeper-costs` no longer adds a turn's unknown token usage as 0 tokens. Token totals now sum only the turns that reported usage and are `null` when none did; `tokens_reported_samples`, `tokens_unreported_samples` and `tokens_unread_samples` say how many turns reported usage, gave `null`, or could not be read. Zero-latency uncosted turns are no longer dropped (the row-kind check already keeps only turn rows), an integer `cost_usd` counts as a reported cost, and a row without `cost_usd` is kept and counted in `cost_unread_samples` instead of vanishing. The dashboard's Keeper cost table and Tokens tile say `미보고` instead of 0 (#38289).
 - grok-4.3 requests that carry a reasoning effort are sent instead of refused: those rows now declare xAI's documented ladder (none, low, medium, high, xhigh). `grok-latest`, which xAI does not document, still refuses an effort-carrying request before sending it (#37868).
 - HTTP/2 `POST /graphql` checks authentication before reading the request body, as HTTP/1 already did (#37893).
 - HTTP/2 responses are no longer cut off at the client's flow-control window: a client with a small window used to receive a 200 with a truncated body, and parallel streams could arrive empty (#37942).

@@ -8963,32 +8963,20 @@ let selected_memory_keeper (state : state) =
   let rows = visible_memory_keepers state in
   List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
 
-(* [header_rows] is how many rows the fleet header above the sort row takes.
-   The renderer wraps it to the frame, so only it knows the number; it passes
-   the length of the rows it draws ([Masc_tui_render_memory.memory_overview_scrolled]). *)
-let memory_overview_scrolled ~header_rows ?cursor (state : state) =
+(* [header_rows] is how many rows the fleet header above the sort row takes,
+   and [context_rows] how many the selected keeper's block below the list
+   takes. The renderer wraps both to the frame, so only it knows the numbers;
+   it passes the length of the rows it draws
+   ([Masc_tui_render_memory.memory_overview_scrolled]).
+
+   [context_rows] was counted here instead, as nine readings plus one row per
+   alert and read error. That was right only while every reading fitted one
+   row, and the block breaks its rows at clause marks now, so a count taken
+   from the readings would size the list for a block two or three rows
+   shorter than the one drawn. *)
+let memory_overview_scrolled ~header_rows ~context_rows (state : state) =
   let keepers = visible_memory_keepers state in
   let count = List.length keepers in
-  let cursor = Option.value cursor ~default:state.memory_health_cursor in
-  let context_rows =
-    match List.nth_opt keepers (max 0 (min cursor (count - 1))) with
-    | None -> 0
-    | Some keeper ->
-        (* Divider, snapshot, facts, source, Librarian, saved/prepared context
-           and Vision, then the
-           selected keeper's read errors and server alerts. *)
-        9 + List.length keeper.mkh_alerts
-        + (if Option.is_some keeper.mkh_read_error then 1 else 0)
-        + (if Option.is_some keeper.mkh_source_read_error then 1 else 0)
-        (* The Librarian cause row, drawn only for a pass that stopped or
-           crashed. *)
-        + (match
-             Option.bind keeper.mkh_librarian.Tui_decode.mlh_state
-               Tui_decode.memory_librarian_pass_end_cause
-           with
-           | Some _ -> 1
-           | None -> 0)
-  in
   (* One row per keeper row the decoder refused, then a divider. *)
   let refused_rows =
     match state.memory_health with

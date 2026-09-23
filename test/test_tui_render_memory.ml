@@ -417,6 +417,49 @@ let rows_drawn ~cols ~budget state =
     ~push_empty:(fun () -> incr count);
   !count
 
+let body_lines ~cols ~budget state =
+  let lines = ref [] in
+  let keep line = lines := Masc_tui_theme.strip_sgr line :: !lines in
+  Render_memory.render_memory_body ~cols ~budget state
+    ~push:keep
+    ~push_styled:(fun ~style:_ line -> keep line)
+    ~push_selected:keep
+    ~push_divider:(fun () -> keep "")
+    ~push_empty:(fun () -> keep "");
+  List.rev !lines
+
+(* The Librarian row ends in "failed N since server start". Cut at the frame
+   it reads "failed N", which is a running total and not what the server
+   said (#36497) -- the reading the fleet summary above already breaks at its
+   clause mark rather than lose. The row under the list did not.
+
+   A reading the frame cannot hold in two rows keeps being cut: the block is
+   paid for out of the list's rows, and a block that grows without a bound
+   takes the list with it. *)
+let test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark () =
+  let keeper =
+    { (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024) with
+      Decode.mkh_librarian_failures = 3
+    }
+  in
+  let state = make_state () in
+  state.memory_health <- Some (make_fleet_health keeper);
+  state.memory_health_cursor <- 0;
+  let holds needle lines =
+    List.exists (fun line -> String.equal (String.trim line) needle) lines
+  in
+  check bool "the count keeps its qualifier on a row of its own" true
+    (holds "failed 3 since server start" (body_lines ~cols:140 ~budget:30 state));
+  let narrow = body_lines ~cols:60 ~budget:30 state in
+  check bool "a row that needs more than one break is not broken" true
+    (List.exists
+       (fun line ->
+         let line = String.trim line in
+         String.length line > 8 && String.sub line 0 9 = "Librarian")
+       narrow);
+  check bool "and the narrow frame draws no orphan tail" false
+    (holds "failed 3 since server start" narrow)
+
 (* The fleet readings wrap, so the header takes more rows at a narrow width
    than a fixed count could assume; the scroll bound now receives the real
    length ([~header_rows]) instead of a guess, and the body has to draw inside
@@ -1604,7 +1647,12 @@ let test_render_memory_overflow_selection () =
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
       ~overflow_takes_row:layout.sc_overflow_takes_row
   in
-  check int "five keepers fit two list rows beside their context" 2
+  (* One of the two list rows went to the context block when the Librarian
+     row started breaking at its clause mark rather than losing "failed N
+     since server start" to the frame. The block is paid for out of the same
+     rows as the list, and this fixture's frame is 22 rows: a terminal tall
+     enough to show the roster spends the row against many more. *)
+  check int "five keepers fit one list row beside their context" 1
     (height (Render_memory.memory_overview_scrolled ~cols:100 state));
   let assert_selected_visible () =
     let used = ref 0 and selected = ref None in
@@ -1752,6 +1800,8 @@ let () =
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
         ; test_case "header rows come out of the budget" `Quick
             test_memory_header_rows_come_out_of_the_budget
+        ; test_case "the keeper block breaks the Librarian row at a clause mark"
+            `Quick test_the_keeper_block_breaks_the_librarian_row_at_a_clause_mark
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
         ; test_case "the filter bar names the query it counted" `Quick
             test_the_memory_filter_bar_names_the_query_it_counted

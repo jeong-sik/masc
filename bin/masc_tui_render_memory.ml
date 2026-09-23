@@ -116,7 +116,53 @@ let memory_updated_text = function
 let recall_tokens bytes =
   Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet bytes
 ;;
-let memory_context_lines (k : memory_keeper_health) =
+(* One break, and no more. The block sits under the list and is paid for out
+   of the same frame, so a reading the frame cannot hold in two rows is one
+   the block has no room for and is cut as it was. At a terminal wide enough
+   to draw the roster, the Librarian row and an alert each need one break. *)
+let maximum_rows_for_a_reading = 2
+
+(* Every row of the keeper block is a list of clauses that a Printf joined
+   with the clause mark, so the mark is where the row may break. The block
+   was drawn one row per reading and cut at the frame: the Librarian row lost
+   "failed N since server start", the tail #36497 records as reading like a
+   running total, and a server alert lost the half that says what to do about
+   it.
+
+   A row with no mark -- an alert is one sentence -- is one clause, and
+   [pack_clauses] wraps a clause too wide for a row rather than cutting it.
+   Continuation rows carry the same two-space indent as the first. *)
+let clause_rows ~cols line =
+  let indent = "  " in
+  let indent_cells = Message_layout.display_width indent in
+  let body =
+    if String.starts_with ~prefix:indent line then
+      String.sub line indent_cells (String.length line - indent_cells)
+    else line
+  in
+  let separator = Message_layout.clause_separator in
+  let separator_length = String.length separator in
+  let clauses =
+    let length = String.length body in
+    let rec split ~from ~at acc =
+      if at + separator_length > length then
+        List.rev (String.sub body from (length - from) :: acc)
+      else if String.equal (String.sub body at separator_length) separator then
+        split ~from:(at + separator_length) ~at:(at + separator_length)
+          (String.sub body from (at - from) :: acc)
+      else split ~from ~at:(at + 1) acc
+    in
+    split ~from:0 ~at:0 []
+  in
+  let packed =
+    Message_layout.pack_clauses
+      ~max_cells:(max 1 (framed_inner_width cols - indent_cells))
+      clauses
+    |> List.map (fun row -> indent ^ row)
+  in
+  if List.length packed <= maximum_rows_for_a_reading then packed else [ line ]
+
+let memory_context_lines ~cols (k : memory_keeper_health) =
   let current_line =
     Printf.sprintf "  %s · %s · snapshot r%d · recall %s tok · updated %s"
       k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
@@ -270,8 +316,19 @@ let memory_context_lines (k : memory_keeper_health) =
           k.mkh_source_read_error
       ]
   in
-  [current_line; facts_line; source_line; librarian_line] @ librarian_cause_lines @ context_lines
-  @ (vision_line :: (read_error_lines @ alert_lines))
+  (* Only the rows whose tail changes what the row claims are broken. The
+     Librarian row ends in "failed N since server start", and a cut leaves
+     "failed N", which reads as a running total (#36497); an alert is one
+     sentence from the server and a cut takes the half that says what to do.
+     The readings around them end in a timestamp or a byte count, where a cut
+     costs a value rather than the meaning of the ones before it, and
+     breaking every row would double the block at the widths a terminal is
+     likely to have. *)
+  [ current_line; facts_line; source_line ]
+  @ clause_rows ~cols librarian_line
+  @ librarian_cause_lines @ context_lines
+  @ (vision_line :: read_error_lines)
+  @ List.concat_map (clause_rows ~cols) alert_lines
 
 type memory_state = Masc_tui_types.memory_state =
   | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
@@ -672,10 +729,21 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
   total @ readings
 
 
+(* Both counts are the length of what this module draws: the fleet header
+   above the list, and the selected keeper's block below it. Neither is a
+   count of readings -- a reading breaks into as many rows as the frame
+   gives it. *)
 let memory_overview_scrolled ~cols ?cursor (state : state) =
+  let keepers = visible_memory_keepers state in
+  let cursor = Option.value cursor ~default:state.memory_health_cursor in
+  let context_rows =
+    match List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) with
+    | None -> 0
+    | Some keeper -> List.length (memory_context_lines ~cols keeper)
+  in
   memory_overview_scrolled
     ~header_rows:(List.length (memory_fleet_header_rows ~cols state))
-    ?cursor state
+    ~context_rows state
 
 let render_memory_body ~cols ~budget (state : state)
     ~(push : string -> unit)
@@ -752,7 +820,7 @@ let render_memory_body ~cols ~budget (state : state)
   let context_lines =
     match List.nth_opt keepers cursor with
     | None -> []
-    | Some k -> memory_context_lines k
+    | Some k -> memory_context_lines ~cols k
   in
   let layout = memory_overview_scrolled ~cols ~cursor state in
   let rows = budget + Masc_tui_frame.chrome_rows in

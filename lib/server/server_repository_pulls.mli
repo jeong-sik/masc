@@ -110,9 +110,13 @@ type keeper_checkouts_read =
       (** A [scan_truncated] limit counts the Keeper as unread for every
           repository: checkouts past it were never seen. *)
   | Checkouts_absent
-      (** The playground does not exist ([Root_missing]), e.g. a microvm guest
-          not booted in this process. No checkout, so no branch and nothing
-          unread. *)
+      (** A shared-mount playground directory does not exist ([Root_missing]):
+          no checkout, so no branch and nothing unread. *)
+  | Checkouts_not_booted
+      (** An endpoint-owned playground answered [Root_missing]: its guest is
+          not running (not booted in this process, or gone). Its volume
+          outlives the guest, so its checkouts are unknown; counted apart
+          from unread so a restart does not read as a fleet of failures. *)
   | Checkouts_unread of string
       (** The Keeper's metadata or playground could not be read, or its
           inspection raised: any of its checkouts may be on any branch. *)
@@ -135,6 +139,7 @@ type keeper_on_repository =
           Keeper's playground was not read or its discovery stopped early, a
           checkout's origin or the catalog was not read, or the branch probe
           failed. *)
+  ; not_booted : bool  (** See {!Checkouts_not_booted}. *)
   }
 
 type repository_keepers =
@@ -164,6 +169,9 @@ type keeper_join =
       ; keepers_unread : int
           (** Keepers not in [keepers] with a checkout that may be of this
               repository but whose branch is unknown. *)
+      ; keepers_not_booted : int
+          (** Keepers whose guest is not running, so whose checkouts were not
+              seen at all. Not counted in [keepers_unread]. *)
       }
 
 (** {1 Snapshot} *)
@@ -261,10 +269,12 @@ val current : unit -> snapshot
 (** The latest refresh, or {!initial} before the first one ends. *)
 
 val checkouts_of_scan :
+  tree_location:Keeper_types_profile_sandbox.tree_location ->
   (Keeper_sandbox_control.checkout_scan, Keeper_playground_checkouts.scan_error) result ->
   keeper_checkouts_read
-(** [Root_missing] is {!Checkouts_absent}; every other scan error is
-    {!Checkouts_unread} with its text. *)
+(** [Root_missing] is {!Checkouts_absent} for a shared mount and
+    {!Checkouts_not_booted} for an endpoint-owned tree; every other scan
+    error is {!Checkouts_unread} with its text. *)
 
 val inspect_fleet_checkouts : config:Workspace.config -> inspect_checkouts
 (** {!Keeper_sandbox_control.checkout_scan} for every persisted Keeper,

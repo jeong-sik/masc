@@ -58,6 +58,7 @@ type reader =
 type keeper_checkouts_read =
   | Checkouts_read of Keeper_sandbox_control.checkout_scan
   | Checkouts_absent
+  | Checkouts_not_booted
   | Checkouts_unread of string
 
 type keeper_checkouts =
@@ -71,6 +72,7 @@ type keeper_on_repository =
   { on_keeper : string
   ; branches : string list
   ; unread : string list
+  ; not_booted : bool
   }
 
 type repository_keepers =
@@ -90,6 +92,7 @@ type keeper_join =
   | Join_read of
       { keepers : string list
       ; keepers_unread : int
+      ; keepers_not_booted : int
       }
 
 type repository_entry =
@@ -543,9 +546,14 @@ let row_evidence ~repository_id (row : Keeper_sandbox_control.freshness_row) =
     Row_unread (row.row_checkout_path ^ ": origin unavailable: " ^ reason)
 
 let keeper_on_repository ~repository_id ({ keeper; checkouts } : keeper_checkouts) =
+  let not_booted =
+    match checkouts with
+    | Checkouts_not_booted -> true
+    | Checkouts_read _ | Checkouts_absent | Checkouts_unread _ -> false
+  in
   let branches, unread =
     match checkouts with
-    | Checkouts_absent -> [], []
+    | Checkouts_absent | Checkouts_not_booted -> [], []
     | Checkouts_unread reason -> [], [ reason ]
     | Checkouts_read { Keeper_sandbox_control.scan_rows; scan_truncated } ->
       (* Checkouts past a stopped discovery were never seen, so any of them
@@ -567,9 +575,10 @@ let keeper_on_repository ~repository_id ({ keeper; checkouts } : keeper_checkout
         scan_rows
         ([], truncated)
   in
-  match branches, unread with
-  | [], [] -> None
-  | _ :: _, _ | [], _ :: _ -> Some { on_keeper = keeper; branches; unread }
+  match branches, unread, not_booted with
+  | [], [], false -> None
+  | _ :: _, _, _ | [], _ :: _, _ | [], [], true ->
+    Some { on_keeper = keeper; branches; unread; not_booted }
 
 let has_open_pulls = function
   | Pulls_read { pulls = _ :: _; _ } -> true
@@ -594,7 +603,7 @@ let pull_keepers entry pull =
   (* A head branch in a fork is not a branch of this repository, so no
      checkout of this repository can be on it, whatever the join knows. *)
   if pull.cross_repository
-  then Join_read { keepers = []; keepers_unread = 0 }
+  then Join_read { keepers = []; keepers_unread = 0; keepers_not_booted = 0 }
   else
   match entry.keepers with
   | Keepers_not_inspected -> Join_not_inspected
@@ -610,7 +619,10 @@ let pull_keepers entry pull =
       List.length
         (List.filter (fun k -> (not (on_branch k)) && not (List.is_empty k.unread)) on_repository)
     in
-    Join_read { keepers; keepers_unread }
+    let keepers_not_booted =
+      List.length (List.filter (fun k -> k.not_booted) on_repository)
+    in
+    Join_read { keepers; keepers_unread; keepers_not_booted }
 
 let refresh ~now ~http_post ~base_path ~previous =
   let now_s = now () in
@@ -729,15 +741,21 @@ let review_state_to_string = function
   | Review_none -> "none"
 
 let keeper_join_fields = function
-  | Join_read { keepers; keepers_unread } ->
+  | Join_read { keepers; keepers_unread; keepers_not_booted } ->
     [ "keepers", `List (List.map (fun k -> `String k) keepers)
     ; "keepers_unread", `Int keepers_unread
+    ; "keepers_not_booted", `Int keepers_not_booted
     ]
   | Join_keepers_unlisted reason ->
-    [ "keepers", `Null; "keepers_unread", `Null; "keepers_error", `String reason ]
+    [ "keepers", `Null
+    ; "keepers_unread", `Null
+    ; "keepers_not_booted", `Null
+    ; "keepers_error", `String reason
+    ]
   | Join_not_inspected ->
     [ "keepers", `Null
     ; "keepers_unread", `Null
+    ; "keepers_not_booted", `Null
     ; "keepers_error", `String "Keeper checkouts were not inspected"
     ]
 
@@ -821,6 +839,7 @@ let repository_keepers_to_yojson = function
                    [ "keeper", `String k.on_keeper
                    ; "branches", strings k.branches
                    ; "unread", strings k.unread
+                   ; "not_booted", `Bool k.not_booted
                    ])
                on_repository) )
       ]
@@ -855,15 +874,20 @@ let current () = Atomic.get projection
    5000 GraphQL points an hour. *)
 let poll_interval_s = 60.0
 
-let checkouts_of_scan = function
-  | Ok scan -> Checkouts_read scan
-  (* The playground does not exist, e.g. a microvm guest not booted in this
-     process: no checkout to be on any branch. *)
-  | Error (Keeper_playground_checkouts.Root_missing _) -> Checkouts_absent
+let checkouts_of_scan ~(tree_location : Keeper_types_profile_sandbox.tree_location) scan =
+  match scan, tree_location with
+  | Ok scan, Keeper_types_profile_sandbox.(Shared_mount | Endpoint_owned) -> Checkouts_read scan
+  (* A host directory that does not exist holds no checkout. *)
+  | Error (Keeper_playground_checkouts.Root_missing _), Keeper_types_profile_sandbox.Shared_mount -> Checkouts_absent
+  (* An endpoint-owned tree answers Root_missing only when its guest is not
+     running (not booted in this process, or gone). The guest's volume
+     outlives it, so its checkouts are unknown, not absent. *)
+  | Error (Keeper_playground_checkouts.Root_missing _), Keeper_types_profile_sandbox.Endpoint_owned ->
+    Checkouts_not_booted
   | Error
       (( Keeper_playground_checkouts.Root_not_directory _
        | Root_unreadable _
-       | Root_probe_unreachable _ ) as scan_error) ->
+       | Root_probe_unreachable _ ) as scan_error), Keeper_types_profile_sandbox.(Shared_mount | Endpoint_owned) ->
     Checkouts_unread (Keeper_playground_checkouts.scan_error_to_string scan_error)
 
 let inspect_keeper ~(config : Workspace.config) ~catalog keeper =
@@ -874,7 +898,11 @@ let inspect_keeper ~(config : Workspace.config) ~catalog keeper =
     (* One Keeper's failure stays that Keeper's unread reason instead of
        losing every other Keeper's answer. *)
     (match Keeper_sandbox_control.checkout_scan ~catalog ~config ~meta () with
-     | scan -> checkouts_of_scan scan
+     | scan ->
+       checkouts_of_scan
+         ~tree_location:
+           (Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile)
+         scan
      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
      | exception exn -> Checkouts_unread ("checkout inspection raised " ^ Printexc.to_string exn))
 

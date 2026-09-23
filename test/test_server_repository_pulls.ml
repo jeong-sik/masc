@@ -437,6 +437,8 @@ let fleet : Pulls.fleet_checkouts =
       }
       (* A microvm guest not booted in this process has no playground. *)
     ; { Pulls.keeper = "eta"; checkouts = Checkouts_absent }
+      (* A microvm guest not running: its volume may hold checkouts, unseen. *)
+    ; { Pulls.keeper = "iota"; checkouts = Checkouts_not_booted }
       (* Discovery stopped after one checkout of another repository: a
          checkout of masc may be among those never seen. *)
     ; { Pulls.keeper = "theta"
@@ -507,6 +509,12 @@ let test_keepers_join_by_exact_branch () =
     ; 3, Some [], (Some 0, None)
     ]
     (List.map join_of (json_pulls joined));
+  Alcotest.(check (list (option int)))
+    "guest not running is its own count, apart from unread"
+    [ Some 1; Some 1; Some 0 ]
+    (List.map
+       (fun pull -> Yojson.Safe.Util.(pull |> member "keepers_not_booted" |> to_int_option))
+       (json_pulls joined));
   (* The next refresh keeps the join until the next join replaces it. *)
   let http_post, _, _ = counting_stub three_pull_page in
   let next = Pulls.refresh ~now ~http_post ~base_path ~previous:joined in
@@ -556,18 +564,25 @@ let test_scan_errors_map_to_absent_or_unread () =
     | Pulls.Checkouts_read _ -> "read"
     | Pulls.Checkouts_absent -> "absent"
     | Pulls.Checkouts_unread _ -> "unread"
+    | Pulls.Checkouts_not_booted -> "not_booted"
+  in
+  let scans =
+    [ Ok { Control.scan_rows = []; scan_truncated = None }
+    ; Error (P.Root_missing { root = "/w" })
+    ; Error (P.Root_not_directory { root = "/w"; kind = "file" })
+    ; Error (P.Root_unreadable { root = "/w"; detail = "EACCES" })
+    ; Error (P.Root_probe_unreachable { root = "/w"; reason = "timeout" })
+    ]
   in
   Alcotest.(check (list string))
-    "scan answers"
-    [ "read"; "absent"; "unread"; "unread"; "unread" ]
-    (List.map
-       (fun scan -> kind (Pulls.checkouts_of_scan scan))
-       [ Ok { Control.scan_rows = []; scan_truncated = None }
-       ; Error (P.Root_missing { root = "/w" })
-       ; Error (P.Root_not_directory { root = "/w"; kind = "file" })
-       ; Error (P.Root_unreadable { root = "/w"; detail = "EACCES" })
-       ; Error (P.Root_probe_unreachable { root = "/w"; reason = "timeout" })
-       ])
+    "scan answers, shared mount then endpoint-owned"
+    [ "read"; "absent"; "unread"; "unread"; "unread"
+    ; "read"; "not_booted"; "unread"; "unread"; "unread"
+    ]
+    (List.concat_map
+       (fun tree_location ->
+         List.map (fun scan -> kind (Pulls.checkouts_of_scan ~tree_location scan)) scans)
+       Keeper_types_profile_sandbox.[ Shared_mount; Endpoint_owned ])
 
 let test_fork_pull_joins_no_keeper_in_any_join_state () =
   let _, read = pulls_read () in

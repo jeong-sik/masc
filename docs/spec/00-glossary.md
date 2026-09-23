@@ -751,6 +751,11 @@ status: reference
 
 **Verification ID**
 : 제출 하나의 식별자. 판정은 자기가 읽은 id 가 지금 id 와 같을 때만 적용된다.
+  운영자 판정(`POST /api/v1/verification/verdict`)은 읽은 `verification_id`를
+  필수로 요구하며, 백로그 잠금 아래에서 지금 id와 다르면
+  `Task_error.VerificationSuperseded`(HTTP 409)로 거절된다. 판정자가 증거를
+  읽는 사이에 Producer가 재제출하거나 취소 요청으로 제출을 교체한 경우, 낡은
+  판정이 새 제출에 붙는 것을 막는다.
 
 **Completion Authority**
 : 판정을 내리는 쪽. 서버 안의 판정 에이전트(`System_llm_agent`)이거나 인증된 HTTP

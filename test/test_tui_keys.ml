@@ -357,6 +357,62 @@ let test_schedule_create_form_names_the_canonical_required_fields () =
   check str "cron alternative is discoverable" "0 9 * * *"
     (form |> member "recurrence_cron" |> to_string)
 
+(* The modify key's help says "running/finished rows refuse". These pin that
+   the refusal now happens at the keypress, and that the set it refuses is the
+   store's own: [Transition_refused] is Running or [is_terminal].
+
+   The vocabulary is checked against
+   [Schedule_contract_values.schedule_status_strings] rather than trusted as a
+   hand-copied list, which is a second copy of the contract that goes stale
+   quietly. *)
+let refusal_for status =
+  Masc_tui_types.schedule_modify_refusal
+    { schedule_form_row with sch_status = status }
+
+let test_modify_refuses_exactly_the_statuses_the_store_refuses () =
+  (* The two sides are spelled out rather than recomputed from the gate's own
+     expression: a test that recomputes it only proves the code equals itself.
+     The sort below then checks these words against the contract's vocabulary,
+     so a status added upstream fails here instead of being classified
+     unasked. *)
+  let refused = [ "running"; "succeeded"; "failed"; "cancelled"; "expired" ] in
+  let opens = [ "scheduled"; "due" ] in
+  check (Alcotest.list str)
+    "the two sides together name every status the contract has"
+    (List.sort compare Schedule_contract_values.schedule_status_strings)
+    (List.sort compare (refused @ opens));
+  List.iter
+    (fun word ->
+      check Alcotest.bool (word ^ " is refused before the editor opens") true
+        (refusal_for word <> None))
+    refused;
+  (* The inputs that split this from a blanket refusal. Without them a gate
+     that refused everything would pass every assertion above. *)
+  List.iter
+    (fun word ->
+      check Alcotest.bool (word ^ " still opens the editor") true
+        (refusal_for word = None))
+    opens
+
+let test_modify_names_the_status_it_refuses () =
+  match refusal_for "running" with
+  | None -> Alcotest.fail "a running row must refuse"
+  | Some reason ->
+    (* The operator is told which word on the screen closed the door, not
+       just that it is closed. *)
+    check str "the reason quotes the status the screen showed"
+      "the store refuses a running schedule; only scheduled and due rows change"
+      reason
+
+let test_modify_leaves_an_unnamed_status_to_the_server () =
+  (* [sch_status] stays a string so a status this build does not name renders
+     as itself. Refusing on a word we cannot read would turn that forward
+     compatibility into a row nobody can edit, so the roundtrip is the right
+     answer here -- the server knows what it means. *)
+  check Alcotest.bool "a status this build does not name is not refused here"
+    true
+    (refusal_for "paused" = None)
+
 let test_schedule_update_form_preserves_exact_editable_definition () =
   let open Yojson.Safe.Util in
   let form =
@@ -1929,6 +1985,8 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_last_outcome = None
   ; sl_p50_elapsed_s = None
   ; sl_selected_slots = []
+  ; sl_runs_without_slot =
+      { Tui_decode.slws_vendor_system_one = 0; slws_server_restarted = 0; slws_no_slot = 0 }
   }
 
 (* The four lanes the projection fixes, in its order
@@ -2246,7 +2304,7 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_secrets, []
   ; Detail_github, [ "L"; "P"; "1"; "2" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
-  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u" ]
+  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u"; "U U" ]
   ; Detail_automation, []
   ; Detail_runs, []
   ]
@@ -2267,6 +2325,8 @@ let test_key_atoms_read_the_table_notation () =
        [ "s"; "o" ]);
   Alcotest.(check bool) "Channels takes e" true
     (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
+  Alcotest.(check bool) "Channels takes U for unbind all" true
+    (List.mem "U" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
   Alcotest.(check (list string)) "Info takes nothing" []
     (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
 
@@ -2767,6 +2827,14 @@ let () =
             test_schedules_footer_names_write_and_read_controls
         ; Alcotest.test_case "schedule create form names required fields" `Quick
             test_schedule_create_form_names_the_canonical_required_fields
+        ; Alcotest.test_case
+            "modify refuses exactly the statuses the store refuses" `Quick
+            test_modify_refuses_exactly_the_statuses_the_store_refuses
+        ; Alcotest.test_case "modify names the status it refuses" `Quick
+            test_modify_names_the_status_it_refuses
+        ; Alcotest.test_case
+            "modify leaves an unnamed status to the server" `Quick
+            test_modify_leaves_an_unnamed_status_to_the_server
         ; Alcotest.test_case "schedule update form preserves definition" `Quick
             test_schedule_update_form_preserves_exact_editable_definition
         ; Alcotest.test_case "Repositories offers Code and Git changes" `Quick

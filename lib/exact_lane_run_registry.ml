@@ -12,6 +12,8 @@ type outcome =
       ; detail : string
       }
 
+let server_restarted_code = "server_restarted"
+
 type persistence_state =
   | Not_persisted
   | Durability_unknown
@@ -217,13 +219,13 @@ module Payload = struct
          let elapsed_s = Float.max 0.0 (Time_compat.now () -. started_at) in
          { outcome =
              Failed
-               { code = "server_restarted"
+               { code = server_restarted_code
                ; detail = restart_reason
                }
          ; elapsed_s
          ; output =
              `Assoc
-               [ "reason", `String "server_restarted"
+               [ "reason", `String server_restarted_code
                ; "detail", `String restart_reason
                ]
          ; output_source = In_row

@@ -18,6 +18,8 @@ let pull ?(checks = Server.Checks_passing) ?(review = Server.Review_waiting)
   ; draft
   ; checks
   ; review
+  ; mergeable = Server.Mergeable
+  ; author = Some "someone"
   ; updated_at = 1_790_000_000.
   }
 
@@ -30,6 +32,7 @@ let every_state : Server.snapshot =
   { reader = Server.Reader_ready { keeper = "pr-updater" }
   ; repositories_error = None
   ; rejected_token_digest = None
+  ; keepers = Server.Keepers_listed []
   ; repositories =
       [ entry "masc"
           (Server.Pulls_read

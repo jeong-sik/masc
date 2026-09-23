@@ -27,6 +27,11 @@ type outcome =
       ; detail : string
       }
 
+val server_restarted_code : string
+(** The [Failed] code of a run the server found still running when it
+    restarted and closed on replay. Replay does not know which slot the run
+    had reached, so such a run names none. *)
+
 type persistence_state =
   | Not_persisted
   | Durability_unknown

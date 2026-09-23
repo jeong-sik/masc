@@ -2037,6 +2037,12 @@ type async_msg =
       result : (Browser_lane_view.screenshot * string, string) result;
     }
   | Connectors_loaded of (Masc.Tui_decode.connector_snapshot, string) result
+  | Connector_unbind_all_done of {
+      keeper_name : string;
+      results :
+        (Masc_tui_connector_unbind.target * Masc_tui_connector_unbind.outcome)
+        list;
+    }
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
   | Tools_loaded of int * string option * (Masc.Tui_decode.tool_snapshot, string) result
@@ -4881,6 +4887,59 @@ let launch_connectors_load state ~mailbox =
     | None ->
         state.connectors_inflight <- false;
         enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
+  end
+
+(* A binding write changed what the server holds. A load already in flight
+   may have read before the write landed, so it cannot stand in for this
+   read: mark one more to run when it answers, and the pane does not keep
+   showing bindings that are gone. *)
+let reload_connectors_after_write state ~mailbox =
+  if state.connectors_inflight then state.connectors_reload_after_inflight <- true
+  else launch_connectors_load state ~mailbox
+
+(* One fiber sends the unbinds in order and reports them together: each
+   binding's answer is its own line, so a partial success cannot read as a
+   whole one. *)
+let launch_connector_unbind_all state ~mailbox ~keeper_name targets =
+  if state.connector_unbind_all_inflight then
+    report_action state "error" "unbind all: the previous one is still running"
+  else begin
+    state.connector_unbind_all_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let results =
+        List.map
+          (fun target ->
+             let outcome =
+               try Masc_tui_http.post_connector_unbind_owned ~host ~port target
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn -> Masc_tui_connector_unbind.Failed (Printexc.to_string exn)
+             in
+             (target, outcome))
+          targets
+      in
+      enqueue_async mailbox (Connector_unbind_all_done { keeper_name; results })
+    in
+    let not_sent detail =
+      List.map (fun target -> (target, Masc_tui_connector_unbind.Failed detail))
+        targets
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Masc_tui_fork_guard.launch ~sw
+          ~on_sync_failure:(fun detail ->
+              enqueue_async mailbox
+                (Connector_unbind_all_done
+                   { keeper_name; results = not_sent detail }))
+          (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        enqueue_async mailbox
+          (Connector_unbind_all_done
+             { keeper_name; results = not_sent "Eio switch is unavailable" })
   end
 
 let map_lane_addons state f =
@@ -15211,8 +15270,28 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                      launch_browser_lane state ~mailbox Browser_lane_view.Read)
             | Loading _ | Idle | No_browser | Failed _ -> ())
        | None -> ())
+  | Connector_unbind_all_done { keeper_name; results } ->
+      state.connector_unbind_all_inflight <- false;
+      List.iter
+        (fun ((_, outcome) as result) ->
+           let kind =
+             match outcome with
+             | Masc_tui_connector_unbind.Failed _ -> "error"
+             | Removed | Rebound | Not_found _ -> "system"
+           in
+           add_event state kind (Masc_tui_connector_unbind.outcome_line result))
+        (Masc_tui_connector_unbind.report_order results);
+      report_action state
+        (if Masc_tui_connector_unbind.any_failed results then "error"
+         else "system")
+        (Masc_tui_connector_unbind.summary ~keeper_name results);
+      reload_connectors_after_write state ~mailbox
   | Connectors_loaded result ->
       state.connectors_inflight <- false;
+      if state.connectors_reload_after_inflight then begin
+        state.connectors_reload_after_inflight <- false;
+        launch_connectors_load state ~mailbox
+      end;
       (match result with
       | Ok snapshot ->
           let previous_id =
@@ -16522,7 +16601,8 @@ let main
                       state.connector_unbind_armed <- None;
                       report_action state "system"
                         (action ^ ": ok (" ^ connector ^ ")");
-                      launch_connectors_load state ~mailbox:async_messages
+                      reload_connectors_after_write state
+                        ~mailbox:async_messages
                   | Error detail ->
                       report_action state "error" (action ^ ": " ^ detail))))))
   in
@@ -16587,6 +16667,11 @@ let main
                   let exact =
                     selected.cn_id, binding.cb_channel_id, binding.cb_keeper_name
                   in
+                  let label =
+                    Masc_tui_connector_unbind.channel_label
+                      ~channel_id:binding.cb_channel_id
+                      ~channel_name:binding.cb_channel_name
+                  in
                   if state.connector_unbind_armed = Some exact then begin
                     state.connector_unbind_armed <- None;
                     match
@@ -16601,8 +16686,9 @@ let main
                     with
                     | Ok _ ->
                       report_action state "system"
-                        ("unbind: removed " ^ binding.cb_channel_id);
-                      launch_connectors_load state ~mailbox:async_messages
+                        ("unbind: removed " ^ label);
+                      reload_connectors_after_write state
+                        ~mailbox:async_messages
                     | Error detail ->
                       report_action state "error" ("unbind: " ^ detail)
                   end else begin
@@ -16610,9 +16696,50 @@ let main
                     report_action state "system"
                       (Printf.sprintf
                          "unbind armed: press u again to remove %s → %s"
-                         binding.cb_channel_id binding.cb_keeper_name)
+                         label binding.cb_keeper_name)
                   end)
          | _ -> submit "")
+  in
+  (* [U] twice: every binding the selected Keeper holds, on every transport.
+     The first press names each channel; the second sends exactly those, each
+     conditional on the Keeper still owning it. A snapshot that changed in
+     between re-arms with the new list instead of sending a list the operator
+     never read. *)
+  let handle_connector_unbind_all () =
+    state.connector_unbind_armed <- None;
+    match selected_keeper state, state.connectors with
+    | None, _ ->
+        state.connector_unbind_all_armed <- None;
+        report_action state "error" "unbind all: select a Keeper first"
+    | Some _, None ->
+        state.connector_unbind_all_armed <- None;
+        report_action state "error"
+          "unbind all: channel transports have not been read yet"
+    | Some keeper, Some snapshot -> (
+        let keeper_name = keeper.k_name in
+        let targets =
+          Masc_tui_connector_unbind.targets ~keeper_name snapshot.cs_connectors
+        in
+        let unreadable =
+          Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
+        in
+        match targets, state.connector_unbind_all_armed with
+        | [], _ ->
+            state.connector_unbind_all_armed <- None;
+            report_action state "system"
+              (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
+                 ~unreadable)
+        | _ :: _, Some (armed_keeper, armed_targets)
+          when String.equal armed_keeper keeper_name && armed_targets = targets
+          ->
+            state.connector_unbind_all_armed <- None;
+            launch_connector_unbind_all state ~mailbox:async_messages
+              ~keeper_name targets
+        | _ :: _, (Some _ | None) ->
+            state.connector_unbind_all_armed <- Some (keeper_name, targets);
+            report_action state "system"
+              (Masc_tui_connector_unbind.arm_prompt ~keeper_name
+                 ~confirm_key:"U" ~unreadable targets))
   in
   let handle_connector_edit () =
     state.connector_unbind_armed <- None;
@@ -17561,12 +17688,18 @@ and is loaded on demand through keeper_skill.
   let handle_schedule_modify () =
     match selected_schedule_row state with
     | None -> report_action state "error" "modify: no schedule under the cursor"
+    (* The refusal was always real; it just arrived after the operator had
+       edited fifteen fields and saved. The status is on the screen before the
+       key is pressed, so the answer is available here. *)
     | Some row ->
-      handle_schedule_form ~action:"modify"
-        ~stem:(Masc_tui_types.schedule_update_form_json row)
-        ~post:(fun body_json ->
-          Masc_tui_http.post_schedule_update ~host:server_peer_host
-            ~port:state.port ~body_json)
+      (match Masc_tui_types.schedule_modify_refusal row with
+       | Some reason -> report_action state "error" ("modify: " ^ reason)
+       | None ->
+         handle_schedule_form ~action:"modify"
+           ~stem:(Masc_tui_types.schedule_update_form_json row)
+           ~post:(fun body_json ->
+             Masc_tui_http.post_schedule_update ~host:server_peer_host
+               ~port:state.port ~body_json))
   in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then
@@ -18223,6 +18356,7 @@ and is loaded on demand through keeper_skill.
          Not scoped to the Channels tab: an arm the operator left behind on
          another surface is exactly the stale confirmation this cancels. *)
       if cancelled [ "u" ] then state.connector_unbind_armed <- None;
+      if cancelled [ "U" ] then state.connector_unbind_all_armed <- None;
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
          send. Everything it does not claim reaches the surface with its
@@ -23715,7 +23849,10 @@ and is loaded on demand through keeper_skill.
        | Some "u" | Some "U"
          when (match state.view with
                | Keepers Keeper_list -> true
-               | Keepers Keeper_detail -> key = Some "U"
+               | Keepers Keeper_detail ->
+                   (* The Channels tab takes [U] for unbind-all, as it takes
+                      [u] for removing one binding. *)
+                   key = Some "U" && state.detail_tab <> Detail_channels
                | _ -> false)
               && state.keeper_cursor < List.length state.keepers ->
            (* Open the runtime picker for the keeper under the cursor. The
@@ -24715,6 +24852,10 @@ and is loaded on demand through keeper_skill.
               || (state.view = Keepers Keeper_detail
                   && state.detail_tab = Detail_channels) ->
            handle_connector_unbind ()
+       | Some "U"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_channels ->
+           handle_connector_unbind_all ()
        | Some "a" | Some "A" ->
            (match state.view with
             | Code -> ()

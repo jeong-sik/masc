@@ -831,6 +831,25 @@ let test_append_turn_redacts_github_hosts_token () =
       Alcotest.(check bool) "redaction marker present" true
         (String_util.contains_substring rendered "[REDACTED]"))
 
+(* The login writes hosts.yml under the active cluster's keeper directory, so
+   the redaction snapshot has to look there too. Pointing it at the default
+   cluster left a non-default cluster's gh token unmasked in chat rows. *)
+let test_github_hosts_secret_file_follows_the_active_cluster () =
+  let base_dir = temp_base_path "keeper-chat-store-gh-cluster" in
+  with_env "MASC_CLUSTER_NAME" "chat-cluster" @@ fun () ->
+  let keeper_name = "keeper-chat-gh-cluster" in
+  let expected =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat (Masc.Workspace.keepers_runtime_dir_for_base_path base_dir) keeper_name)
+         "github-cli")
+      "hosts.yml"
+  in
+  Alcotest.(check (list string)) "hosts.yml is read from the active cluster" [ expected ]
+    (Masc.Keeper_github_identity.secret_files_of_base_path ~base_path:base_dir ~keeper_name);
+  Alcotest.(check bool) "the active cluster is not the default one" true
+    (String_util.contains_substring expected "/clusters/chat-cluster/")
+
 let test_load_redacts_raw_persisted_secret_rows () =
   let base_dir = temp_base_path "keeper-chat-store-read-redact" in
   Fun.protect
@@ -3636,6 +3655,8 @@ let () =
             test_append_turn_redacts_projected_secrets;
           Alcotest.test_case "append_turn redacts github hosts.yml token"
             `Quick test_append_turn_redacts_github_hosts_token;
+          Alcotest.test_case "github hosts secret file follows the active cluster"
+            `Quick test_github_hosts_secret_file_follows_the_active_cluster;
           Alcotest.test_case "load redacts raw persisted secret rows" `Quick
             test_load_redacts_raw_persisted_secret_rows;
           Alcotest.test_case "window counts primaries only" `Quick

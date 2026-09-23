@@ -3,11 +3,10 @@ description = """
 Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate).
 
 \
-request_complete no longer completes the Goal directly: it moves executing -> \
-verifying and persists a durable proof request. Verifier verdicts are \
-application-owned typed commits and are deliberately not accepted by this MCP \
-tool. A Goal whose criterion was judged unreachable is refused on \
-request_complete."""
+request_complete moves executing -> verifying and persists a durable proof \
+request; repeated while verifying, it re-arms that request. drop and reopen \
+also leave verifying. Verifier verdicts are not accepted by this MCP tool. A \
+Goal whose criterion was judged unreachable is refused on request_complete."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name. Not

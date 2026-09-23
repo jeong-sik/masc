@@ -54,7 +54,7 @@ let handle_keeper_github_login_post state req reqd =
       let hostname =
         match Server_utils.query_param req "hostname" with
         | Some hostname -> hostname
-        | None -> "github.com"
+        | None -> Keeper_github_identity.default_hostname
       in
       let headers = github_login_stream_headers (Server_auth.get_origin req) in
       let response = Httpun.Response.create ~headers `OK in
@@ -105,7 +105,7 @@ let handle_keeper_github_token_post state req reqd body_str =
           | _ ->
             (match Server_utils.query_param req "hostname" with
              | Some h -> h
-             | None -> "github.com")
+             | None -> Keeper_github_identity.default_hostname)
         in
         match token with
         | Ok tok -> Ok (tok, hostname)
@@ -175,7 +175,7 @@ let handle_keeper_oauth_login_post ~clock state req reqd body_str =
             (match
                Server_keeper_oauth.start
                  ~clock
-                 ~base_path:config.Workspace.base_path
+                 ~config
                  ~keeper:name
                  ~provider_id
                  ~now:(Unix.gettimeofday ())
@@ -212,7 +212,7 @@ let handle_keeper_identity_refresh_post ~clock state req reqd body_str =
             (match
                Server_keeper_oauth.refresh_tools
                  ~clock
-                 ~base_path:config.Workspace.base_path
+                 ~config
                  ~keeper:name
                  ~provider_id
                  ~now:(Unix.gettimeofday ())

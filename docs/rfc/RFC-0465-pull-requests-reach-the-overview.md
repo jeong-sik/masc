@@ -29,12 +29,12 @@ Overview Team 블록(RFC-0464)은 누가 어떤 Task 를 잡았는지까지 말�
 |---|---|---|
 | PR 을 읽는 서버 코드 | 없음 | lib/ 에 GitHub API 클라이언트·`gh pr` 호출 없음 |
 | Keeper 상태의 `pr_history` | 늘 빈 목록 | `keeper_status_detail.ml` 이 `.playground_pr_history.jsonl` 을 읽지만, 이 파일을 쓰는 코드가 없다 |
-| Keeper GitHub 자격 | 12명 모두 공유 계정 `hosts.yml`, App 자격 0명 | `~/.masc/keepers/*/github-cli/hosts.yml` |
-| 등록 저장소 | 3개 (figma-mcp, masc, wkbl) | `/api/v1/repositories` |
+| Keeper GitHub 자격 | 12명이 계정 3개를 나눠 쓴다(anyang-keepers 6, pangyo-preachers 5, jeong-sik 1). App 자격 0명 | `~/.masc/keepers/*/github-cli/hosts.yml` 의 `user` |
+| 등록 저장소 | 3개: figma-mcp·masc(public), wkbl(private) | `/api/v1/repositories`, `gh repo view` |
 | masc 열린 PR | 44개 | `gh pr list` |
 | Task ↔ PR 연결 필드 | 없음 | backlog `execution_links` 는 operation/session id 뿐 |
 
-공유 계정이라 PR 작성자 로그인으로는 Keeper 를 가를 수 없다. 그래서 branch 로 붙인다.
+계정 하나를 여러 Keeper 가 나눠 써서 PR 작성자 로그인으로는 Keeper 한 명을 가를 수 없다. 그래서 branch 로 붙인다.
 `pr_history` 는 쓰는 곳이 없는 필드라 이 RFC 의 첫 PR 에서 지운다.
 
 ## 2. 타입
@@ -85,6 +85,17 @@ GitHub 가 모르는 값을 보내면 그 PR 행은 `Checks_none` 으로 접지 
 B 를 고른 이유: 새 환경변수나 새 비밀 저장소를 만들지 않는다. 선언이 없거나, 가리킨 Keeper 가
 없거나, 그 Keeper 에 `hosts.yml` 토큰이 없으면 PR 섹션이 그 이유를 말하고 읽지 않는다.
 다른 자격으로 대신 읽지 않는다.
+
+토큰은 `Keeper_github_identity.stored_token` 으로 읽기마다 새로 읽는다. 복사해 두지 않으므로
+그 Keeper 가 다시 로그인하거나 로그아웃하면 다음 읽기가 바로 따라간다.
+
+B 에서 꼬일 수 있는 지점과 처리:
+
+| 지점 | 무엇이 일어나나 | 처리 |
+|---|---|---|
+| 접근 권한 | 선언한 Keeper 의 계정이 private 저장소(wkbl)에 권한이 없으면 GitHub 가 404 를 준다 | 그 저장소만 `Pulls_failed` 로 이유를 말한다. 빈 목록으로 보이지 않는다 |
+| rate limit 공유 | 같은 계정을 쓰는 Keeper 들의 `gh` 호출과 시간당 5000 point 를 나눠 쓴다. 폴링은 180 point(약 4%) | 한도에 걸리면 `Pulls_failed` 에 GitHub 의 reset 시각을 싣는다 |
+| 토큰 교체 | 그 Keeper 가 나중에 GitHub App 으로 바뀌면 hosts.yml 토큰이 1시간짜리가 되고, 갱신은 레인이 도구를 띄울 때만 일어난다 | 401 은 "토큰 만료" 로 말하고 재시도하지 않는다. App 전환 때 이 RFC 를 다시 본다 |
 
 ## 5. 스택
 

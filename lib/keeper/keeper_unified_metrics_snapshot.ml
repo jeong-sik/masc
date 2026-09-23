@@ -9,6 +9,17 @@ open Keeper_context_runtime
 include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
 
+(* The [runtime_profile] label of the latency-by-model counter names the
+   runtime that answered the turn. A turn with no runtime observation names
+   none; borrowing the Keeper's assigned lane there would put a lane and a
+   runtime under one label (#38452). *)
+let unobserved_runtime_profile = "unobserved"
+
+let latency_runtime_profile = function
+  | Some runtime_id -> runtime_id
+  | None -> unobserved_runtime_profile
+;;
+
 let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
@@ -79,14 +90,15 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
      counter rate matches the JSONL row rate. *)
   record_turn_latency_bucket ~keeper:meta.name ~latency_ms;
   let runtime_profile =
-    match result.runtime_observation with
-    | Some observation ->
-        observation.Runtime_observation.runtime_id
-    | None -> (runtime_id_of_meta meta)
+    latency_runtime_profile
+      (Option.map
+         (fun (observation : Runtime_observation.runtime_observation) ->
+            observation.runtime_id)
+         result.runtime_observation)
   in
-  (* #9933: same latency bucket, split by provider/model/runtime.
-     This keeps the existing keeper-only counter stable while making
-     long-running turns attributable to the redacted runtime lane. *)
+  (* #9933: same latency bucket, split by the runtime that answered. This
+     keeps the existing keeper-only counter stable while making long-running
+     turns attributable to a runtime. *)
   record_turn_latency_by_model_bucket
     ~keeper:meta.name
     ~channel:(Keeper_world_observation.channel_to_string channel)

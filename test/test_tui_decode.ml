@@ -7977,7 +7977,6 @@ let test_decode_server_identity_reads_telemetry () =
           Alcotest.(check int) "heap_words" 5242880 gc.Tui_decode.sgc_heap_words;
           Alcotest.(check int) "live_words" 2621440 gc.Tui_decode.sgc_live_words;
           Alcotest.(check int) "minor_heap_size" 4194304 gc.Tui_decode.sgc_minor_heap_size;
-          Alcotest.(check int) "space_overhead" 80 gc.Tui_decode.sgc_space_overhead;
           Alcotest.(check int) "minor_collections" 120 gc.Tui_decode.sgc_minor_collections;
           Alcotest.(check int) "major_collections" 5 gc.Tui_decode.sgc_major_collections);
       (match identity.Tui_decode.sid_scheduler with

@@ -5,6 +5,7 @@
  ; against whatever the build directory happens to hold.
  (deps
   %{workspace_root}/bin/masc_tui_types.ml
+  %{workspace_root}/lib/tui_decode.ml
   %{workspace_root}/bin/masc_tui_loader.ml
   %{workspace_root}/bin/masc_tui_ansi.ml
   (glob_files %{workspace_root}/bin/masc_tui_render*.ml))

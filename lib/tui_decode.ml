@@ -2021,8 +2021,6 @@ type keeper_call = {
   kc_outcome : Tool_result.recorded_call_outcome;
   kc_duration_ms : float option;
   kc_turn : int option;
-  kc_task_id : string option;
-  kc_model : string option;
   kc_execution_id : string option;
   kc_tool_use_id : string option;
   kc_schedule : keeper_call_schedule option;
@@ -2034,7 +2032,6 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;
-  kcs_count : int;
   kcs_health : string;
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
@@ -2828,7 +2825,6 @@ type harness_calibration = {
 
 type harness_overview = {
   hov_evaluator_status : string;
-  hov_last_signal_at : float option;
 }
 
 type harness_snapshot = {
@@ -5839,13 +5835,7 @@ let decode_harness_overview json =
         | `String value -> value
         | _ -> "unknown"
       in
-      let last_signal_at =
-        match member "last_signal_at" overview with
-        | `Float value -> Some value
-        | `Int value -> Some (Float.of_int value)
-        | _ -> None
-      in
-      Some { hov_evaluator_status = status; hov_last_signal_at = last_signal_at }
+      Some { hov_evaluator_status = status }
   | _ -> None
 
 let decode_harness_snapshot json =
@@ -6006,11 +5996,6 @@ let decode_keeper_call json =
     | _ -> None
   in
   let kc_turn = match member "turn" json with `Int value -> Some value | _ -> None in
-  let string_opt key =
-    match member key json with
-    | `String value when String.trim value <> "" -> Some value
-    | _ -> None
-  in
   let optional_nonnegative_int key =
     match member key json with
     | `Null -> Ok None
@@ -6063,8 +6048,6 @@ let decode_keeper_call json =
       ; kc_outcome
       ; kc_duration_ms
       ; kc_turn
-      ; kc_task_id = string_opt "task_id"
-      ; kc_model = string_opt "model"
       ; kc_execution_id = nonblank kc_execution_id
       ; kc_tool_use_id = nonblank kc_tool_use_id
       ; kc_schedule
@@ -6075,7 +6058,6 @@ let decode_keeper_call json =
 
 let decode_keeper_calls_snapshot ~requested_keeper json =
   let* kcs_keeper = required_string_field json "keeper" in
-  let* kcs_count = required_int_field json "count" in
   let* kcs_health = required_string_field json "health" in
   let* entries_json = required_list_field json "entries" in
   let* rows =
@@ -6106,7 +6088,6 @@ let decode_keeper_calls_snapshot ~requested_keeper json =
   Ok
     { kcs_keeper
     ; kcs_entries = List.rev kcs_entries
-    ; kcs_count
     ; kcs_health
     ; kcs_latest_age_s
     ; kcs_stale_reason
@@ -7529,7 +7510,6 @@ type gate_rule = {
   gr_tool : string;
   gr_fingerprint : string;
   gr_created_at : float;
-  gr_created_by : string option;
   gr_expires_at : float option;
 }
 
@@ -7790,11 +7770,6 @@ let decode_gate_rule json =
     | `Int value -> Ok (float_of_int value)
     | _ -> Error "approval rule created_at must be a number"
   in
-  let optional_string field =
-    match member field json with
-    | `String value -> Some value
-    | _ -> None
-  in
   let gr_expires_at =
     match member "expires_at" json with
     | `Float value -> Some value
@@ -7807,7 +7782,6 @@ let decode_gate_rule json =
     ; gr_tool
     ; gr_fingerprint
     ; gr_created_at
-    ; gr_created_by = optional_string "created_by"
     ; gr_expires_at
     }
 
@@ -8259,7 +8233,6 @@ type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
   sgc_minor_heap_size : int;
-  sgc_space_overhead : int;
   sgc_minor_collections : int;
   sgc_major_collections : int;
   sgc_compactions : int;
@@ -8370,7 +8343,6 @@ let decode_server_identity json =
           { sgc_heap_words = int_in gc_obj "heap_words" 0
           ; sgc_live_words = int_in gc_obj "live_words" 0
           ; sgc_minor_heap_size = int_in gc_obj "minor_heap_size" 0
-          ; sgc_space_overhead = int_in gc_obj "space_overhead" 0
           ; sgc_minor_collections = int_in gc_obj "minor_collections" 0
           ; sgc_major_collections = int_in gc_obj "major_collections" 0
           ; sgc_compactions = int_in gc_obj "compactions" 0

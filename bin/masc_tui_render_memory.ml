@@ -154,8 +154,9 @@ let memory_context_lines (k : memory_keeper_health) =
           then " · read position unreadable"
           else " · nothing read yet"
         | Some position, Some value when position > value.mcf_end_atom ->
-          Printf.sprintf " · read to atom %d, %d atoms past the cut"
-            position (position - value.mcf_end_atom)
+          Printf.sprintf " · read to atom %d, %s past the cut" position
+            (Masc_tui_message_layout.count_noun
+               (position - value.mcf_end_atom) "atom")
         | Some position, Some _ | Some position, None ->
           Printf.sprintf " · read to atom %d" position in
       let rewriting = match cycle.mcc_rewriting_through with
@@ -173,9 +174,11 @@ let memory_context_lines (k : memory_keeper_health) =
               value.mcpo_end_atom (Terminal_text.single_line value.mcpo_trace_id)
           | Context_without_snapshot -> "no snapshot: this turn only"
           | Context_not_applied -> "saved context not applied" in
-        Printf.sprintf "%s · %d request bytes · %s"
+        Printf.sprintf "%s · %s · %s"
           (memory_updated_text (Some value.mcp_prepared_at))
-          value.mcp_request_bytes (Terminal_text.single_line value.mcp_runtime_id), input in
+          (Masc_tui_message_layout.count_noun value.mcp_request_bytes
+             "request byte")
+          (Terminal_text.single_line value.mcp_runtime_id), input in
     let synthesis = match cycle.mcc_synthesis with
       | None -> "not observed since server start"
       | Some value ->
@@ -559,19 +562,40 @@ let render_memory_body ~cols ~budget (state : state)
   (match state.memory_health with
    | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
    | Some snapshot ->
-       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %s turns unread · %d atoms behind in continuity (%d keepers not measured) · %d failures since server start"
+       (* Every count spells its own noun: each of these reads 1 on an
+          ordinary day, and the line said "1 keepers", "1 atoms",
+          "1 failures". The unread turns keep "?" when nothing measured
+          them, which is not a count and cannot take a noun from one. *)
+       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %s · Librarian: %s unread · %s behind in continuity (%s not measured) · %s since server start"
          snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
-         snapshot.mhs_total_support_invalidations
-         (Option.fold ~none:"?" ~some:string_of_int snapshot.mhs_total_librarian_unread_turns)
-         snapshot.mhs_total_librarian_continuity_unread_atoms
-         snapshot.mhs_total_librarian_continuity_unmeasured
-         snapshot.mhs_total_librarian_failures));
+         (Masc_tui_message_layout.count_noun
+            snapshot.mhs_total_support_invalidations "support invalidation")
+         (match snapshot.mhs_total_librarian_unread_turns with
+          | None -> "? turns"
+          | Some turns -> Masc_tui_message_layout.count_noun turns "turn")
+         (Masc_tui_message_layout.count_noun
+            snapshot.mhs_total_librarian_continuity_unread_atoms "atom")
+         (Masc_tui_message_layout.count_noun
+            snapshot.mhs_total_librarian_continuity_unmeasured "keeper")
+         (Masc_tui_message_layout.count_noun
+            snapshot.mhs_total_librarian_failures "failure")));
   push info_bar;
   let search_bar =
+    (* The one value the list was filtered by. [visible_memory_keepers] narrows
+       on [memory_overview_query], which is the text being typed while a search
+       is open and the applied one otherwise; the bar decided whether to draw
+       from that and then quoted [search_last] instead. Typing the first filter
+       drew the count for what was typed beside an empty pair of quotes, so the
+       line named a filter that matched everything and a number that did not.
+
+       And the noun follows the count: filtering by a Keeper's name usually
+       leaves exactly one, which read "1 matching keepers". The stats line four
+       rows up already counts through the helper that declines the plural. *)
     if query <> "" then
-      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%d matching keepers)  %s[Esc to clear]%s"
-        Ansi.bold Ansi.reset (Terminal_text.single_line state.search_last)
-        shown (Theme.recede ()) Ansi.reset
+      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
+        Ansi.bold Ansi.reset (Terminal_text.single_line query)
+        (Masc_tui_message_layout.count_noun shown "matching keeper")
+        (Theme.recede ()) Ansi.reset
     else ""
   in
   if search_bar <> "" then push search_bar;
@@ -777,8 +801,9 @@ let render_memory_facts_body ~cols ~budget (state : state)
   if pills_line <> "" then push pills_line;
   let search_banner =
     if String.length (String.trim state.search_last) > 0 then
-      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%d matching facts)  %s[Esc to clear]%s"
-        Ansi.bold Ansi.reset (Terminal_text.single_line state.search_last) total
+      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
+        Ansi.bold Ansi.reset (Terminal_text.single_line state.search_last)
+        (Masc_tui_message_layout.count_noun total "matching fact")
         (Theme.recede ()) Ansi.reset
     else ""
   in

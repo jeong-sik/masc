@@ -17,7 +17,10 @@ val refusal_of_editor_error : Server_skill_editor.error -> Workspace_skill_publi
 
 (** [refresh] republishes the catalog snapshot after the write; the installed
     publisher builds it from the live runtime.toml exactly as the operator
-    create route does. *)
+    create route does. A SKILL.md whose name the catalog already answers to,
+    from any source, is refused as [skill_name_taken] before anything is
+    written: Keepers see one Skill per name, so it would either hide that Skill
+    or be hidden by it. *)
 val publish :
   refresh:(unit -> (Skill_catalog_snapshot_service.publication, string) result) ->
   Workspace.config ->

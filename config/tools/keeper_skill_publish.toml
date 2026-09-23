@@ -3,7 +3,8 @@ description = """
 Publish a new Skill package into the workspace's project-agents Skill source. \
 The SKILL.md is checked by the same parser as the operator Skill editor and \
 keeper_skill_validate, then the catalog is republished; a Keeper that lists its \
-skills sees it once listed. Never overwrites: an existing package name is refused. Operators \
+skills sees it once listed. Never overwrites or hides another Skill: an existing \
+package name, or a Skill name already in the catalog from any source, is refused. Operators \
 can delete it afterwards. The audit log records you, the \
 reference and evidence."""
 additional_properties = false

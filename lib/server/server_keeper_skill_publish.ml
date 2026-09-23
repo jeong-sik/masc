@@ -43,16 +43,61 @@ let source_id () =
   Skill_source_config.source_id_of_string project_agents_source_id
 ;;
 
-let publish ~refresh (config : Workspace.config) (request : Publish.request) =
-  match source_id () with
-  | Error detail ->
-    Error
-      (Publish.Refused
-         { code = "invalid_source_id"
-         ; message = "project-agents source id is invalid: " ^ detail
-         ; cause = Publish.Source_unavailable
-         })
-  | Ok source_id ->
+(* Keepers see one Skill per name: the entry from the source declared first.
+   A Keeper package named like a Skill already in the catalog would hide that
+   Skill from every Keeper when project-agents is declared first -- the live
+   order puts it ahead of the operator's repository source -- and would stay
+   hidden itself, while the publish reports success, when it is declared
+   later. So a Keeper publishes under a new name only; the operator editor
+   keeps its own rule.
+
+   When the SKILL.md or the catalog cannot be read here, [create] reads them
+   again and refuses with its own typed error, so nothing is decided on a
+   missing answer. The same package already in project-agents is [create]'s
+   to refuse as [package_already_exists]. *)
+let catalog_holder ~base_path ~source_id (request : Publish.request) =
+  match
+    Server_skill_editor.preview_new
+      ~source_id
+      ~package_id:(Skill_reference.package_id_to_string request.package_id)
+      request.source_text
+  with
+  | Error (_ : Server_skill_editor.error) -> None
+  | Ok preview ->
+    let identity =
+      preview.Server_skill_editor.profile.Keeper_skill_observability.reference
+        .Skill_reference.identity
+    in
+    let name = identity.Skill_reference.name in
+    (match Server_skill_snapshot_runtime.lookup ~base_path with
+     | Ok (Server_skill_snapshot_runtime.Ready snapshot) ->
+       (match Skill_catalog_snapshot.find_effective_by_name snapshot name with
+        | Some (entry : Skill_catalog_snapshot.entry)
+          when not
+                 (Skill_reference.equal_identity
+                    entry.Skill_catalog_snapshot.identity
+                    identity) ->
+          Some (name, entry.Skill_catalog_snapshot.identity.Skill_reference.source_id)
+        | Some _ | None -> None)
+     | Ok (Server_skill_snapshot_runtime.Not_registered
+          | Server_skill_snapshot_runtime.Uninitialized)
+     | Error (_ : Server_skill_snapshot_runtime.error) -> None)
+;;
+
+let name_taken_refusal ~name ~holder =
+  Publish.Refused
+    { code = "skill_name_taken"
+    ; message =
+        Printf.sprintf
+          "a Skill named %S is already in the catalog from source %s; publish the \
+           procedure under a new name"
+          name
+          (Skill_source_config.source_id_to_string holder)
+    ; cause = Publish.Request_refused
+    }
+;;
+
+let create_and_audit ~refresh (config : Workspace.config) (request : Publish.request) ~source_id =
     (match
        Server_skill_editor.create
          ~base_path:config.base_path
@@ -112,6 +157,21 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
          ~outcome:audit_outcome
          ();
        Ok result)
+;;
+
+let publish ~refresh (config : Workspace.config) (request : Publish.request) =
+  match source_id () with
+  | Error detail ->
+    Error
+      (Publish.Refused
+         { code = "invalid_source_id"
+         ; message = "project-agents source id is invalid: " ^ detail
+         ; cause = Publish.Source_unavailable
+         })
+  | Ok source_id ->
+    (match catalog_holder ~base_path:config.base_path ~source_id request with
+     | Some (name, holder) -> Error (name_taken_refusal ~name ~holder)
+     | None -> create_and_audit ~refresh config request ~source_id)
 ;;
 
 let install () =

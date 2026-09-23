@@ -134,6 +134,14 @@ val save :
     this authority boundary. *)
 val writable_sources : base_path:string -> (writable_source list, error) result
 
+(** The package {!create} would write, parsed and validated from its SKILL.md
+    text, before anything touches disk. *)
+val preview_new :
+  source_id:Skill_source_config.source_id ->
+  package_id:string ->
+  string ->
+  (preview, error) result
+
 (** Create one new package directory and SKILL.md without overwriting. *)
 val create :
   base_path:string ->

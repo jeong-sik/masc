@@ -48,7 +48,12 @@ let config_text =
     Server_keeper_skill_publish.project_agents_source_id
 ;;
 
-let with_workspace ?(source_root_exists = true) f =
+let with_workspace
+      ?(source_root_exists = true)
+      ?(config_text = config_text)
+      ?(prepare = fun ~base_path:_ -> ())
+      f
+  =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -64,6 +69,7 @@ let with_workspace ?(source_root_exists = true) f =
       then (
         Unix.mkdir (Filename.concat base_path ".agents") 0o700;
         Unix.mkdir (Filename.concat base_path ".agents/skills") 0o700);
+      prepare ~base_path;
       let refresh () =
         Ok
           (Service.refresh
@@ -309,6 +315,53 @@ let test_first_publish_creates_the_source_folder () =
     (read_file (Filename.concat base_path ".agents/skills/first/SKILL.md"))
 ;;
 
+(* The live order: the Keeper source is declared before the operator's
+   read-only one, and Keepers see one Skill per name, the first source's. A
+   Keeper package named like the operator's Skill would hide it from every
+   Keeper, so the name is refused and nothing is written. *)
+let operator_source_config =
+  config_text
+  ^ "[[skills.sources]]\n\
+     id = \"operator-skills\"\n\
+     anchor = \"base-path\"\n\
+     path = \".operator/skills\"\n\
+     access = \"read-only\"\n"
+;;
+
+let test_a_name_the_catalog_already_answers_to_is_refused () =
+  let operator_text = instruction "shared" in
+  with_workspace
+    ~config_text:operator_source_config
+    ~prepare:(fun ~base_path ->
+      let root = Filename.concat base_path ".operator" in
+      let package = Filename.concat root "skills/shared" in
+      Unix.mkdir root 0o700;
+      Unix.mkdir (Filename.concat root "skills") 0o700;
+      Unix.mkdir package 0o700;
+      Out_channel.with_open_bin (Filename.concat package "SKILL.md") (fun channel ->
+        output_string channel operator_text))
+  @@ fun ~base_path ~workspace ~config ~refresh ->
+  Atomic.set Workspace_hooks.keeper_skill_publish_fn
+    (Server_keeper_skill_publish.publish ~refresh);
+  call config
+    (args ~package_id:"shared" (instruction ~description:"The Keeper's own take." "shared"))
+  |> failed_with
+       ~code:"skill_name_taken"
+       ~class_:Tool_result.Policy_rejection
+       ~effect_disposition:Tool_result.Proven_pre_effect;
+  check bool "nothing written" false
+    (Sys.file_exists (Filename.concat base_path ".agents/skills/shared"));
+  match Service.current ~workspace with
+  | Some snapshot ->
+    (match Skill_catalog_snapshot.find_effective_by_name snapshot "shared" with
+     | Some entry ->
+       check string "the operator's Skill still answers to the name" "operator-skills"
+         (Skill_source_config.source_id_to_string
+            entry.Skill_catalog_snapshot.identity.Skill_reference.source_id)
+     | None -> fail "the operator's Skill left the catalog")
+  | None -> fail "no snapshot"
+;;
+
 let () =
   Mirage_crypto_rng_unix.use_default ();
   run
@@ -322,6 +375,8 @@ let () =
             test_editor_publishes_and_never_overwrites
         ; test_case "first publish creates the source folder" `Quick
             test_first_publish_creates_the_source_folder
+        ; test_case "a name the catalog already answers to is refused" `Quick
+            test_a_name_the_catalog_already_answers_to_is_refused
         ] )
     ]
 ;;

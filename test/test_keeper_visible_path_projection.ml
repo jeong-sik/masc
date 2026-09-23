@@ -320,6 +320,37 @@ let test_repository_checkout_projection_reports_typed_freshness () =
     (entry |> Json.member "freshness" |> Json.member "ahead" |> Json.to_int)
 ;;
 
+(* A checkout with no origin remote, and one whose origin is a local path,
+   name no catalog repository. Both are answers, so neither may read as an
+   origin that could not be looked up. *)
+let test_repository_checkout_without_catalog_origin_is_unregistered () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let init name =
+    let checkout = Filename.concat playground ("repos/" ^ name) in
+    ensure_dir checkout;
+    ignore (run_git_or_fail ~cwd:checkout [ "init"; "-b"; "main" ]);
+    checkout
+  in
+  ignore (init "no-origin");
+  let local = init "local-origin" in
+  ignore
+    (run_git_or_fail ~cwd:local [ "remote"; "add"; "origin"; Filename.concat playground "elsewhere" ]);
+  let states =
+    Keeper_sandbox_control.repository_checkouts_json ~config ~meta
+    |> Json.member "entries"
+    |> Json.to_list
+    |> List.map (fun entry ->
+      ( entry |> Json.member "checkout_name" |> Json.to_string
+      , entry |> Json.member "catalog" |> Json.member "state" |> Json.to_string ))
+    |> List.sort compare
+  in
+  Alcotest.(check (list (pair string string)))
+    "catalog state"
+    [ "local-origin", "unregistered"; "no-origin", "unregistered" ]
+    states
+;;
+
 let test_repository_checkout_projection_ignores_symlinked_directory () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
@@ -913,6 +944,10 @@ let () =
             "reports catalog identity, dirty state, and freshness"
             `Quick
             test_repository_checkout_projection_reports_typed_freshness
+        ; Alcotest.test_case
+            "a checkout without a catalog origin is unregistered"
+            `Quick
+            test_repository_checkout_without_catalog_origin_is_unregistered
         ; Alcotest.test_case
             "ignores symlinked checkout directories"
             `Quick

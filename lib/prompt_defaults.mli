@@ -39,6 +39,12 @@ val bootstrap_runtime :
     is logged via [Log.Misc.error] and swallowed so a corrupt
     override file cannot bring the boot path down. *)
 
+val bootstrap_markdown_dir :
+  workspace_path:string -> prompt_markdown_dir:string -> unit
+(** What {!bootstrap_runtime} does once the directory is resolved: point
+    {!Prompt_registry} at [prompt_markdown_dir], load it, and restore the
+    overrides saved under [workspace_path]. Idempotent on the same pair. *)
+
 val init : unit -> unit
 (** Install prompt-registry observers and re-scan the currently
     configured markdown directory.  Used by [bootstrap_runtime]

@@ -61,30 +61,55 @@ let fleet =
   ; ("quiet", [])
   ]
 
-(* The server's own answer for [fleet], wrapped with the cache word the
-   route appends. *)
-let server_json ~state =
+let mkdir_p dir =
+  let rec go dir =
+    if not (Sys.file_exists dir) then (
+      go (Filename.dirname dir);
+      Unix.mkdir dir 0o755)
+  in
+  go dir
+
+(* A line written straight into the day file of [ts], the way a torn write
+   would leave it. *)
+let write_raw_line config name ~ts line =
+  let base_dir = Dated_jsonl.base_dir (Keeper_types_support.keeper_metrics_store config name) in
+  let dated = Jsonl_writer.dated_path ~base_dir ~ts in
+  mkdir_p (Filename.dirname dated.path);
+  let out = open_out_gen [ Open_append; Open_creat ] 0o644 dated.path in
+  output_string out line;
+  output_char out '\n';
+  close_out out
+
+let with_workspace f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Masc_test_deps.init_eio_clock env;
   let config = Masc.Workspace.default_config (temp_dir ()) in
   ignore (Masc.Workspace.init config ~agent_name:None);
+  f config
+
+let append_turns config name turns =
   List.iter
-    (fun (name, turns) ->
-      List.iter
-        (fun (cost, tokens) ->
-          Dated_jsonl.append
-            (Keeper_types_support.keeper_metrics_store config name)
-            (`Assoc (turn_row ~cost ~tokens)))
-        turns)
-    fleet;
+    (fun (cost, tokens) ->
+      Dated_jsonl.append
+        (Keeper_types_support.keeper_metrics_store config name)
+        (`Assoc (turn_row ~cost ~tokens)))
+    turns
+
+(* The server's own answer for [keepers], wrapped with the cache object the
+   route appends. *)
+let server_answer ?(state = Route.Cache_fresh) ?age_s ?error config names =
   let body =
     Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-      ~keepers:(List.map (fun (name, _) -> make_meta name) fleet)
-      ~window_minutes:Spend.window_minutes
+      ~keepers:(List.map make_meta names) ~window_minutes:Spend.window_minutes
   in
   Route.json_with_cache_metadata body
-    (Route.cache_metadata ~state ~generated_at:(Unix.gettimeofday ()) ())
+    (Route.cache_metadata ~state ~generated_at:(Unix.gettimeofday ()) ?age_s ?error ())
+
+let server_json ?state ?age_s ?error () =
+  with_workspace (fun config ->
+      List.iter (fun (name, turns) -> append_turns config name turns) fleet;
+      server_answer ?state ?age_s ?error config (List.map fst fleet))
 
 let decode json =
   match Spend.decode_reading json with
@@ -108,27 +133,35 @@ let strip text =
 
 let names = List.map fst fleet @ [ "unlisted" ]
 
+let sum_pp pp fmt = function
+  | Spend_unknown -> Format.fprintf fmt "unknown"
+  | Spend_sum { sum; missing } -> Format.fprintf fmt "%a (missing %d)" pp sum missing
+
 let spend_testable =
   testable
     (fun fmt (spend : keeper_spend) ->
-      let sum pp fmt = function
-        | Spend_unknown -> Format.fprintf fmt "unknown"
-        | Spend_sum { sum; missing } -> Format.fprintf fmt "%a (missing %d)" pp sum missing
-      in
       match spend with
       | Spend_no_turns -> Format.fprintf fmt "no turns"
+      | Spend_unread reason -> Format.fprintf fmt "unread: %s" reason
       | Spend_turns { cost_usd; tokens } ->
           Format.fprintf fmt "cost %a, tokens %a"
-            (sum (fun fmt -> Format.fprintf fmt "%.4f")) cost_usd
-            (sum Format.pp_print_int) tokens)
+            (sum_pp (fun fmt -> Format.fprintf fmt "%.4f")) cost_usd
+            (sum_pp Format.pp_print_int) tokens)
     ( = )
 
+let read_keepers reading =
+  match reading with
+  | Overview_spend_read { keepers; _ } -> keepers
+  | Overview_spend_unread | Overview_spend_warming | Overview_spend_failed _ ->
+      fail "a fresh answer decodes as read"
+
 let test_server_json_decodes_per_keeper () =
-  match decode (server_json ~state:Route.Cache_fresh) with
-  | Overview_spend_read { window_minutes; keepers; undecodable } ->
+  match decode (server_json ()) with
+  | Overview_spend_read { window_minutes; keepers; undecodable; freshness } ->
       check int "the window asked for is the window answered" Spend.window_minutes
         window_minutes;
       check int "every row decodes" 0 undecodable;
+      check bool "a fresh answer is fresh" true (freshness = Spend_fresh);
       let spend name =
         match List.assoc_opt name keepers with
         | Some spend -> spend
@@ -153,66 +186,101 @@ let test_server_json_decodes_per_keeper () =
       check spend_testable "no turns is its own reading" Spend_no_turns (spend "quiet")
   | _ -> fail "a fresh answer decodes as read"
 
-let tags () =
-  let tag = Spend.keeper_tags (decode (server_json ~state:Route.Cache_fresh)) names in
-  fun name -> strip (tag name)
-
 let test_tags_draw_known_floor_and_unknown () =
-  let tag = tags () in
-  check string "a priced Keeper's cost and tokens" "$0.75 25 tok     " (tag "priced");
-  check string "an unpriced Keeper draws $?, never $0" "$? 3.5M tok      "
+  let tag = Spend.keeper_tags (decode (server_json ())) names in
+  let tag name = strip (tag name) in
+  check string "a priced Keeper's cost and tokens" "$0.75 25 tok   " (tag "priced");
+  check string "an unpriced Keeper draws tokens only, never $0" "3.5M tok       "
     (tag "subscription");
-  check string "a partly priced Keeper draws a floor" "\xe2\x89\xa5$1.25 \xe2\x89\xa5400 tok  "
+  check string "a partly priced Keeper draws a floor" "\xe2\x89\xa5$1.25 \xe2\x89\xa5400 tok"
     (tag "mixed");
-  check string "a Keeper with no turns says so" "no turns         " (tag "quiet");
-  check string "a Keeper the server did not list is unknown" "$? ? tok         "
+  check string "a Keeper with no turns says so" "no turns       " (tag "quiet");
+  check string "a Keeper the server did not list is unknown" "? tok          "
     (tag "unlisted");
   let widths =
     List.sort_uniq compare
       (List.map (fun name -> Masc_tui_message_layout.display_width (tag name)) names)
   in
-  check (list int) "every tag takes the same cells" [ 17 ] widths
+  check (list int) "every tag takes the same cells" [ 15 ] widths
+
+let total reading names =
+  match Spend.team_total reading names with
+  | Some total -> strip total
+  | None -> fail "a read answer over drawn rows has a team total"
 
 let test_team_total () =
-  let total =
-    match Spend.team_total (decode (server_json ~state:Route.Cache_fresh)) with
-    | Some total -> strip total
-    | None -> fail "a read answer has a team total"
-  in
-  check string "the total is a floor over the window" "24h \xe2\x89\xa5$2.00 \xc2\xb7 \xe2\x89\xa53.5M tok"
-    total
+  let reading = decode (server_json ()) in
+  check string "the total over the fleet is a floor"
+    "24h \xe2\x89\xa5$2.00 \xe2\x89\xa53.5M tok"
+    (total reading (List.map fst fleet));
+  check string "a team that reported no cost draws tokens only" "24h 3.5M tok"
+    (total reading [ "subscription" ]);
+  check string "a team whose drawn Keepers had no turns says so" "24h no turns"
+    (total reading [ "quiet" ])
+
+(* A Keeper the block draws but the rows do not account for -- its meta read
+   failed, or it was created after the cached answer -- is spend nobody
+   read. The title must not look exact beside its "? tok" row. *)
+let test_team_total_counts_a_drawn_keeper_missing_from_the_rows () =
+  let reading = decode (server_json ()) in
+  check string "an exact Keeper plus an unlisted one is a floor"
+    "24h \xe2\x89\xa5$0.75 \xe2\x89\xa525 tok"
+    (total reading [ "priced"; "unlisted" ]);
+  check string "only unlisted Keepers are unknown" "24h ? tok"
+    (total reading [ "unlisted" ])
+
+(* A fresh answer with no rows is not a team that spent nothing. *)
+let test_team_total_of_an_empty_answer_is_unknown () =
+  let reading = with_workspace (fun config -> decode (server_answer config [])) in
+  check (list string) "the answer has no rows" [] (List.map fst (read_keepers reading));
+  check string "the drawn Keepers are unknown, not idle" "24h ? tok"
+    (total reading [ "priced"; "subscription" ]);
+  check (option string) "a block with no rows has no total" None
+    (Spend.team_total reading [])
 
 (* Each word the route can send, and what the Team block does with it. *)
-let expected_reading = function
-  | Route.Cache_fresh | Route.Cache_stale_refreshing -> `Read
-  | Route.Cache_warming -> `Warming
-
 let test_every_cache_state_decodes () =
   List.iter
     (fun state ->
       let label = Route.cache_state_to_string state in
-      (* A warming answer carries the placeholder: its empty rows say
-         nothing, so it must not read as "no Keeper spent anything". *)
-      let body =
-        match state with
-        | Route.Cache_warming ->
-            Route.json_with_cache_metadata
-              (Dashboard_http_keeper.keeper_cost_aggregates_json
-                 ~config:(Masc.Workspace.default_config (temp_dir ()))
-                 ~keepers:[] ~window_minutes:Spend.window_minutes)
-              (Route.cache_metadata ~state ~generated_at:0.0 ())
-        | Route.Cache_fresh | Route.Cache_stale_refreshing -> server_json ~state
-      in
-      match (expected_reading state, decode body) with
-      | `Read, Overview_spend_read _ | `Warming, Overview_spend_warming -> ()
-      | _ -> failf "cache state %s decoded to the wrong reading" label)
+      match state with
+      | Route.Cache_fresh -> (
+          match decode (server_json ~state ()) with
+          | Overview_spend_read { freshness = Spend_fresh; _ } -> ()
+          | _ -> failf "%s decodes as a fresh read" label)
+      | Route.Cache_stale_refreshing -> (
+          match decode (server_json ~state ~age_s:95.0 ~error:"EIO" ()) with
+          | Overview_spend_read
+              { freshness = Spend_stale { age_s; last_error = Some "EIO" }; _ } as reading
+            ->
+              check (float 0.001) "the age survives" 95.0 age_s;
+              check string "the title says how old" "24h, 1m old \xe2\x89\xa5$0.75 \xe2\x89\xa525 tok"
+                (total reading [ "priced"; "unlisted" ]);
+              check (list string) "the failed refresh is said"
+                [ "$ spend is 1m old, refresh failed: EIO" ]
+                (List.map strip (Spend.lines reading))
+          | _ -> failf "%s with an error decodes as stale with it" label)
+      | Route.Cache_warming -> (
+          (* A warming answer carries the placeholder: its empty rows say
+             nothing, so it must not read as "no Keeper spent anything". *)
+          let placeholder ?error () =
+            with_workspace (fun config -> server_answer ~state ?error config [])
+          in
+          (match decode (placeholder ()) with
+           | Overview_spend_warming -> ()
+           | _ -> failf "%s decodes as warming" label);
+          match decode (placeholder ~error:"EACCES" ()) with
+          | Overview_spend_failed err ->
+              check bool "the error is carried" true
+                (String.ends_with ~suffix:"EACCES" err)
+          | _ -> failf "%s with an error decodes as a failure" label))
     [ Route.Cache_fresh; Route.Cache_stale_refreshing; Route.Cache_warming ]
 
 let test_not_read_draws_no_tag_and_one_line () =
   List.iter
     (fun (reading, label) ->
       check string (label ^ ": no tag") "" (Spend.keeper_tags reading names "priced");
-      check (option string) (label ^ ": no total") None (Spend.team_total reading))
+      check (option string) (label ^ ": no total") None (Spend.team_total reading names))
     [ (Overview_spend_unread, "unread")
     ; (Overview_spend_warming, "warming")
     ; (Overview_spend_failed "refused", "failed")
@@ -223,11 +291,48 @@ let test_not_read_draws_no_tag_and_one_line () =
     [ "$ spend unread: refused" ]
     (List.map strip (Spend.lines (Overview_spend_failed "refused")))
 
+(* The refresh applies this: a failed fetch after a good one replaces it. *)
+let test_a_failed_load_replaces_the_last_good_reading () =
+  let good = Spend.reading_of_load (Ok (decode (server_json ()))) in
+  (match good with
+   | Overview_spend_read _ -> ()
+   | _ -> fail "a good load is read");
+  match Spend.reading_of_load (Error "HTTP 503") with
+  | Overview_spend_failed "HTTP 503" -> ()
+  | _ -> fail "a failed load is the failure, not the last good reading"
+
+(* A row that is not JSON may have been a turn: the sums are floors. A store
+   the server could not read is unknown and said under the block. *)
+let test_torn_and_unreadable_stores () =
+  let reading =
+    with_workspace (fun config ->
+        let now = Unix.gettimeofday () in
+        append_turns config "torn" [ (Some 0.5, Some 10) ];
+        write_raw_line config "torn" ~ts:now "{\"ts_unix\":";
+        append_turns config "broken" [ (Some 0.5, Some 10) ];
+        let base_dir =
+          Dated_jsonl.base_dir (Keeper_types_support.keeper_metrics_store config "broken")
+        in
+        let dated = Jsonl_writer.dated_path ~base_dir ~ts:now in
+        Sys.remove dated.path;
+        Unix.mkdir dated.path 0o755;
+        decode (server_answer config [ "torn"; "broken" ]))
+  in
+  let tag = Spend.keeper_tags reading [ "torn"; "broken" ] in
+  check string "a torn row makes the sums floors" "\xe2\x89\xa5$0.50 \xe2\x89\xa510 tok"
+    (strip (tag "torn"));
+  check bool "an unreadable store is unknown" true
+    (String.starts_with ~prefix:"? tok" (strip (tag "broken")));
+  check bool "the unreadable store is said" true
+    (List.exists
+       (String.starts_with ~prefix:"$ spend unread for 1 Keeper: ")
+       (List.map strip (Spend.lines reading)))
+
 (* A row this build cannot read leaves its Keeper unknown and is counted;
    the other rows still draw. *)
 let test_unreadable_row_is_unknown () =
   let json =
-    match server_json ~state:Route.Cache_fresh with
+    match server_json () with
     | `Assoc fields ->
         `Assoc
           (List.map
@@ -255,12 +360,26 @@ let test_unreadable_row_is_unknown () =
    | Overview_spend_read { undecodable; _ } -> check int "the bad row is counted" 1 undecodable
    | _ -> fail "one bad row does not fail the reading");
   let tag name = strip (Spend.keeper_tags reading names name) in
-  check bool "its Keeper is unknown" true (String.starts_with ~prefix:"$? ? tok" (tag "priced"));
+  check bool "its Keeper is unknown" true (String.starts_with ~prefix:"? tok" (tag "priced"));
   check bool "another Keeper still draws" true
-    (String.starts_with ~prefix:"$? 3.5M tok" (tag "subscription"));
+    (String.starts_with ~prefix:"3.5M tok" (tag "subscription"));
   check (list string) "the count is said under the block"
     [ "$ spend rows unreadable: 1 Keeper drawn unknown" ]
     (List.map strip (Spend.lines reading))
+
+(* The tag goes at the right of the row only where the row still fits whole:
+   a stuck Keeper's cause is drawn nowhere else, so a narrow row keeps it
+   and drops the spend. *)
+let test_a_narrow_row_keeps_its_detail () =
+  let row = "! k-stuck crashed 3m  token expired for the github connector" in
+  let tag = "1.2M tok" in
+  let narrow = Spend.place_tag ~inner:52 ~tag row in
+  check string "the detail is whole and the tag is gone" row narrow;
+  let wide = Spend.place_tag ~inner:128 ~tag row in
+  check int "a wide row spans the frame" 128 (Masc_tui_message_layout.display_width wide);
+  check bool "a wide row starts with its detail" true (String.starts_with ~prefix:row wide);
+  check bool "a wide row ends with the tag" true (String.ends_with ~suffix:tag wide);
+  check string "an empty tag leaves the row alone" row (Spend.place_tag ~inner:128 ~tag:"" row)
 
 let () =
   run "tui_keeper_spend"
@@ -269,8 +388,16 @@ let () =
         ; test_case "tags draw known, floor and unknown" `Quick
             test_tags_draw_known_floor_and_unknown
         ; test_case "team total" `Quick test_team_total
+        ; test_case "team total counts a drawn Keeper missing from the rows" `Quick
+            test_team_total_counts_a_drawn_keeper_missing_from_the_rows
+        ; test_case "team total of an empty answer is unknown" `Quick
+            test_team_total_of_an_empty_answer_is_unknown
         ; test_case "every cache state decodes" `Quick test_every_cache_state_decodes
         ; test_case "not read draws no tag" `Quick test_not_read_draws_no_tag_and_one_line
+        ; test_case "a failed load replaces the last good reading" `Quick
+            test_a_failed_load_replaces_the_last_good_reading
+        ; test_case "torn and unreadable stores" `Quick test_torn_and_unreadable_stores
         ; test_case "an unreadable row is unknown" `Quick test_unreadable_row_is_unknown
+        ; test_case "a narrow row keeps its detail" `Quick test_a_narrow_row_keeps_its_detail
         ] )
     ]

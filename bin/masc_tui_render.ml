@@ -385,11 +385,15 @@ let overview_team_detail_lines (state : state) =
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     ~quota_line ~detail_lines ~pr_tag_of_keeper ~spend_tags ~spend_total =
   (* Each Keeper's spend over the window, padded to the widest tag among
-     the rows so the tags after it start in one column. *)
+     the rows so the tags stand in one column at the right. The title sums
+     the same rows. *)
   let spend_tag_of_keeper =
-    spend_tags
-      (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows)
+    spend_tags (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows)
   in
+  let spend_total =
+    spend_total (List.map (fun (row : Overview_team.row) -> row.keeper.okp_name) team.rows)
+  in
+  let inner = framed_inner_width cols in
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -441,14 +445,16 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     (* The Keeper's PR, ahead of the detail so a narrow row keeps it: its
        number and one glyph for its checks, "+N" for more. *)
     let pr_tag = pr_tag_of_keeper row.keeper.okp_name in
-    (* Spend sits after the age, ahead of the PR: what the Keeper cost is
-       the row's report, the PR and the detail are what it is on. *)
-    let spend_tag = spend_tag_of_keeper row.keeper.okp_name in
-    Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s%s" tone mark Ansi.reset
-      (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
-      tone
-      (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
-      Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset spend_tag pr_tag detail
+    (* Spend goes at the right, after the detail, and only where the row
+       still fits whole: the detail is the row's reason, and a stuck
+       Keeper's cause is drawn nowhere else. *)
+    Keeper_spend.place_tag ~inner
+      ~tag:(spend_tag_of_keeper row.keeper.okp_name)
+      (Printf.sprintf "%s%s%s %s %s%s%s %s%s%s  %s%s" tone mark Ansi.reset
+         (fit_width (Terminal_text.single_line row.keeper.okp_name) name_cells)
+         tone
+         (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
+         Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail)
   in
   let parked_line =
     match team.parked with

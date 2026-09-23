@@ -4204,6 +4204,7 @@
  (libraries
   alcotest
   masc_test_deps
+  masc.jsonl_writer
   masc.server
   masc_tui_types
   masc_tui_message_layout

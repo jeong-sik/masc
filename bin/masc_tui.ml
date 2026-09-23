@@ -10567,9 +10567,8 @@ let apply_repository_pulls_load state = function
 (* A failed read replaces the last good one, as the pull requests do: a
    spend drawn after the reading that said so stopped arriving would be a
    number nobody observed. *)
-let apply_keeper_spend_load state = function
-  | Ok reading -> state.overview_spend <- reading
-  | Error err -> state.overview_spend <- Overview_spend_failed err
+let apply_keeper_spend_load state result =
+  state.overview_spend <- Masc_tui_keeper_spend.reading_of_load result
 
 let apply_keeper_roster_load state = function
   | Ok roster ->

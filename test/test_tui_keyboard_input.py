@@ -14324,7 +14324,7 @@ def repository_pulls_fixture() -> HttpResponse:
 
 def keeper_costs_fixture() -> HttpResponse:
     # GET /api/v1/dashboard/keeper-costs: k-author's runtime reported usage
-    # but no cost, so its Team row draws "$?" beside its tokens, never $0.
+    # but no cost, so its Team row draws its tokens and no dollar figure.
     return (
         200,
         {
@@ -14344,6 +14344,7 @@ def keeper_costs_fixture() -> HttpResponse:
                     "p50_latency_ms": 100.0,
                     "p95_latency_ms": 100.0,
                     "sample_count": 3,
+                    "metrics_read": {"state": "read", "malformed_rows": 0},
                 }
             ],
             "window_minutes": 1440,
@@ -14351,6 +14352,67 @@ def keeper_costs_fixture() -> HttpResponse:
             "cache": {"state": "fresh", "generated_at": 1_790_000_000.0},
         },
     )
+
+
+STUCK_KEEPER_CAUSE = b"token expired for the github connector"
+
+
+def stuck_keeper_briefing() -> HttpResponse:
+    item = {
+        "kind": "keeper_attention",
+        "severity": "warning",
+        "summary": "k-stuck " + STUCK_KEEPER_CAUSE.decode(),
+        "target_type": "keeper",
+        "target_id": "k-stuck",
+    }
+    status, body = pull_requests_briefing()
+    assert isinstance(body, dict)
+    body = dict(body)
+    body["attention_queue"] = [item]
+    body["keeper_briefs"] = [
+        {"name": "k-stuck", "phase": "crashed", "last_turn_ago_s": 180},
+    ]
+    return (status, body)
+
+
+def stuck_keeper_costs_fixture() -> HttpResponse:
+    status, body = keeper_costs_fixture()
+    assert isinstance(body, dict)
+    body = dict(body)
+    row = dict(body["keepers"][0])
+    row["keeper_name"] = "k-stuck"
+    body["keepers"] = [row]
+    return (status, body)
+
+
+def narrow_stuck_row_keeps_its_cause_interaction() -> Interaction:
+    # The spend tag sits at the right of a Team row and only where the row
+    # fits whole: at 56 columns a stuck Keeper's row keeps its cause, which
+    # the attention panel no longer draws, and drops the spend.
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(process, master_fd, output, b"1.2M tok", start=0, timeout=10.0)
+        frame = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=56,
+            needle=b"k-stuck",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        plain = CSI_RE.sub(b"", frame)
+        if b"token expired" not in plain:
+            raise AssertionError(f"the stuck row lost its cause at 56 columns: {frame!r}")
+        os.write(master_fd, b"q")
+
+    return interact
 
 
 def pull_requests_on_overview_interaction() -> Interaction:
@@ -14365,11 +14427,13 @@ def pull_requests_on_overview_interaction() -> Interaction:
             b"1 conflicting",
             b"1 not by a Keeper",
             b"#11",
-            # The row's cost is unknown, drawn as "$?" beside its tokens.
-            b"$?\x1b[0m 1.2M tok  #11",
+            # The row's cost is unknown: its tokens are drawn, no dollar figure.
+            b"1.2M tok",
             b"24h",
         ):
             wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
+        if b"$" in CSI_RE.sub(b"", bytes(output)).split(b"Team", 1)[-1].split(b"Tasks", 1)[0]:
+            raise AssertionError(f"an unpriced Team block drew a dollar figure: {bytes(output)!r}")
         # The harness confirms the exit that this first press arms.
         os.write(master_fd, b"q")
 
@@ -14993,6 +15057,15 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/dashboard/briefing": pull_requests_briefing(),
             "/api/v1/repositories/pulls": repository_pulls_fixture(),
             "/api/v1/dashboard/keeper-costs": keeper_costs_fixture(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Narrow stuck row keeps its cause",
+        interact=narrow_stuck_row_keeps_its_cause_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": stuck_keeper_briefing(),
+            "/api/v1/dashboard/keeper-costs": stuck_keeper_costs_fixture(),
         },
     )
     run_terminal_scenario(

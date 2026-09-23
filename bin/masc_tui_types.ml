@@ -2034,9 +2034,10 @@ type overview_pulls_reading =
 
 (** A sum over a Keeper's turns of a value its runtime may not report
     (GET /api/v1/dashboard/keeper-costs). [Spend_sum] adds the turns that
-    reported one; [missing] counts the turns that gave none or could not be
-    read, so the sum is a floor whenever [missing > 0]. [Spend_unknown] is
-    turns that all left the value out: never a zero. *)
+    reported one; [missing] counts what may be left out of it -- turns that
+    gave no value or an unreadable one, and rows that were not JSON -- so
+    the sum is a floor whenever [missing > 0]. [Spend_unknown] is turns that
+    all left the value out: never a zero. *)
 type 'a spend_sum =
   | Spend_sum of { sum : 'a; missing : int }
   | Spend_unknown
@@ -2044,6 +2045,15 @@ type 'a spend_sum =
 type keeper_spend =
   | Spend_no_turns
   | Spend_turns of { cost_usd : float spend_sum; tokens : int spend_sum }
+  | Spend_unread of string
+      (** The server could not read this Keeper's metrics store. *)
+
+(** How old the server's cached answer is. [Spend_stale] is an answer past
+    its refresh time; [last_error] is why the last refresh failed, if it
+    did. *)
+type spend_freshness =
+  | Spend_fresh
+  | Spend_stale of { age_s : float; last_error : string option }
 
 type overview_spend_reading =
   | Overview_spend_unread
@@ -2054,6 +2064,7 @@ type overview_spend_reading =
       keepers : (string * keeper_spend) list;
       undecodable : int;
           (** Rows this build could not read; their Keepers draw unknown. *)
+      freshness : spend_freshness;
     }
   | Overview_spend_failed of string
 

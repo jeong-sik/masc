@@ -2511,9 +2511,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "overview_layout" [ "tasks_error" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)
   (* pr_tag_of_keeper and spend_tag_of_keeper look the name up, and
-     spend_tags takes the names as lookup keys; none of them draws it. *)
+     spend_tags and spend_total take the names as lookup keys; none of them
+     draws it. *)
   check_fields
-    ~non_rendering_calls:[ "pr_tag_of_keeper"; "spend_tag_of_keeper"; "spend_tags" ]
+    ~non_rendering_calls:
+      [ "pr_tag_of_keeper"; "spend_tag_of_keeper"; "spend_tags"; "spend_total" ]
     "overview_team_lines"
     [ "okp_name"; "id"; "title" ];
   (* The spend line prints the transport or decode failure it was given. *)

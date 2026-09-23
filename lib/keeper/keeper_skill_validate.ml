@@ -1,6 +1,11 @@
 let ( let* ) = Result.bind
 
-let request = function
+type draft =
+  { artifact : Keeper_peer_artifact_ref.t
+  ; package_id : Skill_reference.package_id
+  }
+
+let draft_of_json = function
   | `Assoc fields when List.length fields = 2 ->
     (match List.assoc_opt "artifact" fields, List.assoc_opt "package_id" fields with
      | Some artifact, Some (`String directory) ->
@@ -10,10 +15,12 @@ let request = function
          |> Result.map_error (fun error ->
            "package_id " ^ Skill_reference.package_id_error_to_string error)
        in
-       Ok (artifact, package_id)
+       Ok { artifact; package_id }
      | _ -> Error "artifact and string package_id are required")
   | _ -> Error "Expected exactly artifact and package_id"
 ;;
+
+let read_draft ~config draft = Keeper_peer_artifact.fetch ~config draft.artifact
 
 let failure ~class_ ~code ~message fields =
   Keeper_tool_execution.failure_data
@@ -29,12 +36,12 @@ let failure ~class_ ~code ~message fields =
 ;;
 
 let handle ~config ~args =
-  match request args with
+  match draft_of_json args with
   | Error message ->
     failure ~class_:Tool_result.Policy_rejection ~code:"invalid_skill_validation_request"
       ~message []
-  | Ok (artifact, package_id) ->
-    (match Keeper_peer_artifact.fetch ~config artifact with
+  | Ok ({ artifact; package_id } as draft) ->
+    (match read_draft ~config draft with
      | Error message ->
        failure ~class_:Tool_result.Runtime_failure ~code:"artifact_read_failed" ~message []
      | Ok source_text ->

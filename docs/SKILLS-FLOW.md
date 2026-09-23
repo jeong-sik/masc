@@ -179,7 +179,9 @@ Tools 화면에서 `J/K`로 published Skill을 고르고 `e`를 누르면 `$EDIT
 
 새 Skill은 같은 화면에서 `c`(지시 스킬)나 `C`(합성 스킬 starter)로 만든다. `$EDITOR`에서
 쓴 원문을 첫 번째 쓰기 가능한 source로 `/api/v1/skills/editor/create`에 보낸다. 같은 이름의
-package가 이미 있으면 덮어쓰지 않고 `package_already_exists`로 거절한다. 대시보드는
+package가 이미 있으면 덮어쓰지 않고 `package_already_exists`로 거절한다. `create`와
+`save`는 원문 대신 `keeper_skill_validate`가 검증한 `{artifact, package_id}`를 `draft`로
+받을 수 있다. 서버는 그 export bytes를 읽어 같은 검증과 쓰기 경로에 넘긴다. 대시보드는
 Skills › Skill Studio의 **+ New Skill**이 같은 경로를 쓴다. `Enter`는 선택한 revision의
 activation 기록과 마지막으로 끝난 합성 실행을 `/api/v1/skills/evidence`로 불러온다.
 삭제는 `DELETE /api/v1/skills/editor`만 있고 TUI·대시보드 조작은 없다.

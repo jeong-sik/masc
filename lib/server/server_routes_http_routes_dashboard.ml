@@ -467,8 +467,26 @@ let parse_runtime_config_raw_body body_str =
 type skill_editor_body =
   { reference : Skill_reference.t
   ; source_text : string option
+  ; draft : Keeper_skill_validate.draft option
   ; confirmed : bool option
   }
+
+(* A validated draft names SKILL.md bytes a Keeper exported and checked with
+   [keeper_skill_validate]. The editor reads those bytes itself, so the
+   operator approves a reference instead of copying text. *)
+let parse_skill_draft json =
+  match Json_util.assoc_member_opt "draft" json with
+  | None -> Ok None
+  | Some draft_json ->
+    Keeper_skill_validate.draft_of_json draft_json
+    |> Result.map (fun draft -> Some draft)
+    |> Result.map_error (fun detail -> "invalid draft: " ^ detail)
+;;
+
+let read_skill_draft state draft =
+  Keeper_skill_validate.read_draft ~config:(Mcp_server.workspace_config state) draft
+  |> Result.map_error (fun detail -> "draft artifact unreadable: " ^ detail)
+;;
 
 let parse_skill_editor_body body_str =
   try
@@ -487,21 +505,28 @@ let parse_skill_editor_body body_str =
               | Some (`String source_text) -> Ok (Some source_text)
               | Some _ -> Error "source_text must be a string"
             in
+            let* draft = parse_skill_draft json in
             let* confirmed =
               match Json_util.assoc_member_opt "confirmed" json with
               | None -> Ok None
               | Some (`Bool confirmed) -> Ok (Some confirmed)
               | Some _ -> Error "confirmed must be a boolean"
             in
-            Ok { reference; source_text; confirmed }))
+            Ok { reference; source_text; draft; confirmed }))
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
 
+type skill_create_source =
+  | Authored_text of
+      { package_id : string
+      ; source_text : string
+      }
+  | Validated_draft of Keeper_skill_validate.draft
+
 type skill_create_body =
   { source_id : Skill_source_config.source_id
-  ; package_id : string
-  ; source_text : string
+  ; source : skill_create_source
   }
 
 let parse_skill_create_body body_str =
@@ -522,15 +547,28 @@ let parse_skill_create_body body_str =
         Skill_source_config.source_id_of_string source_id_text
         |> Result.map_error (fun detail -> "invalid source_id: " ^ detail)
       in
-      let* package_id = required "package_id" in
-      let* source_text =
-        match Json_util.assoc_member_opt "source_text" json with
-        | Some (`String value) when not (String.equal value "") -> Ok value
-        | Some (`String _) -> Error "source_text must not be empty"
-        | Some _ -> Error "source_text must be a string"
-        | None -> Error "source_text required"
+      let* draft = parse_skill_draft json in
+      let* source =
+        match draft with
+        | Some draft ->
+          (match
+             ( Json_util.assoc_member_opt "package_id" json
+             , Json_util.assoc_member_opt "source_text" json )
+           with
+           | None, None -> Ok (Validated_draft draft)
+           | _ -> Error "draft carries its own package_id and bytes; send it alone")
+        | None ->
+          let* package_id = required "package_id" in
+          let* source_text =
+            match Json_util.assoc_member_opt "source_text" json with
+            | Some (`String value) when not (String.equal value "") -> Ok value
+            | Some (`String _) -> Error "source_text must not be empty"
+            | Some _ -> Error "source_text must be a string"
+            | None -> Error "source_text or draft required"
+          in
+          Ok (Authored_text { package_id; source_text })
       in
-      Ok { source_id; package_id; source_text }
+      Ok { source_id; source }
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
@@ -2215,7 +2253,7 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = _; confirmed = _ } ->
+             | Ok { reference; source_text = _; draft = _; confirmed = _ } ->
                Http.Response.json_value
                  ~compress:true
                  ~request:req
@@ -2241,7 +2279,19 @@ let add_routes ~sw ~clock router =
              match parse_skill_create_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { source_id; package_id; source_text } ->
+             | Ok { source_id; source } ->
+               let source =
+                 match source with
+                 | Authored_text { package_id; source_text } -> Ok (package_id, source_text)
+                 | Validated_draft draft ->
+                   read_skill_draft state draft
+                   |> Result.map (fun source_text ->
+                     Skill_reference.package_id_to_string draft.Keeper_skill_validate.package_id, source_text)
+               in
+               (match source with
+                | Error message ->
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+                | Ok (package_id, source_text) ->
                let base_path = (Mcp_server.workspace_config state).base_path in
                let refresh () =
                  match Runtime.load_config_observation () with
@@ -2281,7 +2331,7 @@ let add_routes ~sw ~clock router =
                     ~compress:true
                     ~request:req
                     (Server_skill_editor.create_outcome_to_yojson outcome)
-                    reqd)))
+                    reqd))))
          request reqd)
   |> Http.Router.add
        ~path:"/api/v1/skills/editor"
@@ -2293,7 +2343,7 @@ let add_routes ~sw ~clock router =
                match parse_skill_editor_body body_str with
                | Error message ->
                  respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-               | Ok { reference; source_text = _; confirmed } ->
+               | Ok { reference; source_text = _; draft = _; confirmed } ->
                  let base_path = (Mcp_server.workspace_config state).base_path in
                  let refresh () =
                    match Runtime.load_config_observation () with
@@ -2359,7 +2409,7 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = _; confirmed = _ } ->
+             | Ok { reference; source_text = _; draft = _; confirmed = _ } ->
                (match
                   Server_skill_editor.load
                     ~base_path:(Mcp_server.workspace_config state).base_path
@@ -2380,13 +2430,13 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = None; confirmed = _ } ->
+             | Ok { reference = _; source_text = None; draft = _; confirmed = _ } ->
                respond_dashboard_error
                  ~status:`Bad_request
                  ~request:req
                  reqd
                  "source_text required"
-             | Ok { reference; source_text = Some source_text; confirmed = _ } ->
+             | Ok { reference; source_text = Some source_text; draft = _; confirmed = _ } ->
                (match
                   Server_skill_editor.preview
                     ~base_path:(Mcp_server.workspace_config state).base_path
@@ -2412,13 +2462,24 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference; source_text = None; confirmed = _ } ->
-               respond_dashboard_error
-                 ~status:`Bad_request
-                 ~request:req
-                 reqd
-                 "source_text required"
-             | Ok { reference; source_text = Some source_text; confirmed = _ } ->
+             | Ok { reference; source_text; draft; confirmed = _ } ->
+               let source =
+                 match source_text, draft with
+                 | Some source_text, None -> Ok source_text
+                 | None, Some draft ->
+                   if
+                     String.equal
+                       (Skill_reference.package_id_to_string draft.Keeper_skill_validate.package_id)
+                       (Skill_reference.package_id_to_string reference.Skill_reference.identity.package_id)
+                   then read_skill_draft state draft
+                   else Error "draft package_id must name the referenced Skill package"
+                 | Some _, Some _ -> Error "send source_text or draft, not both"
+                 | None, None -> Error "source_text or draft required"
+               in
+               (match source with
+                | Error message ->
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+                | Ok source_text ->
                let base_path = (Mcp_server.workspace_config state).base_path in
                let refresh () =
                  match Runtime.load_config_observation () with
@@ -2458,7 +2519,7 @@ let add_routes ~sw ~clock router =
                     ~compress:true
                     ~request:req
                     (Server_skill_editor.save_outcome_to_yojson outcome)
-                    reqd)))
+                    reqd))))
          request reqd)
   |> Http.Router.post "/api/v1/skills/refresh" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

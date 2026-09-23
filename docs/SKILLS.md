@@ -24,7 +24,16 @@ Keeper는 새 `SKILL.md`를 `keeper_artifact_transfer`로 export한 뒤, 반환�
 편집기의 크기 제한으로 원문 bytes를 읽기 전용 검증한다. 결과의 artifact와
 package 이름은 검증한 입력을 가리키며, 발행된 Skill Reference가 아니다.
 정적 검증은 실행 성공이나 안전성을 증명하지 않고 source·snapshot도 변경하지
-않는다. 발행은 기존 관리자 편집기 경로를 따른다.
+않는다.
+
+발행은 운영자가 한다. 관리자 편집기의 `/api/v1/skills/editor/create`와 `/save`는
+붙여 넣은 `source_text` 대신 `draft`로 같은 `{artifact, package_id}` 쌍을 받는다.
+서버가 export된 bytes를 직접 읽는다. blob이 없거나, 크기가 다르거나, 내용 hash가
+reference와 맞지 않으면 거절한다. 읽은 bytes는 붙여 넣은 원문과 같은 편집기 경로로
+검증하고 쓰고 snapshot을 발행한다. 권한(`CanAdmin`)과 크기 제한도 같다. `create`는
+`draft`의 `package_id`로 package를 만들고, `save`는 `draft`의 `package_id`가 저장할
+Skill reference의 package와 다르면 거절한다. TUI와 대시보드의 생성·저장 화면은
+`$EDITOR`나 입력란의 원문을 보내며, `draft`는 HTTP API로만 보낸다.
 
 Keeper가 직접 발행하는 `keeper_skill_publish`와 `keeper_compose_save`는 각각
 [self-authored-skills](rfc/RFC-keeper-self-authored-skills.md)와

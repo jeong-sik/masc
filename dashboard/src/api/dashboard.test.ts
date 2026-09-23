@@ -3517,6 +3517,28 @@ describe('fetchKeeperConfig', () => {
     )
   })
 
+  it('decodes an unbuildable system prompt as its typed reason (#38354)', async () => {
+    const unavailable = {
+      reason: 'constitution_unreadable',
+      path: '/base/.masc/constitution/articles.jsonl',
+      detail: 'Sys_error("Is a directory")',
+    }
+    const body = (value: unknown) =>
+      `{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"input_policy":"small","activation_mode":"manual","skills":{"names":null},"prompt":{"effective_system_prompt":null,"assembled_system_prompt":null,"system_prompt_unavailable":${JSON.stringify(value)}}}`
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(body(unavailable), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    const result = await fetchKeeperConfig('keeper-sangsu')
+    expect(result.prompt.system_prompt_unavailable).toEqual(unavailable)
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(body({ ...unavailable, reason: 'something_else' }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrowError(
+      'Invalid keeper config response: prompt.system_prompt_unavailable must be a known reason with path and detail, or null',
+    )
+  })
+
   it('rejects a missing max_context_override wire field', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}}}', {

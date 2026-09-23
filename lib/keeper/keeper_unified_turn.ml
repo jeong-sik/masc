@@ -818,9 +818,6 @@ let run_keeper_cycle
                in
                let render_prompt observation =
                  Keeper_unified_prompt.build_prompt
-                     ~meta
-                     ~config
-                     ~profile_defaults
                      ~turn_decision
                      ?previous_turn_stop
                      ~current_task
@@ -833,9 +830,10 @@ let run_keeper_cycle
                      ~observation
                      ()
                in
-               let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
+               let prompt_parts =
                  Eio_guard.with_named_switch "turn:prompt" (fun () -> render_prompt observation)
                in
+               let { Keeper_unified_prompt.world_state; user_message } = prompt_parts in
                let dynamic_context_for_tools = match meta.input_policy, observation.own_recent_actions with
                  | Keeper_input_policy.Small, Ok turns ->
                    Some (fun tools ->
@@ -871,10 +869,18 @@ let run_keeper_cycle
                let turn_ctx_cell =
                  Keeper_tool_call_log.create_turn_ctx_cell ()
                in
-               (* 4. Build turn prompt callback: use our unified system prompt *)
-               let build_turn_prompt ~base_system_prompt:_ ~messages:_
+               (* 4. Build turn prompt callback. The system prompt is the base
+                  prompt [Keeper_run_context] built -- the same one a direct
+                  turn sends. Rendering a second one here read the
+                  constitution ledger twice per turn, and the two reads could
+                  disagree (#38354). *)
+               let sent_system_prompt_bytes = ref None in
+               let build_turn_prompt ~base_system_prompt ~messages:_
                  : Keeper_agent_run.turn_prompt
                  =
+                 sent_system_prompt_bytes := Some (String.length base_system_prompt);
+                 Keeper_unified_prompt.emit_prompt_metrics
+                   ~meta ~system_prompt:base_system_prompt prompt_parts;
                  (* The observation frame rides [dynamic_context]: rebuilt fresh
                     every turn and composed into the per-turn system prompt, so
                     it never enters the persisted AGENT_CORE conversation. Persisting
@@ -882,7 +888,7 @@ let run_keeper_cycle
                     (943/945 identical frames in one live checkpoint, #25193)
                     and exhausted the request window. Persisted user content is utterances
                     only (wake marker, answered Asks, and HITL resolutions). *)
-                 { system_prompt; dynamic_context = world_state; dynamic_context_for_tools }
+                 { dynamic_context = world_state; dynamic_context_for_tools }
                in
                (* 5. Run via Agent_core.Agent.run() with transient-error retry.
                   The turn-local AGENT_CORE Event_bus preserves factual
@@ -1359,7 +1365,7 @@ let run_keeper_cycle
                     "%s: keeper cycle FAILED runtime=%s lane=%s error_origin=%s \
                      attempts=%s deferred_next_runtime=%s \
                      max_context=%d context_budget=%d \
-                     primary_budget=%d requested_override=%s system_and_user_bytes=%d \
+                     primary_budget=%d requested_override=%s system_and_user_bytes=%s \
                      cycle_latency=%dms%s error=%s"
                     meta.name
                     (keeper_cycle_failed_runtime_to_string
@@ -1377,9 +1383,15 @@ let run_keeper_cycle
                      with
                      | Some requested -> string_of_int requested
                      | None -> "none")
-                    (String.length system_prompt
-                     + String.length world_state
-                     + String.length user_message)
+                    (* A turn refused before its prompt was built sent no
+                       system prompt; a count would claim one. *)
+                    (match !sent_system_prompt_bytes with
+                     | Some system_bytes ->
+                       string_of_int
+                         (system_bytes
+                          + String.length world_state
+                          + String.length user_message)
+                     | None -> "not_sent")
                     latency_ms
                     (if is_provider_wire_error
                     then " (provider wire error, counts toward crash threshold)"

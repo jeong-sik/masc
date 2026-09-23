@@ -1509,6 +1509,12 @@ interface KeeperSupervisorDiagnostics {
 
 // --- Keeper Config (structured read-only view) ---
 
+interface KeeperSystemPromptUnavailable {
+  reason: 'constitution_unreadable'
+  path: string
+  detail: string
+}
+
 interface KeeperConfigPrompt {
   instructions: string
   // The server emits exactly one shared block. keeper.constitution,
@@ -1524,6 +1530,9 @@ interface KeeperConfigPrompt {
   }
   effective_system_prompt: string
   assembled_system_prompt: string
+  // Why the server could not build the system prompt. A keeper turn is
+  // refused for the same reason, so there is no prompt to preview (#38354).
+  system_prompt_unavailable: KeeperSystemPromptUnavailable | null
   unified_user_message_preview: string
 }
 

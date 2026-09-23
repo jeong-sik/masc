@@ -304,7 +304,10 @@ let test_run_context_binds_generation_before_agent_core_checkpoint () =
       ()
     |> function
     | Ok context -> context
-    | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+    | Error (Keeper_run_context.Checkpoint_unread error) ->
+      fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+    | Error (Keeper_run_context.Constitution_unreadable error) ->
+      fail (World_constitution_store.read_error_to_string error)
   in
   check bool "caller-owned context remains the AGENT_CORE context" true
     (run_context.shared_context == shared_context);
@@ -507,6 +510,13 @@ let with_run_checkpoint f =
   f ~config ~meta ~base_dir ~session_dir ~checkpoint ~path ~prepare
 ;;
 
+let prepare_error_to_string = function
+  | Keeper_run_context.Checkpoint_unread error ->
+    Keeper_checkpoint_store.checkpoint_load_error_to_string error
+  | Keeper_run_context.Constitution_unreadable error ->
+    World_constitution_store.read_error_to_string error
+;;
+
 (* The same young Keeper has a valid history before and after a failed read.
    A rejected owned-file read models a temporary filesystem fault without
    relying on process privileges or a race. The production turn entrypoint
@@ -562,11 +572,79 @@ let test_checkpoint_read_error_stops_turn ~io_failure () =
   if io_failure then (Unix.unlink path; Unix.rename held path)
   else Fs_compat.save_file path original;
   match prepare () with
-  | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  | Error error -> fail (prepare_error_to_string error)
   | Ok ctx ->
     check int "the next tick resumes the original turn count" 1 ctx.start_turn_count;
     check bool "the next tick keeps the original messages" true
       (Keeper_context_runtime.messages_of_context ctx.ctx_work = checkpoint.messages)
+;;
+
+(* #38354. A constitution ledger that exists but cannot be read stops the turn
+   on the same not-dispatched path as an unreadable checkpoint: no prompt is
+   built, so none is sent without the world's articles. Nothing is recorded
+   against the ledger, so the next tick after it reads again prepares
+   normally, with the articles in its prompt. *)
+let test_unreadable_constitution_stops_turn_and_the_next_tick_resumes () =
+  with_run_checkpoint
+  @@ fun ~config ~meta ~base_dir ~session_dir:_ ~checkpoint:_ ~path:_ ~prepare ->
+  let base_path = config.Workspace.base_path in
+  let ledger = World_constitution_store.ledger_path ~base_path in
+  Fs_compat.mkdir_p ledger;
+  let prompt_built = ref false in
+  let settlement =
+    Keeper_agent_run.run_turn ~config ~meta ~base_dir
+      ~publication_recovery:
+        { Keeper_publication_recovery_availability.provider =
+            Keeper_publication_recovery_availability.non_runtime_provider
+        ; keeper_name = meta.name }
+      ~profile_defaults:Keeper_types_profile_defaults.empty_keeper_profile_defaults
+      ~turn_ctx_cell:(Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~max_context:4096
+      ~build_turn_prompt:(fun ~base_system_prompt:_ ~messages:_ ->
+        prompt_built := true;
+        fail "an unreadable constitution reached prompt construction")
+      ~user_message:"continue the saved work" ~turn_kind:Turn_record.Direct
+      ~skill_snapshot:(Skill_catalog_snapshot.config_unreadable ~detail:"unused fixture")
+      ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
+      ~runtime_id:"unconfigured-test-runtime" ()
+  in
+  (match settlement.Keeper_agent_run.result with
+   | Error (Agent_core.Error.Io (FileOpFailed { op; path = failed_path; detail = _ })) ->
+     check string "the failed operation is the constitution read"
+       "load constitution ledger" op;
+     check string "the failure names the ledger" ledger failed_path
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "an unreadable constitution allowed a turn");
+  check bool "no prompt or model turn ran" false !prompt_built;
+  Unix.rmdir ledger;
+  let article = "open before you record" in
+  let written =
+    match
+      World_constitution_types.make
+        ~id:(World_constitution_types.Article_id.generate ())
+        ~text:article ~author:meta.name ~at:0.0 ~evidence:[]
+    with
+    | Ok written -> written
+    | Error invalid -> fail (World_constitution_types.invalid_to_string invalid)
+  in
+  (match
+     World_constitution_store.append_at ~base_path ~expected_end_offset:0
+       (World_constitution_types.Added written)
+   with
+   | Ok () -> ()
+   | Error error -> fail (World_constitution_store.append_error_to_string error));
+  let carries text =
+    let n = String.length text and m = String.length article in
+    let rec scan i =
+      i + m <= n && (String.equal (String.sub text i m) article || scan (i + 1))
+    in
+    scan 0
+  in
+  match prepare () with
+  | Error error -> fail (prepare_error_to_string error)
+  | Ok ctx ->
+    check bool "the next tick's prompt carries the article" true
+      (carries ctx.base_system_prompt)
 ;;
 
 let test_unreadable_path_is_not_an_absent_checkpoint () =
@@ -576,8 +654,8 @@ let test_unreadable_path_is_not_an_absent_checkpoint () =
   Unix.rename path held;
   Unix.symlink (path ^ ".missing") path;
   (match prepare () with
-   | Error (Keeper_checkpoint_store.Io_error _) -> ()
-   | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+   | Error (Keeper_run_context.Checkpoint_unread (Keeper_checkpoint_store.Io_error _)) -> ()
+   | Error error -> fail (prepare_error_to_string error)
    | Ok _ -> fail "a failed path lookup was treated as an absent checkpoint");
   check bool "the unreadable canonical path was not replaced" true
     ((Unix.lstat path).Unix.st_kind = Unix.S_LNK);
@@ -593,7 +671,7 @@ let test_superseded_context_can_start_fresh () =
       ~version:(Agent_core.Checkpoint.checkpoint_version - 1) in
   let original = Fs_compat.load_file path in
   match prepare () with
-  | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  | Error error -> fail (prepare_error_to_string error)
   | Ok ctx ->
     check int "the deliberate version cut starts fresh" 0 ctx.start_turn_count;
     check bool "restart evidence follows the first accepted save" true
@@ -607,7 +685,7 @@ let test_admitted_checkpoint_is_the_run_history_source () =
   @@ fun ~config:_ ~meta:_ ~base_dir:_ ~session_dir:_ ~checkpoint ~path ~prepare ->
   Fs_compat.save_file path "{ unreadable checkpoint";
   match prepare ~checkpoint () with
-  | Error error -> fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+  | Error error -> fail (prepare_error_to_string error)
   | Ok ctx ->
     check int "the admitted continuation retains its turn count" 1 ctx.start_turn_count;
     check bool "the admitted continuation supplies its full history" true
@@ -1866,6 +1944,8 @@ let () =
             (test_checkpoint_read_error_stops_turn ~io_failure:true);
           test_case "checkpoint parse failure stops the turn and preserves history" `Quick
             (test_checkpoint_read_error_stops_turn ~io_failure:false);
+          test_case "an unreadable constitution stops the turn and the next tick resumes"
+            `Quick test_unreadable_constitution_stops_turn_and_the_next_tick_resumes;
           test_case "an unreadable path is not an absent checkpoint" `Quick
             test_unreadable_path_is_not_an_absent_checkpoint;
           test_case "a deliberate checkpoint version cut still starts fresh" `Quick

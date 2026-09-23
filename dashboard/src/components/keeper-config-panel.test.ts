@@ -104,6 +104,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       },
       effective_system_prompt: 'full prompt',
       assembled_system_prompt: 'assembled prompt',
+      system_prompt_unavailable: null,
       unified_user_message_preview: 'world state',
     },
     execution: {
@@ -2457,6 +2458,37 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
 
     const link = container.querySelector('[data-testid="kcf-prompt-global-edit-link"]')
     expect(link?.classList.contains('set-link')).toBe(true)
+  })
+
+  it('shows why the system prompt cannot be built instead of an empty preview (#38354)', async () => {
+    const base = makeKeeperConfig()
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(makeKeeperConfig({
+      prompt: {
+        ...base.prompt,
+        effective_system_prompt: '',
+        assembled_system_prompt: '',
+        system_prompt_unavailable: {
+          reason: 'constitution_unreadable',
+          path: '/base/.masc/constitution/articles.jsonl',
+          detail: 'Sys_error("Is a directory")',
+        },
+      },
+    }))
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '프롬프트')
+    await flush()
+    const systemTab = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('통합 시스템'),
+    )
+    systemTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+
+    const notice = container.querySelector('[data-testid="kcf-system-prompt-unavailable"]')
+    expect(notice?.textContent).toContain('/base/.masc/constitution/articles.jsonl')
+    expect(notice?.textContent).toContain('Is a directory')
   })
 
   async function openAccessTab(config: KeeperConfig): Promise<void> {

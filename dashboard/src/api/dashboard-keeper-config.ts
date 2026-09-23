@@ -38,6 +38,23 @@ function decodeInputPolicy(value: unknown): KeeperInputPolicy {
   throw new Error('Invalid keeper config response: input_policy must be small or wide')
 }
 
+function decodeSystemPromptUnavailable(
+  value: unknown,
+): KeeperConfig['prompt']['system_prompt_unavailable'] {
+  if (value === null || value === undefined) return null
+  if (
+    isRecord(value)
+    && value.reason === 'constitution_unreadable'
+    && typeof value.path === 'string'
+    && typeof value.detail === 'string'
+  ) {
+    return { reason: value.reason, path: value.path, detail: value.detail }
+  }
+  throw new Error(
+    'Invalid keeper config response: prompt.system_prompt_unavailable must be a known reason with path and detail, or null',
+  )
+}
+
 function decodeMaxContextOverride(value: unknown): number | null {
   if (value === null) return null
   if (isPositiveSafeInteger(value)) return value
@@ -364,6 +381,8 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       },
       effective_system_prompt: asNullableString(prompt.effective_system_prompt) ?? '',
       assembled_system_prompt: asNullableString(prompt.assembled_system_prompt) ?? '',
+      system_prompt_unavailable:
+        decodeSystemPromptUnavailable(prompt.system_prompt_unavailable),
       unified_user_message_preview:
         asNullableString(prompt.unified_user_message_preview) ?? '',
     },

@@ -2178,7 +2178,13 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           <${PromptBlock} title="공유 시스템" block=${c.prompt.system_prompt_blocks.system} />
         `
       : promptPreviewTab.value === 'system'
-        ? html`<${LongText} text=${c.prompt.assembled_system_prompt || c.prompt.effective_system_prompt} truncateAt=${null} />`
+        ? c.prompt.system_prompt_unavailable
+          ? html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-system-prompt-unavailable">
+              헌법 원장을 읽지 못해서 시스템 프롬프트를 만들 수 없어요. 이 상태에서는 턴도 돌지 않아요.
+              <div class="font-mono mt-1">${c.prompt.system_prompt_unavailable.path}</div>
+              <div class="font-mono">${c.prompt.system_prompt_unavailable.detail}</div>
+            </div>`
+          : html`<${LongText} text=${c.prompt.assembled_system_prompt || c.prompt.effective_system_prompt} truncateAt=${null} />`
         : html`<${LongText} text=${c.prompt.unified_user_message_preview} truncateAt=${null} />`}
   `
 

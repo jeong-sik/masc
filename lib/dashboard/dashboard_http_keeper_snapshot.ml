@@ -180,17 +180,35 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
           in
           let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
             Workspace_memory_publication.observe ~base_path:config.base_path) in
-          Keeper_unified_prompt.build_prompt_preview ~meta:m ~config
-            ~profile_defaults:defaults ~current_task ~active_goal_summaries
+          Keeper_unified_prompt.build_prompt_preview ~current_task ~active_goal_summaries
             ~task_skill_surfaces ~workspace_memory ~repository_freshness ~observation ()
         in
-        (* Match what a turn actually sends: the observation frame rides the
-           per-turn dynamic context (system side), and the persisted user
-           message is the wake marker / utterances only. *)
-        ( parts.Keeper_unified_prompt.system_prompt
-          ^ "\n\n"
-          ^ parts.Keeper_unified_prompt.world_state,
+        (* Match what a turn actually sends: the base system prompt with the
+           observation frame riding the per-turn dynamic context (system
+           side), and the persisted user message is the wake marker /
+           utterances only. A turn that cannot build the base prompt is not
+           sent, so neither is an assembled preview of it. *)
+        ( Result.map
+            (fun system_prompt ->
+              system_prompt ^ "\n\n" ^ parts.Keeper_unified_prompt.world_state)
+            effective_system_prompt,
           parts.Keeper_unified_prompt.user_message )
+      in
+      let prompt_text_json = function
+        | Ok text -> `String text
+        | Error (_ : World_constitution_store.read_error) -> `Null
+      in
+      (* The reason the system prompt is absent, as the typed read error the
+         turn is refused with (#38354). [null] when the prompt was built. *)
+      let system_prompt_unavailable_json =
+        match effective_system_prompt with
+        | Ok _ -> `Null
+        | Error (World_constitution_store.Unreadable { path; detail }) ->
+          `Assoc
+            [ "reason", `String "constitution_unreadable"
+            ; "path", `String path
+            ; "detail", `String detail
+            ]
       in
       let prompt =
         `Assoc [
@@ -205,8 +223,10 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
               [
                 ("system", prompt_block_json Prompt_names.keeper);
               ] );
-          ("effective_system_prompt", `String effective_system_prompt);
-          ("assembled_system_prompt", `String assembled_system_prompt_preview);
+          ("effective_system_prompt", prompt_text_json effective_system_prompt);
+          ("assembled_system_prompt",
+           prompt_text_json assembled_system_prompt_preview);
+          ("system_prompt_unavailable", system_prompt_unavailable_json);
           ("unified_user_message_preview", `String unified_user_message_preview);
         ]
       in

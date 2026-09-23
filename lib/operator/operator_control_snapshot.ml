@@ -176,14 +176,26 @@ let keepers_json
                   if lightweight && meta.paused
                   then (
                     let t_ph = Time_compat.now () in
+                    let registry_phase =
+                      Keeper_registry.get_phase ~base_path:config.base_path meta.name
+                    in
                     let phase_str =
-                      match
-                        Keeper_registry.get_phase ~base_path:config.base_path meta.name
-                      with
+                      match registry_phase with
                       | Some p -> `String (Keeper_state_machine.phase_to_string p)
                       | None -> `String "paused"
                     in
                     dt_phase := Time_compat.now () -. t_ph;
+                    (* Same reading as the unpaused branch below, from the
+                       same registry read as [phase]. Pausing is an operator
+                       decision published in [paused]; it does not remove
+                       the health observation. *)
+                    let diagnostic =
+                      Keeper_status_runtime.keeper_diagnostic_json
+                        ~meta
+                        ~phase:registry_phase
+                        ~history_items:[]
+                        ~now_ts:(Time_compat.now ())
+                    in
                     let runtime_trust =
                       let t_trust = Time_compat.now () in
                       let result =
@@ -212,6 +224,7 @@ let keepers_json
                                  (Keeper_status_runtime.control_plane_status_to_string
                                     Keeper_status_runtime.Cp_paused) )
                            ; "paused", `Bool true
+                           ; "diagnostic", diagnostic
                            ; "turn_count", `Int meta.runtime.usage.total_turns
                            ; ( "keeper_keepalive_interval_s"
                              , `Float keeper_keepalive_interval_s )
@@ -357,6 +370,17 @@ let keepers_json
                            , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                            )
                          ; "status", `String status
+                           (* [status] is folded from this diagnostic, and the
+                              readers that rank or classify health
+                              (dashboard briefing, execution continuity) read
+                              [diagnostic.health_state]. Without it on the row
+                              the briefing published health null for every
+                              keeper, and the execution render rebuilt it from
+                              a second registry read. That render now reuses
+                              this one, so its health follows the cached
+                              snapshot (up to ten seconds old) and agrees with
+                              [status] on the same row. *)
+                         ; "diagnostic", diagnostic
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")
                          ; "turn_count", `Int meta.runtime.usage.total_turns

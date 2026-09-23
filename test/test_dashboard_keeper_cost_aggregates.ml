@@ -54,6 +54,18 @@ let int_field key json =
         (Printf.sprintf "field %s is not int: %s"
            key (Yojson.Safe.to_string other))
 
+(* Every turn row lands in exactly one of reported, unreported, unread, for
+   cost and for tokens alike; a path that skips a tally shows up here. *)
+let check_partition aggregate =
+  let samples = int_field "sample_count" aggregate in
+  List.iter
+    (fun prefix ->
+      check int (prefix ^ " readings partition the samples") samples
+        (int_field (prefix ^ "_reported_samples") aggregate
+        + int_field (prefix ^ "_unreported_samples") aggregate
+        + int_field (prefix ^ "_unread_samples") aggregate))
+    [ "cost"; "tokens" ]
+
 let float_field key json =
   match Yojson.Safe.Util.member key json with
   | `Float value -> value
@@ -132,6 +144,7 @@ let test_only_current_turn_rows_count_as_cost_samples () =
     |> keeper_item
   in
   check int "only current turns counted" 2 (int_field "sample_count" aggregate);
+  check_partition aggregate;
   check (float 0.0001) "total cost excludes retired rows and heartbeat" 0.5
     (float_field "total_cost_usd" aggregate);
   check int "input tokens include nested current schema" 17
@@ -191,6 +204,7 @@ let test_unreported_cost_is_counted_not_summed_as_zero () =
       ]
   in
   check int "all three turns are samples" 3 (int_field "sample_count" aggregate);
+  check_partition aggregate;
   check int "one turn reported its cost" 1
     (int_field "cost_reported_samples" aggregate);
   check int "two turns did not report a cost" 2
@@ -264,6 +278,7 @@ let test_unreported_tokens_are_counted_not_summed_as_zero () =
       ]
   in
   check int "both turns are samples" 2 (int_field "sample_count" aggregate);
+  check_partition aggregate;
   check int "one turn reported tokens" 1
     (int_field "tokens_reported_samples" aggregate);
   check int "one turn did not report tokens" 1
@@ -307,6 +322,7 @@ let test_zero_latency_uncosted_turn_is_a_sample () =
       ]
   in
   check int "the turn is a sample" 1 (int_field "sample_count" aggregate);
+  check_partition aggregate;
   check int "its cost is counted as unreported" 1
     (int_field "cost_unreported_samples" aggregate);
   check int "its tokens add up" 42 (int_field "total_tokens" aggregate);
@@ -327,6 +343,7 @@ let test_int_cost_is_reported_and_missing_cost_is_unread () =
       ]
   in
   check int "both rows are samples" 2 (int_field "sample_count" aggregate);
+  check_partition aggregate;
   check int "the integer cost is reported" 1
     (int_field "cost_reported_samples" aggregate);
   check int "the missing cost is unread" 1
@@ -355,6 +372,7 @@ let test_unreadable_usage_is_unread () =
       ]
   in
   check int "the row is a sample" 1 (int_field "sample_count" aggregate);
+  check_partition aggregate;
   check int "its tokens are unread" 1 (int_field "tokens_unread_samples" aggregate);
   check int "its tokens are not unreported" 0
     (int_field "tokens_unreported_samples" aggregate);

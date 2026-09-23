@@ -325,6 +325,28 @@ let test_reader_ready_reads_with_the_keeper_token () =
   | Pulls.Pulls_read { pulls = []; undecodable = 0; _ } -> ()
   | _ -> failf "an empty page reads as no open pull requests"
 
+(* A refresh that raises keeps the last rows but marks them; the next
+   refresh that returns clears the mark from its own reading. *)
+let test_a_raised_refresh_marks_the_rows_until_the_next_one_returns () =
+  let base_path = ready_base_path ~token:"gho_from_hosts" in
+  let config = Masc.Workspace.default_config base_path in
+  let http_post, _, _ = counting_stub (ok_response (page ~has_next:false ~cursor:None [])) in
+  let first = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  Alcotest.(check bool) "a returned refresh carries no mark" true
+    (Option.is_none first.repositories_error);
+  let raising ~url:_ ~token:_ ~body:_ = failwith "transport broke" in
+  let raised =
+    match Pulls.refresh ~now ~http_post:raising ~config ~previous:first with
+    | _ -> failf "a transport that raises must escape refresh for start to catch"
+    | exception (Failure _ as exn) -> Pulls.refresh_raised ~previous:first exn
+  in
+  Alcotest.(check bool) "the raise is said" true (Option.is_some raised.repositories_error);
+  Alcotest.(check int) "the last rows stay"
+    (List.length first.repositories) (List.length raised.repositories);
+  let next = Pulls.refresh ~now ~http_post ~config ~previous:raised in
+  Alcotest.(check bool) "the next returned refresh clears the mark" true
+    (Option.is_none next.repositories_error)
+
 let test_rejected_token_is_not_sent_again () =
   let base_path = ready_base_path ~token:"gho_revoked" in
   let rejected =
@@ -406,6 +428,10 @@ let () =
             "ready reader reads with the keeper token"
             `Quick
             test_reader_ready_reads_with_the_keeper_token
+        ; Alcotest.test_case
+            "a raised refresh marks the rows until the next one returns"
+            `Quick
+            test_a_raised_refresh_marks_the_rows_until_the_next_one_returns
         ] )
     ; ( "provider limits"
       , [ Alcotest.test_case

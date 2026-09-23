@@ -265,20 +265,6 @@ let purge_error_to_string = function
     "checkpoint purge install failed: " ^ detail
 ;;
 
-let checkpoint_load_error_to_string = function
-  | Keeper_checkpoint_store.Not_found -> "not found"
-  | Superseded_version { expected; got } ->
-    Printf.sprintf "version %d superseded by %d" got expected
-  | Store_error detail -> "store error: " ^ detail
-  | Parse_error detail -> "parse error: " ^ detail
-  | Io_error detail -> "io error: " ^ detail
-  | Agent_core_error detail -> "agent core error: " ^ detail
-;;
-
-let checkpoint_ref_create_error_to_string =
-  Keeper_checkpoint_store.checkpoint_ref_create_error_to_string
-;;
-
 let checkpoint_identity_error_to_string =
   Keeper_checkpoint_store.checkpoint_identity_error_to_string
 ;;

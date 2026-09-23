@@ -2524,6 +2524,22 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* [Link.scan] reads the body without drawing it, but what it returns is
      drawn -- and [Link.parse] percent-decodes, so an id can carry the escape
      bytes the body could not. Sanitize where it lands. *)
+  (* The metrics pane draws four wire words and escaped none of them: the
+     scheduler's probe word beside this pane's own prose, a Keeper id fitted
+     to sixteen cells (fitting is not escaping), and the tool name each
+     pending gate call and held approval is counted under, which the bar
+     chart draws as a label. The pane already escapes the YOLO Keeper names
+     beside them, so the invariant was understood here and these four were
+     missed. *)
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    ~non_rendering_calls:[ "scheduler_probe_text" ] "render_kpi_cards"
+    [ "ssch_probe" ];
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    ~non_rendering_calls:[ "scheduler_probe_text" ] "render_section_fleet"
+    [ "ssch_probe" ];
+  check_fields ~module_path:"bin/masc_tui_render_metrics.ml"
+    "render_section_tools"
+    [ "mkh_keeper_id"; "gp_display_tool"; "kta_tool" ];
   check_identifiers ~module_path:render_path ~binding:"board_read_pane"
     ~callees:sanitizer_calls [ "id" ];
   (* Every split surface hands its list through one sidebar, so this is the

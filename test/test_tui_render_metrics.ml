@@ -702,6 +702,73 @@ let test_render_metrics_body_all_sections () =
     sections
 ;;
 
+(* What the wire sends becomes one printable row before this pane styles it.
+   Four values here did not: the scheduler's probe word, a Keeper id fitted to
+   sixteen cells -- fitting is not escaping -- and the tool name each pending
+   gate call and each held approval is counted under, which the bar chart
+   draws as its label. The pane escapes the YOLO Keeper names beside them, so
+   the rule was understood here and these were missed. *)
+let escape = "\027[31m"
+
+let drawn lines = String.concat "\n" lines
+
+let test_the_tools_section_escapes_the_word_it_counts_by () =
+  let state = make_state () in
+  let gp =
+    { (make_gate_pending ~id:"gp1" ~keeper:"alpha") with
+      Decode.gp_display_tool = "bash" ^ escape ^ "red"
+    }
+  in
+  state.gate_pending <- [ gp ];
+  state.gate_snapshot_observed <- true;
+  let output = drawn (Render_metrics.render_section_tools ~cols:90 state) in
+  check bool "the chart's label carries no escape" false (contains output escape)
+
+(* The Keeper id is drawn by the same section, fitted to sixteen cells.
+   Fitting is not escaping. *)
+let test_the_tools_section_escapes_a_keeper_id () =
+  let state = make_state () in
+  let kh =
+    make_keeper_health ~keeper_id:("alpha" ^ escape) ~facts:25
+      ~snapshot_bytes:4096
+  in
+  state.memory_health <-
+    Some (make_memory_health ~total_facts:25 ~source_facts:0 ~keepers:[ kh ]);
+  let output = drawn (Render_metrics.render_section_tools ~cols:90 state) in
+  check bool "the fitted id carries none either" false (contains output escape)
+
+(* The probe word reaches three rows through one reader, so it is escaped
+   there rather than at each row. *)
+let test_the_fleet_section_escapes_the_probe_word () =
+  let state = make_state () in
+  state.server_identity <-
+    Some
+      { Decode.sid_version = "0.0.0"
+      ; sid_binary_commit = "deadbeef"
+      ; sid_binary_commit_age_s = None
+      ; sid_base_path = "/tmp"
+      ; sid_masc_root = "/tmp"
+      ; sid_executable_in_worktree = None
+      ; sid_state_ready = None
+      ; sid_uptime = None
+      ; sid_sse_clients = None
+      ; sid_gc = None
+      ; sid_scheduler =
+          Some
+            { Decode.ssch_probe = "running" ^ escape
+            ; ssch_samples = 0
+            ; ssch_p50_ms = 0.
+            ; ssch_p95_ms = 0.
+            ; ssch_p99_ms = 0.
+            ; ssch_max_ms = 0.
+            ; ssch_mean_ms = 0.
+            ; ssch_stalls = 0
+            ; ssch_pool_domains = None
+            }
+      };
+  let output = drawn (Render_metrics.render_section_fleet ~cols:90 state) in
+  check bool "the probe row carries no escape" false (contains output escape)
+
 let () =
   run "tui_render_metrics"
     [ ( "kpis"
@@ -728,6 +795,12 @@ let () =
         ; test_case "fleet_populated" `Quick test_section_fleet_populated
         ; test_case "resources_populated" `Quick test_section_resources_populated
         ; test_case "tools_populated" `Quick test_section_tools_populated
+        ; test_case "the tools section escapes the word it counts by" `Quick
+            test_the_tools_section_escapes_the_word_it_counts_by
+        ; test_case "the tools section escapes a Keeper id" `Quick
+            test_the_tools_section_escapes_a_keeper_id
+        ; test_case "the fleet section escapes the probe word" `Quick
+            test_the_fleet_section_escapes_the_probe_word
         ; test_case "approval source observations" `Quick test_approval_source_observations
         ; test_case "memory block names its reading" `Quick test_memory_block_names_its_reading
         ] )

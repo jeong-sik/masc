@@ -232,6 +232,7 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       goal_ids: [],
       input: { cmd: 'ls' },
       input_preview: 'ls -la',
+      phase: 'queued',
       summary_status: 'not_requested',
       exact_attempt: { state: 'unbound' },
       summary_attempt_disposition: { code: 'ready' },
@@ -241,8 +242,35 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     expect(result!.tool_name).toBe('shell_exec')
     expect(result!.waiting_s).toBe(30)
     expect(result!.input_preview).toBe('ls -la')
+    expect(result!.phase).toBe('queued')
     expect(result!.exact_attempt).toEqual({ state: 'unbound' })
     expect(result!.summary_attempt_disposition).toEqual({ code: 'ready' })
+  })
+
+  it('requires phase to be one of the closed queue progression phases', () => {
+    const base = {
+      id: 'q-p',
+      keeper_name: 'janitor',
+      tool_name: 'shell_exec',
+      input_hash: 'a'.repeat(64),
+      sequence: 1,
+      requested_at: 1_776_427_200,
+      waiting_s: 30,
+      turn_id: null,
+      task_id: null,
+      goal_id: null,
+      goal_ids: [],
+      summary_status: 'not_requested',
+      exact_attempt: { state: 'unbound' },
+      summary_attempt_disposition: { code: 'ready' },
+    }
+    expect(normalizeKeeperApprovalQueueItem(base)).toBeNull()
+    expect(normalizeKeeperApprovalQueueItem({ ...base, phase: 'unknown' })).toBeNull()
+    for (const phase of ['queued', 'judging', 'human_required', 'blocked'] as const) {
+      const item = normalizeKeeperApprovalQueueItem({ ...base, phase })
+      expect(item).not.toBeNull()
+      expect(item!.phase).toBe(phase)
+    }
   })
 
   const baseItem = {
@@ -257,6 +285,7 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     task_id: null,
     goal_id: null,
     goal_ids: [],
+    phase: 'queued' as const,
     exact_attempt: { state: 'unbound' },
     summary_attempt_disposition: { code: 'ready' },
   }

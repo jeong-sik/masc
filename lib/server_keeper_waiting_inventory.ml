@@ -679,6 +679,11 @@ let hitl_rows keeper_name pending =
           ; ( "summary_attempt_disposition"
             , Keeper_approval_queue_rules_types.summary_attempt_disposition_to_yojson
                 entry.summary_attempt_disposition )
+          ; ( "phase"
+            , Keeper_approval_queue_rules_types.approval_queue_phase_to_yojson
+                (Keeper_approval_queue_rules_types.phase_of_disposition_and_summary
+                   ~disposition:entry.summary_attempt_disposition
+                   ~summary_status:entry.summary_status) )
           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
           ; "task_id", Json_util.string_opt_to_json entry.task_id
           ; "goal_id", Json_util.string_opt_to_json entry.goal_id

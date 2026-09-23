@@ -315,6 +315,128 @@ let test_summary_failed_has_no_retryable () =
     [ `Bool true; `String "yes" ]
 ;;
 
+let test_approval_queue_phase_round_trip () =
+  List.iter
+    (fun phase ->
+       let tag = Q.approval_queue_phase_to_string phase in
+       check
+         (option (testable (fun ppf p -> Format.pp_print_string ppf (Q.approval_queue_phase_to_string p)) ( = )))
+         "of_string"
+         (Some phase)
+         (Q.approval_queue_phase_of_string tag);
+       let json = Q.approval_queue_phase_to_yojson phase in
+       check
+         (testable (fun ppf j -> Format.pp_print_string ppf (Yojson.Safe.to_string j)) ( = ))
+         "to_yojson is string"
+         (`String tag)
+         json;
+       match Q.approval_queue_phase_of_yojson_with_error json with
+       | Ok roundtrip ->
+         check bool "round trip equality" true (roundtrip = phase)
+       | Error err -> fail ("round trip failed: " ^ err))
+    Q.approval_queue_phases
+;;
+
+let test_approval_queue_phase_decoder_is_closed () =
+  check
+    (option (testable (fun ppf p -> Format.pp_print_string ppf (Q.approval_queue_phase_to_string p)) ( = )))
+    "unknown string gives None"
+    None
+    (Q.approval_queue_phase_of_string "unknown");
+  (match Q.approval_queue_phase_of_yojson_with_error (`String "not_a_phase") with
+   | Ok _ -> fail "unknown string tag must reject"
+   | Error _ -> ());
+  match Q.approval_queue_phase_of_yojson_with_error (`Int 123) with
+  | Ok _ -> fail "non-string must reject"
+  | Error _ -> ()
+;;
+
+let test_phase_of_disposition_and_summary () =
+  let available_summary judgment =
+    Q.Summary_available
+      { summary_version = 1
+      ; generated_at = 100.0
+      ; model_run_id = "run-1"
+      ; context_summary = "test summary"
+      ; key_questions = []
+      ; judgment
+      ; rationale = "test rationale"
+      }
+  in
+  let pre_worker_unavailable code =
+    Q.Summary_attempt_pre_worker_unavailable
+      { reason_code = code
+      ; operator_detail = "unavailable"
+      }
+  in
+  (* Identity unbound -> blocked *)
+  check bool "identity_unbound -> blocked" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:Q.Summary_attempt_identity_unbound
+       ~summary_status:Q.Summary_not_requested
+     = Q.Phase_blocked);
+  (* Persistence uncertain -> blocked *)
+  check bool "persistence_uncertain -> blocked" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:Q.Summary_attempt_persistence_uncertain
+       ~summary_status:Q.Summary_pending
+     = Q.Phase_blocked);
+  (* Pre-worker unavailable (start_reserved) -> blocked *)
+  check bool "start_reserved -> blocked" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:(pre_worker_unavailable Q.Summary_pre_worker_start_reserved)
+       ~summary_status:Q.Summary_pending
+     = Q.Phase_blocked);
+  (* Pre-worker unavailable (auto_judge_unavailable) -> blocked *)
+  check bool "auto_judge_unavailable -> blocked" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:(pre_worker_unavailable Q.Summary_pre_worker_auto_judge_unavailable)
+       ~summary_status:Q.Summary_not_requested
+     = Q.Phase_blocked);
+  (* Summary failed -> blocked *)
+  check bool "summary_failed -> blocked" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:Q.Summary_attempt_ready
+       ~summary_status:(Q.Summary_failed { reason = "model error" })
+     = Q.Phase_blocked);
+  (* Require human -> human_required *)
+  check bool "require_human -> human_required" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:Q.Summary_attempt_settled
+       ~summary_status:(available_summary Q.Require_human)
+     = Q.Phase_human_required);
+  (* In flight -> judging *)
+  check bool "in_flight -> judging" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:Q.Summary_attempt_in_flight
+       ~summary_status:Q.Summary_not_requested
+     = Q.Phase_judging);
+  (* Summary pending -> judging *)
+  check bool "summary_pending -> judging" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:Q.Summary_attempt_ready
+       ~summary_status:Q.Summary_pending
+     = Q.Phase_judging);
+  (* Settled + Approve -> judging *)
+  check bool "settled + approve -> judging" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:Q.Summary_attempt_settled
+       ~summary_status:(available_summary Q.Approve)
+     = Q.Phase_judging);
+  (* Settled + Deny -> judging *)
+  check bool "settled + deny -> judging" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:Q.Summary_attempt_settled
+       ~summary_status:(available_summary Q.Deny)
+     = Q.Phase_judging);
+  (* Ready + not_requested -> queued *)
+  check bool "ready + not_requested -> queued" true
+    (Q.phase_of_disposition_and_summary
+       ~disposition:Q.Summary_attempt_ready
+       ~summary_status:Q.Summary_not_requested
+     = Q.Phase_queued)
+;;
+
 let () =
   run
     "Keeper_approval_queue_rules_types"
@@ -352,6 +474,12 @@ let () =
         ; test_case "refusal kinds list every constructor" `Quick
             test_observed_refusal_kinds_list_every_constructor
         ; test_case "decoder is closed" `Quick test_observed_refusal_decoder_is_closed
+        ] )
+    ; ( "phase"
+      , [ test_case "round trip" `Quick test_approval_queue_phase_round_trip
+        ; test_case "decoder is closed" `Quick test_approval_queue_phase_decoder_is_closed
+        ; test_case "phase derivation from disposition and summary" `Quick
+            test_phase_of_disposition_and_summary
         ] )
     ]
 ;;

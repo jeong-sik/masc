@@ -9194,6 +9194,7 @@ let test_decode_gate_identity_row_reads_its_target () =
       [ ("id", `String "appr-1");
         ("keeper_name", `String "echo");
         ("tool_name", `String "identity_call");
+        ("phase", `String "queued");
         ("input_preview", `String "{\"provider_id\":\"atlassian\"}");
         ("waiting_s", `Int 42);
         ( "input",
@@ -9224,86 +9225,63 @@ let test_decode_gate_identity_row_reads_its_target () =
           Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
 let test_decode_gate_rows_distinguish_operator_phases () =
-  let phase ~summary_status ~disposition =
-    let row =
-      `Assoc
-        [ "id", `String "appr-phase"
-        ; "keeper_name", `String "phase-keeper"
-        ; "tool_name", `String "tool_execute"
-        ; "input_preview", `String "gh auth status"
-        ; "waiting_s", `Int 42
-        ; "input", `Assoc []
-        ; "summary_status", summary_status
-        ; "summary_attempt_disposition", disposition
-        ]
+  let phase ?phase_field () =
+    let base_fields =
+      [ "id", `String "appr-phase"
+      ; "keeper_name", `String "phase-keeper"
+      ; "tool_name", `String "tool_execute"
+      ; "input_preview", `String "gh auth status"
+      ; "waiting_s", `Int 42
+      ; "input", `Assoc []
+      ]
     in
+    let fields =
+      match phase_field with
+      | Some p -> ("phase", p) :: base_fields
+      | None -> base_fields
+    in
+    let row = `Assoc fields in
     match
       Tui_decode.decode_gate_snapshot
         (gate_snapshot_json ~queue:(`List [ row ]) ())
     with
-    | Ok { gs_pending = [ pending ]; _ } -> pending.gp_phase
+    | Ok { gs_pending = [ pending ]; _ } -> Ok pending.gp_phase
     | Ok snapshot ->
       Alcotest.failf
         "expected one pending phase row, got %d"
         (List.length snapshot.gs_pending)
-    | Error detail -> Alcotest.fail detail
+    | Error detail -> Error detail
   in
-  let available judgment =
-    `Assoc
-      [ "status", `String "available"
-      ; ( "summary"
-        , `Assoc [ "judgment", `String judgment ] )
-      ]
-  in
-  let disposition code = `Assoc [ "code", `String code ] in
   Alcotest.check
     Alcotest.bool
-    "ready work is queued"
+    "queued phase"
     true
-    (phase
-       ~summary_status:(`String "not_requested")
-       ~disposition:(disposition "ready")
-     = Tui_decode.Gate_queued);
+    (phase ~phase_field:(`String "queued") () = Ok Tui_decode.Gate_queued);
   Alcotest.check
     Alcotest.bool
-    "in-flight work is judging"
+    "judging phase"
     true
-    (phase
-       ~summary_status:(`String "pending")
-       ~disposition:(disposition "in_flight")
-     = Tui_decode.Gate_judging);
+    (phase ~phase_field:(`String "judging") () = Ok Tui_decode.Gate_judging);
   Alcotest.check
     Alcotest.bool
-    "require_human is a terminal handoff"
+    "human_required phase"
     true
-    (phase
-       ~summary_status:(available "require_human")
-       ~disposition:(disposition "settled")
-     = Tui_decode.Gate_human_required);
+    (phase ~phase_field:(`String "human_required") () = Ok Tui_decode.Gate_human_required);
   Alcotest.check
     Alcotest.bool
-    "failed Auto Judge work is blocked"
+    "blocked phase"
     true
-    (phase
-       ~summary_status:
-         (`Assoc
-            [ "status", `String "failed"
-            ; "reason", `String "exact attempt quarantined"
-            ])
-       ~disposition:(disposition "settled")
-     = Tui_decode.Gate_blocked);
+    (phase ~phase_field:(`String "blocked") () = Ok Tui_decode.Gate_blocked);
   Alcotest.check
     Alcotest.bool
-    "a start reservation surfaces as blocked, not judging"
+    "unknown phase rejects"
     true
-    (phase
-       ~summary_status:(`String "pending")
-       ~disposition:
-         (`Assoc
-            [ "code", `String "pre_worker_unavailable"
-            ; "reason_code", `String "start_reserved"
-            ])
-     = Tui_decode.Gate_blocked)
+    (Result.is_error (phase ~phase_field:(`String "unknown_phase") ()));
+  Alcotest.check
+    Alcotest.bool
+    "missing phase rejects"
+    true
+    (Result.is_error (phase ()))
 ;;
 
 let test_decode_gate_block_reason_and_retry_contract () =
@@ -9312,6 +9290,7 @@ let test_decode_gate_block_reason_and_retry_contract () =
       [ "id", `String "appr-retry"
       ; "keeper_name", `String "retry-keeper"
       ; "tool_name", `String "identity_call"
+      ; "phase", `String "blocked"
       ; "input_preview", `String "{}"
       ; "input_hash", `String (String.make 64 'a')
       ; "sequence", `Int 41
@@ -9370,6 +9349,7 @@ let execute_gate_row ~preview ~input =
     [ ("id", `String "appr-1");
       ("keeper_name", `String "rw-e0-r9-20260820-review");
       ("tool_name", `String "tool_execute");
+      ("phase", `String "queued");
       ("input_preview", `String preview);
       ("waiting_s", `Int 57330);
       ("input", input);
@@ -9479,6 +9459,7 @@ let test_decode_gate_row_of_another_operation_has_no_site () =
       [ ("id", `String "appr-3");
         ("keeper_name", `String "code-reviewer");
         ("tool_name", `String "memory_write");
+        ("phase", `String "queued");
         ("input_preview", `String "{}");
         ("input", `Assoc [ ("cwd", `String "/somewhere") ]);
       ]
@@ -9535,6 +9516,7 @@ let test_decode_gate_row_of_another_operation_keeps_its_preview () =
       [ ("id", `String "appr-2");
         ("keeper_name", `String "code-reviewer");
         ("tool_name", `String "memory_write");
+        ("phase", `String "queued");
         ("input_preview", `String "{\"title\":\"PR #31279 turn 109\"}");
         ("input", `Assoc [ ("title", `String "PR #31279 turn 109") ]);
       ]

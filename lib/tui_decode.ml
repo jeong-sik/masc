@@ -7643,45 +7643,14 @@ let gate_input_preview ~operation ~server_preview envelope =
    the row; absent legacy fields remain queued rather than gaining invented
    success. *)
 let gate_pending_phase_of_json json =
-  let summary = member "summary_status" json in
-  let disposition = member "summary_attempt_disposition" json in
-  let disposition_code =
-    match member "code" disposition with
-    | `String value -> value
-    | _ -> ""
-  in
-  let pre_worker_reason =
-    match member "reason_code" disposition with
-    | `String value -> value
-    | _ -> ""
-  in
-  let summary_status =
-    match summary with
-    | `String value -> value
-    | `Assoc _ ->
-      (match member "status" summary with
-       | `String value -> value
-       | _ -> "")
-    | _ -> ""
-  in
-  let judgment =
-    match member "summary" summary |> member "judgment" with
-    | `String value -> value
-    | _ -> ""
-  in
-  match disposition_code, pre_worker_reason, summary_status, judgment with
-  | ("identity_unbound" | "persistence_uncertain"), _, _, _ -> Gate_blocked
-  (* A start reservation is a pre-worker state like its siblings: the worker is
-     not judging yet. Rendering it as judging hid reservations that a restart
-     stranded (now recovered by [release_orphaned_start_reservation]) behind a
-     healthy-looking in-progress row. Blocked surfaces a lingering one; a healthy
-     reservation clears within a poll. *)
-  | "pre_worker_unavailable", _, _, _ -> Gate_blocked
-  | _, _, "failed", _ -> Gate_blocked
-  | _, _, "available", "require_human" -> Gate_human_required
-  | "in_flight", _, _, _ | _, _, "pending", _ -> Gate_judging
-  | "settled", _, "available", ("approve" | "deny") -> Gate_judging
-  | _ -> Gate_queued
+  let* raw = required_string_field json "phase" in
+  match raw with
+  | "queued" -> Ok Gate_queued
+  | "judging" -> Ok Gate_judging
+  | "human_required" -> Ok Gate_human_required
+  | "blocked" -> Ok Gate_blocked
+  | other ->
+    Error (Printf.sprintf "unknown gate pending phase: %S" other)
 
 let gate_auto_judge_detail_of_json json =
   let summary = member "summary_status" json in
@@ -7734,6 +7703,7 @@ let decode_gate_pending json =
     | `Assoc _ as input -> Some input
     | _ -> None
   in
+  let* gp_phase = gate_pending_phase_of_json json in
   Ok
     {
       gp_id;
@@ -7747,7 +7717,7 @@ let decode_gate_pending json =
       gp_execution_sandbox =
         snd (gate_execution_site ~operation:gp_operation input);
       gp_waiting_s;
-      gp_phase = gate_pending_phase_of_json json;
+      gp_phase;
       gp_auto_judge_detail = gate_auto_judge_detail_of_json json;
       gp_retry_request = gate_retry_request_of_json ~id:gp_id json;
     }

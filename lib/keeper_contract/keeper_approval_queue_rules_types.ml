@@ -97,6 +97,87 @@ type summary_attempt_disposition =
       summary_attempt_pre_worker_unavailable
   | Summary_attempt_settled
 
+type approval_queue_phase =
+  | Phase_queued
+  | Phase_judging
+  | Phase_human_required
+  | Phase_blocked
+
+let approval_queue_phases =
+  [ Phase_queued
+  ; Phase_judging
+  ; Phase_human_required
+  ; Phase_blocked
+  ]
+;;
+
+let approval_queue_phase_to_string = function
+  | Phase_queued -> "queued"
+  | Phase_judging -> "judging"
+  | Phase_human_required -> "human_required"
+  | Phase_blocked -> "blocked"
+;;
+
+let approval_queue_phase_of_string = function
+  | "queued" -> Some Phase_queued
+  | "judging" -> Some Phase_judging
+  | "human_required" -> Some Phase_human_required
+  | "blocked" -> Some Phase_blocked
+  | _ -> None
+;;
+
+let approval_queue_phase_to_yojson phase =
+  `String (approval_queue_phase_to_string phase)
+;;
+
+let approval_queue_phase_of_yojson_with_error = function
+  | `String raw ->
+    (match approval_queue_phase_of_string raw with
+     | Some phase -> Ok phase
+     | None ->
+       Error
+         (Printf.sprintf
+            "invalid approval_queue_phase: %s (expected one of %s)"
+            raw
+            (String.concat ", " (List.map approval_queue_phase_to_string approval_queue_phases))))
+  | other ->
+    Error
+      (Printf.sprintf
+         "approval_queue_phase must be a string, got %s"
+         (Yojson.Safe.to_string other))
+;;
+
+let phase_of_disposition_and_summary
+    ~(disposition : summary_attempt_disposition)
+    ~(summary_status : summary_status) : approval_queue_phase =
+  match disposition with
+  | Summary_attempt_identity_unbound
+  | Summary_attempt_persistence_uncertain
+  | Summary_attempt_pre_worker_unavailable _ ->
+    Phase_blocked
+  | Summary_attempt_in_flight ->
+    (match summary_status with
+     | Summary_failed _ -> Phase_blocked
+     | Summary_available { judgment = Require_human; _ } -> Phase_human_required
+     | Summary_not_requested
+     | Summary_pending
+     | Summary_available { judgment = Approve | Deny; _ } -> Phase_judging)
+  | Summary_attempt_ready ->
+    (match summary_status with
+     | Summary_failed _ -> Phase_blocked
+     | Summary_available { judgment = Require_human; _ } -> Phase_human_required
+     | Summary_pending -> Phase_judging
+     | Summary_not_requested
+     | Summary_available { judgment = Approve | Deny; _ } -> Phase_queued)
+  | Summary_attempt_settled ->
+    (match summary_status with
+     | Summary_failed _ -> Phase_blocked
+     | Summary_available { judgment = Require_human; _ } -> Phase_human_required
+     | Summary_pending
+     | Summary_available { judgment = Approve | Deny; _ } -> Phase_judging
+     | Summary_not_requested -> Phase_queued)
+;;
+
 type observed_status =
   | Observed_exit of int
   | Observed_signal of int

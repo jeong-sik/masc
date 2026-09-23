@@ -354,32 +354,38 @@ let emit_usage_metrics_and_log
       else Log.Keeper.info
     in
     log_usage
-      "%s: keeper usage telemetry %s runtime_lane=%s reasons=%s input=%d output=%d"
+      ~keeper_name:updated_meta.name
+      "%s: keeper usage telemetry %s runtime=%s reasons=%s input=%d output=%d"
       updated_meta.name
       (if Keeper_usage_trust.warns_operator usage_trust
        then "untrusted"
        else "unavailable")
-      runtime_lane_label
+      result.Keeper_agent_run.runtime_id
       (String.concat "," reasons)
       result.usage.input_tokens
       result.usage.output_tokens
    | Keeper_usage_trust.Usage_missing ->
      Log.Keeper.info
-       "%s: keeper usage telemetry missing runtime_lane=%s"
+       ~keeper_name:updated_meta.name
+       "%s: keeper usage telemetry missing runtime=%s"
        updated_meta.name
-       runtime_lane_label
+       result.Keeper_agent_run.runtime_id
    | Keeper_usage_trust.Usage_trusted -> ());
   let logged_total_tokens =
     match usage_resolution.delta with
     | Some usage -> usage.input_tokens + usage.output_tokens
     | None -> 0
   in
+  (* Internal log: the keeper and the runtime that answered, as observed. The
+     redacted lane label is for external metric labels only
+     (Boundary_redaction). *)
   Log.Keeper.info
+    ~keeper_name:updated_meta.name
     ~category:Log.Turn
-    "%s: keeper cycle %s runtime_lane=%s tokens=%d latency=%dms mode=%s stop=%s"
+    "%s: keeper cycle %s runtime=%s tokens=%d latency=%dms mode=%s stop=%s"
     updated_meta.name
     (terminal_outcome_to_log_label terminal_outcome)
-    runtime_lane_label
+    result.Keeper_agent_run.runtime_id
     logged_total_tokens
     latency_ms
     turn_mode_label

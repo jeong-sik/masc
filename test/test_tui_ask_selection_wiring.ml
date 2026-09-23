@@ -234,6 +234,15 @@ let test_a_folded_ask_says_how_long_it_has_waited () =
        ~binding_name:"ask_summary_line" ~field_name:"ar_asked_at");
   Alcotest.(check int) "and spells it with the shared ladder" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"ask_summary_line" ~callee:"Message_layout.age_text");
+  (* [age_text] names both ends. Subtracting the two times here instead would
+     let the difference be taken the wrong way round -- [span_text] floors at
+     zero, so every row would read "0s" and the two rows would be alike
+     again, which is the thing this column exists to end. A count that reads
+     the source cannot see a reversed subtraction; forbidding the subtraction
+     is what it can see. *)
+  Alcotest.(check int) "and does not do the arithmetic itself" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"ask_summary_line" ~callee:"Message_layout.span_text")
 ;;
 

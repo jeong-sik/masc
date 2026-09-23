@@ -1474,7 +1474,14 @@ let ask_summary_line ~now ~(row : Masc.Tui_decode.ask_row) =
   Printf.sprintf " %s%s  %s  %d question%s waiting%s" Ansi.dim
     (fit_width (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper) 16)
     (fit_width
-       (Message_layout.span_text (now -. row.Masc.Tui_decode.ar_asked_at))
+       (* [age_text], not a subtraction into [span_text]: the two ends are
+          named, so the difference cannot be taken the wrong way round, and a
+          clock that has moved backwards says nothing rather than drawing
+          every row as "0s" -- which is the same two-rows-alike this column
+          exists to end. *)
+       (Option.value ~default:""
+          (Message_layout.age_text ~now
+             ~since:row.Masc.Tui_decode.ar_asked_at))
        ask_age_cells)
     count
     (if count = 1 then "" else "s")

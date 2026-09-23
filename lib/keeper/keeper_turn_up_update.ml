@@ -386,7 +386,6 @@ let config_publication_rollback_of_result result =
   | _ -> None
 ;;
 
-
 type manifest_publication =
   | Publication_failed of
       Keeper_turn_up_config_persistence.outcome
@@ -735,8 +734,8 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
              | Error
                  (Keeper_turn_up_config_persistence.Publication_exception
                     { detail; _ }) ->
-               (* The exception arm of the persistence transaction rolls back
-                  before it returns this; a failed rollback surfaces as a
+               (* The persistence transaction rolls a [Publication_exception]
+                  back before returning it; a failed rollback surfaces as a
                   reconciliation error instead. *)
                refused_unchanged
                  (config_publication_rollback_result

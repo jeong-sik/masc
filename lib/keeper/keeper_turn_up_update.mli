@@ -84,7 +84,6 @@ val config_revision_conflict_of_result :
 val config_publication_rollback_of_result :
   Keeper_types_profile.tool_result -> string option
 
-
 type lane_swap_refusal =
   | Swap_turn_in_flight of Keeper_owner.turn_in_flight
       (** A turn holds the slot; the lane was not touched. *)

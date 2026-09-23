@@ -1021,7 +1021,7 @@ let respond_config_reconciliation ~request reqd ~name ~error =
         @ [ "error", error ]))
     reqd
 
-let respond_config_revision_conflict ~request reqd ~name ~config_write
+let respond_config_revision_conflict ~request reqd ~name
       ({ expected; observed } : Keeper_turn_up_config_persistence.conflict)
   =
   Http.Response.json_value
@@ -1029,7 +1029,7 @@ let respond_config_revision_conflict ~request reqd ~name ~config_write
     ~request
     (`Assoc
       ([ "ok", `Bool false; "keeper", `String name ]
-       @ config_write_fields config_write
+       @ config_write_fields Keeper_turn_up_update.Config_unchanged
        @ [ ( "error"
            , `Assoc
                [ "code", `String Keeper_turn_up_update.config_revision_conflict_code
@@ -1206,7 +1206,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                             with
                             | Some conflict ->
                               respond_config_revision_conflict
-                                ~request:req reqd ~name ~config_write conflict
+                                ~request:req reqd ~name conflict
                             | None ->
                            (match
                               Keeper_turn_up_update

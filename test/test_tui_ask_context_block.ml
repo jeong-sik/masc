@@ -24,10 +24,7 @@ let drawn context =
   Prim.draw_ask_context buf 120 ~row:(row context);
   Buffer.contents buf
 
-let contains needle text =
-  let n = String.length needle and t = String.length text in
-  let rec walk i = i + n <= t && (String.sub text i n = needle || walk (i + 1)) in
-  n = 0 || walk 0
+let contains needle text = String_util.contains_substring text needle
 
 let test_a_break_stays_a_break () =
   let text = drawn "first paragraph\n\nsecond paragraph" in

@@ -1476,7 +1476,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
                  (if plan.Ask_layout.questions_hidden = 1 then "" else "s")
                  Ansi.reset);
           if plan.Ask_layout.context_shown then Buffer.add_string buf why_text
-          else if why_rows > 0 then
+          else if plan.Ask_layout.context_notice then
             (* The questions are the ask and the reason explains it, so the
                reason is what the plan drops first. It used to drop without a
                word: hidden questions are counted on a line of their own and

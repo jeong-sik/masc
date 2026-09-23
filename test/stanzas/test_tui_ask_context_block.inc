@@ -6,4 +6,4 @@
  ; without it the test reads a cached verdict and stays green while the line
  ; it asserts is gone.
  (deps %{workspace_root}/bin/masc_tui_render.ml)
- (libraries alcotest ast_grep masc masc_tui_render_prim))
+ (libraries alcotest ast_grep masc masc.string_util masc_tui_render_prim))

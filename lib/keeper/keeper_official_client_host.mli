@@ -25,17 +25,14 @@ type prepared_turn =
     [Whole_input_transmitted] carries the MASC-prepared messages handed to the
     client integration. It does not prove that the client placed every byte in
     the provider request or model context. Starts hand over the seed history.
-    On a Claude Code resume, MASC hands the canonical snapshot over as
-    replacement system-layer configuration, but the client may reuse the
-    session's original system prompt instead; this receipt records the handoff,
-    not what the model read. Codex resume behaviour needs its own evidence and
-    is not inferred from the Claude Code path. Client-owned native conversation
-    and tool history outside the snapshot are not included in this capture.
-    Do not use this receipt to compare per-lane model-input byte totals.
+    Codex resume behaviour needs its own evidence and is not inferred from the
+    Claude Code path. Client-owned native conversation and tool history outside
+    the snapshot are not included in this capture. Do not use this receipt to
+    compare per-lane model-input byte totals.
 
     [Held_by_client_session] means that the lane did not retransmit that
-    history, as on Antigravity resume. The current goal and ephemeral context
-    may still be sent. The accumulated client-owned history is not observable
+    history, as on Antigravity and Claude Code resumes. The current goal and
+    the composed per-turn context ({!resume_prompt}) may still be sent. The accumulated client-owned history is not observable
     here, so attributing the local prepared list would count bytes that were
     not sent. This distinction is not the [Start]/[Resume] distinction. *)
 type transmitted_model_input =
@@ -191,6 +188,34 @@ val is_composed_system_context : Agent_core.Types.message -> bool
     surface: the per-turn context carrier or the Librarian working state.
     Adapters keep such messages out of the canonical history snapshot and
     re-send them on resume. *)
+
+val history_role_label : Agent_core.Types.role -> string
+(** The role line ([SYSTEM:], [USER:], ...) and its newline that an adapter
+    writes in front of one encoded message when it carries messages as prompt
+    text. *)
+
+val is_carried_on_resume : Agent_core.Types.message -> bool
+(** Whether a resume sends this message in front of its prompt: a message
+    {!is_composed_system_context} selects, or the historical task reference
+    ({!Keeper_official_task_reference.is_reference}). Both change per turn or
+    per operation, which the vendor session cannot already hold.
+
+    A resumed Claude Code session sends the system prompt it recorded at its
+    first launch, so a per-turn System message reaches a resumed session only
+    when it carries one of these markers. A new kind of per-turn System
+    context must be tagged with one; an untagged one lands in the system
+    prompt file only, which a resume does not read. *)
+
+val resume_prompt : goal:string -> Agent_core.Types.message list -> string
+(** The user prompt a lane sends when it resumes a vendor session that already
+    holds the conversation and the system prompt it recorded at its first
+    launch. The messages {!is_carried_on_resume} selects are rendered, in
+    order, each behind its {!history_role_label}, in front of [goal] and
+    separated from it by a blank line. Everything else in [messages] is left
+    out: the vendor session holds it. With none selected the prompt is [goal]
+    exactly. Antigravity and Claude Code resumes both send this; Antigravity
+    refuses a task reference before it composes, so on that lane the
+    selection is the composed context alone. *)
 
 val measure_message_bytes : Agent_core.Types.message -> int
 (** Bytes one message occupies in the canonical MASC encoding

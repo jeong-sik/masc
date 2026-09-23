@@ -51,11 +51,11 @@ let check_id_name = function
   | Keeper_persistence -> "keeper_persistence"
   | Browser_lane -> "browser_lane"
 
-(* imp's history opens on what imp itself needs: a readable workspace, model
-   binding, declaration and persisted record. A browser lane is a separate
-   surface; a launcher aimed at an old port says nothing about whether imp's
-   conversation can be read, so its drift is reported beside the conversation
-   instead of sending the operator back to "choose a workspace". *)
+(* Existing history opens on a readable workspace, model binding, declaration
+   and persisted record. A browser lane is a separate surface; a launcher aimed
+   at an old port says nothing about whether a conversation can be read, so its
+   drift is reported beside it instead of sending the operator back to "choose
+   a workspace". *)
 let role = function
   | Workspace | Model_connection | Keeper_declaration | Sandbox | Keeper_persistence ->
     Required_to_open
@@ -109,20 +109,43 @@ let model_checks config_path =
          "A model is configured. Check its current sign-in, response and tool access."
          [Configure_models; Start_imp]]
 
+(* The workspace's Keeper history is readable exactly when the server's boot
+   reconcile admits it: every metadata file passes the same
+   [validate_current_meta_file_result] (Keeper_store_boot_reconcile), and one
+   that does not refuses the whole boot unless the operator accepts the
+   quarantine. Judging it any other way opens a TUI on a server that will not
+   start. imp is only the Keeper the setup journey creates; a workspace whose
+   Keepers were declared by hand never has it, and judging history by imp alone
+   sent that workspace back into setup on every bare `masc`. *)
 let persistence_check base_path =
   let root = Workspace_utils.masc_root_dir_from ~base_path
     ~cluster_name:(Env_config_core.cluster_name ()) in
-  let path = Filename.concat (Filename.concat root Common.keepers_runtime_dirname)
-    (Keeper_runtime_root_entry.keeper_basename ~keeper_name:"imp" Keeper_runtime_root_entry.Metadata) in
-  match Keeper_meta_store.read_meta_file_path_read_only ~ownership_root:base_path path with
-  | Ok None -> check Keeper_persistence Needs_setup
-      "imp has no persisted history yet. Prepare imp before opening its conversation." [Start_imp]
-  | Ok (Some meta) when String.equal meta.name "imp" ->
-    check Keeper_persistence Satisfied
-      "imp has persisted history. This does not verify that it is running or that its model and sandbox are ready." [Start_imp]
-  | Ok (Some _) | Error _ -> check Keeper_persistence Invalid
-      "imp's persisted history cannot be read as its current metadata. Inspect configuration before proceeding."
-      [Inspect_configuration]
+  let dir = Filename.concat root Common.keepers_runtime_dirname in
+  let listed = if directory_exists dir then Safe_ops.list_dir_safe dir else Ok [] in
+  match listed with
+  | Error detail -> check Keeper_persistence Invalid
+      (detail ^ ". Inspect configuration before proceeding.") [Inspect_configuration]
+  | Ok entries ->
+    let names =
+      entries
+      |> List.filter_map Keeper_runtime_root_entry.metadata_keeper_name
+      |> List.filter Keeper_config.validate_name
+      |> List.sort String.compare in
+    let refused = List.filter (fun name ->
+        Result.is_error (Keeper_meta_store.validate_current_meta_file_result
+          (Filename.concat dir (Keeper_runtime_root_entry.keeper_basename ~keeper_name:name
+             Keeper_runtime_root_entry.Metadata)))) names in
+    match names, refused with
+    | [], _ -> check Keeper_persistence Needs_setup
+        "No Keeper has persisted history yet. Prepare imp before opening its conversation." [Start_imp]
+    | _ :: _, _ :: _ -> check Keeper_persistence Invalid
+        ("Keeper metadata this build cannot read: " ^ String.concat ", " refused
+         ^ ". The server refuses to boot until it is repaired or started with --accept-store-quarantine.")
+        [Inspect_configuration]
+    | _ :: _, [] -> check Keeper_persistence Satisfied
+        ("Persisted Keeper history: " ^ String.concat ", " names
+         ^ ". This does not verify that any of them is running or that its model and sandbox are ready.")
+        []
 
 let keeper_checks base_path =
   let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in

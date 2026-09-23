@@ -3062,8 +3062,12 @@ let test_a_quota_hint_that_names_no_time_is_recorded_as_observed () =
 ;;
 
 let test_the_production_answer_test_reads_provider_turns () =
-  let yielded = Runtime_agent.yielded_pre_first_token ~session_id:"session" in
-  Alcotest.(check bool) "a pre-first-token yield did not hear the candidate" false
+  let yielded =
+    { (completed_run_result ()) with
+      stop_reason = Runtime_agent.Yielded_to_durable_stimulus { turns_used = 0 }
+    }
+  in
+  Alcotest.(check bool) "a yield before any provider turn did not hear the candidate" false
     (Driver.For_testing.run_result_answered yielded);
   Alcotest.(check bool) "a yield after a provider turn did" true
     (Driver.For_testing.run_result_answered
@@ -3259,6 +3263,29 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
     Alcotest.(check (list string)) "replacement starts in declared order"
       ["shared_a.test_model"; "other.test_model"]
       (backpressure_order ["shared_a.test_model"; "other.test_model"]))
+;;
+
+(* An official client (Codex app server here) has no HTTP identity. A reload
+   that leaves its provider, model and binding as they were must keep its
+   observation cell, or any runtime.toml save puts a demoted head back at the
+   front of its lane. *)
+let test_official_client_rate_limit_survives_unchanged_reload () =
+  with_runtime_config runtime_toml_checkpoint_lane (fun () ->
+    let head = Option.get (Runtime.get_runtime_by_id "codex.codex") in
+    Runtime_candidate_backpressure.note_rate_limit
+      ~candidate:head.Runtime.candidate_backpressure ~retry_after:None;
+    let order () =
+      match Driver.assignment_walk_order ~now:(Unix.gettimeofday ()) "checkpoint_lane" with
+      | Ok walk -> walk.Driver.order
+      | Error _ -> Alcotest.fail "the lane resolves"
+    in
+    Alcotest.(check (list string)) "the resting official client walks last"
+      [ "primary.test_model"; "codex.codex" ] (order ());
+    reload_runtime_config runtime_toml_checkpoint_lane;
+    Alcotest.(check bool) "the reloaded row keeps its observation" true
+      (Option.is_some (observed_candidate "codex.codex"));
+    Alcotest.(check (list string)) "it still walks last after the reload"
+      [ "primary.test_model"; "codex.codex" ] (order ()))
 ;;
 
 let test_rate_limit_credential_rotation_under_same_reference () =
@@ -5136,6 +5163,8 @@ let () =
             test_a_same_path_suffix_waits_only_for_a_recorded_rest;
           Alcotest.test_case "rate limit survives only unchanged binding reload" `Quick
             test_rate_limit_candidate_survives_unchanged_reload_only;
+          Alcotest.test_case "official client rate limit survives unchanged reload" `Quick
+            test_official_client_rate_limit_survives_unchanged_reload;
           Alcotest.test_case "rate limit identity detects same-reference credential rotation" `Quick
             test_rate_limit_credential_rotation_under_same_reference;
           Alcotest.test_case

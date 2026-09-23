@@ -23,6 +23,16 @@
 
 ### Fixed
 
+- The Memory health Librarian row no longer loses track of the Librarian when
+  a keeper writes its own memory. The last success is the newest journal line
+  the Librarian committed and the failure shown is the newest Librarian
+  failure after it, so a `keeper_memory_write` or retraction neither blanks
+  "Memory saved" nor hides a failed pass
+  (`server_dashboard_http_keeper_memory_health.ml`). The TUI decodes the pass
+  ending and the failure kind as closed variants, refuses a value it does not
+  know, draws both in plain words ("caught up", "last pass saved nothing",
+  "model call failed") instead of the wire words, and draws the cause of a
+  stopped or crashed pass on its own `Librarian cause` row (#38049).
 - The planning projection counts a Task awaiting verification as its own state instead of folding it into `in_progress`. The live Backlog row read `in_progress=21` for 14 Tasks being worked and 7 waiting on a verifier, while the Task Review tab beside it counted those same 7, so one screen gave the same Tasks two numbers and the word naming the wait was the one the count hid. `task_backlog` now carries `awaiting_verification`, and the TUI's Backlog row draws it with the mark its Task rows wear (#37995).
 - The Keepers fleet row says when its task-owner scan came up short. The scan reports what it could not read, and only a backlog failure moves the fleet status off `ok`, so a Keeper whose profile did not load left its tasks out of the count with nothing on the row saying so. The count now carries its own shortfall: `task owner without fiber 0+ (2 sources unread)`, the `+` because the number is a lower bound over the sources that could be read (#38012).
 - The chat status area no longer reserves a row it does not draw. The pane skips the in-flight row for the request the live transcript is already drawing — that transcript says the phase, the age and the tools, and a second row put a second age and an opaque request id above the `ACTIVE TURN` line — but the row budget counted every in-flight request. With one message in flight, which is the ordinary case, the area held a row nobody drew: a blank line under the status rows and the footer one row off from what was on screen. The pane and the budget now read the same list (#37741).

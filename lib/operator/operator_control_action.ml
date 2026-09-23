@@ -176,11 +176,12 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
   in
   loop 0
 
-(* The actor is who the request authenticated as, never a name in its body:
-   a confirm compares it with the actor that staged the action, and a body
+(* The actor is the caller's identity, never an [actor] field in its body: a
+   confirm compares it with the actor that staged the action, and a body
    field would let any caller name the stager. HTTP passes the token-bound
-   actor as [actor_hint]; MCP's [ctx.agent_name] is bound to the session's
-   token. *)
+   actor as [actor_hint]. On MCP [ctx.agent_name] is the session's name,
+   which a per-agent credential binds; confirming also takes CanAdmin
+   (Tool_catalog), the permission staging took. *)
 let resolved_actor ?actor_hint (ctx : 'a context) =
   normalized_actor ~context_actor:ctx.agent_name actor_hint
 

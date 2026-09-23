@@ -373,7 +373,9 @@ let explicit_metadata : (string * metadata) list =
     ("masc_get_metrics", read_state_tool);
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);
-    ("masc_operator_confirm", broadcast_tool);
+    (* Confirming runs the staged action without checking its permission
+       again, so it takes the permission staging did. *)
+    ("masc_operator_confirm", with_required_permission Masc_domain.CanAdmin broadcast_tool);
     ("masc_runtime_verify", local_runtime_tool Local_runtime_tool_policy.Verify);
     ( "masc_runtime_ollama_probe"
     , local_runtime_tool Local_runtime_tool_policy.Ollama_probe );

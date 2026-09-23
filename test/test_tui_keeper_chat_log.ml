@@ -420,7 +420,7 @@ let test_decode_events_error_by_code () =
   (* One without a code is the handler's own answer and is read like any
      other refusal, not sent to masc login. *)
   check events_error "403 without an auth code keeps the server's words"
-    (Log.Events_undecodable "403 not yours")
+    (Log.Events_denied "403 not yours")
     (decode ~status:403 (envelope "not_owner" "not yours"))
 ;;
 

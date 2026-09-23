@@ -84,7 +84,11 @@ let roster_failure_of_status ~status ~body =
   | 401 | 403 -> (
       match Masc_tui_credential.server_reason_of_body body with
       | Some reason -> Roster_unauthorized reason
-      | None -> unreachable ())
+      | None ->
+          (* The server answered and refused; the status says so where the
+             server's sentence alone would read like a lost connection. *)
+          Roster_unreachable
+            (Printf.sprintf "HTTP %d: %s" status (response_detail ~status body)))
   | _ -> unreachable ()
 
 let find_row rows name =

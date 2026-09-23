@@ -303,6 +303,7 @@ type events_error =
       ; message : string
       }
   | Events_refused of string
+  | Events_denied of string
   | Events_undecodable of string
   | Events_transport of string
 
@@ -322,6 +323,7 @@ let events_error_to_string = function
       (cursor_refusal_to_string refusal)
       message
   | Events_refused detail -> "events request refused: " ^ detail
+  | Events_denied detail -> "events request denied: " ^ detail
   | Events_undecodable detail -> "events body unreadable: " ^ detail
   | Events_transport detail -> "events request failed: " ^ detail
 ;;
@@ -343,6 +345,20 @@ let decode_events_error ~status ~credential_sent body =
   match credential_refusal with
   | Some reason ->
     Events_refused (Masc_tui_credential.refusal ~credential_sent reason)
+  | None when status = 401 || status = 403 ->
+    (* The handler refused this read and said why. It is not a body this
+       build cannot read, and not the credential: the server's own sentence
+       is what the operator needs. *)
+    let said =
+      match Yojson.Safe.from_string body with
+      | `Assoc fields -> (
+        match List.assoc_opt "message" fields, List.assoc_opt "error" fields with
+        | Some (`String message), _ | None, Some (`String message) -> message
+        | (Some _ | None), _ -> body)
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> body
+      | exception Yojson.Json_error _ -> body
+    in
+    Events_denied (Printf.sprintf "%d %s" status said)
   | None ->
   match Yojson.Safe.from_string body with
   | `Assoc fields ->

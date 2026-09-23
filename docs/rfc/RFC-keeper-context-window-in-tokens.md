@@ -3,7 +3,7 @@ rfc: "keeper-context-window-in-tokens"
 title: "Carry the Keeper window from where the Librarian absorbed; the provider judges request size"
 status: Active
 created: 2026-09-15
-updated: 2026-09-20
+updated: 2026-09-23
 author: vincent
 related: ["memory-os-bounded-context-and-librarian-curator", "tool-results-age-out-of-context", "runtime-two-layers"]
 ---
@@ -614,7 +614,7 @@ let halve ~first_atom ~atom_count =
 
 13.2·13.3 을 걷어내기 시작하는 때는 Librarian 생명주기 RFC(`RFC-librarian-lifecycle.md`) §7 (라)가 정한다. 그 조건과 진행은 그 RFC 에만 적는다. 순서를 바꾸면 대체할 것이 없는 상태에서 45 MB 가 아무 제지 없이 나간다.
 
-조건이 하나 더 있다. 밀림 표시(같은 RFC 의 I4)가 창이 그 위치에 기대기 전에 화면에 떠 있어야 한다. Librarian 이 서면 이력은 자라고 요청은 결국 provider 한도에서 거절되는데(§13.9), 표시가 없으면 화면에는 실패한 턴만 보이고 원인은 보이지 않는다.
+조건이 하나 더 있다. 밀림 표시(같은 RFC 의 I4)가 창이 그 위치에 기대기 전에 화면에 떠 있어야 한다. Librarian 이 서면 Keeper 요청은 Librarian 이 아직 읽지 않은 구간을 건너뛰고 나간다(§13.9). 표시가 없으면 무엇이 빠졌는지 화면에서 보이지 않는다.
 
 ### 13.8 overlay 를 비우고 `max-context` 결정을 한 곳에 둔다
 
@@ -632,4 +632,4 @@ let halve ~first_atom ~atom_count =
 
 - 이력을 빼고 남는 부분(`pinned` 메시지: 매 턴 새로 붙는 system·facts·브리핑 블록)이 혼자 provider 한도를 넘는 경우. 13.2 가 바이트 창을 없애면 이것을 알려 주는 것은 provider 의 typed 거절뿐이다. 턴은 그 오류로 끝나고(13.6), 다음 사이클도 같은 요청으로 같은 거절을 받는다. §1 에는 그 반복을 멈추는 장치가 없다. 줄일 것은 이력이 아니라 그 부분이고, facts 는 Librarian 의 `absorbs`·`dropped` 가 줄인다(Librarian RFC §6).
   - `critic` 의 30턴(13.2)은 이 경우가 아니었다. 거절한 쪽은 provider 가 아니라 `antigravity_subscription.gemini-3-8-flash-high` 레인의 masc 바이트 창(`max-prompt-bytes` 131,072)이었고, 그 모델의 `max-context` 는 1,048,576 토큰이다(`<base-path>/.masc/config/runtime.toml` 의 `[models.gemini-3-8-flash-high]`). 그 레인은 지금 이력을 자르지 않고 넘긴다(§4 의 5번).
-- Librarian 이 서 있을 때. 창이 보는 위치가 움직이지 않는 동안 이력은 자라고, 좁혀 다시 보내는 길은 13.3 이 지웠다. 그래서 요청은 끝내 provider 한도에서 거절되고 턴마다 오류로 끝난다. 시간 상한은 두지 않는다. 실패한 Librarian 은 타이머 재시도 없이 다음 신호를 기다리고, 원인별로 푸는 방법은 Librarian RFC §4.3·§4.10 이 소유한다. 이 fail-closed 대가를 바꾸는 결정도 그 RFC 에만 적는다. 밀림 표시를 먼저 띄우는 조건은 §1 의 6 과 §13.7 에 있다.
+- Librarian 이 서 있을 때. 창이 보는 위치가 움직이지 않는 동안 이력은 자란다. 범위를 반씩 좁혀 다시 보내지는 않는다(13.3). 대신 provider 가 그 범위를 크기로 거절하면 마지막으로 끝난 턴의 경계부터 한 번 다시 보내고, 건너뛴 구간을 요청과 화면에 적는다. 규칙과 이유는 Librarian RFC §4.10 이 소유한다. 시간 상한은 두지 않는다. 실패한 Librarian 은 타이머 재시도 없이 다음 신호를 기다리고, 원인별로 푸는 방법은 Librarian RFC §4.3·§4.10 이 소유한다. 밀림 표시를 먼저 띄우는 조건은 §1 의 6 과 §13.7 에 있다.

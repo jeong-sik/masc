@@ -12213,7 +12213,12 @@ def runtime_resolved_response() -> HttpResponse:
                 },
                 {
                     "id": "degraded",
-                    "runtime_ids": ["runtime-c"],
+                    # runtime-a is here as well as in "primary" so the two
+                    # doors into the runtime detail -- a lane's candidate row
+                    # and the catalog row -- have something to disagree about.
+                    # With every runtime in one lane, a detail that named only
+                    # the lane the reader came through passed.
+                    "runtime_ids": ["runtime-c", "runtime-a"],
                     "declared": True,
                 },
                 {
@@ -12411,8 +12416,8 @@ def runtime_surface_interaction(
                 b"Context source: capability",
                 b"Max output: 8192 tokens",
                 b"Local runtime: no",
-                b"Used by lanes: primary",
-                b"Lane position: 1 of 2",
+                b"Used by lanes: primary, degraded",
+                b"Lane position: 1 of 2 in primary",
                 b"Probe status: reachable",
                 b"Probe transport: http",
                 # The terminal's clock, not the wire's: the scenario runs
@@ -12461,7 +12466,7 @@ def runtime_surface_interaction(
             all_list = screen_text(bytes(output))
             if b"runtime-a" not in all_list:
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
-            if b"Lanes (3 lanes, 4 slots)" not in all_list:
+            if b"Lanes (3 lanes, 5 slots)" not in all_list:
                 raise AssertionError("Runtime catalog counted runtimes as lane slots")
             if b"ready / reachable" not in all_list:
                 raise AssertionError("Runtime catalog omitted independent probe status")
@@ -12477,7 +12482,7 @@ def runtime_surface_interaction(
                 b"Runtime ID: runtime-a",
                 b"Provider: Resolved A",
                 b"Model: model-a",
-                b"Used by lanes: primary",
+                b"Used by lanes: primary, degraded",
                 b"Probe status: reachable",
             ):
                 if needle not in catalog_detail_plain:
@@ -12495,7 +12500,7 @@ def runtime_surface_interaction(
             # /api/v1/dashboard/standalone-lanes body. Walk the full circuit
             # so the return leg is what gets asserted.
             send_and_wait(process, master_fd, output, b"p", b"MASC Lanes")
-            send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 4 slots)")
+            send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 5 slots)")
 
             # The overflow scroll hint is unreachable with this fixture: it
             # renders only when candidates exceed the listing height, but the

@@ -11125,9 +11125,17 @@ let runtime_detail_lines state target ~width =
                String.equal row.rcr_lane_id lane_id
                && String.equal row.rcr_runtime.ro_id runtime_id)
         |> Option.map (fun row ->
+               (* Not [[ row.rcr_lane_id ]]: that is the lane the reader came
+                  through, which the header already names, and the field is
+                  labelled "Used by lanes". A runtime several lanes fall back
+                  to answered this door with one lane and the catalog door
+                  with all of them. *)
                ( row.rcr_runtime
-               , [ row.rcr_lane_id ]
-               , Some (row.rcr_position, row.rcr_candidate_count)
+               , runtime_lanes_using snapshot ~runtime_id:row.rcr_runtime.ro_id
+               , Some
+                   ( row.rcr_lane_id
+                   , row.rcr_position
+                   , row.rcr_candidate_count )
                , row.rcr_probe ))
     | Some snapshot, Runtime_catalog_entry { runtime_id } ->
         runtime_all_rows snapshot
@@ -11166,9 +11174,12 @@ let runtime_detail_lines state target ~width =
       let candidate =
         match position with
         | None -> []
-        | Some (at, total) ->
+        | Some (lane, at, total) ->
+            (* The lane is named because "Used by lanes" above can now hold
+               several, and a position without its lane is a place in an
+               unnamed list. *)
             runtime_detail_field ~width ~style:Ansi.reset "Lane position"
-              (Printf.sprintf "%d of %d" at total)
+              (Printf.sprintf "%d of %d in %s" at total lane)
       in
       let quota =
         match runtime_quota_badge runtime with

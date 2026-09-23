@@ -416,6 +416,12 @@ val render_repository_changes_diff :
 
 val runtime_quota_badge : Masc.Tui_decode.runtime_option -> string option
 
+(** The lanes that list a runtime among their candidates, in resolved order.
+    Both doors into the runtime detail read it, so neither can answer with a
+    shorter list than the other. *)
+val runtime_lanes_using :
+  Masc.Tui_decode.runtime_surface_snapshot -> runtime_id:string -> string list
+
 val runtime_all_rows :
   Masc.Tui_decode.runtime_surface_snapshot ->
   (Masc.Tui_decode.runtime_option * string list) list

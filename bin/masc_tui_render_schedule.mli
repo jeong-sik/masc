@@ -599,3 +599,10 @@ val classify_wake_reading :
     (retained count, per-schedule ceiling) once the exact lookup answers.
     [Wake_last_only] is the row's single newest attempt while the list is in
     flight; it is not an empty history, and neither is a failed load. *)
+
+(** {1 Schedule hold reading} *)
+
+val schedule_hold_reading : due:string -> string
+(** What the Schedules screen says about a schedule the runner is holding:
+    since when its held occurrence has been due, and that it waits for the
+    target Keeper to take the previous wake. [due] is already formatted. *)

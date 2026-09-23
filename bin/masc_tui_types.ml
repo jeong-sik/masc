@@ -1381,6 +1381,10 @@ type schedule_row = {
   sch_reaction_quarantined: int option;
       (** Ledger records the projection could not match. Nonzero is why a
           status reads worse than the steps below it look. *)
+  sch_runner_hold: Tui_decode.schedule_runner_hold option;
+      (** The occurrence the schedule runner is holding back because the
+          target Keeper has not taken the previous one yet. A held occurrence
+          has no wake, so none of the fields above can say it (#38205). *)
 }
 
 let schedule_json_string field = function

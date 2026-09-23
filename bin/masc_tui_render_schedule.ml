@@ -1440,3 +1440,10 @@ let classify_wake_reading ~history_error ~history =
   | None, None -> Wake_last_only
   | None, Some (0, _) -> Wake_never
   | None, Some (count, retention) -> Wake_history { count; retention }
+
+(* A schedule the runner holds back (#38205). Its status stays [due] and its
+   last wake is still the previous occurrence's, so without this reading a
+   held heartbeat looks like a late one. *)
+let schedule_hold_reading ~due =
+  Printf.sprintf "held since %s: the keeper has not taken the previous wake yet"
+    due

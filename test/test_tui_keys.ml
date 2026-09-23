@@ -341,6 +341,7 @@ let schedule_form_row : schedule_row =
   ; sch_queue_ack_recorded_at_iso = None
   ; sch_wake_cancelled_recorded_at_iso = None
   ; sch_reaction_quarantined = None
+  ; sch_runner_hold = None
   }
 
 let test_schedule_create_form_names_the_canonical_required_fields () =

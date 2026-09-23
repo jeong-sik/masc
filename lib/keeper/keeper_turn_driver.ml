@@ -906,9 +906,16 @@ let attempt_runtime_candidates
                 | Keeper_runtime_failure_route.Refusal_body_not_received
                 | Keeper_runtime_failure_route.Generation_repeated
                 | Keeper_runtime_failure_route.Attempt_rejected
-                | Keeper_runtime_failure_route.Provider_reported_failure )
+                | Keeper_runtime_failure_route.Provider_reported_failure
+                | Keeper_runtime_failure_route.Request_refused
+                | Keeper_runtime_failure_route.Provider_wire_defect )
             } ->
           ()
+        (* A 5xx the provider called permanent failed this candidate without
+           an answer, the same fact a transient 5xx records. *)
+        | Keeper_runtime_failure_route.Rotate_now
+            { rotate = Keeper_runtime_failure_route.Server_error_not_transient } ->
+          note_failed_attempt Runtime_candidate_backpressure.Server_error
         (* The turn's input or MASC itself failed; another candidate would not
            do better, so this is no evidence about this one. *)
         | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> ());

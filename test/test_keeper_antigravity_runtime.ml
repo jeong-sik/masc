@@ -543,25 +543,29 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         "provider cumulative turn count"
                         73
                         resumed.turns;
-                      let preserved_prompt = In_channel.with_open_bin
-                        (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
-                      List.iter (fun (system_prompt, initial_messages) ->
+                      (* The fixture answers 73 cumulative turns only when
+                         asked to resume its conversation; a fresh start
+                         reports 1. The control resume runs last, so the
+                         checks below read a session settled at ordinal 73. *)
+                      let run_context ~goal (system_prompt, initial_messages) =
                         match Keeper_turn_driver.run_named
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
-                          ~base_path ~goal:"New goal must not run with stale context"
+                          ~base_path ~goal
                           ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
                           ~initial_messages ~hooks ~context:(Agent_core.Context.create ())
                           ~sw ~net:(Eio.Stdenv.net env) () with
-                        | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
-                          check string "changed context has explicit admission reason"
-                            "official_client_session.context_admission" field
                         | Error error -> fail (Agent_core.Error.to_string error)
-                        | Ok _ -> fail "Antigravity resumed stale canonical context")
+                        | Ok run -> run.Keeper_turn_driver.run_result.turns
+                      in
+                      List.iter (fun changed ->
+                        check int "changed context starts a fresh vendor session" 1
+                          (run_context ~goal:"New goal must not run with stale context" changed))
                         ["changed core instructions", large_history;
                          "pre-dispatch fixture system prompt", large_history @ [Agent_core.Types.user_msg "new native correction"]];
-                      check string "rejected context never reaches CLI prompt"
-                        preserved_prompt (In_channel.with_open_bin
-                          (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all)))));
+                      check int "control: unchanged context resumes the fresh session" 73
+                        (run_context ~goal:"Call masc_probe once"
+                           ("pre-dispatch fixture system prompt",
+                            large_history @ [Agent_core.Types.user_msg "new native correction"]))))));
       (match List.rev !transmitted_inputs with
        | [ Keeper_official_client_host.Whole_input_transmitted messages;
            Keeper_official_client_host.Held_by_client_session ] ->

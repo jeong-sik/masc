@@ -1625,12 +1625,24 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     check bool "transient spawn failure preserves verified unchanged source"
       true (validate_unchanged_context ~expected:(Some released)
         ~snapshot_sha256:frontier.snapshot_sha256 = Ok ());
-    check bool "changed source cannot claim the unchanged-source channel" true
-      (Result.is_error (claim_with_context_frontier
-        ~context_frontier:(Some {frontier with delivery=Canonical_source_guard;
-          snapshot_sha256=String.make 64 'b'; acknowledged_turn=None})
-        ~base_path ~keeper_name ~expected:(Some released) ~client_kind:Codex ~owner_epoch
-        ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:8.));
+    let resumable_plan =
+      plan_claim ~expected:(Some released) ~client_kind:Codex ~runtime_id:"codex.default"
+      |> Result.get_ok in
+    check bool "control: the released session is a resume" true
+      (resumable_plan.previous_settlement <> None);
+    (match reconcile_context resumable_plan ~expected:(Some released)
+             ~snapshot_sha256:frontier.snapshot_sha256 with
+     | Ok plan -> check bool "unchanged source keeps resuming" true (plan.previous_settlement <> None)
+     | Error _ -> fail "unchanged source was refused");
+    (match reconcile_context resumable_plan ~expected:(Some released)
+             ~snapshot_sha256:(String.make 64 'b') with
+     | Ok plan ->
+       check bool "changed source drops the settlement" true (plan.previous_settlement = None);
+       check int "changed source starts at ordinal 1" 1 plan.turn_count
+     | Error _ -> fail "changed source was refused instead of starting fresh");
+    check bool "a session with no acknowledged frontier is still refused" true
+      (reconcile_context resumable_plan ~expected:(Some started)
+         ~snapshot_sha256:frontier.snapshot_sha256 = Error Context_frontier_missing);
     let state_path = path ~base_path ~keeper_name |> Result.get_ok in
     let unbound_json = match Yojson.Safe.from_file state_path with
       | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
@@ -1643,11 +1655,62 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     | Error detail -> fail detail)
 ;;
 
+(* A changed canonical source (a new system prompt at boot) used to refuse
+   every later claim, so the keeper failed each cycle forever. The claim now
+   starts a fresh vendor session; an unchanged source still resumes. *)
+let test_changed_canonical_source_claims_a_fresh_session () =
+  with_workspace "masc-context-fresh-" (fun base_path ->
+    let keeper_name = "fresh" in
+    let guard sha = Some {snapshot_sha256=sha; message_count=3;
+      delivery=Canonical_source_guard; acknowledged_turn=None} in
+    let claim ~expected ~sha ~at = claim_with_context_frontier ~context_frontier:(guard sha)
+      ~base_path ~keeper_name ~expected ~client_kind:Codex ~owner_epoch
+      ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:at in
+    let claimed = claim ~expected:None ~sha:(String.make 64 'a') ~at:1. |> Result.get_ok in
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session" ~updated_at:2. |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session" ~updated_at:3. |> Result.get_ok in
+    let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session" ~turn_id:"turn" ~turn_count:starting.turn_count ~updated_at:4. |> Result.get_ok in
+    let settled = settle ~base_path ~keeper_name ~expected:started
+      ~session_id:"session" ~turn_id:"turn" ~updated_at:5. |> Result.get_ok in
+    match claim ~expected:(Some settled) ~sha:(String.make 64 'b') ~at:6. with
+    | Ok {phase=Start {previous_settlement=None; _}; turn_count=1; _} -> ()
+    | Ok _ -> fail "changed source claimed a resume of the old vendor session"
+    | Error detail -> fail ("changed source was refused: " ^ detail))
+
+let test_unchanged_canonical_source_still_resumes () =
+  with_workspace "masc-context-resume-" (fun base_path ->
+    let keeper_name = "resume" in
+    let guard = Some {snapshot_sha256=String.make 64 'a'; message_count=3;
+      delivery=Canonical_source_guard; acknowledged_turn=None} in
+    let claim ~expected ~at = claim_with_context_frontier ~context_frontier:guard
+      ~base_path ~keeper_name ~expected ~client_kind:Codex ~owner_epoch
+      ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:at in
+    let claimed = claim ~expected:None ~at:1. |> Result.get_ok in
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session" ~updated_at:2. |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session" ~updated_at:3. |> Result.get_ok in
+    let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session" ~turn_id:"turn" ~turn_count:starting.turn_count ~updated_at:4. |> Result.get_ok in
+    let settled = settle ~base_path ~keeper_name ~expected:started
+      ~session_id:"session" ~turn_id:"turn" ~updated_at:5. |> Result.get_ok in
+    match claim ~expected:(Some settled) ~at:6. with
+    | Ok {phase=Start {previous_settlement=Some {session_id="session"; _}; _}; _} -> ()
+    | Ok _ -> fail "unchanged source did not resume the vendor session"
+    | Error detail -> fail ("unchanged source was refused: " ^ detail))
+
 let () =
   run
     "official client session store"
     [ ( "durable owner"
       , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
+        ; test_case "changed canonical source claims a fresh session" `Quick
+            test_changed_canonical_source_claims_a_fresh_session
+        ; test_case "unchanged canonical source still resumes" `Quick
+            test_unchanged_canonical_source_still_resumes
         ; test_case "clear missing state without creating store" `Quick
             test_clear_missing_state_does_not_create_store
         ; test_case "clear removes stale epoch claim" `Quick

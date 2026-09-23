@@ -278,6 +278,19 @@ val validate_unchanged_context : expected:t option -> snapshot_sha256:string ->
   (unit, context_admission_error) result
 val context_admission_error_to_string : context_admission_error -> string
 
+val reconcile_context : claim_plan -> expected:t option -> snapshot_sha256:string ->
+  (claim_plan, context_admission_error) result
+(** Fold a moved canonical source into the plan, as {!reconcile_tool_surface}
+    does for a moved tool surface. A settled session that acknowledged a
+    different canonical history or system prompt cannot resume: the vendor
+    conversation would keep the old instructions. The plan becomes the
+    fresh-session plan instead of refusing every later turn, so a changed
+    prompt no longer stops the keeper; what lived only in the superseded
+    vendor conversation is not carried over. A session with no acknowledged
+    frontier ([Context_frontier_missing]) is still refused: nothing shows
+    what it settled against. [claim_with_context_frontier] applies this again
+    for [Canonical_source_guard]. *)
+
 val claim_with_context_frontier :
   context_frontier:context_frontier option ->
   base_path:string ->

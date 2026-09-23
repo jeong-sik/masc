@@ -2856,6 +2856,8 @@
 
 (include stanzas/test_keeper_tool_approval_mode_actor_log.inc)
 
+(include stanzas/test_keeper_decision_actor_log.inc)
+
 (include stanzas/test_keeper_toml_parser.inc)
 
 (include stanzas/test_keeper_toml_loader.inc)
@@ -5299,6 +5301,11 @@
  (name test_tui_table)
  (modules test_tui_table)
  (libraries alcotest masc_tui_message_layout masc_tui_table))
+
+(test
+ (name test_tui_text_block)
+ (modules test_tui_text_block)
+ (libraries alcotest astring masc_tui_text_block))
 
 (test
  (name test_operator_attention_summary)

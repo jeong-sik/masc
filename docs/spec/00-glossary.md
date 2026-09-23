@@ -1111,8 +1111,9 @@ status: reference
   - **Composed System Context**: 이 둘을 함께 부르는 이름(`is_composed_system_context`).
     공식 클라이언트 어댑터는 이 메시지들을 canonical history 스냅숏에서 빼고 resume 때
     다시 보낸다.
-  - **구성 검사**: 요청은 carrier를 정확히 하나만 실어야 한다. working state가 carrier
-    태그를 입으면 `prompt_context_carrier_repeated`로 거절된다(#37894·#38033).
+  - **입력 귀속 검사**: turn 기록의 입력 귀속(`input_components`)은 요청 하나에 carrier가
+    하나라고 보고 푼다. carrier가 두 번 보이면 요청은 그대로 나가고, 입력 귀속만 비운 채
+    `prompt_context_carrier_repeated`를 사유로 남긴다.
   → [Runtime_model_input_tail_window](../../lib/runtime/runtime_model_input_tail_window.mli) · [Keeper_official_client_host.is_composed_system_context](../../lib/keeper/keeper_official_client_host.mli) · [Keeper_agent_prompt_metrics](../../lib/keeper/keeper_agent_prompt_metrics.mli)
 
 **Continuity Synthesis Observation (대화 요약 진행 관측)**

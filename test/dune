@@ -4211,6 +4211,18 @@
   masc_tui_overview_team))
 
 (test
+ (name test_tui_overview_goals)
+ (modules test_tui_overview_goals)
+ (libraries
+  alcotest
+  masc
+  masc.masc_goal
+  masc_types
+  masc_tui_types
+  masc_tui_overview_goals
+  yojson))
+
+(test
  (name test_tui_render_metrics)
  (modules test_tui_render_metrics)
  (libraries

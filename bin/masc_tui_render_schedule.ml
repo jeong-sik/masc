@@ -133,6 +133,7 @@ end
 
 type overview_allocation = {
   attention_rows : int;
+  goal_rows : int;
   team_rows : int;
   task_error_rows : int;
   task_rows : int;
@@ -150,7 +151,10 @@ let overview_fixed_rows = 10
 (* The Team block's title row and the divider under it. *)
 let overview_team_chrome_rows = 2
 
-let allocate_overview ~terminal_rows ~attention_count
+(* The divider under the GOALS block. Its headline is one of its rows. *)
+let overview_goal_chrome_rows = 1
+
+let allocate_overview ~terminal_rows ~attention_count ~goal_count
     ~team_count ~task_count ~has_task_error =
   (* Ten rows are invariant chrome. What is left is shared by the Attention
      panel and the task block, and whatever neither needs becomes
@@ -196,11 +200,28 @@ let allocate_overview ~terminal_rows ~attention_count
      cannot: it is sized by its keeper rows, after the one task row held back
      above, and it is drawn whole or not at all -- a title and a divider with
      no row between them would be chrome that says nothing. *)
+  (* GOALS answers whether the fleet's work moves any goal. It is drawn above
+     the alert panel, but the panel is the alert surface and is served first;
+     GOALS is served next, ahead of the Team and task blocks and after the one
+     task row held back above. Its rows are cut from the bottom, so the
+     headline is the last to go. *)
+  let goal_rows =
+    if goal_count <= 0 then 0
+    else
+      let room =
+        available - attention_rows - reserved_task_rows
+        - overview_goal_chrome_rows
+      in
+      if room <= 0 then 0 else min goal_count room
+  in
+  let goal_block_rows =
+    if goal_rows > 0 then goal_rows + overview_goal_chrome_rows else 0
+  in
   let team_rows =
     if team_count <= 0 then 0
     else
       let room =
-        available - attention_rows - reserved_task_rows
+        available - attention_rows - goal_block_rows - reserved_task_rows
         - overview_team_chrome_rows
       in
       if room <= 0 then 0 else min team_count room
@@ -210,7 +231,7 @@ let allocate_overview ~terminal_rows ~attention_count
   in
   let task_block_rows =
     min desired_task_block_rows
-      (max 0 (available - attention_rows - team_block_rows))
+      (max 0 (available - attention_rows - goal_block_rows - team_block_rows))
   in
   let task_error_rows = min desired_task_error_rows task_block_rows in
   let task_rows =
@@ -218,10 +239,11 @@ let allocate_overview ~terminal_rows ~attention_count
   in
   let filler_rows =
     max 0
-      (available - attention_rows - team_block_rows - task_error_rows
-     - task_rows)
+      (available - attention_rows - goal_block_rows - team_block_rows
+     - task_error_rows - task_rows)
   in
-  { attention_rows; team_rows; task_error_rows; task_rows; filler_rows }
+  { attention_rows; goal_rows; team_rows; task_error_rows; task_rows;
+    filler_rows }
 
 (* Detail lines under the Team block (a repository's pull requests) are worth
    drawing but not worth a backlog row: they take only rows that would

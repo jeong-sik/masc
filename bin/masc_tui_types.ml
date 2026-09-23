@@ -1975,6 +1975,14 @@ type overview_quota_reading =
   | Quota_read of Tui_decode.runtime_option list
   | Quota_failed of string
 
+(** The Overview's reading of [GET /api/v1/dashboard/goals]. A failed read and
+    one not made yet are each drawn as what they are, never as an empty
+    section. *)
+type overview_goals_reading =
+  | Goals_unread
+  | Goals_read of Tui_decode.overview_goal list
+  | Goals_failed of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -2883,6 +2891,7 @@ type surface_needs = {
   needs_asks : bool;
   needs_runtime_quota : bool;
   needs_repository_pulls : bool;
+  needs_overview_goals : bool;
 }
 
 let nothing =
@@ -2897,6 +2906,7 @@ let nothing =
     needs_asks = false;
     needs_runtime_quota = false;
     needs_repository_pulls = false;
+    needs_overview_goals = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2919,12 +2929,14 @@ let rec surface_needs ~keeper_pane_drawn surface =
 and surface_needs_of_surface : surface -> surface_needs = function
   (* The Team block names the quota windows that are shut. The catalogue is
      43 KB and answers in under two milliseconds on the live runtime, and
-     only this surface draws the windows beside the Keepers they stop. *)
+     only this surface draws the windows beside the Keepers they stop.
+     The goal tree is read only here too: the GOALS section is its reader. *)
   | Overview ->
       { nothing with
         needs_transport = true
       ; needs_runtime_quota = true
       ; needs_repository_pulls = true
+      ; needs_overview_goals = true
       }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -2987,6 +2999,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_runtime_quota && not previous.needs_runtime_quota
   ; needs_repository_pulls =
       next.needs_repository_pulls && not previous.needs_repository_pulls
+  ; needs_overview_goals =
+      next.needs_overview_goals && not previous.needs_overview_goals
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -5633,6 +5647,7 @@ type state = {
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
   mutable overview_pulls: overview_pulls_reading;
+  mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -7767,6 +7782,7 @@ let create_state
   runtime_catalog = [];
   overview_quota = Quota_unread;
   overview_pulls = Overview_pulls_unread;
+  overview_goals = Goals_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;

@@ -308,14 +308,43 @@ let recurrence_of_arg args =
     validate_recurrence_arg (Schedule_domain.Cron { expression; timezone })
 ;;
 
-(* [default_id] is asked only when the call names no actor id, so a call that
-   names one never depends on who the endpoint thinks is calling. *)
-let actor_from_args args ~prefix ~default_id ~default_kind =
-  let* id =
-    match string_opt args (prefix ^ "_id") with
-    | Some id -> Ok id
-    | None -> default_id ()
-  in
+(* The actor id a call records. When the boundary resolved a caller, that is
+   the actor: a client-supplied id that names someone else is refused rather
+   than silently ignored, because an MCP caller could otherwise name any actor
+   and the HTTP boundary already replaced it for the same reason (#37149).
+   Only an unnamed caller -- one the endpoint minted a placeholder for -- has
+   to name the actor itself. *)
+let actor_id_from_caller ~caller ~prefix ~default_id args =
+  match caller with
+  | Named_caller name ->
+    (match string_opt args (prefix ^ "_id") with
+     | Some given when not (String.equal given name) ->
+       Error
+         (Typed_refusal
+            { kind = Schedule_contract_values.Refusal_actor_mismatch
+            ; message =
+                Printf.sprintf
+                  "%s_id names %s but the caller is %s; the actor is the \
+                   caller, so omit the field"
+                  prefix given name
+            ; facts =
+                [ "field", `String (prefix ^ "_id")
+                ; "caller", `String name
+                ; "given", `String given
+                ]
+            })
+     | Some _ | None -> Ok name)
+  | Unnamed_caller ->
+    (match string_opt args (prefix ^ "_id") with
+     | Some id -> Ok id
+     | None -> default_id ())
+;;
+
+(* [default_id] is asked only when the call names no actor id and the boundary
+   knows no caller. The kind is not forced: the caller type carries a name,
+   not a kind, so it stays as the call declared or the action's default. *)
+let actor_from_args ctx args ~prefix ~default_id ~default_kind =
+  let* id = actor_id_from_caller ~caller:ctx.caller ~prefix ~default_id args in
   let* kind = plain (actor_kind_of_arg args (prefix ^ "_kind") default_kind) in
   let display_name = string_opt args (prefix ^ "_display_name") in
   if String.equal (String.trim id) ""
@@ -616,12 +645,12 @@ let handle_write ~action ~tool_name ~start_time ctx args =
     in
     let* due_at = resolve_due_at ~dispatched_at:start_time recurrence args in
     let* requested_by =
-      actor_from_args args ~prefix:"requested_by"
-        ~default_id:(fun () -> Ok "operator")
+      actor_from_args ctx args ~prefix:"requested_by"
+        ~default_id:(fun () -> caller_name ctx ~instead:"pass requested_by_id")
         ~default_kind:Schedule_domain.Human_operator
     in
     let* scheduled_by =
-      actor_from_args args ~prefix:"scheduled_by"
+      actor_from_args ctx args ~prefix:"scheduled_by"
         ~default_id:(fun () -> caller_name ctx ~instead:"pass scheduled_by_id")
         ~default_kind:Schedule_domain.Automated_actor
     in
@@ -1059,22 +1088,28 @@ let handle_get ~tool_name ~start_time ctx args =
        ok ~tool_name ~start_time (schedule_request_json ?last_wake request))
 ;;
 
-(* Takes the config alone, not the full [context]: cancel touches nothing but
-   the schedule store, so requiring the creation-path hooks (or an agent name
-   the arguments already carry) would be a dependency this action does not
-   have. *)
-let handle_cancel ~tool_name ~start_time (config : Workspace.config) args =
+(* Takes the caller, not the full [context]: cancel touches nothing but the
+   schedule store, so the creation-path hooks are a dependency this action
+   does not have. The caller is what it needs -- the canceller is the resolved
+   caller, not a client-supplied id (#37149 for HTTP, and the same rule here
+   so the MCP path cannot name another actor). *)
+let handle_cancel ~tool_name ~start_time ~caller (config : Workspace.config) args =
   let parsed =
-    let* schedule_id = required_string args "schedule_id" in
-    let* cancelled_by_id = required_string args "cancelled_by_id" in
-    let* cancelled_by_kind =
-      actor_kind_of_arg args "cancelled_by_kind" Schedule_domain.Human_operator
+    let* schedule_id = plain (required_string args "schedule_id") in
+    let* cancelled_by_id =
+      actor_id_from_caller ~caller ~prefix:"cancelled_by"
+        ~default_id:(fun () -> plain (required_string args "cancelled_by_id"))
+        args
     in
-    let* reason = required_string args "reason" in
+    let* cancelled_by_kind =
+      plain
+        (actor_kind_of_arg args "cancelled_by_kind" Schedule_domain.Human_operator)
+    in
+    let* reason = plain (required_string args "reason") in
     Ok (schedule_id, cancelled_by_id, cancelled_by_kind, reason)
   in
   match parsed with
-  | Error msg -> workflow_error ~tool_name ~start_time msg
+  | Error refusal -> refusal_result ~tool_name ~start_time refusal
   | Ok (schedule_id, cancelled_by_id, cancelled_by_kind, reason) ->
     (match Schedule_service.cancel config ~schedule_id with
      | Error err ->
@@ -1102,9 +1137,9 @@ let handle_note_add ~tool_name ~start_time ctx args =
     let* schedule_id = plain (required_string args "schedule_id") in
     let* body = plain (required_string args "body") in
     let* author_id =
-      match string_opt args "author_id" with
-      | Some explicit -> Ok explicit
-      | None -> caller_name ctx ~instead:"pass author_id"
+      actor_id_from_caller ~caller:ctx.caller ~prefix:"author"
+        ~default_id:(fun () -> caller_name ctx ~instead:"pass author_id")
+        args
     in
     let* author_kind =
       plain (actor_kind_of_arg args "author_kind" Schedule_domain.Automated_actor)
@@ -1181,7 +1216,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = Get_request; _ } -> handle handle_get
   | Some { action = Cancel_request; _ } ->
       handle (fun ~tool_name ~start_time ctx ->
-          handle_cancel ~tool_name ~start_time ctx.config)
+          handle_cancel ~tool_name ~start_time ~caller:ctx.caller ctx.config)
   | Some { action = Add_note; _ } -> handle handle_note_add
   | Some { action = List_notes; _ } -> handle handle_notes_list
   (* [None] is "not a schedule tool". Spelling it out rather than [_] keeps the

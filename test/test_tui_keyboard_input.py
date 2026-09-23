@@ -5136,7 +5136,7 @@ def board_detail_authority_interaction(
             # The Overview draws the new briefing's attention item, which is
             # how the walk below knows the refresh reached it.
             late_briefing = overview_event_briefing()
-            late_briefing["attention_items"] = [
+            late_briefing["attention_queue"] = [
                 {
                     "kind": "fixture_marker",
                     "severity": "info",

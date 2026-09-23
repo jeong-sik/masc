@@ -72,7 +72,7 @@ let board_attention_quarantine_requeue_result
       args
   =
   let module Command = Keeper_board_attention_quarantine_command in
-  match Command.parse_tool_command args with
+  match Command.parse_tool_command ~requested_by:ctx.agent_name args with
   | Error error ->
     let data = Command.input_error_to_json error in
     Tool_result.make_err
@@ -91,7 +91,6 @@ let board_attention_quarantine_requeue_result
     let audit =
       Command.audit
         ctx.config
-        ~actor:ctx.agent_name
         command
         ~outcome:
           (match result with

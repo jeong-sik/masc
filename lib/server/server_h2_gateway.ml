@@ -1229,6 +1229,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
 
+      | `GET, "/api/v1/repositories/pulls" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            h2_respond_json_value h2_reqd
+              (Server_repository_pulls.snapshot_to_yojson
+                 (Server_repository_pulls.current ()))
+              ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/briefing" ->
           with_h2_public_read h2_reqd (fun state ->
             let json = dashboard_briefing_http_json ~state ~sw ~clock httpun_request in

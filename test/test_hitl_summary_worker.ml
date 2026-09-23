@@ -118,10 +118,16 @@ let pending_entry
   | None -> fail "pending approval disappeared"
 ;;
 
-let publish_lane ?(cli_slot_ids = []) slot_ids snapshot =
+let publish_lane ?(cli_slot_ids = []) ?(max_output_tokens = Some 4_096) slot_ids snapshot =
   match
     Runtime.publish_exact_output_registry
-      ~lanes:[ { Runtime_schema.id = Worker.For_testing.lane_id; slot_ids; cli_slot_ids } ]
+      ~lanes:
+        [ { Runtime_schema.id = Worker.For_testing.lane_id
+          ; slot_ids
+          ; cli_slot_ids
+          ; max_output_tokens
+          }
+        ]
       snapshot
   with
   | Ok _ -> ()
@@ -386,8 +392,9 @@ let test_the_judge_sees_what_the_box_refused () =
   install_queue base_path;
   let entry = pending_entry ~base_path () in
   let refusal : QT.observed_refusal =
-    { observed_status = QT.Observed_exit 2
-    ; observed_stderr = "sh: 1: cannot create w: Permission denied"
+    { observed_refusal_kind = QT.Setup_failed
+    ; observed_status = QT.Observed_exit 127
+    ; observed_stderr = "masc-exec-shim: Unix.Unix_error(Unix.ENOENT, \"chdir\", \"/w\")"
     ; observed_stderr_omitted_bytes = 0
     }
   in
@@ -1051,7 +1058,9 @@ let test_predispatch_failure_advances_only_to_agent_core_successor () =
              check bool
                "advance retains the typed transport failure"
                true
-               (cause = EO.Completion_failed)
+               (match cause with
+                | EO.Completion_failed _ -> true
+                | _ -> false)
            | EO.Flow_advance_candidate_rejected _ ->
              fail "transport failure was recorded as a candidate rejection")
         | _ -> fail "exactly one typed AGENT_CORE advance should be retained");

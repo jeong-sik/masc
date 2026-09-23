@@ -30,6 +30,9 @@ sedi() {
 
 echo "Bumping release version to $NEW_VERSION"
 
+# A malformed changelog fragment stops the bump before any file changes.
+python3 "$ROOT_DIR/scripts/changelog-fragments.py" check --dir "$ROOT_DIR/changelog.d"
+
 # 1) SSOT: dune-project
 sedi -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
   "$ROOT_DIR/dune-project"
@@ -50,14 +53,17 @@ if [ -f "$ROOT_DIR/masc.opam" ]; then
   echo "  masc.opam version synchronized (CI verifies generated metadata)"
 fi
 
-# 4) CHANGELOG stub (prepend if missing)
+# 4) CHANGELOG: fold the per-PR fragments (changelog.d/<PR>.md) into
+# [Unreleased], then add the version stub if missing. The release author moves
+# the [Unreleased] entries into the version section before tagging.
+python3 "$ROOT_DIR/scripts/changelog-fragments.py" assemble \
+  --dir "$ROOT_DIR/changelog.d" --changelog "$ROOT_DIR/CHANGELOG.md"
 if ! grep -q "^## \[$NEW_VERSION\]" "$ROOT_DIR/CHANGELOG.md"; then
   tmp_file="$(mktemp)"
+  # The stub goes under [Unreleased], above the newest release, so
+  # [Unreleased] stays the first section changelog-fragments.py reads.
   awk -v ver="$NEW_VERSION" -v d="$TODAY" '
-    NR == 1 { print; next }
-    NR == 2 {
-      print;
-      print "";
+    !done && /^## \[[0-9]/ {
       print "## [" ver "] - " d;
       print "";
       print "### Changed";
@@ -65,7 +71,8 @@ if ! grep -q "^## \[$NEW_VERSION\]" "$ROOT_DIR/CHANGELOG.md"; then
       print "";
       print "### Deprecated";
       print "- TBD";
-      next
+      print "";
+      done = 1
     }
     { print }
   ' "$ROOT_DIR/CHANGELOG.md" > "$tmp_file"
@@ -134,5 +141,5 @@ echo ""
 echo "Next:"
 echo "  scripts/check-version-truth.sh"
 echo "  # Build and installed-release smoke run in CI."
-echo "  git add dune-project README.md README.ko.md CHANGELOG.md masc.opam ROADMAP.md docs/PRODUCT-OPERATING-PLAN.md docs/spec/SPEC-INDEX.md docs/INSTALL.md docs/INSTALL.ko.md docs-site/src/content/docs/getting-started/quickstart.md docs-site/src/content/docs/ko/getting-started/quickstart.md"
+echo "  git add dune-project README.md README.ko.md CHANGELOG.md changelog.d masc.opam ROADMAP.md docs/PRODUCT-OPERATING-PLAN.md docs/spec/SPEC-INDEX.md docs/INSTALL.md docs/INSTALL.ko.md docs-site/src/content/docs/getting-started/quickstart.md docs-site/src/content/docs/ko/getting-started/quickstart.md"
 echo "  git commit -m \"chore(release): bump version to $NEW_VERSION\""

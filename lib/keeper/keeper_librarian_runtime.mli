@@ -9,6 +9,14 @@ val messages_for_librarian
   :  Keeper_librarian.input
   -> (Agent_core.Types.message list, string) result
 
+(** Every variable the [librarian] template is rendered with for a Memory
+    pass, with the [continuity] range when one is attached: the input's own
+    variables and the shared [working_contexts_rule] fragment. *)
+val librarian_prompt_variables
+  :  ?continuity:Keeper_librarian_continuity.prepared
+  -> Keeper_librarian.input
+  -> ((string * string) list, string) result
+
 type extraction_error
 
 val extraction_error_to_string : extraction_error -> string
@@ -37,9 +45,25 @@ val preflight_slots
     accepted. *)
 
 
+type served_slot =
+  | Api_slot of string
+      (** An API slot, named by its exact-output flow candidate id. *)
+  | Cli_slot of string
+      (** A CLI slot, named by its lane runtime id -- the id a CLI's
+          {!Keeper_lane_cli_oneshot.input_capacity} carries. *)
+(** The slot whose answer a pass accepted. The two transports name slots from
+    separate spaces, so a caller asks which transport answered by
+    constructor, not by comparing ids. *)
+
+val served_slot_id : served_slot -> string
+
 type write_scope = Context_only | Context_and_memory
-(** The caller names the evidence's purpose. A queue-source organization pass
-    writes only working Context; a durable range retains Memory processing. *)
+(** The caller names the evidence's purpose. A durable range retains Memory
+    processing. [Context_only] never writes Memory, so it never asks for a
+    Memory judgment: with [continuity] it asks the [librarian.continuity]
+    prompt for the working state alone, and without it the
+    [librarian.working_context] prompt for the working contexts alone. Each
+    answer is refused if it carries any other field. *)
 
 type not_committed =
   { detail : string
@@ -58,8 +82,14 @@ type not_committed =
             absent model), and every failure that never reached a provider all
             answer false, as does a pass that recorded no typed cause at all.
             A provider error that is not an HTTP refusal arrives as
-            [Completion_failed], which answers true whatever it held,
-            a dropped connection or a hard quota included (#37899).
+            [Completion_failed] with its typed transport error and whether
+            the request was sent. A request never sent answers false. A sent
+            one answers true only for a named context overflow, an oversized
+            response, a deadline on the request's own processing, or an empty
+            completion stopped by the context window or the output budget. A
+            dropped connection, a DNS failure, a hard quota, an idle stream,
+            any other empty completion and every unclassified failure answer
+            false.
 
             The verdict covers every failed visit of the walk, not the last
             one, so the same set of causes answers the same way whatever order
@@ -84,7 +114,8 @@ val run_best_effort
        (** The character limit a CLI slot reported while refusing, for
            {!fit_continuity}. An API slot's refusal reports none. *)
   -> ?on_not_committed:(not_committed -> unit)
-  -> ?on_continuity_committed:(Librarian_continuity_snapshot.t -> unit)
+  -> ?on_continuity_committed:(served_by:served_slot -> Librarian_continuity_snapshot.t -> unit)
+       (** [served_by] is the slot whose answer committed. *)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
   -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner
@@ -104,6 +135,20 @@ val run_best_effort
     succeeds. [durable_range_id] and [official_range_id] are committed through the Memory store's WAL
     sidecar, so a durable consumer can recover a later progress-file failure
     without submitting the completed-turn range again. *)
+
+(** What an accepted answer publishes besides Memory. A continuity pass is
+    accepted only with its working state, so the two arrive together. *)
+type continuity_answer =
+  | Memory_only
+  | Continuity of
+      { prepared : Keeper_librarian_continuity.prepared
+      ; working_state : string
+      }
+
+type accepted =
+  { selection : Keeper_librarian.selection
+  ; continuity_answer : continuity_answer
+  }
 
 module For_testing : sig
   val cause_shows_size : Agent_core.Exact_output.execution_error_cause -> bool
@@ -137,7 +182,7 @@ module For_testing : sig
     -> selected_input:Keeper_librarian.input
     -> messages:Agent_core.Types.message list
     -> unit
-    -> ( (Keeper_librarian.selection * Yojson.Safe.t) * string
+    -> ( (accepted * Yojson.Safe.t) * served_slot
        , classified_error )
        result
 

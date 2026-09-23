@@ -69,7 +69,9 @@ let denylisted_env_name name =
 (* These names are authored by the SSH runner for every request. They do not
    belong to the endpoint's caller-controlled env allowlist: without them the
    preflight can prove a Keeper identity that the payload can never use. *)
-let runtime_env_allowlist = [ "GH_CONFIG_DIR"; "GIT_TERMINAL_PROMPT" ]
+let runtime_env_allowlist =
+  [ "GH_CONFIG_DIR"; "GIT_TERMINAL_PROMPT" ]
+  @ Exec_ssh_protocol.keeper_git_author_env_names
 
 let env_of_process () =
   Array.to_list (Unix.environment ())

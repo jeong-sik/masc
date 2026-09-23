@@ -71,14 +71,10 @@ let judgment_write_json (ctx : 'a context) args =
       then Ok confidence
       else Error "confidence must be a number between 0.0 and 1.0"
     in
-    let keeper_name =
-      match get_string_opt args "keeper_name" with
-      | Some raw ->
-          let trimmed = String.trim raw in
-          if trimmed <> "" then trimmed
-          else normalized_actor ~context_actor:ctx.agent_name None
-      | None -> normalized_actor ~context_actor:ctx.agent_name None
-    in
+    (* The writer is the caller's authenticated name, never a body field:
+       a body field would let any caller record a judgment as another
+       keeper. Same rule as [resolved_actor] for staged actions. *)
+    let keeper_name = normalized_actor ~context_actor:ctx.agent_name None in
     let evidence_refs = Json_util.get_string_list args "evidence_refs"
     in
     let recommended_action = Json_util.get_object args "recommended_action" in
@@ -176,14 +172,14 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
   in
   loop 0
 
-let resolved_actor_for_args ?actor_hint (ctx : 'a context) args =
-  let payload_actor = get_string_opt args "actor" |> Option.map String.trim in
-  let hinted_actor = actor_hint |> Option.map String.trim in
-  Ok
-    (normalized_actor ~context_actor:ctx.agent_name
-       (match hinted_actor with
-       | Some actor when actor <> "" -> Some actor
-       | _ -> payload_actor))
+(* The actor is the caller's identity, never an [actor] field in its body: a
+   confirm compares it with the actor that staged the action, and a body
+   field would let any caller name the stager. HTTP passes the token-bound
+   actor as [actor_hint]. On MCP [ctx.agent_name] is the session's name,
+   which a per-agent credential binds; confirming also takes CanAdmin
+   (Tool_catalog), the permission staging took. *)
+let resolved_actor ?actor_hint (ctx : 'a context) =
+  normalized_actor ~context_actor:ctx.agent_name actor_hint
 
 let action_request_of_args ?actor_hint (ctx : 'a context) args =
   let action_type =
@@ -193,7 +189,7 @@ let action_request_of_args ?actor_hint (ctx : 'a context) args =
   let raw_target_type =
     get_string args "target_type" "" |> String.trim |> String.lowercase_ascii
   in
-  let* actor = resolved_actor_for_args ?actor_hint ctx args in
+  let actor = resolved_actor ?actor_hint ctx in
   Ok
     {
       actor;

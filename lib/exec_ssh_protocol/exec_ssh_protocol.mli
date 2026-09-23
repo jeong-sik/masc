@@ -94,6 +94,17 @@ val github_token_env_names : string list
     GitHub identity ([GH_CONFIG_DIR]); the shim refuses them in an endpoint's
     [env_file] for the same reason. *)
 
+val keeper_git_author_env_names : string list
+(** [GIT_AUTHOR_NAME] and [GIT_COMMITTER_NAME]: the names the runtime sets
+    to the Keeper's name in every environment a Keeper command runs in, so
+    each commit a Keeper makes names that Keeper. The value is the runtime's,
+    not the Keeper's: the shim refuses these names in an endpoint's
+    [env_file], and the lane's copy replaces a caller-supplied one. Emails
+    are left to whatever git config the command sees. *)
+
+val keeper_git_author_env : keeper_name:string -> (string * string) list
+(** {!keeper_git_author_env_names}, each paired with [keeper_name]. *)
+
 val default_scratch_root : string
 (** [/tmp]: where a shim makes a boxed request's scratch when its config
     names no [scratch_root]. Shared with the microvm boot, which mounts the

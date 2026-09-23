@@ -96,10 +96,15 @@ type refusal_kind =
       (** No due input, and the recurrence cannot derive one. *)
   | Refusal_caller_unidentified
       (** The call needs the caller's name and the endpoint does not know it. *)
+  | Refusal_actor_mismatch
+      (** An actor id argument names someone other than the caller. *)
   | Refusal_argument_out_of_range
       (** An integer argument outside its declared minimum and maximum. *)
   | Refusal_cursor_mismatch
       (** A cursor used with filters other than the listing that issued it. *)
+  | Refusal_not_schedule_owner
+      (** A named caller asked to update or cancel a schedule it did not
+          make and that does not wake it. *)
 
 val refusal_kind_to_string : refusal_kind -> string
 val refusal_kind_of_string : string -> (refusal_kind, decode_error) result

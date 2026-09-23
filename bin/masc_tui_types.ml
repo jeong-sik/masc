@@ -1,5 +1,6 @@
 [@@@warning "-32-69"]
 module Tui_decode = Masc.Tui_decode
+module Memory_category = Masc.Keeper_memory_os_types
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
 
@@ -1239,12 +1240,23 @@ type attention_severity =
   | Attention_warning
   | Attention_info
 
+(** What an attention item is about. Parsed once at the decode boundary so a
+    reader that joins items to Keepers matches a constructor instead of
+    comparing the wire word. A target the TUI does not join on keeps its wire
+    words as they came. *)
+type attention_target =
+  | Attention_keeper of string
+  | Attention_other of { target_type: string; target_id: string option }
+
 type attention_item = {
   ai_kind: string;
   ai_severity: attention_severity;
   ai_summary: string;
-  ai_target_type: string;
-  ai_target_id: string option;
+  ai_target: attention_target;
+  ai_blocker_summary: string option;
+      (** [evidence.runtime_blocker.runtime_blocker_summary] on a Keeper
+          runtime-blocker item: the cause alone, without the Keeper name and
+          class word [ai_summary] wraps it in. [None] on every other item. *)
   ai_evidence_ts: float option;
       (** Epoch seconds of the evidence's [log_ts], when the producer stamped
           one (tool-host failures do). The row's age is drawn from it; items
@@ -1277,13 +1289,15 @@ type board_post = {
   bp_votes: int;
   bp_comment_count: int;
   bp_created_at: string;
+  bp_created_at_unix: float option;
+      (** Unix seconds of the moment the post appeared. Four of the five sort
+          orders rank or break ties on it, so it is the number those lists are
+          made from. [None] when the post carried no numeric [created_at]. *)
   bp_updated_at: float option;
-      (** Unix seconds of the last move on the post or its comments. The server
-          has always sent it; the list drew neither timestamp, so the one
-          question a board answers -- what is still alive -- had no column, and
-          two of the sort orders ([recent], [updated]) ranked by a number the
-          reader could not see. [None] when the post carried neither this nor a
-          numeric [created_at]: there is no time to measure an age from. *)
+      (** Unix seconds of the last move on the post or its comments. The
+          [updated] order ranks on it. [None] when the post carried neither
+          this nor a numeric [created_at]: there is no time to measure an age
+          from. *)
   bp_hearth: string option;
       (** The sub-board it lives in. 24 of them here, and 1550 of 2171 posts
           sit in [verification] alone — a flat list is 71% one topic with
@@ -1367,6 +1381,10 @@ type schedule_row = {
   sch_reaction_quarantined: int option;
       (** Ledger records the projection could not match. Nonzero is why a
           status reads worse than the steps below it look. *)
+  sch_runner_hold: Tui_decode.schedule_runner_hold option;
+      (** The occurrence the schedule runner is holding back because the
+          target Keeper has not taken the previous one yet. A held occurrence
+          has no wake, so none of the fields above can say it (#38205). *)
 }
 
 let schedule_json_string field = function
@@ -1389,6 +1407,70 @@ let schedule_payload_body = function
        | Some (`Assoc _ as body) -> body
        | Some _ | None -> `Assoc [])
   | _ -> `Assoc []
+
+(** What the Keeper's schedule store holds, in one line above its rows.
+
+    The tab drew the rows and nothing else, and a Keeper whose store has run
+    for weeks answers with a wall of closed work: on the live fleet
+    [code-reviewer] held 100 requests, 1 of them scheduled and the other 99
+    succeeded or cancelled. A reader had no way to learn that from the screen
+    without scrolling to the end of it.
+
+    Live and closed are split by [Schedule_domain.is_terminal], the same rule
+    the store itself uses, and a count of zero is left out -- a disposition
+    nothing is in is not a fact about this Keeper. *)
+let schedule_counts_line counts =
+  let spell statuses =
+    counts
+    |> List.filter (fun (status, count) -> count > 0 && List.mem status statuses)
+    |> List.map (fun (status, count) ->
+           Printf.sprintf "%d %s" count
+             (Schedule_domain.schedule_status_to_string status))
+  in
+  let live, closed =
+    List.partition
+      (fun status -> not (Schedule_domain.is_terminal status))
+      Schedule_domain.all_schedule_statuses
+  in
+  let live_text =
+    match spell live with
+    | [] -> "nothing live"
+    | parts -> String.concat ", " parts
+  in
+  let closed_total =
+    counts
+    |> List.filter (fun (status, _) -> List.mem status closed)
+    |> List.fold_left (fun total (_, count) -> total + count) 0
+  in
+  match spell closed with
+  | [] -> live_text
+  | parts ->
+      Printf.sprintf "%s \xc2\xb7 %s closed (%s)" live_text
+        (string_of_int closed_total) (String.concat ", " parts)
+
+(** Why the store would refuse a modify, read before the editor opens.
+
+    The rule is [Schedule_domain.modify_allowed], the same function
+    [Schedule_store.update_request] calls, so this file holds no copy of it.
+    The reason names only the status the row showed: the screen may be one
+    refresh behind a recurring schedule that has since finished running.
+
+    [None] is the answer for a word this build does not name. It is the same
+    promise [sch_status] makes by staying a string: an unrecognised status
+    renders as itself, and it is the server's call, not ours, whether it can
+    be modified. Refusing on a word we cannot read would turn forward
+    compatibility into a locked row. *)
+let schedule_modify_refusal (row : schedule_row) : string option =
+  match Schedule_domain.schedule_status_of_string row.sch_status with
+  | Error _ -> None
+  | Ok status ->
+      if Schedule_domain.modify_allowed status then None
+      else
+        Some
+          (Printf.sprintf
+             "the store refuses to modify a %s schedule (status as last \
+              read; refresh if it has changed)"
+             row.sch_status)
 
 let schedule_update_form_json (row : schedule_row) =
   let body = schedule_payload_body row.sch_payload in
@@ -1461,6 +1543,11 @@ type schedule_snapshot = {
   scs_request_count: int option;
   scs_truncated: bool;
   scs_next_due_iso: string option;
+  (** Every status the store holds for this target, not only the page the
+      server sent, so the count stays right when the page is capped. [None]
+      exactly when the store read failed, which is the same fact
+      [scs_request_count = None] carries. *)
+  scs_counts: (Schedule_domain.schedule_status * int) list option;
   scs_rows: schedule_row list;
 }
 
@@ -1501,11 +1588,11 @@ type pane_focus =
   | Right_pane
 
 (** Runtime surface sub-mode. [Runtime_lanes] answers "what is each lane
-    going to call, in what order" — the failover view. [Runtime_all] answers
+    going to call, in what order" — the candidate-order view. [Runtime_all] answers
     "what can this workspace call at all", which the lane view cannot: a
     runtime no lane names is absent from it entirely, and the roster is where
     an operator finds one to assign. Same snapshot, two questions. *)
-(* The order a failover picker should offer runtimes in. What the lane needs
+(* The order the candidate picker should offer runtimes in. What the lane needs
    is a candidate that fails independently of the ones it already has, so a
    different provider outranks a faster model from the same one: two slots on
    one provider go down together, which is the state this picker exists to
@@ -1535,7 +1622,7 @@ type runtime_mode =
   | Runtime_lanes
   | Runtime_all
 
-(* What the failover picker adds the chosen runtime to. A conversation lane
+(* What the candidate picker adds the chosen runtime to. A conversation lane
    and a standalone lane's walk order both take it at the end; a new lane
    takes it as its first candidate, which is how the lane comes to exist. *)
 type runtime_lane_pick =
@@ -1869,9 +1956,11 @@ let acting_retained_quiet = 200
     same as nine running ones.
 
     [klc_unreadable] counts rows whose word is missing or outside the
-    vocabulary. They are not folded into any state: a Keeper whose liveness
-    this build cannot name is a different fact from an idle one, and the row
-    says so rather than picking the convenient neighbour. *)
+    vocabulary, and the Keepers the briefing lists under [keepers_unread]
+    because the server could not build their row. They are not folded into
+    any state: a Keeper whose liveness this build cannot name is a different
+    fact from an idle one, and the row says so rather than picking the
+    convenient neighbour. *)
 type keeper_liveness_counts = {
   klc_active: int;
   klc_offline: int;
@@ -1880,15 +1969,102 @@ type keeper_liveness_counts = {
   klc_unreadable: int;
 }
 
+(** The Overview's reading of the runtime catalogue's quota windows. A failed
+    read is kept apart from one not made yet, and neither is drawn as "no
+    window is shut". *)
+type overview_quota_reading =
+  | Quota_unread
+  | Quota_read of Tui_decode.runtime_option list
+  | Quota_failed of string
+
+(** One open pull request as [GET /api/v1/repositories/pulls] reports it
+    (RFC-0465). The check and review words are parsed at decode; a word this
+    build cannot name makes the row undecodable rather than a default. *)
+type pull_checks = Pull_checks_passing | Pull_checks_failing | Pull_checks_running | Pull_checks_none
+type pull_review = Pull_review_approved | Pull_review_changes_requested | Pull_review_waiting | Pull_review_none
+type pull_mergeable = Pull_mergeable | Pull_conflicting | Pull_mergeable_unknown
+
+type open_pull = {
+  op_number: int;
+  op_title: string;
+  op_head_branch: string;
+  op_draft: bool;
+  op_checks: pull_checks;
+  op_review: pull_review;
+  op_mergeable: pull_mergeable;
+  op_keeper: string option;
+      (** The Keeper whose name is this PR's last commit author (RFC-0465
+          §2.1). Only meaningful while the snapshot's Keeper list was read;
+          see {!pulls_keepers}. *)
+}
+
+type repository_pulls_reading =
+  | Repo_pulls_read of { pulls: open_pull list; undecodable: int }
+  | Repo_pulls_failed of string
+      (** The server's failure kind, with its detail when it carried one. *)
+  | Repo_pulls_not_read
+  | Repo_not_github
+
+type repository_pulls_row = { rp_repository: string; rp_state: repository_pulls_reading }
+
+type pulls_reader =
+  | Pulls_reader_ready of string
+  | Pulls_reader_not_ready of string
+      (** Why the server is not reading: not declared, the Keeper is missing,
+          or its token cannot be read. *)
+
+(** Whether the server read the Keeper list it joined authors against. A PR
+    with no Keeper means "no Keeper wrote it" only under [Pulls_keepers_listed]. *)
+type pulls_keepers =
+  | Pulls_keepers_not_listed
+  | Pulls_keepers_listed
+  | Pulls_keepers_failed of string
+
+type overview_pulls_reading =
+  | Overview_pulls_unread
+  | Overview_pulls_read of {
+      reader: pulls_reader;
+      keepers: pulls_keepers;
+      repositories_error: string option;
+          (** The server could not list the registered repositories; the rows
+              are the last list it could, so they may be out of date. *)
+      repositories: repository_pulls_row list;
+    }
+  | Overview_pulls_failed of string
+
+(** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
+    briefing writes [null] for a Keeper with no registry entry (an offline
+    Keeper that never booted this process), which is a different fact from a
+    word this build cannot name; neither is folded into a phase. *)
+type overview_keeper_phase =
+  | Keeper_phase of Tui_decode.keeper_phase
+  | Keeper_phase_absent
+  | Keeper_phase_unreadable of string
+
+(** One [keeper_briefs] row, as the Overview Team block reads it. *)
+type overview_keeper = {
+  okp_name: string;
+  okp_phase: overview_keeper_phase;
+  okp_last_turn_ago_s: float option;
+      (** [None] when the Keeper has not finished a turn this process saw. *)
+  okp_paused: bool option;
+      (** The brief's [paused]: an operator paused this Keeper. It is read
+          apart from [okp_phase] because a paused Keeper is left out of
+          autoboot, so after a server restart it has no registry entry and
+          its phase is [null] while [paused] still says [true]. [None] when
+          the brief carried no boolean there. *)
+}
+
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
-  ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_liveness: keeper_liveness_counts;
+  ov_keeper_rows: overview_keeper list;
+      (** Every [keeper_briefs] row with a name, in the briefing's order. *)
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
-  ov_top_attention: attention_item option;
   ov_generated_at: string;
 }
 
@@ -1927,6 +2103,7 @@ type planning_backlog = Tui_decode.planning_backlog
   pb_todo: int;
   pb_claimed: int;
   pb_running: int;
+  pb_awaiting_verification: int;
   pb_done: int;
   pb_cancelled: int;
 }
@@ -2087,6 +2264,51 @@ let planning_visible_goals ~filter ~sort (goals : planning_goal list)
   in
   List.stable_sort compare (List.filter (planning_passes_filter filter) goals)
 
+(* How far a standalone lane's slot history is from its finished runs. The
+   server counts the slots and the runs without one from the same list of
+   finished runs, so the two add up and this is 0. Anything else means the
+   server's projection broke, and the detail draws the difference, positive
+   or negative, rather than rounding it away. Running rows are in neither
+   count: a run that has not finished has not chosen. *)
+let standalone_lane_slot_history_gap (lane : Tui_decode.standalone_lane) =
+  let named =
+    List.fold_left
+      (fun n (sc : Tui_decode.standalone_lane_slot_count) -> n + sc.slsc_count)
+      0 lane.sl_selected_slots
+  in
+  let without = lane.sl_runs_without_slot in
+  let accounted =
+    named + without.slws_vendor_system_one + without.slws_server_restarted
+    + without.slws_no_slot
+  in
+  lane.sl_succeeded_count + lane.sl_failed_count + lane.sl_cancelled_count
+  - accounted
+
+(* What the slot history line says after the slots: the finished runs that
+   named no slot, by the reason the server gives, and then any gap between
+   all the counts and the finished runs. Zero counts say nothing. *)
+let standalone_lane_runs_without_slot_parts (lane : Tui_decode.standalone_lane) =
+  let without = lane.sl_runs_without_slot in
+  let counted label count =
+    if count = 0 then [] else [ Printf.sprintf "%s: %d" label count ]
+  in
+  let no_slot =
+    if without.slws_no_slot = 0 then []
+    else
+      [ Masc_tui_message_layout.count_noun without.slws_no_slot "run" ^ " named no slot" ]
+  in
+  let gap =
+    match standalone_lane_slot_history_gap lane with
+    | 0 -> []
+    | gap when gap > 0 ->
+      [ Printf.sprintf "%s finished in no count"
+          (Masc_tui_message_layout.count_noun gap "run") ]
+    | gap -> [ Printf.sprintf "counts exceed finished runs by %d" (-gap) ]
+  in
+  counted "Vendor System One" without.slws_vendor_system_one
+  @ counted "closed by server restart" without.slws_server_restarted
+  @ no_slot @ gap
+
 type board_sort =
   | Board_hot
   | Board_trending
@@ -2116,6 +2338,40 @@ let board_sort_explanation = function
   | Board_updated -> "latest changed first"
   | Board_discussed -> "most replies first; newer breaks ties"
 ;;
+
+(** Which of a post's two times the sort put the rows in order by. Four of the
+    five orders key or break ties on the moment the post appeared; only
+    [Board_updated] keys on the moment it last changed.
+
+    This is a reading of what the server does, not a rule it follows: the
+    orders are applied in [Board_dispatch.sort_posts] and [Board_sort], and
+    nothing here can see them. It sits beside [board_sort_explanation] because
+    the two answer the same question -- what this order is -- and a server
+    that changed an order would leave both wrong together. Move them
+    together. *)
+type board_sort_time =
+  | Board_time_posted
+  | Board_time_changed
+
+let board_sort_time = function
+  | Board_hot | Board_trending | Board_recent | Board_discussed ->
+      Board_time_posted
+  | Board_updated -> Board_time_changed
+
+(** The word over the list's age column. It names the time the column holds,
+    so the header changes with the sort rather than letting one word stand for
+    both times. Both fit the six cells the column has. *)
+let board_age_header = function
+  | Board_time_posted -> "AGE"
+  | Board_time_changed -> "MOVED"
+
+(** Which of a post's two times the age column measures from. Both are
+    [option] because a post can arrive carrying neither, and the column then
+    has no age to draw. *)
+let board_age_source ~time ~posted ~changed =
+  match time with
+  | Board_time_posted -> posted
+  | Board_time_changed -> changed
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
@@ -2222,6 +2478,30 @@ let lowercase_contains ~needle haystack =
     that finds nothing while the row is right there. *)
 let identity_names ~query (id, label) =
   lowercase_contains ~needle:query label || lowercase_contains ~needle:query id
+
+(** Which Keeper a connected client is acting for, where that is a reading
+    its row does not already carry.
+
+    A Keeper's own session is filed under the Keeper's name, so the cell
+    repeated the name beside it on every Keeper row -- twelve of fourteen on
+    a live workspace -- while the row's type already said it was a Keeper.
+    What the column is for is the other case: a client bound to a Keeper's
+    session under a name of its own. *)
+let client_acting_for ~name ~keeper_name =
+  match keeper_name with
+  | Some keeper when not (String.equal keeper name) -> Some keeper
+  | Some _ | None -> None
+
+(** Whether any row in a client listing has a Keeper to name. Where none
+    does, the column is seventeen blank cells and the clock at the end of the
+    row is what loses them. *)
+let clients_act_for_others rows =
+  List.exists
+    (fun (row : Tui_decode.client_row) ->
+      Option.is_some
+        (client_acting_for ~name:row.Tui_decode.cr_name
+           ~keeper_name:row.Tui_decode.cr_keeper_name))
+    rows
 
 let identity_connectable ?(query = "") providers =
   List.filter_map
@@ -2528,6 +2808,18 @@ type surface =
   | Tools
   | System_logs
 
+(** The Keeper roster or one Keeper's detail: where the selected Keeper is
+    the one on screen, so a key can be read as meaning that Keeper. Every
+    constructor is named so a new surface has to decide. *)
+let shows_selected_keeper = function
+  | Keepers (Keeper_list | Keeper_detail) -> true
+  | Keepers (Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories
+  | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+  | System_logs ->
+      false
+
 (** The Activity screen is two surfaces under one tab strip: the event
     feed and the system logs, reached from each other with 1 and 2. A
     rule about "the Activity screen" reads this rather than [Acting]
@@ -2593,6 +2885,8 @@ type surface_needs = {
   needs_keeper_chat : bool;
   needs_operator_approvals : bool;
   needs_asks : bool;
+  needs_runtime_quota : bool;
+  needs_repository_pulls : bool;
 }
 
 let nothing =
@@ -2605,6 +2899,8 @@ let nothing =
     needs_keeper_chat = false;
     needs_operator_approvals = false;
     needs_asks = false;
+    needs_runtime_quota = false;
+    needs_repository_pulls = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2625,7 +2921,15 @@ let rec surface_needs ~keeper_pane_drawn surface =
   else needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  | Overview -> { nothing with needs_transport = true }
+  (* The Team block names the quota windows that are shut. The catalogue is
+     43 KB and answers in under two milliseconds on the live runtime, and
+     only this surface draws the windows beside the Keepers they stop. *)
+  | Overview ->
+      { nothing with
+        needs_transport = true
+      ; needs_runtime_quota = true
+      ; needs_repository_pulls = true
+      }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -2677,6 +2981,10 @@ let surface_needs_delta ~previous ~next =
       next.needs_operator_approvals
       && not previous.needs_operator_approvals
   ; needs_asks = next.needs_asks && not previous.needs_asks
+  ; needs_runtime_quota =
+      next.needs_runtime_quota && not previous.needs_runtime_quota
+  ; needs_repository_pulls =
+      next.needs_repository_pulls && not previous.needs_repository_pulls
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -2741,17 +3049,22 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
+(* [authority_rows] is how many rows the line naming the SSOT and the last
+   probe took at this width. It wraps at clause marks
+   ([runtime_authority_rows]), so a narrow frame spends more than one row on it
+   and a count fixed at one puts the footer past the frame's last row. *)
 let runtime_listing_chrome
       ?(stale_rows = 0)
       ?(route_rows = 0)
       ?(editor_rows = None)
+      ~authority_rows
       ~error
       ~action_error
       ~prompt
       ~picker_rows
       ()
   =
-  listing_chrome ~error + 2
+  listing_chrome ~error + 1 + max 1 authority_rows
   + (if Option.is_some action_error then 2 else 0)
   + (if stale_rows > 0 then stale_rows + 1 else 0)
   + (if prompt then 2 else 0)
@@ -3518,13 +3831,13 @@ let next_memory_sort = function
 
 type memory_category_filter =
   | Category_all
-  | Category_ordinary of string
+  | Category_ordinary of Memory_category.category
   | Category_source
   | Category_dropped
 
 let memory_category_filter_label = function
   | Category_all -> "All"
-  | Category_ordinary cat -> cat
+  | Category_ordinary cat -> Memory_category.category_to_string cat
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
@@ -4810,6 +5123,16 @@ let slot_editor_target_name = function
   | Media_failover_slots -> "[runtime].media_failover"
 ;;
 
+(* The slot editor's half of the same question the pick list asks. The media
+   failover route has no per-entry write, so a drop or a move sends the whole
+   order it read; an exact lane names the one slot and lets the writer read
+   the declared order under its lock. Exhaustive, so a target added later
+   says which side it is on. *)
+let slot_editor_target_sends_whole_order = function
+  | Media_failover_slots -> true
+  | Exact_lane_slots _ -> false
+;;
+
 (* A name being typed on the Runtime reading. [Renaming_lane] carries the name
    the lane has now, because the write names both and the prompt shows the
    one being replaced. *)
@@ -5179,8 +5502,19 @@ type state = {
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
+  (* The Info tab's Board-attention rows, keyed by the Keeper they were read
+     for. [requeue_board_quarantine_inflight] holds the partition a requeue
+     press is waiting on, so a second press before the answer is not a second
+     request against the same quarantine. *)
+  mutable keeper_board_quarantines:
+    (string, Masc_tui_board_quarantine.t) Masc_tui_fetched.t;
+  mutable board_quarantine_requeue_inflight: string option;
   mutable github_token_input: string option;
   mutable github_token_save_status: string option;
+  (* The scopes the next [L] login asks for beyond gh's minimum. Off until the
+     operator ticks one: [workflow] lets the token change CI, which runs with
+     the repository's secrets. *)
+  mutable github_login_scopes: Masc.Keeper_github_identity.login_scope list;
   (* The Identity tab. Stamped with the keeper it was fetched for, like the
      other fetched tabs, so the pane shows loading rather than another
      keeper's answer. The providers are held rather than pre-rendered lines
@@ -5294,6 +5628,11 @@ type state = {
   mutable runtime_pick_keeper: string option;
   mutable runtime_pick_cursor: int;
   mutable runtime_catalog: Tui_decode.runtime_option list;
+  (* The Overview's own read of the same catalogue, kept apart from the
+     picker's [runtime_catalog] so a refresh behind the Overview never moves
+     the rows under an open picker's cursor. *)
+  mutable overview_quota: overview_quota_reading;
+  mutable overview_pulls: overview_pulls_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -5598,10 +5937,29 @@ type state = {
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
+  (* A binding write landed while a load was in flight; read once more when
+     that load answers. *)
+  mutable connectors_reload_after_inflight: bool;
   mutable connectors_scroll: int;
   mutable connectors_cursor: int;
   mutable connectors_binding_cursor: int;
   mutable connector_unbind_armed: (string * string * string) option;
+  (* The first [U] on the Channels tab: whose bindings, and exactly which.
+     The second press sends these and no others, so a binding that appeared
+     after the first press is not removed without being named. *)
+  mutable connector_unbind_all_armed:
+    (string * Masc_tui_connector_unbind.target list) option;
+  mutable connector_unbind_all_inflight: bool;
+  (* A Keeper the operator just paused or shut down, waiting for a fresh
+     connector read to learn whether it still holds bindings to offer to
+     remove. *)
+  mutable connector_unbind_offer_pending: string list;
+  (* The offer after a pause or shutdown, while it waits for its one key.
+     Separate from the unbind-all arm: that arm answers [U], and on the
+     Keeper list [U] is the runtime picker. *)
+  mutable connector_unbind_offer: Masc_tui_connector_unbind.offer option;
+  (* Frames the terminal accepted with changed output. *)
+  mutable frames_presented: int;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
@@ -6278,6 +6636,28 @@ let text_input_target (state : state) ~compact_viewport =
   else if state.view = Board && state.board_mode = Board_compose then
     Some Text_board_draft
   else None
+;;
+
+(* Whether the quit key is a quit key right now. A field taking typed text
+   owns every printable key it is handed, [q] with them, so the answer is no
+   while any of them is open.
+
+   Written out rather than closed with [Some _]: the list is the whole
+   vocabulary of typing places, and a field added to it has to be walked past
+   here before it reaches an operator. It was three names and a catch-all, and
+   the other ten -- the command palette among them -- let a typed [q] arm the
+   exit instead of landing in the field. Two of the ten were caught again by a
+   condition spelled at the quit branch itself, which is the shape this
+   function exists to stop. *)
+let quit_key_allowed_for = function
+  | Some
+      ( Text_browser_url | Text_ask_answer | Text_fusion_launch
+      | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
+      | Text_voice_wizard | Text_palette | Text_row_search
+      | Text_identity_app_form | Text_identity_filter | Text_github_token
+      | Text_board_draft ) ->
+      false
+  | None -> true
 ;;
 
 (* One reading of the state for both the send path and the footer; the order
@@ -7342,8 +7722,11 @@ let create_state
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;
+  keeper_board_quarantines = Masc_tui_fetched.initial;
+  board_quarantine_requeue_inflight = None;
   github_token_input = None;
   github_token_save_status = None;
+  github_login_scopes = [];
   identity_view = None;
   identity_view_error = None;
   identity_login = None;
@@ -7383,6 +7766,8 @@ let create_state
   runtime_pick_keeper = None;
   runtime_pick_cursor = 0;
   runtime_catalog = [];
+  overview_quota = Quota_unread;
+  overview_pulls = Overview_pulls_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;
@@ -7555,10 +7940,16 @@ let create_state
   connectors = None;
   connectors_error = None;
   connectors_inflight = false;
+  connectors_reload_after_inflight = false;
   connectors_scroll = 0;
   connectors_cursor = 0;
   connectors_binding_cursor = 0;
   connector_unbind_armed = None;
+  connector_unbind_all_armed = None;
+  connector_unbind_all_inflight = false;
+  connector_unbind_offer_pending = [];
+  connector_unbind_offer = None;
+  frames_presented = 0;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;
@@ -8448,17 +8839,30 @@ let surface_search_query surface query =
 
 let memory_fact_search_text = function
   | Memory_row_fact f ->
-      f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
-      ^ f.Tui_decode.mf_origin
+      f.Tui_decode.mf_claim ^ " "
+      ^ Memory_category.category_to_string f.Tui_decode.mf_category
+      ^ " " ^ f.Tui_decode.mf_origin
   | Memory_row_source_fact f ->
       f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
   | Memory_row_invalidation f ->
       f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
 
+(* The filter the Memory surface is narrowed by: the text being typed while a
+   search is open, and the applied one otherwise. Every count, every list and
+   every banner on the surface reads it here, so the number beside a filter is
+   a count of what that filter left. The rule was written out twice -- once
+   for the keeper table, once inside [memory_fact_rows] -- and the facts
+   banner read a third value, [search_last], so with a filter already applied
+   it quoted the old word over a count of the new one. *)
+let memory_search_query (state : state) =
+  match state.search with
+  | Some q -> surface_search_query Memory q
+  | None -> surface_search_query Memory state.search_last
+
+(* The keeper table matches case-folded, so its own reading is folded. Same
+   filter, one normalisation. *)
 let memory_overview_query (state : state) =
-    match state.search with
-    | Some q -> String.lowercase_ascii (surface_search_query Memory q)
-    | None -> String.lowercase_ascii (surface_search_query Memory state.search_last)
+  String.lowercase_ascii (memory_search_query state)
 
 
 (* What Esc does on Memory, nearest layer first: a filter, then the fact
@@ -8559,7 +8963,10 @@ let selected_memory_keeper (state : state) =
   let rows = visible_memory_keepers state in
   List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
 
-let memory_overview_scrolled ?cursor (state : state) =
+(* [header_rows] is how many rows the fleet header above the sort row takes.
+   The renderer wraps it to the frame, so only it knows the number; it passes
+   the length of the rows it draws ([Masc_tui_render_memory.memory_overview_scrolled]). *)
+let memory_overview_scrolled ~header_rows ?cursor (state : state) =
   let keepers = visible_memory_keepers state in
   let count = List.length keepers in
   let cursor = Option.value cursor ~default:state.memory_health_cursor in
@@ -8573,14 +8980,29 @@ let memory_overview_scrolled ?cursor (state : state) =
         9 + List.length keeper.mkh_alerts
         + (if Option.is_some keeper.mkh_read_error then 1 else 0)
         + (if Option.is_some keeper.mkh_source_read_error then 1 else 0)
+        (* The Librarian cause row, drawn only for a pass that stopped or
+           crashed. *)
+        + (match
+             Option.bind keeper.mkh_librarian.Tui_decode.mlh_state
+               Tui_decode.memory_librarian_pass_end_cause
+           with
+           | Some _ -> 1
+           | None -> 0)
+  in
+  (* One row per keeper row the decoder refused, then a divider. *)
+  let refused_rows =
+    match state.memory_health with
+    | Some { Tui_decode.mhs_refused_keepers = []; _ } | None -> 0
+    | Some { Tui_decode.mhs_refused_keepers = refused; _ } -> List.length refused + 1
   in
   { sc_count = count
   ; sc_chrome =
       Masc_tui_frame.chrome_rows
-      (* Totals, Librarian, legend, sort, divider, headings, divider. *)
-      + 7 + context_rows
+      (* The fleet header, then legend, sort, divider, headings, divider. *)
+      + header_rows + 5 + context_rows
       + (if memory_overview_query state <> "" then 1 else 0)
       + (if Option.is_some state.memory_health_error then 2 else 0)
+      + refused_rows
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
@@ -8606,7 +9028,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
               | Category_ordinary category ->
                   List.filter
                     (fun (fact : Tui_decode.memory_fact) ->
-                      String.equal fact.Tui_decode.mf_category category)
+                      fact.Tui_decode.mf_category = category)
                     store.Tui_decode.mos_facts
               | Category_source | Category_dropped -> []
             in
@@ -8637,11 +9059,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
             (src, inv)
       in
       let all_rows = ordinary @ source_rows @ invalidation_rows in
-      let query =
-        match state.search with
-        | Some q -> surface_search_query Memory q
-        | None -> surface_search_query Memory state.search_last
-      in
+      let query = memory_search_query state in
       let filtered_rows =
         if query = "" then all_rows
         else
@@ -8701,7 +9119,8 @@ let memory_fact_rows (state : state) : memory_fact_row list =
            List.sort
              (fun a b ->
                let cat = function
-                 | Memory_row_fact f -> (0, f.Tui_decode.mf_category)
+                 | Memory_row_fact f ->
+                     (0, Memory_category.category_to_string f.Tui_decode.mf_category)
                  | Memory_row_source_fact _ -> (1, "source")
                  | Memory_row_invalidation _ -> (2, "dropped")
                in
@@ -8729,10 +9148,10 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                String.compare (claim a) (claim b))
              filtered_rows)
 
-(* The categories the loaded ordinary store and source store actually hold, distinct and
-   sorted -- the [c] cycle walks these. Read from the rows, never from a
-   list this side hardcodes: the taxonomy is the server's, and a category it
-   adds appears here without a code change. *)
+(* The categories the loaded ordinary store and source store actually hold,
+   distinct and in the taxonomy's constructor order -- the [c] cycle walks
+   these. Read from the rows rather than [all_categories], so the strip names
+   only the categories this keeper has written. *)
 let memory_fact_categories (state : state) : memory_category_filter list =
   match state.memory_facts with
   | None -> []
@@ -8896,6 +9315,21 @@ let runtime_lane_write_busy (state : state) =
    the last write; sending it again could restore a candidate another writer
    removed. Keep the refusal typed by the list state rather than guessing
    freshness from elapsed time or the notice text. *)
+(* Whether the write this pick sends replaces the order the list last read,
+   in full. Those are the writes a stale list can undo: the server takes what
+   we send as the whole order, so an entry another writer removed comes back.
+   Appending one slot, or creating a lane out of the pick alone, cannot do
+   that -- the server joins those to the order it holds.
+
+   Exhaustive on purpose. The rule used to live in the dispatch as a list of
+   constructors beside a comment reading "only the conversation-lane arm
+   sends [existing] in full", and [Pick_media_failover] -- which sends
+   [existing @ [ pick ]] -- sat on the unguarded side of it. A pick added
+   later has to say which side it is on. *)
+let runtime_lane_pick_sends_whole_order = function
+  | Pick_conversation_lane _ | Pick_media_failover -> true
+  | Pick_exact_lane _ | Pick_new_lane _ | Pick_route_default -> false
+
 let runtime_lane_candidate_write_refusal (state : state) =
   if runtime_lane_write_busy state
   then Some Lane_write_pending
@@ -9141,6 +9575,17 @@ let plan_slot_edit (state : state) edit =
        if runtime_lane_write_busy state
        then Refuse_slot_edit Lane_write_pending
        else (
+         match
+           ( slot_editor_target_sends_whole_order target
+           , runtime_lane_candidate_write_refusal state )
+         with
+         | true, Some notice ->
+           (* The order under the cursor is the one the list last read, and
+              after a failed read-back that is evidence of the state before
+              the last write. The pick list refuses the same write for the
+              same reason. *)
+           Refuse_slot_edit notice
+         | true, None | false, (Some _ | None) ->
          match target, edit with
          | Exact_lane_slots _, Drop_slot when count <= 1 ->
            (* The writer refuses it too. Saying so here keeps the round trip
@@ -9199,7 +9644,7 @@ type runtime_lane_fact =
       (* No [runtime.lanes.<id>] table declares this lane: it is the single
          candidate an assignment naming a runtime rests on. It reads exactly
          like [Lane_single_candidate] on the wire -- one candidate, first
-         position. A declared lane of one candidate walks no failover either;
+         position. A declared lane of one candidate has no next candidate either;
          what separates this one is that [D] has no table to remove. *)
   | Lane_single_candidate
   | Lane_head
@@ -9305,11 +9750,21 @@ let runtime_pick_facts_width facts =
     facts
   + max 0 (List.length facts - 1)
 
+(* The kind badge that opens each row. Both are padded to the wider one, so
+   the target column starts at the same cell on a lane row and a model row. *)
+let runtime_pick_lane_badge = "[LANE]"
+let runtime_pick_model_badge = "[MODEL]"
+
+let runtime_pick_badge_cells =
+  max
+    (Masc_tui_message_layout.display_width runtime_pick_lane_badge)
+    (Masc_tui_message_layout.display_width runtime_pick_model_badge)
+
 (* Everything in the row that is not one of the two columns and not the facts:
    the cursor mark, the kind badge, and the two-space gap on each side of the
    route column. The row the renderer draws is
    [cursor ^ badge ^ target ^ "  " ^ route ^ "  " ^ facts]. *)
-let runtime_pick_fixed_cells = 2 + 7 + 2 + 2
+let runtime_pick_fixed_cells = 2 + runtime_pick_badge_cells + 2 + 2
 
 (* What is left for the facts once the chrome and the two column floors are
    paid. At 80 columns that is 15 cells, which one fact fills. *)
@@ -9383,8 +9838,107 @@ let runtime_pick_column_widths ~cols items =
   in
   target, shared - target
 
-let runtime_surface_listing_chrome state =
-  runtime_listing_chrome ~error:state.runtime_surface_error
+(* The three fleet totals, in one place. The Overview, the lane rows and the
+   Runtime authority row all say them, and a screen that folds its own copy
+   keeps compiling while the two answers drift. It lives here rather than in
+   the renderer because the renderer is an executable module: a test cannot
+   link it, and this is the first of those screens whose row count a test
+   reads. *)
+let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
+  let turns =
+    List.fold_left
+      (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_turns)
+      0 keepers
+  in
+  let tokens =
+    List.fold_left
+      (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_tokens)
+      0 keepers
+  in
+  let cost =
+    List.fold_left
+      (fun acc (k : Tui_decode.keeper) -> acc +. k.Tui_decode.k_total_cost_usd)
+      0.0 keepers
+  in
+  turns, tokens, cost
+
+(* The authority line under the Runtime title: where every reading on this
+   screen comes from, and what the last probe found. It is one sentence of
+   clauses, and with a fleet on screen it asked for about 197 cells with every
+   count a single digit -- the frame gives 96 at the 100 columns the PTY
+   harness opens and 136 at 140, so it was cut mid-word at every width a
+   terminal is likely to have. What the cut took was the tail: the config path
+   this whole screen is a reading of, and a cut path names a file that does not
+   exist.
+
+   The shape is the Memory fleet header's (#36497): pack at clause marks rather
+   than at any space, continuation rows under the same indent. A clause carries
+   its own qualifier -- "2 probe-only" counts runtimes the probe reached and
+   the config does not name, so a row ending at "2" claims something else. *)
+let runtime_authority_rows ~cols (state : state) : string list =
+  let single_line = Tui_decode.sanitize_terminal_text in
+  let clauses =
+    match state.runtime_surface with
+    | None ->
+        [ "SSOT: runtime.toml"
+        ; "projections: /api/v1/runtime/resolved + runtime-probe"
+        ]
+    | Some snapshot ->
+        let config =
+          match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_config_path with
+          | None -> "config path unavailable"
+          | Some path -> single_line path
+        in
+        let summary_text =
+          match snapshot.Tui_decode.rss_probe with
+          | None -> "probe unavailable"
+          | Some probe ->
+              let summary = probe.Tui_decode.rps_summary in
+              Printf.sprintf "%d reachable / %d failed / %d skipped"
+                summary.Tui_decode.rpsu_reachable
+                summary.Tui_decode.rpsu_failed
+                summary.Tui_decode.rpsu_skipped
+        in
+        let probe_note =
+          match
+            snapshot.Tui_decode.rss_probe_error, snapshot.Tui_decode.rss_probe
+          with
+          | Some detail, _ -> [ "probe: " ^ single_line detail ]
+          | None, Some probe ->
+              (match probe.Tui_decode.rps_errors with
+               | detail :: _ -> [ "probe: " ^ single_line detail ]
+               | [] -> [])
+          | None, None -> []
+        in
+        let probe_only_note =
+          match snapshot.Tui_decode.rss_unassigned_probe_count with
+          | 0 -> []
+          | count -> [ Printf.sprintf "%d probe-only" count ]
+        in
+        let fleet_note =
+          match state.keepers with
+          | [] -> []
+          | keepers ->
+              let turns, tokens, cost = aggregate_keeper_stats keepers in
+              [ Printf.sprintf
+                  "fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
+                  (List.length keepers) turns (format_context_tokens tokens) cost
+              ]
+        in
+        [ "SSOT: runtime.toml"; "projections: resolved + probe"; summary_text ]
+        @ fleet_note @ [ config ] @ probe_only_note @ probe_note
+  in
+  let indent = "  " in
+  let room =
+    max 1 (Masc_tui_frame.inner_width ~cols - String.length indent)
+  in
+  Masc_tui_message_layout.pack_clauses ~max_cells:room clauses
+  |> List.map (fun line -> indent ^ line)
+
+let runtime_surface_listing_chrome ~cols state =
+  runtime_listing_chrome
+    ~authority_rows:(List.length (runtime_authority_rows ~cols state))
+    ~error:state.runtime_surface_error
     ~action_error:state.runtime_lane_notice
     ~stale_rows:(List.length (runtime_lane_stale_lines state))
     ~prompt:(Option.is_some (runtime_lane_prompt state))
@@ -9400,6 +9954,27 @@ let runtime_surface_listing_chrome state =
     ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
       (runtime_picker_projection state))
     ()
+
+(* The Runtime listing's bound. Its chrome depends on the terminal width, so
+   the caller passes the width it drew at and the keys move through the same
+   count the frame drew with. *)
+let runtime_scrolled ~cols (state : state) : scrolled option =
+  if Option.is_some state.runtime_detail_target then None
+  else
+    Some
+      { sc_count =
+          (* The two views draw different lists, and the scroll bound is the
+             list being drawn. Reading candidates in both stopped the roster
+             at the slot count and left the runtimes past it unreachable. *)
+          (match state.runtime_surface, state.runtime_mode with
+           | None, _ -> 0
+           | Some s, Runtime_lanes -> List.length s.Tui_decode.rss_candidates
+           | Some s, Runtime_all ->
+               List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
+      ; sc_chrome = runtime_surface_listing_chrome ~cols state
+      ; sc_overflow_takes_row = false
+      ; sc_preview_keep = None
+      }
 
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
@@ -9500,7 +10075,10 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         listing ~error:state.memory_facts_error
           (List.length (memory_fact_rows state))
       else
-        Some (memory_overview_scrolled state)
+        (* The overview's header rows are wrapped to the terminal width, which
+           this module does not read. [Masc_tui.scrolled_surface] answers it
+           from the renderer, as it does for Tools. *)
+        None
   | Changes when Option.is_some (opened_file_change state) -> None
   | Changes ->
       Some
@@ -9530,23 +10108,10 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         (match state.connectors with
          | None -> 0
          | Some s -> List.length s.Tui_decode.cs_connectors)
-  | Runtime ->
-      if Option.is_some state.runtime_detail_target then None
-      else Some
-        { sc_count =
-            (* The two views draw different lists, and the scroll bound is the
-               list being drawn. Reading candidates in both stopped the roster
-               at the slot count and left the runtimes past it unreachable. *)
-            (match state.runtime_surface, state.runtime_mode with
-             | None, _ -> 0
-             | Some s, Runtime_lanes ->
-                 List.length s.Tui_decode.rss_candidates
-             | Some s, Runtime_all ->
-                 List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
-        ; sc_chrome = runtime_surface_listing_chrome state
-        ; sc_overflow_takes_row = false
-        ; sc_preview_keep = None
-        }
+  (* The authority row above the list is wrapped to the terminal width, which
+     this arm does not read. [Masc_tui.scrolled_surface] answers Runtime from
+     [runtime_scrolled] with the width, as it does for the Memory overview. *)
+  | Runtime -> None
   | Config when state.config_pane = Config_runtime && state.runtime_config_status_open -> None
   | Config when state.config_pane = Config_runtime ->
       Some
@@ -9640,9 +10205,17 @@ let approval_items (state : state) =
 let approvals_open_questions (state : state) =
   Option.map Masc_tui_ask_projection.open_rows state.asks_snapshot
 
+(* The questions themselves. One ask can carry several, and counting the asks
+   under the word "question" understated the work: the live surface read
+   "MASC Approvals (1 question)" and "Questions waiting on you (1)" over one
+   ask holding two, with "+2 more questions" three rows below saying so. *)
 let approvals_open_question_count (state : state) =
   match approvals_open_questions state with
-  | Some rows -> List.length rows
+  | Some rows ->
+      List.fold_left
+        (fun total (row : Tui_decode.ask_row) ->
+          total + List.length row.Tui_decode.ar_questions)
+        0 rows
   | None -> 0
 
 let approvals_surface_pending (state : state) =
@@ -9735,8 +10308,12 @@ let fleet_token_sparkline (state : state) =
   braille_sparkline tokens
 ;;
 
+(* The header's `$` reading. It is the same sum the Runtime authority row
+   says, so it comes from the same fold: a rule about what counts (dropping
+   cancelled turns, say) that lands in only one of them would compile. *)
 let fleet_total_cost_usd (state : state) =
-  List.fold_left (fun acc (k : keeper) -> acc +. k.k_total_cost_usd) 0.0 state.keepers
+  let _, _, cost = aggregate_keeper_stats state.keepers in
+  cost
 ;;
 
 let conversation_urls (state : state) : string list =

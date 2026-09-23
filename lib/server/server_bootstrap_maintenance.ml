@@ -58,6 +58,14 @@ let log_schedule_dispatch (dispatch : Schedule_runner.dispatch_result) =
       error
 ;;
 
+let log_schedule_hold_started (signal : Schedule_runner.wake_signal) =
+  Log.Server.info
+    "schedule_runner: occurrence=%s schedule_id=%s held: its target has not \
+     consumed the previous occurrence yet"
+    (Schedule_occurrence_id.to_string signal.occurrence_id)
+    signal.schedule_id
+;;
+
 let wake_enqueue_counts_of_dispatches dispatches =
   let module Consumers = Server_schedule_consumers in
   let bump_wake_failed
@@ -430,6 +438,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       ~sw
       ~clock
       ~base_path:(Mcp_server.workspace_config state).base_path;
+  (* RFC-0465: open pull requests of the registered GitHub repositories, read
+     with the declared pr_reader Keeper's token and held in memory only. *)
+  Server_repository_pulls.start
+    ~sw
+    ~clock
+    ~config:(Mcp_server.workspace_config state);
   (* Restore retained tool metrics before installing the live observer. This
      order prevents startup hydration from overwriting a call that completed
      concurrently. A failed read leaves the current snapshot unchanged and is
@@ -501,9 +515,14 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          Log.Server.warn
            "schedule_runner: startup recovery crashed: %s"
            (Printexc.to_string exn));
-      let rec loop () =
+      (* [previously_held] is the held set the last successful tick saw. A
+         hold lasts until the target consumes its earlier occurrence, so it is
+         logged when it starts, not on every tick that re-observes it
+         (#37912); /health lists the current set. *)
+      let rec loop previously_held =
         let started_at = Time_compat.now () in
         Schedule_runner_status.record_tick_started ~now:started_at;
+        let held_after_tick =
         (try
            match
              Schedule_runner.tick
@@ -526,6 +545,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                result;
              record_schedule_runner_tick_outcome "ok";
              List.iter log_schedule_dispatch result.dispatches;
+             List.iter log_schedule_hold_started
+               (Schedule_runner.newly_held ~previous:previously_held result.held);
              if result.Schedule_runner.emitted <> []
                 || result.rescheduled > 0
                 || result.dispatches <> []
@@ -538,13 +559,17 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  (List.length result.dispatches)
              else
                Log.Server.debug
-                 "schedule_runner: idle due_changed=0 emitted=0 rescheduled=0 dispatched=0"
+                 "schedule_runner: idle due_changed=%d emitted=0 rescheduled=0 dispatched=0 held=%d"
+                 result.due_changed
+                 (List.length result.held);
+             result.held
            | Error err ->
              let finished_at = Time_compat.now () in
              let error = Schedule_runner.runner_error_to_string err in
              Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
              record_schedule_runner_tick_outcome "error";
-             Log.Server.warn "schedule_runner: tick failed: %s" error
+             Log.Server.warn "schedule_runner: tick failed: %s" error;
+             previously_held
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -552,11 +577,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            let error = Printexc.to_string exn in
            Schedule_runner_status.record_tick_crash ~started_at ~finished_at error;
            record_schedule_runner_tick_outcome "crash";
-           Log.Server.warn "schedule_runner: tick crashed: %s" error);
+           Log.Server.warn "schedule_runner: tick crashed: %s" error;
+           previously_held)
+        in
         Eio.Time.sleep clock schedule_runner_interval_sec;
-        loop ()
+        loop held_after_tick
       in
-      loop ());
+      loop []);
   (* Non-public registered tool usage log: durable JSONL observability. *)
   Tool_usage_log.init
     ~base_path:(Mcp_server.workspace_config state).base_path

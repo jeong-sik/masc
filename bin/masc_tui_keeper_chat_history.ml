@@ -185,7 +185,10 @@ let rec interruption_cause_of_internal_error
   | Keeper_internal_error.Incomplete_tool_transcript _
   | Keeper_internal_error.Terminal_effect_failed _
   | Keeper_internal_error.Receipt_persistence_failed _
-  | Keeper_internal_error.Gate_replay_repair_required _ -> None
+  | Keeper_internal_error.Gate_replay_repair_required _
+  (* An autonomous turn that yielded to a person before its provider answered
+     never reaches a chat row: the unified turn settles it as skipped. *)
+  | Keeper_internal_error.Preempted_before_first_token _ -> None
 ;;
 
 (* A fence forbids replaying the turn in place when an effect was attempted,
@@ -203,6 +206,7 @@ let effect_attempted_of_internal_error
      | Keeper_provider_attempt_effect_core.No_effect_observed
      | Keeper_provider_attempt_effect_core.Observation_unavailable -> false)
   | Keeper_internal_error.Host_stopped_turn _
+  | Keeper_internal_error.Preempted_before_first_token _
   | Keeper_internal_error.Runtime_connection_closed _
   | Keeper_internal_error.Official_client_recovery_required _
   | Keeper_internal_error.Runtime_exhausted _

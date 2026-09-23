@@ -74,19 +74,27 @@ let librarian_dropped_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
+let librarian_working_contexts_schema =
+  array_schema (object_schema
+    ~required:["merge_contexts"; "sources"; "context"; "next_steps"]
+    [ "merge_contexts", string_array_schema
+    ; "sources", `Assoc
+        [ "type", `String "array"; "items", string_schema; "minItems", `Int 1 ]
+    ; "context", string_schema
+    ; "next_steps", string_array_schema ])
+;;
+
+let librarian_working_state_schema =
+  `Assoc ["type", `String "string"; "minLength", `Int 1]
+;;
+
 let librarian_output_schema ~working_state =
   let fields =
     [ ( Keeper_librarian.wire_field_new_claims
       , `Assoc [ "type", `String "array"; "items", librarian_claim_schema ] )
     ; Keeper_librarian.wire_field_dropped, array_schema librarian_dropped_schema
-    ; "working_state", working_state
-    ; "working_contexts", array_schema (object_schema
-        ~required:["merge_contexts"; "sources"; "context"; "next_steps"]
-        [ "merge_contexts", string_array_schema
-        ; "sources", `Assoc
-            [ "type", `String "array"; "items", string_schema; "minItems", `Int 1 ]
-        ; "context", string_schema
-        ; "next_steps", string_array_schema ])
+    ; Keeper_librarian.wire_field_working_state, working_state
+    ; Keeper_librarian.wire_field_working_contexts, librarian_working_contexts_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -97,8 +105,23 @@ let librarian_current_output_schema =
 ;;
 
 let librarian_continuity_output_schema =
-  librarian_output_schema
-    ~working_state:(`Assoc ["type", `String "string"; "minLength", `Int 1])
+  librarian_output_schema ~working_state:librarian_working_state_schema
+;;
+
+(* The two context-only passes answer one field each. Neither carries a Memory
+   field: the range's Memory is owned by the durable pass (a continuity pass
+   over a committed range) or is not this pass's source (a pending-input
+   organization pass). *)
+let librarian_continuity_state_output_schema =
+  let fields = [ Keeper_librarian.wire_field_working_state, librarian_working_state_schema ] in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let librarian_working_context_output_schema =
+  let fields =
+    [ Keeper_librarian.wire_field_working_contexts, librarian_working_contexts_schema ]
+  in
+  object_schema ~required:(List.map fst fields) fields
 ;;
 
 let board_attention_judgment_batch_output_schema =

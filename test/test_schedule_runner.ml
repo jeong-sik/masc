@@ -175,9 +175,9 @@ let test_tick_emits_due_candidate_once () =
     (List.length (read_recent_signal_rows config 10))
 ;;
 
-(* The seen-key list changes only when a tick emits a signal, and it holds
-   every occurrence ever signalled (430 KB on a live root). A tick that emits
-   nothing must leave the file alone. The list is stored compact here, so a
+(* The seen-key list changes only when a tick emits a signal or drops a key
+   no tick can produce again. A tick that does neither must leave the file
+   alone. The list is stored compact here, so a
    rewrite, which pretty-prints, would change its bytes. *)
 let test_tick_without_a_new_signal_leaves_the_seen_keys_file_alone () =
   with_workspace
@@ -199,6 +199,153 @@ let test_tick_without_a_new_signal_leaves_the_seen_keys_file_alone () =
     "the seen-key file keeps the bytes it had"
     compact
     (In_channel.with_open_bin seen_path In_channel.input_all)
+;;
+
+let seen_keys_path config =
+  Filename.concat (Filename.dirname (signals_dir config)) "signal_keys.json"
+;;
+
+let read_seen_keys config =
+  match Yojson.Safe.from_file (seen_keys_path config) with
+  | `List rows ->
+    List.map
+      (function
+        | `String key -> key
+        | other -> failf "seen key is not a string: %s" (Yojson.Safe.to_string other))
+      rows
+  | other -> failf "seen-key file is not a list: %s" (Yojson.Safe.to_string other)
+;;
+
+let occurrence_key (request : schedule_request) ~due_at =
+  Schedule_occurrence_id.make
+    ~schedule_instance_id:request.schedule_instance_id
+    ~schedule_id:request.schedule_id
+    ~due_at
+    ~payload_digest:(Schedule_domain.payload_digest request.payload)
+  |> Schedule_occurrence_id.to_string
+;;
+
+(* A forgotten schedule is gone from the ledger, and a schedule created under
+   the same id later gets a fresh instance id, so no tick can produce its key
+   again. The tick that forgets it drops the key. *)
+let test_tick_prunes_the_key_of_a_forgotten_schedule () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request = create_ok ~schedule_id:"forgotten-1" config in
+  let due = tick_ok config ~now:201.0 ~consumer:(accepting_consumer calls) in
+  check int "the due tick emits" 1 (List.length due.emitted);
+  check
+    Alcotest.(list string)
+    "the emitted occurrence is recorded seen"
+    [ occurrence_key request ~due_at:200.0 ]
+    (read_seen_keys config);
+  (* The ledger stamps its own writes with the wall clock, and a pass whose
+     [now] is behind that stamp forgets nothing, so this pass runs later. *)
+  let later = Unix.gettimeofday () +. 3600.0 in
+  let forgetting =
+    match tick config ~now:later ~consumer:(accepting_consumer calls) ~retention_days:0 with
+    | Ok result -> result
+    | Error err -> fail (runner_error_to_string err)
+  in
+  check int "the forgetting tick emits nothing" 0 (List.length forgetting.emitted);
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> ()
+   | Some _ -> fail "the finished schedule was not forgotten");
+  check
+    Alcotest.(list string)
+    "the forgotten schedule's key is pruned"
+    []
+    (read_seen_keys config)
+;;
+
+(* A recurring schedule's next due time is always after the [now] that
+   advanced it, and the emitted occurrence was due at or before that [now],
+   so the schedule never returns to an occurrence it left. Its old key is
+   dropped; a tick that then neither emits nor prunes writes nothing. *)
+let test_tick_prunes_the_key_of_an_occurrence_the_schedule_moved_past () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    create_ok ~schedule_id:"moved-1" ~recurrence:(Interval { interval_sec = 60 }) config
+  in
+  let first = tick_ok config ~now:201.0 in
+  check int "the first occurrence emits" 1 (List.length first.emitted);
+  check
+    Alcotest.(list string)
+    "the first occurrence is recorded seen"
+    [ occurrence_key request ~due_at:200.0 ]
+    (read_seen_keys config);
+  let between = tick_ok config ~now:259.0 in
+  check int "nothing is due between occurrences" 0 (List.length between.emitted);
+  check
+    Alcotest.(list string)
+    "the key of the occurrence left behind is pruned"
+    []
+    (read_seen_keys config);
+  let compact = Yojson.Safe.to_string (Yojson.Safe.from_file (seen_keys_path config)) in
+  Out_channel.with_open_bin (seen_keys_path config) (fun channel ->
+    output_string channel compact);
+  let idle = tick_ok config ~now:259.5 in
+  check int "the idle tick emits nothing" 0 (List.length idle.emitted);
+  check
+    string
+    "a tick that neither emits nor prunes leaves the file's bytes alone"
+    compact
+    (In_channel.with_open_bin (seen_keys_path config) In_channel.input_all);
+  let second = tick_ok config ~now:260.0 in
+  check int "the next occurrence emits" 1 (List.length second.emitted);
+  check
+    Alcotest.(list string)
+    "only the current occurrence is recorded seen"
+    [ occurrence_key request ~due_at:260.0 ]
+    (read_seen_keys config);
+  check int "two durable signals" 2 (List.length (read_recent_signal_rows config 10))
+;;
+
+(* A retried occurrence keeps its identity and stays due, so it is still the
+   schedule's current occurrence: the prune keeps its key even on a tick that
+   drops another schedule's key, and the retry is not emitted a second time. *)
+let test_tick_prune_keeps_a_key_the_schedule_can_still_produce () =
+  with_workspace
+  @@ fun config ->
+  let retry_request = create_ok ~schedule_id:"retry-keep-1" config in
+  let moving_request =
+    create_ok ~schedule_id:"moving-1" ~recurrence:(Interval { interval_sec = 60 }) config
+  in
+  let consumer : Schedule_runner.consumer =
+    { accepts = (fun _request -> Ok ())
+    ; dispatch =
+        (fun _config ~now:_ _signal request ~commit_acceptance ->
+           if String.equal request.schedule_id retry_request.schedule_id
+           then Error (Retryable_dispatch_failure "queue storage unavailable")
+           else
+             Result.map
+               (fun acceptance_commit ->
+                  Work_accepted { detail = accepted_detail; acceptance_commit })
+               (commit_acceptance accepted_detail))
+    ; defer_wake = (fun _config ~occurrence_id:_ _request -> false)
+    }
+  in
+  let retry_key = occurrence_key retry_request ~due_at:200.0 in
+  let first = tick_ok config ~now:201.0 ~consumer in
+  check int "both schedules emit" 2 (List.length first.emitted);
+  check
+    Alcotest.(list string)
+    "both occurrences are recorded seen"
+    (List.sort String.compare [ retry_key; occurrence_key moving_request ~due_at:200.0 ])
+    (List.sort String.compare (read_seen_keys config));
+  let second = tick_ok config ~now:202.0 ~consumer in
+  check int "the retried occurrence is not emitted again" 0 (List.length second.emitted);
+  check int "the retried occurrence is dispatched again" 1 (List.length second.dispatches);
+  check
+    Alcotest.(list string)
+    "the moved-past key is pruned and the retried key is kept"
+    [ retry_key ]
+    (read_seen_keys config);
+  let third = tick_ok config ~now:203.0 ~consumer in
+  check int "the retry after the prune is still not emitted" 0 (List.length third.emitted);
+  check int "two durable signals" 2 (List.length (read_recent_signal_rows config 10))
 ;;
 
 (* #26686 item 1: a primary that exists but will not parse must not
@@ -749,6 +896,7 @@ let test_runner_status_snapshot_tracks_liveness () =
     { due_changed = 1
     ; emitted = []
     ; rescheduled = 2
+    ; held = []
     ; dispatches =
         [ { occurrence_id = test_occurrence_id "status-1"
           ; schedule_id = "status-1"
@@ -780,10 +928,43 @@ let test_runner_status_snapshot_tracks_liveness () =
   check int "last unsupported dispatch count" 0 (json_int "dispatch_unsupported" counts);
   check int "last start-rejected dispatch count" 0
     (json_int "dispatch_start_rejected" counts);
+  check int "a tick that held nothing lists no held occurrence" 0
+    (match json_field "held" ok with
+     | Some (`List held) -> List.length held
+     | Some _ | None -> fail "held is not a list");
+  let held_signal : wake_signal =
+    { occurrence_id = test_occurrence_id "status-held"
+    ; kind = Due_candidate
+    ; schedule_instance_id = "instance-status-held"
+    ; schedule_id = "status-held"
+    ; emitted_at = 1.5
+    ; due_at = 200.0
+    ; payload_digest = "test-payload"
+    ; payload = `Assoc []
+    }
+  in
+  Schedule_runner_status.record_tick_ok ~started_at:1.5 ~finished_at:1.75
+    (* A hold-only tick: zero counts, so the totals checked below are the
+       other ticks' sums. *)
+    { ok_result with due_changed = 0; rescheduled = 0; dispatches = []; held = [ held_signal ] };
+  let held_ids () =
+    match json_field "held" (render ~now:2.0 ()) with
+    | Some (`List held) ->
+      List.map
+        (fun row ->
+           match json_field "schedule_id" row with
+           | Some (`String id) -> id
+           | Some _ | None -> fail "held row has no schedule_id")
+        held
+    | Some _ | None -> fail "held is not a list"
+  in
+  check (list string) "the newest tick's held occurrence is listed" [ "status-held" ]
+    (held_ids ());
   let dispatch_failure_result =
     { due_changed = 3
     ; emitted = []
     ; rescheduled = 0
+    ; held = []
     ; dispatches =
         [ { occurrence_id = test_occurrence_id "status-dispatch-failed"
           ; schedule_id = "status-dispatch-failed"
@@ -810,6 +991,8 @@ let test_runner_status_snapshot_tracks_liveness () =
     ~started_at:2.0
     ~finished_at:2.125
     dispatch_failure_result;
+  check (list string) "held is replaced by the next tick, not accumulated" []
+    (held_ids ());
   let dispatch_degraded = render ~now:2.25 () in
   check string "dispatch failure degrades status" "degraded"
     (json_string "status" dispatch_degraded);
@@ -854,7 +1037,8 @@ let test_runner_status_snapshot_tracks_liveness () =
   check int "wake unregistered keeper count" 1
     (json_int "wake_skipped_unregistered_keeper" wake_counts);
   check int "wake failed count" 1 (json_int "wake_failed" wake_counts);
-  (* Three successful ticks so far: totals keep what last_counts forgot. *)
+  (* Four successful ticks so far (one held-only, all zero): totals keep what
+     last_counts forgot. *)
   let totals =
     match json_field "totals" wake_degraded with
     | Some totals -> totals
@@ -936,8 +1120,21 @@ let test_tick_defers_held_wake_without_advancing () =
   let result = tick_ok config ~now:201.0 ~consumer in
   check int "held wake is not dispatched" 0 (List.length !calls);
   check int "held wake emits no signal" 0 (List.length result.emitted);
-  check int "held wake is reported once" 1 (List.length result.dispatches);
-  check_dispatch_status "deferred" Dispatch_deferred (List.hd result.dispatches).status;
+  check int "a held wake is not a dispatch" 0 (List.length result.dispatches);
+  check (list string) "held wake is reported as held once" [ request.schedule_id ]
+    (List.map (fun (signal : wake_signal) -> signal.schedule_id) result.held);
+  let again = tick_ok config ~now:216.0 ~consumer in
+  check (list string) "the same occurrence is held on the next tick"
+    (List.map
+       (fun (signal : wake_signal) -> Schedule_occurrence_id.to_string signal.occurrence_id)
+       result.held)
+    (List.map
+       (fun (signal : wake_signal) -> Schedule_occurrence_id.to_string signal.occurrence_id)
+       again.held);
+  check int "a hold that continues is not newly held" 0
+    (List.length (Schedule_runner.newly_held ~previous:result.held again.held));
+  check int "a hold with no earlier tick is newly held" 1
+    (List.length (Schedule_runner.newly_held ~previous:[] again.held));
   match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
   | None -> fail "schedule missing after deferral"
   | Some stored ->
@@ -954,6 +1151,12 @@ let () =
             test_tick_emits_due_candidate_once
         ; test_case "a tick without a new signal leaves the seen-key file alone" `Quick
             test_tick_without_a_new_signal_leaves_the_seen_keys_file_alone
+        ; test_case "prunes the key of a forgotten schedule" `Quick
+            test_tick_prunes_the_key_of_a_forgotten_schedule
+        ; test_case "prunes the key of an occurrence the schedule moved past" `Quick
+            test_tick_prunes_the_key_of_an_occurrence_the_schedule_moved_past
+        ; test_case "prune keeps a key the schedule can still produce" `Quick
+            test_tick_prune_keeps_a_key_the_schedule_can_still_produce
         ; test_case "recovers seen keys from the .last-good mirror when the primary is corrupt" `Quick
             test_tick_recovers_seen_keys_from_last_good_mirror_when_primary_is_corrupt
         ; test_case "reports failure when the seen-keys write cannot commit" `Quick

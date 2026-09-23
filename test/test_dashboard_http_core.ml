@@ -322,6 +322,13 @@ let test_keeper_sensitive_get_permissions_are_exact () =
     ; "memory-facts"; "working-context"; "file-changes"; "tool-calls" ];
   check bool "safe chat history stays on its ordinary read route" true
     (permission "/api/v1/keepers/fixture-keeper/chat/history" = None);
+  (* The operator snapshot serves the same inventory rows under public read;
+     a per-Keeper door onto them keeps that gate rather than inventing one. *)
+  check bool "board quarantine rows share the operator snapshot's read gate" true
+    (permission
+       ("/api/v1/keepers/fixture-keeper"
+        ^ Server_dashboard_http_keeper_api.keeper_suffix_board_attention_quarantines)
+     = None);
   check bool "checkpoint permission" true
     (permission "/api/v1/keepers/fixture-keeper/checkpoints" = Some Masc_domain.CanAdmin);
   check bool "turn records require authenticated state read" true
@@ -2343,6 +2350,77 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   let json = Server_dashboard_http.dashboard_planning_http_json ~config in
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
+
+(* A Task awaiting verification is finished work waiting on a verifier, and
+   the Planning surface counts that queue on its own tab. Counted as
+   in_progress, the same seven Tasks were two numbers under two words on one
+   screen, and the word naming the wait was the one the count hid. *)
+let test_planning_counts_a_task_awaiting_verification_on_its_own () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
+  let open Yojson.Safe.Util in
+  (* The store refuses a stamp that is not RFC 3339, in every status that
+     carries one. *)
+  let stamp = "2026-09-23T00:00:00Z" in
+  let task id status =
+    let json =
+      `Assoc
+        [ "id", `String id
+        ; "title", `String id
+        ; "description", `String ""
+        ; "priority", `Int 3
+        ; "status", `String "todo"
+        ; "files", `List []
+        ; "created_at", `String stamp
+        ]
+    in
+    match Masc_domain.task_of_yojson json with
+    | Ok task -> { task with Masc_domain.task_status = status }
+    | Error detail -> fail detail
+  in
+  let backlog =
+    match Workspace_backlog.read_backlog_r config with
+    | Ok backlog -> backlog
+    | Error detail -> fail detail
+  in
+  Workspace_backlog.write_backlog config
+    { backlog with
+      tasks =
+        [ task "t-todo" Masc_domain.Todo
+        ; task "t-claimed" (Masc_domain.Claimed { assignee = "a"; claimed_at = stamp })
+        ; task
+            "t-running"
+            (Masc_domain.InProgress { assignee = "a"; started_at = stamp })
+        ; task
+            "t-awaiting"
+            (Masc_domain.AwaitingVerification
+               { assignee = "a"
+               ; started_at = stamp
+               ; submitted_at = stamp
+               ; intent = Masc_domain.Complete_task
+               ; verification_id = "v-1"
+               })
+        ; task
+            "t-done"
+            (Masc_domain.Done
+               { assignee = "a"; completed_at = stamp; notes = None })
+        ; task
+            "t-cancelled"
+            (Masc_domain.Cancelled
+               { cancelled_by = "a"; cancelled_at = stamp; reason = None })
+        ]
+    };
+  let counts =
+    Server_dashboard_http.dashboard_planning_http_json ~config
+    |> member "task_backlog"
+  in
+  let count key = counts |> member key |> to_int in
+  check int "the one being worked" 1 (count "in_progress");
+  check int "the one waiting on a verifier" 1 (count "awaiting_verification");
+  check int "todo" 1 (count "todo");
+  check int "claimed" 1 (count "claimed");
+  check int "done" 1 (count "done");
+  check int "cancelled" 1 (count "cancelled")
 
 let test_goal_source_failure_is_not_empty () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -6364,6 +6442,9 @@ let () =
             test_goal_link_source_failure_preserves_unrelated_planning;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
+          test_case "planning counts a task awaiting verification on its own"
+            `Quick
+            test_planning_counts_a_task_awaiting_verification_on_its_own;
           test_case "shell auth canonicalizes token owner" `Quick
             test_dashboard_shell_auth_json_canonicalizes_token_owner;
           test_case "shell auth reports missing token" `Quick

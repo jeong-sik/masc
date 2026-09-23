@@ -303,6 +303,20 @@ let tab_strip_gap = "  "
 
 let tab_strip_cut = "\xe2\x80\xa6"
 
+(* A tab entry's label. The count is a convenience -- the tab is a place to
+   go, and the screen it opens draws its own rows -- so a tab whose source
+   this screen has not read carries its name alone.
+
+   A zero from an unread snapshot is not a reading. The Runtime strip counted
+   standalone lanes off [state.standalone_lanes], which only the Lanes screen
+   loads, and drew "Standalone (0)" beside a Lanes screen listing five; the
+   Lanes strip counted runtimes and lanes off [state.runtime_surface], which
+   only the Runtime screen loads, and drew "All runtimes (0)" over a server
+   holding 125. *)
+let tab_entry_label name = function
+  | None -> name
+  | Some reading -> Printf.sprintf "%s (%s)" name reading
+
 (* The cells this strip needs to keep its promise: the current entry whole,
    with the cut marks its position calls for. Below this the window cannot
    grow past the current entry and [fit_width] cuts into the entry itself --
@@ -481,7 +495,7 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Tool -> Theme.quiet_origin ()
     | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_live ->
       Theme.info ()
-    | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_used ->
+    | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_settled ->
       Theme.ok ()
     | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_attention ->
       Theme.warn ()

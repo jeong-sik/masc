@@ -100,26 +100,27 @@ type remember_outcome =
       (** The call id was never held, was already answered, or timed out
           longer ago than {!ttl_sec}. Nothing is remembered: an answer that
           cannot be attributed to an ask this process made — recently — is
-          discarded, as before. *)
+          discarded. *)
 
 val remember_late :
   t ->
   ?now:float ->
   keeper_name:string ->
   tool_call_id:string ->
+  actor:string ->
   Keeper_tool_approval_registry.decision ->
   unit ->
   remember_outcome
 (** Attribute an answer whose wait is gone. Only an ask that actually timed
     out here (recorded by {!note_timed_out}) and is no older than {!ttl_sec}
     matches, so the remembered decision always descends from a question the
-    operator was really shown.
+    operator was really shown. Timed-out asks are matched newest-first: if
+    a provider recycles a call id, the answer attaches to the most recent
+    ask that carried it, which is the prompt the operator saw last.
 
-    Expired asks are matched newest-first: if a provider ever recycles a
-    tool call id, the answer attaches to the newest ask that carried it.
-    That is the safe direction — it is the prompt the operator was shown
-    most recently, and any older entry with the same id describes an ask
-    its own timeout already ended. *)
+    [actor] is the authenticated caller recorded at the HTTP boundary
+    (task-1662) — who made this decision outlives the HTTP request, so it is
+    threaded here rather than read back from the answering client. *)
 
 val take :
   t ->
@@ -136,3 +137,12 @@ val take :
     Entries older than {!ttl_sec} are reaped before the lookup, so a stale
     memory reads as [None] — no memory — and the call is asked about
     again. *)
+
+(** {1 Decision attribution}
+
+    Who made a remembered decision. The stamp is taken from the
+    authenticated HTTP caller, never from the answering client's own
+    accounting of itself (task-1662): a self-reported identity would let the
+    answering client write any name into the ledger. Consumed entries are
+    gone by the time {!take} returns, so the stamp is visible only through
+    the module's own log lines and for as long as the memory stands. *)

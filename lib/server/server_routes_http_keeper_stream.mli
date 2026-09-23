@@ -2,6 +2,7 @@
     the Keeper could not be told, which is not a success. *)
 val ask_answer_response :
   ask_id:string ->
+  actor:string ->
   answer_count:int ->
   open_remaining:int ->
   delivered:bool ->
@@ -144,8 +145,13 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
     parse / handler errors. *)
 
 val handle_keeper_tool_approval :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/tool-approval].
+
+    [actor] is the authenticated caller (task-1662): the decision outlives
+    the HTTP request, so who made it is threaded here, written into the
+    late-answer memory and the emitted log line, and echoed back as
+    [actor] in the JSON body.
 
     Reads [{"name", "tool_call_id", "decision"}] where decision is
     ["approve"] or ["deny"], and releases the matching held tool call.
@@ -202,7 +208,7 @@ val handle_keeper_run_next :
     only the observed current turn. Existing inputs and other queue order stay intact. *)
 
 val handle_keeper_turn_interrupt :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].
     Accepts an [interrupt_token] from the turns listing to signal only the
     observed switch. A changed or repeated token is declined without touching
@@ -446,14 +452,17 @@ module For_testing : sig
 end
 
 val handle_keeper_ask_answer :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/ask-answer].
 
     Reads [{"name", "ask_id", "answers": [{"question_id", "response"}], ...}]
     where a response is [{"kind": "chose", "choice_ids": [...]}],
     [{"kind": "wrote", "text": ...}], or [{"kind": "skipped"}]. Optional
-    ["actor_id"] and ["session_id"] record who answered and from which
-    dashboard session.
+    ["session_id"] records which dashboard session answered. The body has no
+    ["actor_id"] field: who answered is [actor], the authenticated caller
+    (task-1662) — a self-reported identity would let the answering client
+    write any name into the log. The response echoes [actor] so the caller
+    sees what was recorded.
 
     Two surfaces can submit for one ask at once and nothing locks the log. The
     fold settles on first write, so a submission that lost returns [`Conflict]

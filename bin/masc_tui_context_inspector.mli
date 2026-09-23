@@ -133,12 +133,21 @@ type forecast_carried_origin =
       (** No ledger since the server started: the range that turn's record measured. *)
   | Carried_halved_after_refusal of { retry : int }
   | Carried_evicted_after_refusal of { retry : int }
+  | Carried_turn_start_after_seed_refusal
+      (** No Librarian point, and the range a seed opened was refused as too
+          large: the turn's front moved to the turn boundary. *)
   | Carried_turn_start of { end_atom : int }
       (** No front to start from: this turn's own atoms, from the end of the
           last completed turn. *)
   | Carried_turn_start_unknown of { reason : string }
       (** No front, and the turn start could not be read: the newest atom
           alone. [reason] is what the boundary reader said. *)
+  | Carried_librarian_snapshot of { end_atom : int; boundary_line : int }
+      (** A Librarian continuity snapshot fits: its working state rides in
+          place of the atoms before [end_atom]. *)
+  | Carried_librarian_progress of { end_atom : int }
+      (** No snapshot fits and the Librarian's read position does: the atoms
+          before [end_atom] are in memory and nothing stands in for them. *)
 
 type forecast_carried =
   { first_atom : int

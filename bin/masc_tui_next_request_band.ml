@@ -20,6 +20,8 @@ let origin_sentence = function
       Printf.sprintf "front halved after a refusal (retry %d)" retry
   | Inspector.Carried_evicted_after_refusal { retry } ->
       Printf.sprintf "front evicted after a refusal (retry %d)" retry
+  | Inspector.Carried_turn_start_after_seed_refusal ->
+      "the seed range was refused: front moved to where this turn began"
   | Inspector.Carried_turn_start { end_atom } ->
       (* The fact line ahead of this sentence already says which atom the
          range opens on ([first_atom]); [end_atom] is the completed boundary
@@ -32,6 +34,14 @@ let origin_sentence = function
       Printf.sprintf
         "no front, and where this turn began could not be read: the newest atom alone (%s)"
         reason
+  | Inspector.Carried_librarian_snapshot { end_atom; boundary_line } ->
+      Printf.sprintf
+        "the Librarian's working state stands in for the atoms before %d (boundary line %d)"
+        end_atom boundary_line
+  | Inspector.Carried_librarian_progress { end_atom } ->
+      Printf.sprintf
+        "the Librarian has read up to atom %d; nothing is sent in place of those atoms"
+        end_atom
 ;;
 
 (* A Unix epoch as a UTC clock reading, the day dropped: the band compares

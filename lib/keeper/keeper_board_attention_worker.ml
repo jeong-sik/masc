@@ -485,8 +485,11 @@ let failure_category_of_reason = function
   | Partition.Durable_partition_invariant _ ->
     Candidate.Durable_partition_invariant
   | Partition.Exact_setup_unavailable _ -> Candidate.Exact_setup_unavailable
-  | Partition.Exact_flow_replayed -> Candidate.Exact_flow_replayed
-  | Partition.Exact_execution_terminal -> Candidate.Exact_execution_terminal
+  | Partition.Exact_flow_replayed _ -> Candidate.Exact_flow_replayed
+  | Partition.Exact_lane_exhausted _ -> Candidate.Exact_lane_exhausted
+  | Partition.Exact_flow_bookkeeping_failed _ ->
+    Candidate.Exact_flow_bookkeeping_failed
+  | Partition.Exact_completion_failed _ -> Candidate.Exact_completion_failed
   | Partition.Domain_output_invalid _ -> Candidate.Domain_output_invalid
   | Partition.Execution_provenance_mismatch _ ->
     Candidate.Execution_provenance_mismatch
@@ -494,6 +497,8 @@ let failure_category_of_reason = function
     Candidate.Unexpected_worker_failure
   | Partition.Exact_execution_quarantined _ ->
     Candidate.Exact_execution_quarantined
+  | Partition.Exact_execution_interrupted _ ->
+    Candidate.Exact_execution_interrupted
 ;;
 
 let candidate_provenance (provenance : Partition.exact_provenance) :
@@ -520,17 +525,25 @@ let attempt_provenance_of_progress = function
 
 let attempt_provenance_of_reason = function
   | Partition.Exact_execution_quarantined progress
+  | Partition.Exact_execution_interrupted progress
+  | Partition.Exact_flow_replayed (Some progress)
+  | Partition.Exact_lane_exhausted { progress = Some progress; _ }
+  | Partition.Exact_flow_bookkeeping_failed { progress = Some progress; _ }
+  | Partition.Exact_completion_failed { progress = Some progress; _ }
   | Partition.Domain_output_invalid { progress = Some progress; _ }
-  | Partition.Execution_provenance_mismatch { progress = Some progress; _ } ->
+  | Partition.Execution_provenance_mismatch { progress = Some progress; _ }
+  | Partition.Unexpected_worker_failure { progress = Some progress; _ } ->
     attempt_provenance_of_progress progress
   | Partition.Candidate_membership_conflict _
   | Partition.Durable_partition_invariant _
   | Partition.Exact_setup_unavailable _
-  | Partition.Exact_flow_replayed
-  | Partition.Exact_execution_terminal
+  | Partition.Exact_flow_replayed None
+  | Partition.Exact_lane_exhausted { progress = None; _ }
+  | Partition.Exact_flow_bookkeeping_failed { progress = None; _ }
+  | Partition.Exact_completion_failed { progress = None; _ }
   | Partition.Domain_output_invalid { progress = None; _ }
   | Partition.Execution_provenance_mismatch { progress = None; _ }
-  | Partition.Unexpected_worker_failure _ -> None
+  | Partition.Unexpected_worker_failure { progress = None; _ } -> None
 ;;
 
 let quarantine_blocked_partition ~base_path partition =
@@ -566,7 +579,8 @@ let quarantine_blocked_partition ~base_path partition =
   | Partition.Ready
   | Partition.Running _
   | Partition.Completed _
-  | Partition.Settled _ ->
+  | Partition.Settled _
+  | Partition.Abandoned _ ->
     Error ("partition is not Blocked: " ^ partition.partition_id)
 ;;
 
@@ -629,14 +643,8 @@ let running_progress partition =
   | Partition.Ready
   | Partition.Completed _
   | Partition.Settled _
+  | Partition.Abandoned _
   | Partition.Blocked _ -> None
-;;
-
-let preserve_durable_progress partition fallback =
-  match running_progress partition with
-  | Some ((Partition.Bound _ | Partition.Advancing _) as progress) ->
-    Partition.Exact_execution_quarantined progress
-  | Some Partition.Unbound | None -> fallback
 ;;
 
 let classified_progress partition =
@@ -684,10 +692,8 @@ let complete_projection
           ^ completed.keeper_name))
   | Error detail ->
     let reason =
-      preserve_durable_progress
-        !latest_partition
-        (Partition.Durable_partition_invariant
-           ("exact completion failed: " ^ detail))
+      Partition.Exact_completion_failed
+        { detail; progress = classified_progress !latest_partition }
     in
     blocked_step
       ~now
@@ -707,6 +713,7 @@ let is_not_relevant_completion partition =
   | Partition.Ready
   | Partition.Running _
   | Partition.Settled _
+  | Partition.Abandoned _
   | Partition.Blocked _ -> false
 ;;
 
@@ -744,35 +751,38 @@ let deliver_and_settle_completed ~base_path ~keeper_name partition =
   | Partition.Ready
   | Partition.Running _
   | Partition.Settled _
+  | Partition.Abandoned _
   | Partition.Blocked _ ->
     Error
       ("completed partition query returned non-Completed state: "
        ^ partition.partition_id)
 ;;
 
+(* [Not_relevant] carries nothing across the owner lane: no event is
+   enqueued for the owner to consume (keeper_board_attention_candidate.mli:
+   "Relevant judgments cross the owner lane only when the owner durably
+   applies and consumes the exact candidate judgment"). Waiting for the
+   owner's own heartbeat to run [settle_completed_snapshot] orphans the
+   candidate whenever that specific owner is not currently ticking
+   (task-1666's measured 98 live cases); the worker settles it here
+   instead, independent of the owner. *)
+let settle_if_not_relevant ~base_path completed =
+  if is_not_relevant_completion completed
+  then (
+    let* (_ : Partition.t) =
+      deliver_and_settle_completed
+        ~base_path
+        ~keeper_name:completed.Partition.keeper_name
+        completed
+    in
+    Ok ())
+  else Ok ()
+;;
+
 let signal_completion ~base_path = function
   | Completion_blocked step -> Ok step
   | Completion_projected (completed, owner) ->
-    (* [Not_relevant] carries nothing across the owner lane: no event is
-       enqueued for the owner to consume (keeper_board_attention_candidate.mli:
-       "Relevant judgments cross the owner lane only when the owner durably
-       applies and consumes the exact candidate judgment"). Waiting for the
-       owner's own heartbeat to run [settle_completed_snapshot] orphans the
-       candidate whenever that specific owner is not currently ticking
-       (task-1666's measured 98 live cases); the worker settles it here
-       instead, independent of the owner. *)
-    let* () =
-      if is_not_relevant_completion completed
-      then (
-        let* (_ : Partition.t) =
-          deliver_and_settle_completed
-            ~base_path
-            ~keeper_name:completed.Partition.keeper_name
-            completed
-        in
-        Ok ())
-      else Ok ()
-    in
+    let* () = settle_if_not_relevant ~base_path completed in
     let owner_wake =
       Keeper_registry.wakeup_running_exact
         ~intent:Keeper_registry.Attention_result
@@ -930,8 +940,7 @@ type execution_disposition =
 
 let execution_disposition partition = function
   | Exact_flow.Flow_already_started _ ->
-    Execution_blocked
-      (preserve_durable_progress partition Partition.Exact_flow_replayed)
+    Execution_blocked (Partition.Exact_flow_replayed (classified_progress partition))
   | Exact_flow.Before_dispatch_persistence_failed
       { cause; current; evidence = _ } ->
     Execution_blocked
@@ -954,11 +963,19 @@ let execution_disposition partition = function
     Execution_blocked
       (Partition.Execution_provenance_mismatch
          { detail; progress = classified_progress partition })
-  | Exact_flow.Providers_exhausted _
-  | Exact_flow.Cli_slots_exhausted _
-  | Exact_flow.Flow_bookkeeping_failed _ ->
+  | (Exact_flow.Providers_exhausted _ | Exact_flow.Cli_slots_exhausted _) as
+    exhausted ->
     Execution_blocked
-      (preserve_durable_progress partition Partition.Exact_execution_terminal)
+      (Partition.Exact_lane_exhausted
+         { detail = Exact_flow.error_detail exhausted
+         ; progress = classified_progress partition
+         })
+  | Exact_flow.Flow_bookkeeping_failed _ as failed ->
+    Execution_blocked
+      (Partition.Exact_flow_bookkeeping_failed
+         { detail = Exact_flow.error_detail failed
+         ; progress = classified_progress partition
+         })
   | Exact_flow.Provenance_mismatch detail ->
     Execution_blocked
       (Partition.Execution_provenance_mismatch
@@ -1038,18 +1055,7 @@ let complete_existing_judgment
         "existing judgment completion"
         transition
     in
-    let* () =
-      if is_not_relevant_completion completed
-      then (
-        let* (_ : Partition.t) =
-          deliver_and_settle_completed
-            ~base_path
-            ~keeper_name:completed.Partition.keeper_name
-            completed
-        in
-        Ok ())
-      else Ok ()
-    in
+    let* () = settle_if_not_relevant ~base_path completed in
     let owner_wake =
       exact_owner_wake
         ~base_path
@@ -1238,6 +1244,7 @@ let prepare_next_ready
          | Partition.Running _
          | Partition.Completed _
          | Partition.Settled _
+         | Partition.Abandoned _
          | Partition.Blocked _ -> false)
       partitions
   with
@@ -1382,7 +1389,8 @@ let rec converge_requeue_conflict
   | Partition.Blocked _
   | Partition.Running _
   | Partition.Completed _
-  | Partition.Settled _ ->
+  | Partition.Settled _
+  | Partition.Abandoned _ ->
     Error
       ("partition generation changed during requeue convergence: "
        ^ partition.partition_id)
@@ -1454,14 +1462,14 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
          (match partition.state with
           | Partition.Blocked _ ->
             Log.Keeper.error
-              "Board attention candidate permanently absent during quarantine reconciliation; settling blocked partition keeper=%s partition=%s candidate=%s"
+              "Board attention candidate permanently absent during quarantine reconciliation; abandoning blocked partition keeper=%s partition=%s candidate=%s"
               keeper_name
               partition.partition_id
               partition.candidate_id;
-            let* (_ : Partition.t) = Partition.settle ~now ~base_path ~partition in
+            let* (_ : Partition.t) = Partition.abandon ~now ~base_path ~partition in
             loop rest
           | Partition.Ready | Partition.Running _ | Partition.Completed _
-          | Partition.Settled _ -> loop rest)
+          | Partition.Settled _ | Partition.Abandoned _ -> loop rest)
        | Some candidate ->
          (match partition.state, Candidate.status_view candidate.status with
        | ( Partition.Blocked _
@@ -1549,7 +1557,8 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
           | Partition.Ready, _
           | Partition.Running _, _
           | Partition.Completed _, _
-          | Partition.Settled _, _ ->
+          | Partition.Settled _, _
+          | Partition.Abandoned _, _ ->
             loop rest))
   in
   loop initial_candidates partitions
@@ -1579,6 +1588,7 @@ let process_next_with_claim_ready_exact_current
            | Partition.Running _
            | Partition.Completed _
            | Partition.Settled _
+           | Partition.Abandoned _
            | Partition.Blocked _ -> false)
         partitions)
   in
@@ -1605,10 +1615,10 @@ let process_next_with_claim_ready_exact_current
         (!latest_partition).partition_id
         (Printexc.to_string exn);
       let reason =
-        preserve_durable_progress
-          !latest_partition
-          (Partition.Unexpected_worker_failure
-             "Board attention worker raised unexpectedly")
+        Partition.Unexpected_worker_failure
+          { detail = Printexc.to_string exn
+          ; progress = classified_progress !latest_partition
+          }
       in
       blocked_step
         ~now:(now ())

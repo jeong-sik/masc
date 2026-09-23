@@ -163,6 +163,8 @@ type install_report =
   ; replayed_deliveries : int
   ; delivery_replay_failures : delivery_replay_failure list
   ; replay_projection_error : storage_error option
+  ; retired_deliveries : int
+  ; delivery_retirement_error : storage_error option
   }
 
 type install_error = Install_storage_failed of storage_error
@@ -198,9 +200,28 @@ val install_error_to_string : install_error -> string
     scoped unavailable until operator repair.
     In-flight summaries retain their durable state. Independent delivery replay
     failures are returned in [delivery_replay_failures] and never prevent later
-    journals or Gate recovery from being attempted. *)
+    journals or Gate recovery from being attempted.
+    A spent delivery is removed from the store; the count is
+    [retired_deliveries]. A delivery is spent when its wake was delivered and
+    is no longer in its Keeper's event queue, no unsettled execution of that
+    Keeper names the approval, and an approval's grant is consumed; or when its
+    Keeper's meta is gone: deleting a Keeper drops its approvals and
+    rejections, used or not, at the next install, so a Keeper created again
+    under the same name starts without them. A delivery whose Keeper meta,
+    queue, or operation store cannot be read, or whose Keeper has meta but no
+    queue, is kept. The removal is skipped while the store or the replay projection is
+    unavailable, and a failed write is reported in
+    [delivery_retirement_error] and retried at the next install. *)
 val install_persistence :
   base_path:string -> (install_report, install_error) result
+
+(** Run the snapshot decode {!install_persistence} runs on
+    [gate/pending.json], without installing anything. [Error] carries the
+    loader's own message: an unsupported [version] (which names the runtime
+    reset), a malformed snapshot, or the first entry the loader would drop.
+    The append log is not read. *)
+val validate_pending_snapshot :
+  base_path:string -> Yojson.Safe.t -> (unit, string) result
 
 (** Read the exact approved request from the durable resolution journal. [None]
     means that its one-shot authorization has already been consumed. *)
@@ -446,7 +467,13 @@ type resolution_result =
 
     [base_path] is the authenticated caller workspace. The pending or
     in-progress delivery entry must belong to it exactly before any resolution
-    claim or journal mutation is attempted. *)
+    claim or journal mutation is attempted.
+
+    A delivery that {!install_persistence} retired as spent is gone from the
+    queue, so deciding it again returns [Not_found] and writes nothing; the
+    decision stays on the audit ledger. While the delivery is still held, the
+    same request again completes without a new ledger row and a different one
+    is [Already_resolved]. *)
 val resolve_with_policy :
   base_path:string ->
   id:string ->

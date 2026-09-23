@@ -1536,10 +1536,20 @@ let boxed_surface_chrome_rows = 10
    ANSI is not counted toward the indent -- display_width reads cells, not
    escape bytes. box_line pads content to the inner width, so a row of exactly
    the inner width is filled, not truncated. *)
+(* A block, not a line. [single_line] escapes every control byte, and a
+   newline is one: run over a body whole it prints "\x0A" at each break and
+   hands back one unbroken paragraph. Two of the three questions the live
+   fleet was holding carried newlines in their context -- eleven in one -- so
+   the pane drew the operator's own paragraph breaks into the sentence.
+   [wrap_body] escapes line by line, which covers what the escape is for and
+   leaves the breaks as breaks. *)
 let box_wrapped_field buf cols ~head ~style body =
   let indent = Message_layout.display_width head in
   let avail = max 8 (framed_inner_width cols - indent) in
-  match Message_layout.wrap_words ~max_cells:avail (Terminal_text.single_line body) with
+  match
+    Message_layout.wrap_body ~max_cells:avail
+      ~sanitize:Terminal_text.single_line body
+  with
   | [] -> box_line buf cols head
   | first :: rest ->
       box_line buf cols (head ^ style ^ first ^ Ansi.reset);
@@ -1652,10 +1662,13 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
       match choice.Masc.Tui_decode.ac_description with
       | None -> ()
       | Some description ->
+        (* Not [single_line] here: the field is a block and the escaping is
+           the block reader's, one line at a time. Sanitising first would
+           leave nothing for it to break on. *)
         box_wrapped_field buf cols
           ~head:"          "
           ~style:Ansi.dim
-          (Terminal_text.single_line description))
+          description)
     question.Masc.Tui_decode.aq_choices;
   (* What the operator has put down so far, in the two shapes a list of
      choices cannot show. *)
@@ -2124,6 +2137,13 @@ let planning_backlog_counts (backlog : planning_backlog) =
      [in_progress], and so does the CLI's own tally. This row was the only
      place that renamed it, so one state read as two on one screen. *)
   ; ("in_progress", backlog.pb_running, progress_active ^ " in_progress")
+  (* Work that is finished and waiting on a verifier, which is the queue the
+     Task Review tab counts on this same surface. It sat inside [in_progress],
+     so the row said twenty-one were being worked while seven of them were
+     waiting for a reader. *)
+  ; ( "awaiting_verification"
+    , backlog.pb_awaiting_verification
+    , progress_active ^ " awaiting_verification" )
   ; ("done", backlog.pb_done, progress_done ^ " done")
   ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
   ]
@@ -2818,17 +2838,24 @@ let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
         ^ Ansi.reset )
 
 
+(* Which lanes list this runtime among their candidates, in the order the
+   resolved projection holds them. The runtime detail asks the same question
+   from two doors -- the catalog row and a lane's candidate row -- and a
+   runtime that several lanes fall back to must answer both doors the same,
+   so the answer is computed here rather than at either door. *)
+let runtime_lanes_using (snapshot : Masc.Tui_decode.runtime_surface_snapshot)
+    ~runtime_id =
+  let open Masc.Tui_decode in
+  snapshot.rss_resolved.rrs_lanes
+  |> List.filter (fun (lane : runtime_resolved_lane) ->
+         List.exists (String.equal runtime_id) lane.rrl_runtime_ids)
+  |> List.map (fun (lane : runtime_resolved_lane) -> lane.rrl_id)
+
 let runtime_all_rows (snapshot : Masc.Tui_decode.runtime_surface_snapshot) =
   let open Masc.Tui_decode in
   List.map
     (fun (runtime : runtime_option) ->
-       let lanes =
-         snapshot.rss_resolved.rrs_lanes
-         |> List.filter (fun (lane : runtime_resolved_lane) ->
-                List.exists (String.equal runtime.ro_id) lane.rrl_runtime_ids)
-         |> List.map (fun (lane : runtime_resolved_lane) -> lane.rrl_id)
-       in
-       runtime, lanes)
+       runtime, runtime_lanes_using snapshot ~runtime_id:runtime.ro_id)
     snapshot.rss_resolved.rrs_runtimes
 
 

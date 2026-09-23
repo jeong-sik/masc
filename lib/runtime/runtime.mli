@@ -306,26 +306,11 @@ type unavailable_runtime_assignment =
   ; runtime_id : string
   }
 
-type dropped_runtime_route =
-  { route_name : string
-  ; runtime_id : string
-  }
-
-type dropped_runtime_lane =
-  { lane_id : string
-  ; runtime_ids : string list
-  }
-
 type startup_degradation =
   { report : missing_catalog_report
   ; configured_default_runtime_id : string
-  ; effective_default_runtime_id : string
   ; disabled_runtime_ids : string list
   ; unavailable_assignments : unavailable_runtime_assignment list
-  ; dropped_routes : dropped_runtime_route list
-  ; dropped_media_failover : string list
-  ; dropped_lane_candidates : dropped_runtime_lane list
-  ; dropped_lanes : dropped_runtime_lane list
   }
 (** Operator-visible startup degradation. Missing-catalog runtime bindings are
     removed from the active runtime set so requests never dispatch through AGENT_CORE
@@ -704,8 +689,7 @@ val temperature_of_runtime_id : string -> float option
     for the model bound to runtime [id], or [None] when the id is not configured
     or the model leaves it unset.  Consumed by
     {!Runtime_inference.resolve_temperature}: a keeper turn uses this value when
-    set and its caller fallback ([MASC_KEEPER_UNIFIED_TEMP]) otherwise.  Required
-    for models that reject the default temperature (Kimi K2.7 accepts only 1.0). *)
+    set and its caller fallback ([MASC_KEEPER_UNIFIED_TEMP]) otherwise. *)
 
 val reasoning_effort_of_runtime_id : string -> Llm_provider.Reasoning_effort.t option
 (** Per-model [reasoning-effort] from runtime.toml, or [None] when unset or

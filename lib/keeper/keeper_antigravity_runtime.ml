@@ -60,15 +60,8 @@ let home_error_to_core_error error =
     (Runtime_antigravity_home.error_to_string error)
 ;;
 
-let history_role_label = function
-  | Agent_core.Types.System -> "SYSTEM:\n"
-  | Agent_core.Types.User -> "USER:\n"
-  | Agent_core.Types.Assistant -> "ASSISTANT:\n"
-  | Agent_core.Types.Tool -> "TOOL:\n"
-;;
-
 let render_message (message : Agent_core.Types.message) =
-  Ok (history_role_label message.role ^ Host.encode_history_message message)
+  Ok (Host.history_role_label message.role ^ Host.encode_history_message message)
 ;;
 
 let render_messages messages =
@@ -79,14 +72,6 @@ let render_messages messages =
       loop (rendered_message :: rendered) rest
   in
   loop [] messages
-;;
-
-let extra_system_context_messages messages =
-  List.filter
-    (fun (message : Agent_core.Types.message) ->
-      Agent_core.Types.Extra_system_context_provenance.classify message.metadata
-      = Agent_core.Types.Extra_system_context_provenance.Present)
-    messages
 ;;
 
 (* A keeper turn cannot start without its labels; the missing asset is a
@@ -102,7 +87,7 @@ let current_goal_label () = required_label (Antigravity_input_frame.current_goal
 let prompt_section_separator = Antigravity_input_frame.section_separator
 
 let measure_model_input_message_bytes (message : Agent_core.Types.message) =
-  String.length (history_role_label message.role)
+  String.length (Host.history_role_label message.role)
   + String.length (Host.encode_history_message message)
   + String.length prompt_section_separator
 ;;
@@ -221,18 +206,11 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
 
 let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
   if is_resume
-  then (
+  then
     (* The provider conversation already owns the static system prompt and
        seeded history. The hook context is turn-local, though, so dropping its
-       typed carrier on resume changes provider meaning. Prefix only that
-       provenance-marked System material and keep the legacy goal bytes exact
-       when no dynamic context was supplied. *)
-    let* context =
-      prepared.messages |> extra_system_context_messages |> render_messages
-    in
-    match String_util.trim_nonempty context with
-    | None -> Ok goal
-    | Some context -> Ok (context ^ prompt_section_separator ^ goal))
+       typed carrier on resume changes provider meaning. *)
+    Ok (Host.resume_prompt ~goal prepared.messages)
   else
     let* history = render_messages prepared.messages in
     Ok

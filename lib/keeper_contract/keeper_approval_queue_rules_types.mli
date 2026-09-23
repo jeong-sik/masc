@@ -93,39 +93,78 @@ type summary_attempt_disposition =
       summary_attempt_pre_worker_unavailable
   | Summary_attempt_settled
 
-(** How a request ended when the executor ran it boxed (RFC-0422): the box
-    refused every write outside a scratch and every socket, and the program
-    ended with this status. *)
+(** How the attempt to run a request boxed ended (RFC-0422): the exit status
+    the shim reported for a box it could not build. It is never the
+    requested program's own status, because that program never started. *)
 type observed_status =
   | Observed_exit of int
   | Observed_signal of int
   | Observed_stopped of int
 
-(** What the judge is shown of a refused observe run: the status and the
-    tail of what the program wrote to stderr. [observed_stderr_omitted_bytes]
-    is how many leading bytes the bound cut, so a reader can tell a short
-    stderr from a clipped one. *)
+(** Why the box could not be built, as the shim's typed acknowledgement
+    names it (lib/exec_shim). In every case the requested program was never
+    started, boxed or unboxed: the shim does not fall back to running
+    without the box.
+    - [Socket_rule_not_applied]: the child could not install its seccomp
+      socket filter.
+    - [Write_rule_not_applied]: the child could not install its Landlock
+      write ruleset.
+    - [Setup_failed]: the child failed before the box applied for a reason
+      it did not attribute to either rule (for example its working
+      directory or [no_new_privs]).
+    - [Unattributed]: the shim refused before starting a child (a host that
+      cannot build the box, a jail or configuration refusal), or a shim that
+      does not name its refusal. *)
+type observed_refusal_kind =
+  | Socket_rule_not_applied
+  | Write_rule_not_applied
+  | Setup_failed
+  | Unattributed
+
+val observed_refusal_kinds : observed_refusal_kind list
+(** Every kind once, in a fixed order. The list is walked through an
+    exhaustive successor match, so a new constructor needs a successor arm
+    before it compiles. The match alone does not keep it in the list: an arm
+    that ends the walk early drops the kinds after it, and a back-edge loops.
+    The contract tests pin the list against every constructor. *)
+
+val observed_refusal_kind_to_string : observed_refusal_kind -> string
+
+val observed_refusal_kind_of_string : string -> observed_refusal_kind option
+(** [None] for any tag {!observed_refusal_kind_to_string} does not produce. *)
+
+(** What the judge is shown of a refused observe run: why the box could not
+    be built, the status, and the tail of what the shim wrote to stderr
+    while giving up. [observed_stderr_omitted_bytes] is how many leading
+    bytes the bound cut, so a reader can tell a short stderr from a clipped
+    one. *)
 type observed_refusal =
-  { observed_status : observed_status
+  { observed_refusal_kind : observed_refusal_kind
+  ; observed_status : observed_status
   ; observed_stderr : string
   ; observed_stderr_omitted_bytes : int
   }
 
 val observed_refusal :
-  max_stderr_bytes:int -> status:observed_status -> stderr:string -> observed_refusal
+  max_stderr_bytes:int ->
+  refusal_kind:observed_refusal_kind ->
+  status:observed_status ->
+  stderr:string ->
+  observed_refusal
 (** The refusal with [stderr] bounded to its last [max_stderr_bytes], cut at a
-    UTF-8 character boundary. The tail rather than the head: the refused write
-    or socket is the last thing a program reports. *)
+    UTF-8 character boundary. The tail rather than the head: the reason the
+    box could not be built is the last thing the shim reports. *)
 
 val observed_refusal_to_yojson : observed_refusal -> Yojson.Safe.t
 val observed_refusal_of_yojson : Yojson.Safe.t -> (observed_refusal, string) result
-(** Closed decoder: [status.kind] must be [exit], [signal] or [stopped], and
-    every field is required. *)
+(** Closed decoder: [refusal_kind] must be one of
+    {!observed_refusal_kind_to_string}'s tags, [status.kind] must be [exit],
+    [signal] or [stopped], and every field is required. *)
 
 (** A pending request never owns or suspends a Keeper lane. [sequence] is the
     durable queue-issued order identity; [requested_at] is observation only.
     [observation] is present when the Gate ran the request boxed before
-    deferring it (RFC-0422) and carries what the box refused. *)
+    deferring it (RFC-0422) and carries why the box could not be built. *)
 type pending_approval =
   { id : string
   ; keeper_name : string

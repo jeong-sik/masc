@@ -506,8 +506,74 @@ let preview_new ~source_id ~package_id source_text =
     }
 ;;
 
+(* A declared read-write source whose folder does not exist yet can never
+   take its first package: the scan reports it missing, [find_writable_source]
+   refuses it, and nothing else creates the folder. Creating a package is
+   what the source is declared for, so the folder is made here and the
+   catalog refreshed before the package is written. A source in any other
+   state is left as the scan found it. *)
+let with_missing_source_root_created ~base_path ~refresh snapshot source_id =
+  let source_id_text = Skill_source_config.source_id_to_string source_id in
+  let missing_root =
+    snapshot
+    |> Skill_catalog_snapshot.sources
+    |> List.find_map (fun (source_scan : Skill_catalog_snapshot.source_scan) ->
+      if
+        String.equal
+          (Skill_source_config.source_id_to_string source_scan.source.source.id)
+          source_id_text
+      then (
+        match source_scan.source.source.access, source_scan.observation with
+        | Skill_source_config.Read_write, Skill_catalog_snapshot.Source_missing { resolved_path }
+          -> Some resolved_path
+        | ( Skill_source_config.Read_write
+          , ( Skill_catalog_snapshot.Source_ready _
+            | Source_not_directory _
+            | Source_unavailable _
+            | Source_unresolved _ ) )
+        | Skill_source_config.Read_only, _ -> None)
+      else None)
+  in
+  match missing_root with
+  | None -> Ok snapshot
+  | Some resolved_path ->
+    let not_ready reason =
+      Log.Dashboard.warn
+        "skill source %s at %s cannot take a package: %s"
+        source_id_text
+        resolved_path
+        reason;
+      Error Source_not_ready
+    in
+    (* Each folder that did not exist is fsynced through its parent, as the
+       package directory is below, so a crash cannot drop the new source
+       folder with a durable SKILL.md inside it. A symlinked ancestor is
+       followed, the same as a source root the write path already accepts. *)
+    let rec create_missing path =
+      if not (Sys.file_exists path)
+      then (
+        let parent = Filename.dirname path in
+        if not (String.equal parent path) then create_missing parent;
+        (try Unix.mkdir path 0o755 with
+         | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+        Keeper_fs_durable_directory.fsync_directory parent)
+    in
+    (match
+       Eio_guard.run_in_systhread ~label:"skill-editor-create-source-root" (fun () ->
+         create_missing resolved_path);
+       Eio_guard.check_if_ready ()
+     with
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn -> not_ready ("creating the folder failed: " ^ Printexc.to_string exn)
+     | () ->
+       (match refresh () with
+        | Error reason -> not_ready ("catalog refresh after creating the folder failed: " ^ reason)
+        | Ok (_ : Skill_catalog_snapshot_service.publication) -> current_snapshot ~base_path))
+;;
+
 let create ~base_path ~source_id ~package_id ~source_text ~refresh =
   let* snapshot = current_snapshot ~base_path in
+  let* snapshot = with_missing_source_root_created ~base_path ~refresh snapshot source_id in
   let* source_root = find_writable_source snapshot source_id in
   let* preview = preview_new ~source_id ~package_id source_text in
   let package_dir = Filename.concat source_root package_id in

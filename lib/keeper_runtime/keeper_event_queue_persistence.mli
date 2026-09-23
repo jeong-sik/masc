@@ -276,6 +276,11 @@ val validate_state_read_only_result :
     checkpointing or WAL compaction. A missing snapshot starts from the WAL
     row's exact complete pre-transition state, matching {!load_state_result}. *)
 
+val durable_state_exists_result :
+  base_path:string -> keeper_name:string -> (bool, string) result
+(** Whether the Keeper's queue snapshot or transition WAL exists. A missing
+    queue loads as empty through {!load_result}; this tells the two apart. *)
+
 val validate_existing_state_read_only_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
 (** Decode existing durable state and replay its v6 WAL without checkpointing

@@ -35,7 +35,7 @@ let handle_callback ~clock request reqd =
       ~heading:"This server is still starting"
       ~detail:"Start the login again once it is up."
   | Some state ->
-    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+    let config = Mcp_server.workspace_config state in
     (match query "error", query "code", query "state" with
      (* The provider says the operator declined, or it refused the request.
         Its own words, because ours would be a guess at what happened on a
@@ -50,7 +50,7 @@ let handle_callback ~clock request reqd =
      | None, Some code, Some state_value
        when String.trim code <> "" && String.trim state_value <> "" ->
        (match
-          Server_keeper_oauth.finish ~clock ~base_path ~state:state_value ~code
+          Server_keeper_oauth.finish ~clock ~config ~state:state_value ~code
             ~now:(Unix.gettimeofday ())
         with
         | Ok attached ->

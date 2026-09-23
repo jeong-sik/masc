@@ -747,6 +747,27 @@ type checkpoint_ref_load_error =
       }
   | Ref_lock_failed of string
 
+let checkpoint_ref_create_error_to_string = function
+  | Keeper_checkpoint_ref.Negative_turn_count value ->
+    Printf.sprintf "negative turn count %d" value
+  | Keeper_checkpoint_ref.Invalid_sha256 value ->
+    Printf.sprintf "invalid checkpoint sha256 %S" value
+
+let checkpoint_identity_error_to_string = function
+  | Session_id_invalid detail -> "invalid session id: " ^ detail
+  | Ref_create_failed error -> checkpoint_ref_create_error_to_string error
+
+let checkpoint_ref_load_error_to_string = function
+  | Ref_not_found -> "checkpoint not found"
+  | Ref_read_failed error -> checkpoint_load_error_to_string error
+  | Ref_identity_invalid error -> checkpoint_identity_error_to_string error
+  | Ref_session_mismatch { expected; actual } ->
+    Printf.sprintf
+      "session mismatch expected=%s actual=%s"
+      (Keeper_id.Trace_id.to_string expected)
+      (Keeper_id.Trace_id.to_string actual)
+  | Ref_lock_failed detail -> "checkpoint lock failed: " ^ detail
+
 type exact_checkpoint_snapshot =
   { checkpoint : Agent_core.Checkpoint.t
   ; reference : Keeper_checkpoint_ref.t
@@ -1106,6 +1127,8 @@ let save_agent_core_if_source_with
             | Ok (Keeper_fs.Committed_but_observer_failed failure) ->
               publish ~canonical_path [ Commit_observer_failed failure ])))
       with
+      | Eio.Cancel.Cancelled _ as cancelled ->
+        Printexc.raise_with_backtrace cancelled (Printexc.get_raw_backtrace ())
       | exn -> `Raised (exn, Printexc.get_raw_backtrace ())
     in
     let observed_installation installed_ref =
@@ -1163,10 +1186,13 @@ let save_agent_core_if_absent ~session_dir candidate =
       ~session_dir ~expected_source_ref:candidate_ref candidate
 ;;
 
-(* Accepted continuations are not observational rolling history. Their
-   content address is private to this store and has no expiry or prune path. *)
+(* Accepted continuations are not observational rolling history: nothing
+   expires them while a semantic execution names them. Once none does,
+   [Keeper_retained_checkpoint_sweep] removes them at server startup. *)
+let retained_dirname = "accepted-checkpoints"
+
 let retained_checkpoint_path ~session_dir (reference : Keeper_checkpoint_ref.t) =
-  Filename.concat (Filename.concat session_dir "accepted-checkpoints")
+  Filename.concat (Filename.concat session_dir retained_dirname)
     (reference.sha256 ^ ".json")
 
 let read_retained_locked ~session_dir ~reference =

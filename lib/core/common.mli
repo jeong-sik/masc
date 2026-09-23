@@ -92,6 +92,10 @@ type keeper_runtime_store_placement =
   | Keeper_scoped_rotated
       (** [keepers/<name>/<store>/<file>.jsonl] plus numeric rotations. The
           flat-file pass owns these, not the dated one. *)
+  | Keepers_root_scoped
+      (** [keepers/<store>/<file>]: beside the keeper directories, so a reader
+          that walks [keepers/] must not take it for a keeper. No retention
+          pass owns it. *)
   | Workspace_scoped
       (** [<masc root>/<store>]: named here for the dirname, but not written
           under [keepers/]. *)
@@ -107,6 +111,17 @@ val keeper_runtime_store_placement
     for months at roughly 4 MB a day fleet-wide. A store now has to say where
     it lives, and the match is exhaustive, so the next one cannot be added
     without answering. *)
+
+val keepers_root_store_dirnames : string list
+(** Directory names of the stores placed [Keepers_root_scoped]: they sit
+    beside the keeper directories under [keepers/], so no keeper may take one
+    of these names. *)
+
+val is_keepers_root_store_dirname : string -> bool
+(** Whether [name] is one of {!keepers_root_store_dirnames}, ignoring ASCII
+    case: on a case-insensitive filesystem (macOS APFS by default)
+    [keepers/Tool_Usage] is the same directory as [keepers/tool_usage]. *)
+
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and
     {!Keeper_identity} can both compute it without depending on each

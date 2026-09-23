@@ -14,6 +14,7 @@ let placement_name = function
   | Common.Keeper_scoped_dated -> "keeper_scoped_dated"
   | Common.Keeper_scoped_versioned -> "keeper_scoped_versioned"
   | Common.Keeper_scoped_rotated -> "keeper_scoped_rotated"
+  | Common.Keepers_root_scoped -> "keepers_root_scoped"
   | Common.Workspace_scoped -> "workspace_scoped"
 ;;
 

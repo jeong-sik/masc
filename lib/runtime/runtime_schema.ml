@@ -229,9 +229,8 @@ type model_spec =
     (** [temperature] — per-model sampling temperature for keeper turns. [None]
         keeps the caller fallback ([MASC_KEEPER_UNIFIED_TEMP], then the AGENT_CORE
         [agent_default] profile). [Some t] overrides it for every turn on this
-        model. Required for models that reject the default value: e.g. Kimi K2.7
-        (kimi-for-coding) accepts only temperature = 1.0 and rejects any other
-        value at request time ("only 1 is allowed for this model"). Resolved via
+        model. A model whose endpoint fixes the value declares that on its
+        AGENT_CORE catalog row ([ignored_sampling_parameters]) instead. Resolved via
         {!Runtime.temperature_of_runtime_id} → {!Runtime_inference.resolve_temperature},
         symmetric to the [max-output-tokens]/[max_tokens] path. *)
   ; top_p : float option
@@ -382,6 +381,7 @@ type exact_output_lane_decl =
   { id : string
   ; slot_ids : string list
   ; cli_slot_ids : string list
+  ; max_output_tokens : int option
   }
 [@@deriving show, eq]
 

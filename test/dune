@@ -85,6 +85,8 @@
  (modules test_keeper_skill_validate)
  (libraries masc_test_deps masc.skill_snapshot_service))
 
+(include stanzas/test_keeper_skill_publish.inc)
+
 (test
  (name test_keeper_request_failure)
  (modules test_keeper_request_failure)
@@ -2667,6 +2669,8 @@
 
 (include stanzas/test_h2_mode_vocabulary.inc)
 
+(include stanzas/test_h2_request_body_admission.inc)
+
 (include stanzas/test_heartbeat_integration.inc)
 
 (include stanzas/test_http_pages_asset_read.inc)
@@ -2799,6 +2803,7 @@
 
 (include stanzas/test_keeper_memory_write.inc)
 
+(include stanzas/test_keeper_memory_write_supersedes.inc)
 
 (include stanzas/test_keeper_tool_emission_hook.inc)
 
@@ -2853,6 +2858,8 @@
 (include stanzas/test_keeper_approval_resolved_history.inc)
 
 (include stanzas/test_keeper_tool_approval_mode_actor_log.inc)
+
+(include stanzas/test_keeper_decision_actor_log.inc)
 
 (include stanzas/test_keeper_toml_parser.inc)
 
@@ -3337,6 +3344,8 @@
 
 (include stanzas/test_keeper_meta_invalid_recovery.inc)
 
+(include stanzas/test_keeper_name_reserves_store_dirs.inc)
+
 (include stanzas/test_store_unreadable.inc)
 
 
@@ -3474,6 +3483,33 @@
  (name test_tui_connection_status)
  (modules test_tui_connection_status)
  (libraries alcotest masc masc_tui_types))
+
+; Anchored here rather than at the head of the file. That alone is not enough
+; to keep two pull requests apart -- this stanza and the one below it both
+; chose the same anchor and collided on the merge -- so a suite added later
+; picks a stanza no open branch is already sitting under.
+; [masc.masc_schedule] is here for [Schedule_domain], whose status list and
+; terminal rule the line under test walks rather than restating.
+(test
+ (name test_tui_schedule_counts_line)
+ (modules test_tui_schedule_counts_line)
+ (libraries alcotest masc.masc_schedule masc_tui_types))
+
+; Its own anchor, under the other suite that links only the state vocabulary
+; and the wire types, so two pull requests adding a suite do not both land on
+; the head of this file.
+(test
+ (name test_tui_lane_slot_reach)
+ (modules test_tui_lane_slot_reach)
+ (libraries alcotest masc masc_tui_types))
+
+; Its own anchor, under the other suite that links only the state vocabulary,
+; so two pull requests adding a suite do not both land on the head of this
+; file.
+(test
+ (name test_tui_quit_key_yields)
+ (modules test_tui_quit_key_yields)
+ (libraries alcotest masc_tui_types))
 
 (test
  (name test_tui_chat_gate_row)
@@ -3849,6 +3885,9 @@
  (modules test_tui_render_tools)
  (libraries
   alcotest
+  ; The wire decoder, so the surface under test is built the way the live
+  ; loader builds it rather than by hand.
+  masc
   masc_tui_keys
   masc_tui_render_tools
   masc_tui_theme
@@ -4051,12 +4090,18 @@
 (test
  (name test_tui_credential)
  (modules test_tui_credential)
- (libraries alcotest masc.string_util masc_tui_credential))
+ (libraries alcotest masc.masc_types masc.string_util masc_tui_credential))
 
 (test
  (name test_tui_keeper_control)
  (modules test_tui_keeper_control)
- (libraries alcotest masc masc.string_util masc_tui_keeper_control yojson))
+ (libraries
+  alcotest
+  masc
+  masc.string_util
+  masc_tui_credential
+  masc_tui_keeper_control
+  yojson))
 
 (test
  (name test_tui_editor)
@@ -4087,6 +4132,13 @@
  (name test_tui_board_read_layout)
  (modules test_tui_board_read_layout)
  (libraries alcotest masc_tui_board_read_layout masc_tui_types masc_tui_board_detail))
+
+; Its own anchor, under the other board stanza, so two pull requests adding a
+; suite do not both land on the head of this file.
+(test
+ (name test_tui_board_age_column)
+ (modules test_tui_board_age_column)
+ (libraries alcotest astring masc_tui_types masc_tui_render_schedule))
 
 (test
  (name test_tui_browser_lane_layout)
@@ -4137,6 +4189,23 @@
  (name test_tui_chart)
  (modules test_tui_chart)
  (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
+
+; RFC-0464: the Overview Team block's projection.
+; RFC-0465: the TUI pull request decoder against the server's own encoder.
+(test
+ (name test_tui_repository_pulls)
+ (modules test_tui_repository_pulls)
+ (libraries alcotest masc.server masc_tui_types masc_tui_repository_pulls))
+
+(test
+ (name test_tui_overview_team)
+ (modules test_tui_overview_team)
+ (libraries
+  alcotest
+  masc
+  masc_types
+  masc_tui_types
+  masc_tui_overview_team))
 
 (test
  (name test_tui_render_metrics)
@@ -5281,7 +5350,15 @@
 (test
  (name test_tui_connector_state)
  (modules test_tui_connector_state)
- (libraries alcotest masc masc_tui_connector_state))
+ (libraries alcotest ast_grep compiler-libs.common masc
+   masc_tui_connector_state)
+ (deps
+  (source_tree ../bin)))
+
+(test
+ (name test_tui_connector_unbind)
+ (modules test_tui_connector_unbind)
+ (libraries alcotest masc masc_tui_connector_unbind))
 
 (test
  (name test_tui_fleet_line)
@@ -5289,9 +5366,29 @@
  (libraries alcotest masc masc_tui_fleet_line))
 
 (test
+ (name test_tui_client_rows)
+ (modules test_tui_client_rows)
+ (libraries alcotest masc masc_tui_types))
+
+(test
  (name test_tui_table)
  (modules test_tui_table)
  (libraries alcotest masc_tui_message_layout masc_tui_table))
+
+(test
+ (name test_tui_wire_age)
+ (modules test_tui_wire_age)
+ (libraries alcotest masc_tui_wire_age))
+
+(test
+ (name test_tui_board_quarantine)
+ (modules test_tui_board_quarantine)
+ (libraries alcotest masc yojson masc_tui_fetched masc_tui_board_quarantine))
+
+(test
+ (name test_tui_text_block)
+ (modules test_tui_text_block)
+ (libraries alcotest astring masc_tui_text_block))
 
 (test
  (name test_operator_attention_summary)
@@ -5719,6 +5816,10 @@
 (include stanzas/test_keeper_ask_answer_wake.inc)
 
 (include stanzas/test_server_keeper_oauth_client.inc)
+
+; RFC-0465: open pull requests of registered GitHub repositories.
+(include stanzas/test_server_repository_pulls.inc)
+
 (include stanzas/test_keeper_identity_declarations.inc)
 (include stanzas/test_keeper_oauth_identity.inc)
 
@@ -5737,6 +5838,11 @@
 (include stanzas/test_tui_ask_layout.inc)
 
 (include stanzas/test_tui_ask_projection.inc)
+
+(include stanzas/test_tui_tasks_title_fits_the_frame.inc)
+(include stanzas/test_tui_board_hearth_census_width.inc)
+
+(include stanzas/test_tui_ask_context_block.inc)
 
 (include stanzas/test_tui_memory_back.inc)
 
@@ -5922,7 +6028,7 @@
 (test
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
- (libraries alcotest masc yojson))
+ (libraries alcotest masc unix yojson))
 
 (test
  (name test_tui_image_mosaic)
@@ -5998,7 +6104,12 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries alcotest masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+ ; The pick dispatch lives in the executable, which no test can link, so the
+ ; one assertion about it is read through Ast_grep. The source is a dep:
+ ; without it the test reads a cached verdict and stays green while the
+ ; wiring it asserts is gone.
+ (deps %{workspace_root}/bin/masc_tui.ml)
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 
 (rule
@@ -6220,17 +6331,6 @@
  (deps (alias runtest-test_tui_ask_alternative)))
 
 (rule
- (alias runtest-test_runtime_default_catalog_cli)
- (deps test_runtime_default_catalog_cli.py ../bin/main_eio.exe
-       (source_tree ../scripts/fixtures/release-evidence))
- (action
-  (run python3 %{dep:test_runtime_default_catalog_cli.py} %{dep:../bin/main_eio.exe})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_runtime_default_catalog_cli)))
-
-(rule
  (alias runtest-test_install_runtime_setup)
  (deps test_install_runtime_setup.py ../scripts/install-runtime-setup.py
        ../bin/main_eio.exe (source_tree ../scripts/fixtures/release-evidence)
@@ -6359,6 +6459,8 @@
  (libraries alcotest masc.dashboard masc.masc_types yojson digestif))
 
 (include stanzas/test_h2_json_worker.inc)
+
+(include stanzas/test_h2_response_window.inc)
 
 (rule
  (alias runtest-test_tui_keyboard_input-msx-background-poll)

@@ -441,6 +441,29 @@ let recovery_failure_of_client_error = function
   | Runtime_claude_code.Stopped_by_host _ -> Session_store.Protocol_failed
 ;;
 
+(* A Gate continuation may only resume the session it was captured in. When
+   that session refuses the resume as a context overflow, the vendor's own
+   conversation is full: the resume prompt is the same at every masc capacity,
+   and no fresh start may carry the continuation. That is not an input
+   rejection an operator can retry -- [Retry_previous] would send into the same
+   full session -- so it is recorded [Vendor_session_full]: the continuation
+   ends for good ({!Keeper_direct_gate_continuation.session_full} reads it) and
+   the next ordinary turn supersedes it with a fresh session. Whether a
+   response or tool effect was observed first is kept in the record. *)
+let recovery_failure_of_attempt ~session_mode ~gate_continuation error =
+  match session_mode, gate_continuation, error with
+  | ( Runtime_claude_code.Resume _
+    , true
+    , Runtime_claude_code.Context_window_exceeded
+        { tool_effect_attempted; response_emitted; _ } ) ->
+    Session_store.Vendor_session_full
+      (if tool_effect_attempted || response_emitted
+       then Session_store.Activity_observed
+       else Session_store.No_activity_observed)
+  | (Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), _ ->
+    recovery_failure_of_client_error error
+;;
+
 (* The CLI frame carries Anthropic exclusive counts; the shared constructor
    produces the canonical inclusive api_usage without changing its scope. *)
 let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
@@ -469,6 +492,7 @@ module For_testing = struct
   let bounded_probe_config = bounded_probe_config
   let host_stop_turn_identity = host_stop_turn_identity
   let recovery_failure_of_client_error = recovery_failure_of_client_error
+  let recovery_failure_of_attempt = recovery_failure_of_attempt
 
   let start_seed_projection ~capacity_bytes ?carried_front_seed ?librarian_front ?on_carried_front
         ~turn_start ?on_model_input_window_observation ~keeper_name ~runtime_id messages
@@ -502,9 +526,11 @@ end
    recoveries are never resolved here because an effect-observed overflow is
    never retry-safe. A failed resolution is not retried here; the next
    attempt's claim surfaces the refusal instead. *)
-(* A Gate is bound to its previous settlement. An observation-free rejected
-   input may retry there, but may never discard that session for a fresh one. *)
-let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_path ~keeper_name ~runtime_id ()
+(* The retry is always a fresh start. A resume sends the vendor session the
+   same prompt at every capacity, so only a start carries the shrunk range;
+   an attempt bound to its previous session (a Gate continuation) is never
+   authorized to shrink-retry, see [context_overflow_retry_safe]. *)
+let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ()
   =
   match Session_store.load ~base_path ~keeper_name with
   | Error _ -> ()
@@ -525,9 +551,7 @@ let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_
          ~keeper_name
          ~expected
          ~recovery_id
-         ~resolution:(match official_client_continuation with
-           | Some _ -> Session_store.Retry_previous
-           | None -> Session_store.Restart_fresh)
+         ~resolution:Session_store.Restart_fresh
          ~resolved_by:"context-overflow-shrink-retry"
          ~resolved_at:(Time_compat.now ())
      with
@@ -538,7 +562,7 @@ let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_
 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection
+    ~tools ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
@@ -646,7 +670,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~system_prompt
         ~tools
         ~initial_messages
-        ~model_input_projection
+        ~model_input_projection:(model_input_projection_for session_mode)
         ~hooks:(Some hooks)
     in
     let* () = Keeper_official_task_reference.require_preserved
@@ -669,43 +693,54 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                 })
               images )
     in
-    let snapshot_messages = List.filter (fun (message : Agent_core.Types.message) ->
-      Agent_core.Types.Extra_system_context_provenance.classify message.metadata
-      <> Agent_core.Types.Extra_system_context_provenance.Present) prepared.messages in
-    let source_snapshot_sha256 = `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
-      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    let snapshot_messages =
+      List.filter (fun message -> not (Host.is_composed_system_context message))
+        prepared.messages in
     let snapshot = `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
     let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
       |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    (* Claude Code resumes with the system prompt it recorded at the session's
+       first launch ([--system-prompt-snapshot], default on): every later
+       request and resume sends that record as-is until the conversation is
+       compacted, whatever [--system-prompt-file] holds. What changes per turn
+       or per operation -- the context carrier, the Librarian working state
+       and the historical task reference ({!Host.is_carried_on_resume}) -- is
+       therefore sent in front of the resume prompt, and the canonical
+       conversation, which the vendor session already holds, is not sent. The
+       frontier and the input report say so. *)
     let context_frontier : Session_store.context_frontier =
       {snapshot_sha256; message_count=List.length snapshot_messages;
-       delivery=(match session_mode with Start -> Prepared_start_context | Resume _ -> Replaced_configuration);
+       delivery=(match session_mode with
+         | Start -> Prepared_start_context
+         | Resume _ -> Held_by_vendor_session);
        acknowledged_turn=None} in
-    let external_context = match session_mode with
-      | Runtime_claude_code.Start -> []
-      | Runtime_claude_code.Resume _ ->
-        [ "The following versioned canonical conversation snapshot is historical data \
-           from Keeper, including work outside this vendor session. Preserve its message \
-           roles and tool result outcomes. Historical tool calls are not new requests; \
-           do not replay completed effects. Use the current user prompt for new instructions."
-        ; Yojson.Safe.to_string (`Assoc
-            ["schema", `String "masc.official-client-canonical-context.v1";
-             "snapshot_sha256", `String snapshot_sha256;
-             "source_snapshot_sha256", `String source_snapshot_sha256;
-             "source_message_count", `Int (List.length initial_messages);
-             "projection", `String "prepared_model_input"; "messages", snapshot]) ] in
-    (* Attribute current replacement context only after a complete user write;
-       the vendor-owned tool transcript remains outside this capture. *)
     let report_transmitted_input () =
       on_transmitted_model_input
         (match session_mode with
          | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
-         | Runtime_claude_code.Resume _ -> Host.Whole_input_transmitted prepared.messages)
+         | Runtime_claude_code.Resume _ -> Host.Held_by_client_session)
     in
     let prompt =
       match session_mode with
       | Runtime_claude_code.Start -> initial_turn_prompt ~history ~goal
-      | Runtime_claude_code.Resume _ -> goal
+      | Runtime_claude_code.Resume _ -> Host.resume_prompt ~goal prepared.messages
+    in
+    (* A resume file only takes effect once the conversation is compacted and
+       the client records a new prompt. It keeps out what the resume prompt
+       carries, so that record never holds a stale copy of it. *)
+    let system_file_messages =
+      match session_mode with
+      | Runtime_claude_code.Start -> system_messages
+      | Runtime_claude_code.Resume _ ->
+        prepared.messages
+        |> List.filter_map (fun (message : Agent_core.Types.message) ->
+          match message.role with
+          | Agent_core.Types.System when not (Host.is_carried_on_resume message) ->
+            Some (Host.encode_history_message message)
+          | Agent_core.Types.System
+          | Agent_core.Types.User
+          | Agent_core.Types.Assistant
+          | Agent_core.Types.Tool -> None)
     in
     (* [None] means "masc named no system prompt, take the client's built-in
        one" since #33072 stopped passing [--system-prompt ""]. The probe and
@@ -715,7 +750,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        empty (#33165). *)
     let system_prompt =
       Some
-        ((prepared.system_prompt :: system_messages) @ external_context
+        ((prepared.system_prompt :: system_file_messages)
          |> List.filter (fun text -> String.trim text <> "")
          |> String.concat "\n\n"
          |> String.trim)
@@ -1112,10 +1147,19 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             | _, Some detail -> Error (internal_error detail)
             | _, None -> settle_host_stop ~usage stop)
          | Error error ->
+           (* A resumed session is refused on the vendor's own conversation,
+              which a smaller masc range does not change: the resume prompt is
+              the same at every capacity. The retry is therefore a fresh start
+              carrying the shrunk range, which a Gate continuation forbids --
+              it must stay in its original session -- so that turn ends on the
+              typed overflow instead of respawning the same refused input. *)
            context_overflow_retry_safe :=
-             (match error with
-              | Runtime_claude_code.Context_window_exceeded
-                  { tool_effect_attempted = false; response_emitted = false; _ } ->
+             (match session_mode, official_client_continuation, error with
+              | Runtime_claude_code.Resume _, Some _, _ -> false
+              | ( (Runtime_claude_code.Start | Runtime_claude_code.Resume _)
+                , (Some _ | None)
+                , Runtime_claude_code.Context_window_exceeded
+                    { tool_effect_attempted = false; response_emitted = false; _ } ) ->
                 true
               | _ -> false);
            (* A provider can reject after the child process spawned but
@@ -1136,7 +1180,12 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                 Keeper_provider_attempt_effect.No_effect_observed
             | _ -> ());
            if not !state_persistence_failed
-           then recovery_failure := recovery_failure_of_client_error error;
+           then
+             recovery_failure :=
+               recovery_failure_of_attempt
+                 ~session_mode
+                 ~gate_continuation:(Option.is_some official_client_continuation)
+                 error;
            Error (claude_error_to_core_error error)
          | Ok turn ->
            recovery_failure := Session_store.Protocol_failed;
@@ -1310,24 +1359,20 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
   let starting_capacity_bytes =
-    (* [max_capacity] is the runtime's declared ceiling: the shrink state
-       reads it to discard a remembered capacity that now exceeds it. This lane
-       passed [max_int], so a model that declares max-prompt-bytes was sent the
-       whole history anyway and learned its ceiling only from the provider's
-       rejection -- after the turn had already run. claude-sonnet-5 declares
-       524288, and one live keeper spent 29 minutes per attempt discovering it
-       (2026-08-24). A runtime that declares nothing keeps the old behaviour.
+    (* Every turn starts at the runtime's declared ceiling. Before that
+       ceiling was read, this lane passed [max_int], so a model that declares
+       max-prompt-bytes was sent the whole history anyway and learned its
+       ceiling only from the provider's rejection -- after the turn had
+       already run. claude-sonnet-5 declares 524288, and one live keeper
+       spent 29 minutes per attempt discovering it (2026-08-24). A runtime
+       that declares nothing starts unbounded.
 
        The ceiling is the model's max-prompt-bytes. keeper_unified_turn
        already sizes the pinned briefing from the same number and says the
        projection cuts the conversation window; this is that cut. *)
-    Keeper_context_overflow_shrink_state.starting_capacity
-      ~keeper_name
-      ~runtime_id
-      ~max_capacity:
-        (Option.value
-           (Runtime.max_prompt_bytes_of_runtime_id runtime_id)
-           ~default:unbounded_model_input_capacity_bytes)
+    Option.value
+      (Runtime.max_prompt_bytes_of_runtime_id runtime_id)
+      ~default:unbounded_model_input_capacity_bytes
   in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
@@ -1348,16 +1393,9 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
            against that size. There is no local account that could rule the
            next size out, so the provider's own target stands. *)
         ~shrink_admits_history:(fun ~capacity:_ -> true)
-        ~record_success:(fun ~capacity ->
-          if capacity <> unbounded_model_input_capacity_bytes
-          then
-            Keeper_context_overflow_shrink_state.record_success
-              ~keeper_name
-              ~runtime_id
-              ~capacity)
         ~on_shrink_retry:
           (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
-            resolve_input_rejected_for_shrink_retry ~official_client_continuation
+            resolve_input_rejected_for_shrink_retry
               ~base_path
               ~keeper_name
               ~runtime_id
@@ -1380,20 +1418,30 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
             ~system_prompt
             ~tools
             ~initial_messages
-            ~model_input_projection:
-              (Some
-                 (model_input_projection_for_capacity
-                    ~capacity_bytes
-                    ~observed_next_shrink_capacity_bytes
-                    ~observed_floor_capacity_bytes
-                    ?on_model_input_window_observation
-                    ?carried_front_seed
-                    ?librarian_front
-                    ?on_carried_front
-                    ~turn_start
-                    ~keeper_name
-                    ~runtime_id
-                    model_input_projection))
+            (* A resume still projects: the Librarian working state it
+               carries in front of the prompt is placed by this projection.
+               It reports no window and no carried front, though -- the range
+               it measures is not what a resume sends. *)
+            ~model_input_projection_for:(fun session_mode ->
+              let observed callback =
+                match session_mode with
+                | Runtime_claude_code.Start -> callback
+                | Runtime_claude_code.Resume _ -> None
+              in
+              Some
+                (model_input_projection_for_capacity
+                   ~capacity_bytes
+                   ~observed_next_shrink_capacity_bytes
+                   ~observed_floor_capacity_bytes
+                   ?on_model_input_window_observation:
+                     (observed on_model_input_window_observation)
+                   ?carried_front_seed
+                   ?librarian_front
+                   ?on_carried_front:(observed on_carried_front)
+                   ~turn_start
+                   ~keeper_name
+                   ~runtime_id
+                   model_input_projection))
             (* Reported inside the attempt rather than from the projection.
                The projection cannot see [session_mode], and on this lane that
                is the whole question: it runs on every turn, but only a [Start]

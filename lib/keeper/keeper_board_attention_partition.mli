@@ -58,12 +58,32 @@ type running_progress =
       ; next : candidate_visit
       }
 
+(** Each cause is its own constructor and carries the durable progress it
+    had, so the cause is never overwritten by the progress and a reader
+    tells the causes apart by constructor, not by [detail] text. *)
 type blocked_reason =
   | Candidate_membership_conflict of string
   | Durable_partition_invariant of string
   | Exact_setup_unavailable of string
-  | Exact_flow_replayed
-  | Exact_execution_terminal
+  | Exact_flow_replayed of running_progress option
+      (** The exact flow for this partition had already started: a
+          concurrent duplicate reached it. *)
+  | Exact_lane_exhausted of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** Every HTTP slot refused and the CLI tail had none to walk, or
+          refused too. [detail] is the flow's own sentence. *)
+  | Exact_flow_bookkeeping_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** The flow could not record its own run bookkeeping. *)
+  | Exact_completion_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** The judgment arrived but persisting the completion failed. *)
   | Domain_output_invalid of
       { detail : string
       ; progress : running_progress option
@@ -72,8 +92,17 @@ type blocked_reason =
       { detail : string
       ; progress : running_progress option
       }
-  | Unexpected_worker_failure of string
+  | Unexpected_worker_failure of
+      { detail : string
+      ; progress : running_progress option
+      }
   | Exact_execution_quarantined of running_progress
+  | Exact_execution_interrupted of running_progress
+      (** A process restart cut a bound execution. Not a judgment about the
+          candidate: the judgment lane is a read-only model call, so
+          redispatch spends tokens and nothing else. [Blocked -> Ready] is
+          legal, so the operator requeue reaches it; nothing reopens it
+          automatically. *)
 
 type running_state =
   { worker_epoch : Worker_epoch.t
@@ -89,15 +118,17 @@ type state =
       ; completed_at : float
       }
   | Settled of { settled_at : float }
-      (** Terminal for [settle]'s own caller, but not for the ledger: [ensure_roots]
-          reopens a [Settled] root straight back to [Ready] (same deterministic
-          identity, next generation) when the matching candidate is still
-          [Resumable_pending] — the Candidate ledger never recorded any judgment
-          for it, so the root settling can only be a desync (e.g. the
-          "candidate permanently absent" path settling a [Blocked] root without
-          ever judging it). A [Resumable_judged] or [Requeued_resumable] match
-          leaves [Settled] alone; those belong to [reconcile_quarantines]'s own
-          bookkeeping instead. No other transition leaves [Settled]. *)
+      (** Terminal: a judgment is on record. No transition leaves [Settled]. *)
+  | Abandoned of { abandoned_at : float }
+      (** Terminal for judgment purposes and never reached by [settle]: the
+          root gave up its candidate without ever recording one (e.g.
+          [reconcile_quarantines] abandoning a [Blocked] root whose candidate
+          is permanently absent from the ledger). [ensure_roots] reopens an
+          [Abandoned] root back to [Ready] (same deterministic identity, next
+          generation) when the matching candidate is still [Resumable_pending]
+          — nothing was ever judged. A [Resumable_judged] or
+          [Requeued_resumable] match leaves [Abandoned] alone; those belong to
+          [reconcile_quarantines]'s own bookkeeping instead. *)
   | Blocked of
       { reason : blocked_reason
       ; blocked_at : float
@@ -147,9 +178,11 @@ val ensure_roots :
 val recover_for_process_start :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result
 (** Canonically compact the append ledger. Only [Running Unbound] returns to
-    [Ready]. [Bound] executions become terminal
-    [Blocked (Exact_execution_quarantined _)] and can never be redispatched.
-    The return value is the number of Running roots terminalized or released.
+    [Ready]. [Bound] executions become
+    [Blocked (Exact_execution_interrupted _)] — requeueable, not terminal:
+    the judgment lane is a read-only model call, so redispatch spends tokens
+    and nothing else (see [execute]'s doc). The return value is the number of
+    Running roots terminalized or released.
     Old schema rows and non-tail malformed JSON are rejected without migration.
     A torn final append is truncated under the ledger lock. *)
 
@@ -250,6 +283,15 @@ val settle :
   now:float -> base_path:string -> partition:t -> (t, string) result
 (** Idempotently mark one [Completed] or terminal [Blocked] root [Settled]
     after its domain obligation or operator disposition has been applied. *)
+
+val abandon :
+  now:float -> base_path:string -> partition:t -> (t, string) result
+(** Idempotently mark one [Blocked] root [Abandoned]: its candidate is
+    permanently absent from the Candidate ledger, so the root gives up
+    without ever recording a judgment. Unlike [Settled], an [Abandoned] root
+    still reopens through [ensure_roots] when the matching candidate turns
+    out to be alive and [Resumable_pending]. A root that is already
+    [Abandoned] is returned unchanged. *)
 
 module For_testing : sig
   val path : base_path:string -> keeper_name:string -> string

@@ -72,10 +72,15 @@ let ensure_producer_playground (config : Workspace.config) producer =
   path
 ;;
 
+(* The clock of the running [with_workspace], for a test that must fail
+   rather than hang when an awaited event never arrives. *)
+let workspace_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
   Masc_test_deps.init_eio_clock env;
+  workspace_clock := Some (Eio.Stdenv.clock env);
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect
@@ -327,47 +332,42 @@ let test_goal_proof_reads_the_workspace_playground () =
   let reviewer =
     fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-      match lookup with
-      | AR.No_lookup_surface ->
-        fail "the Goal proof judge was handed no lookup surface"
-      | AR.Lookup_tools { schemas; dispatch; root_layout } ->
-        check bool "the read tool is advertised" true
-          (List.exists
-             (fun (schema : Masc_domain.tool_schema) ->
-                String.equal schema.name "tool_read_file")
-             schemas);
-        check bool "the web tool is advertised" true
-          (List.exists
-             (fun (schema : Masc_domain.tool_schema) ->
-                String.equal schema.name "masc_web_fetch")
-             schemas);
-        check bool "the prompt names the tools the judge holds" true
-          (String_util.contains_substring prompt "tool_read_file");
-        check bool "the prompt lists the root the tools resolve against" true
-          (List.exists
-             (fun entry -> String_util.contains_substring prompt entry)
-             root_layout);
-        let path = Filename.concat "some-keeper" "measurement.txt" in
-        let read =
-          dispatch
-            ~name:"tool_read_file"
-            ~args:(`Assoc [ "file_path", `String path ])
-          |> lookup_text
-        in
-        (match read with
-         | Error detail -> fail ("the judge could not read the measurement: " ^ detail)
-         | Ok output ->
-           reads := !reads + 1;
-           check bool "the judge read the measurement itself" true
-             (String_util.contains_substring output "pass rate: 100%"));
-        let input =
-          `Assoc [ "verdict", `String "APPROVE"; "reason", `String stated_reason ]
-        in
-        on_tool_result
-          ~input
-          (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
-             "recorded");
-        Ok {AR.selected_runtime_id="verifier-a";verdict=Some (AR.Approve stated_reason)}
+      let { AR.schemas; dispatch } = lookup in
+      check bool "the read tool is advertised" true
+        (List.exists
+           (fun (schema : Masc_domain.tool_schema) ->
+              String.equal schema.name "tool_read_file")
+           schemas);
+      check bool "the web tool is advertised" true
+        (List.exists
+           (fun (schema : Masc_domain.tool_schema) ->
+              String.equal schema.name "masc_web_fetch")
+           schemas);
+      check bool "the prompt names the tools the judge holds" true
+        (String_util.contains_substring prompt "tool_read_file");
+      check bool "the prompt lists the root the tools resolve against" true
+        (String_util.contains_substring prompt "some-keeper");
+      let path = Filename.concat "some-keeper" "measurement.txt" in
+      let read =
+        dispatch
+          ~name:"tool_read_file"
+          ~args:(`Assoc [ "file_path", `String path ])
+        |> lookup_text
+      in
+      (match read with
+       | Error detail -> fail ("the judge could not read the measurement: " ^ detail)
+       | Ok output ->
+         reads := !reads + 1;
+         check bool "the judge read the measurement itself" true
+           (String_util.contains_substring output "pass rate: 100%"));
+      let input =
+        `Assoc [ "verdict", `String "APPROVE"; "reason", `String stated_reason ]
+      in
+      on_tool_result
+        ~input
+        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
+           "recorded");
+      Ok {AR.selected_runtime_id="verifier-a";verdict=Some (AR.Approve stated_reason)}
   in
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])
@@ -397,11 +397,7 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
   let reviewer =
     fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-      let dispatch =
-        match lookup with
-        | AR.Lookup_tools { dispatch; _ } -> dispatch
-        | AR.No_lookup_surface -> fail "the judge was handed no lookup surface"
-      in
+      let { AR.dispatch; _ } = lookup in
       let read =
         dispatch
           ~name:"tool_read_file"
@@ -497,13 +493,11 @@ let test_goal_proof_surface_survives_a_crowded_playground () =
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   let reached = ref false in
-  let layout_seen = ref [] in
+  let prompt_seen = ref "" in
   let reviewer =
-    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
-        ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-      (match lookup with
-       | AR.No_lookup_surface -> fail "the crowded root produced no lookup surface"
-       | AR.Lookup_tools { root_layout; _ } -> layout_seen := root_layout);
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_
+        ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
+      prompt_seen := prompt;
       reached := true;
       on_tool_result
         ~input:
@@ -520,7 +514,12 @@ let test_goal_proof_surface_survives_a_crowded_playground () =
     (fun () -> drain config);
   check bool "the evaluator was reached rather than deferred" true !reached;
   check bool "every producer is listed, none dropped by a cap" true
-    (List.length !layout_seen >= checkouts);
+    (List.for_all
+       (fun index ->
+          String_util.contains_substring
+            !prompt_seen
+            (Printf.sprintf "producer-%02d" index))
+       (List.init checkouts Fun.id));
   check string "the review produced a verdict" "executing"
     (stored_phase config goal_id)
 ;;
@@ -577,7 +576,7 @@ let test_lane_unavailable_keeps_the_pending_row () =
     (fun () ->
        let work =
          match Agent.collect_pending config with
-         | Ok work -> work
+         | Ok { Agent.collected; _ } -> collected
          | Error failure -> fail (Agent.scan_failure_to_string failure)
        in
        let outcomes = List.map (Agent.process_pending_work config) work in
@@ -822,8 +821,6 @@ let test_skipped_scan_records_one_row_and_one_warn_per_cycle () =
       check string "the scan names the refused member" "criterion_revision" field;
       check string "the scan names the repair" "criterion_revision" repair
     | Error (Agent.Scan_skipped _) -> fail "the reason is not the refused schema member"
-    | Error (Agent.Ledger_reconcile_failed _) ->
-      fail "an unreadable store was reported as a ledger reconcile failure"
     | Ok () -> fail "rows without criterion_revision drained as a healthy store"
   in
   cycle ();
@@ -869,8 +866,6 @@ let test_scan_preserves_source_failure () =
   (match Agent.collect_pending config with
    | Error (Agent.Scan_skipped unavailable) ->
      check string "scan names the file it could not read" path unavailable.Goal_store.file
-   | Error (Agent.Ledger_reconcile_failed _) ->
-     fail "an unreadable store was reported as a ledger reconcile failure"
    | Ok _ -> fail "unavailable source was reported as a successful scan");
   check string "scan does not repair primary" "unreadable primary"
     (Fs_compat.load_file path);
@@ -889,7 +884,7 @@ let test_committed_proven_proof_reconciles_without_review () =
   in
   let work =
     match Agent.collect_pending config with
-    | Ok work -> work
+    | Ok { Agent.collected; _ } -> collected
     | Error failure -> fail (Agent.scan_failure_to_string failure)
   in
   check bool "reconciliation does not call the model again" false
@@ -1004,7 +999,7 @@ let test_committed_refuted_proof_reconciles_without_rearm () =
   in
   let work =
     match Agent.collect_pending config with
-    | Ok work -> work
+    | Ok { Agent.collected; _ } -> collected
     | Error failure -> fail (Agent.scan_failure_to_string failure)
   in
   check bool "refutation is not overwritten by a re-armed request" false
@@ -1016,6 +1011,63 @@ let test_committed_refuted_proof_reconciles_without_rearm () =
     check string "the exact refutation run survives" "goal-run-before-crash"
       verdict.Goal_verification.verification_run_id
   | _ -> fail "reconciliation overwrote the refuted ledger state"
+;;
+
+(* One Verifying goal whose ledger cannot be re-armed must not stop the
+   scan. The bad goal holds a human-confirmed proof for its current
+   criterion while its phase is still Verifying: reconciliation finds no
+   committed proof to replay, and re-arming refuses because the criterion is
+   already proven. The other goal, an ordinary pending request, is still
+   collected and still drained. *)
+let test_one_unreconcilable_goal_does_not_stop_the_scan () =
+  with_workspace
+  @@ fun config ->
+  let bad_goal_id =
+    set_up_committed_proof_crash
+      config
+      ~outcome:Goal_verification.Proven
+      ~evidence:"proven before the phase write"
+  in
+  let proven =
+    match (ledger_record config bad_goal_id).completion with
+    | Goal_verification.Proof_proven verdict -> verdict
+    | _ -> fail "test setup: the bad goal needs a proven ledger row"
+  in
+  (match
+     Goal_verification.record_human_confirmation
+       config
+       ~goal_id:bad_goal_id
+       proven
+       ~operator_id:"operator"
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  let ctx = workspace_ctx config in
+  let good_goal_id = create_goal ctx "Goal beside an unreconcilable ledger" in
+  ignore
+    (must_succeed "request_complete" (transition ctx good_goal_id "request_complete"));
+  (match Agent.collect_pending config with
+   | Ok { Agent.collected; unreconciled } ->
+     check bool "the healthy goal is still collected" true
+       (has_completion_work good_goal_id collected);
+     check bool "the unreconcilable goal is not collected" false
+       (has_completion_work bad_goal_id collected);
+     check (list string) "the scan names the one goal it could not reconcile"
+       [ bad_goal_id ]
+       (List.map (fun (failure : Agent.reconcile_failure) -> failure.failed_goal_id)
+          unreconciled)
+   | Error failure -> fail (Agent.scan_failure_to_string failure));
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:
+      (recording_reviewer (ref []) [ "verifier-a", Stub_approve "healthy goal verified" ])
+    (fun () -> drain config);
+  check string "the healthy goal is drained past the bad one" "awaiting_confirmation"
+    (stored_phase config good_goal_id);
+  check string "the bad goal stays verifying" "verifying" (stored_phase config bad_goal_id);
+  match (ledger_record config bad_goal_id).completion with
+  | Goal_verification.Human_confirmed _ -> ()
+  | _ -> fail "the scan rewrote the unreconcilable goal's ledger row"
 ;;
 
 let test_superseded_review_keeps_the_evaluated_original_criterion () =
@@ -1119,6 +1171,79 @@ let test_wake_after_deferred_persist_survives_active_scan () =
   check bool "wake was consumed while old claim active" true !scanned_while_active;
   check int "release delivered exactly one new review" 2 (List.length !calls);
   check string "new proof completed without another external wake" "awaiting_confirmation" (stored_phase config goal_id)
+;;
+
+(* A verifier lane that never answers must not keep its slot or the Goal's
+   claim once the operator takes the Goal out of verifying. The first review
+   hangs; Reopen cancels it and frees the claim, and the next request is
+   reviewed and committed without any other wake. *)
+(* Upper bound on the wait for the next review to commit. Every step is local
+   and stubbed, so reaching it means the cancel never happened. *)
+let hung_review_wait_s = 30.0
+
+let test_reopen_from_verifying_cancels_a_hung_review () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Verifier never answers" in
+  ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+  let entered, resolve_entered = Eio.Promise.create () in
+  let hanging_reviewer =
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
+        ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+      ignore (Eio.Promise.try_resolve resolve_entered ());
+      let never, _ = Eio.Promise.create () in
+      Eio.Promise.await never
+  in
+  let calls = ref [] in
+  let registry = Goal_verification_run_registry.global () in
+  let finished, resolve_finished = Eio.Promise.create () in
+  let saved_observer = Atomic.get Goal_verification_run_registry.change_observer_fn in
+  let observer () =
+    let committed =
+      reviews_of_goal registry goal_id
+      |> List.exists (fun (run : Goal_verification_run_registry.run) ->
+        match run.status with
+        | Goal_verification_run_registry.Completed
+            { outcome = Goal_verification_run_registry.Committed; _ } -> true
+        | Goal_verification_run_registry.Completed _
+        | Goal_verification_run_registry.Running -> false)
+    in
+    if committed then ignore (Eio.Promise.try_resolve resolve_finished ())
+  in
+  Fun.protect ~finally:(fun () -> Atomic.set Goal_verification_run_registry.change_observer_fn saved_observer)
+    (fun () ->
+      Atomic.set Goal_verification_run_registry.change_observer_fn observer;
+      with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"])
+        ~reviewer:hanging_reviewer
+        (fun () ->
+          Eio.Switch.run (fun sw ->
+            Goal_verification_agent.start ~sw ~config;
+            Eio.Promise.await entered;
+            Atomic.set AR.run_llm_reviewer_fn
+              (recording_reviewer calls ["verifier-a", Stub_approve "measured after reopen"]);
+            let reopened = must_succeed "reopen from verifying" (transition ctx goal_id "reopen") in
+            check string "reopen leaves verifying" "executing" (json_state reopened [ "goal"; "phase" ]);
+            ignore (must_succeed "new request" (transition ctx goal_id "request_complete"));
+            let clock = match !workspace_clock with
+              | Some clock -> clock
+              | None -> fail "test setup: with_workspace did not record its clock" in
+            match Eio.Time.with_timeout clock hung_review_wait_s (fun () ->
+                Eio.Promise.await finished; Ok ()) with
+            | Ok () -> ()
+            | Error `Timeout ->
+              fail (Printf.sprintf
+                "no committed review %.0fs after reopen: the hung review was not \
+                 cancelled or its claim was not released" hung_review_wait_s))));
+  let runs = reviews_of_goal registry goal_id in
+  check bool "the hung review was cancelled" true
+    (List.exists (fun (run : Goal_verification_run_registry.run) ->
+       match run.status with
+       | Goal_verification_run_registry.Completed
+           { outcome = Goal_verification_run_registry.Review_cancelled _; _ } -> true
+       | Goal_verification_run_registry.Completed _
+       | Goal_verification_run_registry.Running -> false) runs);
+  check int "the new request was reviewed once" 1 (List.length !calls);
+  check string "the new request committed" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
 let test_pending_before_phase_waits_for_explicit_request () =
@@ -1290,6 +1415,8 @@ let () =
             test_wake_after_deferred_persist_survives_active_scan
         ; test_case "pending before phase waits for explicit retry" `Quick
             test_pending_before_phase_waits_for_explicit_request
+        ; test_case "reopen from verifying cancels a hung review" `Quick
+            test_reopen_from_verifying_cancels_a_hung_review
         ; test_case "new request rejects an old answer for identical criteria" `Quick
             test_new_request_rejects_old_answer_for_same_criterion
         ; test_case "proof pending drains to completed" `Quick
@@ -1335,6 +1462,10 @@ let () =
             "committed refuted proof reconciles without re-arm"
             `Quick
             test_committed_refuted_proof_reconciles_without_rearm
+        ; test_case
+            "one unreconcilable goal does not stop the scan"
+            `Quick
+            test_one_unreconcilable_goal_does_not_stop_the_scan
         ; test_case "verifying goal with a missing request is rearmed and drained"
             `Quick
             test_verifying_goal_with_a_missing_request_is_rearmed_and_drained

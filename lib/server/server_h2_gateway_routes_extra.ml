@@ -7,10 +7,11 @@ open Server_h2_gateway_helpers
 (* Dispatch board, Gate, voice, karma, and static asset routes.
    Returns [true] if the route was handled, [false] otherwise. *)
 (* [with_public_read] is the parent gateway's own H2 public-read gate, handed
-   in rather than rebuilt here. The five routes that take it are wrapped in
-   Server_auth.with_public_read on HTTP/1 and are not in the public-read
-   allowlist, so under MASC_HTTP_AUTH_STRICT=1 HTTP/1 answers 401 while this
-   dispatcher used to run the handler (#28161). *)
+   in rather than rebuilt here. Every route below that HTTP/1 wraps in
+   Server_auth.with_public_read takes it, so under MASC_HTTP_AUTH_STRICT=1 a
+   token-less h2c read is refused exactly where HTTP/1 answers 401 (#28161).
+   The Board list and post-detail arms resolve their optional reaction actor
+   inside that gate, in the same order as HTTP/1. *)
 let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
                     | `CONNECT | `TRACE | `Other of string ]) =
@@ -33,8 +34,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            h2_reqd
            (Server_auth.not_initialized_response path)
            ~status:`Internal_server_error
-           ~extra_headers:cors;
-         true)
+           ~extra_headers:cors)
       else f None
     | Some (config : Workspace.config) ->
       (match
@@ -44,9 +44,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            httpun_request
        with
        | Ok actor -> f (Option.map board_actor_author_for_write actor)
-       | Error error ->
-         h2_respond_auth_error error;
-         true)
+       | Error error -> h2_respond_auth_error error)
   in
   match httpun_meth, path with
   | `GET, "/api/v1/voice/config" ->
@@ -59,6 +57,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/api/v1/board" ->
+      with_public_read (fun () ->
       with_optional_board_reaction_actor (fun reaction_actor ->
       let hearth = query_param httpun_request "hearth" in
       let sort_by = board_sort_order_of_request httpun_request in
@@ -110,8 +109,8 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
         ("offset", `Int offset);
         ("sort_by", `String (board_sort_label sort_by));
       ] in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
-      true)
+      h2_respond_json_value h2_reqd json ~extra_headers:cors));
+      true
 
   | `GET, "/api/v1/board/curation" ->
       with_public_read (fun () ->
@@ -150,15 +149,16 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
       true
 
   | `GET, "/api/v1/board/sub-boards" ->
-      let sub_boards = Board_dispatch.list_sub_boards () in
-      let json =
-        `Assoc
-          [
-            ( "sub_boards",
-              `List (List.map Board.sub_board_to_yojson sub_boards) );
-          ]
-      in
-      h2_respond_json_value h2_reqd json ~extra_headers:cors;
+      with_public_read (fun () ->
+        let sub_boards = Board_dispatch.list_sub_boards () in
+        let json =
+          `Assoc
+            [
+              ( "sub_boards",
+                `List (List.map Board.sub_board_to_yojson sub_boards) );
+            ]
+        in
+        h2_respond_json_value h2_reqd json ~extra_headers:cors);
       true
 
   | `GET, "/api/v1/board/karma/ledger" ->
@@ -200,9 +200,19 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
         h2_respond_json_value h2_reqd json ~extra_headers:cors);
       true
 
+  (* Must stay above the [/api/v1/board/<post_id>] arm: that arm takes any
+     remainder, so a sub-board path placed after it would be answered as a
+     post lookup under the post arm's gate. *)
+  | `GET, p when String.starts_with ~prefix:board_sub_board_detail_prefix p ->
+      with_public_read (fun () ->
+        let status, json = board_sub_board_detail_json ~path:p in
+        h2_respond_json_value h2_reqd json ~status ~extra_headers:cors);
+      true
+
   | `GET, p
     when String.starts_with ~prefix:"/api/v1/board/" p
          && String.length p > 14 ->
+      with_public_read (fun () ->
       with_optional_board_reaction_actor (fun reaction_actor ->
       let post_id = String.sub p 14 (String.length p - 14) in
       match
@@ -214,16 +224,15 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
           h2_reqd
           (Server_board_post_response_format.error_json error)
           ~status:`Bad_request
-          ~extra_headers:cors;
-        true
+          ~extra_headers:cors
       | Ok response_format ->
         let voter = board_voter_query httpun_request in
         let status, body =
           board_post_detail_json ~voter
             ~reaction_actor ~config ~response_format ~post_id
         in
-        h2_respond_json h2_reqd body ~status ~extra_headers:cors;
-        true)
+        h2_respond_json h2_reqd body ~status ~extra_headers:cors));
+      true
 
   | `GET, "/api/v1/karma" ->
       with_public_read (fun () ->
@@ -247,7 +256,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            let response = H2.Response.create ~headers `OK in
            let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
            H2.Body.Writer.write_string writer body;
-           H2.Body.Writer.close writer
+           h2_close_after_flush writer
        | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
@@ -261,7 +270,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
            let response = H2.Response.create ~headers `OK in
            let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
            H2.Body.Writer.write_string writer body;
-           H2.Body.Writer.close writer
+           h2_close_after_flush writer
        | None | Some (Error _) -> h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found);
       true
 
@@ -300,7 +309,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read
              let response = H2.Response.create ~headers `OK in
              let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
              H2.Body.Writer.write_string writer final_body;
-             H2.Body.Writer.close writer
+             h2_close_after_flush writer
          | Error error ->
            (match Web_dashboard.asset_error_http_status error with
             | `Not_found ->

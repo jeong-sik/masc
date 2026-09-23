@@ -4594,7 +4594,6 @@ describe('fetchRuntimeProviders', () => {
           message: 'runtime catalog degraded boot',
           config_path: '/tmp/masc-test/runtime.toml',
           configured_default_runtime_id: 'runpod_mtp.qwen',
-          effective_default_runtime_id: 'runpod_mtp.qwen',
           missing_catalog_model_count: 1,
           missing_catalog_models: [
             {
@@ -4607,16 +4606,6 @@ describe('fetchRuntimeProviders', () => {
           disabled_runtime_ids: ['mimo.mimo-v2.5-pro'],
           unavailable_assignments: [
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
-          ],
-          dropped_routes: [
-            { route_name: 'runtime.default', runtime_id: 'mimo.mimo-v2.5-pro' },
-          ],
-          dropped_media_failover: ['mimo.mimo-v2.5-pro'],
-          dropped_lane_candidates: [
-            { lane_id: 'coding', runtime_ids: ['mimo.mimo-v2.5-pro'] },
-          ],
-          dropped_lanes: [
-            { lane_id: 'mimo-only', runtime_ids: ['mimo.mimo-v2.5-pro'] },
           ],
           next_action: 'Add a row for each to the AGENT_CORE embedded catalog.',
         },
@@ -4703,12 +4692,10 @@ describe('fetchRuntimeProviders', () => {
     expect(result.assignment_status?.assignments[0]?.keeper).toBe('budgettest')
     expect(result.startup_degradation?.status).toBe('degraded')
     expect(result.startup_degradation?.terminal_reason).toBe('missing_agent_core_catalog_models')
-    expect(result.startup_degradation?.effective_default_runtime_id).toBe('runpod_mtp.qwen')
+    expect(result.startup_degradation?.configured_default_runtime_id).toBe('runpod_mtp.qwen')
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
     expect(result.startup_degradation?.unavailable_assignments[0]?.keeper_name).toBe('budgettest')
-    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.default')
-    expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 
   it('preserves thinking-control wires without duplicating the server enum', async () => {
@@ -4849,67 +4836,74 @@ describe('fetchRuntimeModelMetrics', () => {
 })
 
 describe('fetchKeeperCostMetrics', () => {
-  it('redacts legacy model breakdown labels while preserving cost totals', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        window_minutes: 60,
-        keepers: [
-          {
-            keeper_name: 'keeper-alpha',
-            total_cost_usd: 0.5,
-            total_input_tokens: 10,
-            total_output_tokens: 5,
-            total_tokens: 15,
-            p50_latency_ms: 100,
-            p95_latency_ms: 100,
-            sample_count: 2,
-            model_breakdown: [
-              { model: 'private-provider:claude', cost_usd: 0.2 },
-              { model: 'private-provider:model-b', cost_usd: 0.3 },
-            ],
-          },
-        ],
-        generated_at: 1,
-      }), {
+  function stubKeeperCosts(keepers: unknown[]) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ window_minutes: 60, keepers, generated_at: 1 }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
+    ))
+  }
+
+  it('keeps an unreported total cost as null instead of $0', async () => {
+    stubKeeperCosts([
+      {
+        keeper_name: 'subscription-keeper',
+        total_cost_usd: null,
+        cost_reported_samples: 0,
+        cost_unreported_samples: 3,
+        total_input_tokens: 10,
+        total_output_tokens: 5,
+        total_tokens: 15,
+        p50_latency_ms: 100,
+        p95_latency_ms: 100,
+        sample_count: 3,
+      },
+    ])
 
     const result = await fetchKeeperCostMetrics(60)
 
-    expect(result.keepers[0]?.model_breakdown).toEqual([
-      { model: 'runtime', cost_usd: 0.5 },
-    ])
+    expect(result.keepers[0]?.total_cost_usd).toBeNull()
+    expect(result.keepers[0]?.cost_unreported_samples).toBe(3)
   })
 
-  it('marks missing model breakdown labels as unknown instead of fabricating runtime', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        keepers: [
-          {
-            keeper_name: 'keeper-alpha',
-            total_cost_usd: 0.5,
-            sample_count: 2,
-            model_breakdown: [
-              { cost_usd: 0.2 },
-              { model: ' ', cost_usd: 0.3 },
-            ],
-          },
-        ],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
+  it('keeps the reported sum and the unreported count side by side', async () => {
+    stubKeeperCosts([
+      {
+        keeper_name: 'mixed-keeper',
+        total_cost_usd: 0.25,
+        cost_reported_samples: 1,
+        cost_unreported_samples: 2,
+        sample_count: 3,
+      },
+    ])
 
     const result = await fetchKeeperCostMetrics(60)
 
-    expect(result.keepers[0]?.model_breakdown).toEqual([
-      { model: 'unknown_model', cost_usd: 0.5 },
+    expect(result.keepers[0]?.total_cost_usd).toBe(0.25)
+    expect(result.keepers[0]?.cost_reported_samples).toBe(1)
+    expect(result.keepers[0]?.cost_unreported_samples).toBe(2)
+  })
+
+  it('drops a keeper row whose total cost disagrees with its reported count', async () => {
+    stubKeeperCosts([
+      { keeper_name: 'reported-but-no-total', cost_reported_samples: 2, cost_unreported_samples: 0, sample_count: 2 },
+      { keeper_name: 'reported-but-null-total', total_cost_usd: null, cost_reported_samples: 1, cost_unreported_samples: 0, sample_count: 1 },
+      { keeper_name: 'total-but-none-reported', total_cost_usd: 0.5, cost_reported_samples: 0, cost_unreported_samples: 2, sample_count: 2 },
+      { keeper_name: 'consistent', total_cost_usd: null, cost_reported_samples: 0, cost_unreported_samples: 2, sample_count: 2 },
     ])
+
+    const result = await fetchKeeperCostMetrics(60)
+
+    expect(result.keepers.map(k => k.keeper_name)).toEqual(['consistent'])
+  })
+
+  it('drops a keeper row that does not say how many samples reported a cost', async () => {
+    stubKeeperCosts([{ keeper_name: 'keeper-alpha', total_cost_usd: 0.5, sample_count: 2 }])
+
+    const result = await fetchKeeperCostMetrics(60)
+
+    expect(result.keepers).toEqual([])
   })
 })
 

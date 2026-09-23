@@ -270,14 +270,27 @@ type provider_refusal =
   | Network_error
   | Timeout
 
+type generation_dispatch_fact =
+  | No_generation_dispatch
+  | Generation_dispatch_started
+
 type execution_error_cause =
   | Attempt_already_started
   | Clock_required_for_timeout
   | Frozen_request_mismatch
-  | Completion_failed
-      (** A failure without a more specific Exact cause. The receipt may
-          already contain response headers, for example when provider parsing
-          fails. This cause alone does not authorize a dispatched retry. *)
+  | Completion_failed of
+      { error : Http_client.http_error
+      ; dispatch : generation_dispatch_fact
+      }
+      (** A provider failure without a more specific Exact cause, carrying the
+          typed transport error that produced it -- a network failure, a
+          deadline, a rejected wiring, a provider terminal or a classified
+          provider failure such as a hard quota or an empty completion -- and
+          whether the request had been sent when it failed. An HTTP refusal is
+          {!Provider_response_refused} and never arrives here.
+          The receipt may already contain response headers, for example when
+          provider parsing fails. This cause alone does not authorize a
+          dispatched retry. *)
   | Response_body_deadline_exceeded
       (** Successful HTTP response headers arrived, but the explicitly declared
           total deadline expired before its body completed. No complete body,
@@ -470,6 +483,12 @@ val admit_target_ref
     or reports the frozen missing, invalid, or read-failed credential outcome. *)
 val resolve_target : admitted_target -> (selected_target, target_selection_error) result
 
+val admitted_target_with_max_tokens : admitted_target -> int -> admitted_target
+(** Rebuild an admitted target with its request [max_tokens] set to the given
+    output budget, leaving the binding identity untouched. A lane declares its
+    own budget; the catalog's [max_output_tokens] is a validation bound and
+    must not be sent as the request budget. *)
+
 (** Brand an opaque domain JSON schema. AGENT_CORE never interprets domain keys as a
     provider wire envelope; it always constructs the selected target's wire
     envelope itself. *)
@@ -504,6 +523,19 @@ val project_request_body
   -> messages:Types.message list
   -> output_requirement
   -> (request_body_projection, admission_error) result
+
+type projection_target = private
+  { config : Provider_config.t
+  ; capabilities : Capabilities.capabilities
+  ; anthropic_thinking_control : Capabilities.anthropic_thinking_control option
+  ; body_timeout_s : float option
+  ; model_admitted : bool
+  }
+
+val projection_target : admitted_target -> projection_target
+(** The credential-free immutable request projection captured by
+    {!admit_target_ref}. It carries the config the exact request will run on,
+    including the [max_tokens] a lane's declared output budget set. *)
 
 val admission_error_reason : admission_error -> string
 (** One readable line naming the refusing condition ("unsupported_image_input",
@@ -777,10 +809,6 @@ type flow_candidate_failure =
       { candidate : flow_attempt_receipt
       ; cause : execution_error
       }
-
-type generation_dispatch_fact =
-  | No_generation_dispatch
-  | Generation_dispatch_started
 
 type 'callback_error flow_execution_error =
   | Flow_attempt_already_started of flow_evidence

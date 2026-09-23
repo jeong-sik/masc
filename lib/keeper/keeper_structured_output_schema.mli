@@ -10,6 +10,14 @@ val librarian_continuity_output_schema : Yojson.Safe.t
 (** Same Memory decision contract, with a required nonempty working state for
     completed-conversation synthesis. Domain parsing also rejects whitespace. *)
 
+val librarian_continuity_state_output_schema : Yojson.Safe.t
+(** A continuity pass over a range whose Memory is already committed: only
+    the required nonempty working state, and no Memory field. *)
+
+val librarian_working_context_output_schema : Yojson.Safe.t
+(** A pending-input organization pass: only the working contexts, and no
+    Memory field. *)
+
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 

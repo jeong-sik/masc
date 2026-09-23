@@ -150,7 +150,7 @@ let runtime_toml
     if include_board_attention
     then
       Printf.sprintf
-        "\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [%S]\n"
+        "\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [%S]\nmax_output_tokens = 4096\n"
         lane_target
     else ""
   in
@@ -159,7 +159,7 @@ let runtime_toml
     then
       let slot_ids = Option.value ~default:[ lane_target ] hitl_slots in
       Printf.sprintf
-        "\n[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [%s]\n"
+        "\n[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [%s]\nmax_output_tokens = 4096\n"
         (slot_ids |> List.map (Printf.sprintf "%S") |> String.concat ", ")
     else ""
   in
@@ -195,6 +195,7 @@ default = "replacement_provider.replacement"
 
 [runtime.exact_output_lanes.auxiliary_exact]
 slots = [%s]
+max_output_tokens = 4096
 |}
        (auxiliary_slots |> List.map (Printf.sprintf "%S") |> String.concat ", "))
     ^ board_attention_lane
@@ -280,7 +281,12 @@ let require_replacement_base_changed label = function
 ;;
 
 let transaction_lanes lane_id : Runtime_schema.exact_output_lane_decl list =
-  [ { id = lane_id; slot_ids = [ replacement_target ]; cli_slot_ids = [] } ]
+  [ { id = lane_id
+    ; slot_ids = [ replacement_target ]
+    ; cli_slot_ids = []
+    ; max_output_tokens = Some 4_096
+    }
+  ]
 ;;
 
 let require_transaction_lane label ~lane_id registry =
@@ -316,6 +322,7 @@ default = %S
 
 [runtime.exact_output_lanes.%s]
 slots = [%S]
+max_output_tokens = 4096
 |}
     runtime_name
     runtime_name

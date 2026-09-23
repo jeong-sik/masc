@@ -107,6 +107,7 @@ type runtime_handler =
   | Tool_peer_artifact
   | Tool_artifact_read
   | Tool_skill_validate
+  | Tool_skill_publish
   | Tool_workspace_memory_read
   | Tool_memory_search
   | Tool_memory_retract
@@ -240,6 +241,7 @@ let runtime_handler_to_string = function
   | Tool_peer_artifact -> "keeper_artifact_transfer"
   | Tool_artifact_read -> "tool_artifact_read"
   | Tool_skill_validate -> "tool_skill_validate"
+  | Tool_skill_publish -> "tool_skill_publish"
   | Tool_workspace_memory_read -> "tool_workspace_memory_read"
   | Tool_memory_search -> "tool_memory_search"
   | Tool_memory_retract -> "tool_memory_retract"
@@ -467,6 +469,7 @@ let descriptor
       | Tool_peer_artifact
   | Tool_artifact_read
       | Tool_skill_validate
+      | Tool_skill_publish
       | Tool_workspace_memory_read
       | Tool_memory_search
       | Tool_library_search
@@ -2416,6 +2419,17 @@ let internal_descriptors : t list =
       ~input_schema:Keeper_runtime_schemas_toml.skill_validate.input_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_skill_validate
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.skill.publish"
+      ~name:Keeper_runtime_schemas_toml.skill_publish.name
+      ~description:Keeper_runtime_schemas_toml.skill_publish.description
+      ~input_schema:Keeper_runtime_schemas_toml.skill_publish.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_skill_publish
       ()
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity

@@ -111,7 +111,7 @@ trace 하나에 atom 이 112개 쌓여 있고, 사람이 rondo 에게 말을 걸
 
 ```mermaid
 flowchart TD
-  A["Keeper 턴 첫 요청 조립<br/>memory-current.json 을 읽어 facts 전부를 싣는다<br/>보낼 이력의 시작은 Ledger, response-observed Turn_record, Whole_history 순으로 복원한다<br/>Librarian 에게 묻지 않는다"] --> B["턴 실행"]
+  A["Keeper 턴 첫 요청 조립<br/>memory-current.json 을 읽어 facts 전부를 싣는다<br/>보낼 이력의 시작은 Librarian 스냅숏, Librarian 이 읽은 위치, 원장 또는 response-observed Turn_record, 턴 시작, 가장 새 atom 순으로 고른다<br/>Librarian 에게 묻지 않는다"] --> B["턴 실행"]
   B --> C["finalize: checkpoint 저장<br/>librarian_messages 는 checkpoint 의 메시지 전부"]
   C --> D{"librarian_config_state 가 Enabled 인가"}
   D -->|"아니오"| X0["끝. 기록 없음"]
@@ -248,7 +248,7 @@ claude_code·antigravity 턴 뒤의 회차는 메시지를 중앙값 1개 받았
 | Memory OS RFC §3 | "librarian 이 올바르게 동작하는 한 overflow 상황은 존재하지 않는다" | 그렇게 만드는 장치가 코드에 없다. 창을 고르는 파일(`keeper_carried_front`·`keeper_carried_range`·`keeper_model_input_ledger`·`keeper_turn_driver_try_provider`·`keeper_unified_turn`)에 Librarian 참조가 0건이다 |
 | Memory OS RFC §3.5 | 저널 줄에 `watermark` 를 남긴다 | 라이브 저널의 커밋 줄 키는 `change, dropped, outcome, recorded_at, revision, source` 뿐이다. 구현된 적이 없다 |
 | 창 RFC §13.6 | "고를 것이 없고 틀릴 수도 없다" | 위치가 안 읽은 구간을 넘어가면 틀린다. 읽은 데까지만 옮길 때 참이다(§4.5 I1) |
-| 창 RFC §13.6 | 도구 결과 마커는 "지금은 거절 경로의 `last_resort` 에서만 켜진다" | 끝난 턴의 도구 결과는 이미 조립 때 마커로 나간다(RFC-0363, 기본 켜짐). `last_resort` 가 바꾸는 것은 지금 턴의 결과다 |
+| 창 RFC §13.6 | 도구 결과 마커는 "지금은 거절 경로에서만 켜진다" | 끝난 턴의 도구 결과는 이미 조립 때 마커로 나간다(RFC-0363, 기본 켜짐). 크기 거절 뒤의 강등(`Current_turn_demoted`, 창 RFC §10.4)이 바꾸는 것은 지금 턴의 결과다 |
 
 Memory OS RFC 의 두 문장은 §8 의 문서 PR 에서 고친다. 창 RFC 의 세 문장은 아직 머지되지 않은 Draft #37008 의 것이라 그 소유자에게 요청한다.
 
@@ -309,10 +309,10 @@ flowchart TD
 - **한 회차는 읽은 위치부터 기록된 마지막 턴 끝까지를 전부 읽는다.** 평소에는 한 턴이다. Librarian 이 밀렸으면 밀린 구간 전부다. 범위의 끝은 일어난 일(기록된 턴 끝)이지 고른 숫자가 아니다.
 - **성공하면 다시 본다. 실패하면 신호를 기다린다.** 회차가 도는 동안 끝난 턴이 있으면 성공 뒤에 이어서 읽는다. 실패 뒤에는 곧바로 다시 돌지 않고, 타이머도 두지 않는다. 다음 신호에 같은 위치부터 다시 읽는다. 기다리는 동안 온 신호는 잃지 않는다. 이미 와 있으면 바로 깬다.
 - 한가한 Keeper 의 밀린 턴은 다음 신호까지 다시 읽히지 않는다. 그동안 그 Keeper 는 턴을 돌지 않으므로 요청도 커지지 않는다. 다음 턴이 끝나면 그 신호에 밀린 구간을 같이 읽는다.
-- **읽기가 실패해도 받은 일 정리는 굶지 않는다.** 읽기 회차가 실패한 뒤에도 받은 일이 바뀌어 있으면 메시지 없는 회차를 돌리고 나서 기다린다. 지금은 받은 일 신호가 cadence 를 건너뛰어 바로 돈다. 그보다 늦어지지 않게 한다.
+- **읽기가 실패해도 받은 일 정리는 굶지 않는다.** 받은 일이 바뀌면 그 신호가 메시지 없는 회차를 Keeper 의 Librarian 레인에 바로 넣는다(`keeper_librarian_queue_refresh.ml` 의 `install`). 이 회차는 읽기 회차의 성패와 상관없이 돈다.
 - 범위가 비어 있으면 LLM 을 부르지 않고 위치만 옮긴다. 내부 생각을 이력에 남기지 않는 턴(`keeper_replay_checkpoint.ml` 의 `exclude_thought_from_replay`)이 도구를 쓰지 않았으면, 저장할 때 그 턴의 몫이 통째로 빠져 끝이 앞 턴과 같다. 읽을 것이 없는 턴이다.
 - **두 턴 이상을 읽다 실패했으면 가장 오래된 한 턴씩 읽어서 밀린 범위를 모두 비운다.** 좁힌 회차 하나가 성공했다고 곧바로 전부 읽기로 돌아가지 않는다. `Nothing_to_read`가 실제로 확인되거나 `All_unread`가 성공했을 때만 제한을 푼다. 범위가 커서 생긴 실패(모델 한도, 시간 초과, 출력 거절)를 숫자 없이 푸는 방법이다. 실패 표식은 루프의 메모리에만 둔다. 서버가 재시작하면 전부 읽기부터 다시 한다.
-- **연속성 회차도 같은 규칙을 쓴다.** 읽은 위치를 옮기는 durable 회차와, 스냅숏이 덮는 앞부분을 다시 쓰는 연속성 회차는 "회차가 실패했으면 다음엔 얼마나 읽나"라는 한 질문에 답한다. 지금 답이 두 벌이다. durable 쪽은 위 규칙대로 실패 표식을 루프에 두고 가장 오래된 한 턴으로 좁힌다(`keeper_librarian_durable_consumer.ml` 의 `failed_before` 와 `To_first_cut_point`). 연속성 쪽은 표식이 없어 회차마다 넓은 범위에서 다시 시작하고, 한 회차 안에서 범위를 반으로 접다가(`keeper_librarian_continuity.ml` 의 `narrow`), 마지막 걸음의 거절을 용량 거절로 읽지 못하면 로그 없이 끝난다(`keeper_librarian_queue_refresh.ml` 의 `Not_committed` 갈래, 판정은 `keeper_librarian_runtime.ml` 의 `capacity_refused_by_flow`). 두 번째 벌을 지운다.
+- **연속성 회차도 좁힌 폭을 다음 회차로 넘긴다.** 읽은 위치를 옮기는 durable 회차와, 스냅숏이 덮는 앞부분을 다시 쓰는 연속성 회차는 "회차가 실패했으면 다음엔 얼마나 읽나"라는 한 질문에 답한다. durable 쪽은 위 규칙대로 실패 표식을 루프에 두고 가장 오래된 한 턴으로 좁힌다(`keeper_librarian_durable_consumer.ml` 의 `failed_before` 와 `To_first_cut_point`). 연속성 쪽은 한 회차 안에서 범위를 반으로 접고(`keeper_librarian_continuity.ml` 의 `narrow`), 크기 때문에 거절당한 폭을 루프 메모리에 남겨 다음 회차가 그 폭에서 시작한다(`keeper_librarian_queue_refresh.ml` 의 `limited_widths`). 걸음이 크기 때문에 실패했는지는 `walk_shows_size`(`keeper_librarian_runtime.mli`)가 들고, 아래 표가 정한다.
 
   durable 회차는 실패 종류를 보지 않는다. 바닥이 한 턴이라, 일시적인 실패에 잘못 좁혀도 비용은 회차 하나이고 성공하면 제한이 풀린다. 한쪽으로만 안전하게 틀리므로 분류가 필요 없다.
 
@@ -324,10 +324,14 @@ flowchart TD
   |---|---|---|
   | `Context_overflow` · `Input_capacity` · `Request_body_refused` | 접는다 | 크기 때문이라고 공급자가 말했다 |
   | `Timeout` | 접는다 | §4.3 이 이미 "범위가 커서 생긴 실패"로 센 셋 중 하나다 |
-  | `Invalid_request` | 접는다 | 이유를 모른다. 모르는 것은 진전을 내는 쪽으로 읽는다 |
-  | `Refusal_body_not_received` | 접는다 | 같은 이유로 모른다 |
+  | `Invalid_request` | 접는다 | 요청이 공급자에 닿은 뒤 이유 없이 거절됐다. 창 RFC §10.4 처럼 크기 거절로 읽는다 |
+  | `Refusal_body_not_received` | 접는다 | 같은 이유다. 상태 줄은 왔고 이유가 담긴 본문을 못 읽었다 |
   | `Rate_limited` · `Overloaded` · `Server_error` · `Network_error` | 기다린다 | 요청 자체는 받아들여졌다. 접으면 폭만 잃는다 |
   | `Auth_failed` · `Authorization_refused` · `Payment_required` · `Not_found` | 기다린다 | 크기와 무관하고 운영자가 고쳐야 풀린다. 접어도 같은 거절이 온다 |
+
+  HTTP 거절이 아닌 공급자 오류는 `Exact_output.Completion_failed` 로 온다. 그 안에는 `Http_client.http_error` 갈래와, 요청이 나갔는지(`generation_dispatch_fact`)가 같이 들어 있다(#37899, `keeper_librarian_runtime.ml` 의 `completion_failure_shows_size`). 나가지 않은 요청은 어느 공급자도 판정하지 않았으므로 기다린다. transport 는 연결 수립 시간 초과도 `Http_operation` 으로 보고하므로, 나갔는지를 보지 않으면 한 번도 보내지 않은 요청이 폭을 줄인다. 나간 요청은 크기를 말한 경우에만 접는다. 공급자가 context overflow 라고 말했을 때, 응답 본문이 한도를 넘었을 때, 빈 완료의 stop reason 이 `ContextWindowExceeded`·`MaxTokens` 일 때, 그리고 공급자가 요청 전체를 쥐고 시간 안에 끝내지 못했을 때(`Wall_clock`·`Http_operation`·`First_token`·`Non_streaming_body`·`Stream_body`)다. 나머지는 기다린다. 연결 실패, DNS·TLS, 끊긴 연결, 하드 쿼터, 용량 소진, 설정 오류, provider terminal, 그 밖의 빈 완료가 그렇다. 조용해진 스트림(`Stream_idle`·`Cli_stdout_idle`), 한 단계의 시간 초과(`Provider_step`), 슬롯·용량을 기다린 시간 초과(`Queue`·`Capacity_backpressure`)도 입력 크기를 말하지 않는다.
+
+  **모름의 자리가 판정을 가른다.** 요청이 공급자에 닿은 뒤 이유 없이 거절된 것(위 표의 `Invalid_request`·`Refusal_body_not_received`)만 크기 거절로 읽는다. 전송 계층과 provider 계층의 모름(`NetworkError Unknown`, `Unknown_timeout`, `Unknown_provider_failure`, stop reason 이 `Unknown` 인 빈 완료)은 크기에 대한 증거가 없으므로 기다린다. 2026-09-22 msx-retro-mania 는 이런 모름을 좁힘으로 읽어 폭이 130 에서 16 atom 까지 줄었다.
 
   갈래를 보기 전에 무엇이 갈래를 가진 실패인지 먼저 가른다. 후보가 디스패치에 닿기 전에 걸러진 사전 거절(`Exact_output.Flow_advance_candidate_rejected`)은 요청을 보낸 적이 없으므로 접을지 기다릴지의 근거가 되지 못한다. 그 걸음은 아무 말도 하지 않은 것으로 둔다.
 
@@ -363,7 +367,7 @@ flowchart TD
 
   창 RFC §13.3 은 거절에 범위를 반씩 접는 것을 지웠다. 그 논거 셋 중 무엇이 여기로 옮겨지는지 갈라 적는다. (1) "반으로 접어도 범인이 남고 무관한 대화만 버려진다"는 옮겨지지 않는다. 턴 요청은 접은 만큼을 잃지만, 재구축은 0..N 의 앞부분을 덮는 일이라 접은 만큼이 다음 회차로 미뤄질 뿐이다. (2) "인자에 바이트가 없다"는 절반만 옮겨진다. §13.3 이 그린 그림은 큰 도구 결과 하나가 작은 atom 수천 개 사이에 숨어 접어도 남는 것이었다. `conversation_history` 에는 그 범인이 없다 — `keeper_librarian.ml` 의 `text_of_content` 가 도구 호출과 결과를 `[tool use omitted: …]`·`[tool result omitted: …]` 한 줄로 바꾸고, 생각 블록은 버리며, 이미지·문서·소리도 마커다. 그 칸만 보면 남는 것은 글이라 바이트가 atom 수를 대체로 따라간다.
 
-  그러나 연속성 회차는 같은 atom 을 두 벌 싣는다. 접힌 `conversation_history` 와, 도구 본문이 그대로 든 `completed_conversation` 이다(`keeper_librarian_continuity.ml` 의 `prompt_json` 이 `Agent_core.Checkpoint.message_to_json` 을 그대로 넘기고, `config/prompts/librarian.md` 가 둘 다 읽게 한다). 2026-09-22 goo-yang-bong 의 checkpoint 실측으로 0..3,189 은 원문 3.5 MB 대 접힌 글 0.66 MB, 0..12,756 은 14.2 MB 대 2.87 MB 다. 그날 거절당한 1,751,800 토큰이 이것이다. 그러므로 §13.3 의 (2)는 이 회차에 **그대로** 옮겨진다. 두 벌을 한 벌로 만드는 것은 #37857 이고, 그때까지 이 절의 사다리는 바이트가 atom 수를 따라가지 않는 입력 위에서 걷는다. 남은 이 빚은 자를 자리가 생길 때 갚는다. 자리가 없는 이유가 둘이므로 removal target 도 둘이다: #37207 이 공식 클라이언트 턴의 원문을 durable 로 남기고, #37102 가 턴 끝 줄을 checkpoint 저장 결과에 걸지 않게 한다. 둘 다 닫히면 이 절의 atom 사다리를 지우고 가장 오래된 한 턴 하나로 합친다. (3) "한 번 틀릴 때마다 올려 보내고 거절받는다"는 표식이 없앤다. 좁힌 값이 회차를 넘어 남으면 사다리는 한 시작점당 한 번만 걷는다.
+  연속성 회차도 atom 을 접힌 `conversation_history` 한 벌로만 싣는다. `continuity` 자료는 이전 상태(`previous_working_state`)뿐이다(`keeper_librarian_continuity.ml` 의 `prompt_json`, #37857). 도구 이름과 성패는 접힌 줄에 남는다 — 호출 줄이 같은 id 로 이름을, 결과 줄이 `is_error` 를 적는다. 2026-09-23 라이브에서 연속성 자료가 붙은 입력 935 건(최근 24시간)을 다시 재면, 도구 원문을 싣던 때의 렌더 변수 합 266.6 MB 가 한 벌로는 179.5 MB 이고, 가장 큰 입력은 7.0 MB 에서 2.0 MB 로 준다. 그러므로 §13.3 의 (2)는 이 회차에도 위와 같이 절반만 옮겨진다. 남은 빚은 자를 자리가 생길 때 갚는다. 자리가 없는 이유가 둘이므로 removal target 도 둘이다: #37207 이 공식 클라이언트 턴의 원문을 durable 로 남기고, #37102 가 턴 끝 줄을 checkpoint 저장 결과에 걸지 않게 한다. 둘 다 닫히면 이 절의 atom 사다리를 지우고 가장 오래된 한 턴 하나로 합친다. (3) "한 번 틀릴 때마다 올려 보내고 거절받는다"는 표식이 없앤다. 좁힌 값이 회차를 넘어 남으면 사다리는 한 시작점당 한 번만 걷는다.
 
 - **표식은 커밋이 아니라 소진에서 푼다.** 좁힌 회차 하나가 커밋했다고 전부 읽기로 돌아가지 않는다. 남은 범위가 다 읽혔을 때만 푼다. 커밋마다 풀면 다음 회차가 다시 넓은 범위에서 시작해 같은 사다리를 처음부터 걷는다(#37583).
 
@@ -480,7 +484,7 @@ flowchart TD
 | 도구 이름과 성패 | Keeper 메모리의 `tool_calls` | 그 범위 메시지의 ToolUse 이름과 ToolResult `is_error` |
 | 상대방 관측 | 턴 끝 시각 이전의 최근 72개 | 읽은 위치의 시각과 범위 끝의 시각 사이 |
 | facts, 받은 일, Keeper 역할 | 회차가 도는 순간의 값 | 같다 |
-| Goal 기준 | closure: 회차가 도는 순간의 task. durable: 없음(`No_task`) | durable 회차는 턴 끝 줄에 task 정체성이 없어 싣지 않는다(§8 "멈춘 Keeper 의 역할과 task"). closure 는 범위가 기록된 마지막 턴에서 끝나면 같다. 지금 task 를 지나간 턴의 것으로 추측하지 않는다 |
+| Goal 기준 | durable·continuity: 없음(`No_task`). queue: Keeper 의 지금 task(`Keeper_librarian_input_sources.goal_context_for_task`) | durable·continuity 회차는 턴 끝 줄에 task 정체성이 없어 싣지 않는다(§8 "멈춘 Keeper 의 역할과 task"). 지금 task 를 지나간 턴의 것으로 추측하지 않는다. queue 회차는 턴 범위 없이 밀린 입력과 이전 맥락 묶음을 정리하고, 회차가 도는 순간의 task 를 싣는다. 입력이 쌓인 뒤 task 가 바뀌었다면 바뀐 task 가 실리는 근사다 |
 
 - 지금 Keeper 메모리가 넘기는 도구 성패에는 `Unknown` 이 있다. 메시지에는 `is_error` 두 값뿐이다. 이 차이가 출력에 주는 영향은 하네스로 잰다.
 - checkpoint 를 디스크에서 읽는 비용은 하네스와 라이브에서 잰다. 크면 깨우는 신호에 메모리 속 메시지를 귀띔으로 같이 넘기되, 범위 양 끝 digest 가 맞을 때만 쓴다.
@@ -613,6 +617,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 ## 6. 이 RFC 가 닫지 않는 것
 
 - 도구 결과 본문. 회차는 지금처럼 읽지 않는다. 끝난 턴의 도구 결과는 blob 마커로 다시 열 수 있다(RFC-0363).
+- 끝나지 못한 턴. 끝 줄이 없어서 회차가 읽지 않는다(§1 의 3 은 끝난 턴만 말한다). 그 턴의 도구 결과가 창을 넘겨 거절됐다면, 다음 턴도 같은 atom 을 싣고 같은 거절을 받는다. 이 반복은 창 쪽이 닫는다. 크기 거절 뒤에 그 결과를 마커로 바꿔 같은 후보에 한 번 다시 보낸다(창 RFC §10.4 마지막 줄, §13.9). 받아들여지면 턴이 끝나 끝 줄이 생기고, 회차는 그 턴을 평소처럼 읽는다.
 - facts 와 고정 브리핑이 혼자 모델 한도를 넘는 경우(창 RFC §13.9). facts 블록의 크기는 코드가 숫자로 자르지 않는다. Librarian 의 `absorbs`·`dropped` 가 줄인다.
 - 슬롯 넘김(#36979)과 exact 레인 deadline 선언(#37004). 이 RFC 가 고치지는 않았고, 둘 다 2026-09-21 에 닫혔다(§4.10).
 - 재시작 줄을 하나도 못 쓴 채로 이력이 새로 시작한 경우. 줄 쓰기가 실패해도 턴과 비우기는 그대로 진행한다(§4.6). 빈 이력에서 시작한 턴이 시작할 때의 줄과 끝의 줄을 둘 다 못 쓰고(저장만 하고 죽은 턴은 끝의 줄이 원래 없다) 이력에 atom 을 남기면, 다음 턴은 `Continued_history` 라 그 trace 에는 재시작 줄이 끝내 없다. 재시작 줄의 append 도중에 서버가 죽은 Keeper 가 그렇다 — 다음 append 는 그 조각을 잘라내고 이어서 쓰지만(§4.6) 잘려 나간 재시작 줄은 돌아오지 않는다. 읽은 위치가 있던 Keeper 는 위치가 맞지 않아 서고(§4.4 의 5) 화면에 뜬다. 읽은 위치가 없던 Keeper 는 첫 구간이 기준점 앞에 놓여 읽히지 않는다(§4.4 의 3 ③). checkpoint 버전 교체로 시작한 턴은 저장 뒤에 줄을 쓰므로, 받아들여진 저장과 그 줄 사이에 프로세스가 죽어도 같은 일이 난다. 못 쓴 줄은 ERROR 로그와 `masc_keeper_turn_boundary_failures_total` 에 남는다.
@@ -668,7 +673,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 - **두 파일의 배포 preflight 등록.** 2026-09-21 확인: `bin/deployment_preflight_helper.ml` 의 `durable_stores` 에 두 파일이 없고, lint(`scripts/ci/check_exact_field_decoder_preflight.py`)는 `exact_field_names_result` 를 모른다(#37019). 읽는 쪽이 들어갔으므로 ①·②·③ 과 같은 스택의 작은 PR(④)로 등록한다.
 - **Keeper 를 지울 때의 순서.** `purge_keeper_artifacts` 는 `Keeper_memory_lane.with_librarian_purge` 안에서 실행 중 작업을 취소·대기하고, 이전 health 관측을 지운 뒤 파일을 삭제한다. 이 구간에 들어온 wake 는 기록하고 버리며, 동시 purge 는 명시적인 오류를 받는다. 삭제가 성공하거나 실패·취소되면 해당 purge 소유자만 제외 상태를 해제한다. 따라서 대기 중 늦게 온 wake 가 새 작업을 시작해 삭제된 파일을 다시 만들 수 없다. `request_cancel` 은 다른 domain 의 요청을 거절하므로 bracket 전체를 owner domain 에서 실행한다. Keeper 의 일반 시작·중지는 이 상태를 바꾸지 않는다.
 - **exact-output registry 가 공개되기 전.** 순서를 지키는 것은 `create_server_state` 의 프로그램 순서다 — `configure_exact_output_registry` 가 동기로 끝난 뒤에야 `start_keeper_loops` 가 불리고 그 안에서 `keeper_autoboot` 가 fork 된다. `Runtime_startup_state` 는 그 전에 이미 `Available` 일 수 있다(`note_runtime_loaded` 가 `Runtime.set_loaded` 에서 올린다). autoboot 의 `await_available` 이 실제로 막는 것은 setup-required 경로뿐이다. 그래서 ②는 autoboot 안에 두면 새 장치 없이 만족한다.
-- **멈춘 Keeper 의 역할과 task.** `consume_one` 은 `Keeper_meta_store` 로 디스크의 meta 를 읽고 `meta.instructions` 를 싣는다(#37208). 공식 클라이언트 closure 는 owner projection 을 보지만, 그 경로는 방금 턴을 돈 Keeper 에만 있으므로 멈춘 Keeper 에는 닿지 않는다. task 는 싣지 않는다: durable 회차의 `goal_context` 는 `No_task` 로 고정이다(`keeper_librarian_durable_consumer.ml`). 턴 끝 기록에 그 턴의 task 정체성이 없고, 지금 task 는 나중 턴의 것일 수 있어 지나간 턴의 것으로 추측하지 않는다. §4.7 의 Goal 기준 행은 closure 경로(`goal_context_for_task`)에만 참이다. durable 회차에 task 를 실으려면 턴 끝 줄에 task 정체성을 싣는 생산자 변경이 먼저다 — 열린 항목이다.
+- **멈춘 Keeper 의 역할과 task.** `consume_one` 은 `Keeper_meta_store` 로 디스크의 meta 를 읽고 `meta.instructions` 를 싣는다(#37208). task 는 싣지 않는다: durable 회차의 `goal_context` 는 `No_task` 로 고정이다(`keeper_librarian_durable_consumer.ml`). 턴 끝 기록에 그 턴의 task 정체성이 없고, 지금 task 는 나중 턴의 것일 수 있어 지나간 턴의 것으로 추측하지 않는다. Goal 기준은 queue 회차만 싣는다(§4.7). durable 회차에 task 를 실으려면 턴 끝 줄에 task 정체성을 싣는 생산자 변경이 먼저다 — 열린 항목이다.
 - **취소.** 위에 있던 "밖에서 부른다"는 낡은 문장이었다. `keeper_librarian_runtime.ml` 의 `Cancelled` 갈래는 이미 `Eio.Cancel.protect` 안에서 완료 표시와 실패 저널을 쓴다(2026-08-07 실측을 인용한 주석이 그 자리에 있다). Curator 와 같은 자리이고, 서버 종료 때 Keeper 수만큼 한꺼번에 취소돼도 같다. 고칠 것이 없다.
 
 **5단계의 hard cut(2026-09-22).** 저널의 실패 줄은 필드 이름이 정확히 일치해야 읽힌다(`keeper_memory_os_current.ml` `failed_entry_of_fields`). `cadence_deferred` 를 지웠으므로 그 필드가 있는 옛 실패 줄(2026-09-21 기준 전 기간 5,330개)은 새 코드가 읽지 못하고, 새 실패 줄은 롤백한 코드가 읽지 못한다. §5 가 스냅숏과 턴 기록에 대해 피한 그 일을 저널에서는 받아들였고, 저널 파일은 옮기지 않았다. 근거: reader 는 줄 단위 `result` 를 돌려주고(`read_journal_tail`), TUI 는 못 읽는 줄을 버리고 세며, dashboard 는 `undecodableLines` 로 세고, health 는 마지막 한 줄만 본다. 같은 상태의 줄이 이미 있었다 — 2026-07-31~08-06 에 `outcome` 없이 쓰인 2,770줄이 그렇게 세어지고 있었고 꼬리 창(기본 50, 최대 500줄)에서 밀려난 뒤였다. 저널은 관측용이다(스냅숏 커밋은 별도 파일). 배포 preflight 는 저널을 읽지 않으므로 바꾸지 않았다. 저장 스키마에서 wire 필드를 지우면 lint 의 `scripts/wire-field-removal-schema-gate.sh` 가 버전 bump·strip 스크립트·`schema-compat:` 줄 중 하나를 요구한다 — 이 hard cut 은 위 근거를 commit message 의 `schema-compat:` 줄로 적어 통과했다. RFC-0456 §5 는 저널 형식을 바꾸지 않는다고 적었으므로 이 RFC 가 그 부분을 대신한다.

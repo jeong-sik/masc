@@ -127,6 +127,8 @@ type install_report =
   ; replayed_deliveries : int
   ; delivery_replay_failures : delivery_replay_failure list
   ; replay_projection_error : storage_error option
+  ; retired_deliveries : int
+  ; delivery_retirement_error : storage_error option
   }
 
 type install_error = Install_storage_failed of storage_error
@@ -4481,6 +4483,123 @@ let compare_pending_order left right =
   | workspace_order -> workspace_order
 ;;
 
+(* ── Spent deliveries leave the store at install
+
+   A delivery stays after its wake is sent so the wake's readers can re-read
+   the decision: the intake reconciles the queued [Hitl_resolved] against it,
+   host replay records its outcome on it, and a waiting direct operation
+   observes it until it resumes. Every one of those reads is driven by the
+   queued wake or by an operation that has not resumed yet, and a consumed
+   grant is never replayed at boot. So once the grant is consumed and the
+   addressed Keeper's queue no longer holds the wake, nothing reads the row
+   again; the operator's decision and the consumption are on the audit
+   ledger. Without this every approval left a permanent row (2,131 consumed
+   approvals, 7.8 MB, on 2026-09-23).
+
+   The check runs here, once per install, because the install is the one
+   place that already walks every delivery, and because no wake is in flight
+   before the Keepers start: whichever path acknowledged the wake (spent
+   grant reconciliation, native continuation, a turn's intake), the queue is
+   the durable answer. A queue that cannot be read keeps the row. *)
+let queued_hitl_wake_ids ~base_path ~keeper_name =
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Error reason -> Error reason
+  | Ok queue ->
+    Ok
+      (Keeper_event_queue.to_list queue
+       |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+         match stimulus.payload with
+         | Keeper_event_queue.Hitl_resolved resolution -> Some resolution.approval_id
+         | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_attention _
+         | Keeper_event_queue.Bootstrap
+         | Keeper_event_queue.Fusion_completed _
+         | Keeper_event_queue.Schedule_due _
+         | Keeper_event_queue.Connector_attention _
+         | Keeper_event_queue.Ask_answered _
+         | Keeper_event_queue.Completion_authority_rejected _
+         | Keeper_event_queue.Task_cancelled _
+         | Keeper_event_queue.Workspace_message _
+         | Keeper_event_queue.Delegate_completed _
+         | Keeper_event_queue.Composition_completed _
+         | Keeper_event_queue.Task_outcome _ -> None))
+;;
+
+let spent_delivery_ids ~base_path loaded_deliveries =
+  let wakes_by_keeper = Hashtbl.create 8 in
+  let queued_wakes keeper_name =
+    match Hashtbl.find_opt wakes_by_keeper keeper_name with
+    | Some wakes -> wakes
+    | None ->
+      let wakes = queued_hitl_wake_ids ~base_path ~keeper_name in
+      (match wakes with
+       | Ok _ -> ()
+       | Error reason ->
+         Log.Keeper.warn
+           ~keeper_name
+           "approval_queue: event queue unreadable; consumed deliveries kept: %s"
+           reason);
+      Hashtbl.add wakes_by_keeper keeper_name wakes;
+      wakes
+  in
+  List.filter_map
+    (fun delivery ->
+       if not delivery.grant_consumed
+       then None
+       else
+         match queued_wakes delivery.entry.keeper_name with
+         | Error _ -> None
+         | Ok ids ->
+           if List.mem delivery.entry.id ids then None else Some delivery.entry.id)
+    loaded_deliveries
+;;
+
+(* The sidecar is written before the snapshot. A crash between the two leaves
+   a consumed delivery without its outcome, which the next install retires
+   the same way; the other order would leave an outcome whose delivery is
+   gone, and that fails the sidecar load. An unreadable sidecar is left
+   alone: rewriting it from memory would drop the outcomes it still holds. *)
+let retire_spent_deliveries ~base_path ids =
+  with_pending_store_lock (fun () ->
+    if
+      SMap.mem base_path (Atomic.get unavailable_stores)
+      || SMap.mem base_path (Atomic.get replay_projection_errors)
+    then Ok 0
+    else (
+      let current = Atomic.get deliveries in
+      let retired =
+        List.filter
+          (fun id ->
+             match SMap.find_opt id current with
+             | Some delivery ->
+               delivery.grant_consumed
+               && String.equal delivery.entry.audit_base_path base_path
+             | None -> false)
+          ids
+      in
+      match retired with
+      | [] -> Ok 0
+      | _ :: _ ->
+        let updated_deliveries =
+          List.fold_left (fun map id -> SMap.remove id map) current retired
+        in
+        (match save_replay_results_file_unlocked ~base_path ~delivery_map:updated_deliveries with
+         | Error error -> Error error
+         | Ok (Visible_sync_unconfirmed reason) ->
+           Error { path = replay_results_store_path ~base_path; reason }
+         | Ok Fsync_completed ->
+           (match
+              persist_snapshot_unlocked
+                ~base_path
+                ~pending_map:(Atomic.get pending)
+                ~delivery_map:updated_deliveries
+            with
+            | Error error -> Error error
+            | Ok () ->
+              Atomic.set deliveries updated_deliveries;
+              Ok (List.length retired)))))
+;;
+
 let install_persistence_internal ~after_load ~base_path =
   (* Snapshot read and installation are one transition. The hybrid pending
      store lock serializes Eio and non-Eio callers, cooperatively gates Eio
@@ -4611,6 +4730,15 @@ let install_persistence_internal ~after_load ~base_path =
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
   | Ok (loaded_pending, loaded_deliveries, replay_projection_error) ->
+    let retired_deliveries, delivery_retirement_error =
+      match
+        retire_spent_deliveries
+          ~base_path
+          (spent_delivery_ids ~base_path loaded_deliveries)
+      with
+      | Ok count -> count, None
+      | Error error -> 0, Some error
+    in
     let rec replay count failures = function
       | [] ->
         Ok
@@ -4618,6 +4746,8 @@ let install_persistence_internal ~after_load ~base_path =
           ; replayed_deliveries = count
           ; delivery_replay_failures = List.rev failures
           ; replay_projection_error
+          ; retired_deliveries
+          ; delivery_retirement_error
           }
       | delivery :: rest ->
         if delivery.grant_consumed

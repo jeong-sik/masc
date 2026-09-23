@@ -2021,6 +2021,156 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
+(* ── A consumed delivery leaves the store once its wake is gone
+
+   [drop_resolution] stands in for the acknowledgement: every ack path ends
+   with the [Hitl_resolved] entry removed from the Keeper's queue, and that
+   removal is what the install reads. *)
+let durable_delivery_ids ~base_path =
+  match AQ.For_testing.durable_snapshot_json ~base_path with
+  | Error detail -> Alcotest.fail detail
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    json
+    |> member "deliveries"
+    |> to_list
+    |> List.map (fun delivery -> delivery |> member "entry" |> member "id" |> to_string)
+;;
+
+let approve_with_wake ~base_path ~keeper_name ~input =
+  let approval_id = submit ~base_path ~keeper_name ~input in
+  (match aq_resolve ~base_path ~id:approval_id ~decision:Rule_types.Decision.Approve with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+  let resolution =
+    durable_resolution_opt ~base_path ~keeper_name ~approval_id
+    |> require_some "approved resolution was not delivered"
+  in
+  approval_id, resolution
+;;
+
+let consume_grant_exn ~base_path ~keeper_name ~input approval_id =
+  match
+    AQ.consume_approved_resolution
+      ~base_path
+      ~id:approval_id
+      ~keeper_name
+      ~tool_name:"external-effect"
+      ~input
+  with
+  | Ok (AQ.Consumption_committed _) -> ()
+  | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+    Alcotest.fail "grant consumption did not commit"
+  | Error error -> Alcotest.fail (AQ.grant_error_to_string error)
+;;
+
+let test_consumed_delivery_with_acknowledged_wake_leaves_the_store () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-spent-delivery-retired" in
+  let input = `Assoc [ "target", `String "spent" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let approval_id, resolution = approve_with_wake ~base_path ~keeper_name ~input in
+       consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+       let output_ref = store_replay_artifact ~base_path "spent replay result" in
+       (match
+          AQ.record_consumed_resolution_replay
+            ~base_path
+            ~id:approval_id
+            ~outcome:(AQ.Replay_applied output_ref)
+        with
+        | Ok AQ.Replay_recorded -> ()
+        | Ok AQ.Replay_already_recorded -> Alcotest.fail "outcome was already recorded"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       drop_resolution ~base_path ~keeper_name resolution;
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "spent delivery retired" 1 report.retired_deliveries;
+       Alcotest.(check bool)
+         "retirement wrote the store"
+         true
+         (Option.is_none report.delivery_retirement_error);
+       Alcotest.(check bool)
+         "durable store no longer holds the delivery"
+         false
+         (List.mem approval_id (durable_delivery_ids ~base_path));
+       (match AQ.approved_resolution_state ~base_path ~id:approval_id with
+        | Error (AQ.Grant_resolution_missing actual) ->
+          Alcotest.(check string) "missing names the approval" approval_id actual
+        | Ok _ -> Alcotest.fail "retired delivery is still readable"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       (* The sidecar lost the outcome with its delivery, so the next load
+          finds no outcome without a delivery. *)
+       AQ.For_testing.reset_runtime_state ();
+       let second = install_exn ~base_path in
+       Alcotest.(check bool)
+         "replay sidecar stays consistent"
+         true
+         (Option.is_none second.replay_projection_error);
+       Alcotest.(check int) "nothing left to retire" 0 second.retired_deliveries)
+;;
+
+let test_consumed_delivery_with_queued_wake_survives_a_restart () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-spent-delivery-wake-queued" in
+  let input = `Assoc [ "target", `String "wake-queued" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let approval_id, resolution = approve_with_wake ~base_path ~keeper_name ~input in
+       consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "queued wake keeps the delivery" 0 report.retired_deliveries;
+       Alcotest.(check bool)
+         "durable store still holds the delivery"
+         true
+         (List.mem approval_id (durable_delivery_ids ~base_path));
+       (match AQ.approved_resolution_state ~base_path ~id:approval_id with
+        | Ok AQ.Resolution_consumed -> ()
+        | Ok AQ.Resolution_unconsumed -> Alcotest.fail "consumed grant reappeared"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       Alcotest.(check bool)
+         "wake is still queued"
+         true
+         (Option.is_some (durable_resolution_opt ~base_path ~keeper_name ~approval_id));
+       drop_resolution ~base_path ~keeper_name resolution)
+;;
+
+let test_unconsumed_delivery_without_a_wake_survives_and_replays () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-unconsumed-delivery-kept" in
+  let input = `Assoc [ "target", `String "unconsumed" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let approval_id, resolution = approve_with_wake ~base_path ~keeper_name ~input in
+       drop_resolution ~base_path ~keeper_name resolution;
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "unconsumed delivery is not retired" 0 report.retired_deliveries;
+       Alcotest.(check int) "unconsumed delivery replayed" 1 report.replayed_deliveries;
+       (match AQ.approved_resolution_state ~base_path ~id:approval_id with
+        | Ok AQ.Resolution_unconsumed -> ()
+        | Ok AQ.Resolution_consumed -> Alcotest.fail "restart consumed the grant"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       let replayed =
+         durable_resolution_opt ~base_path ~keeper_name ~approval_id
+         |> require_some "replay did not queue the wake again"
+       in
+       drop_resolution ~base_path ~keeper_name replayed)
+;;
+
 let test_pre_effect_replay_failure_retires_grant_and_unblocks_continuation () =
   let base_path = temp_dir () in
   let keeper_name = "queue-pre-effect-replay-failure" in
@@ -5985,6 +6135,18 @@ let () =
             "cycle grant binds origin and is consumed once"
             `Quick
             test_cycle_grant_uses_exact_effect_and_is_consumed_once
+        ; Alcotest.test_case
+            "consumed delivery with acknowledged wake leaves the store"
+            `Quick
+            test_consumed_delivery_with_acknowledged_wake_leaves_the_store
+        ; Alcotest.test_case
+            "consumed delivery with queued wake survives a restart"
+            `Quick
+            test_consumed_delivery_with_queued_wake_survives_a_restart
+        ; Alcotest.test_case
+            "unconsumed delivery without a wake survives and replays"
+            `Quick
+            test_unconsumed_delivery_without_a_wake_survives_and_replays
         ; Alcotest.test_case
             "pre-effect replay failure retires grant and continues"
             `Quick

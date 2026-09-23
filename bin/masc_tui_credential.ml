@@ -54,10 +54,26 @@ let server_reason_of_code : Masc_error.Auth_error_code.t -> server_reason =
   | Masc_error.Auth_error_code.Unknown ->
       Rejected
 
+(* The server writes the code in one of two places. The REST refusal
+   ([Server_auth.auth_error_json]) puts it at the top of the body; an /mcp
+   refusal is a JSON-RPC error and carries it in [error.data]
+   ([Server_mcp_transport_http_respond.error_body]). The TUI reads both kinds
+   of route, so reading only the first left every /mcp refusal generic. *)
+let auth_error_code_field fields =
+  match List.assoc_opt "auth_error_code" fields with
+  | Some _ as code -> code
+  | None -> (
+      match List.assoc_opt "error" fields with
+      | Some (`Assoc error) -> (
+          match List.assoc_opt "data" error with
+          | Some (`Assoc data) -> List.assoc_opt "auth_error_code" data
+          | Some _ | None -> None)
+      | Some _ | None -> None)
+
 let server_reason_of_body body =
   match Yojson.Safe.from_string body with
   | `Assoc fields -> (
-      match List.assoc_opt "auth_error_code" fields with
+      match auth_error_code_field fields with
       | Some (`String code) -> (
           match Masc_error.Auth_error_code.of_string code with
           | Some code -> server_reason_of_code code
@@ -81,10 +97,12 @@ let refusal_cause ~credential_sent reason =
     | Expired ->
         Printf.sprintf "the operator token this %s presented has expired"
           agent_name
+    (* Not "lacks the role": the server sends this code for every Forbidden,
+       and some of those are not about the role at all. *)
     | Insufficient_role ->
         Printf.sprintf
-          "the operator token this %s presented lacks the role this request \
-           needs"
+          "the operator token this %s presented is not allowed to make this \
+           request"
           agent_name
     | Rejected ->
         Printf.sprintf "the operator token this %s presented was refused"

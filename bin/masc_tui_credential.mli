@@ -24,11 +24,14 @@ val self_mint_expiry_hours : int
 type server_reason =
   | Expired  (** The bearer was known and has expired. *)
   | Insufficient_role
-      (** The bearer was accepted but its role does not reach this route. *)
+      (** The bearer was accepted but is not allowed to make this request.
+          Usually its role, though the server sends the same code for every
+          Forbidden. *)
   | Rejected  (** Any other refusal, including one whose body names no code. *)
 
 val server_reason_of_body : string -> server_reason
-(** The server's reason, read from the [auth_error_code] of a 401/403 body and
+(** The server's reason, read from the [auth_error_code] of a 401/403 body --
+    at the top of a REST body, or under [error.data] of a JSON-RPC one -- and
     decoded with [Masc_error.Auth_error_code.of_string]. A body that is not
     JSON, or carries no code this client acts on, is {!Rejected}. *)
 

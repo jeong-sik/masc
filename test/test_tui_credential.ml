@@ -79,6 +79,14 @@ let test_the_server_reason_comes_from_the_typed_code () =
      = Credential.Insufficient_role);
   check bool "an invalid token is a plain refusal" true
     (of_code Masc_error.Auth_error_code.Invalid_token = Credential.Rejected);
+  (* An /mcp refusal is a JSON-RPC error with the code under error.data. *)
+  check bool "a JSON-RPC refusal is read from error.data" true
+    (Credential.server_reason_of_body
+       (Printf.sprintf
+          {|{"jsonrpc":"2.0","id":null,"error":{"code":-32001,"message":"x","data":{"auth_error_code":%S}}}|}
+          (Masc_error.Auth_error_code.to_string
+             Masc_error.Auth_error_code.Token_expired))
+     = Credential.Expired);
   List.iter
     (fun (label, raw) ->
       check bool (label ^ " is a plain refusal") true
@@ -95,8 +103,8 @@ let test_the_server_reason_comes_from_the_typed_code () =
 let test_each_reason_reads_as_itself () =
   let sent = Credential.refusal_cause ~credential_sent:true in
   check bool "expired says expired" true (has "has expired" (sent Credential.Expired));
-  check bool "a role refusal names the role" true
-    (has "lacks the role" (sent Credential.Insufficient_role));
+  check bool "a forbidden bearer says it is not allowed" true
+    (has "not allowed" (sent Credential.Insufficient_role));
   check bool "the rest is a refusal" true (has "was refused" (sent Credential.Rejected));
   List.iter
     (fun reason ->

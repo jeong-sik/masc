@@ -61,7 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- masc-tui says why the server refused its operator token. Every 401/403 read "the operator token this masc-tui presented was refused", so an expired bearer looked like any other failure — a Keeper's GitHub identity view read as a GitHub account problem. The TUI now reads the refusal body's typed `auth_error_code`: `token_expired` says the token has expired, `insufficient_role` says it is not allowed to make the request, and any other code keeps the old sentence. The code is read at the top of a REST refusal and under `error.data` of an `/mcp` JSON-RPC refusal. The code is now a closed type, `Masc_error.Auth_error_code.t`, which the server writes with `to_string` and the TUI reads with `of_string` and matches in full, so a new code fails the TUI's build instead of falling through. The JSON reads, the keeper roster, the chat events journal and the chat reconciliation read all use it (#38144).
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result

@@ -2856,48 +2856,54 @@ let test_an_empty_completion_clears_stale_unavailability_evidence () =
    head whose credential works again answers without waiting for a restart. *)
 let test_access_refusal_rotates_this_turn_and_the_next_turn_tries_the_head () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
-    reset_quota_lane_rests ();
     Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       let refused = "shared_a.test_model" and fallback = "shared_b.test_model" in
       let ids = [ refused; fallback ] in
-      let attempts = ref [] in
-      let access_refusal =
-        Agent_core.Provider_failure_attribution.core_error_of_http_error
-          ~provider:"candidate-access-fixture"
-          (Llm_provider.Http_client.HttpError
-             { code = 401
-             ; body = Llm_provider.Http_client.Received "arbitrary provider denial"
-             ; retry_after_header = None
-             })
-      in
-      let head_refuses = ref true in
-      let turn () =
-        walk_once
-          (fun runtime_id ->
-             attempts := runtime_id :: !attempts;
-             if String.equal runtime_id refused && !head_refuses
-             then Error access_refusal
-             else Ok ())
-          ids
-      in
-      (match turn () with
-       | Ok () -> ()
-       | Error error ->
-         Alcotest.failf "access fallback failed: %s" (Agent_core.Error.to_string error));
-      Alcotest.(check (list string)) "the refused turn rotates within the declared lane"
-        ids (List.rev !attempts);
-      Alcotest.(check bool) "the refusal leaves no candidate evidence" true
-        (Option.is_none (observed_candidate refused));
-      Alcotest.(check (list string)) "the next turn keeps the declared order"
-        ids (backpressure_order ids);
-      attempts := [];
-      head_refuses := false;
-      (match turn () with
-       | Ok () -> ()
-       | Error error ->
-         Alcotest.failf "restored head failed: %s" (Agent_core.Error.to_string error));
-      Alcotest.(check (list string)) "the next turn tries the head first and it answers"
-        [ refused ] (List.rev !attempts)))
+      (* 401 is AuthError and 403 is AuthorizationError; both route to
+         [Auth_failed]. *)
+      List.iter
+        (fun code ->
+           reset_quota_lane_rests ();
+           let label what = Printf.sprintf "HTTP %d: %s" code what in
+           let attempts = ref [] in
+           let access_refusal =
+             Agent_core.Provider_failure_attribution.core_error_of_http_error
+               ~provider:"candidate-access-fixture"
+               (Llm_provider.Http_client.HttpError
+                  { code
+                  ; body = Llm_provider.Http_client.Received "arbitrary provider denial"
+                  ; retry_after_header = None
+                  })
+           in
+           let head_refuses = ref true in
+           let turn () =
+             walk_once
+               (fun runtime_id ->
+                  attempts := runtime_id :: !attempts;
+                  if String.equal runtime_id refused && !head_refuses
+                  then Error access_refusal
+                  else Ok ())
+               ids
+           in
+           (match turn () with
+            | Ok () -> ()
+            | Error error ->
+              Alcotest.failf "%s" (label ("access fallback failed: " ^ Agent_core.Error.to_string error)));
+           Alcotest.(check (list string)) (label "the refused turn rotates within the declared lane")
+             ids (List.rev !attempts);
+           Alcotest.(check bool) (label "the refusal leaves no candidate evidence") true
+             (Option.is_none (observed_candidate refused));
+           Alcotest.(check (list string)) (label "the next turn keeps the declared order")
+             ids (backpressure_order ids);
+           attempts := [];
+           head_refuses := false;
+           (match turn () with
+            | Ok () -> ()
+            | Error error ->
+              Alcotest.failf "%s" (label ("restored head failed: " ^ Agent_core.Error.to_string error)));
+           Alcotest.(check (list string)) (label "the next turn tries the head first and it answers")
+             [ refused ] (List.rev !attempts))
+        [ 401; 403 ]))
 ;;
 (* The evidence follows the failure route. A closed runtime connection is
    routed as a server error, so it is evidence; MASC's own capacity, a

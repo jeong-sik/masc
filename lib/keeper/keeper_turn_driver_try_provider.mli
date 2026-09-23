@@ -409,7 +409,6 @@ val context_overflow_shrink_sequence :
   starting_capacity:int ->
   same_run_retry_authorized:(unit -> bool) ->
   shrink_admits_history:(capacity:int -> bool) ->
-  record_success:(capacity:int -> unit) ->
   on_shrink_retry:
     (shrink_attempt:int ->
      previous_capacity:int ->

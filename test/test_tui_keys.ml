@@ -5,6 +5,7 @@
    and the specific drifts the table was written to close. *)
 
 open Masc_tui_types
+module Cat = Masc.Keeper_memory_os_types
 
 let check = Alcotest.check
 let str = Alcotest.string
@@ -449,8 +450,8 @@ let memory_state_with_facts () =
             { Tui_decode.mos_revision = 1
             ; mos_updated_at = 0.
             ; mos_facts =
-                [ sample_memory_fact ~category:"lesson" ~claim:"a"
-                ; sample_memory_fact ~category:"blocker" ~claim:"b"
+                [ sample_memory_fact ~category:Cat.Lesson ~claim:"a"
+                ; sample_memory_fact ~category:Cat.Blocker ~claim:"b"
                 ]
             }
       ; mfs_source =
@@ -478,7 +479,9 @@ let memory_state_with_facts () =
 let category_filter_testable =
   let pp fmt = function
     | Category_all -> Format.pp_print_string fmt "Category_all"
-    | Category_ordinary s -> Format.fprintf fmt "Category_ordinary %S" s
+    | Category_ordinary c ->
+        Format.fprintf fmt "Category_ordinary %S"
+          (Cat.category_to_string c)
     | Category_source -> Format.pp_print_string fmt "Category_source"
     | Category_dropped -> Format.pp_print_string fmt "Category_dropped"
   in
@@ -488,7 +491,7 @@ let test_memory_fact_rows_follow_the_category_filter () =
   let state = memory_state_with_facts () in
   Alcotest.(check int) "All lists both stores plus the drops" 4
     (List.length (memory_fact_rows state));
-  state.memory_facts_category <- Category_ordinary "lesson";
+  state.memory_facts_category <- Category_ordinary Cat.Lesson;
   (match memory_fact_rows state with
    | [ Memory_row_fact fact ] ->
        check str "the filter narrows ordinary facts only" "a"
@@ -498,23 +501,23 @@ let test_memory_fact_rows_follow_the_category_filter () =
          (Printf.sprintf "unexpected filtered shape (%d rows)"
             (List.length rows)));
   Alcotest.(check (list category_filter_testable)) "categories are the loaded ones, sorted"
-    [ Category_ordinary "blocker"
-    ; Category_ordinary "lesson"
+    [ Category_ordinary Cat.Blocker
+    ; Category_ordinary Cat.Lesson
     ; Category_source
     ; Category_dropped
     ]
     (memory_fact_categories state)
 
 let test_memory_category_cycle_returns_to_all () =
-  let categories = [ Category_ordinary "blocker"; Category_ordinary "lesson" ] in
-  Alcotest.(check category_filter_testable) "All steps to the first" (Category_ordinary "blocker")
+  let categories = [ Category_ordinary Cat.Blocker; Category_ordinary Cat.Lesson ] in
+  Alcotest.(check category_filter_testable) "All steps to the first" (Category_ordinary Cat.Blocker)
     (next_memory_category Category_all categories);
-  Alcotest.(check category_filter_testable) "then to the next" (Category_ordinary "lesson")
-    (next_memory_category (Category_ordinary "blocker") categories);
+  Alcotest.(check category_filter_testable) "then to the next" (Category_ordinary Cat.Lesson)
+    (next_memory_category (Category_ordinary Cat.Blocker) categories);
   Alcotest.(check category_filter_testable) "the last returns to All" Category_all
-    (next_memory_category (Category_ordinary "lesson") categories);
+    (next_memory_category (Category_ordinary Cat.Lesson) categories);
   Alcotest.(check category_filter_testable) "a vanished category restarts at All" Category_all
-    (next_memory_category (Category_ordinary "gone") categories);
+    (next_memory_category (Category_ordinary Cat.Goal) categories);
   Alcotest.(check category_filter_testable) "no categories keeps All" Category_all
     (next_memory_category Category_all [])
 
@@ -2241,7 +2244,7 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
-  ; Detail_github, [ "L"; "P"; "1" ]
+  ; Detail_github, [ "L"; "P"; "1"; "2" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
   ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u" ]
   ; Detail_automation, []

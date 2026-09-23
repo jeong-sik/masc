@@ -1403,6 +1403,7 @@ let start_keeper_loops_owned
   =
   Progress.set_sse_callback Sse.broadcast;
   Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
+  Server_keeper_skill_publish.install ();
   (* Bus creation carries no queue policy. Each subscriber owns its bounded,
      non-blocking queue contract. *)
   let event_bus = Agent_core.Event_bus.create () in

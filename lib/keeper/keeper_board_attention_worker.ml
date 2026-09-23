@@ -566,7 +566,8 @@ let quarantine_blocked_partition ~base_path partition =
   | Partition.Ready
   | Partition.Running _
   | Partition.Completed _
-  | Partition.Settled _ ->
+  | Partition.Settled _
+  | Partition.Abandoned _ ->
     Error ("partition is not Blocked: " ^ partition.partition_id)
 ;;
 
@@ -629,6 +630,7 @@ let running_progress partition =
   | Partition.Ready
   | Partition.Completed _
   | Partition.Settled _
+  | Partition.Abandoned _
   | Partition.Blocked _ -> None
 ;;
 
@@ -707,6 +709,7 @@ let is_not_relevant_completion partition =
   | Partition.Ready
   | Partition.Running _
   | Partition.Settled _
+  | Partition.Abandoned _
   | Partition.Blocked _ -> false
 ;;
 
@@ -744,6 +747,7 @@ let deliver_and_settle_completed ~base_path ~keeper_name partition =
   | Partition.Ready
   | Partition.Running _
   | Partition.Settled _
+  | Partition.Abandoned _
   | Partition.Blocked _ ->
     Error
       ("completed partition query returned non-Completed state: "
@@ -1238,6 +1242,7 @@ let prepare_next_ready
          | Partition.Running _
          | Partition.Completed _
          | Partition.Settled _
+         | Partition.Abandoned _
          | Partition.Blocked _ -> false)
       partitions
   with
@@ -1382,7 +1387,8 @@ let rec converge_requeue_conflict
   | Partition.Blocked _
   | Partition.Running _
   | Partition.Completed _
-  | Partition.Settled _ ->
+  | Partition.Settled _
+  | Partition.Abandoned _ ->
     Error
       ("partition generation changed during requeue convergence: "
        ^ partition.partition_id)
@@ -1454,14 +1460,14 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
          (match partition.state with
           | Partition.Blocked _ ->
             Log.Keeper.error
-              "Board attention candidate permanently absent during quarantine reconciliation; settling blocked partition keeper=%s partition=%s candidate=%s"
+              "Board attention candidate permanently absent during quarantine reconciliation; abandoning blocked partition keeper=%s partition=%s candidate=%s"
               keeper_name
               partition.partition_id
               partition.candidate_id;
-            let* (_ : Partition.t) = Partition.settle ~now ~base_path ~partition in
+            let* (_ : Partition.t) = Partition.abandon ~now ~base_path ~partition in
             loop rest
           | Partition.Ready | Partition.Running _ | Partition.Completed _
-          | Partition.Settled _ -> loop rest)
+          | Partition.Settled _ | Partition.Abandoned _ -> loop rest)
        | Some candidate ->
          (match partition.state, Candidate.status_view candidate.status with
        | ( Partition.Blocked _
@@ -1549,7 +1555,8 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
           | Partition.Ready, _
           | Partition.Running _, _
           | Partition.Completed _, _
-          | Partition.Settled _, _ ->
+          | Partition.Settled _, _
+          | Partition.Abandoned _, _ ->
             loop rest))
   in
   loop initial_candidates partitions
@@ -1579,6 +1586,7 @@ let process_next_with_claim_ready_exact_current
            | Partition.Running _
            | Partition.Completed _
            | Partition.Settled _
+           | Partition.Abandoned _
            | Partition.Blocked _ -> false)
         partitions)
   in

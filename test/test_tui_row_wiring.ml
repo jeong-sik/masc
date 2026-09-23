@@ -1048,6 +1048,26 @@ let test_the_loader_stops_opening_keys_no_screen_draws () =
     still_read
 ;;
 
+(* The keeper detail's Automation rows drew a status, a recurrence and a
+   summary, and a Keeper's store keeps every request it ever took. On the
+   live roster code-reviewer holds 91 rows: twenty of them share one status
+   and one summary, ten more share another. Twenty identical lines say the
+   same thing twenty times and tell a reader nothing about which is which.
+
+   [sch_requested_at_iso] is on every row and was drawn nowhere. The three
+   that read "#36319 리뷰 등기 (dispatch 결과 확인 후)" were asked for at
+   13:39:53, 13:43:50 and 13:45:04 on 2026-09-14, so the clock is what parts
+   them. It is drawn with the terminal's own short timestamp, the helper the
+   other row clocks read, rather than a format of its own. *)
+let test_an_automation_row_says_when_it_was_asked_for () =
+  Alcotest.(check int) "the row reads the request clock" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines" ~field_name:"sch_requested_at_iso");
+  Alcotest.(check int) "and spells it with the shared stamp" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines" ~callee:"Terminal_text.short_timestamp")
+;;
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -1140,5 +1160,7 @@ let () =
             test_both_doors_into_the_runtime_detail_ask_the_same_lane_list
         ; Alcotest.test_case "the Board age column reads the sort once" `Quick
             test_the_board_age_column_reads_the_sort_once
+        ; Alcotest.test_case "an automation row says when it was asked for"
+            `Quick test_an_automation_row_says_when_it_was_asked_for
         ] )
     ]

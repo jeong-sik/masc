@@ -7713,8 +7713,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  ])
             @ List.map
                 (fun (row : schedule_row) ->
-                   Printf.sprintf "  %-12s %-18s %s"
+                   (* When it was asked for, beside what it asks. A Keeper's
+                      store keeps every request it ever took, and the same
+                      one-shot is asked for again and again: on the live
+                      roster code-reviewer holds 91 rows, 20 of them the same
+                      status and the same summary. Without the clock those 20
+                      are one line drawn twenty times, and the three that read
+                      "#36319 리뷰 등기 (dispatch 결과 확인 후)" were asked for
+                      at 13:39:53, 13:43:50 and 13:45:04 on the same day. *)
+                   Printf.sprintf "  %-12s %s  %-18s %s"
                      (Terminal_text.single_line row.sch_status)
+                     (Terminal_text.short_timestamp row.sch_requested_at_iso)
                      (Terminal_text.single_line row.sch_recurrence_summary)
                      (Terminal_text.single_line
                         (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))

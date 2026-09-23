@@ -45,8 +45,13 @@ turn): call `masc_dos_step` again rather than pressing more keys. A key call
 proves delivery, not that the game accepted the choice: read the screen.
 Menus often want the number and then `enter`.
 
-`keys_pressed` below the number you sent means the call reached its step
-ceiling; the rest never reached the machine.
+Send one decision per call — a menu number and `enter` — and read the
+picture before the next. Do not chain keys across a screen change: while a
+game fades or loads it often shows a still screen and polls for a "skip"
+key, which reads as settled, and the next key you queued is eaten by that
+wait instead of reaching the next prompt. A sequence stops by itself at a key
+that leaves the program busy; `keys_pressed` below the number you sent says
+where, and the rest never reached the machine.
 
 ## Saves
 

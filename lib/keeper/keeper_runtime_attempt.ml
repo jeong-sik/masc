@@ -42,10 +42,13 @@ let provider_error_to_http_error = function
      Carrying it back as the same transport value keeps the walk where
      [Runtime_attempt_fsm.should_try_next] puts every provider terminal, and
      where the failure route puts it ([Provider_integration]). *)
-  | Llm_provider.Error.ProviderTerminal { reason; detail; _ } ->
-    let body = if String.trim detail = "" then reason else detail in
-    Llm_provider.Http_client.ProviderTerminal
-      { kind = Llm_provider.Http_client.Other reason; message = body }
+  | Llm_provider.Error.ProviderTerminal { kind; detail; _ } ->
+    let body =
+      if String.trim detail = ""
+      then Llm_provider.Error.provider_terminal_reason kind
+      else detail
+    in
+    Llm_provider.Http_client.ProviderTerminal { kind; message = body }
   | Llm_provider.Error.NotFound { detail; _ } ->
     http_error
       ~code:404

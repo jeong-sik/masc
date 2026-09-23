@@ -242,7 +242,7 @@ let provider_terminal =
   Agent_core.Error.Provider
     (Llm_provider.Error.ProviderTerminal
        { provider = "claude_code"
-       ; reason = "session_conflict"
+       ; kind = Llm_provider.Http_client.Session_conflict
        ; detail = "session already in use"
        })
 
@@ -499,6 +499,20 @@ let test_walk_rotates_where_the_route_says_it_does () =
         true
         (claims_of label = Walk_stops))
     [ "provider:terminal"; "provider:parse_error"; "config:invalid" ];
+  (* Every named difference names a census row, and that row's route makes a
+     claim the walk can be compared with; otherwise the entry excuses
+     nothing and stays in the list unnoticed. *)
+  List.iter
+    (fun (label, _reason) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s names a census row" label)
+        true
+        (List.exists (fun (l, _, _) -> String.equal l label) census_rows);
+      Alcotest.(check bool)
+        (Printf.sprintf "%s routes to a class the walk can be compared with" label)
+        true
+        (claims_of label <> No_claim_this_walk_checks))
+    walk_and_route_differ_on_purpose;
   List.iter
     (fun (label, error, _count) ->
       let walked = rotates error in
@@ -511,7 +525,8 @@ let test_walk_rotates_where_the_route_says_it_does () =
           match claim with
           | Walk_rotates -> walked
           | Walk_stops -> not walked
-          | No_claim_this_walk_checks -> false
+          | No_claim_this_walk_checks ->
+            Alcotest.failf "%s has no claim to differ from" label
         in
         Alcotest.(check bool)
           (Printf.sprintf "%s still differs on purpose (%s)" label reason)

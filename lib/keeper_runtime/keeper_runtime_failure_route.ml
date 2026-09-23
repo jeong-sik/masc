@@ -258,10 +258,9 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
     observe_retry Server_error
   (* The provider said this 5xx is not transient, so the same path answers
      the same way; a different candidate is a different server. The walk
-     rotates on every 5xx ([Runtime_attempt_fsm.should_try_next]), and
-     [Retry.server_status_class_of_code] is the typed reading of that class,
-     the one [Retry.classify_error] builds [ServerError] from. A code outside
-     it is not a server failure the walk moves on. *)
+     ([Runtime_attempt_fsm.should_try_next]) and this route both read the
+     server-failure class from [Retry.server_status_class_of_code]. A code
+     outside it is not a server failure the walk moves on. *)
   | Llm_provider.Error.ServerError { transient = false; code; _ } ->
     (match Llm_provider.Retry.server_status_class_of_code code with
      | Some (Llm_provider.Retry.Overloaded_status | Llm_provider.Retry.Server_error_status)

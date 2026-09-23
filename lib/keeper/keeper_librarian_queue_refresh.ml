@@ -130,7 +130,9 @@ let uncommitted_pass () =
     let lane_id = Exact_lane_run_registry.lane_key Exact_lane_run_registry.Librarian in
     match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
     | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> Lane_unconfigured
-    | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> Not_committed
+    | Ok _
+    | Error (Runtime_exact_output_registry.No_admitted_lane_slots _)
+    | Error (Runtime_exact_output_registry.Missing_lane_output_budget _) -> Not_committed
 ;;
 
 let run_durable_with_commit ~config ~keeper_name ~commit =

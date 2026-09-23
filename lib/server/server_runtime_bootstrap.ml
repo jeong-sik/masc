@@ -384,6 +384,11 @@ let warn_optional_exact_output_lane registry ~lane_id ~feature =
       "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
       feature
       lane_id
+  | Error (Runtime_exact_output_registry.Missing_lane_output_budget _) ->
+    Log.Server.warn
+      "exact_output: %s is degraded because lane %S declares no max_output_tokens"
+      feature
+      lane_id
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Log.Server.warn
       "exact_output: %s is degraded until [runtime.exact_output_lanes.%s] is configured with AGENT_CORE target refs"

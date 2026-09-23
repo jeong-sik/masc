@@ -299,6 +299,14 @@ type exact_output_lane_decl =
             fallbacks AFTER every catalog slot is exhausted
             (RFC cli-runtimes-as-lane-slots). Empty keeps the lane
             HTTP-only. *)
+  ; max_output_tokens : int option
+        (** [max_output_tokens] — the output budget the lane's requests
+            declare as [max_tokens]. A lane that omits it is refused at
+            resolution rather than run with the field omitted: an omitted
+            [max_tokens] lets a provider reserve its catalog ceiling (the
+            OpenRouter 402 of 2026-09-21), and the catalog ceiling is a
+            validation bound, never a request default. [None] means the
+            declaration named no budget. *)
   }
 [@@deriving show, eq]
 

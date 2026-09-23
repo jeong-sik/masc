@@ -470,6 +470,12 @@ val admit_target_ref
     or reports the frozen missing, invalid, or read-failed credential outcome. *)
 val resolve_target : admitted_target -> (selected_target, target_selection_error) result
 
+val admitted_target_with_max_tokens : admitted_target -> int -> admitted_target
+(** Rebuild an admitted target with its request [max_tokens] set to the given
+    output budget, leaving the binding identity untouched. A lane declares its
+    own budget; the catalog's [max_output_tokens] is a validation bound and
+    must not be sent as the request budget. *)
+
 (** Brand an opaque domain JSON schema. AGENT_CORE never interprets domain keys as a
     provider wire envelope; it always constructs the selected target's wire
     envelope itself. *)
@@ -504,6 +510,19 @@ val project_request_body
   -> messages:Types.message list
   -> output_requirement
   -> (request_body_projection, admission_error) result
+
+type projection_target = private
+  { config : Provider_config.t
+  ; capabilities : Capabilities.capabilities
+  ; anthropic_thinking_control : Capabilities.anthropic_thinking_control option
+  ; body_timeout_s : float option
+  ; model_admitted : bool
+  }
+
+val projection_target : admitted_target -> projection_target
+(** The credential-free immutable request projection captured by
+    {!admit_target_ref}. It carries the config the exact request will run on,
+    including the [max_tokens] a lane's declared output budget set. *)
 
 val admission_error_reason : admission_error -> string
 (** One readable line naming the refusing condition ("unsupported_image_input",

@@ -53,10 +53,13 @@ let runtime_toml effort = Printf.sprintf {|[runtime]
 default = "openrouter.probe"
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["openrouter.probe"]
+max_output_tokens = 4096
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["openrouter.probe"]
+max_output_tokens = 4096
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["openrouter.probe"]
+max_output_tokens = 4096
 [providers.openrouter]
 protocol = "openai-compatible-http"
 endpoint = "https://openrouter.ai/api/v1"
@@ -68,6 +71,7 @@ key = "OPENROUTER_API_KEY"
 api-name = "z-ai/glm-5.3-flash"
 tools-support = true
 thinking-support = true
+max-output-tokens = 384000
 reasoning-effort = %S
 [openrouter.probe]
 |} effort
@@ -158,9 +162,16 @@ let test_explicit_effort_reaches_serialized_request () =
         ~io:{ getenv = (fun _ -> Ok (Some "synthetic-no-network")) }
         ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
       |> require_ok "wire resolver snapshot" in
-    let selected = Resolver.admit_target_ref snapshot target.target_ref
-      |> require_ok "wire admitted target" |> Resolver.resolve_target
-      |> require_ok "wire selected target" in
+    let selected =
+      Resolver.admit_target_ref snapshot target.target_ref
+      |> require_ok "wire admitted target"
+      (* The runtime bootstrap runs this target through a lane that declares
+         [max_output_tokens = 4096]; the wire plan must carry the same budget
+         or the frozen bytes differ for a reason the test is not about. *)
+      |> fun admitted -> Resolver.admitted_target_with_max_tokens admitted 4096
+      |> Resolver.resolve_target
+      |> require_ok "wire selected target"
+    in
     let requirement = Ready.make_output_requirement
         ~schema:(`Assoc [ "type", `String "object" ])
         ~minimum_guarantee:Ready.Json_syntax in
@@ -181,6 +192,29 @@ let test_explicit_effort_reaches_serialized_request () =
       Yojson.Safe.Util.(body |> member "reasoning_effort" |> to_string))
     [ Llm_provider.Reasoning_effort.Low; Llm_provider.Reasoning_effort.High ]
 
+let test_declared_lane_budget_reaches_serialized_request () =
+  with_runtime @@ fun load ->
+  let target = load "low" in
+  let projected = EO.projection_target target in
+  let preflight =
+    Plan.preflight
+      ~config:projected.config
+      ~messages
+      ~body_timeout_s:projected.body_timeout_s
+      ~anthropic_thinking_control:projected.anthropic_thinking_control
+    |> require_ok "preflight"
+  in
+  let plan = Plan.finalize_unmeasured preflight |> require_ok "finalize" in
+  let serialized = Plan.request_body plan in
+  let body = Yojson.Safe.from_string serialized in
+  (* The lane declares 4096 while the catalog ceiling is 384000. The request
+     must carry the lane's budget, not the ceiling: the ceiling is what the
+     model can emit, and sending it made OpenRouter reserve the whole ceiling
+     and answer 402 on a 400-byte judgment (2026-09-21). *)
+  check int "the declared lane budget is the request max_tokens" 4096
+    Yojson.Safe.Util.(body |> member "max_tokens" |> to_int)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -194,4 +228,6 @@ let () =
         test_case "effort changes frozen identity and preserves captured target" `Quick
           test_effort_changes_frozen_exact_identity;
         test_case "low and high survive the actual request serializer" `Quick
-          test_explicit_effort_reaches_serialized_request ] ]
+          test_explicit_effort_reaches_serialized_request;
+        test_case "the declared lane budget is the serialized max_tokens" `Quick
+          test_declared_lane_budget_reaches_serialized_request ] ]

@@ -78,6 +78,10 @@ type resolved_lane =
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
   | No_admitted_lane_slots of { lane_id : string }
+  | Missing_lane_output_budget of { lane_id : string }
+      (** The lane has at least one HTTP slot but declares no
+          [max_output_tokens]. Refused rather than run with the catalog
+          ceiling as the request budget. *)
 
 val publish
   :  ?required_lane_ids:string list

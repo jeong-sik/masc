@@ -405,7 +405,10 @@ let run_runtime_evidence ?fixture_dir () =
       [ { Fixture.id = "librarian-absorb-fixture"; base_url = librarian.base_url } ] in
     (match Runtime_exact_output_registry.publish
       ~lanes:[ { Runtime_schema.id = "librarian_exact"
-               ; slot_ids = [ "librarian-absorb-fixture" ]; cli_slot_ids = [] } ] resolver with
+               ; slot_ids = [ "librarian-absorb-fixture" ]
+               ; cli_slot_ids = []
+               ; max_output_tokens = Some 4_096
+               } ] resolver with
      | Ok _ -> ()
      | Error error -> Alcotest.fail
          (Runtime_exact_output_registry.publication_error_to_string error));

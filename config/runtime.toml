@@ -106,17 +106,29 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # skill_applicability = false  # current request + authorized Skill body advice
 # excluded_keepers = []
 
+# Each exact-output lane declares the output budget its requests send as
+# max_tokens. The value is the operator's declaration, not a code constant:
+# the model's catalog max_output_tokens is what it *can* emit (deepseek-v4
+# declares 384000), and sending that as the request budget made OpenRouter
+# reserve the whole ceiling and answer 402 on a 400-byte judgment
+# (2026-09-21). 8192 tokens bounds a large structured judgment while staying
+# far below the ceiling. A lane with HTTP slots and no max_output_tokens is
+# refused at resolution rather than run with the ceiling.
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+max_output_tokens = 8192
 
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+max_output_tokens = 8192
 
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+max_output_tokens = 8192
 
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash"]
+max_output_tokens = 8192
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
 # docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).

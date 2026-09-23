@@ -408,8 +408,13 @@ let test_registry_preserves_admitted_slots_without_resolving_credentials () =
           ; "credential-read-failed"
           ]
       ; cli_slot_ids = []
+      ; max_output_tokens = Some 4_096
       }
-    ; { id = "credential-constrained"; slot_ids = credential_constrained ; cli_slot_ids = [] }
+    ; { id = "credential-constrained"
+      ; slot_ids = credential_constrained
+      ; cli_slot_ids = []
+      ; max_output_tokens = Some 4_096
+      }
     ]
   in
   let registry =
@@ -467,7 +472,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
   in
   let cli = [ "official.verifier" ] in
   (match Registry.publish
-     ~lanes:[{id="mixed-kind-duplicate";slot_ids=[replacement_target];cli_slot_ids=[replacement_target]}]
+     ~lanes:[{id="mixed-kind-duplicate";slot_ids=[replacement_target];cli_slot_ids=[replacement_target];max_output_tokens=Some 4_096}]
      snapshot with
    | Error (Registry.Duplicate_lane_slot {slot_id; _}) ->
      Alcotest.(check string) "API/CLI occurrences cannot lose their kind" replacement_target slot_id
@@ -475,7 +480,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
    | Ok _ -> Alcotest.fail "cross-kind duplicate was admitted");
   (match
      Registry.publish
-       ~lanes:[ { id = "mixed"; slot_ids = [ replacement_target ]; cli_slot_ids = cli } ]
+       ~lanes:[ { id = "mixed"; slot_ids = [ replacement_target ]; cli_slot_ids = cli; max_output_tokens = Some 4_096 } ]
        snapshot
    with
    | Error error ->
@@ -498,7 +503,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
           (Registry.lane_resolution_error_to_string error)));
   (match Registry.publish
       ~required_lane_ids:[ "cli-required" ]
-      ~lanes:[ { id = "cli-required"; slot_ids = []; cli_slot_ids = cli } ]
+      ~lanes:[ { id = "cli-required"; slot_ids = []; cli_slot_ids = cli; max_output_tokens = None } ]
       snapshot with
    | Error error -> Alcotest.failf "CLI-only required lane must publish: %s"
        (Registry.publication_error_to_string error)
@@ -509,7 +514,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
       | _ -> Alcotest.fail "required CLI-only lane must resolve"));
   (match Registry.publish
       ~required_lane_ids:[ "verifier_exact" ]
-      ~lanes:[ { id = "verifier_exact"; slot_ids = []; cli_slot_ids = cli } ]
+      ~lanes:[ { id = "verifier_exact"; slot_ids = []; cli_slot_ids = cli; max_output_tokens = None } ]
       snapshot with
    | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
    | Ok _ ->
@@ -532,7 +537,7 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
   let unmaterialized = "official.unmaterialized" in
   (match Registry.publish
       ~required_lane_ids:[ "verifier_exact" ]
-      ~lanes:[ { id = "verifier_exact"; slot_ids = []; cli_slot_ids = [ unmaterialized ] } ]
+      ~lanes:[ { id = "verifier_exact"; slot_ids = []; cli_slot_ids = [ unmaterialized ]; max_output_tokens = None } ]
       snapshot with
    | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
    | Ok _ ->
@@ -545,13 +550,13 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
       | Ok _ ->
         Alcotest.fail "readiness accepted a cli slot with no materialized runtime"));
   (match Registry.publish
-      ~lanes:[ { id = "empty"; slot_ids = []; cli_slot_ids = [] } ] snapshot with
+      ~lanes:[ { id = "empty"; slot_ids = []; cli_slot_ids = []; max_output_tokens = None } ] snapshot with
    | Error (Registry.Empty_lane _) -> ()
    | _ -> Alcotest.fail "a lane with neither transport must remain invalid");
   match
     Registry.publish
       ~lanes:
-        [ { id = "cli-only"; slot_ids = [ "not-in-frozen-catalog" ]; cli_slot_ids = cli } ]
+        [ { id = "cli-only"; slot_ids = [ "not-in-frozen-catalog" ]; cli_slot_ids = cli; max_output_tokens = Some 4_096 } ]
       snapshot
   with
   | Error error ->
@@ -585,7 +590,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
   let optional_registry =
     match
       Registry.publish
-        ~lanes:[ { id = optional_lane; slot_ids = [ unknown_target ]; cli_slot_ids = [] } ]
+        ~lanes:[ { id = optional_lane; slot_ids = [ unknown_target ]; cli_slot_ids = []; max_output_tokens = Some 4_096 } ]
         snapshot
     with
     | Ok registry -> registry
@@ -614,7 +619,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
     match
       Registry.publish
         ~required_lane_ids:[ required_lane ]
-        ~lanes:[ { id = required_lane; slot_ids = [ replacement_target ]; cli_slot_ids = [] } ]
+        ~lanes:[ { id = required_lane; slot_ids = [ replacement_target ]; cli_slot_ids = []; max_output_tokens = Some 4_096 } ]
         snapshot
     with
     | Ok registry -> registry
@@ -627,7 +632,7 @@ let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
   (match
      Registry.publish
        ~required_lane_ids:[ required_lane ]
-       ~lanes:[ { id = required_lane; slot_ids = [ unknown_target ]; cli_slot_ids = [] } ]
+       ~lanes:[ { id = required_lane; slot_ids = [ unknown_target ]; cli_slot_ids = []; max_output_tokens = Some 4_096 } ]
        snapshot
    with
    | Error (Registry.Required_lane_unavailable { lane_id }) ->
@@ -894,7 +899,7 @@ let test_published_registry_value_is_generation_stable () =
   let publish slot_ids =
     match
       Runtime.publish_exact_output_registry
-        ~lanes:[ Runtime_schema.{ id = lane_id; slot_ids; cli_slot_ids = [] } ]
+        ~lanes:[ Runtime_schema.{ id = lane_id; slot_ids; cli_slot_ids = []; max_output_tokens = Some 4_096 } ]
         resolver_snapshot
     with
     | Ok registry -> registry
@@ -1046,7 +1051,7 @@ let test_an_append_keeps_a_slot_the_registry_dropped () =
   write_file path
     (runtime_toml ~include_board_attention:false replacement_target
      ^ Printf.sprintf
-         "\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [%S, %S]\n"
+         "\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [%S, %S]\nmax_output_tokens = 4096\n"
          dropped
          replacement_target);
   (match Runtime.init_default ~config_path:path with
@@ -1101,6 +1106,48 @@ let test_an_append_keeps_a_slot_the_registry_dropped () =
          (List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) selected_slots)
      | Error error -> Alcotest.failf "the lane does not resolve: %s"
                         (Registry.lane_resolution_error_to_string error))
+;;
+
+(* An HTTP lane that declares no output budget is refused rather than run with
+   the catalog ceiling as its request [max_tokens]. The ceiling is what the
+   model can emit, not what the request asks for; sending it made OpenRouter
+   reserve the whole ceiling and answer 402 on a 400-byte judgment
+   (2026-09-21). A cli-only lane sends no [max_tokens] and stays resolvable. *)
+let test_http_lane_without_output_budget_is_refused () =
+  let lane_id = "budgetless" in
+  let resolver_snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "budgetless-lane"; contents = replacement_catalog })
+  in
+  let publish slot_ids cli_slot_ids max_output_tokens =
+    match
+      Runtime.publish_exact_output_registry
+        ~lanes:
+          [ Runtime_schema.{ id = lane_id; slot_ids; cli_slot_ids; max_output_tokens } ]
+        resolver_snapshot
+    with
+    | Ok registry -> registry
+    | Error detail -> Alcotest.failf "failed to publish budget fixture: %s" detail
+  in
+  let http_registry = publish [ replacement_target ] [] None in
+  (match Registry.resolve_lane http_registry ~lane_id with
+   | Error (Registry.Missing_lane_output_budget { lane_id = actual }) ->
+     Alcotest.(check string) "the refused lane is named" lane_id actual
+   | Error error ->
+     Alcotest.failf
+       "an HTTP lane with no budget returned the wrong failure: %s"
+       (Registry.lane_resolution_error_to_string error)
+   | Ok _ -> Alcotest.fail "an HTTP lane with no output budget must not resolve");
+  let cli_registry = publish [] [ replacement_target ] None in
+  (match Registry.resolve_lane cli_registry ~lane_id with
+   | Ok { selected_slots = []; cli_slots = [ slot_id ] } ->
+     Alcotest.(check string) "a cli-only lane needs no budget" replacement_target slot_id
+   | Ok _ -> Alcotest.fail "the cli-only lane resolved to unexpected slots"
+   | Error error ->
+     Alcotest.failf
+       "a cli-only lane must resolve without a budget: %s"
+       (Registry.lane_resolution_error_to_string error))
 ;;
 
 let () =
@@ -1172,5 +1219,9 @@ let () =
             "an append keeps a slot the registry dropped"
             `Quick
             test_an_append_keeps_a_slot_the_registry_dropped
+        ; Alcotest.test_case
+            "an HTTP lane with no output budget is refused, a cli-only lane is not"
+            `Quick
+            test_http_lane_without_output_budget_is_refused
         ] ) ]
 ;;

@@ -606,9 +606,11 @@ reads `name (id)` when the connector's name directory knows it, and
 
 `U` `U` sends one unbind per binding with the Keeper's name as a condition, so
 a channel rebound to another Keeper after the first press is left as is.
-Recent Events gets one line per binding -- removed, skipped (rebound or
-already gone), or FAILED with the server's reason -- and the footer shows the
-count of each. On this tab `U` is unbind-all; the runtime picker stays on `U`
+Recent Events gets one line per binding -- removed, kept (now bound to
+another Keeper), not found (with the server's words), or FAILED with the
+server's reason, failures last -- and the footer shows the count of each and
+names the channels that failed. A transport whose binding list the server
+could not read is named in the prompt as not included. On this tab `U` is unbind-all; the runtime picker stays on `U`
 everywhere else in Keeper detail.
 
 ### Keeper logs

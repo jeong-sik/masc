@@ -722,6 +722,13 @@ let write_git_credential_config ~dir_mode_after ~snapshot =
        result)
 ;;
 
+(* The commit names are not part of the GitHub login: every container a
+   Keeper's commands run in gets them, logged in or not. *)
+let git_author_docker_args ~keeper_name =
+  Exec_ssh_protocol.keeper_git_author_env ~keeper_name
+  |> List.concat_map (fun (name, value) -> [ "--env"; name ^ "=" ^ value ])
+;;
+
 (* Keeper-lifetime containers cannot mount a per-turn snapshot: turn cleanup
    deletes the snapshot directory while the container keeps running, and the
    bind mount would read a vanished path. They mount the stable config
@@ -739,23 +746,25 @@ let write_git_credential_config ~dir_mode_after ~snapshot =
    The cost is explicit — a container created before the first login stays
    without the mount until the keeper's teardown recreates it. *)
 let docker_args_persistent ~config ~keeper_name ~container_masc_dir =
+  let author_args = git_author_docker_args ~keeper_name in
   match existing_config_dir ~config ~keeper_name with
   | Error _ as error -> error
-  | Ok None -> Ok []
+  | Ok None -> Ok author_args
   | Ok (Some host_dir) ->
     (match write_git_credential_config ~dir_mode_after:0o700 ~snapshot:host_dir with
      | Error _ as error -> error
      | Ok _has_git_wiring ->
        let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
        Ok
-         [ "--env"
-         ; "GH_CONFIG_DIR=" ^ container_dir
-         ; "-v"
-         ; host_dir ^ ":" ^ container_dir ^ ":ro"
-         ; "--env"
-         ; "GIT_CONFIG_GLOBAL="
-           ^ Filename.concat container_dir git_credential_config_file_name
-         ])
+         (author_args
+          @ [ "--env"
+            ; "GH_CONFIG_DIR=" ^ container_dir
+            ; "-v"
+            ; host_dir ^ ":" ^ container_dir ^ ":ro"
+            ; "--env"
+            ; "GIT_CONFIG_GLOBAL="
+              ^ Filename.concat container_dir git_credential_config_file_name
+            ]))
 ;;
 
 (* Refresh of the derived gitconfig for the persistent mount, called when a
@@ -769,6 +778,7 @@ let refresh_git_credential_config ~config ~keeper_name =
 ;;
 
 let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
+  let author_args = git_author_docker_args ~keeper_name in
   match existing_config_dir ~config ~keeper_name with
   | Error _ as error -> error
   | Ok None ->
@@ -776,11 +786,12 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
     let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
     Ok
       { args =
-          [ "--env"
-          ; "GH_CONFIG_DIR=" ^ container_dir
-          ; "-v"
-          ; snapshot ^ ":" ^ container_dir ^ ":ro"
-          ]
+          author_args
+          @ [ "--env"
+            ; "GH_CONFIG_DIR=" ^ container_dir
+            ; "-v"
+            ; snapshot ^ ":" ^ container_dir ^ ":ro"
+            ]
       ; identity_state = Unconfigured
       ; host_snapshot_dir = snapshot
       ; revision = unconfigured_tool_identity_revision
@@ -814,11 +825,12 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
              in
              Ok
                { args =
-                   [ "--env"
-                   ; "GH_CONFIG_DIR=" ^ container_dir
-                   ; "-v"
-                   ; snapshot ^ ":" ^ container_dir ^ ":ro"
-                   ]
+                   author_args
+                   @ [ "--env"
+                     ; "GH_CONFIG_DIR=" ^ container_dir
+                     ; "-v"
+                     ; snapshot ^ ":" ^ container_dir ^ ":ro"
+                     ]
                    @ git_wiring_args
                ; identity_state = Configured host_dir
                ; host_snapshot_dir = snapshot

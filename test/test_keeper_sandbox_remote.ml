@@ -354,8 +354,14 @@ let test_frame_exit_and_injected_env () =
       request.remote_root;
     check string "raw stdin" "in" stdin;
     check (list (pair string string))
-      "identity env names the mounted snapshot, then allowlisted caller env"
-      [ "GH_CONFIG_DIR", gh_config_dir; "GIT_TERMINAL_PROMPT", "0"; "LANG", "C" ]
+      "identity env names the mounted snapshot and the keeper's commit names, \
+       then allowlisted caller env"
+      [ "GH_CONFIG_DIR", gh_config_dir
+      ; "GIT_TERMINAL_PROMPT", "0"
+      ; "GIT_AUTHOR_NAME", "keeper-a"
+      ; "GIT_COMMITTER_NAME", "keeper-a"
+      ; "LANG", "C"
+      ]
       request.env
 ;;
 

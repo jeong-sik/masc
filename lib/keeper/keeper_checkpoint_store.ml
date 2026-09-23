@@ -1165,10 +1165,13 @@ let save_agent_core_if_absent ~session_dir candidate =
       ~session_dir ~expected_source_ref:candidate_ref candidate
 ;;
 
-(* Accepted continuations are not observational rolling history. Their
-   content address is private to this store and has no expiry or prune path. *)
+(* Accepted continuations are not observational rolling history: nothing
+   expires them while a semantic execution names them. Once none does,
+   [Keeper_retained_checkpoint_sweep] removes them at server startup. *)
+let retained_dirname = "accepted-checkpoints"
+
 let retained_checkpoint_path ~session_dir (reference : Keeper_checkpoint_ref.t) =
-  Filename.concat (Filename.concat session_dir "accepted-checkpoints")
+  Filename.concat (Filename.concat session_dir retained_dirname)
     (reference.sha256 ^ ".json")
 
 let read_retained_locked ~session_dir ~reference =

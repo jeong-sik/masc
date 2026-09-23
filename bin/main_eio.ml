@@ -700,6 +700,23 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
   Fs_compat.mkdir_p log_dir;
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
+  (* The BasePath writer lease is held and no keeper has started, so no
+     retention is between writing its file and committing the execution that
+     names it. *)
+  (let runtime_root =
+     (Workspace.backend_config_for canonical_base_path).Backend_types.base_path
+   in
+   match Masc.Keeper_retained_checkpoint_sweep.run ~runtime_root with
+   | Error error ->
+     Log.Server.warn "[Startup] retained checkpoint sweep skipped: %s"
+       (Masc.Keeper_retained_checkpoint_sweep.error_to_string error)
+   | Ok { live_references; removed; removed_bytes; failures } ->
+     Log.Server.info
+       "[Startup] retained checkpoint sweep: removed=%d bytes=%d live_references=%d failures=%d"
+       removed removed_bytes live_references (List.length failures);
+     List.iter
+       (fun failure -> Log.Server.warn "[Startup] retained checkpoint sweep: %s" failure)
+       failures);
   (* Only the server samples. Sampling starts before [Eio_main.run] so the
      executor pool, which the main domain spawns while sampling, shares the
      profile and the boot-time loads are in the tables. The rate is a tenth

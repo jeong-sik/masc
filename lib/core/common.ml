@@ -149,6 +149,20 @@ let keeper_runtime_store_placement = function
   | Keeper_runtime_manifests -> Keeper_scoped_rotated
   | Keeper_tool_usage -> Keepers_root_scoped
   | Keeper_trajectories -> Workspace_scoped
+
+let keepers_root_store_dirnames =
+  List.filter_map
+    (fun store ->
+       match keeper_runtime_store_placement store with
+       | Keepers_root_scoped -> Some (keeper_runtime_store_dirname store)
+       | Keeper_scoped_dated
+       | Keeper_scoped_versioned
+       | Keeper_scoped_rotated
+       | Workspace_scoped -> None)
+    keeper_runtime_stores
+
+let is_keepers_root_store_dirname name =
+  List.mem (String.lowercase_ascii name) keepers_root_store_dirnames
 let auth_dir_from_base_path ~base_path =
   Filename.concat (masc_dir_from_base_path ~base_path) "auth"
 

@@ -3344,6 +3344,8 @@
 
 (include stanzas/test_keeper_meta_invalid_recovery.inc)
 
+(include stanzas/test_keeper_name_reserves_store_dirs.inc)
+
 (include stanzas/test_store_unreadable.inc)
 
 
@@ -4175,6 +4177,12 @@
  (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
 
 ; RFC-0464: the Overview Team block's projection.
+; RFC-0465: the TUI pull request decoder against the server's own encoder.
+(test
+ (name test_tui_repository_pulls)
+ (modules test_tui_repository_pulls)
+ (libraries alcotest masc.server masc_tui_types masc_tui_repository_pulls))
+
 (test
  (name test_tui_overview_team)
  (modules test_tui_overview_team)

@@ -1,6 +1,8 @@
 module Reading = Masc.Tui_decode
 module Terminal_text = Masc_tui_ansi.Terminal_text
 
+let unbind_all_key = "U"
+
 type target = {
   connector_id : string;
   connector_name : string;
@@ -138,3 +140,53 @@ let nothing_to_unbind ~keeper_name ~unreadable =
   Printf.sprintf "unbind all: %s has no channel bindings%s"
     (Terminal_text.single_line keeper_name)
     (unreadable_note unreadable)
+
+(* Not [U]: on the Keeper list [U] opens the runtime picker, and "pause,
+   then pick another runtime" is an ordinary sequence. A key the Keeper
+   surfaces bind to nothing else cannot be typed for something else. *)
+let offer_key = "y"
+
+type offer = {
+  offer_keeper : string;
+  offer_targets : target list;
+  offered_at : int;
+}
+
+type offer_reading =
+  | Offer_waits
+  | Offer_accepted
+  | Offer_dropped
+
+let read_offer_input offer ~frames_presented ~input_seen ~key =
+  if not input_seen then Offer_waits
+  else if frames_presented <= offer.offered_at then Offer_dropped
+  else
+    match key with
+    | Some pressed when String.equal pressed offer_key -> Offer_accepted
+    | Some _ | None -> Offer_dropped
+
+(* The key leads: a footer cuts from the right, and the channel list is the
+   part that can be long. *)
+let offer_prompt ~keeper_name ~unreadable targets =
+  Printf.sprintf
+    "%s: also unbind %s's %d channel%s, or any other key to keep them -- %s%s"
+    offer_key
+    (Terminal_text.single_line keeper_name)
+    (List.length targets)
+    (if List.length targets = 1 then "" else "s")
+    (String.concat ", " (List.map target_label targets))
+    (unreadable_note unreadable)
+
+let still_bound ~keeper_name targets =
+  Printf.sprintf "%s still holds %d channel binding%s; %s %s on its Channels \
+                  tab removes them"
+    (Terminal_text.single_line keeper_name)
+    (List.length targets)
+    (if List.length targets = 1 then "" else "s")
+    unbind_all_key unbind_all_key
+
+let offer_read_failed ~keeper_name ~detail =
+  Printf.sprintf
+    "could not read %s's channel bindings to offer removing them: %s"
+    (Terminal_text.single_line keeper_name)
+    (Terminal_text.single_line detail)

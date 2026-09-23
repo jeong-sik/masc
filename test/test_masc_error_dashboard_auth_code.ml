@@ -44,5 +44,19 @@ let () =
        (E.Auth (E.Auth_error.Unauthorized { reason = Generic; message = "x" })));
   check "non-auth -> unknown" (Some "unknown")
     (E.dashboard_auth_error_code (E.Task (E.Task_error.NotFound "id")));
+  (* A client reads the code back with [of_string]; every code the server can
+     write must come back as itself, and a string it never writes as nothing. *)
+  List.iter
+    (fun code ->
+      let written = E.Auth_error_code.to_string code in
+      if E.Auth_error_code.of_string written <> Some code then (
+        Printf.eprintf "FAIL: %s does not read back as itself\n" written;
+        exit 1))
+    E.Auth_error_code.
+      [ Invalid_token; Token_expired; Same_origin_blocked; Insufficient_role
+      ; Actor_mismatch; Missing_token; Unknown ];
+  if E.Auth_error_code.of_string "brand_new_code" <> None then (
+    prerr_endline "FAIL: an unwritten code must not decode";
+    exit 1);
   print_endline
     "test_masc_error_dashboard_auth_code: all assertions passed"

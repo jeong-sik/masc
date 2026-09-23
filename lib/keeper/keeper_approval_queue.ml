@@ -337,7 +337,10 @@ let install_error_to_string = function
    before its last rewrite are recognised as stale. A binary that knows only
    v9 must not open a v10 store and show a resolved approval as pending, so
    the version moved (RFC main-domain-scheduler-latency §8.5, P4e). *)
-let pending_store_version = 10
+(* 11: an entry's [observation] carries [refusal_kind]. A v10 row has none and
+   is not read with a guessed kind; the version check names the reset before
+   any row is decoded. *)
+let pending_store_version = 11
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_version = 1
 let replay_results_store_surface = "keeper_gate_replay_results"
@@ -1700,6 +1703,16 @@ let snapshot_of_yojson ~base_path json =
     in
     Ok (pending_map, delivery_map, next_sequence, generation, pending_entry_errors)
   | _ -> Error "gate_pending snapshot must be a JSON object"
+;;
+
+(* The snapshot decode the loader runs, version check first, for a caller that
+   must judge a store before the server opens it (deployment preflight). An
+   entry the loader would drop counts as a refusal here too. *)
+let validate_pending_snapshot ~base_path json =
+  match snapshot_of_yojson ~base_path json with
+  | Error reason -> Error reason
+  | Ok (_, _, _, _, []) -> Ok ()
+  | Ok (_, _, _, _, first :: _) -> Error first
 ;;
 
 type decoded_log_row =

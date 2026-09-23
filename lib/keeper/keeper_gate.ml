@@ -77,23 +77,14 @@ type authorization_source =
   | Local_output
   | Observed_in_box of boxed_execution
 
-type refusal_kind =
-  | Socket_denied
-  | Write_denied
-  | Unspecified
-
-let refusal_kind_tag = function
-  | Socket_denied -> "socket_denied"
-  | Write_denied -> "write_denied"
-  | Unspecified -> "unspecified"
-;;
-
-(* The closed reading of the shim's refusal record. The refusal's rule name
-   crosses the boundary pipe typed by the child itself, so nothing is read
-   back out of stderr here. An unattributed refusal (older shims, or a rule
-   the child could not name) arrives as [Unspecified], which refuses
-   towards the judge -- misclassification can only cost a judge visit,
-   never an allow. *)
+(* The closed reading of the shim's refusal, the same type the approval row
+   stores. The child names which of its rules could not be installed over the
+   boundary pipe, so nothing is read back out of stderr here. *)
+type refusal_kind = Keeper_approval_queue_rules_types.observed_refusal_kind =
+  | Socket_rule_not_applied
+  | Write_rule_not_applied
+  | Setup_failed
+  | Unattributed
 
 type observation =
   | Observed_result of boxed_execution
@@ -102,6 +93,7 @@ type observation =
       ; stderr : string
       ; refusal_kind : refusal_kind
       }
+  | Observed_partly_refused of { refusal_kind : refusal_kind }
   | Observation_unavailable of string
 
 type authorization =
@@ -549,9 +541,10 @@ let submit ?observation request =
    (RFC-0422). The stderr tail is bounded here, once, by the operator's knob,
    so the durable row and the keeper's own deferred receipt carry the same
    bytes. *)
-let observed_refusal ~status ~stderr =
+let observed_refusal ~refusal_kind ~status ~stderr =
   Keeper_approval_queue_rules_types.observed_refusal
     ~max_stderr_bytes:(Keeper_config.keeper_hitl_observation_stderr_bytes ())
+    ~refusal_kind
     ~status:
       (match status with
        | Unix.WEXITED code -> Keeper_approval_queue_rules_types.Observed_exit code
@@ -2066,9 +2059,9 @@ let decide_after_observation request ~observe =
        allow request source [ audit_receipt ]
      | Observed_refused { status; stderr; refusal_kind } ->
        (* Review 5192723206: no refusal the box's own setup channel can
-          report justifies allowing without the judge — a setup failure is
-          the box NOT applying, and the ack channel cannot see attempts
-          after "A" anyway (that needs SECCOMP_RET_USER_NOTIF or audit
+          report justifies allowing without the judge — every refusal is
+          the box NOT applying and the program never starting, and the ack
+          channel cannot see attempts after "A" anyway (that needs SECCOMP_RET_USER_NOTIF or audit
           logs, a separate observation path). Until that path exists the
           main-line rule holds: every refused observe keeps the judge, and
           the refusal travels to the judge for weighing (RFC-0422 §3.3). *)
@@ -2080,9 +2073,25 @@ let decide_after_observation request ~observe =
            request.operation
            (status_label status)
            (String.length stderr)
-           (refusal_kind_tag refusal_kind)
+           (Keeper_approval_queue_rules_types.observed_refusal_kind_to_string
+              refusal_kind)
        in
-       defer ~observation:(observed_refusal ~status ~stderr) request Judge_requested
+       defer
+         ~observation:(observed_refusal ~refusal_kind ~status ~stderr)
+         request
+         Judge_requested
+     | Observed_partly_refused { refusal_kind } ->
+       (* One stage's box applied and another stage's box
+          could not be built. The row's observation means "nothing started",
+          which is false here, so none is written; the judge weighs the
+          request itself. *)
+       Log.Keeper.info
+         ~keeper_name:request.keeper_name
+         "observe run partly refused (a stage's box applied) operation=%s refusal_kind=%s; \
+          the judge decides"
+         request.operation
+         (Keeper_approval_queue_rules_types.observed_refusal_kind_to_string refusal_kind);
+       defer request Judge_requested
      | Observation_unavailable reason ->
        (* Unlike Observed_refused, no box could be built at all here — a
           missing shim, an unadvertised box, a dispatch the typed gate

@@ -121,7 +121,11 @@ let runtime_blocker_surface_opt (config : Workspace_utils.config) (meta : keeper
   (match runtime_registry_entry config meta.name with
      | Some entry ->
        (match entry.last_failure_reason with
-        | Some reason -> runtime_blocker_surface_of_failure_reason reason
+        | Some reason ->
+          runtime_blocker_surface_of_failure_reason
+            ~latest_receipt:(fun () ->
+              Keeper_execution_receipt.read_latest_receipt config meta.name)
+            reason
         | None -> None)
      | None -> None)
 ;;
@@ -159,7 +163,7 @@ let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper
   match runtime_blocker_surface_opt config meta with
   | Some blocker ->
     [ "runtime_blocker_class", `String blocker.blocker_class
-    ; "runtime_blocker_summary", `String blocker.summary
+    ; "runtime_blocker_summary", `String (Lazy.force blocker.summary)
     ; "runtime_blocker_facts", runtime_blocker_facts_json meta
     ]
   | None ->

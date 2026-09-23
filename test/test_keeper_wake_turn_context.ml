@@ -51,6 +51,7 @@ let unpacked_prompt_config =
      let sync =
        Masc.Managed_asset_sync.sync
          ~domain:Masc.Managed_asset_sync.Prompts
+         ~edit_layer:Masc.Managed_asset_sync.No_edit_layer
          ~read:Embedded_config.read
          ~files:Embedded_config.file_list
          ~dest_dir:prompts_dir

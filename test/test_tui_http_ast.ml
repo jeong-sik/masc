@@ -2552,8 +2552,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      cannot be escaped whole. *)
   check_fields ~module_path:"bin/masc_tui_render_memory.ml"
     ~non_rendering_calls:[ "detail_claim_lines" ] "memory_fact_detail_lines"
+    (* [mf_category] is not on this list. It stopped being wire text: the
+       decoder turns it into [Keeper_memory_os_types.category], so the pane
+       prints a word this build spells, not one a keeper sent. *)
     [ "mf_claim"
-    ; "mf_category"
     ; "mf_origin"
     ; "mf_memory_id"
     ; "msf_path"

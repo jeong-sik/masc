@@ -152,7 +152,11 @@ let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error
     `Repeating_generation (r.provider, r.shape, r.occurrences, r.unit_bytes, r.detail)
   | Llm_provider.Error.ProviderTerminal r ->
     `Invalid_request
-      (Retry.Unknown_invalid_request, Printf.sprintf "%s: %s" r.reason r.detail)
+      ( Retry.Unknown_invalid_request
+      , Printf.sprintf
+          "%s: %s"
+          (Llm_provider.Error.provider_terminal_reason r.kind)
+          r.detail )
 ;;
 
 let of_core_error (err : Error.t) : core_error_poly =

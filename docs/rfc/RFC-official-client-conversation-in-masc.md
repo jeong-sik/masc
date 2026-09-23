@@ -256,6 +256,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 - resume 시스템 프롬프트에 canonical 스냅샷을 넣지 않는다. 지금은 전달되지 않고, 전달되는 설정(§5.4)에서는 이력이 두 번 들어간다.
   - 스냅샷은 masc 체크포인트 이력이다. 여기에는 다른 레인에서 돈 턴도 들어 있다. 그 전달은 5.6 이 맡는다.
 - resume 은 `context_frontier` 의 스냅샷 값을 저장된 값 그대로 넘긴다. `acknowledged_turn` 은 지금처럼 claim 이 비우고 settle 이 채운다(`keeper_official_client_session_store.ml:941-942, 1074-1077`).
+  - settle 없이 이전 settlement 로 돌아가는 두 경로(`release_transient`, `Retry_previous` 복구)는 그 settlement 를 다시 채운다(`frontier_restored_to`). 비워 두면 다음 claim 이 `Context_frontier_missing` 으로 새 세션을 열어, `Retry_previous` 가 대화를 잇지 못한다.
 
 ### 5.4 턴 맥락 전달 (운영자 결정)
 

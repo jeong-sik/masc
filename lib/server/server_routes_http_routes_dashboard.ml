@@ -471,12 +471,13 @@ type skill_editor_body =
   ; confirmed : bool option
   }
 
-(* A validated draft names SKILL.md bytes a Keeper exported and checked with
-   [keeper_skill_validate]. The editor reads those bytes itself, so the
-   operator approves a reference instead of copying text. *)
+(* A draft names SKILL.md bytes a Keeper exported, in the shape
+   [keeper_skill_validate] takes. The editor reads those bytes itself and
+   validates them again, so the operator approves a reference instead of
+   copying text. *)
 let parse_skill_draft json =
   match Json_util.assoc_member_opt "draft" json with
-  | None -> Ok None
+  | None | Some `Null -> Ok None
   | Some draft_json ->
     Keeper_skill_validate.draft_of_json draft_json
     |> Result.map (fun draft -> Some draft)
@@ -486,6 +487,25 @@ let parse_skill_draft json =
 let read_skill_draft state draft =
   Keeper_skill_validate.read_draft ~config:(Mcp_server.workspace_config state) draft
   |> Result.map_error (fun detail -> "draft artifact unreadable: " ^ detail)
+;;
+
+(* The bytes an existing Skill's preview or save works on. A refusal carries
+   the draft it refused, if any, so a write route can audit it. *)
+let skill_edit_source state (reference : Skill_reference.t) ~source_text ~draft =
+  match source_text, draft with
+  | Some source_text, None -> Ok (source_text, None)
+  | None, Some draft ->
+    if
+      String.equal
+        (Skill_reference.package_id_to_string draft.Keeper_skill_validate.package_id)
+        (Skill_reference.package_id_to_string reference.Skill_reference.identity.package_id)
+    then
+      read_skill_draft state draft
+      |> Result.map (fun source_text -> source_text, Some draft)
+      |> Result.map_error (fun message -> message, Some draft)
+    else Error ("draft package_id must name the referenced Skill package", Some draft)
+  | Some _, Some _ -> Error ("send source_text or draft, not both", None)
+  | None, None -> Error ("source_text or draft required", None)
 ;;
 
 let parse_skill_editor_body body_str =
@@ -522,7 +542,7 @@ type skill_create_source =
       { package_id : string
       ; source_text : string
       }
-  | Validated_draft of Keeper_skill_validate.draft
+  | Draft_reference of Keeper_skill_validate.draft
 
 type skill_create_body =
   { source_id : Skill_source_config.source_id
@@ -555,7 +575,7 @@ let parse_skill_create_body body_str =
              ( Json_util.assoc_member_opt "package_id" json
              , Json_util.assoc_member_opt "source_text" json )
            with
-           | None, None -> Ok (Validated_draft draft)
+           | None, None -> Ok (Draft_reference draft)
            | _ -> Error "draft carries its own package_id and bytes; send it alone")
         | None ->
           let* package_id = required "package_id" in
@@ -1033,7 +1053,19 @@ let audit_runtime_config_write
       "runtime.toml audit log failed: %s"
       (Printexc.to_string exn)
 
-let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome =
+let skill_draft_audit_fields = function
+  | None -> []
+  | Some (draft : Keeper_skill_validate.draft) ->
+    [ ( "draft"
+      , `Assoc
+          [ "artifact_sha256", `String draft.Keeper_skill_validate.artifact.Keeper_peer_artifact_ref.blob.Tool_output.sha256
+          ; ( "package_id"
+            , `String (Skill_reference.package_id_to_string draft.Keeper_skill_validate.package_id) )
+          ] )
+    ]
+;;
+
+let audit_skill_write ?draft state agent_name ~reference ~source_text ~status ~outcome =
   try
     Audit_log.log_action
       (Mcp_server.workspace_config state)
@@ -1041,16 +1073,40 @@ let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome 
       ~action:(Audit_log.Custom "skill_write")
       ~details:
         (`Assoc
-          [ "reference", Skill_reference.to_yojson reference
-          ; "candidate_revision",
-            `String
-              (Skill_reference.content_revision_of_source_text source_text
-               |> Skill_reference.content_revision_to_string)
-          ; "bytes", `Int (String.length source_text)
-          ; "lines", `Int (runtime_config_line_count source_text)
-          ; "status", `String status
-          ])
+          ([ "reference", Skill_reference.to_yojson reference
+           ; "candidate_revision",
+             `String
+               (Skill_reference.content_revision_of_source_text source_text
+                |> Skill_reference.content_revision_to_string)
+           ; "bytes", `Int (String.length source_text)
+           ; "lines", `Int (runtime_config_line_count source_text)
+           ; "status", `String status
+           ]
+           @ skill_draft_audit_fields draft))
       ~outcome
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Dashboard.warn "Skill write audit failed: %s" (Printexc.to_string exn)
+;;
+
+(* A draft the editor never got bytes from: no candidate revision exists, so
+   the record names the artifact it refused. *)
+let audit_skill_draft_refusal state agent_name ?reference ~draft reason =
+  try
+    Audit_log.log_action
+      (Mcp_server.workspace_config state)
+      ~agent_id:agent_name
+      ~action:(Audit_log.Custom "skill_write")
+      ~details:
+        (`Assoc
+          ((match reference with
+             | Some reference -> [ "reference", Skill_reference.to_yojson reference ]
+             | None -> [])
+           @ [ "status", `String "draft_refused" ]
+           @ skill_draft_audit_fields (Some draft)))
+      ~outcome:(Audit_log.Failure reason)
       ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2280,13 +2336,21 @@ let add_routes ~sw ~clock router =
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
              | Ok { source_id; source } ->
+               let draft =
+                 match source with
+                 | Authored_text _ -> None
+                 | Draft_reference draft -> Some draft
+               in
                let source =
                  match source with
                  | Authored_text { package_id; source_text } -> Ok (package_id, source_text)
-                 | Validated_draft draft ->
+                 | Draft_reference draft ->
                    read_skill_draft state draft
                    |> Result.map (fun source_text ->
                      Skill_reference.package_id_to_string draft.Keeper_skill_validate.package_id, source_text)
+                   |> Result.map_error (fun message ->
+                     audit_skill_draft_refusal state agent_name ~draft message;
+                     message)
                in
                (match source with
                 | Error message ->
@@ -2321,6 +2385,7 @@ let add_routes ~sw ~clock router =
                       preview, "created_but_unpublished", Audit_log.Failure reason
                   in
                   audit_skill_write
+                    ?draft
                     state
                     agent_name
                     ~reference:preview.profile.reference
@@ -2430,13 +2495,11 @@ let add_routes ~sw ~clock router =
              match parse_skill_editor_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { reference = _; source_text = None; draft = _; confirmed = _ } ->
-               respond_dashboard_error
-                 ~status:`Bad_request
-                 ~request:req
-                 reqd
-                 "source_text required"
-             | Ok { reference; source_text = Some source_text; draft = _; confirmed = _ } ->
+             | Ok { reference; source_text; draft; confirmed = _ } ->
+               (match skill_edit_source state reference ~source_text ~draft with
+                | Error (message, _) ->
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+                | Ok (source_text, _) ->
                (match
                   Server_skill_editor.preview
                     ~base_path:(Mcp_server.workspace_config state).base_path
@@ -2453,7 +2516,7 @@ let add_routes ~sw ~clock router =
                       ; "preview", Server_skill_editor.preview_to_yojson preview
                       ])
                     reqd
-                | Error error -> respond_skill_editor_error ~request:req reqd error)))
+                | Error error -> respond_skill_editor_error ~request:req reqd error))))
          request reqd)
   |> Http.Router.post "/api/v1/skills/editor/save" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -2463,23 +2526,14 @@ let add_routes ~sw ~clock router =
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
              | Ok { reference; source_text; draft; confirmed = _ } ->
-               let source =
-                 match source_text, draft with
-                 | Some source_text, None -> Ok source_text
-                 | None, Some draft ->
-                   if
-                     String.equal
-                       (Skill_reference.package_id_to_string draft.Keeper_skill_validate.package_id)
-                       (Skill_reference.package_id_to_string reference.Skill_reference.identity.package_id)
-                   then read_skill_draft state draft
-                   else Error "draft package_id must name the referenced Skill package"
-                 | Some _, Some _ -> Error "send source_text or draft, not both"
-                 | None, None -> Error "source_text or draft required"
-               in
-               (match source with
-                | Error message ->
+               (match skill_edit_source state reference ~source_text ~draft with
+                | Error (message, refused) ->
+                  Option.iter
+                    (fun draft ->
+                      audit_skill_draft_refusal state agent_name ~reference ~draft message)
+                    refused;
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-                | Ok source_text ->
+                | Ok (source_text, draft) ->
                let base_path = (Mcp_server.workspace_config state).base_path in
                let refresh () =
                  match Runtime.load_config_observation () with
@@ -2498,7 +2552,7 @@ let add_routes ~sw ~clock router =
                     ~refresh
                 with
                 | Error error ->
-                  audit_skill_write state agent_name ~reference ~source_text
+                  audit_skill_write ?draft state agent_name ~reference ~source_text
                     ~status:(Server_skill_editor.error_code error)
                     ~outcome:(Audit_log.Failure (Server_skill_editor.error_to_string error));
                   respond_skill_editor_error ~request:req reqd error
@@ -2512,7 +2566,7 @@ let add_routes ~sw ~clock router =
                     | Saved_but_unpublished { reason; _ } ->
                       "saved_but_unpublished", Audit_log.Failure reason
                   in
-                  audit_skill_write state agent_name ~reference ~source_text
+                  audit_skill_write ?draft state agent_name ~reference ~source_text
                     ~status
                     ~outcome:audit_outcome;
                   Http.Response.json_value

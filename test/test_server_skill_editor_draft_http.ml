@@ -163,6 +163,23 @@ let published_reference response =
   U.(response |> member "preview" |> member "profile" |> member "reference")
 ;;
 
+let error_of response = U.(member "error" response |> to_string)
+
+let draft_sha256 draft =
+  U.(draft |> member "artifact" |> member "blob" |> member "_blob" |> member "sha256"
+     |> to_string)
+;;
+
+(* Audit rows the routes wrote for this draft's artifact, by status. *)
+let draft_audit_statuses fixture draft =
+  Audit_log.read_entries fixture.config
+  |> List.filter_map (fun (entry : Audit_log.audit_entry) ->
+    match U.(entry.details |> member "draft" |> member "artifact_sha256") with
+    | `String sha when String.equal sha (draft_sha256 draft) ->
+      Some U.(entry.details |> member "status" |> to_string)
+    | _ -> None)
+;;
+
 let create fixture ?token draft =
   http fixture ?token ~path:"/api/v1/skills/editor/create"
     (`Assoc [ "source_id", `String "workspace"; "draft", draft ])
@@ -176,6 +193,8 @@ let test_validated_draft_round_trip () =
   let status, response = create fixture ~token:fixture.admin draft in
   check int "admin create" 200 status;
   check string "published" "created_and_published" U.(member "status" response |> to_string);
+  check (list string) "the write audit names the artifact" [ "created_and_published" ]
+    (draft_audit_statuses fixture draft);
   check string "exact exported bytes on disk" source (read_file (skill_path fixture "proposed"));
   let reference = published_reference response in
   check string "published revision is the exported bytes"
@@ -184,6 +203,20 @@ let test_validated_draft_round_trip () =
     U.(member "content_revision" reference |> to_string);
   let edited = instruction ~name:"proposed" ~description:"Inspect the lane status first." in
   let _, edited_draft = validated_draft fixture ~package_id:"proposed" edited in
+  let status, response =
+    http fixture ~token:fixture.admin ~path:"/api/v1/skills/editor/preview"
+      (`Assoc [ "reference", reference; "draft", edited_draft ]) in
+  check int "admin preview of a draft" 200 status;
+  check string "preview names the draft's revision"
+    (Skill_reference.content_revision_of_source_text edited
+     |> Skill_reference.content_revision_to_string)
+    U.(response |> member "preview" |> member "profile" |> member "reference"
+       |> member "content_revision" |> to_string);
+  check string "preview writes nothing" source (read_file (skill_path fixture "proposed"));
+  let status, _ =
+    http fixture ~token:fixture.admin ~path:"/api/v1/skills/editor/read"
+      (`Assoc [ "reference", reference; "draft", `Null ]) in
+  check int "a null draft is an absent draft" 200 status;
   let status, response =
     http fixture ~token:fixture.admin ~path:"/api/v1/skills/editor/save"
       (`Assoc [ "reference", reference; "draft", edited_draft ]) in
@@ -206,33 +239,69 @@ let test_changed_or_unknown_artifact_is_refused () =
   let blob = U.member "_blob" normalized in
   let with_blob blob =
     replace "artifact" (replace "blob" (replace "_blob" blob normalized) artifact) draft in
-  let refused label draft =
-    let status, _ = create fixture ~token:fixture.admin draft in
+  let refused label ~field ~expected draft =
+    let status, response = create fixture ~token:fixture.admin draft in
     check int label 400 status;
+    check string (label ^ ": reason") expected U.(member field response |> to_string);
     check bool (label ^ ": nothing written") false
       (Sys.file_exists (skill_path fixture "proposed"))
   in
-  refused "unknown artifact"
-    (with_blob (replace "sha256" (`String (String.make 64 '0')) blob));
-  refused "size differs from the export"
+  let unknown = with_blob (replace "sha256" (`String (String.make 64 '0')) blob) in
+  refused "unknown artifact" ~field:"error"
+    ~expected:"draft artifact unreadable: Exported artifact is absent" unknown;
+  check (list string) "the refusal is audited" [ "draft_refused" ]
+    (draft_audit_statuses fixture unknown);
+  refused "size differs from the export" ~field:"error"
+    ~expected:"draft artifact unreadable: Exported artifact size differs from its reference"
     (with_blob (replace "bytes" (`Int (U.(member "bytes" blob |> to_int) + 1)) blob));
-  refused "package the document does not name"
+  refused "package the document does not name" ~field:"code" ~expected:"validation_failed"
     (replace "package_id" (`String "another-package") draft);
-  let status, _ =
+  let status, response =
     http fixture ~token:fixture.admin ~path:"/api/v1/skills/editor/create"
       (`Assoc [ "source_id", `String "workspace"; "draft", draft
               ; "source_text", `String source ]) in
   check int "draft and pasted text together" 400 status;
+  check string "draft and pasted text: reason"
+    "draft carries its own package_id and bytes; send it alone" (error_of response);
   let status, response = create fixture ~token:fixture.admin draft in
   check int "the untouched draft still publishes" 200 status;
   let reference = published_reference response in
   let _, other = validated_draft fixture ~package_id:"other"
       (instruction ~name:"other" ~description:"Another Skill.") in
-  let status, _ =
+  let status, response =
     http fixture ~token:fixture.admin ~path:"/api/v1/skills/editor/save"
       (`Assoc [ "reference", reference; "draft", other ]) in
   check int "save refuses a draft for another package" 400 status;
+  check string "another package: reason"
+    "draft package_id must name the referenced Skill package" (error_of response);
   check string "saved Skill is unchanged" source (read_file (skill_path fixture "proposed"))
+;;
+
+(* The reference is untouched and the size still matches; only the stored
+   bytes changed after validation. *)
+let test_changed_blob_content_is_refused () =
+  with_fixture @@ fun fixture ->
+  let source = instruction ~name:"proposed" ~description:"Inspect the lane status." in
+  let _, draft = validated_draft fixture ~package_id:"proposed" source in
+  let sha256 = draft_sha256 draft in
+  let blob_path =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat (Common.masc_dir_from_base_path ~base_path:fixture.base_path)
+            "tool_blobs")
+         (String.sub sha256 0 2))
+      sha256
+  in
+  let changed = instruction ~name:"proposed" ~description:"Inspect the lane status!" in
+  check int "same size as the export" (String.length source) (String.length changed);
+  Unix.chmod blob_path 0o600;
+  write_file blob_path changed;
+  let status, response = create fixture ~token:fixture.admin draft in
+  check int "changed content" 400 status;
+  check bool "refused as an integrity mismatch" true
+    (String.starts_with ~prefix:"draft artifact unreadable: integrity mismatch"
+       (error_of response));
+  check bool "nothing written" false (Sys.file_exists (skill_path fixture "proposed"))
 ;;
 
 let test_non_admin_is_refused () =
@@ -253,6 +322,8 @@ let () =
           test_validated_draft_round_trip
       ; test_case "changed or unknown artifact is refused" `Quick
           test_changed_or_unknown_artifact_is_refused
+      ; test_case "blob content changed after validation is refused" `Quick
+          test_changed_blob_content_is_refused
       ; test_case "non-admin is refused" `Quick test_non_admin_is_refused
       ] ]
 ;;

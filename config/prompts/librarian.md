@@ -38,8 +38,10 @@ template_variables: [continuity, working_context, current_memory, conversation_h
 기억이 여러 개면 그중 하나만 현재 상태입니다. 순서는 claim에 적힌 시점(날짜, 순번,
 프레임 같은 표시)으로 먼저 정하고, 그런 표시가 없으면 `last_seen`이 가장 늦은 것을
 현재로 봅니다. 순서를 정할 수 없거나 같은 대상인지 확실하지 않으면 지우지 않습니다.
-현재가 아닌 상태 기억은 낡은 상태로 삭제하되, 그 기억에만 있는 교훈·제약·결정은
-낡은 것이 아니니 먼저 새 claim으로 남기세요.
+현재가 아닌 상태 기억은 낡은 상태로 `dropped`에 넣어 삭제하되, 그 기억에만 있는
+교훈·제약·결정은 낡은 것이 아니니 먼저 새 claim으로 남기세요. 낡은 상태를 현재 상태
+claim의 `absorbs`에 넣지 마세요. 옛 시점의 수치와 위치는 현재 상태 claim에 없으므로,
+묶기를 확인하는 Keeper에서는 그 재료가 전부 그대로 남습니다.
 `origin`·`basis`·`first_seen`·`last_seen`을 `new_claims`에 복사하지 않습니다. 새 claim도 해당 Board
 글·댓글을 근거로 삼으면 그 출처 ID를 기존 출력 필드 `board_post_id`·
 `board_comment_id`에 적을 수 있습니다. 묶는다는 이유만으로 출처를 물려주지 마세요.

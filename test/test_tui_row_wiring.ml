@@ -264,6 +264,24 @@ let test_the_overview_load_stops_reading_a_field_no_screen_draws () =
    nearest state. *)
 let loader = "bin/masc_tui_loader.ml"
 
+(* The schedule store's dispositions are named once, by the shared contract
+   the server builds this object from. The decoder walks that list instead of
+   spelling the seven words again, so a status the contract gains is asked for
+   here without this file changing -- and cannot be quietly dropped from the
+   Automation tab's count line. *)
+let test_the_schedule_counts_are_read_from_the_shared_status_list () =
+  Alcotest.(check bool) "the decoder walks the contract's own list" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:loader
+       ~binding_name:"decode_schedule_snapshot"
+       ~callee:"Schedule_domain.schedule_status_to_string"
+     > 0);
+  Alcotest.(check int) "and spells no disposition of its own" 0
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:loader
+       ~binding_name:"decode_schedule_snapshot"
+       ~literals:
+         [ "scheduled"; "due"; "running"; "succeeded"; "failed"; "cancelled"
+         ; "expired" ])
+
 let test_the_fleet_row_reads_the_control_planes_own_word () =
   Alcotest.(check int) "the liveness word is parsed, not matched as text" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:loader
@@ -970,6 +988,8 @@ let () =
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the load stops reading a field no screen draws"
             `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
+        ; Alcotest.test_case "the schedule counts read the shared status list"
+            `Quick test_the_schedule_counts_are_read_from_the_shared_status_list
         ; Alcotest.test_case "the fleet row reads the control plane's word"
             `Quick test_the_fleet_row_reads_the_control_planes_own_word
         ; Alcotest.test_case "the operation is compared before repeating"

@@ -1404,6 +1404,46 @@ let schedule_payload_body = function
        | Some _ | None -> `Assoc [])
   | _ -> `Assoc []
 
+(** What the Keeper's schedule store holds, in one line above its rows.
+
+    The tab drew the rows and nothing else, and a Keeper whose store has run
+    for weeks answers with a wall of closed work: on the live fleet
+    [code-reviewer] held 100 requests, 1 of them scheduled and the other 99
+    succeeded or cancelled. A reader had no way to learn that from the screen
+    without scrolling to the end of it.
+
+    Live and closed are split by [Schedule_domain.is_terminal], the same rule
+    the store itself uses, and a count of zero is left out -- a disposition
+    nothing is in is not a fact about this Keeper. *)
+let schedule_counts_line counts =
+  let spell statuses =
+    counts
+    |> List.filter (fun (status, count) -> count > 0 && List.mem status statuses)
+    |> List.map (fun (status, count) ->
+           Printf.sprintf "%d %s" count
+             (Schedule_domain.schedule_status_to_string status))
+  in
+  let live, closed =
+    List.partition
+      (fun status -> not (Schedule_domain.is_terminal status))
+      Schedule_domain.all_schedule_statuses
+  in
+  let live_text =
+    match spell live with
+    | [] -> "nothing live"
+    | parts -> String.concat ", " parts
+  in
+  let closed_total =
+    counts
+    |> List.filter (fun (status, _) -> List.mem status closed)
+    |> List.fold_left (fun total (_, count) -> total + count) 0
+  in
+  match spell closed with
+  | [] -> live_text
+  | parts ->
+      Printf.sprintf "%s \xc2\xb7 %s closed (%s)" live_text
+        (string_of_int closed_total) (String.concat ", " parts)
+
 (** Why the store would refuse a modify, read before the editor opens.
 
     [Schedule_store.Transition_refused] names its own boundary: "the request
@@ -1504,6 +1544,11 @@ type schedule_snapshot = {
   scs_request_count: int option;
   scs_truncated: bool;
   scs_next_due_iso: string option;
+  (** Every status the store holds for this target, not only the page the
+      server sent, so the count stays right when the page is capped. [None]
+      exactly when the store read failed, which is the same fact
+      [scs_request_count = None] carries. *)
+  scs_counts: (Schedule_domain.schedule_status * int) list option;
   scs_rows: schedule_row list;
 }
 

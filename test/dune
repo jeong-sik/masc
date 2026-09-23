@@ -3484,6 +3484,17 @@
  (modules test_tui_connection_status)
  (libraries alcotest masc masc_tui_types))
 
+; Anchored here rather than at the head of the file. That alone is not enough
+; to keep two pull requests apart -- this stanza and the one below it both
+; chose the same anchor and collided on the merge -- so a suite added later
+; picks a stanza no open branch is already sitting under.
+; [masc.masc_schedule] is here for [Schedule_domain], whose status list and
+; terminal rule the line under test walks rather than restating.
+(test
+ (name test_tui_schedule_counts_line)
+ (modules test_tui_schedule_counts_line)
+ (libraries alcotest masc.masc_schedule masc_tui_types))
+
 ; Its own anchor, under the other suite that links only the state vocabulary
 ; and the wire types, so two pull requests adding a suite do not both land on
 ; the head of this file.

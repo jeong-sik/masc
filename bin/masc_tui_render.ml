@@ -7579,14 +7579,28 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                   ^ Ansi.reset
                 ]
           else
-            List.map
-              (fun (row : schedule_row) ->
-                 Printf.sprintf "  %-12s %-18s %s"
-                   (Terminal_text.single_line row.sch_status)
-                   (Terminal_text.single_line row.sch_recurrence_summary)
-                   (Terminal_text.single_line
-                      (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
-              rows
+            (* What the store holds, above the rows it sent. The rows come
+               live-first, and a Keeper whose store has run for weeks answers
+               with a page of closed work behind the one live row -- without
+               this line a reader learns that only by scrolling to the end.
+               The counts describe the whole store, so they stay right when
+               the page below them is capped. *)
+            (match snapshot.scs_counts with
+             | None -> []
+             | Some counts ->
+                 [ Ansi.dim ^ "  "
+                   ^ Masc_tui_types.schedule_counts_line counts
+                   ^ Ansi.reset
+                 ; ""
+                 ])
+            @ List.map
+                (fun (row : schedule_row) ->
+                   Printf.sprintf "  %-12s %-18s %s"
+                     (Terminal_text.single_line row.sch_status)
+                     (Terminal_text.single_line row.sch_recurrence_summary)
+                     (Terminal_text.single_line
+                        (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
+                rows
       | _, _ ->
           [ Ansi.dim ^ "  (loading this Keeper's schedules…)" ^ Ansi.reset ]
     in

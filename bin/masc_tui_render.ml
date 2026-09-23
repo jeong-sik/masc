@@ -514,7 +514,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     in
     let detail =
       match row.detail with
-      | Overview_team.Blocker { summary; held } ->
+      | Overview_team.Blocker { summary; held; item = _ } ->
           Terminal_text.single_line summary ^ held_tail held
       | Overview_team.Phase_word { word = _; held } ->
           Printf.sprintf "%sno attention item names a cause%s%s" Ansi.dim
@@ -666,29 +666,6 @@ let overview_layout (state : state) ~terminal_rows =
     | None -> []
     | Some overview -> overview.ov_attention_items
   in
-  (* An item about a Keeper the Team block lists is that Keeper's row there:
-     a stuck Keeper carries the item's sentence, a paused one sits on the
-     parked line. Drawn in both places, the same stop took two rows and read
-     as two problems. The Attention panel keeps what the Team block cannot
-     say -- items about anything else, and about Keepers the briefing did
-     not list. When the viewport is too short for a Team block, the panel
-     keeps every item: an item nothing draws is an item lost. *)
-  let beside_team =
-    match state.overview with
-    | None -> all_attention
-    | Some overview ->
-        List.filter
-          (fun (item : attention_item) ->
-            match item.ai_target with
-            | Attention_keeper name ->
-                not
-                  (List.exists
-                     (fun (keeper : overview_keeper) ->
-                       String.equal keeper.okp_name name)
-                     overview.ov_keeper_rows)
-            | Attention_other _ -> true)
-          all_attention
-  in
   let tasks_error = Terminal_text.optional_single_line state.tasks_error in
   let team_count =
     match overview_team state with
@@ -708,10 +685,19 @@ let overview_layout (state : state) ~terminal_rows =
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
   in
+  (* An item a drawn Team row carries -- a stuck Keeper's row prints its
+     sentence -- is that Keeper's row there; drawn in both places the same
+     stop took two rows and read as two problems. Only items the viewport
+     actually draws on a Team row leave the panel: an item about a running
+     Keeper, a second item about the same Keeper, and the items of rows the
+     budget cuts all stay, because nothing else on screen says them. *)
   let attention_items, row_budget =
-    let with_team = allocate beside_team in
-    if with_team.team_rows > 0 then (beside_team, with_team)
-    else (all_attention, allocate all_attention)
+    match overview_team state with
+    | None -> (all_attention, allocate all_attention)
+    | Some team ->
+        Overview_team.settle team ~attention:all_attention ~allocate
+          ~team_rows:(fun (budget : Render_schedule.overview_allocation) ->
+            budget.team_rows)
   in
   attention_items, tasks_error, row_budget
 
@@ -900,13 +886,31 @@ let render_overview (state : state) =
      where it says something the rows cannot: that some did not fit. The
      Events panel beside it states its window the same way. *)
   let attention_count = List.length attention_items in
+  (* Items a drawn Team row carries are drawn there, not here
+     ([overview_layout]). The panel says how many went there, so its count
+     and the briefing's total do not disagree without a reason on screen,
+     and an empty panel is not read as "nothing needs attention". *)
+  let on_team_rows =
+    match ov with
+    | None -> 0
+    | Some o -> List.length o.ov_attention_items - attention_count
+  in
   let attention_title =
-    if attention_count = 0 then " Attention "
-    else if attention_count <= row_budget.attention_rows then
-      Printf.sprintf " Attention %d " attention_count
-    else
-      Printf.sprintf " Attention %d/%d " row_budget.attention_rows
-        attention_count
+    let counted =
+      if attention_count = 0 then " Attention "
+      else if attention_count <= row_budget.attention_rows then
+        Printf.sprintf " Attention %d " attention_count
+      else
+        Printf.sprintf " Attention %d/%d " row_budget.attention_rows
+          attention_count
+    in
+    let with_team =
+      Printf.sprintf "%s+%d on Team " counted on_team_rows
+    in
+    if attention_count > 0 && on_team_rows > 0
+       && String.length with_team <= panel_width
+    then with_team
+    else counted
   in
   (* A burst of identical lines (manual refreshes, a broadcast fan-out) folds
      into one row with a ×N tail; the window scrolls over folded rows. *)
@@ -950,14 +954,6 @@ let render_overview (state : state) =
      note sat two cells right of the rows it replaces and of the title above
      them, while the Events panel beside it put its title and its rows on one
      column. *)
-  (* Items about Keepers the Team block lists are drawn there, not here
-     ([overview_layout]). An empty panel with such items is not "nothing
-     needs attention", so it says where they went. *)
-  let on_team_rows =
-    match ov with
-    | None -> 0
-    | Some o -> List.length o.ov_attention_items - attention_count
-  in
   let attention_empty_note =
     match empty_page_of ~snapshot:state.overview ~error:overview_error with
     | Page_empty when on_team_rows > 0 ->

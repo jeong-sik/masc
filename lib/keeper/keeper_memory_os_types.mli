@@ -153,6 +153,14 @@ type absorbed_statement =
   ; into : string
   }
 
+(** A new claim that continues a retired memory, both by exact memory id:
+    [superseded] leaves the snapshot and [superseded_by] carries it on. The
+    commit records it as a [Revised] event on the old id (RFC-0418). *)
+type revision =
+  { superseded : string
+  ; superseded_by : string
+  }
+
 val dropped_statement_to_json : dropped_statement -> Yojson.Safe.t
 
 (** Inverse of {!dropped_statement_to_json}. Field-exact: an object carrying

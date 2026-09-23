@@ -44,7 +44,7 @@ type input =
 (* A new claim that continues a dropped memory: the librarian said so with
    [supersedes], and the parser checked that the old id exists and is in
    [dropped]. Recorded as a [Revised] event on the old id (RFC-0418). *)
-type revision =
+type revision = Keeper_memory_os_types.revision =
   { superseded : string
   ; superseded_by : string
   }

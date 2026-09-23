@@ -59,7 +59,7 @@ type input =
     The librarian named the old one with [supersedes]; the parser checked
     that it exists and is in [dropped]. Recorded as a [Revised] event on the
     old id after the snapshot commits (RFC-0418). *)
-type revision =
+type revision = Keeper_memory_os_types.revision =
   { superseded : string
   ; superseded_by : string
   }

@@ -35,7 +35,7 @@ let with_source f =
 let prepare config = P.prepare ~config ~keeper_name ~trace_id () |> get
 let record_prepared_memory config prepared =
   let range_id = P.memory_range_id ~config ~keeper_name prepared |> get in
-  ignore (Masc.Keeper_memory_os_current.apply_disposition ~durable_range_id:range_id
+  ignore (Masc.Keeper_memory_os_current.apply_disposition ~revisions:[] ~durable_range_id:range_id
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path)
     ~keeper_id:keeper_name ~now:1000. ~source:{kind=Masc.Keeper_memory_os_current.Librarian;trace_id}
     ~absorbed:[] ~new_claims:[] () |> get)
@@ -172,7 +172,7 @@ let record_ordinary config prepared ~start_atom =
   let own=P.memory_range_id ~config ~keeper_name prepared |> get in
   let range_id={own with Masc.Keeper_memory_os_current.receipt_scope=Masc.Workspace.keepers_runtime_dir config;
     start_atom} in
-  ignore (Masc.Keeper_memory_os_current.apply_disposition ~durable_range_id:range_id
+  ignore (Masc.Keeper_memory_os_current.apply_disposition ~revisions:[] ~durable_range_id:range_id
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path)
     ~keeper_id:keeper_name ~now:1000. ~source:{kind=Masc.Keeper_memory_os_current.Librarian;trace_id}
     ~absorbed:[] ~new_claims:[] () |> get)
@@ -349,7 +349,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   let source = List.map message [String.make 1000 'a'; String.make 1000 'b';
     String.make 1000 'c'; String.make 6000 'd'] in
   save source; boundary ~fresh:true 1 source;
-  let current = Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1000.
+  let current = Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1000.
     ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[] () |> get
     |> fun (d : Current.disposition) -> d.snapshot in
   let half = prepare config |> some |> P.narrow |> some in
@@ -575,7 +575,7 @@ let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ~slot_count ~answer f =
   in
   save atoms;
   boundary ~fresh:true 1 atoms;
-  ignore (Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1000.
+  ignore (Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1000.
     ~source:{ kind = Current.Librarian; trace_id } ~absorbed:[] ~new_claims:[] () |> get);
   (* No forget_measurement between passes: that is what a server restart does,
      and the width these cases are about lives in the same memory. *)

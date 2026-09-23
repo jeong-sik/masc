@@ -694,7 +694,7 @@ let test_a_restated_memory_still_current_takes_its_absorptions () =
       | Error error -> fail (Librarian.parse_error_to_string error)
     in
     let committed =
-      Current.apply_disposition ~keepers_dir ~keeper_id ~now:200.
+      Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:200.
         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
         ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
         ~new_claims:selection.new_claims
@@ -757,7 +757,7 @@ let test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_i
        |> require
        : Current.t);
     let committed =
-      Current.apply_disposition ~keepers_dir ~keeper_id ~now:200.
+      Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:200.
         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
         ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
         ~new_claims:selection.new_claims
@@ -1400,7 +1400,7 @@ let test_keeper_memory_io_offload_fallback_and_domain_safety env () =
         (* Populate an initial snapshot to test read_current_facts and record_failure with snapshot present *)
         let fact_initial = fact ~claim:"Offloaded fact 1" in
         let _ =
-          Current.apply_disposition
+          Current.apply_disposition ~revisions:[]
             ~keepers_dir
             ~keeper_id
             ~now:1_000_000.
@@ -1600,7 +1600,7 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
         | Ok selection -> selection
         | Error error -> fail (Librarian.parse_error_to_string error)
       in
-      Current.apply_disposition ~keepers_dir ~keeper_id ~now
+      Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now
         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
         ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
         ~new_claims:selection.new_claims () |> require

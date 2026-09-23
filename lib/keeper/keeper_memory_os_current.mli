@@ -289,13 +289,21 @@ type disposition =
             answer's order. *)
   ; absorbed_not_applied : Keeper_memory_os_types.absorbed_statement list
         (** the other absorptions passed in: the target was neither in the
-            locked snapshot nor among [new_claims] (the source stays current),
-            or the locked snapshot no longer held the source. No row is
-            written for them. *)
+            locked snapshot nor among the stored [new_claims] (the source
+            stays current), or the locked snapshot no longer held the source.
+            No row is written for them. *)
+  ; claims_not_applied : Keeper_memory_os_types.fact list
+        (** the [new_claims] not stored: each supersedes or absorbs a memory
+            the locked snapshot no longer holds. In the answer's order. *)
+  ; revisions_applied : Keeper_memory_os_types.revision list
+        (** the [revisions] this commit carried out: the old id left the
+            snapshot and its successor is in it. Only these get a [Revised]
+            event. In the answer's order. *)
   }
-(** What one [apply_disposition] commit did. The absorptions a caller passed
-    in are what it asked for; these two lists are what the store did, and
-    together they hold every absorption passed in. *)
+(** What one [apply_disposition] commit did. The absorptions, claims and
+    revisions a caller passed in are what it asked for; these lists are what
+    the store did. The two absorption lists together hold every absorption
+    passed in. *)
 
 val apply_disposition
   :  ?on_committed:(disposition -> unit)
@@ -304,6 +312,7 @@ val apply_disposition
   -> ?durable_range_id:durable_range_id
   -> ?official_range_id:official_range_id
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> revisions:Keeper_memory_os_types.revision list
   -> keepers_dir:string
   -> keeper_id:string
   -> now:float
@@ -348,13 +357,25 @@ val apply_disposition
     than defaulted: a caller that leaves it out would add the merged claim and
     keep every fact it absorbs current.
 
-    An absorption goes into a memory the answer names: one of [new_claims], or
-    a current memory the answer wrote again verbatim. The librarian read the
-    snapshot before its provider turn, so that memory may be gone when the lock
-    is taken. An absorption whose target the locked snapshot does not hold and
-    [new_claims] does not add is not applied and is returned in
-    [absorbed_not_applied]; its source stays current, the removed memory is not brought back, and no absorbed row points
-    into an id no snapshot has (#38186). *)
+    The librarian read the snapshot before its provider turn, so a memory its
+    answer names may be gone when the lock is taken: the keeper retracted it,
+    or superseded it with a successor of its own.
+
+    A new claim that supersedes (per [revisions]) or absorbs (per [absorbed])
+    a memory the locked snapshot does not hold is not stored and is returned
+    in [claims_not_applied]: it would carry on content the keeper already
+    removed or replaced, and give the old id a second successor. A memory
+    whose every successor in [revisions] was not stored stays current even if
+    [dropped_statements] retires it. [revisions] is required for the same
+    reason [absorbed] is: a caller that leaves it out would store a successor
+    of a memory the keeper already replaced.
+
+    An absorption goes into a memory the answer names: a stored new claim, or
+    a current memory the answer wrote again verbatim. An absorption whose
+    target the locked snapshot does not hold and this commit does not store is
+    not applied and is returned in [absorbed_not_applied]; its source stays
+    current, the removed memory is not brought back, and no absorbed row
+    points into an id no snapshot has (#38186). *)
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

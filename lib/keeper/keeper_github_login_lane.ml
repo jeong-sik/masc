@@ -182,7 +182,7 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
   let* (_ : string) = step ~redaction endpoint ~argv:[ "chmod"; "0700"; gh_dir ] in
   let lane : Keeper_github_identity.login_lane =
     { run_login =
-        (fun ~on_stdout_chunk ~on_stderr_chunk ->
+        (fun ~scopes ~on_stdout_chunk ~on_stderr_chunk ->
           let result =
             Masc_exec.Sandbox_target.status_tuple
               (run_remote
@@ -190,7 +190,7 @@ let remote_lane ~(config : Workspace.config) ~keeper_name ~hostname =
                  ~timeout_sec:Keeper_github_identity.login_timeout_sec
                  ~on_stdout_chunk:(Some on_stdout_chunk)
                  ~on_stderr_chunk:(Some on_stderr_chunk)
-                 ~argv:(Keeper_github_identity.login_argv ~hostname))
+                 ~argv:(Keeper_github_identity.login_argv ~hostname ~scopes))
           in
           Keeper_sandbox_remote.invalidate_preflight endpoint;
           result)

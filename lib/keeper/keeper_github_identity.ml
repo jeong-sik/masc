@@ -22,9 +22,57 @@ type observation =
   ; checked_at_unix : float
   }
 
+(* The scopes a login may ask for beyond gh's own minimum ([repo], [read:org],
+   [gist]). Closed, so a scope reaches [gh] only once someone has named it
+   here: each one widens what a Keeper can do with the token. [Workflow] is
+   what GitHub asks for before a push that touches [.github/workflows]; a
+   workflow runs with the repository's secrets, so it is never on by default. *)
+type login_scope = Workflow
+
+let login_scope_to_string = function
+  | Workflow -> "workflow"
+;;
+
+let login_scope_of_string = function
+  | "workflow" -> Some Workflow
+  | _ -> None
+;;
+
+let all_login_scopes = [ Workflow ]
+
+(* The login request carries its scopes as [?scopes=workflow,...], beside the
+   [hostname] it already takes as a query parameter. An empty or absent value
+   is no extra scope; a name this module does not offer is refused rather than
+   dropped, so a surface that asked for a scope never gets a token without it
+   and a note saying nothing. *)
+let login_scopes_of_query = function
+  | None -> Ok []
+  | Some raw ->
+    let names =
+      String.split_on_char ',' raw
+      |> List.map String.trim
+      |> List.filter (fun name -> not (String.equal name ""))
+    in
+    List.fold_left
+      (fun acc name ->
+        match acc, login_scope_of_string name with
+        | Error _, _ -> acc
+        | Ok scopes, Some scope -> Ok (scope :: scopes)
+        | Ok _, None ->
+          Error
+            (Printf.sprintf
+               "unknown GitHub login scope %S; offered: %s"
+               name
+               (String.concat ", " (List.map login_scope_to_string all_login_scopes))))
+      (Ok [])
+      names
+    |> Result.map List.rev
+;;
+
 type login_lane =
   { run_login :
-      on_stdout_chunk:(string -> unit)
+      scopes:login_scope list
+      -> on_stdout_chunk:(string -> unit)
       -> on_stderr_chunk:(string -> unit)
       -> Unix.process_status * string * string
   ; run_login_with_token :
@@ -776,7 +824,13 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
 
 let login_timeout_sec = 600.0
 
-let login_argv ~hostname =
+let login_argv ~hostname ~scopes =
+  let scope_args =
+    match List.filter (fun scope -> List.mem scope scopes) all_login_scopes with
+    | [] -> []
+    | scopes ->
+      [ "--scopes"; String.concat "," (List.map login_scope_to_string scopes) ]
+  in
   [ "gh"
   ; "auth"
   ; "login"
@@ -788,6 +842,7 @@ let login_argv ~hostname =
   ; "--web"
   ; "--insecure-storage"
   ]
+  @ scope_args
 ;;
 
 let login_with_token_argv ~hostname =
@@ -1020,13 +1075,13 @@ let local_lane ~config ~keeper_name ~hostname =
   | Ok env ->
     let lane : login_lane =
       { run_login =
-          (fun ~on_stdout_chunk ~on_stderr_chunk ->
+          (fun ~scopes ~on_stdout_chunk ~on_stderr_chunk ->
             Process_eio.run_argv_with_status_split_streaming
               ~timeout_sec:login_timeout_sec
               ~env
               ~on_stdout_chunk
               ~on_stderr_chunk
-              (login_argv ~hostname))
+              (login_argv ~hostname ~scopes))
       ; run_login_with_token =
           (fun ~token ->
             Process_eio.run_argv_with_stdin_and_status_split
@@ -1041,7 +1096,7 @@ let local_lane ~config ~keeper_name ~hostname =
     Ok lane
 ;;
 
-let stream_login ~config ~keeper_name ~make_lane ~is_closed ~send_event =
+let stream_login ~config ~keeper_name ~scopes ~make_lane ~is_closed ~send_event =
   let base_path = config.Workspace.base_path in
   let send event json =
     if is_closed ()
@@ -1079,6 +1134,7 @@ let stream_login ~config ~keeper_name ~make_lane ~is_closed ~send_event =
                   process_result :=
                     Some
                       (lane.run_login
+                         ~scopes
                          ~on_stdout_chunk:
                            (send_redacted_output "stdout" stdout_redaction)
                          ~on_stderr_chunk:
@@ -1209,9 +1265,10 @@ let run_inherited ~timeout_sec ~env = function
    Measured 2026-09-03 against [login_argv] with no terminal attached: [gh]
    writes nothing to stdout and puts the one-time code and the verification URL
    on stderr, so the stderr callback is the one an operator reads. *)
-let run_cli_login ~(lane : login_lane) =
+let run_cli_login ~(lane : login_lane) ~scopes =
   let status, _stdout, _stderr =
     lane.run_login
+      ~scopes
       ~on_stdout_chunk:(fun chunk ->
         print_string chunk;
         flush stdout)

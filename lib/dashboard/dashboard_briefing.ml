@@ -88,6 +88,7 @@ type briefing_projection = {
   attention_queue : attention_context list;
   agent_briefs : Yojson.Safe.t list;
   keeper_briefs : Yojson.Safe.t list;
+  keepers_unread : Keeper_snapshot_unread.t list;
   internal_signals : Yojson.Safe.t list;
 }
 
@@ -162,6 +163,16 @@ let build_projection ?actor ~config ~sw ~clock
     Dashboard_briefing_assembly.build_agent_briefs config attention_queue keeper_items
   in
   let keeper_briefs = Dashboard_briefing_assembly.build_keeper_briefs config keeper_items in
+  (* Keepers the snapshot listed but could not build a row for. They are not
+     in [keeper_items], so without this list they left the briefing without a
+     trace (#38090). The snapshot always writes the list beside its rows; one
+     missing is a producer defect and fails the render rather than reading as
+     "none". *)
+  let keepers_unread =
+    match Keeper_snapshot_unread.of_snapshot snapshot_json with
+    | Ok unread -> unread
+    | Error detail -> invalid_arg ("dashboard briefing: " ^ detail)
+  in
   let internal_signals = Dashboard_briefing_assembly.build_internal_signals incidents recommended_actions in
   {
     generated_at = Masc_domain.now_iso ();
@@ -173,6 +184,7 @@ let build_projection ?actor ~config ~sw ~clock
     attention_queue;
     agent_briefs;
     keeper_briefs;
+    keepers_unread;
     internal_signals;
 }
 
@@ -220,5 +232,7 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
       );
       ("agent_briefs", `List projection.agent_briefs);
       ("keeper_briefs", `List projection.keeper_briefs);
+      ( "keepers_unread",
+        `List (List.map Keeper_snapshot_unread.to_json projection.keepers_unread) );
       ("internal_signals", `List projection.internal_signals);
     ]

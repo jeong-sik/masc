@@ -255,8 +255,8 @@ val get_all_karma : store -> (string * int) list
 
 val available_flairs : (string * string * string) list
 (** Curated flair catalogue.  Each entry is
-    [(slug, emoji, label)] (e.g. [("insight", "💡",
-    "Insight")]).  Consumed by the dashboard chip renderer
+    [(name, emoji, label)] (e.g. [("insight", "💡",
+    "Insight")]).  Consumed by the dashboard badge renderer
     and by {!flair_to_yojson} when serialising a
     karma-enriched post. *)
 

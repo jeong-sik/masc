@@ -1,5 +1,6 @@
 [@@@warning "-32-69"]
 module Tui_decode = Masc.Tui_decode
+module Memory_category = Masc.Keeper_memory_os_types
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
 
@@ -1277,13 +1278,15 @@ type board_post = {
   bp_votes: int;
   bp_comment_count: int;
   bp_created_at: string;
+  bp_created_at_unix: float option;
+      (** Unix seconds of the moment the post appeared. Four of the five sort
+          orders rank or break ties on it, so it is the number those lists are
+          made from. [None] when the post carried no numeric [created_at]. *)
   bp_updated_at: float option;
-      (** Unix seconds of the last move on the post or its comments. The server
-          has always sent it; the list drew neither timestamp, so the one
-          question a board answers -- what is still alive -- had no column, and
-          two of the sort orders ([recent], [updated]) ranked by a number the
-          reader could not see. [None] when the post carried neither this nor a
-          numeric [created_at]: there is no time to measure an age from. *)
+      (** Unix seconds of the last move on the post or its comments. The
+          [updated] order ranks on it. [None] when the post carried neither
+          this nor a numeric [created_at]: there is no time to measure an age
+          from. *)
   bp_hearth: string option;
       (** The sub-board it lives in. 24 of them here, and 1550 of 2171 posts
           sit in [verification] alone — a flat list is 71% one topic with
@@ -1869,9 +1872,11 @@ let acting_retained_quiet = 200
     same as nine running ones.
 
     [klc_unreadable] counts rows whose word is missing or outside the
-    vocabulary. They are not folded into any state: a Keeper whose liveness
-    this build cannot name is a different fact from an idle one, and the row
-    says so rather than picking the convenient neighbour. *)
+    vocabulary, and the Keepers the briefing lists under [keepers_unread]
+    because the server could not build their row. They are not folded into
+    any state: a Keeper whose liveness this build cannot name is a different
+    fact from an idle one, and the row says so rather than picking the
+    convenient neighbour. *)
 type keeper_liveness_counts = {
   klc_active: int;
   klc_offline: int;
@@ -1884,7 +1889,7 @@ type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
-  ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
+  ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_liveness: keeper_liveness_counts;
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
@@ -2117,6 +2122,40 @@ let board_sort_explanation = function
   | Board_updated -> "latest changed first"
   | Board_discussed -> "most replies first; newer breaks ties"
 ;;
+
+(** Which of a post's two times the sort put the rows in order by. Four of the
+    five orders key or break ties on the moment the post appeared; only
+    [Board_updated] keys on the moment it last changed.
+
+    This is a reading of what the server does, not a rule it follows: the
+    orders are applied in [Board_dispatch.sort_posts] and [Board_sort], and
+    nothing here can see them. It sits beside [board_sort_explanation] because
+    the two answer the same question -- what this order is -- and a server
+    that changed an order would leave both wrong together. Move them
+    together. *)
+type board_sort_time =
+  | Board_time_posted
+  | Board_time_changed
+
+let board_sort_time = function
+  | Board_hot | Board_trending | Board_recent | Board_discussed ->
+      Board_time_posted
+  | Board_updated -> Board_time_changed
+
+(** The word over the list's age column. It names the time the column holds,
+    so the header changes with the sort rather than letting one word stand for
+    both times. Both fit the six cells the column has. *)
+let board_age_header = function
+  | Board_time_posted -> "AGE"
+  | Board_time_changed -> "MOVED"
+
+(** Which of a post's two times the age column measures from. Both are
+    [option] because a post can arrive carrying neither, and the column then
+    has no age to draw. *)
+let board_age_source ~time ~posted ~changed =
+  match time with
+  | Board_time_posted -> posted
+  | Board_time_changed -> changed
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
@@ -3543,13 +3582,13 @@ let next_memory_sort = function
 
 type memory_category_filter =
   | Category_all
-  | Category_ordinary of string
+  | Category_ordinary of Memory_category.category
   | Category_source
   | Category_dropped
 
 let memory_category_filter_label = function
   | Category_all -> "All"
-  | Category_ordinary cat -> cat
+  | Category_ordinary cat -> Memory_category.category_to_string cat
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
@@ -5206,6 +5245,10 @@ type state = {
   mutable github_identity_view_error: string option;
   mutable github_token_input: string option;
   mutable github_token_save_status: string option;
+  (* The scopes the next [L] login asks for beyond gh's minimum. Off until the
+     operator ticks one: [workflow] lets the token change CI, which runs with
+     the repository's secrets. *)
+  mutable github_login_scopes: Masc.Keeper_github_identity.login_scope list;
   (* The Identity tab. Stamped with the keeper it was fetched for, like the
      other fetched tabs, so the pane shows loading rather than another
      keeper's answer. The providers are held rather than pre-rendered lines
@@ -6305,6 +6348,28 @@ let text_input_target (state : state) ~compact_viewport =
   else None
 ;;
 
+(* Whether the quit key is a quit key right now. A field taking typed text
+   owns every printable key it is handed, [q] with them, so the answer is no
+   while any of them is open.
+
+   Written out rather than closed with [Some _]: the list is the whole
+   vocabulary of typing places, and a field added to it has to be walked past
+   here before it reaches an operator. It was three names and a catch-all, and
+   the other ten -- the command palette among them -- let a typed [q] arm the
+   exit instead of landing in the field. Two of the ten were caught again by a
+   condition spelled at the quit branch itself, which is the shape this
+   function exists to stop. *)
+let quit_key_allowed_for = function
+  | Some
+      ( Text_browser_url | Text_ask_answer | Text_fusion_launch
+      | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
+      | Text_voice_wizard | Text_palette | Text_row_search
+      | Text_identity_app_form | Text_identity_filter | Text_github_token
+      | Text_board_draft ) ->
+      false
+  | None -> true
+;;
+
 (* One reading of the state for both the send path and the footer; the order
    and the reasoning live in [Masc_tui_send_disposition]. *)
 type send_disposition =
@@ -7369,6 +7434,7 @@ let create_state
   github_identity_view = None;
   github_token_input = None;
   github_token_save_status = None;
+  github_login_scopes = [];
   identity_view = None;
   identity_view_error = None;
   identity_login = None;
@@ -8473,8 +8539,9 @@ let surface_search_query surface query =
 
 let memory_fact_search_text = function
   | Memory_row_fact f ->
-      f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
-      ^ f.Tui_decode.mf_origin
+      f.Tui_decode.mf_claim ^ " "
+      ^ Memory_category.category_to_string f.Tui_decode.mf_category
+      ^ " " ^ f.Tui_decode.mf_origin
   | Memory_row_source_fact f ->
       f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
   | Memory_row_invalidation f ->
@@ -8646,7 +8713,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
               | Category_ordinary category ->
                   List.filter
                     (fun (fact : Tui_decode.memory_fact) ->
-                      String.equal fact.Tui_decode.mf_category category)
+                      fact.Tui_decode.mf_category = category)
                     store.Tui_decode.mos_facts
               | Category_source | Category_dropped -> []
             in
@@ -8741,7 +8808,8 @@ let memory_fact_rows (state : state) : memory_fact_row list =
            List.sort
              (fun a b ->
                let cat = function
-                 | Memory_row_fact f -> (0, f.Tui_decode.mf_category)
+                 | Memory_row_fact f ->
+                     (0, Memory_category.category_to_string f.Tui_decode.mf_category)
                  | Memory_row_source_fact _ -> (1, "source")
                  | Memory_row_invalidation _ -> (2, "dropped")
                in
@@ -8769,10 +8837,10 @@ let memory_fact_rows (state : state) : memory_fact_row list =
                String.compare (claim a) (claim b))
              filtered_rows)
 
-(* The categories the loaded ordinary store and source store actually hold, distinct and
-   sorted -- the [c] cycle walks these. Read from the rows, never from a
-   list this side hardcodes: the taxonomy is the server's, and a category it
-   adds appears here without a code change. *)
+(* The categories the loaded ordinary store and source store actually hold,
+   distinct and in the taxonomy's constructor order -- the [c] cycle walks
+   these. Read from the rows rather than [all_categories], so the strip names
+   only the categories this keeper has written. *)
 let memory_fact_categories (state : state) : memory_category_filter list =
   match state.memory_facts with
   | None -> []

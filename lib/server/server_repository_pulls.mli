@@ -31,6 +31,12 @@ type review_state =
       (** GitHub reports no review decision: the base branch requires no
           review. *)
 
+type mergeable =
+  | Mergeable
+  | Conflicting
+  | Mergeable_unknown
+      (** GitHub has not computed mergeability yet (its [UNKNOWN]). *)
+
 type pull_request =
   { repo_slug : string  (** [owner/repo] *)
   ; number : int
@@ -39,6 +45,11 @@ type pull_request =
   ; draft : bool
   ; checks : check_state
   ; review : review_state
+  ; mergeable : mergeable
+  ; author : string option
+      (** The git author name of the head commit. [None] when the pull
+          request reports no commit, or GitHub gives the author or its name
+          as [null]. *)
   ; updated_at : float
   }
 
@@ -109,6 +120,15 @@ type reader =
 
 (** {1 Snapshot} *)
 
+type keeper_names =
+  | Keepers_not_listed  (** Before the first refresh. *)
+  | Keepers_listed of string list
+      (** The persisted Keeper names ({!Keeper_meta_store.keeper_names_result}),
+          read once per refresh. *)
+  | Keepers_list_failed of string
+      (** The Keeper list could not be read. No pull request is then said to
+          be a Keeper's or not. *)
+
 type repository_entry =
   { repository_id : string
   ; url : string
@@ -124,6 +144,7 @@ type snapshot =
           sentence for the operator, not a code to match on. [None] after
           any refresh that read the list. *)
   ; repositories : repository_entry list
+  ; keepers : keeper_names
   ; rejected_token_digest : string option
       (** BLAKE256 hex of the token GitHub last refused, never the token
           itself. Not part of the JSON. *)
@@ -173,7 +194,7 @@ val read_repository :
 val refresh :
   now:(unit -> float) -> http_post:http_post -> config:Workspace.config -> previous:snapshot -> snapshot
 (** One full read: resolve the reader, load the registered repositories and
-    read each GitHub one. A repository whose previous answer was
+    read each GitHub one, then list the persisted Keeper names once. A repository whose previous answer was
     [Token_rejected] for the same token, or [Rate_limited] with a reset time
     still ahead of [now], keeps that answer and is not fetched. When the
     reader is not ready, nothing is fetched and
@@ -181,7 +202,16 @@ val refresh :
     shown as current. [previous] only stands in when the repository list
     itself cannot be read. *)
 
+val keeper_of_author : keepers:string list -> pull_request -> string option
+(** [Some author] when the head commit's author name is exactly one of
+    [keepers] (case counts); [None] otherwise. A Keeper leaves the branch
+    after opening a pull request, so the join is by who wrote the last
+    commit, not by which checkout has the branch. *)
+
 val snapshot_to_yojson : snapshot -> Yojson.Safe.t
+(** Each pull carries ["author"] and ["keeper"] (string or [null]) and
+    ["mergeable"] ([mergeable] | [conflicting] | [unknown]). ["keeper"] is
+    [null] unless the snapshot's ["keepers"] state is [listed]. *)
 
 (** {1 Projection} *)
 

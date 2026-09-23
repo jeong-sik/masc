@@ -224,7 +224,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
   - direct checkpoint 이어가기(`keeper_direct_checkpoint_continuation.ml:18-27`). 사이에 끼인 steering 턴도 같은 세션에서 돌아야 한다.
   - `Retry_previous` 복구는 대화를 그대로 잇는 것이 계약이다(`keeper_official_client_session_store.ml:1219-1224`).
 - **Codex** (`keeper_codex_runtime.ml:591-595`): resume 규칙이 같다. usage 는 `tokenUsage.last` 다.
-- **Antigravity** (`keeper_antigravity_runtime.ml:455-477, 1055`): resume 규칙이 같다. canonical 원본이 바뀌면 resume 을 거절한다. usage 는 `conversation_cumulative` 다.
+- **Antigravity** (`Keeper_antigravity_runtime.run`): resume 규칙이 같다. canonical 원본(시스템 프롬프트나 공유 기록)이 settle 때와 달라지거나, settle 때의 원본 기록이 없어 같은지 알 수 없으면 그 세션을 이어 쓰지 않고 새 세션을 연다(`Keeper_official_client_session_store.reconcile_context`). 도구 목록이 바뀌었을 때와 같은 처리다. 옛 vendor 세션 안에만 있던 대화는 새 세션으로 넘어가지 않는다. 예외: Gate 이어가기는 원래 세션에 묶여 있어서(완료 판정이 같은 세션의 다음 settle 을 요구한다) 새 세션을 열지 않고 dispatch 전에 거절한다. usage 는 `conversation_cumulative` 다.
 
 ## 4. 결함
 
@@ -343,7 +343,7 @@ related: ["keeper-context-window-in-tokens", "claude-code-context-overflow-bound
 3. **체크포인트 소유.** 쓰는 주체와 `turn_count` 주인, Agent Core 단계 저장·실패 기록·purge 와의 순서. 반복 스냅샷과 판정 쌍은 누가 갖나.
 4. **bootstrap 에피소드 동일성.** RFC-claude-code-context-overflow-bounded-restart 는 durable 이력 전체로 에피소드를 식별한다. §5.6 뒤에는 그 이력이 턴마다 바뀐다.
 5. **Codex.** `thread/resume` 의 `developerInstructions` 적용 여부. `tokenUsage.last` 가 요청 단위인지 턴 단위인지.
-6. **Antigravity.** 요청별 토큰이 없다. 같은 정책으로 갈지, 지금의 guard 로 둘지.
+6. **Antigravity.** 요청별 토큰이 없다. 같은 정책으로 갈지, 지금의 guard 로 둘지. (canonical 원본이 바뀐 뒤의 처리는 정했다: 새 세션. 2026-09-23 운영자 결정)
 7. **§2.2 13:16:42 처럼 resume 턴이 캐시를 전혀 못 읽는 원인.**
 8. **실패한 Agent Core 턴 다음의 Claude Code 턴이 `keeper_instructions` 만 기록한 이유**(analyst 3987·4004·4009·4012·4029·4033·4057).
 

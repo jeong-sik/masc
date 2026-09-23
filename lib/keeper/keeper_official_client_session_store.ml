@@ -1073,6 +1073,15 @@ let validate_unchanged_context ~expected ~snapshot_sha256 =
     else Error Canonical_context_changed
   | Some _ | None -> Error Context_frontier_missing
 
+let reconcile_context plan ~expected ~snapshot_sha256 =
+  match plan.previous_settlement with
+  | None -> plan
+  | Some _ ->
+    (match validate_unchanged_context ~expected ~snapshot_sha256 with
+     | Ok () -> plan
+     | Error (Canonical_context_changed | Context_frontier_missing) ->
+       { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None })
+
 let context_admission_error_to_string = function
   | Context_frontier_missing ->
     "context_frontier_missing: retained vendor conversation has no canonical context provenance; unchanged history cannot be verified"
@@ -1089,14 +1098,11 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
     |> Result.map_error claim_error_to_string
   in
   let plan = reconcile_tool_surface plan ~tool_surface_sha256 in
-  let* () = match context_frontier, plan.previous_settlement with
-    | Some {delivery=Canonical_source_guard; snapshot_sha256; _}, Some _ ->
-      validate_unchanged_context ~expected ~snapshot_sha256
-      |> Result.map_error context_admission_error_to_string
-    | Some {delivery=(Prepared_start_context | Replaced_configuration | Canonical_source_guard
-                     | Held_by_vendor_session); _}, None
-    | Some {delivery=(Prepared_start_context | Replaced_configuration | Held_by_vendor_session); _}, Some _
-    | None, _ -> Ok ()
+  let plan = match context_frontier with
+    | Some {delivery=Canonical_source_guard; snapshot_sha256; _} ->
+      reconcile_context plan ~expected ~snapshot_sha256
+    | Some {delivery=(Prepared_start_context | Replaced_configuration | Held_by_vendor_session); _}
+    | None -> plan
   in
   let last_recovery_resolution =
     Option.bind expected (fun binding -> binding.last_recovery_resolution)

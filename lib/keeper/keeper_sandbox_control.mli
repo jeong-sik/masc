@@ -59,6 +59,17 @@ type checkout_freshness =
       }
   | Freshness_unavailable of string
 
+(** Which catalog repository a checkout's [origin] names. [Ambiguous]
+    carries every catalog id whose URL matches the origin; the two
+    [_unavailable] cases carry why the origin or the catalog could not be
+    read, so the checkout may belong to any repository. *)
+type catalog_resolution =
+  | Registered of Repo_manager_types.repository
+  | Unregistered
+  | Ambiguous of string list
+  | Catalog_unavailable of string
+  | Origin_unavailable of string
+
 (** One checkout's freshness projection for the turn context. Read off the
     same per-checkout probe as {!repository_checkouts_json}, so the tool
     surface and the turn context can never disagree about the same checkout. *)
@@ -67,6 +78,10 @@ type freshness_row = {
       (** Playground-relative path — the cwd the keeper passes to its tools.
           Basenames collide across a playground; paths do not. *)
   row_branch : string option;  (** [None] when the branch probe failed. *)
+  row_catalog : catalog_resolution;
+      (** The catalog repository the checkout's origin names. The server's
+          pull request reader joins a PR to a Keeper through this and
+          [row_branch] (RFC-0465 §0.2). *)
   row_changed_files : int option;  (** [None] when the status probe failed. *)
   row_freshness : checkout_freshness;
 }
@@ -82,6 +97,23 @@ val checkout_freshness_rows :
     typed [scan_error], not an empty list. [?inspection_budget_sec] bounds
     the total git subprocess time across all checkouts (default
     {!Repo_git.inspection_timeout_sec}). *)
+
+(** A playground's measured rows and, when discovery stopped early or could
+    not read a directory, why: checkouts past that point were never seen. *)
+type checkout_scan = {
+  scan_rows : freshness_row list;
+  scan_truncated : Keeper_playground_checkouts.limit option;
+}
+
+val checkout_scan :
+  ?inspection_budget_sec:float ->
+  catalog:(Repo_manager_types.repository list, string) result ->
+  config:Workspace.config ->
+  meta:keeper_meta ->
+  unit ->
+  (checkout_scan, Keeper_playground_checkouts.scan_error) result
+(** {!checkout_freshness_rows} against a catalog the caller already loaded,
+    keeping a truncated discovery visible instead of flattening it. *)
 
 module For_testing : sig
   val repository_checkouts_json_with_budget :

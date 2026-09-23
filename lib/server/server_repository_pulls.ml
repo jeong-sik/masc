@@ -15,6 +15,7 @@ type pull_request =
   ; number : int
   ; title : string
   ; head_branch : string
+  ; cross_repository : bool
   ; draft : bool
   ; checks : check_state
   ; review : review_state
@@ -54,11 +55,52 @@ type reader =
       }
   | Reader_ready of { keeper : string }
 
+type keeper_checkouts_read =
+  | Checkouts_read of Keeper_sandbox_control.checkout_scan
+  | Checkouts_absent
+  | Checkouts_not_booted
+  | Checkouts_unread of string
+
+type keeper_checkouts =
+  { keeper : string
+  ; checkouts : keeper_checkouts_read
+  }
+
+type fleet_checkouts = (keeper_checkouts list, string) result
+
+type keeper_on_repository =
+  { on_keeper : string
+  ; branches : string list
+  ; unread : string list
+  ; not_booted : bool
+  }
+
+type repository_keepers =
+  | Keepers_not_inspected
+  | Keepers_unlisted of
+      { observed_at : float
+      ; error : string
+      }
+  | Keepers_listed of
+      { observed_at : float
+      ; on_repository : keeper_on_repository list
+      }
+
+type keeper_join =
+  | Join_not_inspected
+  | Join_keepers_unlisted of string
+  | Join_read of
+      { keepers : string list
+      ; keepers_unread : int
+      ; keepers_not_booted : int
+      }
+
 type repository_entry =
   { repository_id : string
   ; url : string
   ; slug : string option
   ; pulls : repository_pulls
+  ; keepers : repository_keepers
   }
 
 type snapshot =
@@ -201,7 +243,7 @@ let query =
     pullRequests(states: OPEN, first: $first, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title headRefName isDraft updatedAt reviewDecision
+        number title headRefName isCrossRepository isDraft updatedAt reviewDecision
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       }
     }
@@ -266,19 +308,31 @@ let decode_pull ~repo_slug node =
     ( field "number" node
     , field "title" node
     , field "headRefName" node
+    , field "isCrossRepository" node
     , field "isDraft" node
     , field "updatedAt" node )
   with
   | ( Some (`Int number)
     , Some (`String title)
     , Some (`String head_branch)
+    , Some (`Bool cross_repository)
     , Some (`Bool draft)
     , Some (`String updated_raw) ) ->
     (match
        Time_codec.parse_rfc3339_opt updated_raw, decode_checks node, decode_review node
      with
      | Some updated_at, Some checks, Some review ->
-       Some { repo_slug; number; title; head_branch; draft; checks; review; updated_at }
+       Some
+         { repo_slug
+         ; number
+         ; title
+         ; head_branch
+         ; cross_repository
+         ; draft
+         ; checks
+         ; review
+         ; updated_at
+         }
      | _ -> None)
   | _ -> None
 
@@ -466,6 +520,110 @@ let is_token_rejected = function
   | Pulls_failed { failure = Token_rejected; _ } -> true
   | Pulls_not_read | Pulls_not_github | Pulls_read _ | Pulls_failed _ -> false
 
+(* --- Keepers on a pull request's branch (RFC-0465 §0.2) --- *)
+
+(* What one checkout row says about one repository. *)
+type row_evidence =
+  | Row_on of string
+  | Row_unread of string
+  | Row_elsewhere
+
+let row_evidence ~repository_id (row : Keeper_sandbox_control.freshness_row) =
+  let of_this_repository () =
+    match row.row_branch with
+    | Some branch -> Row_on branch
+    | None -> Row_unread (row.row_checkout_path ^ ": branch probe failed")
+  in
+  match row.row_catalog with
+  | Keeper_sandbox_control.Registered repo
+    when String.equal repo.Repo_manager_types.id repository_id -> of_this_repository ()
+  (* The origin equals the URL of every id listed, this one among them. *)
+  | Ambiguous ids when List.exists (String.equal repository_id) ids -> of_this_repository ()
+  | Registered _ | Ambiguous _ | Unregistered -> Row_elsewhere
+  | Catalog_unavailable reason ->
+    Row_unread (row.row_checkout_path ^ ": repository catalog unavailable: " ^ reason)
+  | Origin_unavailable reason ->
+    Row_unread (row.row_checkout_path ^ ": origin unavailable: " ^ reason)
+
+let keeper_on_repository ~repository_id ({ keeper; checkouts } : keeper_checkouts) =
+  let not_booted =
+    match checkouts with
+    | Checkouts_not_booted -> true
+    | Checkouts_read _ | Checkouts_absent | Checkouts_unread _ -> false
+  in
+  let branches, unread =
+    match checkouts with
+    | Checkouts_absent | Checkouts_not_booted -> [], []
+    | Checkouts_unread reason -> [], [ reason ]
+    | Checkouts_read { Keeper_sandbox_control.scan_rows; scan_truncated } ->
+      (* Checkouts past a stopped discovery were never seen, so any of them
+         may be of this repository. *)
+      let truncated =
+        match scan_truncated with
+        | None -> []
+        | Some limit ->
+          [ "checkout discovery stopped early: "
+            ^ Keeper_playground_checkouts.limit_to_string limit
+          ]
+      in
+      List.fold_right
+        (fun row (branches, unread) ->
+          match row_evidence ~repository_id row with
+          | Row_on branch -> branch :: branches, unread
+          | Row_unread reason -> branches, reason :: unread
+          | Row_elsewhere -> branches, unread)
+        scan_rows
+        ([], truncated)
+  in
+  match branches, unread, not_booted with
+  | [], [], false -> None
+  | _ :: _, _, _ | [], _ :: _, _ | [], [], true ->
+    Some { on_keeper = keeper; branches; unread; not_booted }
+
+let has_open_pulls = function
+  | Pulls_read { pulls = _ :: _; _ } -> true
+  | Pulls_read { pulls = []; _ } | Pulls_not_read | Pulls_failed _ | Pulls_not_github -> false
+
+let repository_keepers ~observed_at ~(fleet : fleet_checkouts) entry =
+  if not (has_open_pulls entry.pulls)
+  then Keepers_not_inspected
+  else (
+    match fleet with
+    | Error error -> Keepers_unlisted { observed_at; error }
+    | Ok keepers ->
+      Keepers_listed
+        { observed_at
+        ; on_repository =
+            List.filter_map
+              (keeper_on_repository ~repository_id:entry.repository_id)
+              keepers
+        })
+
+let pull_keepers entry pull =
+  (* A head branch in a fork is not a branch of this repository, so no
+     checkout of this repository can be on it, whatever the join knows. *)
+  if pull.cross_repository
+  then Join_read { keepers = []; keepers_unread = 0; keepers_not_booted = 0 }
+  else
+  match entry.keepers with
+  | Keepers_not_inspected -> Join_not_inspected
+  | Keepers_unlisted { error; observed_at = _ } -> Join_keepers_unlisted error
+  | Keepers_listed { on_repository; observed_at = _ } ->
+    let on_branch k = List.exists (String.equal pull.head_branch) k.branches in
+    let keepers =
+      List.filter_map
+        (fun k -> if on_branch k then Some k.on_keeper else None)
+        on_repository
+    in
+    let keepers_unread =
+      List.length
+        (List.filter (fun k -> (not (on_branch k)) && not (List.is_empty k.unread)) on_repository)
+    in
+    let keepers_not_booted =
+      List.length (List.filter (fun k -> k.not_booted) on_repository)
+    in
+    Join_read { keepers; keepers_unread; keepers_not_booted }
+
 let refresh ~now ~http_post ~base_path ~previous =
   let now_s = now () in
   let credential = resolve_reader ~base_path in
@@ -508,7 +666,18 @@ let refresh ~now ~http_post ~base_path ~previous =
            longer vouch for; [reader] says why nothing is read now. *)
         | Some _, Error _ -> Pulls_not_read
       in
-      { repository_id = repo.id; url = repo.url; slug; pulls }
+      (* The last join stands until {!join_keepers} replaces it, so a reader
+         between the two publications sees it with its own [observed_at]. *)
+      let keepers =
+        match
+          List.find_opt
+            (fun entry -> String.equal entry.repository_id repo.id)
+            previous.repositories
+        with
+        | Some entry -> entry.keepers
+        | None -> Keepers_not_inspected
+      in
+      { repository_id = repo.id; url = repo.url; slug; pulls; keepers }
     in
     let repositories = List.map entry repos in
     let rejected_token_digest =
@@ -519,6 +688,43 @@ let refresh ~now ~http_post ~base_path ~previous =
       | Ok _ | Error _ -> None
     in
     { reader; repositories_error = None; repositories; rejected_token_digest }
+
+type inspect_checkouts =
+  catalog:(Repo_manager_types.repository list, string) result -> fleet_checkouts
+
+let join_keepers ~now ~(inspect_checkouts : inspect_checkouts) ~base_path snapshot =
+  if not (List.exists (fun entry -> has_open_pulls entry.pulls) snapshot.repositories)
+  then
+    { snapshot with
+      repositories =
+        List.map (fun entry -> { entry with keepers = Keepers_not_inspected }) snapshot.repositories
+    }
+  else (
+    (* One catalog read and one fleet inspection, shared by every repository.
+       A catalog that cannot be read reaches every row as
+       [Catalog_unavailable], so those Keepers count as unread. *)
+    let fleet = inspect_checkouts ~catalog:(Repo_store.load_all ~base_path) in
+    let observed_at = now () in
+    { snapshot with
+      repositories =
+        List.map
+          (fun entry -> { entry with keepers = repository_keepers ~observed_at ~fleet entry })
+          snapshot.repositories
+    })
+
+let join_failed ~observed_at ~error snapshot =
+  { snapshot with
+    repositories =
+      List.map
+        (fun entry ->
+          { entry with
+            keepers =
+              (if has_open_pulls entry.pulls
+               then Keepers_unlisted { observed_at; error }
+               else Keepers_not_inspected)
+          })
+        snapshot.repositories
+  }
 
 (* --- JSON --- *)
 
@@ -534,17 +740,38 @@ let review_state_to_string = function
   | Review_waiting -> "waiting"
   | Review_none -> "none"
 
-let pull_request_to_yojson pull =
+let keeper_join_fields = function
+  | Join_read { keepers; keepers_unread; keepers_not_booted } ->
+    [ "keepers", `List (List.map (fun k -> `String k) keepers)
+    ; "keepers_unread", `Int keepers_unread
+    ; "keepers_not_booted", `Int keepers_not_booted
+    ]
+  | Join_keepers_unlisted reason ->
+    [ "keepers", `Null
+    ; "keepers_unread", `Null
+    ; "keepers_not_booted", `Null
+    ; "keepers_error", `String reason
+    ]
+  | Join_not_inspected ->
+    [ "keepers", `Null
+    ; "keepers_unread", `Null
+    ; "keepers_not_booted", `Null
+    ; "keepers_error", `String "Keeper checkouts were not inspected"
+    ]
+
+let pull_request_to_yojson ~join pull =
   `Assoc
-    [ "repo_slug", `String pull.repo_slug
+    ([ "repo_slug", `String pull.repo_slug
     ; "number", `Int pull.number
     ; "title", `String pull.title
     ; "head_branch", `String pull.head_branch
+    ; "cross_repository", `Bool pull.cross_repository
     ; "draft", `Bool pull.draft
     ; "checks", `String (check_state_to_string pull.checks)
     ; "review", `String (review_state_to_string pull.review)
     ; "updated_at", `Float pull.updated_at
-    ]
+     ]
+     @ keeper_join_fields join)
 
 let failure_to_yojson = function
   | Repository_not_visible -> `Assoc [ "kind", `String "repository_not_visible" ]
@@ -566,14 +793,14 @@ let failure_to_yojson = function
   | Response_unreadable message ->
     `Assoc [ "kind", `String "response_unreadable"; "message", `String message ]
 
-let repository_pulls_to_yojson = function
+let repository_pulls_to_yojson ~join = function
   | Pulls_not_read -> `Assoc [ "state", `String "not_read" ]
   | Pulls_not_github -> `Assoc [ "state", `String "not_github" ]
   | Pulls_read { observed_at; pulls; undecodable } ->
     `Assoc
       [ "state", `String "read"
       ; "observed_at", `Float observed_at
-      ; "pulls", `List (List.map pull_request_to_yojson pulls)
+      ; "pulls", `List (List.map (fun pull -> pull_request_to_yojson ~join:(join pull) pull) pulls)
       ; "undecodable", `Int undecodable
       ]
   | Pulls_failed { observed_at; failure } ->
@@ -594,12 +821,36 @@ let reader_to_yojson = function
       [ "state", `String "token_unavailable"; "keeper", `String keeper; "reason", `String reason ]
   | Reader_ready { keeper } -> `Assoc [ "state", `String "ready"; "keeper", `String keeper ]
 
+let repository_keepers_to_yojson = function
+  | Keepers_not_inspected -> `Assoc [ "state", `String "not_inspected" ]
+  | Keepers_unlisted { observed_at; error } ->
+    `Assoc
+      [ "state", `String "unlisted"; "observed_at", `Float observed_at; "error", `String error ]
+  | Keepers_listed { observed_at; on_repository } ->
+    let strings values = `List (List.map (fun v -> `String v) values) in
+    `Assoc
+      [ "state", `String "listed"
+      ; "observed_at", `Float observed_at
+      ; ( "keepers"
+        , `List
+            (List.map
+               (fun k ->
+                 `Assoc
+                   [ "keeper", `String k.on_keeper
+                   ; "branches", strings k.branches
+                   ; "unread", strings k.unread
+                   ; "not_booted", `Bool k.not_booted
+                   ])
+               on_repository) )
+      ]
+
 let entry_to_yojson entry =
   `Assoc
     [ "repository_id", `String entry.repository_id
     ; "url", `String entry.url
     ; ("slug", match entry.slug with Some slug -> `String slug | None -> `Null)
-    ; "pulls", repository_pulls_to_yojson entry.pulls
+    ; "pulls", repository_pulls_to_yojson ~join:(pull_keepers entry) entry.pulls
+    ; "keeper_checkouts", repository_keepers_to_yojson entry.keepers
     ]
 
 let snapshot_to_yojson snapshot =
@@ -623,24 +874,88 @@ let current () = Atomic.get projection
    5000 GraphQL points an hour. *)
 let poll_interval_s = 60.0
 
-let start ~sw ~clock ~base_path =
+let checkouts_of_scan ~(tree_location : Keeper_types_profile_sandbox.tree_location) scan =
+  match scan, tree_location with
+  | Ok scan, Keeper_types_profile_sandbox.(Shared_mount | Endpoint_owned) -> Checkouts_read scan
+  (* A host directory that does not exist holds no checkout. *)
+  | Error (Keeper_playground_checkouts.Root_missing _), Keeper_types_profile_sandbox.Shared_mount -> Checkouts_absent
+  (* An endpoint-owned tree answers Root_missing only when its guest is not
+     running (not booted in this process, or gone). The guest's volume
+     outlives it, so its checkouts are unknown, not absent. *)
+  | Error (Keeper_playground_checkouts.Root_missing _), Keeper_types_profile_sandbox.Endpoint_owned ->
+    Checkouts_not_booted
+  | Error
+      (( Keeper_playground_checkouts.Root_not_directory _
+       | Root_unreadable _
+       | Root_probe_unreachable _ ) as scan_error), Keeper_types_profile_sandbox.(Shared_mount | Endpoint_owned) ->
+    Checkouts_unread (Keeper_playground_checkouts.scan_error_to_string scan_error)
+
+let inspect_keeper ~(config : Workspace.config) ~catalog keeper =
+  match Keeper_meta_store.read_effective_meta config keeper with
+  | Error reason -> Checkouts_unread ("Keeper metadata: " ^ reason)
+  | Ok None -> Checkouts_unread "Keeper metadata is absent or not decodable"
+  | Ok (Some meta) ->
+    (* One Keeper's failure stays that Keeper's unread reason instead of
+       losing every other Keeper's answer. *)
+    (match Keeper_sandbox_control.checkout_scan ~catalog ~config ~meta () with
+     | scan ->
+       checkouts_of_scan
+         ~tree_location:
+           (Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile)
+         scan
+     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+     | exception exn -> Checkouts_unread ("checkout inspection raised " ^ Printexc.to_string exn))
+
+let inspect_fleet_checkouts ~(config : Workspace.config) ~catalog =
+  match Keeper_meta_store.keeper_names_result config with
+  | Error reason -> Error reason
+  | Ok names ->
+    Ok
+      (List.map
+         (fun keeper ->
+           ({ keeper; checkouts = inspect_keeper ~config ~catalog keeper } : keeper_checkouts))
+         names)
+
+let start ~sw ~clock ~(config : Workspace.config) =
+  let base_path = config.base_path in
+  let now () = Eio.Time.now clock in
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
-      (try
-         let next =
-           refresh
-             ~now:(fun () -> Eio.Time.now clock)
-             ~http_post:default_http_post
-             ~base_path
-             ~previous:(current ())
-         in
-         Atomic.set projection next
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Server.warn
-           "repository_pulls: refresh raised %s; keeping the previous projection"
-           (Printexc.to_string exn));
+      (* Two publications: the pull requests as soon as GitHub has answered,
+         then the same snapshot joined to the Keepers' checkouts. Inspecting
+         the fleet never delays or discards a pull request read. *)
+      let pulls =
+        match
+          refresh ~now ~http_post:default_http_post ~base_path ~previous:(current ())
+        with
+        | snapshot ->
+          Atomic.set projection snapshot;
+          Some snapshot
+        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+        | exception exn ->
+          Log.Server.warn
+            "repository_pulls: refresh raised %s; keeping the previous projection"
+            (Printexc.to_string exn);
+          None
+      in
+      (match pulls with
+       | None -> ()
+       | Some snapshot ->
+         (match
+            join_keepers
+              ~now
+              ~inspect_checkouts:(inspect_fleet_checkouts ~config)
+              ~base_path
+              snapshot
+          with
+          | joined -> Atomic.set projection joined
+          | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+          | exception exn ->
+            let error = "Keeper join raised " ^ Printexc.to_string exn in
+            Log.Server.warn "repository_pulls: %s" error;
+            (* The previous join would otherwise be carried forward by every
+               later refresh and read as current. *)
+            Atomic.set projection (join_failed ~observed_at:(now ()) ~error snapshot)));
       Eio.Time.sleep clock poll_interval_s;
       loop ()
     in

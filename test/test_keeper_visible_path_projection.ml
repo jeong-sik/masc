@@ -785,6 +785,7 @@ let test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured () =
   let current_row : Masc.Keeper_sandbox_control.freshness_row =
     { row_checkout_path = "repos/settled"
     ; row_branch = Some "main"
+    ; row_catalog = Masc.Keeper_sandbox_control.Unregistered
     ; row_changed_files = Some 0
     ; row_freshness =
         Masc.Keeper_sandbox_control.Current
@@ -794,6 +795,7 @@ let test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured () =
   let stale_row : Masc.Keeper_sandbox_control.freshness_row =
     { row_checkout_path = "repos/stale"
     ; row_branch = Some "main"
+    ; row_catalog = Masc.Keeper_sandbox_control.Unregistered
     ; row_changed_files = None
     ; row_freshness =
         Masc.Keeper_sandbox_control.Behind
@@ -803,6 +805,7 @@ let test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured () =
   let broken_row : Masc.Keeper_sandbox_control.freshness_row =
     { row_checkout_path = "repos/broken"
     ; row_branch = None
+    ; row_catalog = Masc.Keeper_sandbox_control.Unregistered
     ; row_changed_files = None
     ; row_freshness =
         Masc.Keeper_sandbox_control.Freshness_unavailable "probe failed"

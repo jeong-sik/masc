@@ -35,7 +35,7 @@ let ok_response body =
 
 let pull_node ~number ~branch ~draft ~review ~rollup =
   Printf.sprintf
-    {|{"number":%d,"title":"PR %d","headRefName":"%s","isDraft":%b,
+    {|{"number":%d,"title":"PR %d","headRefName":"%s","isCrossRepository":false,"isDraft":%b,
        "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":%s,
        "commits":{"nodes":[{"commit":{"statusCheckRollup":%s}}]}}|}
     number
@@ -371,6 +371,238 @@ let test_rate_limit_waits_for_reset () =
   let _third = Pulls.refresh ~now:after_reset ~http_post ~base_path ~previous:second in
   Alcotest.(check int) "asked again at the reset" 2 !calls
 
+(* --- RFC-0465 §0.2: a pull request belongs to the Keepers whose checkout of
+   its repository is on its head branch. --- *)
+
+module Control = Masc.Keeper_sandbox_control
+
+let checkout_row ~path ~catalog branch : Control.freshness_row =
+  { Control.row_checkout_path = path
+  ; row_branch = branch
+  ; row_catalog = catalog
+  ; row_changed_files = None
+  ; row_freshness = Control.Freshness_unavailable "not measured in this case"
+  }
+
+let scanned ?truncated rows =
+  Pulls.Checkouts_read { Control.scan_rows = rows; scan_truncated = truncated }
+
+let masc_repo =
+  Control.Registered (repository ~id:"masc" ~url:"https://github.com/jeong-sik/masc.git")
+
+let fork_node ~number ~branch =
+  Printf.sprintf
+    {|{"number":%d,"title":"PR %d","headRefName":"%s","isCrossRepository":true,"isDraft":false,
+       "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,
+       "commits":{"nodes":[{"commit":{"statusCheckRollup":null}}]}}|}
+    number
+    number
+    branch
+
+let three_pull_page =
+  ok_response
+    (page
+       ~has_next:false
+       ~cursor:None
+       [ pull_node ~number:1 ~branch:"feat/join" ~draft:false ~review:"null" ~rollup:"null"
+       ; pull_node ~number:2 ~branch:"feat/other" ~draft:true ~review:"null" ~rollup:"null"
+       ; fork_node ~number:3 ~branch:"feat/join"
+       ])
+
+let fleet : Pulls.fleet_checkouts =
+  Ok
+    [ { Pulls.keeper = "alpha"
+      ; checkouts = scanned [ checkout_row ~path:"repos/masc" ~catalog:masc_repo (Some "feat/join") ]
+      }
+    ; { Pulls.keeper = "beta"; checkouts = Checkouts_unread "playground root is unreadable" }
+    ; { Pulls.keeper = "gamma"
+      ; checkouts =
+          scanned
+            [ checkout_row ~path:"repos/masc" ~catalog:masc_repo (Some "main")
+            ; checkout_row
+                ~path:"repos/other"
+                ~catalog:(Control.Origin_unavailable "git remote get-url timed out")
+                None
+            ]
+      }
+    ; { Pulls.keeper = "delta"
+      ; checkouts =
+          scanned [ checkout_row ~path:"repos/fork" ~catalog:Control.Unregistered (Some "feat/join") ]
+      }
+    ; { Pulls.keeper = "epsilon"
+      ; checkouts = scanned [ checkout_row ~path:"repos/masc" ~catalog:masc_repo (Some "feat/Join") ]
+      }
+    ; { Pulls.keeper = "zeta"
+      ; checkouts = scanned [ checkout_row ~path:"masc" ~catalog:masc_repo (Some "feat/other") ]
+      }
+      (* A microvm guest not booted in this process has no playground. *)
+    ; { Pulls.keeper = "eta"; checkouts = Checkouts_absent }
+      (* A microvm guest not running: its volume may hold checkouts, unseen. *)
+    ; { Pulls.keeper = "iota"; checkouts = Checkouts_not_booted }
+      (* Discovery stopped after one checkout of another repository: a
+         checkout of masc may be among those never seen. *)
+    ; { Pulls.keeper = "theta"
+      ; checkouts =
+          scanned
+            ~truncated:(Masc.Keeper_playground_checkouts.Checkout_budget_exhausted { budget = 32 })
+            [ checkout_row ~path:"repos/fork" ~catalog:Control.Unregistered (Some "feat/other") ]
+      }
+    ]
+
+let json_pulls snapshot =
+  let json = Pulls.snapshot_to_yojson snapshot in
+  let open Yojson.Safe.Util in
+  match json |> member "repositories" |> to_list with
+  | [ repo ] -> repo |> member "pulls" |> member "pulls" |> to_list
+  | _ -> failf "expected the one registered repository in the JSON"
+
+let join_of json =
+  let open Yojson.Safe.Util in
+  ( json |> member "number" |> to_int
+  , json |> member "keepers" |> to_option (fun ks -> List.map to_string (to_list ks))
+  , ( json |> member "keepers_unread" |> to_int_option
+    , json |> member "keepers_error" |> to_string_option ) )
+
+let join_testable =
+  Alcotest.(list (triple int (option (list string)) (pair (option int) (option string))))
+
+let catalog_ids = function
+  | Ok repos -> List.map (fun (r : Repo_manager_types.repository) -> r.id) repos
+  | Error message -> failf "the join must hand inspection the catalog, got %s" message
+
+let pulls_read () =
+  let base_path = ready_base_path ~token:"gho_join" in
+  let http_post, _, _ = counting_stub three_pull_page in
+  base_path, Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial
+
+let test_keepers_join_by_exact_branch () =
+  let base_path, read = pulls_read () in
+  (* The pull requests are published before any Keeper is inspected. *)
+  Alcotest.check
+    join_testable
+    "before the join"
+    [ 1, None, (None, Some "Keeper checkouts were not inspected")
+    ; 2, None, (None, Some "Keeper checkouts were not inspected")
+    ; 3, Some [], (Some 0, None)
+    ]
+    (List.map join_of (json_pulls read));
+  let inspections = ref [] in
+  let inspect_checkouts ~catalog =
+    inspections := catalog_ids catalog :: !inspections;
+    fleet
+  in
+  let joined = Pulls.join_keepers ~now ~inspect_checkouts ~base_path read in
+  Alcotest.(check (list (list string)))
+    "one inspection per refresh, with the catalog loaded once"
+    [ [ "masc" ] ]
+    !inspections;
+  (* alpha and zeta are on the head branches. beta's playground, one of
+     gamma's origins and theta's stopped discovery were not read, so each may
+     be on either branch; eta has no playground. delta's checkout is another
+     repository, epsilon's branch differs in case. #3 is a fork's
+     [feat/join], which no checkout of this repository can be on. *)
+  Alcotest.check
+    join_testable
+    "keepers per pull request"
+    [ 1, Some [ "alpha" ], (Some 3, None)
+    ; 2, Some [ "zeta" ], (Some 3, None)
+    ; 3, Some [], (Some 0, None)
+    ]
+    (List.map join_of (json_pulls joined));
+  Alcotest.(check (list (option int)))
+    "guest not running is its own count, apart from unread"
+    [ Some 1; Some 1; Some 0 ]
+    (List.map
+       (fun pull -> Yojson.Safe.Util.(pull |> member "keepers_not_booted" |> to_int_option))
+       (json_pulls joined));
+  (* The next refresh keeps the join until the next join replaces it. *)
+  let http_post, _, _ = counting_stub three_pull_page in
+  let next = Pulls.refresh ~now ~http_post ~base_path ~previous:joined in
+  Alcotest.check
+    join_testable
+    "the previous join stands between refresh and join"
+    (List.map join_of (json_pulls joined))
+    (List.map join_of (json_pulls next))
+
+let test_unlisted_keepers_say_so () =
+  let base_path, read = pulls_read () in
+  let joined =
+    Pulls.join_keepers
+      ~now
+      ~inspect_checkouts:(fun ~catalog:_ -> Error "keepers directory unreadable")
+      ~base_path
+      read
+  in
+  Alcotest.check
+    join_testable
+    "no pull request reads as having no Keeper"
+    [ 1, None, (None, Some "keepers directory unreadable")
+    ; 2, None, (None, Some "keepers directory unreadable")
+    ; 3, Some [], (Some 0, None)
+    ]
+    (List.map join_of (json_pulls joined))
+
+let test_no_open_pull_means_no_inspection () =
+  let refuse ~catalog:_ = failf "no open pull request was read, so no checkout is inspected" in
+  (* Reader not declared: nothing read. *)
+  let base_path = temp_base_path () in
+  register base_path;
+  let unread = Pulls.refresh ~now ~http_post:never_called ~base_path ~previous:Pulls.initial in
+  let _ = Pulls.join_keepers ~now ~inspect_checkouts:refuse ~base_path unread in
+  (* Read, but the repository has no open pull request. *)
+  let base_path = ready_base_path ~token:"gho_empty" in
+  let http_post, _, _ = counting_stub (ok_response (page ~has_next:false ~cursor:None [])) in
+  let empty = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  let _ = Pulls.join_keepers ~now ~inspect_checkouts:refuse ~base_path empty in
+  ()
+
+(* Which playground scan answers mean "no checkout" and which mean "may be on
+   any branch". *)
+let test_scan_errors_map_to_absent_or_unread () =
+  let module P = Masc.Keeper_playground_checkouts in
+  let kind = function
+    | Pulls.Checkouts_read _ -> "read"
+    | Pulls.Checkouts_absent -> "absent"
+    | Pulls.Checkouts_unread _ -> "unread"
+    | Pulls.Checkouts_not_booted -> "not_booted"
+  in
+  let scans =
+    [ Ok { Control.scan_rows = []; scan_truncated = None }
+    ; Error (P.Root_missing { root = "/w" })
+    ; Error (P.Root_not_directory { root = "/w"; kind = "file" })
+    ; Error (P.Root_unreadable { root = "/w"; detail = "EACCES" })
+    ; Error (P.Root_probe_unreachable { root = "/w"; reason = "timeout" })
+    ]
+  in
+  Alcotest.(check (list string))
+    "scan answers, shared mount then endpoint-owned"
+    [ "read"; "absent"; "unread"; "unread"; "unread"
+    ; "read"; "not_booted"; "unread"; "unread"; "unread"
+    ]
+    (List.concat_map
+       (fun tree_location ->
+         List.map (fun scan -> kind (Pulls.checkouts_of_scan ~tree_location scan)) scans)
+       Keeper_types_profile_sandbox.[ Shared_mount; Endpoint_owned ])
+
+let test_fork_pull_joins_no_keeper_in_any_join_state () =
+  let _, read = pulls_read () in
+  let fork_join snapshot =
+    List.filter_map
+      (fun ((number, _, _) as join) -> if number = 3 then Some join else None)
+      (List.map join_of (json_pulls snapshot))
+  in
+  let expected = [ 3, Some [], (Some 0, None) ] in
+  Alcotest.check join_testable "before any join" expected (fork_join read);
+  let base_path = ready_base_path ~token:"gho_fork" in
+  let unlisted =
+    Pulls.join_keepers
+      ~now
+      ~inspect_checkouts:(fun ~catalog:_ -> Error "keepers directory unreadable")
+      ~base_path
+      read
+  in
+  Alcotest.check join_testable "keeper list unreadable" expected (fork_join unlisted)
+
 let test_github_slug () =
   List.iter
     (fun (remote, expected) ->
@@ -413,5 +645,24 @@ let () =
             `Quick
             test_rejected_token_is_not_sent_again
         ; Alcotest.test_case "rate limit waits for reset" `Quick test_rate_limit_waits_for_reset
+        ] )
+    ; ( "keepers on branch"
+      , [ Alcotest.test_case
+            "joined by exact branch"
+            `Quick
+            test_keepers_join_by_exact_branch
+        ; Alcotest.test_case "unlisted keepers say so" `Quick test_unlisted_keepers_say_so
+        ; Alcotest.test_case
+            "no open pull request means no inspection"
+            `Quick
+            test_no_open_pull_means_no_inspection
+        ; Alcotest.test_case
+            "scan errors map to absent or unread"
+            `Quick
+            test_scan_errors_map_to_absent_or_unread
+        ; Alcotest.test_case
+            "a fork pull request joins no keeper in any join state"
+            `Quick
+            test_fork_pull_joins_no_keeper_in_any_join_state
         ] )
     ]

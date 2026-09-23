@@ -1347,6 +1347,56 @@ let test_an_unnamed_caller_names_the_actor_itself () =
          [ "schedule_id", `String "sched-named-scheduler"; "body", `String "why" ]))
 ;;
 
+(* The actor a schedule records is the caller the boundary resolved, not a
+   client-supplied id. The HTTP boundary already replaces the id before the
+   tool sees it (#37149); the MCP path does not stamp, so the tool itself must
+   not trust the argument -- otherwise an MCP caller names any actor it likes
+   on create, cancel and note_add. *)
+let test_a_named_caller_is_the_actor_not_the_argument () =
+  with_config
+  @@ fun config ->
+  let caller = Tool_schedule.Named_caller "real-caller" in
+  let created =
+    dispatch_exn ~caller config Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-actor-binding"
+        ; "due_at_unix", `Float future_due_at
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "spoofed actors"
+        ; "requested_by_id", `String "spoofed-requester"
+        ; "scheduled_by_id", `String "spoofed-scheduler"
+        ])
+  in
+  check bool "create succeeds" true (Tool_result.is_success created);
+  let open Yojson.Safe.Util in
+  check string "requested_by is the caller" "real-caller"
+    (Tool_result.data created |> member "requested_by" |> member "id" |> to_string);
+  check string "scheduled_by is the caller" "real-caller"
+    (Tool_result.data created |> member "scheduled_by" |> member "id" |> to_string);
+  let noted =
+    dispatch_exn ~caller config Tool_schemas_schedule.Add_note
+      (`Assoc
+        [ "schedule_id", `String "sched-actor-binding"
+        ; "body", `String "spoofed author"
+        ; "author_id", `String "spoofed-author"
+        ])
+  in
+  check bool "note succeeds" true (Tool_result.is_success noted);
+  check string "note author is the caller" "real-caller"
+    (Tool_result.data noted |> member "note" |> member "author_id" |> to_string);
+  let cancelled =
+    dispatch_exn ~caller config Tool_schemas_schedule.Cancel_request
+      (`Assoc
+        [ "schedule_id", `String "sched-actor-binding"
+        ; "cancelled_by_id", `String "spoofed-canceller"
+        ; "reason", `String "spoofed"
+        ])
+  in
+  check bool "cancel succeeds" true (Tool_result.is_success cancelled);
+  check string "cancelled_by is the caller" "real-caller"
+    (Tool_result.data cancelled |> member "cancelled_by" |> member "id" |> to_string)
+;;
+
 (* A call gives one due input, or none when a calendar recurrence derives
    it. Two inputs are refused with the names the call gave, and an input of
    the wrong JSON type is refused rather than read as absent. *)
@@ -1702,6 +1752,8 @@ let () =
             test_list_pages_by_schedule_id
         ; test_case "an unnamed caller names the actor itself" `Quick
             test_an_unnamed_caller_names_the_actor_itself
+        ; test_case "a named caller is the actor, not the argument" `Quick
+            test_a_named_caller_is_the_actor_not_the_argument
         ; test_case "a call gives exactly one due input" `Quick
             test_a_call_gives_exactly_one_due_input
         ; test_case "due_in_sec counts from the dispatch clock" `Quick

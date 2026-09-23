@@ -371,11 +371,11 @@ let retry_after_of_route = function
   | Rotate_now _ -> None
   | Exhausted_visible_alive _ -> None
 
-(* A provider's retry hint that names a wait: present, a number, above zero. *)
+(* A provider's retry hint that names a wait: present, finite, above zero. *)
 let usable_retry_after = function
   | None -> None
-  | Some hint when Float.is_nan hint || hint <= 0.0 -> None
-  | Some _ as hint -> hint
+  | Some hint when Float.is_finite hint && hint > 0.0 -> Some hint
+  | Some _ -> None
 ;;
 
 (* How long a path rests after a provider refused it (RFC-provider-path-rest).
@@ -385,7 +385,7 @@ let usable_retry_after = function
 
    A usable hint rests that long. A positive fractional hint still rests at
    least one second so the chat lane cannot re-fire in a tight loop (#35246).
-   Without a usable hint (absent, zero, negative, NaN) the class decides: a
+   Without a usable hint (absent, zero, negative, infinite, NaN) the class decides: a
    throttle rests the named floor, and an account exhaustion rests the cap,
    because a quota that said nothing about its end is not known to come back
    within a minute. Every result is clamped to [cap_sec] so a misread header

@@ -1,6 +1,17 @@
+(** What the mark beside a Skill row says about the row, which is not the same
+    question as what the row's words say. The words carry the state -- read,
+    delivered, used, and the three that are not steps of that life -- and the
+    mark carries how far the reader should trust it: still moving, finished,
+    finished without the evidence it should have, or failed.
+
+    [Skill_settled] covers every state a skill's life ends in, whether or not
+    a tool followed. That difference is the row's to spell; a mark saying it
+    would need a fifth shape for a distinction the line already makes in
+    words, and the tone that used to be named for one of the two states read
+    as a claim the mark does not make. *)
 type skill_tone =
   | Skill_live
-  | Skill_used
+  | Skill_settled
   | Skill_attention
   | Skill_failure
 
@@ -568,6 +579,18 @@ val message_viewport_supported :
 val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.
     Words wider than the budget are split between complete UTF-8 scalars. *)
+
+val clause_separator : string
+(** What a header row puts between two clauses: [" · "]. *)
+
+val pack_clauses : max_cells:int -> string list -> string list
+(** Join [clauses] with {!clause_separator} into rows of at most [max_cells],
+    so a row ends where a clause ends.
+    A clause carries its own qualifier -- "0 failures since server start" says
+    the count restarts with the server, and a row ending at "0 failures" says a
+    running total -- so an arbitrary break inside one changes what the row
+    claims. A clause too wide for a row on its own is wrapped by
+    {!wrap_words}; nothing is dropped and nothing is cut. *)
 
 val wrap_body :
   ?markdown:(width:int -> string -> string list) ->

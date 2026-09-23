@@ -271,16 +271,6 @@ export interface DashboardRuntimeStartupUnavailableAssignment {
   runtime_id: string
 }
 
-export interface DashboardRuntimeStartupDroppedRoute {
-  route_name: string
-  runtime_id: string
-}
-
-export interface DashboardRuntimeStartupDroppedLane {
-  lane_id: string
-  runtime_ids: string[]
-}
-
 export interface DashboardRuntimeStartupDegradation {
   schema?: string | null
   status?: string | null
@@ -290,15 +280,10 @@ export interface DashboardRuntimeStartupDegradation {
   message?: string | null
   config_path?: string | null
   configured_default_runtime_id?: string | null
-  effective_default_runtime_id?: string | null
   missing_catalog_model_count: number
   missing_catalog_models: DashboardRuntimeStartupMissingCatalogModel[]
   disabled_runtime_ids: string[]
   unavailable_assignments: DashboardRuntimeStartupUnavailableAssignment[]
-  dropped_routes: DashboardRuntimeStartupDroppedRoute[]
-  dropped_media_failover: string[]
-  dropped_lane_candidates: DashboardRuntimeStartupDroppedLane[]
-  dropped_lanes: DashboardRuntimeStartupDroppedLane[]
   next_action?: string | null
 }
 
@@ -768,27 +753,6 @@ function decodeRuntimeStartupUnavailableAssignment(raw: unknown): DashboardRunti
   }
 }
 
-function decodeRuntimeStartupDroppedRoute(raw: unknown): DashboardRuntimeStartupDroppedRoute | null {
-  if (!isRecord(raw)) return null
-  const routeName = asString(raw.route_name)
-  const runtimeId = asString(raw.runtime_id)
-  if (!routeName || !runtimeId) return null
-  return {
-    route_name: routeName,
-    runtime_id: runtimeId,
-  }
-}
-
-function decodeRuntimeStartupDroppedLane(raw: unknown): DashboardRuntimeStartupDroppedLane | null {
-  if (!isRecord(raw)) return null
-  const laneId = asString(raw.lane_id)
-  if (!laneId) return null
-  return {
-    lane_id: laneId,
-    runtime_ids: asStringArray(raw.runtime_ids),
-  }
-}
-
 function decodeRuntimeStartupDegradation(raw: unknown): DashboardRuntimeStartupDegradation | null {
   if (!isRecord(raw)) return null
   return {
@@ -800,7 +764,6 @@ function decodeRuntimeStartupDegradation(raw: unknown): DashboardRuntimeStartupD
     message: asNullableString(raw.message),
     config_path: asNullableString(raw.config_path),
     configured_default_runtime_id: asNullableString(raw.configured_default_runtime_id),
-    effective_default_runtime_id: asNullableString(raw.effective_default_runtime_id),
     missing_catalog_model_count: asNumber(raw.missing_catalog_model_count) ?? 0,
     missing_catalog_models: asRecordArray(raw.missing_catalog_models)
       .map(decodeRuntimeStartupMissingCatalogModel)
@@ -809,16 +772,6 @@ function decodeRuntimeStartupDegradation(raw: unknown): DashboardRuntimeStartupD
     unavailable_assignments: asRecordArray(raw.unavailable_assignments)
       .map(decodeRuntimeStartupUnavailableAssignment)
       .filter((item): item is DashboardRuntimeStartupUnavailableAssignment => item !== null),
-    dropped_routes: asRecordArray(raw.dropped_routes)
-      .map(decodeRuntimeStartupDroppedRoute)
-      .filter((item): item is DashboardRuntimeStartupDroppedRoute => item !== null),
-    dropped_media_failover: asStringArray(raw.dropped_media_failover),
-    dropped_lane_candidates: asRecordArray(raw.dropped_lane_candidates)
-      .map(decodeRuntimeStartupDroppedLane)
-      .filter((item): item is DashboardRuntimeStartupDroppedLane => item !== null),
-    dropped_lanes: asRecordArray(raw.dropped_lanes)
-      .map(decodeRuntimeStartupDroppedLane)
-      .filter((item): item is DashboardRuntimeStartupDroppedLane => item !== null),
     next_action: asNullableString(raw.next_action),
   }
 }
@@ -1274,6 +1227,8 @@ export type DashboardOfficialClientRecoveryFailure =
   | 'host_hook_failed'
   | 'state_persistence_failed'
   | 'process_restarted'
+  | 'vendor_session_full_no_activity'
+  | 'vendor_session_full_after_activity'
 
 export type DashboardOfficialClientKind = 'codex' | 'claude_code' | 'antigravity'
 
@@ -1411,6 +1366,8 @@ const OFFICIAL_CLIENT_RECOVERY_FAILURES = new Set<DashboardOfficialClientRecover
   'host_hook_failed',
   'state_persistence_failed',
   'process_restarted',
+  'vendor_session_full_no_activity',
+  'vendor_session_full_after_activity',
 ])
 
 const OFFICIAL_CLIENT_KINDS = new Set<DashboardOfficialClientKind>([

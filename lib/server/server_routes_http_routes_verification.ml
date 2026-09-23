@@ -29,6 +29,7 @@ let trimmed_query_param req key =
 
 type operator_verdict_request =
   { task_id : string
+  ; verification_id : string
   ; verdict : Masc_domain.completion_verdict
   ; notes : string
   }
@@ -47,10 +48,21 @@ let optional_string_field fields key =
   | Some _ -> Error (Printf.sprintf "%s must be a string" key)
 ;;
 
+(* [verification_id] is the submission whose evidence the operator read, as
+   the evidence route handed it out. The verdict carries it so the commit
+   refuses when the producer has since resubmitted or superseded it. *)
+let operator_verdict_fields = [ "task_id"; "verification_id"; "verdict"; "reason"; "notes" ]
+
 let parse_operator_verdict_json = function
   | `Assoc fields ->
+    let names = List.map fst fields in
+    if List.exists (fun key -> not (List.mem key operator_verdict_fields)) names
+       || List.length names <> List.length (List.sort_uniq String.compare names)
+    then Error "unknown or duplicate verdict fields"
+    else
     let open Result.Syntax in
     let* task_id = non_empty_string_field fields "task_id" in
+    let* verification_id = non_empty_string_field fields "verification_id" in
     let* verdict_name = non_empty_string_field fields "verdict" in
     let* notes = optional_string_field fields "notes" in
     let* verdict =
@@ -61,7 +73,7 @@ let parse_operator_verdict_json = function
         Ok (Masc_domain.Verdict_rejected { reason })
       | _ -> Error "verdict must be \"approve\" or \"reject\""
     in
-    Ok { task_id; verdict; notes }
+    Ok { task_id; verification_id; verdict; notes }
   | _ -> Error "request body must be a JSON object"
 ;;
 
@@ -132,16 +144,14 @@ let operator_evidence_json ~config ~operator_id ~task_id =
 ;;
 
 let commit_operator_verdict ~config ~operator_id request =
-  let open Result.Syntax in
-  let* _task, _producer, verification_id =
-    awaiting_task config request.task_id
-  in
   let authority = Masc_domain.Human_operator { operator_id } in
   (* The shared verdict commit writes the repair obligation atomically and
-     wakes the same delivery consumer used by system judgments and boot. *)
+     wakes the same delivery consumer used by system judgments and boot. It
+     compares [request.verification_id] with the Task's live one under the
+     backlog lock and answers [VerificationSuperseded] when they differ. *)
   Workspace.commit_verdict_r config ~authority ~verdict:request.verdict
-    ~task_id:request.task_id ~verification_id ~notes:request.notes ()
-  |> Result.map_error Masc_domain.masc_error_to_string
+    ~task_id:request.task_id ~verification_id:request.verification_id
+    ~notes:request.notes ()
 ;;
 
 let error_json message =
@@ -282,8 +292,8 @@ let add_routes router =
                         ; recovered_from = None
                         } ->
                      Dashboard_verification.Backlog_read
-                       { live_request_ids =
-                           Dashboard_verification.awaiting_request_ids
+                       { live =
+                           Dashboard_verification.awaiting_tasks
                              observed_backlog
                        }
                    | Ok { Workspace_backlog.observed_backlog
@@ -294,8 +304,8 @@ let add_routes router =
                         that looks current and is not: anything submitted
                         after the snapshot is missing from it. *)
                      Dashboard_verification.Backlog_recovered
-                       { live_request_ids =
-                           Dashboard_verification.awaiting_request_ids
+                       { live =
+                           Dashboard_verification.awaiting_tasks
                              observed_backlog
                        ; detail =
                            Printf.sprintf
@@ -382,12 +392,12 @@ let add_routes router =
                      ~operator_id
                      verdict_request
                  with
-                 | Error message ->
+                 | Error error ->
                    respond_json_value_with_cors
-                     ~status:`Bad_request
+                     ~status:(Server_auth.http_status_of_auth_error error)
                      request
                      reqd
-                     (error_json message)
+                     (error_json (Masc_domain.masc_error_to_string error))
                  | Ok outcome ->
                    respond_json_value_with_cors
                      request

@@ -256,6 +256,31 @@ let test_absent_checkpoint_is_a_noop () =
   check_official_session_cleared official_session
 ;;
 
+let test_superseded_checkpoint_clears_like_an_absent_one () =
+  with_keeper ~paused:false ~install_owner:true
+  @@ fun ~config ~meta ~saved:_ ~save:_ ~load:_ ~clear ~official_session ->
+  let path = checkpoint_path config meta in
+  let earlier =
+    match Yojson.Safe.from_string (Fs_compat.load_file path) with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              if String.equal key "version"
+              then key, `Int (Agent_core.Checkpoint.checkpoint_version - 1)
+              else key, value)
+           fields)
+    | _ -> fail "checkpoint is not a JSON object"
+  in
+  Fs_compat.save_file path (Yojson.Safe.to_string earlier);
+  let result = clear () in
+  check bool (Tool_result.message result) true (Tool_result.is_success result);
+  check bool "a superseded checkpoint is not current history" false
+    (Yojson.Safe.Util.member "checkpoint_found" (Tool_result.data result)
+     |> Yojson.Safe.Util.to_bool);
+  check_official_session_cleared official_session
+;;
+
 let test_paused_keeper_clears_stale_epoch_without_resuming () =
   with_keeper
     ~official_owner_epoch:"11111111-1111-4111-8111-111111111111"
@@ -281,6 +306,8 @@ let () =
                    (test_checkpoint_read_failure `Unreadable_path)
                ; test_case "absent checkpoint clears only the official session" `Quick
                    test_absent_checkpoint_is_a_noop
+               ; test_case "superseded checkpoint clears like an absent one" `Quick
+                   test_superseded_checkpoint_clears_like_an_absent_one
                ; test_case "paused stale epoch clears without resume" `Quick
                    test_paused_keeper_clears_stale_epoch_without_resuming
                ] ]

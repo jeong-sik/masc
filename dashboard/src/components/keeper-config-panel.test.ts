@@ -1274,8 +1274,8 @@ const githubIdentityMocks = vi.hoisted(() => ({
     hostname: 'github.com',
     config_dir: '/tmp/base/.masc/keepers/keeper-sangsu/github-cli',
     projected_token_env_names: [],
-    stored: { authenticated: true, login: 'masc-sangsu-bot', error: null },
-    effective: { authenticated: false, login: null, error: null },
+    stored: { authenticated: true, login: 'masc-sangsu-bot', scopes: null, error: null },
+    effective: { authenticated: false, login: null, scopes: null, error: null },
     effective_probe_scope: 'host_process_credential_only' as const,
     checked_at_unix: 1786000000,
   })),
@@ -1292,6 +1292,7 @@ const storeMocks = vi.hoisted(() => ({
 vi.mock('../api/dashboard-keeper-github', () => ({
   fetchKeeperGithubIdentity: githubIdentityMocks.fetchKeeperGithubIdentity,
   streamKeeperGithubLogin: githubIdentityMocks.streamKeeperGithubLogin,
+  KEEPER_GITHUB_LOGIN_SCOPES: [{ scope: 'workflow', note: 'changes CI' }],
 }))
 
 import {

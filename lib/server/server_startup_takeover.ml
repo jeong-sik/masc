@@ -259,6 +259,42 @@ let pid_exists pid =
   | Unix.Unix_error (Unix.EPERM, _, _) -> true
 ;;
 
+type process_state =
+  | Running
+  | Zombie
+  | Gone
+
+(* kill(pid, 0) succeeds for a zombie: the process table entry stays until
+   its parent reaps it. A zombie holds no port and never answers, so the ps
+   state letter is what separates it from a live process. A ps that cannot
+   report (exited between the two reads, or ps failed) leaves the answer
+   kill(pid, 0) gave, which is the direction that never reclaims a live
+   holder. *)
+let process_state_of_observation ~signal_reachable ~ps_stat =
+  match signal_reachable, ps_stat with
+  | false, (Some _ | None) -> Gone
+  | true, Some stat ->
+    (match String.trim stat with
+     | "" -> Running
+     | trimmed -> if Char.equal trimmed.[0] 'Z' then Zombie else Running)
+  | true, None -> Running
+;;
+
+let process_stat pid =
+  match
+    Process_eio.run_argv_with_status [ "ps"; "-p"; string_of_int pid; "-o"; "stat=" ]
+  with
+  | Unix.WEXITED 0, output -> Some output
+  | _ -> None
+;;
+
+let process_state pid =
+  match pid_exists pid with
+  | false -> Gone
+  | true ->
+    process_state_of_observation ~signal_reachable:true ~ps_stat:(process_stat pid)
+;;
+
 let base_path_owner_pid = function
   | Owner_this_process pid | Owner_recorded pid ->
     Some pid
@@ -298,15 +334,15 @@ let sleep_poll seconds = if seconds > 0.0 then ignore (Unix.select [] [] [] seco
 let wait_for_pid_exit ?(poll_interval_sec = 0.1) ~timeout_sec pid =
   let deadline = Monotonic_deadline.after ~seconds:(max 0.0 timeout_sec) in
   let rec loop () =
-    if not (pid_exists pid)
-    then true
-    else (
+    match process_state pid with
+    | Gone | Zombie -> true
+    | Running ->
       let remaining = Monotonic_deadline.remaining_seconds deadline in
       if remaining <= 0.0
       then false
       else (
         sleep_poll (Float.min poll_interval_sec remaining);
-        loop ()))
+        loop ())
   in
   loop ()
 ;;
@@ -565,8 +601,8 @@ let acquire_pid_lock
    | Some data ->
      (match String.trim data |> int_of_string_opt with
       | Some pid when pid > 0 ->
-        if pid_exists pid
-        then
+        (match process_state pid with
+        | Running ->
           if probe_liveness ~timeout_sec:probe_timeout_sec port
           then Already_running { pid }
           else if
@@ -619,7 +655,16 @@ let acquire_pid_lock
                      "[WARN] PID %d still appears alive after SIGKILL escalation"
                      pid));
             Acquired)
-        else (
+        | Zombie ->
+          Log.legacy_stderr
+            ~level:Log.Warn
+            ~module_name:"Server"
+            (Printf.sprintf
+               "[WARN] Removing stale PID file (PID %d is a zombie awaiting its \
+                parent's reap; it holds no port)"
+               pid);
+          Acquired
+        | Gone ->
           Log.legacy_stderr
             ~level:Log.Warn
             ~module_name:"Server"
@@ -874,7 +919,7 @@ let inspect_runtime_directory ~base_path runtime_directory =
     | Ok Fs_compat.Owned_directory_missing -> Ok `Missing
     | Error rejection -> Error (Runtime_directory_rejected rejection)
   with
-  | exn ->
+  | exn -> (* cancel-guard-ok: Fs_compat directory inspection is Unix calls, no Eio operation *)
     Error
       (Lease_io_failed
          { operation = "inspect_runtime_directory"
@@ -988,7 +1033,7 @@ let establish_runtime_directory prepared =
          Ok ()
        with
        | Unix.Unix_error (Unix.EEXIST, _, _) -> Ok ()
-       | exn ->
+       | exn -> (* cancel-guard-ok: Unix.mkdir performs no Eio operation *)
          Error
            (Runtime_directory_creation_failed
               { path = prepared.runtime_directory; reason = Printexc.to_string exn })
@@ -1019,7 +1064,7 @@ let observe_lease_path path =
     else Ok (Lease_path_other stat.st_kind)
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Lease_path_missing
-  | exn ->
+  | exn -> (* cancel-guard-ok: Unix.lstat performs no Eio operation *)
     Error
       (Lease_io_failed
          { operation = "lstat_lease_file"

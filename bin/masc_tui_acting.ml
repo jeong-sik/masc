@@ -45,6 +45,13 @@ let visible filter (event : Observer.event) =
   | Everything -> true
   | Turns | Actions -> (
       match event with
+      (* A container that would not start, or whose removal nobody can show,
+         is a failure the operator acts on. One that started or was removed
+         is the lane runtime doing its job, and is state. *)
+      | Observer.Lane_resource { Observer.lr_lifecycle; _ } -> (
+          match lr_lifecycle with
+          | Masc.Lane_addon_resource_events.Acquire_failed | Masc.Lane_addon_resource_events.Release_incomplete -> true
+          | Masc.Lane_addon_resource_events.Acquired | Masc.Lane_addon_resource_events.Release_confirmed -> false)
       | Observer.Agent_core { Observer.kind = Observer.Telemetry; _ } -> false
       | Observer.Agent_core _ -> true
       | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
@@ -60,7 +67,10 @@ let visible filter (event : Observer.event) =
       (* Server push, same verdict as the whole-projection snapshots: a
          deliberation changing stage is something the server reports, not
          something a keeper did. *)
-      | Observer.Fusion_run_status _ ->
+      | Observer.Fusion_run_status _
+      (* A run registry changed. Nothing a keeper did; the frame says only
+         that a reader showing internal runs should fetch them again. *)
+      | Observer.Internal_agent_runs_changed ->
           false
       | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
       | Observer.Keeper_chat_appended _ | Observer.Other _ ->
@@ -94,7 +104,8 @@ let retained_as_action (event : Observer.event) =
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
-  | Observer.Fusion_run_status _ | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+  | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
       visible Actions event
 
 let retain ~actions ~quiet ~event_of entries =
@@ -150,9 +161,29 @@ let elapsed_text ms =
     let seconds = int_of_float (ms /. 1000.) in
     Printf.sprintf "%dm%02ds" (seconds / 60) (seconds mod 60)
 
-let turn_text = function
-  | Some turn -> Printf.sprintf "turn %d" turn
-  | None -> "turn ?"
+let turn_number_text turn = Printf.sprintf "turn %d" turn
+
+(* Two readings of the same value, because the two places it goes want
+   different things from a turn nobody numbered.
+
+   The number is missing whenever the settle that carries it is not in the
+   held window, which on a live-only feed is the common case, not the odd
+   one: over a two-minute live window the Events list drew ten
+   turn-labelled rows and nine of them had no number.
+
+   The column that names the event still has something to say -- it is a
+   turn, and the glyph beside it already says whether it started or
+   finished. The detail beside it does not: a turn with no number adds
+   nothing to "in 812 out 96". Neither of them asks [turn ?], a question
+   the row cannot answer and the reader cannot act on; the acting pane
+   reached the same conclusion about the same value. *)
+let turn_label = function
+  | Some turn -> turn_number_text turn
+  | None -> "turn"
+
+let turn_detail = function
+  | Some turn -> turn_number_text turn
+  | None -> ""
 
 (* The keeper turn a provider call belongs to, as the keeper's hook reports
    it: [total_turns] keeper turns had completed when the call ran, so the
@@ -200,10 +231,24 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
     | Observer.Turn_started -> (Turn_boundary, "turn start", "")
     | Observer.Turn_ready -> (Turn_boundary, "turn ready", "")
     | Observer.Turn_completed -> (Turn_boundary, "turn end", "")
+    (* A run's own wire id rides these four as [task_id]; it is not a MASC
+       task, and the event evidence shows it under its own name. What the row
+       says is how the run went: how long it ran, and for a failure the
+       error's code and text. *)
     | Observer.Agent_started -> (Turn_boundary, "agent start", "")
-    | Observer.Agent_completed -> (Turn_done, "agent done", "")
-    | Observer.Agent_failed -> (Failure, "agent failed", "")
-    | Observer.Agent_yielded -> (Quiet, "agent yielded", "")
+    | Observer.Agent_completed { elapsed_s } ->
+        (Turn_done, "agent done", elapsed_text (elapsed_s *. 1000.))
+    | Observer.Agent_failed { elapsed_s; error_code; error } ->
+        ( Failure
+        , "agent failed"
+        , String.concat " \xc2\xb7 "
+            [ elapsed_text (elapsed_s *. 1000.); error_code; error ] )
+    | Observer.Agent_yielded { elapsed_s } ->
+        (Quiet, "agent yielded", elapsed_text (elapsed_s *. 1000.))
+    | Observer.Agent_input_required { elapsed_s; question } ->
+        ( Attention
+        , "waiting for input"
+        , String.concat " · " [ elapsed_text (elapsed_s *. 1000.); question ] )
     (* Where the tool name is the whole detail, an event that carries none
        leaves the cell empty rather than printing the [?] the default stands
        for. A lone [?] in the Detail column reads as a failure marker and says
@@ -216,10 +261,24 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
         (Attention, name, Option.value ~default:"" e.Observer.tool)
   in
   let detail =
-    match e.Observer.task with
-    | Some task when detail = "" -> task
-    | Some task -> detail ^ " \xc2\xb7 " ^ task
-    | None -> detail
+    match e.Observer.kind, e.Observer.task with
+    | ( ( Observer.Agent_started | Observer.Agent_completed _
+        | Observer.Agent_failed _ | Observer.Agent_yielded _
+        | Observer.Agent_input_required _ )
+      , (Some _ | None) ) ->
+        detail
+    | ( ( Observer.Tool_called | Observer.Tool_completed | Observer.Turn_started
+        | Observer.Turn_ready | Observer.Turn_completed
+        | Observer.Tool_approval_completed | Observer.Telemetry
+        | Observer.Agent_core_other _ )
+      , Some task ) ->
+        if detail = "" then task else detail ^ " \xc2\xb7 " ^ task
+    | ( ( Observer.Tool_called | Observer.Tool_completed | Observer.Turn_started
+        | Observer.Turn_ready | Observer.Turn_completed
+        | Observer.Tool_approval_completed | Observer.Telemetry
+        | Observer.Agent_core_other _ )
+      , None ) ->
+        detail
   in
   { at
   ; keeper = Option.value ~default:"-" e.Observer.agent
@@ -252,7 +311,9 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_waiting_inventory_changed { keeper; _ }
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
-  | Observer.Snapshot _ | Observer.Other _ -> "server"
+  | Observer.Internal_agent_runs_changed | Observer.Lane_resource _
+  | Observer.Snapshot _ | Observer.Other _ ->
+      "server"
 
 let row_of_event ~at ~duration_ms (event : Observer.event) =
   match event with
@@ -291,28 +352,35 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
            | None -> c.Observer.kt_tool)
       }
   | Observer.Keeper_turn_complete t ->
+      (* Each part says only itself; the separator belongs to the join. They
+         each carried a leading " \xc2\xb7 " on the reading that the turn
+         ahead of them is always there to hang it off, and the turn is the
+         one part that can be missing. *)
       let tokens =
         match (t.Observer.tc_input_tokens, t.Observer.tc_output_tokens) with
-        | Some i, Some o -> Printf.sprintf " \xc2\xb7 in %d out %d" i o
-        | Some i, None -> Printf.sprintf " \xc2\xb7 in %d" i
-        | None, Some o -> Printf.sprintf " \xc2\xb7 out %d" o
+        | Some i, Some o -> Printf.sprintf "in %d out %d" i o
+        | Some i, None -> Printf.sprintf "in %d" i
+        | None, Some o -> Printf.sprintf "out %d" o
         | None, None -> ""
       in
       let cost =
         match t.Observer.tc_cost_usd with
-        | Some usd -> Printf.sprintf " \xc2\xb7 $%.4f" usd
+        | Some usd -> Printf.sprintf "$%.4f" usd
         | None -> ""
       in
       let calls =
         match t.Observer.tc_tool_calls with
-        | Some n -> Printf.sprintf " \xc2\xb7 %d call%s" n (if n = 1 then "" else "s")
+        | Some n -> Printf.sprintf "%d call%s" n (if n = 1 then "" else "s")
         | None -> ""
       in
       { at
       ; keeper = t.Observer.tc_keeper
       ; glyph = Turn_done
       ; label = "turn done"
-      ; detail = turn_text t.Observer.tc_turn ^ tokens ^ cost ^ calls
+      ; detail =
+          [ turn_detail t.Observer.tc_turn; tokens; cost; calls ]
+          |> List.filter (fun part -> part <> "")
+          |> String.concat " \xc2\xb7 "
       }
   | Observer.Keeper_composite_changed { keeper; _ } ->
       { at; keeper; glyph = Quiet; label = "composite"; detail = "" }
@@ -321,7 +389,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; keeper = o.Observer.to_keeper
       ; glyph = Quiet
       ; label = "call"
-      ; detail = turn_text (keeper_turn_of_observation o)
+      ; detail = turn_detail (keeper_turn_of_observation o)
       }
   | Observer.Keeper_chat_appended { keeper; connector; _ } ->
       { at
@@ -354,6 +422,29 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; glyph = Quiet
       ; label = "fusion"
       ; detail = status ^ " \xc2\xb7 " ^ run_id
+      }
+  | Observer.Lane_resource resource ->
+      let glyph, label =
+        match resource.Observer.lr_lifecycle with
+        | Masc.Lane_addon_resource_events.Acquired -> (Quiet, "container up")
+        | Masc.Lane_addon_resource_events.Acquire_failed -> (Failure, "container failed")
+        | Masc.Lane_addon_resource_events.Release_confirmed -> (Quiet, "container removed")
+        | Masc.Lane_addon_resource_events.Release_incomplete -> (Failure, "removal unproven")
+      in
+      (* The package says which add-on; the reason is the server's own words,
+         and it is the part a failure row exists to carry. *)
+      let detail =
+        match resource.Observer.lr_detail with
+        | Some reason -> resource.Observer.lr_package ^ " \xc2\xb7 " ^ reason
+        | None -> resource.Observer.lr_package
+      in
+      { at; keeper = "server"; glyph; label; detail }
+  | Observer.Internal_agent_runs_changed ->
+      { at
+      ; keeper = "server"
+      ; glyph = Quiet
+      ; label = "internal runs"
+      ; detail = "a run registry changed"
       }
   | Observer.Snapshot name ->
       { at; keeper = "server"; glyph = Quiet; label = "snapshot"; detail = name }
@@ -499,8 +590,9 @@ let member_of_event (event : Observer.event) =
                ; turn = e.Observer.turn
                })
       | Observer.Telemetry -> Some Member_quiet
-      | Observer.Agent_started | Observer.Agent_completed
-      | Observer.Agent_failed | Observer.Agent_yielded
+      | Observer.Agent_started | Observer.Agent_completed _
+      | Observer.Agent_failed _ | Observer.Agent_yielded _
+      | Observer.Agent_input_required _
       | Observer.Tool_approval_completed | Observer.Agent_core_other _ ->
           None)
   | Observer.Keeper_tool_call c ->
@@ -522,7 +614,8 @@ let member_of_event (event : Observer.event) =
   | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _ | Observer.Snapshot _
-  | Observer.Fusion_run_status _ | Observer.Other _ ->
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+  | Observer.Lane_resource _ | Observer.Other _ ->
       None
 
 let empty_chunk ~keeper ~at =
@@ -681,7 +774,7 @@ let row_of_chunk chunk =
   { at = chunk.ck_at
   ; keeper = chunk.ck_keeper
   ; glyph = (if chunk.ck_settled then Turn_done else Call_started)
-  ; label = turn_text chunk.ck_turn
+  ; label = turn_label chunk.ck_turn
   ; detail
   }
 
@@ -695,7 +788,8 @@ let observation_of_event (event : Observer.event) =
   | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_chat_stream_frame _
   | Observer.Keeper_waiting_inventory_changed _
-  | Observer.Fusion_run_status _ | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+  | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
       None
 
 (* The agent session's ordinal a member states, if it states one. *)
@@ -824,6 +918,30 @@ let file_member ~existing ~keeper ~at ~session ~keeper_turn member =
    the flat view does. The ring holds up to [acting_retained_entries] +
    [acting_retained_quiet] entries and this runs on every frame, so chunks live in a per-keeper table:
    attaching costs the keeper's own chunk count, not the whole screen. *)
+(* What a lane container row folds on under [Turns]: the same package ending
+   the same way for the same reason is one row, however many times it
+   happened. Every other event is listed so a new kind has to say which side
+   it is on. *)
+let lane_fold_key (event : Observer.event) =
+  match event with
+  | Observer.Lane_resource r ->
+      Some (r.Observer.lr_package, r.Observer.lr_lifecycle, r.Observer.lr_detail)
+  | Observer.Agent_core _ | Observer.Keeper_heartbeat _
+  | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
+  | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _
+  | Observer.Keeper_chat_appended _ | Observer.Keeper_chat_stream_frame _
+  | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _
+  | Observer.Internal_agent_runs_changed | Observer.Snapshot _
+  | Observer.Other _ ->
+      None
+
+(* The newest occurrence's row, with how many the screen holds in front of
+   the detail -- at the end it would be the first thing a long reason cuts. *)
+let folded_lane_row ~count entry =
+  let row = row_of_entry ~duration_ms:None entry in
+  if count = 1 then row
+  else { row with detail = Printf.sprintf "\xc3\x97%d %s" count row.detail }
+
 let fold_chunks ~traces entries =
   let oldest_first = List.rev entries in
   let observed : (string * int, (int * int) list) Hashtbl.t = Hashtbl.create 64 in
@@ -858,21 +976,35 @@ let fold_chunks ~traces entries =
   in
   let chunks : (string, chunk list) Hashtbl.t = Hashtbl.create 16 in
   let plains = ref [] in
+  (* A lane container that keeps failing the same way fails once a few
+     seconds; one row per failure would bury the turns this scope is for, the
+     way one row per lifecycle event would bury a turn. Folded like a turn:
+     the newest occurrence stands for the rest. *)
+  let lane_folds = Hashtbl.create 4 in
   List.iteri
     (fun position entry ->
       let event = entry.ae_event in
       let at = entry.ae_at in
       match member_of_event event with
-      | None ->
+      | None -> (
           (* A non-member passes through as its own row only if the Turns
              scope shows it at all. Without this test the fold readmitted
              everything [visible Turns] hides -- composite pushes, heartbeats,
              stream frames, waiting-queue changes -- and a live screen showed
              them outnumbering the turn rows it promised (2026-09-01, 128
              rows). *)
-          if visible Turns event then
-            plains :=
-              (entry.ae_at, row_of_entry ~duration_ms:None entry) :: !plains
+          match (visible Turns event, lane_fold_key event) with
+          | false, (Some _ | None) -> ()
+          | true, Some key ->
+              let count =
+                match Hashtbl.find_opt lane_folds key with
+                | Some (_, held) -> held + 1
+                | None -> 1
+              in
+              Hashtbl.replace lane_folds key (entry, count)
+          | true, None ->
+              plains :=
+                (entry.ae_at, row_of_entry ~duration_ms:None entry) :: !plains)
       | Some member ->
           let keeper = keeper_of_event ~traces event in
           let session = session_of_member member in
@@ -893,6 +1025,10 @@ let fold_chunks ~traces entries =
           Hashtbl.replace chunks keeper
             (file_member ~existing ~keeper ~at ~session ~keeper_turn member))
     oldest_first;
+  Hashtbl.iter
+    (fun _ (entry, count) ->
+      plains := (entry.ae_at, folded_lane_row ~count entry) :: !plains)
+    lane_folds;
   (chunks, !plains)
 
 (* Every keeper's turns as data, newest activity first. The Activity pane
@@ -961,8 +1097,8 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
           | Observer.Keeper_chat_stream_frame _
           | Observer.Keeper_waiting_inventory_changed _
-          | Observer.Fusion_run_status _
-          | Observer.Snapshot _ | Observer.Other _ ->
+          | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed
+          | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before
 
@@ -976,8 +1112,10 @@ let evidence_fields (entry : entry) =
         | Tool_called -> "tool_called" | Tool_completed -> "tool_completed"
         | Turn_started -> "turn_started" | Turn_ready -> "turn_ready"
         | Turn_completed -> "turn_completed" | Agent_started -> "agent_started"
-        | Agent_completed -> "agent_completed" | Agent_failed -> "agent_failed"
-        | Agent_yielded -> "agent_yielded" | Tool_approval_completed -> "tool_approval_completed"
+        | Agent_completed _ -> "agent_completed" | Agent_failed _ -> "agent_failed"
+        | Agent_yielded _ -> "agent_yielded"
+        | Agent_input_required _ -> "agent_input_required"
+        | Tool_approval_completed -> "tool_approval_completed"
         | Telemetry -> "telemetry_event" | Agent_core_other name -> name in
       [ some "Source" "runtime observer event"
       ; some "Event kind" kind
@@ -990,7 +1128,17 @@ let evidence_fields (entry : entry) =
       ; field "Caused by" e.caused_by
       ; field "Correlation ID" e.correlation
       ; field "Runtime agent" e.agent
-      ; field "Task ID" e.task
+      ; field
+          (match e.kind with
+           (* These carry the run's own wire id there, not a task. *)
+           | Agent_started | Agent_completed _ | Agent_failed _ | Agent_yielded _
+           | Agent_input_required _ ->
+               "Agent run ID"
+           | Tool_called | Tool_completed | Turn_started | Turn_ready
+           | Turn_completed | Tool_approval_completed | Telemetry
+           | Agent_core_other _ ->
+               "Task ID")
+          e.task
       ; number "Agent session turn" e.turn
       ; field "Batch index / size" (Option.map (fun (index, size) -> Printf.sprintf "%d / %d" index size) e.batch)
       ; some "Input/output" "not carried by this observer event"

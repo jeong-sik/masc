@@ -1148,6 +1148,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
                 "attention_queue": [],
                 "attention_items": [],
                 "agent_briefs": [],
+                "keepers_unread": [],
             },
         ),
         "/api/v1/board?sort_by=hot": (200, {"posts": [post]}),
@@ -1170,6 +1171,7 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
         "attention_queue": [],
         "attention_items": [],
         "agent_briefs": [],
+        "keepers_unread": [],
     }
 
 
@@ -1273,6 +1275,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
                     "todo": 0,
                     "claimed": 0,
                     "in_progress": 0,
+                    "awaiting_verification": 0,
                     "done": 0,
                     "cancelled": 0,
                 },
@@ -1395,6 +1398,7 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
                 "todo": 0,
                 "claimed": 0,
                 "in_progress": 0,
+                "awaiting_verification": 0,
                 "done": 0,
                 "cancelled": 0,
             },
@@ -1827,6 +1831,7 @@ def run_terminal_scenario(
     extra_args: tuple[str, ...] = (),
     extra_env: dict[str, str] | None = None,
     conflicting_env_base_path: bool = False,
+    omit_operator_token: bool = False,
 ) -> None:
     if not scenario_admitted(scenario_selection, description):
         return
@@ -1895,6 +1900,13 @@ def run_terminal_scenario(
                         "MASC_TOKEN": "masc-tui-keyboard-regression-token",
                     }
                 )
+                if omit_operator_token:
+                    # A first install holds no bearer yet, and the boot decision
+                    # it takes is the one this scenario describes. The harness
+                    # sets MASC_TOKEN above for every other scenario, so the one
+                    # that means "no token" takes it back out here rather than
+                    # leaving the choice to whoever ran the suite.
+                    environment.pop("MASC_TOKEN", None)
                 process = subprocess.Popen(
                     [
                         "/bin/sh",
@@ -2068,6 +2080,23 @@ def navigate_with_arrows_and_quit(
     # That the letters became draft text is the claim above. Leave the pane,
     # then move to Overview where system events are visible.
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
+    # The same claim for the command palette, which is the other place a
+    # printable key is text rather than a command. The quit key used to name
+    # three fields and let the rest through, so a typed "q" armed the exit and
+    # the next one ended the process -- from inside a field showing a cursor.
+    send_and_wait(process, master_fd, output, b":", b"MASC Command palette")
+    palette = send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"qqq",
+        # The prompt is styled, then a plain space, then the query, so the
+        # colon and what was typed are not adjacent bytes.
+        re.compile(rb":(?:" + CSI_RE.pattern + rb")* qqq"),
+    )
+    if b"press again to quit" in CSI_RE.sub(b"", palette):
+        raise AssertionError("a q typed into the palette armed the exit")
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
     send_and_wait(
         process,
@@ -2911,6 +2940,84 @@ def ctrl_y_reaches_the_tui_interaction(
     )
     if process.poll() is not None:
         raise AssertionError(f"Ctrl-Y ended the TUI with exit {process.returncode}")
+    os.write(master_fd, b"q")
+
+
+def first_install_waits_for_its_workspace_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A first install's boot line names the missing workspace, not a command.
+
+    The unit suite pins the sentence and the level the boot decision reports;
+    this pins what the operator actually sees. The harness seeds no
+    ``.masc/auth`` and this scenario omits ``MASC_TOKEN``, so the boot decision
+    is the one a fresh install takes -- no workspace to mint into yet. The
+    Overview events pane draws that notice, and the ``masc login`` command the
+    old single-constructor line handed over is not on the screen. The pane
+    trims a long row at the panel width, so the needle is the notice's opening.
+    """
+    wait_for_output(
+        process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+    )
+    drain_until_quiet(process, master_fd, output)
+    screen = screen_text(bytes(output))
+    if b"no operator token yet" not in screen:
+        raise AssertionError(
+            f"a first install did not name the missing workspace: {screen!r}"
+        )
+    if b"masc login" in screen:
+        raise AssertionError(
+            f"a first install was handed the login command: {screen!r}"
+        )
+    # The pending workspace is the ordinary path, so its row carries no error
+    # mark: the clock's bracket is followed straight by the sentence.
+    if b"] no operator token yet" not in screen:
+        raise AssertionError(
+            f"the pending workspace row is marked as an error: {screen!r}"
+        )
+    os.write(master_fd, b"q")
+
+
+def seed_a_workspace_that_refuses_a_credential(base_path: str) -> None:
+    """A workspace that is here and cannot take a credential.
+
+    ``.masc/auth`` exists, so the boot decision is to mint; ``agents`` beside
+    it is a file where the credential store is a directory, so the mint's
+    write fails. A file rather than a read-only directory because a runner
+    that tests as root writes through a mode bit, and would mint.
+    """
+    auth = Path(base_path) / ".masc" / "auth"
+    auth.mkdir(parents=True)
+    (auth / "agents").write_text("not a directory\n", encoding="utf-8")
+
+
+def failed_mint_is_marked_as_an_error_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A mint that failed reads as an error on the Overview events pane.
+
+    Its row carries the chat pane's failure glyph after the clock, which a
+    pending workspace's row does not; the mark is a shape, so it holds under
+    NO_COLOR as well. The pane trims the sentence at its width, so the needle
+    is the mark and the notice's opening.
+    """
+    wait_for_output(
+        process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+    )
+    drain_until_quiet(process, master_fd, output)
+    screen = screen_text(bytes(output))
+    if b"\xe2\x9c\x97 no operator token, and" not in screen:
+        raise AssertionError(
+            f"a failed mint did not read as a marked error: {screen!r}"
+        )
     os.write(master_fd, b"q")
 
 
@@ -4041,6 +4148,20 @@ def gate_mode_picker_interaction(requests: HttpRequests) -> Interaction:
         expected.append(("/api/v1/dashboard/gate/external-mode", {"mode": "manual"}))
         if mode_requests() != expected:
             raise AssertionError(f"Outside services choice used the wrong lane or mode: {requests!r}")
+        # [ and ] walk the ask cursor on this surface, and the walk used to
+        # take them from the command palette drawn over it: a query with a
+        # bracket in it, a task title like [#31874], arrived with the brackets
+        # gone and the cursor moved behind the overlay.
+        send_and_wait(process, master_fd, output, b":", b"MASC Command palette")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"a[b]c",
+            # The prompt is styled, then a plain space, then the query.
+            re.compile(rb":(?:" + CSI_RE.pattern + rb")* a\[b\]c"),
+        )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Approvals")
         os.write(master_fd, b"q")
 
     return interact
@@ -8417,7 +8538,6 @@ def chat_clarity_http_fixtures() -> HttpFixtures:
                     "tool": "masc_fusion",
                     "input": {"prompt": "panel-input-exact"},
                     "output": "panel-output-exact",
-                    "success": False,
                     "duration_ms": 1200.0,
                     "execution_id": "exec-fusion-1",
                     "tool_use_id": "call-fusion-1",
@@ -8524,7 +8644,7 @@ def skills_usage_clarity_interaction(
         # Tools hangs off Config under [t] now, so the walk goes to the
         # parent stop and hops from there.
         tab_until(process, master_fd, output, b"MASC Config")
-        send_and_wait(process, master_fd, output, b"t", b"MASC Tools")
+        send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
         usage = send_and_wait(
             process,
             master_fd,
@@ -8540,13 +8660,19 @@ def skills_usage_clarity_interaction(
         ]
         expected.extend(f"Unavailable: {reason}".encode() for reason in unavailable)
         if observed:
-            expected.extend((b"work-intake", b"alpha 12/12/9", b"2026-08-28T03:04:05Z"))
+            expected.extend((b"work-intake", b"alpha"))
         for needle in expected:
             if needle not in rendered:
                 raise AssertionError(f"Skill usage did not show {needle!r}: {usage!r}")
+        # One keeper, one row, counts in their own columns (#37830). The time is
+        # the terminal's zone, so only the date's shape is pinned.
+        if observed and not re.search(rb"alpha\s+12\s+12\s+9\s+\d{4}-", rendered):
+            raise AssertionError(
+                f"the keeper's counts are not in their own columns: {usage!r}"
+            )
         if b"never invoked" in rendered:
             raise AssertionError(f"Unknown historical usage was called never invoked: {usage!r}")
-        if not observed and b"alpha 12/12/9" in rendered:
+        if not observed and re.search(rb"alpha\s+12\s+12\s+9", rendered):
             raise AssertionError(f"Unobserved usage inherited a previous count: {usage!r}")
         os.write(master_fd, b"q")
 
@@ -8587,7 +8713,7 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
         def interact(process, master_fd, _slave_fd, output, _base_path):
             resize_and_wait(process, master_fd, output, rows=30, columns=160, needle=b"MASC Overview")
             tab_until(process, master_fd, output, b"MASC Config")
-            send_and_wait(process, master_fd, output, b"t", b"MASC Tools")
+            send_and_wait(process, master_fd, output, b"t", b"MASC Config / Tools")
             frame = send_and_wait(
                 process, master_fd, output, b"p" * 3,
                 b"Skill catalog read failed:" if initial_error else b"1 of 2 catalog Skills observed",
@@ -8601,7 +8727,7 @@ def run_skill_usage_coverage_error_regression(executable: str) -> None:
             if initial_error:
                 if b"unavailable (no catalog reading)" not in rendered:
                     raise AssertionError(f"First failed reading still looked like loading: {frame!r}")
-            elif b"alpha 12/12/9" not in rendered:
+            elif not re.search(rb"alpha\s+12\s+12\s+9\s+\d{4}-", rendered):
                 raise AssertionError(f"Refresh failure lost the previous known counts: {frame!r}")
             os.write(master_fd, b"q")
 
@@ -8859,7 +8985,7 @@ def run_tools_purpose_regression(executable: str) -> None:
         send_and_wait(process, master_fd, output, b"p", b"keeper_status")
         # The footer is the frame's last row, so wait for the frame to finish
         # rather than for its title: the key is read from that row below.
-        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC Tools",
+        resize_and_wait(process, master_fd, output, rows=30, columns=90, needle=b"MASC Config / Tools",
                         final_cursor=b"\x1b[?25l")
         # The strip names the panes; the key that walks them is the footer's
         # "p:section" (#35638). The strip used to say it again as "p:다음 탭".
@@ -9567,7 +9693,7 @@ def keeper_calls_fixture() -> HttpResponse:
                     "tool": "Read",
                     "input": '{"file_path": "lib/a.ml"}',
                     "output": "sentinel-digest-31506",
-                    "success": True,
+                    "wire_outcome": "ok",
                     "duration_ms": 28.4,
                     "turn": 2143,
                 },
@@ -9576,7 +9702,7 @@ def keeper_calls_fixture() -> HttpResponse:
                     "keeper": "alpha",
                     "tool": "tool_execute",
                     "input": '{"argv": ["dune", "build"]}',
-                    "success": False,
+                    "wire_outcome": "error",
                     "duration_ms": 14534.0,
                     "turn": 2144,
                 },
@@ -10265,7 +10391,13 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
             process, master_fd, output, requests, path=VERIFICATION_VERDICT_PATH
         )
         approve_payload = json.loads(approve_body)
-        if approve_payload != {"task_id": "task-901", "verdict": "approve"}:
+        # The verdict names the submission the row showed, so the server can
+        # refuse it when the Task has moved on to another one.
+        if approve_payload != {
+            "task_id": "task-901",
+            "verification_id": "vr-task-901",
+            "verdict": "approve",
+        }:
             raise AssertionError(f"approve body: {approve_payload!r}")
         # Let the approve completion and its queue reload settle before the
         # editor temporarily gives up the alternate screen. Otherwise the
@@ -10290,6 +10422,7 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         reject_payload = json.loads(verdict_bodies()[1])
         if reject_payload != {
             "task_id": "task-901",
+            "verification_id": "vr-task-901",
             "verdict": "reject",
             "reason": "needs a repro",
         }:
@@ -10382,6 +10515,7 @@ def standalone_lane_fixture(
         "last_outcome": "succeeded",
         "p50_elapsed_s": 8.0,
         "selected_slots": [{"slot_id": "glm-coding.glm-5-turbo", "count": 12}],
+        "runs_without_slot": {"vendor_system_one": 0, "server_restarted": 0, "no_slot": 0},
     }
     if lane_id == "board_attention_exact":
         row["jev"] = {"state": "off"}
@@ -10638,7 +10772,7 @@ def keeper_lane_row(
     idle_seconds: int,
     runtime_state: str | None,
     selected_model: str | None,
-    diagnosis: str | None,
+    turn_healthy: bool = True,
 ) -> dict[str, object]:
     last_outcome: object = None
     if runtime_state is not None:
@@ -10652,7 +10786,13 @@ def keeper_lane_row(
         "turn_phase": turn_phase,
         "idle_seconds": idle_seconds,
         "last_outcome": last_outcome,
-        "phase_diagnosis": {"determining_condition": diagnosis},
+        "phase_diagnosis": {
+            "conditions": {
+                "launch_pending": False,
+                "heartbeat_healthy": True,
+                "turn_healthy": turn_healthy,
+            }
+        },
     }
 
 
@@ -10685,11 +10825,10 @@ def keeper_lanes_ia_interaction(
         keepers_plain = CSI_RE.sub(b"", keepers).decode("utf-8")
         for needle in (
             "OPERATIONS",
-            "lifecycle failing",
+            "lifecycle failing (last turn failed)",
             "turn executing",
             "idle 59m",
             "last done",
-            "failing_unhealthy",
         ):
             if needle not in keepers_plain:
                 raise AssertionError(
@@ -11312,6 +11451,209 @@ def keeper_gate_mode_footer_interaction(
         os.write(master_fd, b"q")
 
     return interact
+
+CONNECTORS_PATH = "/api/v1/gate/connectors"
+CONNECTOR_NAMES_PATH = "/api/v1/gate/connector/names"
+CONNECTOR_UNBIND_PATH = "/api/v1/gate/connector/unbind"
+
+
+def connector_unbind_all_fixtures(
+    requests: HttpRequests | None = None,
+) -> HttpFixtures:
+    """alpha holds two Discord channels, beta one; one of alpha's is rebound.
+
+    The name directory knows 111 only, so the other channel has to say its
+    name is unknown. The unbind answers 409 for 333 -- the server's reply when
+    the channel now names another Keeper -- so the result has a skip in it.
+    """
+    fixtures = keeper_runtime_http_fixtures()
+
+    def connectors() -> HttpResponse:
+        # With [requests], a removed binding leaves the list once its unbind
+        # was answered 200 -- the reading the post-unbind reload must show.
+        removed = {
+            json.loads(body)["channel_id"]
+            for path, body in (requests or [])
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        } - {"333"}
+        bindings = [
+            {"channel_id": channel, "keeper_name": keeper}
+            for channel, keeper in (("111", "alpha"), ("444", "beta"), ("333", "alpha"))
+            if channel not in removed
+        ]
+        return (
+            200,
+            {
+                "connectors": [
+                    {
+                        "connector_id": "discord",
+                        "display_name": "Discord",
+                        "status": "connected",
+                        "available": True,
+                        "connected": True,
+                        "configured_bindings": bindings,
+                    }
+                ],
+                "total": 1,
+                "active_count": 1,
+            },
+        )
+
+    fixtures[CONNECTORS_PATH] = connectors
+    fixtures[CONNECTOR_NAMES_PATH] = (
+        200,
+        {
+            "connector_id": "discord",
+            "kind": "channel",
+            "mapping_scope": "workspace",
+            "path": "connector_names/discord/channel",
+            "total": 1,
+            "has_more": False,
+            "mappings": [{"id": "111", "name": "general"}],
+        },
+    )
+
+    def unbind(body: bytes) -> HttpResponse:
+        channel = json.loads(body).get("channel_id")
+        if channel == "333":
+            return (409, {"error": "binding changed"})
+        return (200, {"ok": True})
+
+    fixtures[CONNECTOR_UNBIND_PATH] = RequestHttpResponse(unbind)
+    return fixtures
+
+
+def run_keeper_unbind_all_channels_regression(executable: str) -> None:
+    """U twice on the Channels tab removes every binding of that Keeper.
+
+    #38167: the tab removed one binding per two presses, so five channels
+    took ten presses and five selections. The first U names what it will
+    remove; the second sends one conditional unbind per binding and reports
+    each answer. beta's binding is not sent at all.
+    """
+    requests: HttpRequests = []
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
+        # [ from Info wraps to Runs; Channels is two further back.
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Runs")
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Automation")
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Channels")
+        wait_for_output(process, master_fd, output, b"333 (name unknown)",
+                        start=0, timeout=5.0)
+        drain_until_quiet(process, master_fd, output)
+        listed = screen_text(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        if b"general (111)" not in listed:
+            raise AssertionError(
+                f"the binding list did not name channel 111: {listed!r}"
+            )
+        send_and_wait(process, master_fd, output, b"U",
+                      b"unbind all armed: press U again")
+        if any(path.startswith(CONNECTOR_UNBIND_PATH) for path, _ in requests):
+            raise AssertionError(f"the first U sent an unbind: {requests!r}")
+        send_and_wait(process, master_fd, output, b"U",
+                      b"unbind all of alpha: 1 removed, 1 kept, 0 not found, 0 failed")
+        sent = sorted(
+            (json.loads(body)["channel_id"], json.loads(body)["keeper_name"])
+            for path, body in requests
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        )
+        if sent != [("111", "alpha"), ("333", "alpha")]:
+            raise AssertionError(
+                f"unbind all did not send exactly alpha's two bindings: {sent!r}"
+            )
+        # The pane reads the bindings again after the write: 111 is gone and
+        # 333, kept by the 409, is still alpha's.
+        wait_for_output(process, master_fd, output, b"1 here / 2 total",
+                        start=0, timeout=5.0)
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="U U on the Channels tab unbinds every binding of the Keeper",
+        interact=interact,
+        http_fixtures=connector_unbind_all_fixtures(requests),
+        http_requests=requests,
+    )
+
+
+def run_pause_offers_channel_unbind_regression(executable: str) -> None:
+    """Pausing a Keeper that holds bindings offers to remove them, once.
+
+    #38167: a paused Keeper still routes its Discord channels to itself and
+    answers on them as soon as it runs again. After the pause is accepted the
+    footer names the channels and the one key that removes them. y takes the
+    offer; any other key leaves the bindings. U is not that key: on the list
+    it opens the runtime picker, and "pause, then pick another runtime" must
+    not remove the Keeper's channels.
+    """
+
+    def pause_alpha(process: subprocess.Popen[bytes], master_fd: int,
+                    output: bytearray) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        # Pause is not a two-press action; one p sends it.
+        send_and_wait(process, master_fd, output, b"p",
+                      b"y: also unbind alpha's 2 channels")
+
+    def unbinds(requests: HttpRequests) -> list[tuple[str, str]]:
+        return sorted(
+            (json.loads(body)["channel_id"], json.loads(body)["keeper_name"])
+            for path, body in requests
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        )
+
+    def fixtures() -> HttpFixtures:
+        served = connector_unbind_all_fixtures()
+        served["/api/v1/keepers/alpha/directive"] = (200, {"ok": True})
+        return served
+
+    taken: HttpRequests = []
+
+    def take_offer(process: subprocess.Popen[bytes], master_fd: int,
+                   _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        pause_alpha(process, master_fd, output)
+        send_and_wait(process, master_fd, output, b"y",
+                      b"unbind all of alpha: 1 removed, 1 kept, 0 not found, 0 failed")
+        if unbinds(taken) != [("111", "alpha"), ("333", "alpha")]:
+            raise AssertionError(
+                f"the offer did not send exactly alpha's two bindings: {unbinds(taken)!r}"
+            )
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="y after a pause removes the paused Keeper's channel bindings",
+        interact=take_offer,
+        http_fixtures=fixtures(),
+        http_requests=taken,
+    )
+
+    declined: HttpRequests = []
+
+    def decline_offer(process: subprocess.Popen[bytes], master_fd: int,
+                      _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        pause_alpha(process, master_fd, output)
+        # U straight after the offer is the runtime picker, not a yes.
+        send_and_wait(process, master_fd, output, b"U", b"\xe2\x96\xb8 runtime")
+        if unbinds(declined):
+            raise AssertionError(
+                f"a declined offer still sent unbinds: {unbinds(declined)!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="U after a pause opens the runtime picker and keeps the bindings",
+        interact=decline_offer,
+        http_fixtures=fixtures(),
+        http_requests=declined,
+    )
+
 
 def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
     """Beside the acting pane the row is 92 cells; a strip wider than that
@@ -12086,7 +12428,7 @@ def runtime_resolved_runtime(
     }
 
 
-def runtime_resolved_response() -> HttpResponse:
+def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpResponse:
     runtime_a = runtime_resolved_runtime("runtime-a", "Resolved A", "model-a")
     return (
         200,
@@ -12115,7 +12457,24 @@ def runtime_resolved_response() -> HttpResponse:
                 },
                 {
                     "id": "degraded",
-                    "runtime_ids": ["runtime-c"],
+                    # Off by default. With it on, runtime-a is here as well as
+                    # in "primary", which is what gives the two doors into the
+                    # runtime detail -- a lane's candidate row and the catalog
+                    # row -- something to disagree about. It adds a row to the
+                    # lane listing, and other scripts walk that listing by row:
+                    # test_tui_runtime_lane_editor.py and
+                    # test_tui_selection_visibility.py both call this function
+                    # and count on its shape. The only caller that turns it on
+                    # is runtime_http_fixtures, which feeds nothing but
+                    # runtime_surface_interaction -- the interaction that makes
+                    # the comparison. Two runners register that interaction,
+                    # run_keyboard_regression and run_runtime_regression, and
+                    # both want the extra lane.
+                    "runtime_ids": (
+                        ["runtime-c", "runtime-a"]
+                        if runtime_a_in_two_lanes
+                        else ["runtime-c"]
+                    ),
                     "declared": True,
                 },
                 {
@@ -12150,7 +12509,9 @@ def runtime_http_fixtures() -> tuple[
     )
     fixtures[RUNTIME_PROBE_PATH] = initial_probe
     fixtures[RUNTIME_PROBE_FORCE_PATH] = force_probe
-    fixtures[RUNTIME_RESOLVED_PATH] = runtime_resolved_response()
+    fixtures[RUNTIME_RESOLVED_PATH] = runtime_resolved_response(
+        runtime_a_in_two_lanes=True
+    )
     return fixtures, initial_probe, force_probe
 
 
@@ -12313,8 +12674,8 @@ def runtime_surface_interaction(
                 b"Context source: capability",
                 b"Max output: 8192 tokens",
                 b"Local runtime: no",
-                b"Used by lanes: primary",
-                b"Lane position: 1 of 2",
+                b"Used by lanes: primary, degraded",
+                b"Lane position: 1 of 2 in primary",
                 b"Probe status: reachable",
                 b"Probe transport: http",
                 # The terminal's clock, not the wire's: the scenario runs
@@ -12363,7 +12724,7 @@ def runtime_surface_interaction(
             all_list = screen_text(bytes(output))
             if b"runtime-a" not in all_list:
                 raise AssertionError("Runtime catalog did not keep the selected runtime")
-            if b"Lanes (3 lanes, 4 slots)" not in all_list:
+            if b"Lanes (3 lanes, 5 slots)" not in all_list:
                 raise AssertionError("Runtime catalog counted runtimes as lane slots")
             if b"ready / reachable" not in all_list:
                 raise AssertionError("Runtime catalog omitted independent probe status")
@@ -12379,7 +12740,7 @@ def runtime_surface_interaction(
                 b"Runtime ID: runtime-a",
                 b"Provider: Resolved A",
                 b"Model: model-a",
-                b"Used by lanes: primary",
+                b"Used by lanes: primary, degraded",
                 b"Probe status: reachable",
             ):
                 if needle not in catalog_detail_plain:
@@ -12397,7 +12758,7 @@ def runtime_surface_interaction(
             # /api/v1/dashboard/standalone-lanes body. Walk the full circuit
             # so the return leg is what gets asserted.
             send_and_wait(process, master_fd, output, b"p", b"MASC Lanes")
-            send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 4 slots)")
+            send_and_wait(process, master_fd, output, b"p", b"Lanes (3 lanes, 5 slots)")
 
             # The overflow scroll hint is unreachable with this fixture: it
             # renders only when candidates exceed the listing height, but the
@@ -12588,7 +12949,7 @@ def schedule_detail_interaction() -> Interaction:
         _base_path: str,
     ) -> None:
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Schedules"
+            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
         )
         listing_plain = CSI_RE.sub(b"", listing)
         for needle in (
@@ -13018,7 +13379,7 @@ def fusion_list_detail_interaction(
         send_and_wait(process, master_fd, output, b"\r", b"EVALUATOR VERDICT")
         # The heading precedes asynchronous task/goal enrichment. Inspect one
         # completed screen after both the linked goal and footer are present.
-        observed = (b"masc://planning/goal-ssim-501", b"Left / Esc:list")
+        observed = (b"masc://planning/goal-ssim-501", b"Left / Esc:back")
         for needle in observed:
             wait_for_output(process, master_fd, output, needle,
                             start=verdict_start, timeout=10.0)
@@ -13041,8 +13402,16 @@ def fusion_list_detail_interaction(
             b"masc://planning/goal-ssim-501",
             # #35734 spells hint keys the way the key table does: "Left", not
             # "left"; and with the table's spaces, which is the spelling the
-            # footer's pin reads.
-            b"Left / Esc:list",
+            # footer's pin reads. The label is the table's own ("back") now
+            # that this footer is read from the table rather than written out
+            # in the renderer, where it read "list".
+            b"Left / Esc:back",
+            # #36652: the hand-written row left these two out. [ / ] is
+            # answered here and only here, and the pair that answers a ruling
+            # was missing from the one screen that exists for reading a ruling
+            # in full. The pair is pinned, so a narrow footer keeps it.
+            b"[ / ]:previous / next",
+            b"y / x:agree / overrule",
         ):
             if needle not in verdict_plain:
                 raise AssertionError(
@@ -13378,8 +13747,9 @@ def fusion_live_reload_interaction(
 
 
 # The hook's per-call observation names the keeper turn (total_turns + 1)
-# the session-numbered call below belongs to; without it the row would say
-# "turn ?". The session ordinal (7) and the keeper turn (42) differ, so a
+# the session-numbered call below belongs to; without it the row would name
+# the turn with no number. The session ordinal (7) and the keeper turn (42)
+# differ, so a
 # needle can tell which of the two numbers a row drew.
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"
@@ -13847,8 +14217,68 @@ def duplicated_attention_briefing() -> HttpResponse:
             "attention_items": [],
             "agent_briefs": [],
             "keeper_briefs": [],
+            "keepers_unread": [],
         },
     )
+
+
+def unread_keeper_briefing() -> HttpResponse:
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-23T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [],
+            # The server listed this Keeper but could not build its row
+            # (#38090). It has no brief, and the Overview still counts it.
+            "keepers_unread": [
+                {
+                    "name": "k-unread",
+                    "reason": "row_raised",
+                    "detail": "Failure(\"default runtime not initialized\")",
+                }
+            ],
+        },
+    )
+
+
+def unread_keeper_counted_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Keepers: 1 (1 unreadable)",
+            start=0,
+            timeout=10.0,
+        )
+        # The Team block names the same Keeper, with why its row was unread.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"k-unread",
+            start=0,
+            timeout=10.0,
+        )
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
 
 
 def attention_drawn_once_interaction() -> Interaction:
@@ -14034,7 +14464,6 @@ def run_keyboard_regression(executable: str) -> None:
                     idle_seconds=75,
                     runtime_state="done",
                     selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
                 ),
                 keeper_lane_row(
                     "beta",
@@ -14043,7 +14472,7 @@ def run_keyboard_regression(executable: str) -> None:
                     idle_seconds=3599,
                     runtime_state="done",
                     selected_model=None,
-                    diagnosis="failing_unhealthy",
+                    turn_healthy=False,
                 ),
             ]
         )
@@ -14286,6 +14715,8 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures=enter_split_fixtures,
     )
     run_tab_strip_keeps_current_entry_regression(executable)
+    run_keeper_unbind_all_channels_regression(executable)
+    run_pause_offers_channel_unbind_regression(executable)
     run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
@@ -14426,6 +14857,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=attention_drawn_once_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Unread keeper counted",
+        interact=unread_keeper_counted_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": unread_keeper_briefing(),
         },
     )
     composer_requests: HttpRequests = []
@@ -14739,6 +15178,134 @@ def run_ctrl_y_regression(executable: str) -> None:
         description="Ctrl-Y reaches the TUI instead of the tty's delayed suspend",
         interact=ctrl_y_reaches_the_tui_interaction,
         http_fixtures=overview_event_http_fixtures(),
+    )
+
+
+def exit_reason_log(base_path: str) -> str:
+    """Everything the TUI wrote to its own per-PID stderr log, or "".
+
+    The TUI redirects stderr to ``.masc/logs/masc-tui-<pid>.log`` at boot, so
+    the exit line lands there. The pid is the TUI's, not the launcher shell's,
+    so the file is found by glob rather than by name.
+    """
+    logs = sorted(Path(base_path, ".masc", "logs").glob("masc-tui-*.log"))
+    if not logs:
+        return ""
+    return logs[-1].read_text(encoding="utf-8", errors="replace")
+
+
+def wait_for_exit_reason(base_path: str, needle: str, timeout: float = 10.0) -> str:
+    """The log text once it carries [needle], or an assertion naming what it held.
+
+    The line is written as the process exits, so the read races the write; the
+    poll is what makes the scenario wait for the fact rather than for a sleep.
+    """
+    deadline = time.monotonic() + timeout
+    text = ""
+    while time.monotonic() < deadline:
+        text = exit_reason_log(base_path)
+        if needle in text:
+            return text
+        time.sleep(0.05)
+    raise AssertionError(
+        f"no exit reason {needle!r} in {base_path}/.masc/logs/masc-tui-*.log; "
+        f"the log held:\n{text}"
+    )
+
+
+def quit_writes_its_reason_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    base_path: str,
+) -> None:
+    """Leave with q and read the reason back from the log the TUI wrote.
+
+    The per-PID log held only the boot lines, so a session that ended left no
+    reason behind. The first q arms, the second leaves; the exit line is
+    written as the process returns.
+    """
+    send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+    os.write(master_fd, b"q")
+    # The prefix is part of the contract: the guide tells operators to collect
+    # these rows with `grep '[masc-tui] exit:'`, so the test asks for what that
+    # grep asks for rather than for the bare reason.
+    text = wait_for_exit_reason(base_path, "[masc-tui] exit: normal (quit key)")
+    if "exit: abnormal" in text:
+        raise AssertionError(f"a q quit read as abnormal:\n{text}")
+    # One row per session. at_exit stops at the first callback that raises and
+    # OCaml may retry the rest, so a writer with no guard can leave two -- and
+    # a reader counting a day's ends by cause would count this session twice.
+    rows = text.count("[masc-tui] exit:")
+    if rows != 1:
+        raise AssertionError(
+            f"the session wrote {rows} exit rows, not one:\n{text}"
+        )
+
+
+def sigterm_writes_its_reason_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    slave_fd: int,
+    output: bytearray,
+    base_path: str,
+) -> None:
+    """A terminate signal leaves the same record, naming the signal.
+
+    A service manager's SIGTERM is not the operator's q, and the log has to
+    tell them apart, so the reason carries the signal's name.
+    """
+    terminate_with_sigterm(process, master_fd, slave_fd, output, base_path)
+    wait_for_exit_reason(base_path, "[masc-tui] exit: normal (signal SIGTERM)")
+
+
+def run_exit_reason_regression(executable: str) -> None:
+    # #37813's sibling: the per-PID log held only the boot lines, so a session
+    # that ended left no reason behind. These read the reason back from the log
+    # the process wrote, one per way out.
+    run_terminal_scenario(
+        executable,
+        description="a q quit writes its reason to the session log",
+        interact=quit_writes_its_reason_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="a SIGTERM writes its reason to the session log",
+        interact=sigterm_writes_its_reason_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        confirm_exit=b"",
+    )
+
+
+def run_first_install_credential_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="a first install waits for its workspace instead of the login command",
+        interact=first_install_waits_for_its_workspace_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        omit_operator_token=True,
+    )
+    run_terminal_scenario(
+        executable,
+        description="a mint that failed is marked as an error on the events pane",
+        interact=failed_mint_is_marked_as_an_error_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=seed_a_workspace_that_refuses_a_credential,
+        omit_operator_token=True,
+    )
+    # The mark is a shape, not a colour, so the same row must read the same
+    # with colour off -- the case the task names. The harness clears NO_COLOR
+    # for every other scenario, so this one sets it back.
+    run_terminal_scenario(
+        executable,
+        description="a mint that failed is marked as an error under NO_COLOR",
+        interact=failed_mint_is_marked_as_an_error_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        prepare_workspace=seed_a_workspace_that_refuses_a_credential,
+        omit_operator_token=True,
+        extra_env={"NO_COLOR": "1"},
     )
 
 
@@ -16112,7 +16679,7 @@ def run_schedule_delivery_regression(executable: str) -> None:
         _base_path: str,
     ) -> None:
         listing = palette_go(
-            process, master_fd, output, b"go schedules", b"MASC Schedules"
+            process, master_fd, output, b"go schedules", b"MASC Keepers / Schedules"
         )
         plain = CSI_RE.sub(b"", listing)
         for needle in (
@@ -16193,10 +16760,14 @@ def run_schedule_source_status_regression(executable: str) -> None:
                     "pty": base64.b64encode(zlib.compress(captured[start:end])).decode(),
                 }), flush=True)
 
+            # Wait on "HTTP 503", the error the Schedules pane draws, not a bare
+            # "503": the palette footer prints the fixture server's random port,
+            # and RC run 35815189729 drew "Port: 35039", so the bare needle matched
+            # the palette frame before Schedules ever rendered.
             palette_go(process, master_fd, output, b"go schedules",
-                       b"503" if initial_error else b"status:running")
+                       b"HTTP 503" if initial_error else b"status:running")
             if initial_error:
-                screen = require("data unreliable:", "schedule load failed:", "503")
+                screen = require("data unreliable:", "schedule load failed:", "HTTP 503")
                 for absent in (b"Requests: 0", b"no scheduled automation", b"schedule-proof-701"):
                     if absent in screen:
                         raise AssertionError(f"Failed initial source invented data: {screen!r}")
@@ -16213,23 +16784,23 @@ def run_schedule_source_status_regression(executable: str) -> None:
                         f"the schedule count and its next wake split rows: {summary_row!r}"
                     )
                 fail_reads.set()
-                send_and_wait(process, master_fd, output, b"r", b"503")
-                require("이전 조회 유지 ·", "503", "schedule-proof-701",
+                send_and_wait(process, master_fd, output, b"r", b"HTTP 503")
+                require("이전 조회 유지 ·", "HTTP 503", "schedule-proof-701",
                         "status:running", "Requests: 1")
                 evidence("retained-list-refresh-failed")
                 send_and_wait(process, master_fd, output, b"\x1b[C", b"instance-proof-701")
-                require("이전 조회 유지 ·", "503", "instance-proof-701")
+                require("이전 조회 유지 ·", "HTTP 503", "instance-proof-701")
                 # The warning belongs to the source, so it remains visible
                 # while the retained detail body is scrolled.
                 send_and_wait(process, master_fd, output, b"\x1b[6~", b"DELIVERY EVIDENCE")
-                require("이전 조회 유지 ·", "503")
+                require("이전 조회 유지 ·", "HTTP 503")
                 send_and_wait(process, master_fd, output, b"\x1b[D", b"status:running")
 
             recovered_reads.set()
             fail_reads.clear()
             send_and_wait(process, master_fd, output, b"r", b"recovered-keeper")
             screen = require("status:scheduled", "Requests: 1", "schedule-proof-701")
-            for absent in ("조회 실패:", "갱신 실패:", "503", "status:running"):
+            for absent in ("조회 실패:", "갱신 실패:", "HTTP 503", "status:running"):
                 if absent.encode() in screen:
                     raise AssertionError(f"Recovered source retained old status: {screen!r}")
             evidence("source-recovered")
@@ -16596,6 +17167,133 @@ def run_resources_regression(executable: str) -> None:
     )
 
 
+def open_turn_roster_http_fixtures(started_at_unix: float) -> HttpFixtures:
+    """alpha healthy and beta failing, each with a turn open.
+
+    A failing keeper's keepalive runs the next attempt, so its turn is open
+    while the roster header counts it failing; alpha is the working keeper
+    its row must not look like.
+    """
+    fixtures = keeper_runtime_http_fixtures()
+    status, roster = fixtures["/api/v1/gate/keepers?detailed=true"]
+    alpha, beta = roster["keepers"]
+    beta = {
+        **beta,
+        "status": "active",
+        "health": "failing",
+        "paused": False,
+        "phase": "failing",
+        "activation_mode": "autonomous",
+    }
+    fixtures["/api/v1/gate/keepers?detailed=true"] = (
+        status,
+        {**roster, "keepers": [alpha, beta]},
+    )
+    fixtures["/api/v1/keepers/turns"] = (
+        200,
+        {
+            "schema": "masc.keeper_turns.v1",
+            "keepers": [
+                {
+                    "keeper_name": name,
+                    "status": "ok",
+                    "chat_control_token": f"control-{name}",
+                    "turn": {
+                        "lane": "autonomous",
+                        "started_at_unix": started_at_unix,
+                        "interrupt_token": token,
+                        "preview": None,
+                    },
+                }
+                for name, token in (
+                    ("alpha", "4f3c2a10-5b6d-4e7f-8a9b-0c1d2e3f4a5b"),
+                    ("beta", "7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d"),
+                )
+            ],
+        },
+    )
+    return fixtures
+
+
+def a_failing_keepers_open_turn_reads_failing(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    working = re.compile(rb"\d+s +alpha\b")
+    failing = re.compile(rb"\bfailing +beta\b")
+    deadline = time.monotonic() + 10.0
+    screen = b""
+    while time.monotonic() < deadline:
+        read_available(master_fd, output)
+        screen = screen_text(bytes(output))
+        if working.search(screen) and failing.search(screen):
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError(
+            "the roster did not draw alpha's turn with its elapsed time and "
+            f"beta's with its failing word: {screen!r}"
+        )
+    if not re.search(rb"\b1 failing\b", screen):
+        raise AssertionError(f"the header did not count beta failing: {screen!r}")
+    os.write(master_fd, b"q")
+
+
+def lanes_press_selects_the_lane_under_the_pointer(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """A press lands on the lane drawn under it.
+
+    The hit test turns a terminal row into a lane index by subtracting the
+    rows drawn above the list. That count and the unit test holding it were
+    each written by hand, agreed with each other, and both said five while
+    seven were drawn -- so a press on the first lane opened the third. Here
+    the row comes off the screen the binary just painted, which is the only
+    reading that cannot drift from it.
+
+    The pointer goes to the last lane rather than the first: the cursor
+    starts on the first, so selecting it again would pass without the press
+    doing anything."""
+    palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=220,
+        needle=b"Standalone LLM lanes",
+        controls=(FULL_REDRAW,),
+    )
+    drain_until_quiet(process, master_fd, output)
+    drawn = bytes(output)
+    row = screen_row_of(screen_rows(drawn), b"Verifier")
+    if row < 0:
+        raise AssertionError(
+            f"Lanes drew no Verifier row: {screen_text(drawn).decode('utf-8')!r}"
+        )
+    # SGR reports carry the column before the row, and both count from one --
+    # the same numbering [screen_rows] keys by.
+    press = b"\x1b[<0;6;%dM" % row
+    release = b"\x1b[<0;6;%dm" % row
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        press + release,
+        b"Reviews Task completion and Goal proof evidence.",
+    )
+    # Exit is armed: the first press asks, and the harness sends the second.
+    os.write(master_fd, b"q")
+
+
 def run_keeper_lanes_regression(executable: str) -> None:
     fixtures = keeper_runtime_http_fixtures()
     gate = GatedHttpResponse(
@@ -16608,7 +17306,6 @@ def run_keeper_lanes_regression(executable: str) -> None:
                     idle_seconds=75,
                     runtime_state="done",
                     selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
                 ),
                 keeper_lane_row(
                     "beta",
@@ -16617,7 +17314,7 @@ def run_keeper_lanes_regression(executable: str) -> None:
                     idle_seconds=3599,
                     runtime_state="done",
                     selected_model=None,
-                    diagnosis="failing_unhealthy",
+                    turn_healthy=False,
                 ),
             ]
         )
@@ -16635,9 +17332,26 @@ def run_keeper_lanes_regression(executable: str) -> None:
     fixtures[RUNTIME_CONFIG_RAW_PATH] = standalone_lane_runtime_config_response()
     run_terminal_scenario(
         executable,
+        description="a failing keeper's open turn reads failing",
+        interact=a_failing_keepers_open_turn_reads_failing,
+        http_fixtures=open_turn_roster_http_fixtures(time.time() - 42),
+    )
+    run_terminal_scenario(
+        executable,
         description="Keepers operations and Standalone-only Lanes",
         interact=keeper_lanes_ia_interaction(gate, fixtures),
         http_fixtures=fixtures,
+    )
+    # Its own copy, with the gate replaced by a plain answer: this walk reads
+    # Standalone rows only, and a gate another scenario has to release would
+    # make it depend on running after that one.
+    pointer_fixtures = dict(fixtures)
+    pointer_fixtures[KEEPER_LANES_PATH] = keeper_lanes_response([])
+    run_terminal_scenario(
+        executable,
+        description="a press on a Standalone lane row selects that lane",
+        interact=lanes_press_selects_the_lane_under_the_pointer,
+        http_fixtures=pointer_fixtures,
     )
 
 
@@ -17488,6 +18202,16 @@ SCENARIO_FAMILIES: tuple[ScenarioFamily, ...] = (
     ),
     ScenarioFamily("quit-waiting", "quit with waiting messages regression", (run_quit_waiting_regression,)),
     ScenarioFamily("ctrl-y", "Ctrl-Y regression", (run_ctrl_y_regression,)),
+    ScenarioFamily(
+        "first-install-credential",
+        "first install credential regression",
+        (run_first_install_credential_regression,),
+    ),
+    ScenarioFamily(
+        "exit-reason",
+        "exit reason regression",
+        (run_exit_reason_regression,),
+    ),
     ScenarioFamily("planning-review", "Planning Task Review regression", (run_planning_review_regression,)),
     ScenarioFamily("repositories", "Repositories regression", (run_repositories_regression,)),
     ScenarioFamily("project-changes", "project Git changes regression", (run_project_changes_regression,)),

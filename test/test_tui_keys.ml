@@ -5,6 +5,7 @@
    and the specific drifts the table was written to close. *)
 
 open Masc_tui_types
+module Cat = Masc.Keeper_memory_os_types
 
 let check = Alcotest.check
 let str = Alcotest.string
@@ -45,6 +46,12 @@ let enter_atom_count_exceptions =
   ; (* The second is the history overlay's, which [footer_hints_code] drops
        from the panes that have no commits. *)
     "Workspace / Code", 2
+  ; (* [e / Enter] edits on params and [Enter] uses on themes.
+       [footer_hints_config ~pane] never draws both: this count is of the
+       union the help sheet shows, not of any footer. The per-pane form of
+       this check is [test_every_config_pane_answers_once] below, which is
+       stricter than the one here -- it asks seven screens, not one union. *)
+    "Config", 2
   ]
 
 let test_every_surface_names_one_key_that_acts_on_the_cursor () =
@@ -257,14 +264,22 @@ let test_lanes_scroll_reserves_standalone_matrix_rows () =
 ;;
 
 let test_harness_footer_links_to_overview_task () =
+(* The four surfaces that own a detail -- Harness, Schedules, Verification,
+   Planning -- pin their list footer, and say so. Called without the state,
+   [footer_hints] returns every binding, which puts [[ / ]] (detail-only) and
+   [Right / Enter] (list-only) in one row: a spelling no screen draws. It
+   still caught label drift, so nothing failed; it just described a footer
+   nobody has. The detail side is checked by [test_tui_footer_detail_state],
+   which asserts each state drops the other's key, and for Harness by the PTY
+   walk, which reads the drawn row. *)
   check str "Harness names its task link"
-    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Home/End:top/bottom  Right / Enter:verdict  Left / Esc:back  y:agree  x:overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints Harness)
+    "j/k:move  v:next Planning tab  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:verdict  Left / Esc:back  y / x:agree / overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints ~detail_open:false Harness)
 
 let test_schedules_footer_names_write_and_read_controls () =
   check str "Schedules names create and modify"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints Schedules)
+    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints ~detail_open:false Schedules)
 
 let schedule_form_row : schedule_row =
   { sch_schedule_id = "daily-check"
@@ -341,6 +356,62 @@ let test_schedule_create_form_names_the_canonical_required_fields () =
     (form |> member "recurrence_interval_sec" |> to_int);
   check str "cron alternative is discoverable" "0 9 * * *"
     (form |> member "recurrence_cron" |> to_string)
+
+(* The modify key's help says "running/finished rows refuse". These pin that
+   the refusal now happens at the keypress, and that the set it refuses is the
+   store's own: [Transition_refused] is Running or [is_terminal].
+
+   The vocabulary is checked against
+   [Schedule_contract_values.schedule_status_strings] rather than trusted as a
+   hand-copied list, which is a second copy of the contract that goes stale
+   quietly. *)
+let refusal_for status =
+  Masc_tui_types.schedule_modify_refusal
+    { schedule_form_row with sch_status = status }
+
+let test_modify_refuses_exactly_the_statuses_the_store_refuses () =
+  (* The two sides are spelled out rather than recomputed from the gate's own
+     expression: a test that recomputes it only proves the code equals itself.
+     The sort below then checks these words against the contract's vocabulary,
+     so a status added upstream fails here instead of being classified
+     unasked. *)
+  let refused = [ "running"; "succeeded"; "failed"; "cancelled"; "expired" ] in
+  let opens = [ "scheduled"; "due" ] in
+  check (Alcotest.list str)
+    "the two sides together name every status the contract has"
+    (List.sort compare Schedule_contract_values.schedule_status_strings)
+    (List.sort compare (refused @ opens));
+  List.iter
+    (fun word ->
+      check Alcotest.bool (word ^ " is refused before the editor opens") true
+        (refusal_for word <> None))
+    refused;
+  (* The inputs that split this from a blanket refusal. Without them a gate
+     that refused everything would pass every assertion above. *)
+  List.iter
+    (fun word ->
+      check Alcotest.bool (word ^ " still opens the editor") true
+        (refusal_for word = None))
+    opens
+
+let test_modify_names_the_status_it_refuses () =
+  match refusal_for "running" with
+  | None -> Alcotest.fail "a running row must refuse"
+  | Some reason ->
+    (* The operator is told which word on the screen closed the door, not
+       just that it is closed. *)
+    check str "the reason quotes the status the screen showed"
+      "the store refuses a running schedule; only scheduled and due rows change"
+      reason
+
+let test_modify_leaves_an_unnamed_status_to_the_server () =
+  (* [sch_status] stays a string so a status this build does not name renders
+     as itself. Refusing on a word we cannot read would turn that forward
+     compatibility into a row nobody can edit, so the roundtrip is the right
+     answer here -- the server knows what it means. *)
+  check Alcotest.bool "a status this build does not name is not refused here"
+    true
+    (refusal_for "paused" = None)
 
 let test_schedule_update_form_preserves_exact_editable_definition () =
   let open Yojson.Safe.Util in
@@ -435,8 +506,8 @@ let memory_state_with_facts () =
             { Tui_decode.mos_revision = 1
             ; mos_updated_at = 0.
             ; mos_facts =
-                [ sample_memory_fact ~category:"lesson" ~claim:"a"
-                ; sample_memory_fact ~category:"blocker" ~claim:"b"
+                [ sample_memory_fact ~category:Cat.Lesson ~claim:"a"
+                ; sample_memory_fact ~category:Cat.Blocker ~claim:"b"
                 ]
             }
       ; mfs_source =
@@ -464,7 +535,9 @@ let memory_state_with_facts () =
 let category_filter_testable =
   let pp fmt = function
     | Category_all -> Format.pp_print_string fmt "Category_all"
-    | Category_ordinary s -> Format.fprintf fmt "Category_ordinary %S" s
+    | Category_ordinary c ->
+        Format.fprintf fmt "Category_ordinary %S"
+          (Cat.category_to_string c)
     | Category_source -> Format.pp_print_string fmt "Category_source"
     | Category_dropped -> Format.pp_print_string fmt "Category_dropped"
   in
@@ -474,7 +547,7 @@ let test_memory_fact_rows_follow_the_category_filter () =
   let state = memory_state_with_facts () in
   Alcotest.(check int) "All lists both stores plus the drops" 4
     (List.length (memory_fact_rows state));
-  state.memory_facts_category <- Category_ordinary "lesson";
+  state.memory_facts_category <- Category_ordinary Cat.Lesson;
   (match memory_fact_rows state with
    | [ Memory_row_fact fact ] ->
        check str "the filter narrows ordinary facts only" "a"
@@ -484,23 +557,23 @@ let test_memory_fact_rows_follow_the_category_filter () =
          (Printf.sprintf "unexpected filtered shape (%d rows)"
             (List.length rows)));
   Alcotest.(check (list category_filter_testable)) "categories are the loaded ones, sorted"
-    [ Category_ordinary "blocker"
-    ; Category_ordinary "lesson"
+    [ Category_ordinary Cat.Blocker
+    ; Category_ordinary Cat.Lesson
     ; Category_source
     ; Category_dropped
     ]
     (memory_fact_categories state)
 
 let test_memory_category_cycle_returns_to_all () =
-  let categories = [ Category_ordinary "blocker"; Category_ordinary "lesson" ] in
-  Alcotest.(check category_filter_testable) "All steps to the first" (Category_ordinary "blocker")
+  let categories = [ Category_ordinary Cat.Blocker; Category_ordinary Cat.Lesson ] in
+  Alcotest.(check category_filter_testable) "All steps to the first" (Category_ordinary Cat.Blocker)
     (next_memory_category Category_all categories);
-  Alcotest.(check category_filter_testable) "then to the next" (Category_ordinary "lesson")
-    (next_memory_category (Category_ordinary "blocker") categories);
+  Alcotest.(check category_filter_testable) "then to the next" (Category_ordinary Cat.Lesson)
+    (next_memory_category (Category_ordinary Cat.Blocker) categories);
   Alcotest.(check category_filter_testable) "the last returns to All" Category_all
-    (next_memory_category (Category_ordinary "lesson") categories);
+    (next_memory_category (Category_ordinary Cat.Lesson) categories);
   Alcotest.(check category_filter_testable) "a vanished category restarts at All" Category_all
-    (next_memory_category (Category_ordinary "gone") categories);
+    (next_memory_category (Category_ordinary Cat.Goal) categories);
   Alcotest.(check category_filter_testable) "no categories keeps All" Category_all
     (next_memory_category Category_all [])
 
@@ -534,8 +607,8 @@ let test_verification_footer_carries_the_verdict_keys () =
      the other list -- the store keeps every submission, so the history holds
      rows whose task finished weeks ago -- and [< / >] pages that history. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  h:queue / history  [ / ]:previous / next  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a / x:approve / reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints Verification)
+    "j/k:move  v:next Planning tab  h:queue / history  < / >:newer / older  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a / x:approve / reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints ~detail_open:false Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
@@ -729,8 +802,8 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
-    (Masc_tui_keys.footer_hints Planning)
+    "j/k:move  v:next Planning tab  f:filter  s:sort  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  a:confirm proof  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints ~detail_open:false Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =
   let keys =
@@ -1025,8 +1098,15 @@ let test_the_config_marks_are_in_the_sheet () =
    direction. Workspace / Code: [Left / Esc] leaves the file, then the
    directory, then the surface, and [B] walks back through definition
    jumps -- unrelated, and both called "back". *)
+(* And one that shares a label because no screen shows both rows. Config
+   draws a footer per pane, so "edit" on [e] (runtime, models, prompts,
+   voice) and on [e / Enter] (params) are the same answer given to readers
+   who never meet each other. Kept apart rather than merged into one row
+   because the panes take different keys: merging would put [Enter] in front
+   of four panes that do not answer it. [test_every_config_pane_answers_once]
+   is where this is checked at the size a reader actually sees. *)
 let shared_label_exceptions =
-  [ ("Board", "pane"); ("Workspace / Code", "back") ]
+  [ ("Board", "pane"); ("Workspace / Code", "back"); ("Config", "edit") ]
 
 let test_no_surface_gives_one_answer_two_rows () =
   let found = ref [] in
@@ -1060,6 +1140,77 @@ let test_no_surface_gives_one_answer_two_rows () =
         (Printf.sprintf "%s still shares %S" (fst entry) label)
         true (count >= 2))
     shared_label_exceptions
+
+(* Both exceptions above name Config because the help sheet shows the union of
+   seven panes. No reader sees that union -- [footer_hints_config] draws one
+   pane -- so the invariants they stepped out of are asked here, of each pane.
+   That is seven checks where the surface form was one.
+
+   Read the raw row, not a fitted one: the fitter drops items at narrow
+   widths, and an item it dropped would pass a uniqueness check by being
+   absent. *)
+let config_panes =
+  [ ("runtime", Config_runtime)
+  ; ("models", Config_models)
+  ; ("params", Config_params)
+  ; ("prompts", Config_prompts)
+  ; ("presets", Config_presets)
+  ; ("themes", Config_themes)
+  ; ("voice", Config_voice)
+  ]
+
+(* [hints_of_bindings] joins items with two spaces, and a key may hold a single
+   one ([e / Enter], [Right / Enter]) -- so split on the pair, not on a space.
+   [footer_has_key] splits on one space, which is why it cannot ask for a
+   pair's whole spelling. *)
+let footer_items row =
+  let length = String.length row in
+  let rec split acc start index =
+    if index + 1 >= length then List.rev (String.sub row start (length - start) :: acc)
+    else if row.[index] = ' ' && row.[index + 1] = ' ' then
+      split (String.sub row start (index - start) :: acc) (index + 2) (index + 2)
+    else split acc start (index + 1)
+  in
+  if length = 0 then []
+  else List.filter (fun item -> not (String.equal item "")) (split [] 0 0)
+
+(* An item is [key:label]; a label may hold a colon of its own, so read the
+   key up to the first one. *)
+let item_key item =
+  match String.index_opt item ':' with
+  | Some at -> String.sub item 0 at
+  | None -> item
+
+let item_label item =
+  match String.index_opt item ':' with
+  | Some at -> String.sub item (at + 1) (String.length item - at - 1)
+  | None -> item
+
+let test_every_config_pane_answers_once () =
+  List.iter
+    (fun (name, pane) ->
+      let items = footer_items (Masc_tui_keys.footer_hints_config ~pane) in
+      let enter =
+        List.filter
+          (fun item ->
+            List.exists (String.equal "Enter") (Masc_tui_keys.key_atoms (item_key item)))
+          items
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "the %s pane names at most one key holding Enter (found: %s)" name
+           (String.concat " | " enter))
+        true
+        (List.length enter <= 1);
+      let sorted = List.sort compare (List.map item_label items) in
+      let rec first_repeat = function
+        | a :: (b :: _ as rest) -> if String.equal a b then Some a else first_repeat rest
+        | [ _ ] | [] -> None
+      in
+      Alcotest.(check (option string))
+        (Printf.sprintf "the %s pane gives each answer once" name)
+        None
+        (first_repeat sorted))
+    config_panes
 
 let test_lanes_is_a_main_destination () =
   Alcotest.(check bool) "Lanes is a top-level ring entry" true
@@ -1363,9 +1514,17 @@ let test_fleet_total_cost () =
 let test_config_footer_names_child_hops () =
   (* The five short labels after f are pane-scoped writes and views that were
      in no list at all -- which pane each belongs to is in the help the ?
-     overlay draws, and a pane's own footer carries only its own. *)
+     overlay draws, and a pane's own footer carries only its own.
+
+     This row is a dump of the table, not a screen. Every Config renderer
+     draws [footer_hints_config ~pane], so nobody sees [e:edit] and
+     [e / Enter:edit] side by side the way they stand here -- the panes that
+     answer each are disjoint. Kept because it catches label drift across the
+     whole table in one string; the per-pane rows below are what a reader
+     meets, and [test_every_config_pane_answers_once] is what holds them to
+     one answer each. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  e / Enter:edit  E:advanced JSON  Enter:use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / keeper voice  o:assets  Esc:overview  r:reload  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Config);
   let hints = Masc_tui_keys.footer_hints Config in
   List.iter
@@ -1390,10 +1549,10 @@ let test_runtime_footer_is_the_tables () =
   List.iter
     (fun piece ->
       Alcotest.(check bool) ("keeper lanes name " ^ piece) true (has lanes piece))
-    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add failover"; "r:refresh"
+    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add candidate"; "r:refresh"
     ; "a:new lane"; "x:drop candidate"; "J/K:move candidate"; "D:remove lane" ];
   Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
-  Alcotest.(check bool) "and offer no failover to append" false (has all "e:add failover");
+  Alcotest.(check bool) "and offer no failover to append" false (has all "e:add candidate");
   List.iter
     (fun piece ->
       Alcotest.(check bool) ("all runtimes offer no lane edit " ^ piece) false (has all piece))
@@ -1408,7 +1567,7 @@ let test_runtime_footer_is_the_tables () =
   in
   Alcotest.(check (list string)) "the sheet names the p walk once"
     [ "keeper lanes / all runtimes / service lanes" ] (labels "p");
-  Alcotest.(check (list string)) "and lists failover" [ "add failover" ] (labels "e")
+  Alcotest.(check (list string)) "and lists failover" [ "add candidate" ] (labels "e")
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* The newest/oldest ends and f still belong to Acting. Logs owns the server
@@ -1431,9 +1590,27 @@ let test_system_logs_owns_only_its_real_filter_keys () =
   Alcotest.(check bool) "the ends stay on Acting" true (List.mem "Home/End" acting);
   Alcotest.(check bool) "f stays on Acting" true (List.mem "f" acting)
 
+(* Read a row the way the fitter reads it. [Masc_tui_footer.item_is_pinned]
+   takes an item's key up to its first colon, splits that key into atoms, and
+   matches a single-atom question against them -- which is why [e / Enter] is
+   pinned by "Enter". This asked a different question: it split the row on one
+   space, so the atoms of a key spelled with spaces became separate tokens and
+   only the last one carried the colon. [footer_has_key "e"] was false on a row
+   holding [e / Enter:edit], and [footer_has_key "y"] false on [y / x:agree /
+   overrule] -- the pane answers both.
+
+   The cost was not the false answers. It was that the answer depended on
+   which atom was written last: spelling the pair [Enter / e] would have
+   flipped two assertions without a word of the table changing meaning. An
+   assertion about a key must not turn on the order its spellings appear in. *)
 let footer_has_key key row =
-  String.split_on_char ' ' row
-  |> List.exists (String.starts_with ~prefix:(key ^ ":"))
+  let asked = Masc_tui_keys.key_atoms key in
+  List.exists
+    (fun item ->
+      let drawn = item_key item in
+      String.equal drawn key
+      || (List.length asked = 1 && List.mem key (Masc_tui_keys.key_atoms drawn)))
+    (footer_items row)
 
 let fitted_footer ~cols hints =
   Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:cols ~port:8935
@@ -1460,6 +1637,12 @@ let test_config_pane_footer_actions () =
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
     enabled "f" (pane = Config_themes);
     enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
+    (* Every pane that answers [e], including params -- where #36650 moved the
+       key into the pair [e / Enter] because both spellings open the same
+       field ([handle_runtime_param_edit_open] ~advanced:false). The pane was
+       dropped from this list while [footer_has_key] read only a key's last
+       atom, which made the line say "params does not answer e" about a pane
+       whose dispatcher answers it. This is a list of what the panes do. *)
     enabled "e"
       (List.mem pane
          [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]);
@@ -1499,6 +1682,25 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("params keeps " ^ key ^ " at 120 columns") true
         (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_params))))
     [ "Enter"; "E"; "x" ];
+  (* #36650, measured: this pane does two things -- the type-aware field and
+     the JSON one. While [e] and [Enter] were two items for the first, 80
+     cells held both of them and dropped [E], the only item for the second.
+     The fitter reads position, not meaning, so the row that survived showed
+     two doors to one action and no sign of the other. One item for one
+     action is what buys the cell back. *)
+  let params_at_80 =
+    fitted_footer ~cols:80 (Masc_tui_keys.footer_hints_config ~pane:Config_params)
+  in
+  Alcotest.(check bool) "params keeps its other action at 80 columns" true
+    (footer_has_key "E" params_at_80);
+  (* Both spellings of the field, asked separately. While [footer_has_key] saw
+     only a key's last atom, the [Enter] line passed and an [e] line would
+     have failed -- so the pair's two doors are named here, and a future
+     spelling of [Enter / e] cannot quietly turn either answer around. *)
+  Alcotest.(check bool) "params keeps the shared field at 80 columns" true
+    (footer_has_key "Enter" params_at_80);
+  Alcotest.(check bool) "params keeps the field's other spelling at 80 columns" true
+    (footer_has_key "e" params_at_80);
   (* The themes list pages now, and its own keys still fit the row. *)
   List.iter
     (fun key ->
@@ -1783,6 +1985,8 @@ let standalone_lane ~lane_id ~label : Tui_decode.standalone_lane =
   ; sl_last_outcome = None
   ; sl_p50_elapsed_s = None
   ; sl_selected_slots = []
+  ; sl_runs_without_slot =
+      { Tui_decode.slws_vendor_system_one = 0; slws_server_restarted = 0; slws_no_slot = 0 }
   }
 
 (* The four lanes the projection fixes, in its order
@@ -1808,7 +2012,11 @@ let keeper_lane name : Tui_decode.keeper_lane =
   ; kl_turn_phase = Tui_decode.Lane_turn_idle
   ; kl_idle_seconds = 0
   ; kl_last_outcome = None
-  ; kl_diagnosis = None
+  ; kl_conditions =
+      { Tui_decode.klc_launch_pending = false
+      ; klc_heartbeat_healthy = true
+      ; klc_turn_healthy = true
+      }
   }
 
 let keeper_snapshot lanes : Tui_decode.keeper_lanes_snapshot =
@@ -1906,7 +2114,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_votes = 0
   ; bp_comment_count = 0
   ; bp_created_at = "2026-09-04T00:00:00Z"
-  ; bp_updated_at = None
+  ; bp_created_at_unix = None; bp_updated_at = None
   ; bp_hearth = None
   ; bp_kind = None
   }
@@ -1975,8 +2183,8 @@ let planning_state () =
           ; pr_dropped = 0
           }
       ; pl_backlog =
-          { pb_todo = 0; pb_claimed = 0; pb_running = 0; pb_done = 0
-          ; pb_cancelled = 0 }
+          { pb_todo = 0; pb_claimed = 0; pb_running = 0
+          ; pb_awaiting_verification = 0; pb_done = 0; pb_cancelled = 0 }
       (* This surface's key tests are about the rows the cursor walks, and the
          history lines sit above the divider outside them. Empty keeps the
          fixture about that. *)
@@ -2017,14 +2225,20 @@ let check_hit state ~terminal_rows ~row expected =
     (hit_to_string (lanes_overview_hit state ~terminal_rows ~row))
 
 (* The overview frame, row by row: 1 strip, 2 box top, 3 header, 4 divider,
-   5 matrix heading, and 6-9 the four standalone rows. Everything below is
-   note/padding/footer chrome, never a hidden Keeper table. *)
+   5 standalone heading, 6 the Add-ons summary, 7 the table heading, and 8-11
+   the four standalone rows. Everything below is note/padding/footer chrome,
+   never a hidden Keeper table.
+
+   This list is a second hand count of what [render_lanes_overview] draws, and
+   it went on agreeing with the first while both were two rows short. The
+   screen itself answers in the PTY walk "a press selects the lane drawn under
+   it"; this case holds the edges around it. *)
 let test_overview_hit_reads_the_frame_rows () =
   let state = lanes_state () in
-  check_hit state ~terminal_rows:40 ~row:5 "none";
-  check_hit state ~terminal_rows:40 ~row:6 "standalone 0";
-  check_hit state ~terminal_rows:40 ~row:9 "standalone 3";
-  check_hit state ~terminal_rows:40 ~row:10 "none";
+  check_hit state ~terminal_rows:40 ~row:7 "none";
+  check_hit state ~terminal_rows:40 ~row:8 "standalone 0";
+  check_hit state ~terminal_rows:40 ~row:11 "standalone 3";
+  check_hit state ~terminal_rows:40 ~row:12 "none";
   check_hit state ~terminal_rows:40 ~row:12 "none";
   check_hit state ~terminal_rows:40 ~row:13 "none";
   check_hit state ~terminal_rows:40 ~row:14 "none";
@@ -2044,9 +2258,9 @@ let test_overview_hit_waits_for_the_matrix () =
   (* The matrix's single loading note is not a lane row. *)
   let state = lanes_state () in
   state.standalone_lanes <- None;
-  check_hit state ~terminal_rows:40 ~row:6 "none";
-  check_hit state ~terminal_rows:40 ~row:9 "none";
-  check_hit state ~terminal_rows:40 ~row:10 "none"
+  check_hit state ~terminal_rows:40 ~row:8 "none";
+  check_hit state ~terminal_rows:40 ~row:11 "none";
+  check_hit state ~terminal_rows:40 ~row:12 "none"
 
 (* The detail tabs used to draw a hand-written hint string in the renderer,
    a second key list this module did not own. The strip must project the
@@ -2081,16 +2295,16 @@ let test_detail_tab_hint_projects_the_table () =
    strip and the sheet, so dropping a binding passed both -- the same shape
    as the drift they were written to close. This list is the contract:
    changing it is a decision, not a slip. Sources are the guarded arms in
-   masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P on the
-   GitHub tab, e for the settings form). *)
+   masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P and one
+   digit per login scope on the GitHub tab, e for the settings form). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   [ Detail_info, []
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
-  ; Detail_github, [ "L"; "P" ]
+  ; Detail_github, [ "L"; "P"; "1"; "2" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
-  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u" ]
+  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u"; "U U" ]
   ; Detail_automation, []
   ; Detail_runs, []
   ]
@@ -2111,6 +2325,8 @@ let test_key_atoms_read_the_table_notation () =
        [ "s"; "o" ]);
   Alcotest.(check bool) "Channels takes e" true
     (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
+  Alcotest.(check bool) "Channels takes U for unbind all" true
+    (List.mem "U" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
   Alcotest.(check (list string)) "Info takes nothing" []
     (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
 
@@ -2318,7 +2534,9 @@ let test_workspace_activity_offers_no_row_search () =
   let repository : Tui_decode.repository =
     { rp_id = "masc"; rp_name = "masc"; rp_codebase = None; rp_url = ""
     ; rp_local_path = "."; rp_resolved_local_path = "/tmp/masc"
-    ; rp_default_branch = "main"; rp_status = "ready"; rp_keepers = []
+    ; rp_default_branch = "main"
+    ; rp_status = Tui_decode.Repository_status Repo_manager_types.Active
+    ; rp_keepers = []
     ; rp_auto_sync = false }
   in
   state.view <- Repositories;
@@ -2490,7 +2708,8 @@ let test_a_searchable_surface_does_not_also_bind_n () =
      the key itself, and [search_last] outlives the surface it was typed on.
      A surface that both answers the row search and binds [n] therefore loses
      that key for the rest of the session. Harness did: its overrule now
-     spells [x], the way Verification spells its own rejection.
+     spells [x], the way Verification spells its own rejection, and since
+     #36652 that [x] rides inside the pinned pair [y / x].
 
      Read over the same list the declaration test uses, so the two cannot
      disagree about which surfaces the row search reaches. *)
@@ -2499,8 +2718,19 @@ let test_a_searchable_surface_does_not_also_bind_n () =
        check Alcotest.bool (label ^ " leaves n to the search step") false
          (List.mem "n" (surface_keys surface)))
     surfaces_that_answer_the_row_search;
+  (* Read the atoms, not the whole key: #36652 put the overrule inside the
+     pinned pair ([y / x]) so a narrow verdict pane cannot drop the keys that
+     answer a ruling. What this asserts is unchanged -- this surface's
+     rejection is [x], not [n].
+
+     The [n] check above stays whole on purpose. [n / N] *is* the row search,
+     so a surface carrying that item is fine; what would cost the session is
+     binding a bare [n] to something else. *)
   check Alcotest.bool "Harness overrules with x" true
-    (List.mem "x" (surface_keys Harness))
+    (List.exists
+       (fun key ->
+         List.mem "x" (List.map String.trim (String.split_on_char '/' key)))
+       (surface_keys Harness))
 
 let test_detail_tab_keys_reach_the_help_sheet () =
   let sheet = Masc_tui_keys.help_sections ~current:(Keepers Keeper_detail) () in
@@ -2597,6 +2827,14 @@ let () =
             test_schedules_footer_names_write_and_read_controls
         ; Alcotest.test_case "schedule create form names required fields" `Quick
             test_schedule_create_form_names_the_canonical_required_fields
+        ; Alcotest.test_case
+            "modify refuses exactly the statuses the store refuses" `Quick
+            test_modify_refuses_exactly_the_statuses_the_store_refuses
+        ; Alcotest.test_case "modify names the status it refuses" `Quick
+            test_modify_names_the_status_it_refuses
+        ; Alcotest.test_case
+            "modify leaves an unnamed status to the server" `Quick
+            test_modify_leaves_an_unnamed_status_to_the_server
         ; Alcotest.test_case "schedule update form preserves definition" `Quick
             test_schedule_update_form_preserves_exact_editable_definition
         ; Alcotest.test_case "Repositories offers Code and Git changes" `Quick
@@ -2659,6 +2897,8 @@ let () =
             test_the_config_marks_are_in_the_sheet
         ; Alcotest.test_case "no surface gives one answer two rows" `Quick
             test_no_surface_gives_one_answer_two_rows
+        ; Alcotest.test_case "every Config pane answers once" `Quick
+            test_every_config_pane_answers_once
         ; Alcotest.test_case "the file marks are in the sheet" `Quick
             test_the_file_marks_are_in_the_sheet
         ; Alcotest.test_case "Lanes is a main destination" `Quick

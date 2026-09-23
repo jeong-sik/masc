@@ -3243,7 +3243,7 @@ let test_exception_after_durable_advance_stops_before_successor () =
                   ~before_advance:(fun ~failed ~next ->
                     let failed, failure = flow_execution_failure failed in
                     (match failure.EO.cause with
-                     | EO.Completion_failed -> ()
+                     | EO.Completion_failed _ -> ()
                      | _ ->
                        fail
                          "advance callback did not receive the typed completion failure");
@@ -3624,6 +3624,23 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
       | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited } ->
         ()
       | _ -> fail "HTTP 429 lost its typed rate-limit cause")
+;;
+
+(* A 402 says the binding's account cannot pay, not that the request is bad.
+   Like a 429 it refused before any generation, and the successor carries its
+   own account, so the lane walks it instead of ending on the first candidate —
+   this is the promotion that lets a lane whose last HTTP slot is out of paid
+   quota reach its CLI tail. *)
+let test_payment_required_402_refusal_advances_once_to_successor () =
+  assert_typed_capacity_refusal_advances_once
+    ~label:"payment-required"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 402
+      , {|{"error":{"message":"Insufficient Balance"}}|} )
+    ~assert_cause:(function
+      | EO.Provider_response_refused
+          { http_status = 402; refusal = EO.Payment_required } -> ()
+      | _ -> fail "HTTP 402 lost its typed payment-required cause")
 ;;
 
 let test_server_refusal_advances_once_to_successor status =
@@ -4599,6 +4616,10 @@ let () =
             "HTTP 429 rate limit advances with one dispatch per candidate"
             `Quick
             test_rate_limited_429_refusal_advances_once_to_successor
+        ; test_case
+            "HTTP 402 payment required advances with one dispatch per candidate"
+            `Quick
+            test_payment_required_402_refusal_advances_once_to_successor
         ; test_case "HTTP 500 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 500)
         ; test_case "HTTP 503 advances once to the declared successor" `Quick

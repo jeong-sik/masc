@@ -414,18 +414,7 @@ let runtime_config_raw_json
          ; "commit", runtime_config_commit_json receipt
          ])
 
-(* Line count for the audit [lines] metric. [String.split_on_char '\n'] counts a
-   trailing newline as an extra empty line ("a\nb\n" -> 3 elements), so count
-   newline-separated lines treating a final '\n' as terminating the last line
-   rather than starting a new one ("a\nb\n" -> 2). *)
-let runtime_config_line_count text =
-  if String.length text = 0
-  then 0
-  else (
-    let newlines =
-      String.fold_left (fun n c -> if Char.equal c '\n' then n + 1 else n) 0 text
-    in
-    if Char.equal text.[String.length text - 1] '\n' then newlines else newlines + 1)
+let runtime_config_line_count = Server_skill_write_audit.line_count
 
 (* RFC fusion-seat-routes §2.5 — the typed fusion write. The client sends the
    revision it read with the settings; the edit re-checks it inside the config
@@ -996,28 +985,14 @@ let audit_runtime_config_write
       (Printexc.to_string exn)
 
 let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome =
-  try
-    Audit_log.log_action
-      (Mcp_server.workspace_config state)
-      ~agent_id:agent_name
-      ~action:(Audit_log.Custom "skill_write")
-      ~details:
-        (`Assoc
-          [ "reference", Skill_reference.to_yojson reference
-          ; "candidate_revision",
-            `String
-              (Skill_reference.content_revision_of_source_text source_text
-               |> Skill_reference.content_revision_to_string)
-          ; "bytes", `Int (String.length source_text)
-          ; "lines", `Int (runtime_config_line_count source_text)
-          ; "status", `String status
-          ])
-      ~outcome
-      ()
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Dashboard.warn "Skill write audit failed: %s" (Printexc.to_string exn)
+  Server_skill_write_audit.record
+    (Mcp_server.workspace_config state)
+    ~agent_id:agent_name
+    ~subject:(Server_skill_write_audit.Published reference)
+    ~source_text
+    ~status
+    ~outcome
+    ()
 ;;
 
 let audit_skill_delete state agent_name ~reference ~status ~recovery ~outcome =
@@ -1715,11 +1690,16 @@ let handle_gate_retry_body state operator_name request reqd body_str =
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
 ;;
 
-let handle_gate_rule_delete_body state request reqd body_str =
+let handle_gate_rule_delete_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
     let base_path = (Mcp_server.workspace_config state).base_path in
-    match dashboard_gate_rule_delete_http_json ~base_path ~args with
+    match
+      dashboard_gate_rule_delete_http_json
+        ~base_path
+        ~deleted_by:operator_name
+        ~args
+    with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error message ->
       respond_json_value_with_cors
@@ -3098,9 +3078,9 @@ let add_routes ~sw ~clock router =
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/rules/delete" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _operator_name _req reqd ->
+         (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
-             (handle_gate_rule_delete_body state request reqd))
+             (handle_gate_rule_delete_body state operator_name request reqd))
          request reqd)
 
   |> Http.Router.get "/api/v1/operator" (fun request reqd ->
@@ -3666,8 +3646,8 @@ let add_routes ~sw ~clock router =
          request reqd)
 
   |> Http.Router.post "/api/v1/keepers/turn/interrupt" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
-         handle_keeper_turn_interrupt state request reqd) request reqd)
+       with_tool_actor_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state actor _req reqd ->
+         handle_keeper_turn_interrupt ~actor state request reqd) request reqd)
 
   (* Answers a tool call the keeper is holding. Same authority as interrupting
      a turn: both decide what a running turn is allowed to do next. The route
@@ -3675,8 +3655,8 @@ let add_routes ~sw ~clock router =
      borrowing a dispatchable tool's name, so the permission it enforces stays
      reviewable on its own terms. *)
   |> Http.Router.post "/api/v1/keepers/tool-approval" (fun request reqd ->
-       with_tool_auth ~tool_name:"keeper_tool_approval_route" (fun state _req reqd ->
-         handle_keeper_tool_approval state request reqd) request reqd)
+       with_tool_actor_auth ~tool_name:"keeper_tool_approval_route" (fun state actor _req reqd ->
+         handle_keeper_tool_approval ~actor state request reqd) request reqd)
 
   (* What one Keeper is waiting on a human for. *)
   |> Http.Router.get "/api/v1/keepers/asks" (fun request reqd ->
@@ -3686,8 +3666,8 @@ let add_routes ~sw ~clock router =
   (* Answers a Keeper's question. The operator may be at any surface; the
      log settles concurrent submissions on first write. *)
   |> Http.Router.post "/api/v1/keepers/ask-answer" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_ask" (fun state _req reqd ->
-         handle_keeper_ask_answer state request reqd) request reqd)
+       with_tool_actor_auth ~tool_name:"masc_ask" (fun state actor _req reqd ->
+         handle_keeper_ask_answer ~actor state request reqd) request reqd)
 
   (* Lists the tool calls keepers are holding, so a wait whose owning stream
      watcher is gone can still be answered instead of only timing out

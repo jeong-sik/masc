@@ -120,15 +120,14 @@ let with_ws name fn =
         | Ok tools -> tools
         | Error detail -> fail ("verification lookup fixture is invalid: " ^ detail)
       in
-      let root_layout =
+      let lookup_root =
         match Masc.Verification_authority_tools.root_layout lookup_tools with
-        | Ok layout -> layout
+        | Ok lookup_root -> lookup_root
         | Error detail -> fail ("verification root fixture is unreadable: " ^ detail)
       in
-      let lookup = AR.Lookup_tools
-        { schemas = Masc.Verification_authority_tools.schemas lookup_tools
+      let lookup =
+        { AR.schemas = Masc.Verification_authority_tools.schemas lookup_tools
         ; dispatch = Masc.Verification_authority_tools.dispatch lookup_tools
-        ; root_layout
         }
       in
       (* Preflight the same prompt contract as the daemon before waiting for
@@ -138,6 +137,7 @@ let with_ws name fn =
         ~question:{ completion_contract = None; required_evidence = [];
                     evidence_posture = AR.Note_only; few_shot_block = "" }
         ~lookup
+        ~lookup_root
         { task_title = "Completion fixture preflight"; task_description = "Controlled verdict dispatch";
           completion_notes = "Fixture notes"; agent_name = meta.name; task_id = "fixture-preflight";
           evidence_refs = []; evidence_images = [] } with

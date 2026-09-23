@@ -153,7 +153,15 @@ let format_own_recent_actions_turn (turn : Keeper_own_recent_actions.turn) : str
     | Keeper_own_recent_actions.Failed_call (Some detail) ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_rejected_detail_row
-        [ "turn_id", turn_id; "tool", call.tool; "input", call.input; "detail", detail ])
+        [ "turn_id", turn_id; "tool", call.tool; "input", call.input; "detail", detail ]
+    | Keeper_own_recent_actions.Deferred_call ->
+      render_fragment
+        Prompt_names.keeper_world_own_recent_actions_turn_deferred_row
+        [ "turn_id", turn_id; "tool", call.tool ]
+    | Keeper_own_recent_actions.Unrecorded_call ->
+      render_fragment
+        Prompt_names.keeper_world_own_recent_actions_turn_unrecorded_row
+        [ "turn_id", turn_id; "tool", call.tool ])
   |> String.concat "\n"
 ;;
 

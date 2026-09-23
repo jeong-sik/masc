@@ -173,13 +173,6 @@ type run_result = {
   stop_reason : stop_reason;
 }
 
-val yielded_pre_first_token : session_id:string -> run_result
-(** A synthesized [run_result] for a turn that abandoned its provider attempt
-    before the first streaming event because a person queued behind it (the
-    pre-first-token gap; RFC-0441). [turns_used = 0], no checkpoint,
-    [stop_reason = Yielded_to_durable_stimulus] so downstream treats it as a
-    durable-stimulus yield and re-runs the source wake fresh next cycle. *)
-
 (** {1 Label resolution} *)
 
 val label_resolution_error_to_string :
@@ -316,7 +309,14 @@ val strip_unsupported_modality_blocks :
     [ToolResult] with its remaining blocks. Returns the kept blocks and a
     per-modality drop count summed across both levels. Covers the same blocks
     [required_modalities_of_content_blocks] reads, so a modality reported as
-    required is a modality this function removes. *)
+    required is a modality this function removes.
+
+    A [ToolResult] left with no blocks keeps no structured view
+    ([content_blocks = None]), so each provider wire sends its [content]
+    string rather than an empty block list — which reaches the OpenAI wires as
+    the string ["[]"]. The answer does not depend on who emptied the list:
+    a result that arrived with [content_blocks = Some []] comes back with
+    [None] too. [content] itself is never rewritten. *)
 
 val strip_unsupported_modality_messages :
   Llm_provider.Capabilities.capabilities ->

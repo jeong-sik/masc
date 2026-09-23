@@ -162,14 +162,23 @@ let decide_transition ~phase ~(action : action) =
   | Executing, Reopen -> Ok (Already Executing)
   | Executing, (Confirm_completion | Record_proof_proven | Record_proof_refuted) -> invalid
   (* Verifying (RFC-0387 stage 2): the completion request is in the pipeline
-     and the proof is judged out-of-band. Only the verifier's proof actions
-     leave the phase; a repeated [Request_complete] is the explicit retry the
-     RFC substitutes for wall-clock expiry, so it answers [Already] and the
-     handler reports (and re-arms) the pending proof. *)
+     and the proof is judged out-of-band. The verifier's proof actions leave
+     the phase with a verdict; a repeated [Request_complete] is the explicit
+     retry the RFC substitutes for wall-clock expiry, so it answers [Already]
+     and the handler reports (and re-arms) the pending proof.
+
+     The operator can also leave without a verdict: [Drop] abandons the goal
+     and [Reopen] returns it to [Executing], clearing the pending request.
+     Without these a verifier lane that never answers holds the goal in
+     [Verifying] with no way out. A verdict that arrives after either one
+     names a phase the goal is no longer in and is refused.
+     [Confirm_completion] stays invalid: there is no proof to confirm yet. *)
   | Verifying, Record_proof_proven -> Ok (Move_to Awaiting_confirmation)
   | Verifying, Record_proof_refuted -> Ok (Move_to Executing)
   | Verifying, Request_complete -> Ok (Already Verifying)
-  | Verifying, (Confirm_completion | Drop | Reopen) -> invalid
+  | Verifying, Drop -> Ok (Move_to Dropped)
+  | Verifying, Reopen -> Ok (Move_to Executing)
+  | Verifying, Confirm_completion -> invalid
   (* Completed and Dropped are terminal: only reopening leaves them.
      [Dropped, Request_complete] stays invalid -- completion is not the phase a
      dropped goal is in, so it is a real request for a state change, not a

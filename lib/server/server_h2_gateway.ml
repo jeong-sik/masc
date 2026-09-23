@@ -24,7 +24,7 @@ let make_error_handler () =
     let headers = H2.Headers.of_list [("content-type", "text/plain")] in
     let body = respond headers in
     H2.Body.Writer.write_string body message;
-    H2.Body.Writer.close body
+    h2_close_after_flush body
   in
 
 
@@ -133,7 +133,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
     stop_once ();
     (* Cancellation travels as an exception in Eio, so a wildcard that ate it
        here would report a clean exit from a fiber the switch had cancelled. *)
-    (try H2.Body.Writer.close writer with
+    (try h2_close_after_flush writer with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | _ -> ())
   in
@@ -187,10 +187,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             ~status:`Internal_server_error ~extra_headers:cors
     in
     let h2_respond_auth_error h2_reqd err =
-      let status = http_status_of_auth_error err in
+      let status, body =
+        Server_auth.auth_refusal_response ~protocol:"h2"
+          ~path:(Http.Request.path httpun_request) err
+      in
       h2_respond_json
         h2_reqd
-        (auth_error_json err)
+        body
         ~status:(status :> H2.Status.t)
         (* One policy for both protocols (#28166). Same result as the [cors]
            computed above for this request; naming it here keeps H1 and H2
@@ -374,7 +377,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                ] @ cors) in
                let response = H2.Response.create ~headers:resp_headers `Not_modified in
                let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-               H2.Body.Writer.close writer
+               h2_close_after_flush writer
            | _ ->
                let extra = [("etag", etag_value); ("cache-control", dashboard_index_cache_control); ("vary", "Accept-Encoding")] @ cors in
                h2_respond_html h2_reqd body ~extra_headers:extra)
@@ -904,9 +907,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             let csp_header = ("content-security-policy", graphql_csp_header nonce) in
             h2_respond_html h2_reqd (graphql_playground_html ~nonce) ~extra_headers:(csp_header :: cors))
 
+      (* The gate runs before the body is read, as on H1 where [with_read_auth]
+         wraps [handle_post_graphql]; otherwise a client that will be refused
+         still gets the server to buffer its whole body first. *)
       | `POST, "/graphql" ->
-          h2_read_body h2_reqd (fun body_str ->
-            with_h2_read_auth h2_reqd (fun state ->
+          with_h2_read_auth h2_reqd (fun state ->
+            h2_read_body h2_reqd (fun body_str ->
               let response = Graphql_api.handle_request ~config:(Mcp_server.workspace_config state) body_str in
               let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
               h2_respond_json h2_reqd response.body ~status ~extra_headers:cors))
@@ -1223,6 +1229,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
 
+      | `GET, "/api/v1/repositories/pulls" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            h2_respond_json_value h2_reqd
+              (Server_repository_pulls.snapshot_to_yojson
+                 (Server_repository_pulls.current ()))
+              ~extra_headers:cors)
+
       | `GET, "/api/v1/dashboard/briefing" ->
           with_h2_public_read h2_reqd (fun state ->
             let json = dashboard_briefing_http_json ~state ~sw ~clock httpun_request in
@@ -1342,7 +1355,10 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                    ~status:`Bad_request
                    ~extra_headers:cors
                else
-                 match Keeper_meta_store.read_meta config keeper_name with
+                 (* Effective meta: the lane is chosen by the TOML-owned
+                    [sandbox_profile], which a persisted read answers with
+                    the default. *)
+                 match Keeper_meta_store.read_effective_meta config keeper_name with
                  | Error message ->
                    h2_respond_json_value
                      h2_reqd
@@ -1358,18 +1374,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                         ])
                      ~status:`Not_found
                      ~extra_headers:cors
-                 | Ok (Some _) ->
+                 | Ok (Some meta) ->
                    let hostname =
                      Option.value
-                       ~default:"github.com"
+                       ~default:Keeper_github_identity.default_hostname
                        (Server_utils.query_param httpun_request "hostname")
                    in
-                   (match
-                      Keeper_github_identity.observe
-                        ~config
-                        ~keeper_name
-                        ~hostname
-                    with
+                   (match Keeper_github_login_lane.observe ~config ~meta ~hostname with
                     | Ok observation ->
                       h2_respond_json_value
                         h2_reqd
@@ -1441,9 +1452,20 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                  | Ok (Some meta) ->
                    let hostname =
                      Option.value
-                       ~default:"github.com"
+                       ~default:Keeper_github_identity.default_hostname
                        (Server_utils.query_param httpun_request "hostname")
                    in
+                   match
+                     Keeper_github_identity.login_scopes_of_query
+                       (Server_utils.query_param httpun_request "scopes")
+                   with
+                   | Error message ->
+                     h2_respond_json_value
+                       h2_reqd
+                       (`Assoc [ "error", `String message ])
+                       ~status:`Bad_request
+                       ~extra_headers:cors
+                   | Ok scopes ->
                    let headers =
                      H2.Headers.of_list
                        ([ "content-type", "text/event-stream"
@@ -1469,12 +1491,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                      H2.Body.Writer.flush writer (fun _ -> ())
                    in
                    Fun.protect
-                     ~finally:(fun () -> H2.Body.Writer.close writer)
+                     ~finally:(fun () -> h2_close_after_flush writer)
                      (fun () ->
                         match
                           Keeper_github_identity.stream_login
                             ~config
                             ~keeper_name
+                            ~scopes
                             (* Shaping a Remote_ssh lane runs commands on the
                                endpoint. Doing that before this response existed
                                left the browser waiting on a request that had not
@@ -1708,22 +1731,4 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         ~message:"MASC does not support authority-free OPTIONS *"
         h2_reqd
   in
-  (* H2 error handler *)
-  let _h2_error_handler _client_addr ?request:_ error respond =
-    let msg = match error with
-      | `Exn exn -> Printexc.to_string exn
-      | `Bad_request -> "Bad request"
-      | `Bad_gateway -> "Bad gateway"
-      | `Internal_server_error -> "Internal server error"
-    in
-    let headers = H2.Headers.of_list [
-      ("content-type", "text/plain");
-      ("content-length", string_of_int (String.length msg));
-    ] in
-    let body = respond headers in
-    H2.Body.Writer.write_string body msg;
-    H2.Body.Writer.close body
-  in
-
-
   h2_request_handler

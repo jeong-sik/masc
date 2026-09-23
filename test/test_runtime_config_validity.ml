@@ -4043,32 +4043,17 @@ streaming = false
           Yojson.Safe.Util.(body |> member "temperature" |> to_float)))
 
 (* task-1649: a lane whose every candidate is missing from the catalog is
-   dropped whole at load. Read [degrade_loaded_for_missing_catalog]
-   (runtime.ml) end to end before trusting the ticket's premise here: its
-   [Ok] branch -- the only place a [startup_degradation] value is ever
-   built -- is reached only when [has_routing_references] is false, and
-   that flag covers [dropped_lanes] together with [dropped_lane_candidates]
-   / [dropped_routes] / [dropped_media_failover]. A fully-dropped lane
-   always makes [has_routing_references] true, so a live, returned
-   [Initialized_degraded] can never carry a non-empty [dropped_lanes] --
-   [init_default_degraded_report] refuses the boot instead
-   ([Runtime_config_error]), and [server_runtime_bootstrap.ml] answers that
-   by entering [Setup_required], not by serving keeper turns. There is no
-   path from a fully-dropped lane to [Runtime.resolve_assignment] returning
-   [`Missing] for it at keeper-turn time -- confirmed against every writer
-   of runtime state, including the hot-reload save path
-   ([Runtime.save_config_text] / [validate_config_text]), which rejects the
-   same config for the same reason before it is ever applied live.
-   The earlier form of this test asserted the unreachable branch
-   ([Ok (Initialized_degraded ...)] with [orphaned-lane] inside
-   [dropped_lanes]) and failed in CI exactly where this comment says it
-   must: [degrade_loaded_for_missing_catalog] returned [Error]. What *is*
-   reachable, and was still only pinned for a partially-dropped lane
-   (`test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes`,
-   whose lane keeps one live candidate), is that a *fully*-dropped lane
-   also refuses to boot and the refusal names the lane under
-   "[runtime.lanes].dropped.<lane>", not just
-   "[runtime.lanes].candidates.<lane>". That is what this pins. *)
+   dropped whole at load, and any routing reference to a missing runtime --
+   default, media failover, lane candidate or whole lane -- refuses the
+   degraded boot in [degrade_loaded_for_missing_catalog] (runtime.ml)
+   ([Runtime_config_error]); [server_runtime_bootstrap.ml] answers that by
+   entering [Setup_required]. The hot-reload save path
+   ([Runtime.save_config_text] / [validate_config_text]) rejects the same
+   config for the same reason. A partially-dropped lane is pinned by
+   `test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes`;
+   this pins that a *fully*-dropped lane also refuses to boot and the refusal
+   names the lane under "[runtime.lanes].dropped.<lane>", not just
+   "[runtime.lanes].candidates.<lane>". *)
 let test_fully_dropped_lane_refuses_degraded_boot_and_names_the_lane () =
   let catalog =
     "[[models]]\n\
@@ -4240,9 +4225,6 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check string "configured default"
            "ollama.good"
            degradation.configured_default_runtime_id;
-         check string "effective default"
-           "ollama.good"
-           degradation.effective_default_runtime_id;
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
@@ -4311,7 +4293,7 @@ let test_server_degraded_init_rejects_uncatalogued_default () =
        match Runtime.init_default_degraded_report ~config_path:path with
        | Ok Runtime.Initialized -> fail "expected missing default catalog row"
        | Ok (Runtime.Initialized_degraded _) ->
-         fail "missing configured default must not pick another effective default"
+         fail "a missing configured default must refuse the boot, not pick another default"
        | Error (Runtime.Missing_catalog_models report) ->
          failf
            "expected default-specific config error, got missing catalog report: %s"
@@ -4537,7 +4519,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        default = \"%s\"\n\
        \n\
        [runtime.exact_output_lanes.auxiliary_exact]\n\
-       slots = [\"%s\"]\n"
+       slots = [\"%s\"]\n\
+       max_output_tokens = 4096\n"
       default
       slot
   in

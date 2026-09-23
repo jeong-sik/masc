@@ -226,8 +226,9 @@ pretending to render content. With detail focused, `[`/`]` read the previous
 or next resource without returning to the list. Responses are URI-stamped, so
 a slow older read cannot replace a newer selection. `Ctrl-W` switches between
 list and detail, and `j`/`k` move whichever pane has focus. The selected
-Keeper's Channels tab shows transport status; `b`/`u` open a binding form with
-that Keeper already named.
+Keeper's Channels tab shows transport status; `b` opens a binding form with
+that Keeper already named, and `U` `U` removes all of its bindings (see
+[Keeper detail](#keeper-detail)).
 
 Tools has five deliberately different questions under `p`: `available` is
 the effective surface delivered to the selected Keeper now; `async runs` is
@@ -305,7 +306,10 @@ completion contract's evidence list, attached files - read from the same
 backlog load the list was projected from. `Esc` closes the detail, a second
 `Esc` returns `j`/`k` to the events. Events are windowed against
 both panel columns, so a long event wraps to the width actually available
-rather than the header width.
+rather than the header width. An error event wears the `✗` the chat pane
+uses for a failure, just after the clock; every other level keeps that cell
+for its text. The mark is a shape rather than a colour alone, so it holds
+under `NO_COLOR`.
 
 The tail of the cluster row is what the server reports about its own delivery
 paths: one entry per path, then the queue's pressure and its drop count. It
@@ -459,7 +463,7 @@ restart puts every Keeper back on `auto`.
 
 ### Lanes
 
-The [Glossary](spec/00-glossary.md#core) uses Lane for Runtime candidate order. Runtime execution owns the model/tool loop, exact-output routes select candidates for a work purpose, and memory queues serialize submitted work. These are separate axes; this section's existing UI label `Lanes` shows exact-output routes.
+The [Glossary](spec/00-glossary.md#core) uses Lane for the fixed exact-output execution path — the same thing this section's UI label `Lanes` shows — and Runtime Candidate Order for the order in which a Keeper turn tries runtime candidates. Runtime execution owns the model/tool loop, exact-output routes select candidates for a work purpose, and memory queues serialize submitted work. These are separate axes.
 
 For TOML package installations, open `/addons` from the composer or choose
 `go Lane Add-ons` in the palette. The [Lane Add-on guide](guides/tui-lane-addons.md)
@@ -586,6 +590,37 @@ collapsing to zero.
    Last Turn:             2026-08-23T01:53:26
   j/k:scroll  l:logs  m:message  Esc:back  Tab:next  q:quit  r:refresh
 ```
+
+The Channels tab lists every transport and its channel bindings. A channel
+reads `name (id)` when the connector's name directory knows it, and
+`id (name unknown)` when it does not.
+
+| Key | Effect |
+|-----|--------|
+| `j` / `k` | move between transports |
+| `J` / `K` | move between the selected transport's bindings |
+| `b` | bind a channel to this Keeper (`$EDITOR` form) |
+| `e` | reassign the selected binding |
+| `u` `u` | remove the selected binding; the first press names it, the second removes it |
+| `U` `U` | remove every binding this Keeper holds, on every transport; the first press lists the channels, the second sends them |
+
+`U` `U` sends one unbind per binding with the Keeper's name as a condition, so
+a channel rebound to another Keeper after the first press is left as is.
+Recent Events gets one line per binding -- removed, kept (now bound to
+another Keeper), not found (with the server's words), or FAILED with the
+server's reason, failures last -- and the footer shows the count of each and
+names the channels that failed. A transport whose binding list the server
+could not read is named in the prompt as not included. On this tab `U` is unbind-all; the runtime picker stays on `U`
+everywhere else in Keeper detail.
+
+Pausing (`p`) or shutting down (`s`) a Keeper that still holds channel
+bindings offers to remove them too. A paused Keeper keeps its channels routed
+to itself and answers on them as soon as it runs again. Once the pause or
+shutdown is accepted, the footer reads `y: also unbind <keeper>'s N channels,
+or any other key to keep them -- <channels>`. `y` sends the same conditional
+unbinds as `U` `U` on the Channels tab; any other key leaves the bindings.
+The offer does not answer to `U`: on the list `U` still opens the runtime
+picker, so pausing and then picking another runtime keeps the channels.
 
 ### Keeper logs
 
@@ -1235,7 +1270,7 @@ to wake up". Open it through the `go Schedules` palette entry. The selected
 Keeper also exposes its automation in the Automation detail tab.
 
 ```
- MASC Schedules  10:44:57  HTTP [connected]
+ MASC Keepers / Schedules  10:44:57  HTTP [connected]
  ─────────────────────────────────────────────────────────────────────────────
    Requests: 34  (page shows first 20)  ·  Next due: 2026-08-24 09:57:00
  ─────────────────────────────────────────────────────────────────────────────
@@ -1587,7 +1622,7 @@ the JSON encoding of the same reference is not drawn beside them.
 
 ### Runtime
 
-Runtime lanes and their ordered candidates, joined to the latest provider
+Runtime candidate orders, joined to the latest provider
 metadata reachability reading by exact `runtime_id`.
 
 ```
@@ -1604,7 +1639,7 @@ provider/model labels. The lane fact on each row says why that candidate is
 the one the lane walks: `head`, `fallback #n`, or `single candidate`.
 `GET /api/v1/dashboard/runtime-probe` supplies only a cached provider
 metadata-endpoint reachability reading. It does not send a completion, execute a CLI
-runtime, or report lane failover history.
+runtime, or report runtime candidate order history.
 
 `CLI not probed` is neutral, and a candidate absent from a stale probe is
 `unobserved`, not unhealthy. Green is limited to the `reachable` token; model,
@@ -1830,6 +1865,36 @@ Exit signals restore terminal modes and cursor state. Job-control suspension
 (`Ctrl-Z`) restores the shell terminal, and `fg` re-enters raw mode and forces a
 complete repaint.
 
+Every session writes one line saying why it ended to its own stderr log,
+`.masc/logs/masc-tui-<pid>.log`, prefixed so it can be collected on its own:
+
+```
+[masc-tui] exit: normal (quit key)
+[masc-tui] exit: normal (interrupt)
+[masc-tui] exit: normal (signal SIGTERM)
+[masc-tui] exit: abnormal (exception Failure("..."))
+```
+
+A normal end is the operator or the session's owner asking for it — the `q`
+key, a second `Ctrl-C`, or a terminate signal — and an abnormal one is the
+surface leaving without being asked, such as an uncaught exception. A session
+that leaves without naming a cause reads as `abnormal (no cause was
+recorded)`, which is its own wording rather than a made-up exception. A cause
+longer than 200 bytes is cut on a character boundary and the row ends in
+`[+N bytes]`, so a backtrace cannot turn one session's row into a page.
+
+The line is the only record of the end: the log otherwise holds the boot
+lines, so a session that ended used to leave no reason behind. Counting a
+day's ends by cause is one command:
+
+```
+grep -h '\[masc-tui\] exit:' .masc/logs/masc-tui-*.log | sort | uniq -c | sort -rn
+```
+
+A session killed with `SIGKILL`, or one whose machine lost power, writes
+nothing — no handler runs — so the count covers ends the process survived
+long enough to name.
+
 Viewports below the fixed chrome budget render a compact resize gate instead of
 a clipped frame, and message editing is suppressed until the terminal grows.
 
@@ -1847,7 +1912,13 @@ out the two commands.
 own binary. `start-masc.sh` builds and restarts the server (`bin/main_eio.exe`)
 and does not touch it, so a server restart leaves the TUI on the binary it
 started with. Rebuild with `dune build bin/masc_tui.exe`, then quit and reopen
-the TUI.
+the TUI. `scripts/tui-graceful-restart.sh --build` does that hand quit for you:
+it builds first (a failed build leaves the running session untouched), sends
+the running surface `SIGTERM`, and only starts the fresh binary after the old
+session's per-PID log carries a graceful row (`exit: normal (signal SIGTERM)`,
+the vocabulary above). A session that does not end within `--timeout` is left
+alone — the script never escalates to `SIGKILL` and never starts a second
+surface on top of a live one.
 
 **Header shows `[disconnected]`.** The server is not answering on
 `127.0.0.1:<port>`. Keepers and the Tasks panel keep working; Approvals, Board,

@@ -86,7 +86,8 @@ let count_atoms messages =
          then count
          else (
            match Types.Extra_system_context_provenance.classify m.metadata with
-           | Types.Extra_system_context_provenance.Absent -> count + 1
+           | Types.Extra_system_context_provenance.Absent ->
+             if Window.is_working_state m then count else count + 1
            | _ -> count)
        | Types.System | Types.Tool -> count)
     0
@@ -941,6 +942,25 @@ let test_from_atom_view_keeps_the_atoms_from_the_front () =
     (total_bytes projection.Window.messages) transmitted_bytes
 ;;
 
+(* The Librarian working state opens a summarized range under its own tag:
+   pinned like the per-turn context, but not read as that context. *)
+let test_from_atom_view_keeps_the_working_state_under_its_own_tag () =
+  let working_state =
+    message ~metadata:Window.working_state_metadata ~role:Types.User "working-state"
+  in
+  Alcotest.(check bool) "the working state is not the per-turn context" false
+    (Window.is_extra_context working_state);
+  Alcotest.(check bool) "the per-turn context is not a working state" false
+    (Window.is_working_state extra_context);
+  let history = working_state :: atoms 5 in
+  let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:3 history in
+  Alcotest.(check int) "two atoms kept" 2 (count_atoms projection.Window.messages);
+  Alcotest.(check int) "three dropped" 3 projection.Window.dropped_atoms;
+  Alcotest.(check int) "five counted" 5 projection.Window.atom_count;
+  Alcotest.(check bool) "the working state survives the cut" true
+    (List.exists (fun (m : Types.message) -> m == working_state) projection.Window.messages)
+;;
+
 let test_from_atom_view_at_zero_is_the_whole_history () =
   let history = atoms 4 in
   let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:0 history in
@@ -1112,6 +1132,8 @@ let () =
             test_target_newest_atom_overrun_is_reported_not_refused
         ; Alcotest.test_case "from-atom view keeps the atoms from the front" `Quick
             test_from_atom_view_keeps_the_atoms_from_the_front
+        ; Alcotest.test_case "from-atom view keeps the working state under its own tag" `Quick
+            test_from_atom_view_keeps_the_working_state_under_its_own_tag
         ; Alcotest.test_case "from-atom view at zero is the whole history" `Quick
             test_from_atom_view_at_zero_is_the_whole_history
         ; Alcotest.test_case "from-atom view past the newest atom keeps it" `Quick

@@ -3,6 +3,7 @@
 
     Routes:
     - GET    /api/v1/repositories        — list all repositories
+    - GET    /api/v1/repositories/pulls  — open pull requests (RFC-0465)
     - POST   /api/v1/repositories        — add a new repository
     - GET    /api/v1/repositories/:id    — get a single repository
     - DELETE /api/v1/repositories/:id    — remove a repository

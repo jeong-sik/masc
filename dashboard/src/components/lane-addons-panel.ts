@@ -336,7 +336,7 @@ export function LaneAddonsPanel() {
       ${source.source_id} · ${source.incarnation} · cursor ${source.cursor ?? 'unknown'} · ${source.complete ? 'complete' : 'partial'} ${source.detail ?? ''}
     </p>`)}${slice && html`<p>Slice: ${slice.complete ? 'complete within reported coverage' : 'partial'}</p>`}</div>
     <div class="space-y-2" aria-label="Cross-lane observations">${rows.map(row => html`<article key=${row.id} class="border border-[var(--border)] rounded p-3">
-      <label><input type="checkbox" checked=${selected.includes(row.id)} onChange=${() => setSelected(ids => ids.includes(row.id) ? ids.filter(id => id !== row.id) : [...ids, row.id])} />
+      <label class="v2-mobile-operator-target inline-flex items-center gap-2"><input type="checkbox" checked=${selected.includes(row.id)} onChange=${() => setSelected(ids => ids.includes(row.id) ? ids.filter(id => id !== row.id) : [...ids, row.id])} />
         <strong>${row.title}</strong> · ${row.kind} · ${row.lane_id}</label>
       <p>${formatLaneTime(row.observed_at)} · ${row.subject_id} · actor ${row.actor ?? 'unknown'}</p>
       ${row.clock && html`<p>World time: ${row.clock.domain} ${row.clock.value}</p>`}

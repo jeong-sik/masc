@@ -1,13 +1,28 @@
 open Dashboard_http_keeper_types
 
+(* A turn row's [cost_usd] is [null] when the runtime reported no cost
+   (subscription runtimes; the row's [usage_resolution] then says
+   [exact_cost_unavailable]). That is a different fact from "cost 0", so the
+   reading keeps the two apart. *)
+type cost_reading =
+  | Cost_reported of float
+  | Cost_unreported
+
+let cost_reading_of_row json =
+  match Json_util.assoc_member_opt "cost_usd" json with
+  | Some (`Float value) when Float.is_finite value && value >= 0.0 ->
+      Some (Cost_reported value)
+  | Some `Null -> Some Cost_unreported
+  | Some _
+  | None -> None
+
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.
 
-    Reads each keeper's metrics JSONL, extracts cost_usd / latency_ms /
-    token fields, and returns per-keeper totals plus p50/p95 latency
-    percentiles and a redacted runtime cost breakdown.
-
-    This closes the Phase-2 gap between runtime metrics (already in
-    /api/v1/models/metrics) and per-agent spend (required by preview). *)
+    Reads each keeper's metrics JSONL and returns per-keeper token totals,
+    p50/p95 latency, and cost. Cost is summed only over samples whose runtime
+    reported one; [cost_reported_samples] and [cost_unreported_samples] say
+    how many samples each side holds, and [total_cost_usd] is [null] when no
+    sample in the window reported a cost. *)
 let keeper_cost_aggregates_json
     ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
@@ -21,26 +36,17 @@ let keeper_cost_aggregates_json
       (fun (m : Keeper_meta_contract.keeper_meta) ->
         let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
         let all_metrics_lines = Dated_jsonl.read_recent_lines metrics_store 500 in
-        let costs_rev = ref [] in
+        let reported_cost_sum = ref 0.0 in
+        let cost_reported_samples = ref 0 in
+        let cost_unreported_samples = ref 0 in
         let latencies_rev = ref [] in
         let input_tokens = ref 0 in
         let output_tokens = ref 0 in
         let total_tokens = ref 0 in
-        let runtime_costs : (string, float) Hashtbl.t = Hashtbl.create 8 in
-        let sample_count = ref 0 in
         let nullable_nonnegative_int key json =
           match Json_util.assoc_member_opt key json with
           | Some (`Int value) when value >= 0 -> Some value
           | Some `Null -> Some 0
-          | Some _
-          | None -> None
-        in
-        let nullable_nonnegative_float key json =
-          match Json_util.assoc_member_opt key json with
-          | Some (`Float value)
-            when Float.is_finite value && value >= 0.0 ->
-              Some value
-          | Some `Null -> Some 0.0
           | Some _
           | None -> None
         in
@@ -54,7 +60,7 @@ let keeper_cost_aggregates_json
                   Json_util.assoc_member_opt "ts_unix" j,
                   Json_util.assoc_member_opt "latency_ms" j,
                   Json_util.assoc_member_opt "usage" j,
-                  nullable_nonnegative_float "cost_usd" j
+                  cost_reading_of_row j
                 with
                 | ( Some (`Float ts_unix)
                   , Some (`Int latency_ms)
@@ -63,32 +69,40 @@ let keeper_cost_aggregates_json
                   when Float.is_finite ts_unix
                        && latency_ms >= 0
                        && ts_unix >= start_ts ->
+                    let carries_signal =
+                      latency_ms > 0
+                      ||
+                      (match cost with
+                       | Cost_reported value -> value > 0.0
+                       | Cost_unreported -> false)
+                    in
                     (match
                        nullable_nonnegative_int "input_tokens" usage,
                        nullable_nonnegative_int "output_tokens" usage,
                        nullable_nonnegative_int "total_tokens" usage
                      with
                      | Some input_t, Some output_t, Some total_t
-                       when cost > 0.0 || latency_ms > 0 ->
-                  costs_rev := cost :: !costs_rev;
-                  latencies_rev := float_of_int latency_ms :: !latencies_rev;
-                  input_tokens := !input_tokens + input_t;
-                  output_tokens := !output_tokens + output_t;
-                  total_tokens := !total_tokens + total_t;
-                  let prev =
-                    Option.value
-                      ~default:0.0
-                      (Hashtbl.find_opt runtime_costs "runtime")
-                  in
-                  Hashtbl.replace runtime_costs "runtime" (prev +. cost);
-                          incr sample_count
+                       when carries_signal ->
+                         (match cost with
+                          | Cost_reported value ->
+                              reported_cost_sum := !reported_cost_sum +. value;
+                              incr cost_reported_samples
+                          | Cost_unreported -> incr cost_unreported_samples);
+                         latencies_rev := float_of_int latency_ms :: !latencies_rev;
+                         input_tokens := !input_tokens + input_t;
+                         output_tokens := !output_tokens + output_t;
+                         total_tokens := !total_tokens + total_t
                      | Some _, Some _, Some _
                      | _ -> ())
                 | _ -> ()
             with
             | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
           all_metrics_lines;
-        let total_cost = List.fold_left ( +. ) 0.0 !costs_rev in
+        let total_cost_json =
+          if !cost_reported_samples = 0
+          then `Null
+          else `Float !reported_cost_sum
+        in
         let latency_arr =
           let arr = Array.of_list !latencies_rev in
           Array.sort Float.compare arr;
@@ -104,24 +118,17 @@ let keeper_cost_aggregates_json
           then None
           else Some (percentile_sorted_float latency_arr 95.0)
         in
-        let runtime_breakdown_json =
-          runtime_costs
-          |> Hashtbl.to_seq
-          |> List.of_seq
-          |> List.sort (fun (_, ca) (_, cb) -> Float.compare cb ca)
-          |> List.map (fun (model, cost) ->
-            `Assoc [ "model", `String model; "cost_usd", `Float cost ])
-        in
         `Assoc
           [ "keeper_name", `String m.name
-          ; "total_cost_usd", `Float total_cost
+          ; "total_cost_usd", total_cost_json
+          ; "cost_reported_samples", `Int !cost_reported_samples
+          ; "cost_unreported_samples", `Int !cost_unreported_samples
           ; "total_input_tokens", `Int !input_tokens
           ; "total_output_tokens", `Int !output_tokens
           ; "total_tokens", `Int !total_tokens
           ; "p50_latency_ms", Json_util.float_opt_to_json p50_latency
           ; "p95_latency_ms", Json_util.float_opt_to_json p95_latency
-          ; "sample_count", `Int !sample_count
-          ; "model_breakdown", `List runtime_breakdown_json
+          ; "sample_count", `Int (!cost_reported_samples + !cost_unreported_samples)
           ])
       keepers
   in

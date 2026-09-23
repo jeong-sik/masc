@@ -57,6 +57,15 @@ let keeper_registered_fn
   : (base_path:string -> agent_name:string -> bool) Atomic.t
   = Atomic.make (fun ~base_path:_ ~agent_name:_ -> false)
 
+(* The server installs the editor-backed publisher at boot. Until then a
+   publish is refused as [Not_installed], never silently dropped. *)
+let keeper_skill_publish_fn
+  : (Workspace_utils_backend_setup.config ->
+     Workspace_skill_publish.request ->
+     (Workspace_skill_publish.outcome, Workspace_skill_publish.error) result)
+      Atomic.t
+  = Atomic.make (fun _config _request -> Error Workspace_skill_publish.Not_installed)
+
 (* Default allows every target so embedded contexts without the runtime wiring
    keep creating schedules; the runtime installs the durable-metadata reader at
    boot. Tool_schedule stays free of static keeper dependencies (RFC-0194). *)
@@ -354,6 +363,13 @@ let goal_verification_pending_fn
          Log.Misc.warn
            "goal verification request committed without an installed goal verifier lane goal_id=%s"
            goal_id)
+
+(* Called after an operator Drop or Reopen moved a Goal. The goal verifier
+   lane cancels that Goal's in-flight review and releases its claim. With no
+   lane installed there is no review to cancel, so the default does nothing. *)
+let goal_verification_abandoned_fn
+  : (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
+  = Atomic.make (fun _config ~goal_id:_ -> ())
 
 let verification_notify_verdict_fn
   : (Workspace_utils_backend_setup.config ->

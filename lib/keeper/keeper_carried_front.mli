@@ -43,6 +43,10 @@ type source =
   | Evicted_after_refusal of { retry : int }
       (** A provider or wire refusal moved the front past measured blocks.
           The turn shares this position with its later candidates. *)
+  | Turn_start_after_seed_refusal
+      (** With no Librarian point, the provider refused the range a seed
+          opened as too large: the front moved to the turn boundary, and the
+          turn shares that position with its later candidates and lanes. *)
 
 type seed =
   { first_atom : int
@@ -163,6 +167,17 @@ type seed_read =
 val no_seed_read : seed_read
 (** No seed, unreadable record, or boundary error: a caller that reads no
     records. *)
+
+val warn_seed_read_failures
+  :  keeper_name:string
+  -> runtime_id:string
+  -> seed_read
+  -> unit
+(** Writes one WARN on [keeper_name]'s log for [unreadable] and one for
+    [boundary_error], each when set, naming [runtime_id], the runtime whose
+    request the read started. A read with neither writes nothing; [seed] is
+    not reported. The Agent Core attempt and the official-client host both
+    report their reads here, so one failure reads the same in either lane. *)
 
 val seed_read_of_rows
   :  trace_id:string

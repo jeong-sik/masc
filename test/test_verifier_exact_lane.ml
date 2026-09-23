@@ -17,6 +17,18 @@ let request : AR.review_request =
   }
 ;;
 
+(* Every review is handed a lookup surface. The reviewer is stubbed here, so
+   the surface is carried and never dispatched. *)
+let lookup : AR.lookup_surface =
+  { schemas = []
+  ; dispatch =
+      (fun ~name ~args:_ ->
+         Alcotest.failf "lookup %s dispatched under a stubbed reviewer" name)
+  }
+;;
+
+let lookup_root = AR.Producer_tree []
+
 let configure_prompt_registry () =
   Prompt_registry.set_markdown_dir
     (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts")
@@ -43,7 +55,8 @@ let review_with (req : AR.review_request) () =
       ; evidence_posture = AR.Note_only
       ; few_shot_block = ""
       }
-    ~lookup:AR.No_lookup_surface
+    ~lookup
+    ~lookup_root
     ~base_path:(Filename.get_temp_dir_name ())
     req
 ;;
@@ -306,7 +319,8 @@ let test_explicit_override_never_consults_the_lane () =
        let result =
          AR.review
            ~evaluator_runtime:"explicit-runtime"
-           ~lookup:AR.No_lookup_surface
+           ~lookup
+           ~lookup_root
            ~question:
              { AR.completion_contract = None
              ; required_evidence = []
@@ -433,10 +447,12 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
          [ { Runtime_schema.id = "verifier_exact"
            ; slot_ids = [ "http.verifier-b"; "verifier-missing"; "http.verifier-a" ]
            ; cli_slot_ids = [ "official.verifier" ]
+           ; max_output_tokens = Some 4_096
            }
          ; { Runtime_schema.id = "auxiliary_exact"
            ; slot_ids = [ "http.verifier-a" ]
            ; cli_slot_ids = []
+           ; max_output_tokens = Some 4_096
            }
          ]
        snapshot
@@ -500,6 +516,7 @@ let test_rejected_slot_diagnosis_names_a_runtime_id () =
          [ { Runtime_schema.id = "verifier_exact"
            ; slot_ids = [ "http.verifier-a"; "verifier-missing" ]
            ; cli_slot_ids = []
+           ; max_output_tokens = Some 4_096
            }
          ]
        snapshot
@@ -602,7 +619,13 @@ let with_mixed_verifier_clients ?(config = mixed_client_config) f =
 let publish_verifier_lane ~slot_ids ~cli_slot_ids =
   match
     Runtime.publish_exact_output_registry
-      ~lanes:[ { Runtime_schema.id = "verifier_exact"; slot_ids; cli_slot_ids } ]
+      ~lanes:
+        [ { Runtime_schema.id = "verifier_exact"
+          ; slot_ids
+          ; cli_slot_ids
+          ; max_output_tokens = Some 4_096
+          }
+        ]
       (load_verifier_snapshot ())
   with
   | Ok _ -> ()

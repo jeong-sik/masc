@@ -81,7 +81,7 @@ describe('submitAnswer', () => {
   it('names every unanswered question instead of sending a partial answer', async () => {
     const r = row()
     store.selectAsk(r)
-    const sent = await store.submitAnswer(r, null)
+    const sent = await store.submitAnswer(r)
     expect(sent).toBe(false)
     expect(answerKeeperAsk).not.toHaveBeenCalled()
     expect(store.askError.value).toContain('이관 방식')
@@ -95,13 +95,15 @@ describe('submitAnswer', () => {
     draft = skipQuestion(draft, r.questions[1]!)
     store.updateDraft(draft)
     answerKeeperAsk.mockResolvedValue({ askId: 'a1', answerCount: 2, openRemaining: 0 })
-    const sent = await store.submitAnswer(r, 'vincent')
+    const sent = await store.submitAnswer(r)
     expect(sent).toBe(true)
     expect(answerKeeperAsk).toHaveBeenCalledTimes(1)
     const body = answerKeeperAsk.mock.calls[0]![0] as Record<string, unknown>
     expect(body['name']).toBe('orrery')
     expect(body['ask_id']).toBe('a1')
-    expect(body['actor_id']).toBe('vincent')
+    // No self-reported identity on the wire (task-1662): the server records
+    // the authenticated caller.
+    expect('actor_id' in body).toBe(false)
     expect(fetchKeeperAsks).toHaveBeenCalled()
   })
 
@@ -110,7 +112,7 @@ describe('submitAnswer', () => {
       resolution: { state: 'answered', answeredAt: 2, answeredQuestionIds: ['q1'] },
     })
     store.selectAsk(answered)
-    expect(await store.submitAnswer(answered, null)).toBe(false)
+    expect(await store.submitAnswer(answered)).toBe(false)
     expect(answerKeeperAsk).not.toHaveBeenCalled()
     expect(store.askError.value).toContain('이미 답이 달린')
   })
@@ -122,7 +124,7 @@ describe('submitAnswer', () => {
     draft = skipQuestion(draft, r.questions[1]!)
     store.updateDraft(draft)
     answerKeeperAsk.mockRejectedValue(new AskAnswerConflict('a1', 'already answered at 2'))
-    const sent = await store.submitAnswer(r, null)
+    const sent = await store.submitAnswer(r)
     expect(sent).toBe(false)
     expect(store.askConflict.value).toContain('먼저 답했습니다')
     expect(fetchKeeperAsks).toHaveBeenCalled()
@@ -136,7 +138,7 @@ describe('submitAnswer', () => {
     draft = skipQuestion(draft, r.questions[1]!)
     store.updateDraft(draft)
     answerKeeperAsk.mockRejectedValue(new Error('network is down'))
-    expect(await store.submitAnswer(r, null)).toBe(false)
+    expect(await store.submitAnswer(r)).toBe(false)
     // The draft is still the operator's work; closing it would throw it away
     // over something that may succeed on the next press.
     expect(store.openAskId.value).toBe('a1')

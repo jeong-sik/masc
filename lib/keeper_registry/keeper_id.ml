@@ -17,6 +17,10 @@ module Keeper_name = struct
   let of_string s =
     if not (Safe_identifier.is_portable_name s)
     then Error (Safe_identifier.portable_name_error ~field:"keeper_name")
+    else if Common.is_keepers_root_store_dirname s
+    then
+      Error
+        (Printf.sprintf "keeper_name %S is the keepers/%s runtime store directory" s s)
     else if String.length s > max_length
     then
       Error

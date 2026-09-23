@@ -73,6 +73,12 @@ blocking_lints() {
   run_lint "CHANGELOG has one section for this version" \
     python3 scripts/ci/changelog-section.py \
     "$(sed -n 's/^(version \([0-9.]*\))$/\1/p' dune-project)" CHANGELOG.md /dev/null
+  # Entries arrive as changelog.d/<PR>.md so parallel pull requests do not
+  # all insert at the same line of CHANGELOG.md.
+  run_lint "Changelog fragments well-formed" \
+    python3 scripts/changelog-fragments.py check
+  run_lint "Changelog fragments self-test" \
+    python3 test/test_changelog_fragments.py
   run_lint "Logging consistency" bash scripts/ci/check-logging-consistency.sh
   run_lint "Issue taxonomy parser and reconciliation" node scripts/test-issue-taxonomy-core.cjs
   run_self_test_when_changed "OCaml test suite reporter self-test" \
@@ -127,6 +133,17 @@ blocking_lints() {
     bash scripts/lint/test-suites-are-declared-as-tests.sh --self-test
   run_lint "Test suites declared as tests" \
     bash scripts/lint/test-suites-are-declared-as-tests.sh
+
+  # A test/*.ml no stanza names is silently skipped by dune: the file stays in
+  # the tree, CI stays green, and the suite never runs. The reverse -- a stanza
+  # naming a .py/.sh/.cjs/.mjs script that was deleted -- fails only root @runtest,
+  # which no PR check runs. The baseline is 0 of either, so this is strict
+  # rather than a ratchet.
+  run_self_test_when_changed "Test modules are wired self-test" \
+    scripts/lint/test-modules-are-wired.py \
+    python3 scripts/lint/test-modules-are-wired.py --self-test
+  run_lint "Test modules are wired" \
+    python3 scripts/lint/test-modules-are-wired.py
 
   # The report-only step that runs a pull request's edited suites trusts this
   # tool to say which of them can be run by executing the binary. A wrong
@@ -201,6 +218,13 @@ blocking_lints() {
   run_lint "No yojson 3.0 dead arms" bash scripts/lint/no-yojson-3-dead-arms.sh
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
+  run_lint "TUI graceful restart fixture" env TUI_GRACEFUL_RESTART_SELF_TEST=1 bash scripts/tui-graceful-restart.sh
+  # The fixture above checks the pieces; this drives the whole script against a
+  # real process and a real signal, then runs the same cycle against a copy with
+  # the SIGTERM removed and requires the checks to fail. It refuses to run at all
+  # if a TUI surface is already up, because the script it drives finds surfaces
+  # machine-wide and would restart yours.
+  run_lint "TUI graceful restart, one real cycle" bash scripts/test-tui-graceful-restart-e2e.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
   run_lint "Stale-worktree cleanup keeps commits" bash scripts/test-cleanup-stale-worktrees.sh
   # A guard nobody runs is a document. Twice a guard sat red on untouched main
@@ -222,6 +246,12 @@ blocking_lints() {
   run_lint "HITL exact-flow boundary" bash scripts/check-hitl-exact-flow-boundary.sh
   run_lint "Turn-records envelope parity" bash scripts/check-turn-records-envelope-parity.sh
   run_lint "Drain loops yield" bash scripts/ci/check-drain-loop-yields.sh
+  # h2 0.13.0 cuts a closed body at the peer's flow-control window, so every
+  # H2 response body closes through one helper (#37942). That is a rule about
+  # a single line, and the next route writes it from memory unless something
+  # reads the tree.
+  run_lint "H2 body close goes through the helper" \
+    bash scripts/ci/check-h2-body-close.sh
   run_lint "Log severity anti-patterns" bash scripts/ci/check-log-severity-anti-patterns.sh
   run_lint "Determinism contract" bash scripts/ci/check-determinism-contract.sh
   run_lint "TLA variant sync" bash scripts/ci/check-tla-variant-sync.sh
@@ -332,6 +362,10 @@ blocking_pr_lints() {
     bash scripts/check-release-train-guard.sh --base "${base}" --head HEAD
   run_lint "PR hygiene" \
     bash scripts/check-pr-hygiene.sh --base "${base}" --head "${head}"
+  # A pull request writes changelog.d/<PR>.md; only a release pull request
+  # (version bump or fragment assembly) adds bullets under [Unreleased].
+  run_lint "Changelog entries arrive as fragments" \
+    python3 scripts/changelog-fragments.py pr-guard --base "${base}" --head "${head}"
   # The companion to the boundary guard wired above: a new .mli whose paired
   # .ml is already in that guard's allow-list has to be added alongside it,
   # or every later PR fails on docstrings this one exposed. That is PR #11248

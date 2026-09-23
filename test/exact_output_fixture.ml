@@ -352,8 +352,21 @@ let with_official_client_runtimes f =
        | Ok () -> f ())
 ;;
 
-let publish_registry ?(cli_slot_ids = []) ~lane_id ~slot_ids resolver_snapshot =
-  let lane : Runtime_schema.exact_output_lane_decl = { id = lane_id; slot_ids; cli_slot_ids } in
+(* A fixture lane's declared output budget. The value is arbitrary here — the
+   tests that care about the budget set it explicitly; the rest only need a
+   lane that resolves, and an HTTP lane with no declared budget is refused. *)
+let fixture_max_output_tokens = 4_096
+
+let publish_registry
+      ?(cli_slot_ids = [])
+      ?(max_output_tokens = Some fixture_max_output_tokens)
+      ~lane_id
+      ~slot_ids
+      resolver_snapshot
+  =
+  let lane : Runtime_schema.exact_output_lane_decl =
+    { id = lane_id; slot_ids; cli_slot_ids; max_output_tokens }
+  in
   match Runtime_exact_output_registry.publish ~lanes:[ lane ] resolver_snapshot with
   | Ok registry -> registry
   | Error error ->

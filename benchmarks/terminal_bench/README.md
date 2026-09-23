@@ -34,7 +34,7 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
 
     harbor run -d terminal-bench/terminal-bench@4.0.0 \
       -i terminal-bench/embedding-drift-monitor \
-      --agent agents.masc_agent:MascAgent -m anthropic/claude-fable-5 \
+      --agent agents.masc_agent:MascAgent -m anthropic/claude-fable-5-1 \
       --ak arm=b -k 1 -n 1 --agent-setup-timeout-multiplier 5 -o results/jobs
 
 ## 전체 실행
@@ -90,8 +90,9 @@ CPU 24개가 필요하다. CPU 가 16개인 Mac 에서는 로컬 docker 로 동�
 | g | e 를 keeper 8 로 |
 | h | g + fusion |
 | k | harbor `claude-code`/`opencode` 가 풀고, keeper 풀을 MCP 도구로 받는다 (아래) |
+| l | e + 후보 순서. 모델 둘 이상을 `[runtime.lanes.bench]` 로 묶는다 (아래) |
 
-spawn 도구는 parallel 이 꺼진 arm(b, c, d)에서, delegate 도구는 keeper 1 인 arm(b–e)에서
+spawn 도구는 parallel 이 꺼진 arm(b, c, d)에서, delegate 도구는 keeper 1 인 arm(b–e, l)에서
 keeper TOML `tools.deny` 로 막는다.
 
 HTTP 레인의 b·c·d는 runtime binding(`[<provider>.<model>]`)에
@@ -118,6 +119,32 @@ Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청
 | `kimi_coding` | `KIMI_API_KEY` | arm A 의 kimi-cli 에는 `kimi/<model>` 로 넘어간다 |
 | `openai` | `OPENAI_API_KEY` | 2026-09-10 기준 키에 크레딧이 없어 요청 생성 이후는 확인하지 못했다 |
 | `claude_code` | `CLAUDE_CODE_OAUTH_TOKEN` | 아래 구독 레인 |
+
+## arm L — 후보 순서 (Runtime Candidate Order)
+
+다른 arm 은 모델 하나만 렌더한다. 그래서 `repeated_reasoning_cycle` 처럼 "다음 후보는
+다른 모델이어야 한다" 는 거절이 나오면 넘어갈 후보가 없어 trial 이 `Turn_exception` 으로
+끝난다(#37952). arm L 은 arm e 와 같은 구성에 모델을 둘 이상 넣는다.
+
+    BENCH_MODEL=openrouter/z-ai/glm-5.3 \
+    BENCH_FALLBACK_MODELS=openrouter/deepseek/deepseek-v4-pro ./run_matrix.sh l 1
+
+- `BENCH_MODEL` 이 첫 후보, `BENCH_FALLBACK_MODELS`(쉼표로 구분)가 그 뒤 순서다.
+  harbor 로 직접 돌릴 때는 `--ak arm=l --ak fallback_models=<provider>/<model>,...` 로 준다.
+- 렌더러는 후보마다 `[models."<id>"]` 를 쓰고, `[runtime.lanes.bench]` 에 순서대로
+  적는다. `[runtime].default` 와 keeper_up 의 `runtime_id` 둘 다 lane 이름 `bench` 다.
+  keeper_up 은 그 값을 keeper 의 `[runtime.assignments]` 로 쓰기 때문에, 첫 모델 id 를
+  주면 keeper 가 그 모델에 고정돼 lane 을 한 번도 안 지난다.
+- 후보는 같은 provider 의 서로 다른 모델이어야 한다. 컨테이너에 넘기는 키가 하나이고,
+  같은 모델을 두 번 넣으면 이 거절을 못 넘긴다. official client(`claude_code`)는 받지 않는다.
+- 다른 arm 에 fallback 을 주면 렌더 단계에서 거절한다. arm 하나는 처치 하나로 남긴다.
+- 지금 `aggregate.py` 는 어느 후보가 답했는지 따로 세지 않는다. 넘어갔는지는 trial 의
+  keeper trace 에서 본다.
+
+렌더만 확인할 때(모델 호출 없음, OpenRouter endpoint 목록은 읽는다):
+
+    uv run python configs/render_configs.py l --runtime-id openrouter.z-ai/glm-5.3 \
+      --fallback-runtime-id openrouter.deepseek/deepseek-v4-pro
 
 ## Claude Code 구독 레인 (`claude_code/<model>`)
 

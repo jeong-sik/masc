@@ -771,6 +771,13 @@ let files_under dir ~keep =
     |> List.map (Filename.concat dir)
 ;;
 
+(* The runtime writes keeper stores under the cluster's keepers directory; reading
+   the default cluster's instead finds nothing on any other cluster and passes
+   without having read a row. *)
+let runtime_keepers_dir ~base_path =
+  Masc.Workspace.keepers_runtime_dir_for_base_path base_path
+;;
+
 let keeper_meta_store =
   { store = "keeper meta"
   ; on_refusal =
@@ -778,9 +785,7 @@ let keeper_meta_store =
        from its declaration, losing accumulated counters and the task binding"
   ; scan =
       (fun ~base_path ->
-         let dir =
-           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
-         in
+         let dir = runtime_keepers_dir ~base_path in
          Ok
            (scan_files
               ~paths:
@@ -819,6 +824,32 @@ let memory_os_current_store =
                     | Ok (Some _) -> count_row report (Ok ())
                     | Error detail ->
                       count_row report (Error (keeper_id ^ ": " ^ detail)))
+                 empty_report))
+  }
+;;
+
+let librarian_range_receipt_store =
+  { store = "Librarian range receipt ledger"
+  ; on_refusal =
+      "every Memory write for that keeper -- the librarian, keeper_memory_write \
+       and retraction -- reconciles the ledger first and fails, and the \
+       Librarian cannot prove which range it already committed"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir =
+           Config_dir_resolver.keepers_dir_for_base_path ~base_path
+         in
+         Ok
+           (Masc.Keeper_memory_os_current.list_durable_range_receipt_keeper_ids
+              ~keepers_dir
+            |> List.fold_left
+                 (fun report keeper_id ->
+                    count_row
+                      report
+                      (Masc.Keeper_memory_os_current.validate_durable_range_receipts
+                         ~keepers_dir
+                         ~keeper_id
+                       |> Result.map_error (fun detail -> keeper_id ^ ": " ^ detail)))
                  empty_report))
   }
 ;;
@@ -908,9 +939,7 @@ let provider_input_store =
       ^ "a malformed newer row can mask older exact-input observations"
   ; scan =
       (fun ~base_path ->
-         let keepers_dir =
-           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
-         in
+         let keepers_dir = runtime_keepers_dir ~base_path in
          let store_dir =
            Common.keeper_runtime_store_dirname Common.Keeper_provider_inputs
          in
@@ -982,9 +1011,7 @@ let turn_record_store =
        the caller only warns, so traces accumulate with no failing turn"
   ; scan =
       (fun ~base_path ->
-         let keepers_dir =
-           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
-         in
+         let keepers_dir = runtime_keepers_dir ~base_path in
          let store_dir =
            Common.keeper_runtime_store_dirname Common.Keeper_turn_records
          in
@@ -1045,9 +1072,13 @@ let official_client_session_store =
       "the keeper cannot resume its provider conversation and every adapter        that plans a claim reads the same refusal"
   ; scan =
       (fun ~base_path ->
-         let keepers_dir =
-           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
-         in
+         (* Not [runtime_keepers_dir]: [Keeper_official_client_session_store]
+            writes under [Common.keepers_runtime_dir_of_base], the default
+            cluster's keepers directory, on every cluster. Listing the same
+            directory the store writes is what makes a row here reachable;
+            the cluster-aware directory would list keepers whose session
+            files are not there. *)
+         let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
          Ok
            (files_under keepers_dir ~keep:(fun name ->
               not (Filename.check_suffix name ".json"))
@@ -1075,10 +1106,6 @@ let official_client_session_store =
    store reports as [Incomplete_line] is an append a crash cut short, which the
    next durable append trims away; it is not a row the new binary refuses, so
    it is neither counted as a row nor held against the deploy. *)
-let runtime_keepers_dir ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
-;;
-
 (* Journals and checkpoint locks live beside these directories. Their names
    do not make them stores; inspect the entry itself without following links. *)
 let store_directories root =
@@ -1309,10 +1336,32 @@ let memory_os_events_store =
   }
 ;;
 
+let gate_pending_store =
+  { store = "gate pending approvals"
+  ; on_refusal =
+      "install_persistence refuses the whole approval queue at boot and every \
+       gate decision is unavailable; for an unsupported version, reset \
+       gate/pending.json and gate/pending.log.jsonl after the server is \
+       confirmed stopped and before it starts"
+  ; scan =
+      (fun ~base_path ->
+         let path = Masc.Keeper_gate_path.pending ~base_path in
+         Ok
+           (scan_files
+              ~paths:(if Fs_compat.file_exists path then [ path ] else [])
+              ~decode:(fun ~path:_ contents ->
+                match Yojson.Safe.from_string contents with
+                | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
+                | json -> Masc.Keeper_approval_queue.validate_pending_snapshot ~base_path json)))
+  }
+;;
+
 let durable_stores =
   [ keeper_meta_store
+  ; gate_pending_store
   ; official_client_session_store
   ; memory_os_current_store
+  ; librarian_range_receipt_store
   ; memory_source_current_store
   ; disposition_receipt_store
   ; board_posts_store

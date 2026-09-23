@@ -286,7 +286,7 @@ let keeper_tool_approval_timeout_sec = 180.0
    settled by it once instead of asking the same question again. An answer
    that names no wait this process ever held matches nothing and is dropped,
    as before. *)
-let handle_keeper_tool_approval state request reqd =
+let handle_keeper_tool_approval ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     let parsed =
@@ -337,22 +337,23 @@ let handle_keeper_tool_approval state request reqd =
             match
               Keeper_late_approval.remember_late
                 (Keeper_late_approval.shared ())
-                ~keeper_name ~tool_call_id decision ()
+                ~keeper_name ~tool_call_id ~actor decision ()
             with
             | Keeper_late_approval.Remembered _ -> true
             | Keeper_late_approval.No_matching_ask -> false
         in
         Log.Keeper.info
-          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s settled=%b remembered=%b"
+          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s actor=%s settled=%b remembered=%b"
           keeper_name tool_call_id
           (Keeper_tool_approval_registry.decision_to_string decision)
-          settled remembered;
+          actor settled remembered;
         respond_json_value_with_cors ~status:`OK request reqd
           (`Assoc
              [ ("settled", `Bool settled)
              ; ("remembered", `Bool remembered)
              ; ( "decision"
                , `String (Keeper_tool_approval_registry.decision_to_string decision) )
+             ; ("actor", `String actor)
              ])))
 ;;
 
@@ -586,7 +587,7 @@ let handle_keeper_run_next state ~actor request reqd =
                 "signalled", `Bool result.signalled; "detail", `String detail]))
 ;;
 
-let handle_keeper_turn_interrupt state request reqd =
+let handle_keeper_turn_interrupt ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     let target_result =
@@ -685,14 +686,19 @@ let handle_keeper_turn_interrupt state request reqd =
         (match Keeper_registry.interrupt_current_turn ~base_path keeper_name with
         | Keeper_registry.Exact_turn_cancelled turn_id ->
           Log.Keeper.info ~keeper_name ~turn_id
-            "keeper_turn_interrupt: exact turn cancelled";
+            "keeper_turn_interrupt: exact turn cancelled actor=%s" actor;
           respond_json_value_with_cors ~status:`OK request reqd
-            (`Assoc [ ("signalled", `Bool true); ("turn_id", `Int turn_id) ])
+            (`Assoc
+               [ ("signalled", `Bool true)
+               ; ("turn_id", `Int turn_id)
+               ; ("actor", `String actor)
+               ])
         | Keeper_registry.Exact_no_turn_in_flight ->
           respond_json_value_with_cors ~status:`OK request reqd
             (`Assoc
                [ ("signalled", `Bool false)
                ; ("reason", `String "no_in_flight_turn")
+               ; ("actor", `String actor)
                ])
         | Keeper_registry.Exact_turn_cancel_failed { turn_id; detail } ->
           respond_json_value_with_cors ~status:`OK request reqd
@@ -700,6 +706,7 @@ let handle_keeper_turn_interrupt state request reqd =
                ([ ("signalled", `Bool false)
                 ; ("reason", `String "cancel_failed")
                 ; ("detail", `String detail)
+                ; ("actor", `String actor)
                 ]
                 @ (match turn_id with
                    | Some turn_id -> [ ("turn_id", `Int turn_id) ]
@@ -3590,11 +3597,12 @@ let ask_answer_failure_json failure =
    Keeper are one act: a 2xx when only the first half happened leaves the
    operator believing a decision landed while the Keeper waits on it forever.
    Split out so the choice can be read and tested on its own. *)
-let ask_answer_response ~ask_id ~answer_count ~open_remaining ~delivered =
+let ask_answer_response ~ask_id ~actor ~answer_count ~open_remaining ~delivered =
   let body =
     [
       ("recorded", `Bool true);
       ("ask_id", `String ask_id);
+      ("actor", `String actor);
       ("answer_count", `Int answer_count);
       ("delivered", `Bool delivered);
       ("open_remaining", `Int open_remaining);
@@ -3656,7 +3664,7 @@ let wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id =
             keeper_name ask_id;
           true)
 
-let handle_keeper_ask_answer state request reqd =
+let handle_keeper_ask_answer ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       let parsed =
@@ -3676,17 +3684,12 @@ let handle_keeper_ask_answer state request reqd =
                 | Some (`List items) -> ask_answer_submissions_of_json items
                 | Some _ | None -> Error "answers (array) is required"
               in
-              let actor_id =
-                match List.assoc_opt "actor_id" fields with
-                | Some (`String value) -> Some (String.trim value)
-                | Some _ | None -> None
-              in
               let session_id =
                 match List.assoc_opt "session_id" fields with
                 | Some (`String value) -> Some (String.trim value)
                 | Some _ | None -> None
               in
-              Ok (keeper_name, ask_id, submissions, actor_id, session_id)
+              Ok (keeper_name, ask_id, submissions, session_id)
           | _ -> Error "JSON object body required"
         with Yojson.Json_error message -> Error ("invalid json: " ^ message)
       in
@@ -3694,7 +3697,7 @@ let handle_keeper_ask_answer state request reqd =
       | Error message ->
           respond_json_value_with_cors ~status:`Bad_request request reqd
             (keeper_chat_stream_error_json message)
-      | Ok (keeper_name, ask_id, submissions, actor_id, session_id) ->
+      | Ok (keeper_name, ask_id, submissions, session_id) ->
           if not (Keeper_registry.is_registered ~base_path keeper_name) then
             respond_json_value_with_cors ~status:`Not_found request reqd
               (keeper_chat_stream_error_json "keeper not registered")
@@ -3702,7 +3705,7 @@ let handle_keeper_ask_answer state request reqd =
             let responder =
               {
                 Keeper_ask.surface = Surface_ref.Dashboard { session_id };
-                actor_id;
+                actor_id = Some actor;
                 display_name = None;
               }
             in
@@ -3727,14 +3730,14 @@ let handle_keeper_ask_answer state request reqd =
                  | Keeper_ask_store.Already_withdrawn _
                  | Keeper_ask_store.Rejected _
                  | Keeper_ask_store.Store_failed _ -> ());
-                Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s refused=%s" keeper_name
-                  ask_id
+                Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s actor=%s refused=%s"
+                  keeper_name ask_id actor
                   (Keeper_ask_store.answer_failure_to_string failure);
                 respond_json_value_with_cors ~status:(ask_answer_failure_status failure) request
                   reqd (ask_answer_failure_json failure)
             | Ok answers ->
-                Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s answers=%d" keeper_name
-                  ask_id (List.length answers);
+                Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s actor=%s answers=%d"
+                  keeper_name ask_id actor (List.length answers);
                 (* The answer is durable now; the Keeper that asked still has
                    no idea. Without this wake it is written down where only a
                    screen reads it and the asker has to remember to go and
@@ -3743,10 +3746,10 @@ let handle_keeper_ask_answer state request reqd =
                   wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id
                 in
                 Log.Keeper.info
-                  "keeper_ask_answer: keeper=%s ask_id=%s answers=%d delivered=%b"
-                  keeper_name ask_id (List.length answers) delivered;
+                  "keeper_ask_answer: keeper=%s ask_id=%s actor=%s answers=%d delivered=%b"
+                  keeper_name ask_id actor (List.length answers) delivered;
                 let status, body =
-                  ask_answer_response ~ask_id ~answer_count:(List.length answers)
+                  ask_answer_response ~ask_id ~actor ~answer_count:(List.length answers)
                     ~open_remaining:
                       (Keeper_ask_store.open_ask_count ~base_path ~keeper_name)
                     ~delivered

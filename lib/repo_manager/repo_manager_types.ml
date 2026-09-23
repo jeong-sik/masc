@@ -8,6 +8,36 @@ type repository_status =
   | Error of string
 [@@deriving yojson, show, eq]
 
+(* The word a client reads a repository's status by, and the reading back.
+   The HTTP route spelled these four in a match of its own and the TUI
+   matched the strings back, so the reason [Error] carries was written to the
+   wire beside the word and read by nobody: a repository whose clone or fetch
+   failed said "error" on the Workspace surface with the cause nowhere on it.
+   One table here means a status added to this type cannot reach the wire
+   unnamed, and the reading takes the reason with the word. *)
+let status_wire_name = function
+  | Active -> "active"
+  | Paused -> "paused"
+  | Cloning -> "cloning"
+  | Error _ -> "error"
+;;
+
+let status_error_message = function
+  | Error message -> Some message
+  | Active | Paused | Cloning -> None
+;;
+
+(* [None] for a word this build does not know, and for "error" without the
+   message the producer always sends with it: a status that names a failure
+   and carries no cause is not a reading this can complete. *)
+let status_of_wire_name ~error_message = function
+  | "active" -> Some Active
+  | "paused" -> Some Paused
+  | "cloning" -> Some Cloning
+  | "error" -> Option.map (fun message -> Error message) error_message
+  | _ -> None
+;;
+
 type repository = {
   id : repository_id;
   name : string;

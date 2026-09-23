@@ -694,12 +694,29 @@ let tool_block_style (_projection : Keeper_chat_transcript.tool_projection) =
 
 ;;
 
+(* The mark says whether the row is still moving. Two states are:
+   [Skill_calling] is the read or the run, [Skill_served_pending] is waiting
+   on the delivery record. Every other state is a skill's life at rest.
+
+   [Skill_delivered] -- "전달됨, 도구 안 씀" -- was drawn live, so a settled
+   history line wore the hollow diamond and read as a turn still working. It
+   weighed more after #36870 took the SKILL word off the row and left the
+   mark as the only signal of that axis.
+
+   The same line is already drawn elsewhere: [skill_block_state] ranks the
+   states "what went wrong, then what is still moving, then how far a
+   finished one got", and puts [Skill_delivered] in the finished group. Two
+   places said which states are moving and only one of them was right. *)
 let skill_tone_of_state :
     Keeper_chat_transcript.skill_state -> Message_layout.skill_tone = function
   | Keeper_chat_transcript.Skill_calling
-  | Keeper_chat_transcript.Skill_served_pending
-  | Keeper_chat_transcript.Skill_delivered -> Message_layout.Skill_live
-  | Keeper_chat_transcript.Skill_used -> Message_layout.Skill_used
+  | Keeper_chat_transcript.Skill_served_pending -> Message_layout.Skill_live
+  (* Delivered and used are the two ends of one life, and both are reached.
+     Which one it is, the row spells in words; the mark says the life is
+     over. [Skill_served_only] is finished too, but without the delivery
+     record it should have, and that is what the attention mark is for. *)
+  | Keeper_chat_transcript.Skill_delivered
+  | Keeper_chat_transcript.Skill_used -> Message_layout.Skill_settled
   | Keeper_chat_transcript.Skill_served_only
   | Keeper_chat_transcript.Skill_evidence_missing -> Message_layout.Skill_attention
   | Keeper_chat_transcript.Skill_failed
@@ -2839,28 +2856,20 @@ let render_keeper_message (state : state) =
        a second age and an opaque request id above the ACTIVE TURN line, and
        three ages in one frame read as a stuck screen. The row stays for every
        request the transcript is not covering — a second message sent to the
-       same keeper still has to be visible. *)
-    let live_request_id =
-      match state.msg_live with
-      | Some live
-        when state.msg_target_keeper_name
-             = Some (Masc_tui_types.turn_log_keeper_name live) ->
-        Some (Masc_tui_types.turn_log_execution_id live)
-      | Some _ | None -> None
-    in
+       same keeper still has to be visible.
+
+       [keeper_message_inflight_drawn] is where that choice lives, because the
+       row budget has to make the same one. While the choice was written only
+       here, the budget reserved a row for the request the transcript covers
+       and the status area gained a blank line (#37741). *)
     (match
        List.partition
          (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
-         state.msg_inflight
+         (Masc_tui_types.keeper_message_inflight_drawn state)
      with
      | mine, others ->
          List.iter
            (fun entry ->
-             if
-               not
-                 (Option.equal String.equal live_request_id
-                    (Some (Masc_tui_types.turn_log_execution_id entry.log)))
-             then
              let activity =
                match entry.phase with
                | Turn_streaming ->
@@ -3003,7 +3012,7 @@ let render_keeper_message (state : state) =
            | Working ->
                let heading =
                  if Keeper_chat_transcript.attempt live > 0 then
-                   "FAILOVER IN PROGRESS"
+                   "IN PROGRESS ON NEXT CANDIDATE"
                  else
                    "IN PROGRESS"
                in

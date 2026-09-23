@@ -93,11 +93,19 @@ type quarantine_failure_category =
   | Durable_partition_invariant
   | Exact_setup_unavailable
   | Exact_flow_replayed
-  | Exact_execution_terminal
+  | Exact_lane_exhausted
+      (** Every HTTP slot refused and the CLI tail had none to walk, or
+          refused too. *)
+  | Exact_flow_bookkeeping_failed
+  | Exact_completion_failed
   | Domain_output_invalid
   | Execution_provenance_mismatch
   | Unexpected_worker_failure
   | Exact_execution_quarantined
+  | Exact_execution_interrupted
+      (** A process restart cut a bound execution. Requeueable: the judgment
+          lane is a read-only model call, so redispatch spends tokens and
+          nothing else. *)
 
 type attempt_provenance =
   { slot_id : string
@@ -118,8 +126,17 @@ type quarantine =
 
 type quarantine_phase =
   | Quarantined
-  | Requeue_requested of { requested_at : float }
-  | Requeued of { requeued_at : float }
+  | Requeue_requested of
+      { requested_at : float
+      ; requested_by : string
+        (** The authenticated principal that asked for the requeue. *)
+      }
+  | Requeued of
+      { requeued_at : float
+      ; requested_by : string
+        (** Carried from [Requeue_requested]: finishing the requeue does not
+            change who asked for it. *)
+      }
 
 type quarantine_state =
   { quarantine : quarantine
@@ -319,6 +336,7 @@ val request_quarantine_requeue :
   partition_id:string ->
   expected_quarantine_id:string ->
   requested_at:float ->
+  requested_by:string ->
   (candidate, string) result
 
 val finish_quarantine_requeue :

@@ -30,10 +30,16 @@ let binding_identity_for_call agent provider_config =
   Binding_identity.of_provider_config ~transport provider_config
 ;;
 
-let invalid_request message =
+(* This stage refuses a request it will not dispatch: a missing output
+   ceiling or reservation, an unsupported measurement, an invalid prepared
+   request. No provider read it, so it is not an unknown provider refusal --
+   a consumer that answers those by sending less would cut history for a
+   request that never left. [Attempt_rejected] says what happened: this
+   binding cannot take it, and another declared one may. *)
+let rejected_before_dispatch message =
   Error.Api
     (Llm_provider.Retry.InvalidRequest
-       { message; reason = Llm_provider.Retry.Unknown_invalid_request })
+       { message; reason = Llm_provider.Retry.Attempt_rejected })
 ;;
 
 let input_capacity_error ~binding ~message ~constraint_ ~reason =
@@ -63,7 +69,7 @@ let measurement_error ~binding ~constraint_ ~provider = function
      | None ->
        Provider_failure_attribution.of_request_validation_error
          ~binding
-         (invalid_request
+         (rejected_before_dispatch
             (Printf.sprintf
                "provider-native input measurement %s is unsupported for model %s"
                (Llm_provider.Input_token_count.show_protocol protocol)
@@ -86,11 +92,11 @@ let measurement_error ~binding ~constraint_ ~provider = function
       Llm_provider.Types.Required_output_token_ceiling_missing ->
     Provider_failure_attribution.of_request_validation_error
       ~binding
-      (invalid_request "prepared request has no effective output-token ceiling")
+      (rejected_before_dispatch "prepared request has no effective output-token ceiling")
   | Llm_provider.Count_tokens_sync.Invalid_completion_request detail ->
     Provider_failure_attribution.of_request_validation_error
       ~binding
-      (invalid_request ("invalid prepared completion request: " ^ detail))
+      (rejected_before_dispatch ("invalid prepared completion request: " ^ detail))
 ;;
 
 let fit_error ~binding = function
@@ -117,7 +123,7 @@ let fit_error ~binding = function
   | Llm_provider.Complete.Output_reservation_unknown { model_id } ->
     Provider_failure_attribution.of_request_validation_error
       ~binding
-      (invalid_request
+      (rejected_before_dispatch
          (Printf.sprintf "model %s has no effective output-token reservation" model_id))
   | Llm_provider.Complete.Context_window_exceeded
       { input_tokens; reserved_output_tokens; max_context_tokens } ->
@@ -529,4 +535,30 @@ let dispatch_stream
                              (Provider_failure_attribution.of_http_error ~binding ~provider)))))))
   in
   finish_call ?on_provider_failure result
+;;
+
+let%test "a refusal this stage makes before dispatch is Attempt_rejected" =
+  let config =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~model_id:"model"
+      ~base_url:"https://example.test"
+      ()
+  in
+  match
+    Binding_identity.of_provider_config
+      ~transport:(Binding_identity.transport_for_call ~injected:false)
+      config
+  with
+  | Error _ -> false
+  | Ok binding ->
+    (match
+       (fit_error ~binding
+          (Llm_provider.Complete.Output_reservation_unknown { model_id = "model" }))
+         .Provider_failure_attribution.error
+     with
+     | Error.Api
+         (Llm_provider.Retry.InvalidRequest
+            { reason = Llm_provider.Retry.Attempt_rejected; _ }) -> true
+     | _ -> false)
 ;;

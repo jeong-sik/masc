@@ -117,11 +117,18 @@ let provider_refusal_to_string = function
   | Timeout -> "timeout"
 ;;
 
+type generation_dispatch_fact =
+  | No_generation_dispatch
+  | Generation_dispatch_started
+
 type execution_error_cause =
   | Attempt_already_started
   | Clock_required_for_timeout
   | Frozen_request_mismatch
-  | Completion_failed
+  | Completion_failed of
+      { error : Http_client.http_error
+      ; dispatch : generation_dispatch_fact
+      }
   | Response_body_deadline_exceeded
   | Provider_response_refused of
       { http_status : int
@@ -359,10 +366,6 @@ type flow_candidate_failure =
       { candidate : flow_attempt_receipt
       ; cause : execution_error
       }
-
-type generation_dispatch_fact =
-  | No_generation_dispatch
-  | Generation_dispatch_started
 
 type 'callback_error flow_execution_error =
   | Flow_attempt_already_started of flow_evidence
@@ -1167,7 +1170,7 @@ let evidence_attempt
 let evidence_transport_failure ~ordinal = function
   | Flow_advance_candidate_rejected _ ->
     Ok (Validated_flow_evidence.Candidate_rejected, None)
-  | Flow_advance_execution_failed { cause = Completion_failed; raw_response_sha256; _ } ->
+  | Flow_advance_execution_failed { cause = Completion_failed _; raw_response_sha256; _ } ->
     Ok (Validated_flow_evidence.Completion_failed_before_dispatch, raw_response_sha256)
   | Flow_advance_execution_failed
       { cause = Response_body_deadline_exceeded; raw_response_sha256; _ } ->
@@ -1202,7 +1205,7 @@ let evidence_transport_failure ~ordinal = function
       | Attempt_already_started -> "attempt_already_started"
       | Clock_required_for_timeout -> "clock_required_for_timeout"
       | Frozen_request_mismatch -> "frozen_request_mismatch"
-      | Completion_failed -> "completion_failed"
+      | Completion_failed _ -> "completion_failed"
       | Response_body_deadline_exceeded -> "response_body_deadline_exceeded"
       | Provider_response_refused { http_status; refusal } ->
         Printf.sprintf
@@ -1686,7 +1689,7 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
   | Retry.Timeout _ -> Timeout
 ;;
 
-let execution_error_cause ~http_status = function
+let execution_error_cause ~http_status ~dispatch = function
   | Exec.Clock_required_for_timeout -> Clock_required_for_timeout
   | Exec.Frozen_request_mismatch -> Frozen_request_mismatch
   | Exec.Response_body_deadline_exceeded -> Response_body_deadline_exceeded
@@ -1698,13 +1701,18 @@ let execution_error_cause ~http_status = function
             (Retry.classify_refusal ~retry_after_header ~status:code ~body)
       }
   | Exec.Provider_error
-      (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ }) ->
+      (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ } as error) ->
     (match http_status with
      | Some http_status -> Provider_response_refused { http_status; refusal = Context_overflow }
-     | None -> Completion_failed)
+     | None -> Completion_failed { error; dispatch })
   (* Other transport, provider parsing or observer failures remain distinct
-     from an owned body deadline, even when their receipt has headers. *)
-  | Exec.Provider_error _ -> Completion_failed
+     from an owned body deadline, even when their receipt has headers. The
+     typed transport error travels with the cause so a consumer can tell a
+     dropped connection from a hard quota or an empty completion. *)
+  | Exec.Provider_error
+      (( Http_client.NetworkError _ | Http_client.TimeoutError _
+       | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _
+       | Http_client.ProviderFailure _ ) as error) -> Completion_failed { error; dispatch }
   | Exec.Output_normalization_failed (Exec.Incomplete_structured_response _) ->
     Incomplete_output
   | Exec.Output_normalization_failed Exec.Missing_structured_text -> Missing_output
@@ -1752,7 +1760,11 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
       Error
         { call_id = receipt_call_id receipt
         ; receipt
-        ; cause = execution_error_cause ~http_status:(receipt_http_status receipt) cause
+        ; cause =
+            execution_error_cause
+              ~http_status:(receipt_http_status receipt)
+              ~dispatch:(generation_dispatch_fact_of_receipt receipt)
+              cause
         ; raw_response = Option.map raw_response evidence
         }
     | Ok { outcome; raw_response = evidence } ->
@@ -1803,7 +1815,7 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
 
 let execution_failure_may_advance (error : execution_error) =
   match error.cause, receipt_phase error.receipt with
-  | Completion_failed, Before_dispatch -> receipt_dispatch_count error.receipt = 0
+  | Completion_failed _, Before_dispatch -> receipt_dispatch_count error.receipt = 0
   | Response_body_deadline_exceeded, Response_received ->
     (* No domain validator ran for this incomplete response. Advance through
        the caller's existing settlement callback, retaining the dispatched
@@ -1827,6 +1839,17 @@ let execution_failure_may_advance (error : execution_error) =
        until the refusal kind survived classification the lane could not reach
        it — a 429 arrived here as [Completion_failed] and ended the flow. *)
     receipt_dispatch_count error.receipt = 1
+  | Provider_response_refused { refusal = Payment_required; _ }, Response_received ->
+    (* A 402 is a refusal before any generation ran, and the successor bills a
+       different account, so the frozen lane walks its next candidate instead
+       of ending. It is not always the account alone: OpenRouter compares
+       [max_tokens] times price against the balance, so a smaller request
+       could pass on the same account — either way the successor is a fresh
+       chance. The one-dispatch receipt stays as
+       evidence. Same shape as [Rate_limited] — this promotion is what lets a
+       lane whose last HTTP slot is out of paid quota fall through to its CLI
+       tail instead of recording a permanent failure. *)
+    receipt_dispatch_count error.receipt = 1
   | Provider_response_refused
       { refusal = Overloaded | Server_error; _ }, Response_received ->
     (* The provider returned a complete failure response. Exact requests have
@@ -1848,13 +1871,14 @@ let execution_failure_may_advance (error : execution_error) =
   | Missing_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The remaining refusals do not advance, as before this classification
-     existed. Promoting any one of them needs its own argument about whether the
-     successor can serve the same input, which this change does not make. *)
+     existed ([Payment_required] was promoted above: the successor bills a
+     different account). Promoting any other one
+     needs its own argument about whether the successor can serve the same
+     input, which this change does not make. *)
   | ( Provider_response_refused
         { refusal =
             ( Auth_failed
             | Authorization_refused
-            | Payment_required
             | Invalid_request
             | Refusal_body_not_received
             | Not_found
@@ -1865,11 +1889,18 @@ let execution_failure_may_advance (error : execution_error) =
         ; _
         }
     , (Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal) )
-  | Completion_failed, (Not_started | Dispatch_started | Response_received | Terminal)
+  | Completion_failed _, (Not_started | Dispatch_started | Response_received | Terminal)
   | Response_body_deadline_exceeded,
       (Not_started | Before_dispatch | Dispatch_started | Terminal)
   | ( Provider_response_refused
-        { refusal = Request_body_refused | Rate_limited | Overloaded | Server_error; _ }
+        { refusal =
+            ( Request_body_refused
+            | Rate_limited
+            | Overloaded
+            | Server_error
+            | Payment_required )
+        ; _
+        }
     , (Not_started | Before_dispatch | Dispatch_started | Terminal) )
   | Invalid_json_output, (Not_started | Before_dispatch | Dispatch_started)
   | ( ( Attempt_already_started

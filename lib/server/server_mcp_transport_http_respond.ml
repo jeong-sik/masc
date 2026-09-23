@@ -139,6 +139,15 @@ let mcp_auth_reject_details ~endpoint ~claimed_agent ~token_presented
    distinguish "no client ever connected" from "every client is being
    rejected" ([mcp_transport_sessions.json] empty either way).
    The raw bearer is never logged — only whether one was presented. *)
+(* The metric alone, for a transport that already logs the refusal through
+   another responder. The WebSocket upgrade path answers through
+   [Server_auth.respond_auth_error], which logs the refusal, so calling
+   [record_mcp_auth_reject] there would leave two WARN lines for one reject. *)
+let record_mcp_auth_reject_metric ~endpoint
+    (failure : Server_mcp_transport_http_types.auth_failure) =
+  Transport_metrics.inc_mcp_auth_reject ~endpoint
+    ~reason:(mcp_auth_reject_reason_label failure)
+
 let record_mcp_auth_reject ~endpoint ~claimed_agent ~token_presented
     ~session_id (failure : Server_mcp_transport_http_types.auth_failure) =
   Log.Auth.emit Log.Warn
@@ -147,8 +156,7 @@ let record_mcp_auth_reject ~endpoint ~claimed_agent ~token_presented
          ~session_id failure)
     ~category:Log.Routine
     (Printf.sprintf "MCP auth rejected: %s (%s)" endpoint failure.message);
-  Transport_metrics.inc_mcp_auth_reject ~endpoint
-    ~reason:(mcp_auth_reject_reason_label failure)
+  record_mcp_auth_reject_metric ~endpoint failure
 
 let respond_mcp_auth_error ~(deps : Server_mcp_transport_http_types.deps)
     ~request_authority ~endpoint request reqd ~session_id ~protocol_version

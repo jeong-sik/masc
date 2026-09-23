@@ -37,6 +37,18 @@ val preflight_slots
     accepted. *)
 
 
+type served_slot =
+  | Api_slot of string
+      (** An API slot, named by its exact-output flow candidate id. *)
+  | Cli_slot of string
+      (** A CLI slot, named by its lane runtime id -- the id a CLI's
+          {!Keeper_lane_cli_oneshot.input_capacity} carries. *)
+(** The slot whose answer a pass accepted. The two transports name slots from
+    separate spaces, so a caller asks which transport answered by
+    constructor, not by comparing ids. *)
+
+val served_slot_id : served_slot -> string
+
 type write_scope = Context_only | Context_and_memory
 (** The caller names the evidence's purpose. A queue-source organization pass
     writes only working Context; a durable range retains Memory processing. *)
@@ -44,21 +56,32 @@ type write_scope = Context_only | Context_and_memory
 type not_committed =
   { detail : string
         (** The typed cause, for the caller's log. *)
-  ; walk_was_never_about_size : bool
-        (** No failure the walk recorded could be answered by sending less:
-            each was either a provider momentarily unable to serve a request
-            it accepted (quota, overload, server, network), or a refusal only
-            an operator can lift (authentication, authorization, payment, an
-            absent model). Its caller then waits for the next signal at the
-            width it already had, instead of reading less on a refusal a
-            smaller request would meet just as surely.
+  ; walk_shows_size : bool
+        (** Something this pass met says the range's size is what stopped it:
+            a provider that judged the request too large, one that refused it
+            for a reason it did not name, a refused output, or a candidate
+            whose projection did not fit a slot's declared window.
+
+            False covers everything else, and a caller reading less only when
+            this is true is what keeps an outage from shrinking its reads. An
+            HTTP refusal from a provider that took the request and could not
+            serve it (quota, overload, server, network), a refusal only an
+            operator can lift (authentication, authorization, payment, an
+            absent model), and every failure that never reached a provider all
+            answer false, as does a pass that recorded no typed cause at all.
+            A provider error that is not an HTTP refusal arrives as
+            [Completion_failed] with its typed transport error and whether
+            the request was sent. A request never sent answers false. A sent
+            one answers true only for a named context overflow, an oversized
+            response, a deadline on the request's own processing, or an empty
+            completion stopped by the context window or the output budget. A
+            dropped connection, a DNS failure, a hard quota, an idle stream,
+            any other empty completion and every unclassified failure answer
+            false.
 
             The verdict covers every failed visit of the walk, not the last
             one, so the same set of causes answers the same way whatever order
-            the slots were tried in. A walk that ended in the CLI fallback, or
-            one that recorded no typed cause at all, is false: the pass reads
-            less rather than holding the whole range for a reason it cannot
-            name. *)
+            the slots were tried in. *)
   }
 
 val fit_continuity :
@@ -79,7 +102,8 @@ val run_best_effort
        (** The character limit a CLI slot reported while refusing, for
            {!fit_continuity}. An API slot's refusal reports none. *)
   -> ?on_not_committed:(not_committed -> unit)
-  -> ?on_continuity_committed:(Librarian_continuity_snapshot.t -> unit)
+  -> ?on_continuity_committed:(served_by:served_slot -> Librarian_continuity_snapshot.t -> unit)
+       (** [served_by] is the slot whose answer committed. *)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
   -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner
@@ -100,7 +124,32 @@ val run_best_effort
     sidecar, so a durable consumer can recover a later progress-file failure
     without submitting the completed-turn range again. *)
 
+(** What an accepted answer publishes besides Memory. A continuity pass is
+    accepted only with its working state, so the two arrive together. *)
+type continuity_answer =
+  | Memory_only
+  | Continuity of
+      { prepared : Keeper_librarian_continuity.prepared
+      ; working_state : string
+      }
+
+type accepted =
+  { selection : Keeper_librarian.selection
+  ; continuity_answer : continuity_answer
+  }
+
 module For_testing : sig
+  val cause_shows_size : Agent_core.Exact_output.execution_error_cause -> bool
+  (** The size verdict one provider cause gives, so the whole table can be
+      asserted cause by cause. A walk reads less when any of its failures
+      answers true. *)
+
+  val cli_failure_shows_size : Keeper_lane_cli_oneshot.failure -> bool
+  (** The same verdict for one official-client slot's failure. *)
+
+  val disposition_shows_size : Agent_core.Exact_output.candidate_rejection_disposition -> bool
+  (** The same verdict for a candidate the flow turned away before dispatch. *)
+
   val commit_continuity
     : commit:(unit -> (Librarian_continuity_snapshot.t, string) result)
     -> observe:((Librarian_continuity_snapshot.t, string) result -> unit)
@@ -121,7 +170,7 @@ module For_testing : sig
     -> selected_input:Keeper_librarian.input
     -> messages:Agent_core.Types.message list
     -> unit
-    -> ( (Keeper_librarian.selection * Yojson.Safe.t) * string
+    -> ( (accepted * Yojson.Safe.t) * served_slot
        , classified_error )
        result
 

@@ -8,14 +8,28 @@ open Masc_tui_types
 
 type group = Navigate | Act | Search | Meta
 
+(* Whether a binding answers while a surface's detail is open. A surface that
+   owns a detail draws one footer for two states, so it advertised exactly one
+   key the dispatcher refuses in the state on screen: [Right / Enter] once a
+   detail is already open, [[ / ]] while it is not. The fact was in the table
+   already -- but only as prose inside [help] ("while a detail is open"), which
+   no footer can read. This is that same fact as a value, so the footer and the
+   dispatcher stop disagreeing. *)
+type detail_state =
+  | Either  (** answers in both states; the default *)
+  | List_only  (** only while no detail is open *)
+  | Detail_only  (** only while a detail is open *)
+
 type binding = {
   key : string;
   label : string;
   help : string option;
   group : group;
+  detail : detail_state;
 }
 
-let b ?help group key label = { key; label; help; group }
+let b ?help ?(detail = Either) group key label =
+  { key; label; help; group; detail }
 
 (* [None] is shared by all Config panes; [Some panes] belongs only to those
    input handlers. Keep availability beside the binding, not in a second key
@@ -41,13 +55,25 @@ let config_bindings =
   ; b Navigate "t" "tools"
       ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
   ; b Act "e" "edit"
-      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
-      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]
+      ~help:"runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      Some [ Config_runtime; Config_models; Config_prompts; Config_voice ]
+    (* One item, because they are one action: on params [e] and [Enter] both
+       open the same type-aware field ([handle_runtime_param_edit_open]
+       ~advanced:false). Apart, this pane spent two of its slots on one door,
+       and the fitter -- which reads position, not meaning -- gave up [E] at
+       80 cells, the only other thing the pane does. A reader left with
+       [e:edit] and [Enter:edit / use] would also read the pane as having one
+       way to edit and no advanced one. *)
+  ; b Act "e / Enter" "edit"
+      ~help:"on params: edit the selected value with a type-aware field",
+      Some [ Config_params ]
   ; b Act "E" "advanced JSON"
       ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
-  ; b Act "Enter" "edit / use"
-      ~help:"edit the selected param; on themes, use that colour scheme",
-      Some [ Config_params; Config_themes ]
+    (* Split from the pair above. What [Enter] does on themes is not editing,
+       and one label reading "edit / use" made each pane carry the other's
+       word: a params reader met "use" with nothing to use. *)
+  ; b Act "Enter" "use"
+      ~help:"on themes, use that colour scheme", Some [ Config_themes ]
   ; b Act "x" "default / clear"
       ~help:"params return to default; prompts clear override; themes follow terminal colours",
       Some [ Config_params; Config_prompts; Config_themes ]
@@ -106,8 +132,8 @@ let runtime_keys =
       (b Navigate "c" "clients"
          ~help:"everyone attached to this workspace, off the ring under Runtime")
   ; Keeper_lanes_only
-      (b Act "e" "add failover"
-         ~help:"append a failover candidate to the lane under the cursor (keeper lanes only)")
+      (b Act "e" "add candidate"
+         ~help:"append a candidate to the candidate order of the lane under the cursor (keeper lanes only)")
   ; Keeper_lanes_only
       (b Act "a" "new lane"
          ~help:"name a new lane, then pick its first runtime; e adds the rest")
@@ -235,7 +261,7 @@ let keeper_actions =
   [ b Act "c" "chat" ~help:"chat with the keeper"
   ; b Act "l" "logs"
   ; b Act keeper_calls_key "calls" ~help:"tool calls"
-  ; b Act "u" "runtime" ~help:"pick a runtime lane"
+  ; b Act "u" "runtime" ~help:"pick a runtime candidate order"
   ; b Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
   ; b Act "p / w" "pause / wake"
   ; b Act "s" "shutdown"
@@ -367,7 +393,8 @@ let for_surface = function
                     Masc_tui_types.keeper_detail_tabs))
       ; b Act "o" "logs"
           ~help:"open container logs in Sandbox; Keeper activity elsewhere"
-      ; b Act "U" "runtime" ~help:"pick a runtime lane"
+      ; b Act "U" "runtime"
+          ~help:"pick a runtime candidate order (on the Channels tab U is unbind all)"
       ; b Act "Left / Esc" "back"
       ; b Navigate "Home/End" "top/bottom" ~help:"the ends of this tab"
       ]
@@ -447,7 +474,7 @@ let for_surface = function
       ; b Act "Right / Enter" "runs"
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
-          ~help:"add a failover candidate to this lane's walk order"
+          ~help:"add a candidate to this lane's walk order"
       ; b Act "s" "slots"
           ~help:"edit the lane's declared slots in walk order: x drops, J/K \
                  reorders, Esc closes"
@@ -541,11 +568,11 @@ let for_surface = function
       ; b Navigate "v" "next Planning tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
-      ; b Act "Right / Enter" "detail"
+      ; b Act "Right / Enter" "detail" ~detail:List_only
       ; b Act "Left / Esc" "back"
       ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
       ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "c" "request completion"
           ~help:"send the goal to the completion judge; press again to submit"
@@ -563,9 +590,10 @@ let for_surface = function
   | Schedules ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
       ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Right / Enter" "details" ~help:"open schedule details"
+      ; b Act "Right / Enter" "details" ~detail:List_only
+          ~help:"open schedule details"
       ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "n" "new" ~help:"create a schedule through a $EDITOR JSON form"
       ; b Act "e" "modify"
@@ -581,9 +609,10 @@ let for_surface = function
       ; b Navigate "h" "queue / history"
           ~help:"the queue is what a task is still waiting on; the history is \
                  every request ever submitted, which nothing removes"
-      ; b Act "Right / Enter" "details" ~help:"read the request and evidence"
+      ; b Act "Right / Enter" "details" ~detail:List_only
+          ~help:"read the request and evidence"
       ; b Act "Left / Esc" "back" ~help:"back to the list"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Navigate "< / >" "newer / older"
           ~help:"step either list a page at a time; one page holds two \
@@ -607,14 +636,23 @@ let for_surface = function
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
       ; b Navigate "v" "next Planning tab" ~help:"back round to Goals"
       ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Right / Enter" "verdict" ~help:"open the full evaluator verdict"
+      ; b Act "Right / Enter" "verdict" ~detail:List_only
+          ~help:"open the full evaluator verdict"
       ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
-      ; b Navigate "[ / ]" "previous / next"
+      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "y" "agree" ~help:"record the machine's verdict as yours"
-        (* [x], not [n]: this surface answers the row search, and [n] / [N]
-           step it. Spelled the way Verification spells its own rejection. *)
-      ; b Act "x" "overrule" ~help:"record the opposite verdict; $EDITOR takes the reason"
+        (* One item, spelled the way Verification spells its own pair. Apart,
+           the fitter gives them up one at a time, and the screen that loses
+           them first is the verdict pane -- the one place an operator reads a
+           ruling in full before answering it. [Masc_tui_footer.never_dropped_keys]
+           pins the pair whole; pinning [y] or [x] alone would pin the [y] of
+           every [y / n] and the [x] that deletes a keeper.
+
+           [x], not [n]: this surface answers the row search, and [n] / [N]
+           step it. *)
+      ; b Act "y / x" "agree / overrule"
+          ~help:"y records the machine's verdict as yours; x records the \
+                 opposite, with $EDITOR taking the reason"
       ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
       ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
       ; b Search "n / N" "next / previous match"
@@ -841,7 +879,34 @@ let hints_of_bindings bindings =
   |> List.map (fun { key; label; _ } -> key ^ ":" ^ label)
   |> String.concat "  "
 
-let footer_hints surface = hints_of_bindings (for_surface surface)
+(* [detail_open] is how a surface that owns a detail says which of its two
+   states is on screen. A surface without a detail leaves it out, and then
+   every binding stands -- which is what every caller did before this argument
+   existed, so their footers are unchanged. A surface that does own one and
+   forgets to pass it falls back to that same behaviour, which is the bug this
+   argument exists to end; [test_tui_footer_detail_state] is what keeps a new
+   surface from quietly landing there. *)
+let footer_hints ?detail_open surface =
+  let answers binding =
+    match detail_open, binding.detail with
+    | _, Either -> true
+    | None, (List_only | Detail_only) -> true
+    | Some open_, List_only -> not open_
+    | Some open_, Detail_only -> open_
+  in
+  hints_of_bindings (List.filter answers (for_surface surface))
+
+(* Whether this surface's table scopes any binding to one of the two states.
+   A surface this answers [true] for owes [footer_hints] a [~detail_open] from
+   both of its renderers; [test_tui_footer_detail_state] reads this rather
+   than a list written by hand beside it. *)
+let has_detail_scoped_keys surface =
+  List.exists
+    (fun binding ->
+      match binding.detail with
+      | Either -> false
+      | List_only | Detail_only -> true)
+    (for_surface surface)
 
 (* The keys an open approval answers to. Its footer was written out in the
    renderer, which is how it came to spell the decision keys apart from the
@@ -1237,9 +1302,18 @@ let here_marker = " \xc2\xb7 you are here"
 let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   match tab with
   | Detail_github ->
-      [ b Act "L" "login" ~help:"start the gh device-flow login"
+      [ b Act "L" "login" ~help:"start the gh device-flow login with the ticked scopes"
       ; b Act "P" "token" ~help:"set fine-grained PAT / token"
       ]
+      (* One digit per scope the login can ask for, in the order the tab
+         lists them, so a scope added to the server's list gets its key here
+         without a second edit. *)
+      @ List.mapi
+          (fun index scope ->
+            b Act (string_of_int (index + 1))
+              (Masc.Keeper_github_identity.login_scope_to_string scope)
+              ~help:"tick or untick this scope for the next L login")
+          Masc.Keeper_github_identity.all_login_scopes
   | Detail_sandbox ->
       [ b Act "o" "actual logs"
       ; b Act "d/m/s" "backend"
@@ -1267,6 +1341,12 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ; b Navigate "PgUp/PgDn" "detail page"
       ; b Act "b / e / u u" "bind / reassign / remove"
           ~help:"bind a channel, reassign the selected row, or remove it twice-confirmed"
+        (* Takes [U] from the runtime picker on this tab only, the way [u]
+           is taken above: the picker stays on every other tab. *)
+      ; b Act "U U" "unbind all"
+          ~help:"remove every channel binding of this Keeper on every \
+                 transport, twice-confirmed; a channel rebound to another \
+                 Keeper meanwhile is left as is"
       ]
   | Detail_info | Detail_secrets | Detail_automation | Detail_runs -> []
 

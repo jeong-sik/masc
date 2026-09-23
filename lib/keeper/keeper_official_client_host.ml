@@ -87,24 +87,76 @@ let user_message text : Agent_core.Types.message =
    synthetic User-message encoding, while retaining the shared typed identity
    used by prompt attribution and input-window projection.
 
-   The Librarian's working state rides here too, so it reaches the client the
-   way each adapter delivers System text: Claude Code joins it into
-   [--system-prompt] on every turn, a resume included
+   The Librarian's working state rides the same System path, so it reaches
+   the client the way each adapter delivers System text: Claude Code joins it
+   into [--system-prompt] on every turn, a resume included
    ([Keeper_claude_code_runtime]); Antigravity renders it as a [SYSTEM:]
    section ahead of the history ([Keeper_antigravity_runtime]). The Agent
    Core lane sends the same text as a [User] message, which only that lane's
-   wire has. Moving it to [User] here would change when Claude Code delivers
-   it -- into the start prompt's history alone, absent from resumes -- not
-   only what the model reads it as; that is a lane decision to measure, not
-   a role to flip. The text names itself a summary to use as context, not as
-   new instructions ([Keeper_turn_driver_try_provider.working_state_text]). *)
-let extra_system_context_message text : Agent_core.Types.message =
+   wire has. The text names itself a summary to use as context, not as new
+   instructions ([Keeper_turn_driver_try_provider.working_state_text]).
+
+   The two carry different tags. The composition check over a request expects
+   exactly one per-turn carrier; a working state stamped with the carrier's
+   tag made every request that carried both fail it as a repeated carrier.
+   The working state carries {!Runtime_model_input_tail_window.working_state_metadata},
+   as on the Agent Core lane, and the adapters select both through
+   [is_composed_system_context]. *)
+let system_context_message ~metadata text : Agent_core.Types.message =
   { role = System
   ; content = [ Text text ]
   ; name = None
   ; tool_call_id = None
-  ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+  ; metadata
   }
+;;
+
+let extra_system_context_message text =
+  system_context_message
+    ~metadata:Agent_core.Types.Extra_system_context_provenance.metadata
+    text
+;;
+
+let working_state_message text =
+  system_context_message
+    ~metadata:Runtime_model_input_tail_window.working_state_metadata
+    text
+;;
+
+let is_composed_system_context (message : Agent_core.Types.message) =
+  (match Agent_core.Types.Extra_system_context_provenance.classify message.metadata with
+   | Agent_core.Types.Extra_system_context_provenance.Present -> true
+   | Agent_core.Types.Extra_system_context_provenance.Absent
+   | Agent_core.Types.Extra_system_context_provenance.Invalid
+   | Agent_core.Types.Extra_system_context_provenance.Duplicate -> false)
+  || Runtime_model_input_tail_window.is_working_state message
+;;
+
+let history_role_label = function
+  | Agent_core.Types.System -> "SYSTEM:\n"
+  | Agent_core.Types.User -> "USER:\n"
+  | Agent_core.Types.Assistant -> "ASSISTANT:\n"
+  | Agent_core.Types.Tool -> "TOOL:\n"
+;;
+
+(* A blank line between rendered messages and before the goal. *)
+let resume_section_separator = "\n\n"
+
+let is_carried_on_resume message =
+  is_composed_system_context message || Keeper_official_task_reference.is_reference message
+;;
+
+let resume_prompt ~goal messages =
+  let context =
+    messages
+    |> List.filter is_carried_on_resume
+    |> List.map (fun (message : Agent_core.Types.message) ->
+      history_role_label message.role ^ encode_history_message message)
+    |> String.concat resume_section_separator
+  in
+  match String_util.trim_nonempty context with
+  | None -> goal
+  | Some context -> context ^ resume_section_separator ^ goal
 ;;
 
 let last_tool_results messages =
@@ -519,24 +571,7 @@ let carried_start_range
       ( Runtime_model_input_tail_window.atom_opening_digest messages
       , snd (Runtime_model_input_tail_window.annotate messages) ))
   in
-  Option.iter
-    (fun (unreadable : Keeper_carried_front.unreadable_records) ->
-       Log.Keeper.warn
-         ~keeper_name
-         "model input carried range seed read skipped unreadable turn records \
-          runtime=%s unreadable=%d first_reason=%s"
-         runtime_id
-         unreadable.Keeper_carried_front.count
-         unreadable.Keeper_carried_front.first_reason)
-    seed_read.Keeper_carried_front.unreadable;
-  Option.iter
-    (fun detail ->
-       Log.Keeper.warn
-         ~keeper_name
-         "model input carried range seed read refused the turn-boundary store runtime=%s detail=%s"
-         runtime_id
-         detail)
-    seed_read.Keeper_carried_front.boundary_error;
+  Keeper_carried_front.warn_seed_read_failures ~keeper_name ~runtime_id seed_read;
   let seeded_first_atom =
     match seed_read.Keeper_carried_front.seed with
     | None -> None
@@ -642,9 +677,8 @@ let carried_start_range
     | Absorbed_through { first_atom; absorbed_through; boundary_line; working_state } ->
       (* The working state stands in front of the range, in the same System
          place this lane puts every other piece of context it composes; see
-         [extra_system_context_message] for what that place is on each
-         client. *)
-      ( extra_system_context_message working_state :: messages
+         [working_state_message] for what that place is on each client. *)
+      ( working_state_message working_state :: messages
       , first_atom
       , Librarian_snapshot { absorbed_through; boundary_line } )
     | Plain (first_atom, front) -> messages, first_atom, front
@@ -695,6 +729,213 @@ let carried_start_range
   ; transmitted_bytes
   ; front
   }
+;;
+
+(* A carried range as a lane's declared window left it: the list that goes
+   out, and how many of the range's durable atoms are in it. *)
+type windowed_range =
+  { carried : carried_start
+  ; sent : Agent_core.Types.message list
+  ; atoms_kept : int
+  }
+
+let carried_atoms (carried : carried_start) =
+  carried.projection.Runtime_model_input_tail_window.atom_count
+  - carried.projection.Runtime_model_input_tail_window.dropped_atoms
+;;
+
+(* A carried range windowed at a declared ceiling.
+   [Runtime_model_input_tail_window.project_with_drop] charges the omission
+   preamble up front, as the message it puts back whenever a cut lands on a
+   non-[User] head. A range that already opens with one would pay for it
+   twice -- there and again as its first atom -- and a range that fit would
+   fail at no drop and lose a whole quantum of atoms. So the preamble comes
+   off before the window and goes back when the window dropped nothing: a
+   range that fit goes exactly as it was cut, and a cut that did land puts
+   back its own. [source_projection] runs on the range as composed, preamble
+   and all, so what it records is what goes out; it appends after the range,
+   so a drop from the front reaches what it added only after every durable
+   atom went. *)
+let window_carried_range
+      ~measure_message_bytes
+      ~capacity_bytes
+      ~reserved_bytes
+      ?source_projection
+      (carried : carried_start)
+  =
+  let* projected =
+    match source_projection with
+    | None -> Ok carried.messages
+    | Some project -> project carried.messages
+  in
+  let opened_with, input =
+    match projected with
+    | head :: rest when Runtime_model_input_tail_window.is_synthetic_preamble head ->
+      Some head, rest
+    | _ :: _ | [] -> None, projected
+  in
+  let* projection =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      Runtime_model_input_tail_window.project_with_drop
+        ~allow_empty_history:true
+        ~measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes
+        input)
+    |> Result.map_error Runtime_model_input_tail_window.budget_error_to_core_error
+  in
+  let sent =
+    match opened_with, projection.Runtime_model_input_tail_window.dropped_atoms with
+    | Some preamble, 0 -> preamble :: projection.Runtime_model_input_tail_window.messages
+    | Some _, _ | None, _ -> projection.Runtime_model_input_tail_window.messages
+  in
+  let range = carried_atoms carried in
+  Ok
+    { carried
+    ; sent
+    ; atoms_kept =
+        range - Int.min range projection.Runtime_model_input_tail_window.dropped_atoms
+    }
+;;
+
+(* A seed read taken once however many times a composition asks for it.
+   [compose_librarian_range] may compose a range twice; the second must start
+   from the same seed, and the turn-record read, and whatever it reports on
+   records it could not parse, should happen once. The compositions run one
+   after the other on the caller's fiber. *)
+let read_seed_once = function
+  | None -> None
+  | Some read ->
+    let taken = ref None in
+    Some
+      (fun () ->
+         match !taken with
+         | Some seed -> seed
+         | None ->
+           let seed = read () in
+           taken := Some seed;
+           seed)
+;;
+
+(* The window reading in the history's own vocabulary: the atoms the range
+   kept, counted against the whole history, so the front it names is an atom
+   a later seed can reopen. *)
+let windowed_projection (windowed : windowed_range) : Runtime_model_input_tail_window.projection =
+  { messages = windowed.sent
+  ; dropped_atoms = windowed.carried.history_atom_count - windowed.atoms_kept
+  ; atom_count = windowed.carried.history_atom_count
+  }
+;;
+
+(* Why a working state stayed out of a request. *)
+type working_state_left_out =
+  | Displaces_atoms of { kept_with : int; kept_without : int }
+      (** Carried, it would have pushed out atoms after the range it covers:
+          the window kept [kept_with] of them with it, [kept_without] alone. *)
+  | Leaves_no_turn
+      (** Carried, the window would have kept no atom: a summary with no turn
+          to answer. *)
+  | Does_not_fit of Agent_core.Error.t
+      (** The working state and the messages no cut removes exceed the
+          ceiling on their own. *)
+
+let working_state_left_out_label = function
+  | Displaces_atoms _ -> "displaces_atoms"
+  | Leaves_no_turn -> "leaves_no_turn"
+  | Does_not_fit _ -> "does_not_fit"
+;;
+
+let working_state_left_out_detail = function
+  | Displaces_atoms { kept_with; kept_without } ->
+    Printf.sprintf "atoms_kept_with=%d atoms_kept_without=%d" kept_with kept_without
+  | Leaves_no_turn -> "atoms_kept_with=0"
+  | Does_not_fit error -> Agent_core.Error.to_string error
+;;
+
+let carries_working_state (windowed : windowed_range) =
+  match windowed.carried.front with
+  | Librarian_snapshot _ -> true
+  | Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Librarian_progress _ ->
+    false
+;;
+
+(* RFC-0460. A working state stands in for the atoms before the range it
+   leads, so it goes out only where it displaces none of the atoms after it.
+   Pinned in front of a range the window then has to cut, it would leave
+   atoms that the summary does not cover and the request does not hold -- the
+   gap the lane's own cut exists to keep out of the range. So the range is
+   composed with it first; when that window kept every atom of the range, it
+   goes. Otherwise the same position is composed alone
+   ([Librarian_progress] at the snapshot's end: the atoms before it are in
+   the keeper's memory, and nothing stands in for them), and the working
+   state goes only if the window kept as many atoms with it as without it
+   and at least the newest one.
+
+   Leaving it out is not a refusal. The band where it does not fit is
+   usually the Librarian not having caught up with a long history, which
+   clears as it reads on, and a refused turn there would stop a keeper for
+   nothing an operator can fix. The turn goes out, and the counter and the
+   line below say that it went without its summary and by how much. A
+   request the position alone cannot carry is still refused, with the error
+   of that composition. *)
+let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
+  match librarian_front with
+  | Keeper_turn_driver_try_provider.Librarian_progress _
+  | Keeper_turn_driver_try_provider.No_position -> compose librarian_front
+  | Keeper_turn_driver_try_provider.Librarian_snapshot
+      (snapshot : Librarian_continuity_snapshot.t) ->
+    let with_state = compose librarian_front in
+    (match with_state with
+     | Ok windowed when not (carries_working_state windowed) ->
+       (* The snapshot did not win the range -- the seed or the lane's own
+          cut sat past it -- so nothing was pinned, and the position alone
+          would be this same range. *)
+       with_state
+     | Ok windowed
+       when windowed.atoms_kept >= 1 && windowed.atoms_kept = carried_atoms windowed.carried ->
+       with_state
+     | Ok _ | Error _ ->
+       let* alone =
+         compose
+           (Keeper_turn_driver_try_provider.Librarian_progress
+              { end_atom = snapshot.end_atom })
+       in
+       let leave_out reason =
+         Log.Keeper.warn
+           ~keeper_name
+           "model input working state not carried runtime=%s reason=%s \
+            summary_end=%d first_atom=%s %s: the Librarian position goes \
+            alone until it has read far enough for its summary to fit"
+           runtime_id
+           (working_state_left_out_label reason)
+           snapshot.end_atom
+           (match alone.atoms_kept with
+            | 0 -> "none"
+            | kept -> string_of_int (alone.carried.history_atom_count - kept))
+           (working_state_left_out_detail reason);
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string WorkingStateNotCarried)
+           ~labels:
+             [ "keeper", keeper_name
+             ; "runtime", runtime_id
+             ; "reason", working_state_left_out_label reason
+             ]
+           ();
+         Ok alone
+       in
+       (match with_state with
+        | Ok windowed
+          when windowed.atoms_kept >= 1 && windowed.atoms_kept >= alone.atoms_kept ->
+          (* The ceiling cut both compositions alike: the working state
+             displaced nothing, and it carries more than the position
+             alone. *)
+          with_state
+        | Ok windowed when windowed.atoms_kept = 0 -> leave_out Leaves_no_turn
+        | Ok windowed ->
+          leave_out
+            (Displaces_atoms
+               { kept_with = windowed.atoms_kept; kept_without = alone.atoms_kept })
+        | Error error -> leave_out (Does_not_fit error)))
 ;;
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
@@ -1201,6 +1442,11 @@ let masc_observation_sentence masc =
             "was running this turn when MASC shut down"
           | Keeper_internal_error.Runtime_reported_interrupt ->
             "reported this turn as interrupted")
+     | Keeper_internal_error.Preempted_before_first_token { runtime_id } ->
+       Printf.sprintf
+         "the turn yielded to a queued person before runtime %s produced \
+          anything"
+         runtime_id
      | Keeper_internal_error.Runtime_connection_closed
          { runtime_id; detail; turn_accepted } ->
        Printf.sprintf
@@ -1508,7 +1754,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                     (Repeated_tool_call { tool_name = tool.schema.name; repeated_count }) })
           in
           (try on_result_handoff ~invocation ~content:final_result.content with
-           | exn ->
+           | exn -> (* cancel-guard-ok: reraise_if_reserved re-raises Cancelled *)
              Llm_provider.Reserved_exn.reraise_if_reserved exn;
              Log.Keeper.warn
                ~keeper_name
@@ -1524,7 +1770,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
            | Some observe ->
              let boundary =
                try observe () with
-               | exn ->
+               | exn -> (* cancel-guard-ok: reraise_if_reserved re-raises Cancelled *)
                  Llm_provider.Reserved_exn.reraise_if_reserved exn;
                  Error (Agent_core.Error.Internal (Printexc.to_string exn))
              in

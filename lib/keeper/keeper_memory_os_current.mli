@@ -48,6 +48,23 @@ type retract_error =
   | Retract_fact_not_found of string
   | Retract_persistence_failed of string
 
+type supersede_error =
+  | Supersede_memory_id_invalid
+  | Supersede_self
+      (** The incoming claim has the superseded fact's exact bytes, so it
+          would name itself as its own successor. *)
+  | Supersede_target_not_current of string
+  | Supersede_target_not_authored of string
+      (** The target is current but was not written by this keeper through
+          [keeper_memory_write]; a Librarian copy is the Librarian's to
+          revise. *)
+  | Supersede_successor_rests_on_target of support_invalidation
+      (** The successor is derived and, once the target is gone, has no
+          complete support path left; the target is among its missing
+          premises. A claim cannot rest on the fact it replaces. *)
+  | Supersede_unsupported_derivation of support_invalidation
+  | Supersede_persistence_failed of string
+
 type retraction =
   { memory_id : string
   ; reason : string
@@ -173,6 +190,17 @@ val journal_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> str
     range identity to the exact shared Memory snapshot revision and bytes
     produced from it. *)
 val durable_range_receipt_path : keepers_dir:string -> keeper_id:string -> string
+
+(** Keeper ids that have a range receipt sidecar in [keepers_dir], sorted. *)
+val list_durable_range_receipt_keeper_ids : keepers_dir:string -> string list
+
+(** Decode the range receipt sidecar with the exact schema the runtime uses,
+    without reading or changing the Memory snapshot. Every Memory write for a
+    keeper reconciles this sidecar before it builds, so a sidecar this build
+    cannot decode stops them all; the deploy preflight runs this to refuse the
+    rollout first. A missing sidecar is [Ok ()]. *)
+val validate_durable_range_receipts :
+  keepers_dir:string -> keeper_id:string -> (unit, string) result
 
 (** Durable recovery evidence for one destructive ordinary-current batch. The
     file exists only between plan preparation and exact journal finalization,
@@ -302,7 +330,15 @@ val apply_disposition
     snapshot is built and printed and right before it replaces the old one; if
     that append fails, nothing is committed (RFC-0456 §4.2). Required rather
     than defaulted: a caller that leaves it out would add the merged claim and
-    keep every fact it absorbs current. *)
+    keep every fact it absorbs current.
+
+    An absorption goes into a memory the answer names: one of [new_claims], or
+    a current memory the answer wrote again verbatim. The librarian read the
+    snapshot before its provider turn, so that memory may be gone when the lock
+    is taken. An absorption whose target the locked snapshot does not hold and
+    [new_claims] does not add is not applied and is logged; its source stays
+    current, the removed memory is not brought back, and no absorbed row points
+    into an id no snapshot has (#38186). *)
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -373,6 +409,24 @@ val retract_fact
     reason are written to the same journal commit as the resulting snapshot;
     cascaded removals are represented by [change.invalidated]. Invalid input
     and a missing target fail before any snapshot or journal write. *)
+
+val supersede_fact
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> now:float
+  -> source:source
+  -> superseded_memory_id:string
+  -> Keeper_memory_os_types.fact
+  -> (t, supersede_error) result
+(** Atomically remove one current keeper-authored fact and insert its
+    successor in the same locked update. The successor is added under the
+    same rules as {!upsert_fact}: new claim bytes get the incoming
+    [first_seen]; bytes already current under another identity are a
+    re-observation of that fact. Derived facts that lose their support with
+    the target are removed as in {!retract_fact}. The removal is journaled
+    with a [superseded_by] reason in the same commit. Every refusal writes no
+    snapshot and no journal line. *)
 
 val retract_facts
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

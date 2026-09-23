@@ -11,6 +11,28 @@ let request : AR.review_request =
   }
 ;;
 
+(* Every review is handed a lookup surface; these tests stub the reviewer, so
+   the surface is only carried, never dispatched, except where a test says so. *)
+let lookup : AR.lookup_surface =
+  { schemas =
+      [ { Types_core.name = "keeper_read_file"
+        ; description = "read evidence"
+        ; input_schema = `Assoc []
+        }
+      ]
+  ; dispatch =
+      (fun ~name ~args:_ ->
+         Tool_result.make_ok
+           ~tool_name:name
+           ~start_time:0.0
+           ~data:(`String "artifact body")
+           ~content_blocks:[ Llm_provider.Types.Text "artifact body" ]
+           ())
+  }
+;;
+
+let lookup_root = AR.Producer_tree [ "repo" ]
+
 let with_reviewer reviewer f =
   let saved = Atomic.get AR.run_llm_reviewer_fn in
   Fun.protect
@@ -29,7 +51,8 @@ let review () =
       ; evidence_posture = AR.Note_only
       ; few_shot_block = ""
       }
-    ~lookup:AR.No_lookup_surface
+    ~lookup
+    ~lookup_root
     ~base_path:(Filename.get_temp_dir_name ())
     request
 
@@ -53,7 +76,7 @@ let test_explicit_base_path_reaches_reviewer () =
               ; evidence_posture = AR.Note_only
               ; few_shot_block = ""
               }
-            ~lookup:AR.No_lookup_surface ~base_path:expected request);
+            ~lookup ~lookup_root ~base_path:expected request);
        match !received with
        | Some actual ->
          Alcotest.(check string) "review uses the caller BasePath" expected actual
@@ -66,7 +89,7 @@ let configure_prompt_registry () =
   in
   Prompt_registry.set_markdown_dir prompt_dir;
   (* Prompts live in config/prompts as group files; slot keys such as
-     verification.lookup.none only register when the directory is loaded
+     verification.lookup.producer_tree only register when the directory is loaded
      (#32780). A set without load leaves every slot key missing and the
      review gate falls to evaluator_unavailable before any reviewer runs.
      Matches the other prompt-rendering tests. *)
@@ -317,30 +340,9 @@ let test_note_only_verdict_is_owned_by_the_reviewer () =
    a post-hoc verdict override. *)
 let test_successful_lookup_is_exposed_to_the_reviewer () =
   let saw_success = ref false in
-  let lookup =
-    AR.Lookup_tools
-      { schemas =
-          [ { Types_core.name = "keeper_read_file"
-            ; description = "read evidence"
-            ; input_schema = `Assoc []
-            }
-          ]
-      ; dispatch =
-          (fun ~name ~args:_ ->
-             Tool_result.make_ok
-               ~tool_name:name
-               ~start_time:0.0
-               ~data:(`String "artifact body")
-               ~content_blocks:[ Llm_provider.Types.Text "artifact body" ]
-               ())
-      ; root_layout = [ "repo" ]
-      }
-  in
   with_reviewer
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
-       (match lookup with
-        | AR.No_lookup_surface -> saw_success := false
-        | AR.Lookup_tools { dispatch; _ } ->
+       (let { AR.dispatch; _ } = lookup in
           let result = dispatch ~name:"keeper_read_file" ~args:(`Assoc []) in
           let data_exposes_success =
             match Tool_result.data result with
@@ -381,6 +383,7 @@ let test_successful_lookup_is_exposed_to_the_reviewer () =
              ; few_shot_block = ""
              }
            ~lookup
+           ~lookup_root
            ~base_path:(Filename.get_temp_dir_name ())
            request
        in

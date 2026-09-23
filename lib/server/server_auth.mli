@@ -196,6 +196,7 @@ val ensure_same_origin_if_browser_request :
 val http_status_of_auth_error :
   Masc_domain.masc_error ->
   [> `Bad_request
+  | `Conflict
   | `Forbidden
   | `Internal_server_error
   | `Not_found
@@ -278,10 +279,41 @@ val auth_error_cors_headers : Httpun.Request.t -> (string * string) list
     left the server with different CORS headers depending on the protocol
     (#28166). *)
 
+val auth_refusal_response :
+  protocol:string ->
+  path:string ->
+  Masc_domain.masc_error ->
+  [> `Bad_request
+  | `Conflict
+  | `Forbidden
+  | `Internal_server_error
+  | `Not_found
+  | `Too_many_requests
+  | `Unauthorized ]
+  * string
+(** Log the refusal and hand back the status and body. Every responder that
+    answers a refusal — the h1 responder, the h2 gateway, and the h2 route
+    dispatcher — builds its response from here, so a refusal cannot be answered
+    without a line. The status stays row-polymorphic so each protocol narrows
+    it to [Httpun.Status.t] or [H2.Status.t] at the use site. *)
+
 val respond_auth_error :
   Httpun.Request.t -> Httpun.Reqd.t -> Masc_domain.masc_error -> unit
 (** Compose [http_status_of_auth_error] + [auth_error_json] + generic Bearer
-    challenge + CORS. *)
+    challenge + CORS, and log the refused path and status once for both
+    protocols. *)
+
+val log_auth_refusal : protocol:string -> path:string -> status:int -> unit
+(** Log a refused request's endpoint and status. [auth_refusal_response] calls
+    this, and the h2 gateway's own responder goes through it too, so both
+    protocols leave the same line. The raw bearer is never logged. *)
+
+val auth_refusal_details : protocol:string -> path:string -> status:int -> Yojson.Safe.t
+(** The structured details [log_auth_refusal] emits: the protocol, the refused
+    path and the status. *)
+
+val auth_refusal_message : protocol:string -> path:string -> status:int -> string
+(** The human-readable line [log_auth_refusal] emits. *)
 
 val agent_rl_key_of_request : Httpun.Request.t -> string option
 (** Extract a per-agent rate-limit key from the request.  Prefers the
@@ -319,6 +351,24 @@ val authorize_tool_request_with_actor :
     token-less same-origin request uses its supplied header/query attribution,
     or ["dashboard"] when it supplies no name. The returned name alone does
     not distinguish credential identity from local attribution. *)
+
+(** What the request's credential says about who is calling, beyond the name
+    {!authorize_tool_request_with_actor} returns. *)
+type request_credential_standing =
+  | Operator_credential
+      (** A bearer whose stored credential has the [Admin] role, the one
+          [masc login] and the TUI's workspace credential carry. The
+          internal keeper token is never this. *)
+  | Agent_credential
+      (** The internal keeper token with its keeper name header, or a bearer
+          whose credential has the [Worker] role. The name is verified; the
+          caller is not the operator. *)
+  | No_credential
+      (** No bearer, or one that resolves to no credential: any name on the
+          request is the caller's own claim. *)
+
+val request_credential_standing :
+  base_path:string -> Httpun.Request.t -> request_credential_standing
 
 val authorize_token_bound_permission_request :
   base_path:string ->

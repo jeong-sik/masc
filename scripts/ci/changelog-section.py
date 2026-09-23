@@ -8,7 +8,8 @@ deleted turn-records directory -- is invisible there. This lifts the version's
 own section to the top of the body; the generated list still follows it.
 
 Failing loudly is the point: a tag whose version has no section would publish a
-page that says nothing about the release, so this exits non-zero instead.
+page that says nothing about the release, so this exits non-zero instead. A
+section with no entries -- the bare stub a version bump leaves -- fails too.
 """
 
 import pathlib
@@ -45,6 +46,16 @@ def main() -> int:
         (i for i in range(start + 1, len(lines)) if lines[i].startswith("## [")),
         len(lines),
     )
+    # A heading with no entries under it is as empty as a missing one: the
+    # version bump adds a bare stub, and a release cut before its entries are
+    # moved in would publish a page that says nothing about the release.
+    if not any(line.startswith("- ") for line in lines[start + 1 : end]):
+        print(
+            f"{changelog} {header} has no '- ' entries; move the release's "
+            f"entries into it before tagging {version}",
+            file=sys.stderr,
+        )
+        return 1
     body = "\n".join(lines[start:end]).strip() + "\n"
     pathlib.Path(out).write_text(body, encoding="utf-8")
     return 0

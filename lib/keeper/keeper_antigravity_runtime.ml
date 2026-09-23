@@ -60,15 +60,8 @@ let home_error_to_core_error error =
     (Runtime_antigravity_home.error_to_string error)
 ;;
 
-let history_role_label = function
-  | Agent_core.Types.System -> "SYSTEM:\n"
-  | Agent_core.Types.User -> "USER:\n"
-  | Agent_core.Types.Assistant -> "ASSISTANT:\n"
-  | Agent_core.Types.Tool -> "TOOL:\n"
-;;
-
 let render_message (message : Agent_core.Types.message) =
-  Ok (history_role_label message.role ^ Host.encode_history_message message)
+  Ok (Host.history_role_label message.role ^ Host.encode_history_message message)
 ;;
 
 let render_messages messages =
@@ -79,14 +72,6 @@ let render_messages messages =
       loop (rendered_message :: rendered) rest
   in
   loop [] messages
-;;
-
-let extra_system_context_messages messages =
-  List.filter
-    (fun (message : Agent_core.Types.message) ->
-      Agent_core.Types.Extra_system_context_provenance.classify message.metadata
-      = Agent_core.Types.Extra_system_context_provenance.Present)
-    messages
 ;;
 
 (* A keeper turn cannot start without its labels; the missing asset is a
@@ -102,7 +87,7 @@ let current_goal_label () = required_label (Antigravity_input_frame.current_goal
 let prompt_section_separator = Antigravity_input_frame.section_separator
 
 let measure_model_input_message_bytes (message : Agent_core.Types.message) =
-  String.length (history_role_label message.role)
+  String.length (Host.history_role_label message.role)
   + String.length (Host.encode_history_message message)
   + String.length prompt_section_separator
 ;;
@@ -126,83 +111,56 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes
   =
   fun history_messages ->
   let* librarian_front = Host.read_librarian_front librarian_front history_messages in
-  let carried =
-    Host.carried_start_range
-      ~keeper_name
-      ~runtime_id
-      ~carried_front_seed
-      ~librarian_front
-      ~own_first_atom:0
-      ~turn_start
-      history_messages
+  let carried_front_seed = Host.read_seed_once carried_front_seed in
+  (* The window drops atoms, never a pinned message, so a request whose
+     pinned messages -- the hooks' system context and the preamble -- exceed
+     what the fixed sections leave is refused for every front. A working
+     state is pinned too, and whether it goes is decided before anything is
+     sent ([Host.compose_librarian_range], RFC-0460): it is carried only
+     where it displaces none of the range's atoms, and otherwise the
+     Librarian position goes alone. The empty history stays open to every
+     composition, because that decision is what keeps a working state from
+     going out with no turn to answer; a range with none is the ceiling
+     saying it cannot hold one atom of this conversation, and the goal and
+     system prompt still go out, as the Claude Code lane's shrink floor
+     composes on purpose. *)
+  let compose librarian_front =
+    let carried =
+      Host.carried_start_range
+        ~keeper_name
+        ~runtime_id
+        ~carried_front_seed
+        ~librarian_front
+        ~own_first_atom:0
+        ~turn_start
+        history_messages
+    in
+    Host.window_carried_range
+      ~measure_message_bytes:measure_model_input_message_bytes
+      ~capacity_bytes
+      ~reserved_bytes
+      ?source_projection
+      carried
+  in
+  let* windowed =
+    Host.compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front
   in
   Option.iter
-    (fun observe -> observe carried.Host.front ~transmitted_bytes:carried.Host.transmitted_bytes)
+    (fun observe ->
+       observe
+         windowed.Host.carried.Host.front
+         ~transmitted_bytes:windowed.Host.carried.Host.transmitted_bytes)
     on_carried_front;
-  let* projected_messages =
-    match source_projection with
-    | None -> Ok carried.Host.messages
-    | Some project -> project carried.Host.messages
-  in
-  (* The window drops atoms, never a pinned message, so the pinned messages
-     alone -- the hooks' system context, a working state the Librarian front
-     carries, the preamble -- exceeding what the fixed sections leave refuses
-     the request for every front. Composing once more without the working
-     state would save at most its few kilobytes and hide, for that one band,
-     a request the operator has to make room for: the next turn's pinned
-     messages meet the same ceiling.
-
-     A Librarian snapshot front refuses one band earlier: when the working
-     state is pinned and the window still cannot keep the newest atom.
-     [Host.carried_start_range] clamps every range so it carries the turn it
-     is about to answer, and what would go out here instead is the working
-     state with nothing to answer -- a summary of atoms the request no longer
-     holds. Every other front keeps the empty history: that is the ceiling
-     saying it cannot hold one atom of this conversation, and the goal and
-     system prompt still go out, which is what the Claude Code lane's shrink
-     floor composes on purpose. *)
-  let allow_empty_history =
-    match carried.Host.front with
-    | Host.Librarian_snapshot _ -> false
-    | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start
-    | Host.Turn_start_unknown _ | Host.Librarian_progress _ -> true
-  in
-  Domain_pool_ref.submit_cpu_or_inline (fun () ->
-    match
-      Runtime_model_input_tail_window.project_with_drop
-        ~allow_empty_history
-        ~measure_message_bytes:measure_model_input_message_bytes
-        ~capacity_bytes
-        ~reserved_bytes
-        projected_messages
-    with
-    | Ok projection ->
-      let carried_atoms =
-        carried.Host.projection.atom_count - carried.Host.projection.dropped_atoms
-      in
-      (* Still clamped: a front other than the snapshot keeps the empty
-         history, and its drop then counts the preamble and every atom the
-         carried range never held. *)
-      let durable_dropped = Int.min projection.dropped_atoms carried_atoms in
-      let transmitted_atoms = carried_atoms - durable_dropped in
-      Option.iter
-        (fun observe ->
-           if transmitted_atoms > 0
-           then
-             Option.iter
-               (fun front_atom_digest ->
-                  observe
-                    { Runtime_model_input_tail_window.transmitted_atoms
-                    ; total_atoms = carried.Host.history_atom_count
-                    ; front_atom_digest
-                    })
-               (Runtime_model_input_tail_window.atom_opening_digest
-                  history_messages
-                  (carried.Host.history_atom_count - transmitted_atoms)))
-        on_model_input_window_observation;
-      Ok projection.messages
-    | Error error ->
-      Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
+  Option.iter
+    (fun observe ->
+       Option.iter
+         observe
+         (Runtime_model_input_tail_window.observe
+            ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest history_messages)
+            ~history_atom_count:windowed.Host.carried.Host.history_atom_count
+            (Host.windowed_projection windowed)))
+    on_model_input_window_observation;
+  Ok windowed.Host.sent
 ;;
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
@@ -248,18 +206,11 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
 
 let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
   if is_resume
-  then (
+  then
     (* The provider conversation already owns the static system prompt and
        seeded history. The hook context is turn-local, though, so dropping its
-       typed carrier on resume changes provider meaning. Prefix only that
-       provenance-marked System material and keep the legacy goal bytes exact
-       when no dynamic context was supplied. *)
-    let* context =
-      prepared.messages |> extra_system_context_messages |> render_messages
-    in
-    match String_util.trim_nonempty context with
-    | None -> Ok goal
-    | Some context -> Ok (context ^ prompt_section_separator ^ goal))
+       typed carrier on resume changes provider meaning. *)
+    Ok (Host.resume_prompt ~goal prepared.messages)
   else
     let* history = render_messages prepared.messages in
     Ok

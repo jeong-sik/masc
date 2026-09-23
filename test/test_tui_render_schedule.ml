@@ -196,6 +196,9 @@ let overview_frame_rows ~has_cluster
   10
   + (if has_cluster then 1 else 0)
   + allocation.attention_rows
+  + (if allocation.team_rows > 0
+     then allocation.team_rows + Schedule.overview_team_chrome_rows
+     else 0)
   + allocation.task_error_rows
   + allocation.task_rows
   + allocation.filler_rows
@@ -203,7 +206,7 @@ let overview_frame_rows ~has_cluster
 let test_overview_rows_share_one_viewport_budget () =
   let max_data =
     Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
-      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:false
+      ~attention_count:6 ~event_count:0 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "14-row attention allocation" 2 max_data.attention_rows;
   check int "14-row task allocation" 1 max_data.task_rows;
@@ -212,7 +215,7 @@ let test_overview_rows_share_one_viewport_budget () =
     (overview_frame_rows ~has_cluster:true max_data);
   let task_error =
     Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
-      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:true
+      ~attention_count:6 ~event_count:0 ~team_count:0 ~task_count:5 ~has_task_error:true
   in
   check int "task error keeps its reserved row" 1
     task_error.task_error_rows;
@@ -221,26 +224,26 @@ let test_overview_rows_share_one_viewport_budget () =
     (overview_frame_rows ~has_cluster:true task_error);
   let full =
     Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
-      ~attention_count:6 ~event_count:0 ~task_count:5 ~has_task_error:false
+      ~attention_count:6 ~event_count:0 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "full viewport restores attention cap" 6 full.attention_rows;
   check int "full viewport restores task cap" 5 full.task_rows;
   let events_only =
     Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
-      ~attention_count:0 ~event_count:6 ~task_count:5 ~has_task_error:false
+      ~attention_count:0 ~event_count:6 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "events size the shared panel" 6 events_only.attention_rows;
   check int "events preserve full task rows" 5 events_only.task_rows;
   let mixed_panel =
     Schedule.allocate_overview ~terminal_rows:22 ~has_cluster:true
-      ~attention_count:2 ~event_count:4 ~task_count:5 ~has_task_error:false
+      ~attention_count:2 ~event_count:4 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "the longer panel column determines shared rows" 4
     mixed_panel.attention_rows;
   check int "mixed panel counts preserve full task rows" 5 mixed_panel.task_rows;
   let compact_events_only =
     Schedule.allocate_overview ~terminal_rows:14 ~has_cluster:true
-      ~attention_count:0 ~event_count:6 ~task_count:5 ~has_task_error:false
+      ~attention_count:0 ~event_count:6 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "compact events use remaining panel rows" 2
     compact_events_only.attention_rows;
@@ -256,7 +259,7 @@ let test_overview_rows_share_one_viewport_budget () =
                 (fun has_task_error ->
                   let allocation =
                     Schedule.allocate_overview ~terminal_rows ~has_cluster
-                      ~attention_count ~event_count ~task_count ~has_task_error
+                      ~attention_count ~event_count ~team_count:0 ~task_count ~has_task_error
                   in
                   let total = overview_frame_rows ~has_cluster allocation in
                   if total > terminal_rows then
@@ -311,7 +314,7 @@ let test_overview_frame_always_fills_the_terminal () =
             for terminal_rows = 14 to 80 do
               let allocation =
                 Schedule.allocate_overview ~terminal_rows ~has_cluster
-                  ~attention_count ~event_count ~task_count ~has_task_error
+                  ~attention_count ~event_count ~team_count:0 ~task_count ~has_task_error
               in
               check int
                 (Printf.sprintf "rows %d cluster %b data %d/%d/%d/%b"
@@ -335,7 +338,7 @@ let test_overview_frame_always_fills_the_terminal () =
 let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
   let crowded =
     Schedule.allocate_overview ~terminal_rows:60 ~has_cluster:true
-      ~attention_count:80 ~event_count:0 ~task_count:20 ~has_task_error:false
+      ~attention_count:80 ~event_count:0 ~team_count:0 ~task_count:20 ~has_task_error:false
   in
   check int "the panel stops at its ceiling" 6 crowded.attention_rows;
   check int "every task is still drawn" 20 crowded.task_rows
@@ -346,11 +349,84 @@ let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
 let test_overview_blocks_grow_to_their_item_counts () =
   let roomy =
     Schedule.allocate_overview ~terminal_rows:60 ~has_cluster:true
-      ~attention_count:9 ~event_count:0 ~task_count:12 ~has_task_error:false
+      ~attention_count:9 ~event_count:0 ~team_count:0 ~task_count:12 ~has_task_error:false
   in
   check int "the panel stops at its ceiling" 6 roomy.attention_rows;
   check int "every task is drawn" 12 roomy.task_rows;
   check bool "the remainder becomes filler" true (roomy.filler_rows > 0)
+
+(* The Team block says who is doing what. On the operator's 40-row window with
+   sixteen Keepers it gets its rows ahead of the backlog, the frame still ends
+   on the terminal's last row at every size, and a viewport too short for a
+   title, a divider and one Keeper draws no Team block at all rather than
+   chrome with nothing under it. *)
+(* Pull request lines under the Team block take only blank rows: the 24-row
+   Overview keeps every task, and a tall one draws the lines. *)
+let test_team_detail_lines_take_only_spare_rows () =
+  let tight =
+    Schedule.allocate_overview ~terminal_rows:24 ~has_cluster:true
+      ~attention_count:6 ~event_count:6 ~team_count:0 ~task_count:5
+      ~has_task_error:false
+  in
+  let spent = Schedule.spend_spare_rows_on_team tight ~extra:3 in
+  check int "no blank row, no pull request line" tight.team_rows spent.team_rows;
+  check int "the backlog is untouched" tight.task_rows spent.task_rows;
+  let tall =
+    Schedule.allocate_overview ~terminal_rows:40 ~has_cluster:true
+      ~attention_count:2 ~event_count:2 ~team_count:4 ~task_count:3
+      ~has_task_error:false
+  in
+  let spent = Schedule.spend_spare_rows_on_team tall ~extra:3 in
+  check int "three lines join the drawn block" (tall.team_rows + 3) spent.team_rows;
+  check int "paid from the filler" (tall.filler_rows - 3) spent.filler_rows;
+  check int "the backlog is untouched" tall.task_rows spent.task_rows;
+  check int "40-row frame is exact" 40 (overview_frame_rows ~has_cluster:true spent);
+  let empty =
+    Schedule.allocate_overview ~terminal_rows:40 ~has_cluster:true
+      ~attention_count:2 ~event_count:2 ~team_count:0 ~task_count:3
+      ~has_task_error:false
+  in
+  let spent = Schedule.spend_spare_rows_on_team empty ~extra:2 in
+  check int "a new block opens with two rows" 2 spent.team_rows;
+  check int "and pays its chrome from the filler"
+    (empty.filler_rows - 2 - Schedule.overview_team_chrome_rows) spent.filler_rows;
+  check int "40-row frame is exact" 40 (overview_frame_rows ~has_cluster:true spent)
+
+let test_overview_team_block_sits_between_panel_and_backlog () =
+  let live =
+    Schedule.allocate_overview ~terminal_rows:40 ~has_cluster:true
+      ~attention_count:10 ~event_count:3 ~team_count:13 ~task_count:687
+      ~has_task_error:false
+  in
+  check int "the panel keeps its ceiling" 6 live.attention_rows;
+  check int "every Team row fits" 13 live.team_rows;
+  check int "the backlog takes what is left" 8 live.task_rows;
+  check int "40-row frame is exact" 40
+    (overview_frame_rows ~has_cluster:true live);
+  let short =
+    Schedule.allocate_overview ~terminal_rows:18 ~has_cluster:true
+      ~attention_count:6 ~event_count:0 ~team_count:13 ~task_count:20
+      ~has_task_error:false
+  in
+  check int "a short viewport gives Team no half block" 0 short.team_rows;
+  check int "the backlog keeps its held row" 1 short.task_rows;
+  List.iter
+    (fun team_count ->
+      for terminal_rows = 14 to 80 do
+        let allocation =
+          Schedule.allocate_overview ~terminal_rows ~has_cluster:true
+            ~attention_count:6 ~event_count:6 ~team_count ~task_count:40
+            ~has_task_error:true
+        in
+        check int
+          (Printf.sprintf "rows %d team %d" terminal_rows team_count)
+          terminal_rows
+          (overview_frame_rows ~has_cluster:true allocation);
+        if allocation.team_rows < 0 || allocation.team_rows > team_count then
+          failf "team rows out of range at rows=%d team=%d: %d" terminal_rows
+            team_count allocation.team_rows
+      done)
+    [ 0; 1; 3; 16; 60 ]
 
 let test_board_read_rows_reserve_comments_and_footer () =
   let crowded =
@@ -802,10 +878,9 @@ let test_memory_columns_never_exceed_their_width () =
       (used <= max inner_width memory_minimum_row_width)
   done
 
-(* The Δ column carries a pair, and a cell past its width is cut in the
-   middle: at six cells the fleet's own [+12 -23] drew as [+… -23] and the
-   added count was gone. Two digits each is the daily shape (the widest pair
-   on the live fleet was +11 -16); three each is what a large revision
+(* The Δ column carries a pair, and a cell past its width folds in the middle,
+   which takes the first count. Two digits each is the daily shape (the widest
+   pair on the live fleet was +11 -16); three each is what a large revision
    needs. *)
 let test_the_memory_delta_column_holds_a_pair_of_counts () =
   let columns = Schedule.allocate_memory_columns ~inner_width:240 in
@@ -1014,6 +1089,7 @@ let holds needle haystack =
 
 let verification_probe : Schedule.verification_row_values =
   { vrow_task = "task-verify-000000000000001"
+  ; vrow_verdict = "complete"
   ; vrow_submitted_by = "pinewood-pr-jira-checker-and-more"
   ; vrow_evidence = "12/12"
   ; vrow_title = String.concat "" (List.init 12 (fun _ -> "title "))
@@ -1041,6 +1117,7 @@ let test_verification_rows_stay_on_the_header_columns () =
       (width
          (Schedule.verification_row ~submitter_width ~title_width
             { Schedule.vrow_task = ""
+            ; vrow_verdict = ""
             ; vrow_submitted_by = ""
             ; vrow_evidence = ""
             ; vrow_title = ""
@@ -1076,7 +1153,7 @@ let test_verification_names_its_columns_in_capitals () =
   List.iter
     (fun name ->
       check bool (name ^ " names a column") true (holds name header))
-    [ "TASK"; "SUBMITTED BY"; "EVIDENCE"; "TITLE" ];
+    [ "TASK"; "VERDICT"; "SUBMITTED BY"; "EVIDENCE"; "TITLE" ];
   List.iter
     (fun retired ->
       check bool (retired ^ " is gone") false (holds retired header))
@@ -1383,7 +1460,7 @@ let test_headers_fit_their_columns () =
         , Schedule.harness_header_row
             ~reason_width:(Schedule.harness_reason_width ~inner_width) )
       ; ( "board"
-        , Schedule.board_header_row
+        , Schedule.board_header_row ~age_header:"AGE"
             ~title_width:(Schedule.board_title_width ~inner_width) )
       ]
     in
@@ -1512,6 +1589,22 @@ let test_fusion_keeper_growth_comes_out_of_the_run_id () =
   check bool "narrow table gives preset cells to identities" false compact.fcol_show_preset;
   check bool "the local start date remains whole" true
     (String.starts_with ~prefix:"2026-09-07 11:08" row)
+
+(* A failed run's STATE cell draws its failure code, and the codes come from
+   two closed sets the server writes: the judge's and the delivery's. The
+   widest of them is [evidence_unavailable]; folded, it would read as some
+   other code. *)
+let test_the_widest_failure_code_fits_the_state_cell () =
+  let code = "evidence_unavailable" in
+  let columns =
+    Schedule.allocate_fusion_columns ~inner_width:110 ~keeper_width:16
+  in
+  let row =
+    Schedule.fusion_row ~state_style:"" columns
+      { fusion_probe with frow_state = code }
+  in
+  check bool (Printf.sprintf "%s is drawn whole: %s" code row) true
+    (Option.is_some (index_of row code))
 
 let test_fusion_sidebar_label_format () =
   let label =
@@ -1725,12 +1818,12 @@ let board_probe =
   }
 
 let board_row_of ~title_width values =
-  Schedule.board_row ~styles:Schedule.board_no_styles ~title_width values
+  Schedule.board_row ~styles:Schedule.board_no_styles ~age_header:"AGE" ~title_width values
 
 let test_board_columns_hold_their_offsets () =
   for inner_width = 80 to 240 do
     let title_width = Schedule.board_title_width ~inner_width in
-    let header = Schedule.board_header_row ~title_width in
+    let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
     let row = board_row_of ~title_width board_probe in
     check_left_cell "ID" "A" ~header ~row ~inner_width;
     check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
@@ -1753,8 +1846,8 @@ let test_board_columns_with_styles_hold_their_offsets () =
   in
   for inner_width = 80 to 240 do
     let title_width = Schedule.board_title_width ~inner_width in
-    let header = Schedule.board_header_row ~title_width in
-    let row = Schedule.board_row ~styles ~title_width board_probe in
+    let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
+    let row = Schedule.board_row ~styles ~age_header:"AGE" ~title_width board_probe in
     check_left_cell "ID" "A" ~header ~row ~inner_width;
     check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
     check_left_cell "AUTHOR" "C" ~header ~row ~inner_width;
@@ -1763,6 +1856,83 @@ let test_board_columns_with_styles_hold_their_offsets () =
     check_left_cell "SCORE" "F" ~header ~row ~inner_width;
     check_left_cell "REPLIES" "G" ~header ~row ~inner_width
   done
+
+(* The title is the one column on these two screens that carries a sentence.
+   A post's subject is at the front of its title, so the title keeps its head
+   and gives way at the tail. Every other column here names a thing -- an id,
+   a hearth, an author -- and keeps both ends. *)
+let test_a_title_gives_way_at_its_tail () =
+  let title =
+    "Verify: run-exact-output-lane-board-attention-9e327af211400cba719b59128"
+  in
+  (* The pane the Board draws in beside the roster: 114 cells. *)
+  let title_width = Schedule.board_title_width ~inner_width:114 in
+  let board = board_row_of ~title_width { board_probe with brow_title = title } in
+  let planning =
+    planning_row_of
+      ~title_width:
+        (Schedule.planning_title_width ~inner_width:114
+           ~phase_width:planning_phase_width)
+      { planning_probe with prow_title = title }
+  in
+  List.iter
+    (fun (screen, row) ->
+      check bool
+        (Printf.sprintf "%s keeps the subject: %s" screen row)
+        true
+        (Option.is_some (index_of row "Verify: run-exact"));
+      check bool
+        (Printf.sprintf "%s does not keep the tail instead: %s" screen row)
+        false
+        (Option.is_some (index_of row "719b59128")))
+    [ ("board", board); ("planning", planning) ]
+
+(* The other four readings that are sentences rather than names. They are laid
+   out on the same contract, and each is the last column of its screen, so the
+   fold is the only thing that decides what a reader gets. *)
+let test_every_sentence_column_gives_way_at_its_tail () =
+  let sentence =
+    "Verify: run-exact-output-lane-board-attention-9e327af211400cba719b59128"
+  in
+  let prose_width = 24 in
+  let rows =
+    [ ( "system log"
+      , Schedule.system_log_row ~message_width:prose_width ~level_style:""
+          ~styles:Schedule.system_log_plain_styles
+          { system_log_probe with slog_message = sentence } )
+    ; ( "verification"
+      , Schedule.verification_row ~submitter_width:16
+          ~title_width:prose_width
+          { verification_probe with vrow_title = sentence } )
+    ; ( "changes"
+      , Schedule.change_row ~op_style:"" ~result_style:""
+          ~summary_width:prose_width
+          { change_probe with crow_summary = sentence } )
+    ; ( "harness"
+      , Schedule.harness_row ~verdict_style:"" ~reason_width:prose_width
+          { harness_probe with hrow_reason = sentence } )
+    ]
+  in
+  List.iter
+    (fun (screen, row) ->
+      check bool
+        (Printf.sprintf "%s keeps the front: %s" screen row)
+        true
+        (Option.is_some (index_of row "Verify: run-"));
+      check bool
+        (Printf.sprintf "%s does not keep the tail instead: %s" screen row)
+        false
+        (Option.is_some (index_of row "719b59128")))
+    rows
+
+(* The id beside it is the reading whose two ends say which run it is. *)
+let test_a_board_id_keeps_both_ends () =
+  let row =
+    board_row_of ~title_width:40
+      { board_probe with brow_id = "p-6dc0a4e7eb813cc1" }
+  in
+  check bool "the head is drawn" true (Option.is_some (index_of row "p-6"));
+  check bool "and so is the tail" true (Option.is_some (index_of row "813cc1"))
 
 (* The defect this closes. The rows sized the title to the terminal minus a
    hand-summed constant and the header claimed its own, so at eighty columns
@@ -1773,7 +1943,7 @@ let test_a_board_row_is_as_wide_as_its_header () =
   List.iter
     (fun inner_width ->
       let title_width = Schedule.board_title_width ~inner_width in
-      let header = Schedule.board_header_row ~title_width in
+      let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
       let width text = Masc_tui_message_layout.display_width text in
       List.iter
         (fun (name, values) ->
@@ -1910,6 +2080,10 @@ let () =
             test_overview_task_block_keeps_a_share_of_a_tall_viewport
         ; test_case "overview blocks grow to their item counts" `Quick
             test_overview_blocks_grow_to_their_item_counts
+        ; test_case "team detail lines take only spare rows" `Quick
+            test_team_detail_lines_take_only_spare_rows
+        ; test_case "overview team block sits between panel and backlog" `Quick
+            test_overview_team_block_sits_between_panel_and_backlog
         ; test_case "board read reserves comments and footer" `Quick
             test_board_read_rows_reserve_comments_and_footer
         ; test_case "board read reaches hidden comments" `Quick
@@ -1988,6 +2162,12 @@ let () =
             test_board_columns_hold_their_offsets
         ; test_case "board columns with styles hold their offsets" `Quick
             test_board_columns_with_styles_hold_their_offsets
+        ; test_case "a title gives way at its tail" `Quick
+            test_a_title_gives_way_at_its_tail
+        ; test_case "every sentence column gives way at its tail" `Quick
+            test_every_sentence_column_gives_way_at_its_tail
+        ; test_case "a board id keeps both ends" `Quick
+            test_a_board_id_keeps_both_ends
         ; test_case "a board row is as wide as its header" `Quick
             test_a_board_row_is_as_wide_as_its_header
         ; test_case "board spaces its columns like every other table" `Quick
@@ -2000,6 +2180,8 @@ let () =
             test_fusion_columns_hold_their_offsets
         ; test_case "fusion keeper growth comes out of the run id" `Quick
             test_fusion_keeper_growth_comes_out_of_the_run_id
+        ; test_case "the widest failure code fits the state cell" `Quick
+            test_the_widest_failure_code_fits_the_state_cell
         ; test_case "fusion sidebar label format" `Quick
             test_fusion_sidebar_label_format
         ; test_case "fusion pipeline diagram stages" `Quick

@@ -43,7 +43,11 @@ val session_id_of_headers : (string * string) list -> (string, string) result
 
 (** The [agent_core:*] event family, by [event_type]. A type the server
     named and this build was not taught keeps its name rather than being
-    dropped, so a new event draws as itself instead of vanishing. *)
+    dropped, so a new event draws as itself instead of vanishing.
+
+    A run that ended carries how long it ran, and a failed one the error's
+    code and text, read from the payload with {!Sse_event.Json}'s readers -- the
+    contract the bridge writes it with. *)
 type agent_core_kind =
   | Tool_called
   | Tool_completed
@@ -51,9 +55,10 @@ type agent_core_kind =
   | Turn_ready
   | Turn_completed
   | Agent_started
-  | Agent_completed
-  | Agent_failed
-  | Agent_yielded
+  | Agent_completed of { elapsed_s : float }
+  | Agent_failed of { elapsed_s : float; error_code : string; error : string }
+  | Agent_yielded of { elapsed_s : float }
+  | Agent_input_required of { elapsed_s : float; request_id : string; question : string }
   | Tool_approval_completed
   | Telemetry
   | Agent_core_other of string
@@ -75,6 +80,15 @@ type agent_core = {
   run_id : string option;
   caused_by : string option;
   execution_id : string option;
+}
+
+type lane_resource = {
+  lr_lifecycle : Masc.Lane_addon_resource_events.lifecycle;
+  lr_package : string;  (** the add-on package the instance runs *)
+  lr_instance : string;  (** the instance whose container this is *)
+  lr_detail : string option;
+      (** why it failed, for [Acquire_failed] and [Release_incomplete] *)
+  lr_at : float;
 }
 
 type keeper_heartbeat = {
@@ -179,6 +193,16 @@ type event =
           a keeper act: the Fusion surface re-fetches the run on it instead of
           reading the payload as data, so only the identity strings are kept
           and, unlike the keeper events, it carries no [at]. *)
+  | Internal_agent_runs_changed
+      (** An internal agent run registry -- verification, goal verification,
+          exact lanes -- changed. A server push with no payload, named by
+          {!Masc.Internal_agent_runs_event}. *)
+  | Lane_resource of lane_resource
+      (** A Lane Add-on container was acquired, failed to start, was removed,
+          or could not be shown removed. It arrives in the agent-core family
+          and is recognised by the names {!Masc.Lane_addon_resource_events}
+          mints, as {!Masc.Keeper_event_bridge.public_custom_event_type}
+          spells them on the wire. *)
   | Snapshot of string
       (** A whole-projection push; the name is kept, the payload is not. Which
           types these are comes from the wire's own routing table

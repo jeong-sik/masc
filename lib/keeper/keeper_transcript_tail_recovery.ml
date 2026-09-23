@@ -42,7 +42,17 @@ let recover_keeper config name =
       Filename.concat (Keeper_types_support.session_base_dir_ config) session_id
     in
     (match Store.load_agent_core_with_ref ~session_dir ~session_id with
-     | Error error -> Checkpoint_unavailable error
+     | Error Store.Ref_not_found ->
+       (* No canonical checkpoint: the keeper has not saved one on this trace
+          (an official-client lane, or a trace whose checkpoint a purge moved
+          aside), so there is no open tool cycle to close. Reporting it as a
+          load failure logged an ERROR and counted one recovery failure on
+          every boot -- 27 boots on 2026-09-22 for one such keeper. *)
+       Already_dispatchable
+     | Error
+         ((Store.Ref_read_failed _ | Store.Ref_identity_invalid _
+          | Store.Ref_session_mismatch _ | Store.Ref_lock_failed _) as error) ->
+       Checkpoint_unavailable error
      | Ok (checkpoint, expected_source_ref) ->
        (match Unit_.close_open_tail checkpoint.Agent_core.Checkpoint.messages with
         | Error structural -> Unparseable structural
@@ -94,10 +104,13 @@ let log_outcome name outcome =
       "transcript_tail_recovery: keeper=%s durable metadata unavailable: %s"
       name
       detail
-  | Checkpoint_unavailable _ ->
+  | Checkpoint_unavailable error ->
+    (* The cause decides the remedy: a superseded version is a hard-cut
+       checkpoint the operator purges, a lock failure is transient. *)
     Log.Keeper.error
-      "transcript_tail_recovery: keeper=%s canonical checkpoint unavailable"
+      "transcript_tail_recovery: keeper=%s canonical checkpoint unavailable: %s"
       name
+      (Store.checkpoint_ref_load_error_to_string error)
   | Commit_rejected _ ->
     Log.Keeper.error
       "transcript_tail_recovery: keeper=%s closed tail was not installed"

@@ -154,6 +154,34 @@ let test_the_title_does_not_count_another_queue () =
   Alcotest.(check bool) "the filter note it keeps is still read" true
     (reads ~binding_name:"render_approvals" ~fields:[ "aps_hidden_count" ] > 0)
 
+(* The surface's own title, the tab badge and the Overview row answer the
+   same question, so they count the same population. The title counted the
+   approval rows alone: with one open question and no approvals the tab read
+   "Approvals\xc2\xb71" and the screen it opened read "MASC Approvals (0)",
+   with the question block further down the pane. *)
+let test_the_approvals_title_counts_what_the_badge_counts () =
+  Alcotest.(check int) "the title walks the shared pending helper" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals"
+       ~callee:"approvals_surface_pending"
+     + Ast_grep.count_calls_in_value_binding ~module_path:render
+         ~binding_name:"render_approvals"
+         ~callee:"Masc_tui_types.approvals_surface_pending");
+  (* And names every kind it counted. A total with an unnamed part reads as
+     an arithmetic error on screen. *)
+  Alcotest.(check int) "the four kinds the surface answers" 4
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals"
+       ~literals:[ "held"; "gate"; "op"; "question" ]);
+  (* And takes the question count from the same place the block heading and
+     the badge take it, rather than reading the asks snapshot a third time. *)
+  Alcotest.(check int) "the questions come off the shared reading" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"render_approvals"
+       ~callee:"Masc_tui_types.approvals_open_question_count");
+  Alcotest.(check int) "and the surface reads the asks snapshot nowhere else" 0
+    (reads ~binding_name:"render_approvals" ~fields:[ "asks_snapshot" ])
+
 (* The Overview summary row wears the same word as the tab badge beside it,
    and for a while they counted different things: the badge walked all three
    approval lists, the row read the confirm queue's own visible count. A
@@ -206,6 +234,22 @@ let test_the_summary_row_does_not_count_the_panel_below_it () =
     (Ast_grep.count_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"load_overview"
        ~literals:[ "attention_items" ])
+
+(* The briefing's command_focus repeats the first incident under
+   "top_attention". The loader decoded it into a field of its own, and no
+   screen ever drew that field: the Attention panel lists the incidents
+   themselves, first one first, so the repeat had no row to go to.
+
+   It was not free. [decode_attention_item] refuses an item that is missing a
+   required field, and that refusal came back as the whole overview load
+   failing -- the fleet counts, the health word and the panel itself, blanked
+   over a value nothing reads. The load now stops opening command_focus at
+   all. *)
+let test_the_overview_load_stops_reading_a_field_no_screen_draws () =
+  Alcotest.(check int) "the load no longer opens command_focus" 0
+    (Ast_grep.count_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"load_overview"
+       ~literals:[ "command_focus"; "top_attention" ])
 
 (* The briefing has always carried a liveness word per Keeper, written through
    the control plane's own printer. The Overview row read only how many rows
@@ -416,6 +460,21 @@ let test_the_two_p50s_on_the_lanes_screen_agree () =
        ~binding_name:"standalone_lane_detail_lines"
        ~needle:" \xc2\xb7 p50 latency %.2fs")
 
+(* The configuration clause is written once, in [Tui_decode]. This line used
+   to introduce it with a noun of its own -- "configuration " ^ a word that
+   three of the four states already give a subject -- so an unconfigured lane
+   read "configuration not configured". The caller draws the clause as it
+   comes. *)
+let test_the_lane_line_writes_no_noun_of_its_own () =
+  Alcotest.(check int) "the line takes the clause whole" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:"%s lane \xc2\xb7 %s \xc2\xb7 %s");
+  Alcotest.(check int) "and no longer names the subject itself" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:"%s lane \xc2\xb7 configuration %s \xc2\xb7 %s")
+
 let test_board_lane_detail_draws_typed_jev_readiness () =
   Alcotest.(check int) "the detail reads the decoded JEV field" 1
     (reads ~binding_name:"standalone_lane_detail_lines" ~fields:[ "sl_jev" ]);
@@ -484,7 +543,17 @@ let test_repositories_show_the_server_resolved_checkout_path () =
        ~fields:[ "rp_resolved_local_path" ]
      > 0);
   Alcotest.(check bool) "and keeps assignment in the selected-row context" true
-    (reads ~binding_name:"repository_context_lines" ~fields:[ "rp_keepers" ] > 0)
+    (reads ~binding_name:"repository_context_lines" ~fields:[ "rp_keepers" ] > 0);
+  (* The status column has room for the word and not for the cause a failed
+     clone or fetch leaves behind, so the cause belongs in the selected row's
+     context. The route wrote it to the wire and nothing read it. *)
+  Alcotest.(check int) "the route names the cause it writes" 1
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:producer
+       ~binding_name:"repository_json" ~literals:[ "error_message" ]);
+  Alcotest.(check int) "and the context asks for it" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"repository_context_lines"
+       ~callee:"Masc.Tui_decode.repository_status_reason")
 
 let test_memory_surface_keeps_the_starvation_axes () =
   (* Starvation depends on ordinary absence and failed Librarian runs, while a
@@ -503,11 +572,11 @@ let test_memory_surface_keeps_the_starvation_axes () =
   Alcotest.(check bool) "the title names the starving count" true
     (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0);
   Alcotest.(check bool) "the title keeps source facts separate" true
-    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body" ~fields:[ "mhs_total_source_facts" ] > 0);
+    (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows" ~fields:[ "mhs_total_source_facts" ] > 0);
   Alcotest.(check bool) "the title keeps derived facts separate" true
-    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body" ~fields:[ "mhs_total_derived_facts" ] > 0);
+    (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows" ~fields:[ "mhs_total_derived_facts" ] > 0);
   Alcotest.(check bool) "the title exposes support retractions" true
-    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body"
+    (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows"
        ~fields:[ "mhs_total_support_invalidations" ]
      > 0);
   (* The source snapshot has four numbers and the row has one cell for them,
@@ -622,33 +691,21 @@ let test_a_lane_that_cannot_admit_says_why () =
        ~module_path:render ~binding_name:"standalone_lane_slots_text"
        ~callees:[] ~identifiers:[ "reason" ])
 
-(* The fleet summary above the Keepers table read "2 offline" and named
-   one keeper among them, while that keeper's own row drew a turning mark and a
-   climbing clock. Its turn had started and never been closed; the process
-   behind it had gone. A turn state that outlives its process is the row an
-   operator most needs to read, and it looked like the healthiest kind.
-
-   The elapsed stays -- a turn open two minutes is the fact. The motion does
-   not: it means work is progressing, and for a keeper the health reading calls
-   offline, none is. *)
+(* A turn whose keeper the health reading calls offline was never closed and
+   nothing works it: the row keeps the elapsed time and stops the mark.
+   [Masc_tui_keeper_mark.open_turn] says which reading that is, and
+   test_tui_keeper_mark checks it. What the row has to do is ask it and draw
+   the stopped case it answers. *)
 let test_a_turn_on_a_keeper_that_is_not_running_stops_moving () =
-  (* Counted as an identifier: the reading reaches the match through
-     [Option.map keeper_health_reading health], so it is passed rather than
-     applied and a call count sees nothing. *)
-  Alcotest.(check bool) "the row weighs the health reading against the turn"
-    true
-    (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render ~binding_name:"keeper_row_content" ~callees:[]
-       ~identifiers:[ "Tui_decode.keeper_health_reading" ]
+  Alcotest.(check bool) "the row asks what its open turn draws" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"keeper_row_content"
+       ~callee:"Masc_tui_keeper_mark.open_turn"
      > 0);
-  (* Named: a match that did not reach it would draw a live mark on a keeper
-     whose keepalive is gone. *)
-  Alcotest.(check bool)
-    "Tui_decode.Health_offline is the reading that stops the mark"
-    true
+  Alcotest.(check bool) "the row draws the turn nothing works" true
     (Ast_grep.count_constructors_in_value_binding ~module_path:render
        ~binding_name:"keeper_row_content"
-       ~constructors:[ "Tui_decode.Health_offline" ]
+       ~constructors:[ "Masc_tui_keeper_mark.Left_open" ]
      > 0)
 
 (* The preview's em dash once appeared as double-encoded UTF-8. Running
@@ -732,7 +789,7 @@ let test_the_window_is_measured_where_the_cursor_lands () =
     "the cursor-dependent layout is read in one place" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
        ~binding_name:"surface_body_height_at"
-       ~callee:"memory_overview_scrolled")
+       ~callee:"Masc_tui_render_memory.memory_overview_scrolled")
 
 (* A lookup in the body of a drawing loop is paid once per visible row. The
    count is over the whole renderer rather than one binding, because the
@@ -812,6 +869,90 @@ let test_both_strips_mark_where_they_are_from_one_value () =
   Alcotest.(check bool) "the surface strip reads the same mark" true
     (mark "surface_strip" "bin/masc_tui_render_prim.ml" > 0)
 
+(* The Board title's count. The listing is one server page and the board can
+   hold more, so the count beside the name has to be the one that knows both
+   numbers. A title that goes back to printing the page length typechecks and
+   says nothing on screen but a smaller board. *)
+let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
+  let asks callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"render_board_list" ~callee
+  in
+  Alcotest.(check int) "the title asks what the board holds" 1
+    (asks "board_list_count_text")
+
+(* The slot history and the run total sit one line apart in the lane detail,
+   and the slots cover only the runs that named one -- on the live Board
+   Attention lane, 357 of 489, most of the rest Vendor System One answers.
+   The runs without a slot are drawn by the one function that reads the
+   server's reasons, rather than spelled again beside the line. *)
+let test_the_lane_slot_history_says_what_it_does_not_cover () =
+  Alcotest.(check int) "the detail asks for the runs that named no slot" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~callee:"standalone_lane_runs_without_slot_parts")
+
+(* A stamp that can be older than today is drawn as a span, not as a clock.
+
+   Both of these sit beside the screen's own clock and used to draw the hour
+   alone, on the reading that the header gives them a distance. That holds
+   only while the two are the same day: the Clients roster drew a session last
+   seen on 2026-09-21 as "11:49:28" under a 2026-09-23 header, and the
+   planning baseline is the first read of the process and is never replaced,
+   so a screen left open overnight named a moment on a day nobody could
+   identify.
+
+   Counted rather than read off a screen, because the two are days apart from
+   the clock a test would have to wait for. *)
+let test_a_stamp_that_can_outlive_today_is_drawn_as_a_span () =
+  let asks ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render ~binding_name
+      ~callee
+  in
+  List.iter
+    (fun binding_name ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s asks for the span" binding_name)
+        true
+        (asks ~binding_name ~callee:"Masc_tui_wire_age.text" > 0);
+      Alcotest.(check int)
+        (Printf.sprintf "%s draws no bare clock" binding_name)
+        0
+        (asks ~binding_name ~callee:"Terminal_text.clock_timestamp"))
+    [ "render_clients"; "render_planning_list" ]
+
+(* The runtime detail opens from two doors: a lane's candidate row and the
+   catalog row. Both answer "Used by lanes", and the lane door used to answer
+   it with the one lane the reader arrived through -- a runtime seven lanes
+   fall back to said it was used by one. Both doors now ask
+   [runtime_lanes_using], which reads the resolved projection, so neither can
+   answer with a shorter list than the other. *)
+let test_both_doors_into_the_runtime_detail_ask_the_same_lane_list () =
+  let asks ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"runtime_detail_lines" ~callee
+  in
+  Alcotest.(check int) "the lane door asks the projection for the lanes" 1
+    (asks ~callee:"runtime_lanes_using");
+  Alcotest.(check int) "the catalog door keeps reading the same rows" 1
+    (asks ~callee:"runtime_all_rows")
+
+(* The list is drawn in the order the server sent, and the column beside it is
+   only a reading of that order when it holds the time the order was made
+   from. The column used to hold the last move under every sort, so under
+   "newest post first" a post replied to a minute ago sat sixth reading "25s".
+   The sort is read once for the whole list: the header word and every row's
+   number name the same time only while one reading feeds both. *)
+let test_the_board_age_column_reads_the_sort_once () =
+  let asks ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:"render_board_list" ~callee
+  in
+  Alcotest.(check int) "the list asks which time the sort ordered by" 1
+    (asks ~callee:"board_sort_time");
+  Alcotest.(check int) "and names that time over the column once" 1
+    (asks ~callee:"board_age_header")
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -827,6 +968,8 @@ let () =
             `Quick test_the_overview_row_counts_every_approval_list
         ; Alcotest.test_case "the summary row does not count the panel below"
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
+        ; Alcotest.test_case "the load stops reading a field no screen draws"
+            `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
         ; Alcotest.test_case "the fleet row reads the control plane's word"
             `Quick test_the_fleet_row_reads_the_control_planes_own_word
         ; Alcotest.test_case "the operation is compared before repeating"
@@ -842,6 +985,8 @@ let () =
             test_a_detail_heading_is_spelled_the_way_a_heading_is
         ; Alcotest.test_case "the two p50s on the Lanes screen agree" `Quick
             test_the_two_p50s_on_the_lanes_screen_agree
+        ; Alcotest.test_case "the lane line writes no noun of its own" `Quick
+            test_the_lane_line_writes_no_noun_of_its_own
         ; Alcotest.test_case "Board lane detail draws typed JEV readiness" `Quick
             test_board_lane_detail_draws_typed_jev_readiness
         ; Alcotest.test_case "the Code tree draws one folder arrow" `Quick
@@ -880,5 +1025,19 @@ let () =
             test_no_row_of_a_drawing_loop_walks_a_list
         ; Alcotest.test_case "both strips mark where they are from one value"
             `Quick test_both_strips_mark_where_they_are_from_one_value
+        ; Alcotest.test_case "the Approvals title counts what the badge does"
+            `Quick test_the_approvals_title_counts_what_the_badge_counts
+        ; Alcotest.test_case "the Board title counts through the helper" `Quick
+            test_the_board_title_counts_through_the_helper_that_knows_the_board
+        ; Alcotest.test_case "a stamp that can outlive today is a span" `Quick
+            test_a_stamp_that_can_outlive_today_is_drawn_as_a_span
+        ; Alcotest.test_case
+            "the lane slot history says what it does not cover" `Quick
+            test_the_lane_slot_history_says_what_it_does_not_cover
+        ; Alcotest.test_case
+            "both doors into the runtime detail ask the same lane list" `Quick
+            test_both_doors_into_the_runtime_detail_ask_the_same_lane_list
+        ; Alcotest.test_case "the Board age column reads the sort once" `Quick
+            test_the_board_age_column_reads_the_sort_once
         ] )
     ]

@@ -131,13 +131,12 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
        with
        | Error err ->
          (* Reject-boundary contract: every client-visible auth reject
-            leaves a metric + log trace (see [record_mcp_auth_reject]).
-            The response shape is unchanged. *)
-         Server_mcp_transport_http_respond.record_mcp_auth_reject
+            leaves a metric + log trace. The metric is recorded here; the
+            log line comes from [respond_auth_error], which logs the refusal
+            for both protocols, so this path leaves one line, not two. The
+            response shape is unchanged. *)
+         Server_mcp_transport_http_respond.record_mcp_auth_reject_metric
            ~endpoint:"GET /ws upgrade"
-           ~claimed_agent:(agent_from_request request)
-           ~token_presented:(Option.is_some (auth_token_from_request request))
-           ~session_id:None
            (Server_mcp_transport_http_types.auth_failure_of_masc_error err);
          respond_auth_error request reqd err
        | Ok () ->

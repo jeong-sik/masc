@@ -1,6 +1,8 @@
 type outcome =
   | Ok_call
   | Failed_call of string option
+  | Deferred_call
+  | Unrecorded_call
 
 type call =
   { tool : string
@@ -26,7 +28,7 @@ let string_field name json =
   | _ -> None
 ;;
 
-(* [keeper_turn_id] is persisted as a string. A row whose id is not an integer
+(* The writer persists [keeper_turn_id] as an integer. A row whose id is not one
    cannot be ordered against the others, so it is dropped with the unattributed
    rows rather than folded into an adjacent turn. *)
 let turn_id_field json =
@@ -45,11 +47,16 @@ let turn_id_field json =
 
    A refusal the tool did not describe stays [None]. Substituting an empty
    string would render as a refusal with no reason, indistinguishable from one
-   the tool declined to explain. *)
+   the tool declined to explain.
+
+   A row that does not say how the call ended is [Unrecorded_call], not a
+   refusal: only a refusal carries its input back to the keeper. *)
 let outcome_of_row json =
-  match Json_util.assoc_member_opt "success" json with
-  | Some (`Bool true) -> Ok_call
-  | _ -> Failed_call (string_field "output" json)
+  match Tool_result.recorded_call_outcome json with
+  | Tool_result.Recorded_succeeded -> Ok_call
+  | Tool_result.Recorded_failed -> Failed_call (string_field "output" json)
+  | Tool_result.Recorded_deferred -> Deferred_call
+  | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed -> Unrecorded_call
 ;;
 
 let call_of_row json =
@@ -131,7 +138,7 @@ let digest_failures ?(limit = 8) (turns : turn list) : failure_digest list =
        List.iter
          (fun (call : call) ->
             match call.outcome with
-            | Ok_call -> ()
+            | Ok_call | Deferred_call | Unrecorded_call -> ()
             | Failed_call detail ->
               let key = call.tool ^ "\000" ^ call.input in
               Hashtbl.replace counts key
@@ -197,7 +204,7 @@ let externalize_failures ~base_path ~keeper_name ~policy ~tools turns =
     let turns = List.map (fun (turn : turn) ->
       let calls = List.map (fun (call : call) ->
         match call.outcome with
-        | Ok_call -> call
+        | Ok_call | Deferred_call | Unrecorded_call -> call
         | Failed_call detail ->
           (try
              let input = externalize call.input in

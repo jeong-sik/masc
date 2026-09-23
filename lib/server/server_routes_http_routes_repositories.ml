@@ -30,11 +30,9 @@ let extract_repo_id_for_sync path =
 
 let timestamp_json value = `Intlit (Int64.to_string value)
 
-let status_json = function
-  | Repo_manager_types.Active -> ("active", None)
-  | Paused -> ("paused", None)
-  | Cloning -> ("cloning", None)
-  | Error msg -> ("error", Some msg)
+let status_json status =
+  ( Repo_manager_types.status_wire_name status
+  , Repo_manager_types.status_error_message status )
 
 let git_status_json ~base_path (repo : Repo_manager_types.repository) =
   let abs_local_path = Repo_store.local_path ~base_path repo in
@@ -521,6 +519,15 @@ let add_routes router =
   router
   |> Http.Router.get "/api/v1/repositories" (fun request reqd ->
        with_public_read handle_list_repositories request reqd)
+  (* Exact, so it is found before the [/:id] prefix route below. *)
+  |> Http.Router.get "/api/v1/repositories/pulls" (fun request reqd ->
+       with_public_read
+         (fun _state req reqd ->
+           Http.Response.json_value ~request:req
+             (Server_repository_pulls.snapshot_to_yojson
+                (Server_repository_pulls.current ()))
+             reqd)
+         request reqd)
   |> Http.Router.prefix_get repositories_prefix (fun request reqd ->
        with_public_read handle_get_repository_path request reqd)
   |> Http.Router.post "/api/v1/repositories" (fun request reqd ->

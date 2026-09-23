@@ -237,7 +237,7 @@ let test_preview_line_marks_breaks_and_escapes_the_rest () =
   Alcotest.(check bool) "the result is one row" false
     (String.contains (Tui_decode.preview_line "x\ny\nz") '\n')
 
-let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn
+let keeper_call_row ~keeper ~tool ?(wire_outcome = "ok") ?duration_ms ?turn
     ?execution_id ?tool_use_id ?planned_index ?batch_index ?batch_size
     ?execution_mode ?result_bytes ?truncated_to ?disposition () =
   `Assoc
@@ -245,7 +245,7 @@ let keeper_call_row ~keeper ~tool ?(success = true) ?duration_ms ?turn
      ; "keeper", `String keeper
      ; "tool", `String tool
      ; "input", `String "{\"file_path\": \"lib/a.ml\"}"
-     ; "success", `Bool success
+     ; "wire_outcome", `String wire_outcome
      ]
     @ (match duration_ms with None -> [] | Some d -> [ "duration_ms", `Float d ])
     @ (match turn with None -> [] | Some t -> [ "turn", `Int t ])
@@ -371,7 +371,7 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
                 ~turn:2143 ()
             ; keeper_call_row ~keeper:"analyst" ~tool:"Edit" ()
             ; keeper_call_row ~keeper:"largo" ~tool:"tool_execute"
-                ~success:false ()
+                ~wire_outcome:"error" ()
             ] )
       ]
   in
@@ -387,8 +387,8 @@ let test_keeper_calls_reject_rows_naming_another_keeper () =
       (match snapshot.Tui_decode.kcs_entries with
        | [ first; second ] ->
            Alcotest.(check string) "order kept" "Read" first.Tui_decode.kc_tool;
-           Alcotest.(check bool) "failure carried" false
-             second.Tui_decode.kc_success;
+           Alcotest.(check bool) "failure carried" true
+             (second.Tui_decode.kc_outcome = Tool_result.Recorded_failed);
            Alcotest.(check (option (Alcotest.float 0.01))) "duration optional"
              (Some 28.4) first.Tui_decode.kc_duration_ms;
            Alcotest.(check (option Alcotest.int)) "turn optional" (Some 2143)
@@ -409,7 +409,7 @@ let test_keeper_calls_carry_what_the_call_answered () =
       ; "keeper", `String "largo"
       ; "tool", `String "Execute"
       ; "input", `String {|{"argv": ["ls"]}|}
-      ; "success", `Bool true
+      ; "disposition", `String "completed"
       ; "output", output
       ]
   in
@@ -451,7 +451,7 @@ let test_keeper_calls_require_the_envelope () =
              ; "count", `Int 0
              ; "health", `String "ok"
              ])));
-  Alcotest.(check bool) "a row without success is an error" true
+  Alcotest.(check bool) "an outcome of the wrong type is an error" true
     (Result.is_error
        (Tui_decode.decode_keeper_calls_snapshot ~requested_keeper:"largo"
           (`Assoc
@@ -464,15 +464,13 @@ let test_keeper_calls_require_the_envelope () =
                        [ "ts", `Float 1.0
                        ; "keeper", `String "largo"
                        ; "tool", `String "Read"
+                       ; "wire_outcome", `Int 1
                        ]
                    ] )
              ])))
 
-(* [Keeper_tool_call_log]'s real durable record never writes a [success]
-   key -- only [wire_outcome], and sometimes [disposition]. A row naming
-   neither carries no success signal and still errors (the case above); a
-   row naming either must decode, or every real keeper's calls detail view
-   is unrenderable (#37461). *)
+(* The row's outcome is read by [Tool_result.recorded_call_outcome]: the
+   [disposition] first, the [wire_outcome] when the row has none. *)
 let test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition () =
   let row extra =
     `Assoc
@@ -491,35 +489,41 @@ let test_keeper_calls_success_falls_back_to_wire_outcome_or_disposition () =
          ; "entries", `List [ row extra ]
          ])
   in
-  let success_of extra =
+  let outcome_of extra =
     match snapshot_of extra with
     | Error detail -> Alcotest.failf "expected a snapshot, got %s" detail
     | Ok snapshot -> (
       match snapshot.Tui_decode.kcs_entries with
-      | [ call ] -> call.Tui_decode.kc_success
+      | [ call ] -> (
+        match call.Tui_decode.kc_outcome with
+        | Tool_result.Recorded_succeeded -> "succeeded"
+        | Tool_result.Recorded_deferred -> "deferred"
+        | Tool_result.Recorded_failed -> "failed"
+        | Tool_result.Recorded_unsettled -> "unsettled"
+        | Tool_result.Recorded_malformed -> "malformed")
       | _ -> Alcotest.fail "expected one call")
   in
-  Alcotest.(check bool) "wire_outcome ok reads as success" true
-    (success_of [ "wire_outcome", `String "ok" ]);
-  Alcotest.(check bool) "wire_outcome error reads as failure" false
-    (success_of [ "wire_outcome", `String "error" ]);
-  (* A wire that says it does not know the outcome is not evidence that the
-     call completed: unlike "ok"/"error" this spelling refuses instead of
-     defaulting to success (Unknown -> Permissive Default is the antipattern
-     the earlier fallback fell into; #37650 review caught it). *)
-  (match snapshot_of [ "wire_outcome", `String "unknown" ] with
-   | Ok _ -> Alcotest.fail "wire_outcome unknown must not decode to a call"
+  let check label expected extra =
+    Alcotest.(check string) label expected (outcome_of extra)
+  in
+  check "wire_outcome ok" "succeeded" [ "wire_outcome", `String "ok" ];
+  check "wire_outcome error" "failed" [ "wire_outcome", `String "error" ];
+  (* A wire that does not know the outcome is kept and says so: it is not
+     evidence that the call completed, and not a reason to drop the row. *)
+  check "wire_outcome unknown" "unsettled" [ "wire_outcome", `String "unknown" ];
+  check "no outcome field" "unsettled" [];
+  check "disposition completed" "succeeded" [ "disposition", `String "completed" ];
+  check "disposition failed" "failed" [ "disposition", `String "failed" ];
+  check "disposition deferred is its own case" "deferred"
+    [ "disposition", `String "deferred" ];
+  check "the disposition decides over the wire" "succeeded"
+    [ "disposition", `String "completed"; "wire_outcome", `String "error" ];
+  check "a success flag is not an outcome" "unsettled" [ "success", `Bool true ];
+  (match snapshot_of [ "wire_outcome", `String "maybe" ] with
+   | Ok _ -> Alcotest.fail "an undecodable wire_outcome must not decode to a call"
    | Error detail ->
-     Alcotest.(check string) "the refusal names the unknown wire_outcome"
-       "entries[0]: keeper call wire_outcome is unknown" detail);
-  Alcotest.(check bool) "disposition completed reads as success" true
-    (success_of [ "disposition", `String "completed" ]);
-  Alcotest.(check bool) "disposition failed reads as failure" false
-    (success_of [ "disposition", `String "failed" ]);
-  Alcotest.(check bool) "disposition deferred is not a known failure" true
-    (success_of [ "disposition", `String "deferred" ]);
-  Alcotest.(check bool) "an explicit success still wins over wire_outcome" false
-    (success_of [ "success", `Bool false; "wire_outcome", `String "ok" ])
+     Alcotest.(check string) "the refusal names the malformed outcome"
+       "entries[0]: keeper call outcome is malformed" detail)
 
 let test_timestamp_slices_are_sanitized_after_selection () =
   Alcotest.(check string) "normal clock timestamp, in the zone asked for"
@@ -670,6 +674,7 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
                   [ "todo", `Int 0
                   ; "claimed", `Int 0
                   ; "in_progress", `Int 0
+                  ; "awaiting_verification", `Int 0
                   ; "done", `Int 0
                   ; "cancelled", `Int 0
                   ] )
@@ -835,6 +840,7 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
           [ "todo", `Int 6
           ; "claimed", `Int 7
           ; running_key, `Int 8
+          ; "awaiting_verification", `Int 11
           ; "done", `Int 9
           ; "cancelled", `Int 10
           ] )
@@ -985,6 +991,10 @@ let test_decode_planning_snapshot_current_contract () =
       Alcotest.(check int) "todo" 6 snapshot.pl_backlog.pb_todo;
       Alcotest.(check int) "claimed" 7 snapshot.pl_backlog.pb_claimed;
       Alcotest.(check int) "in progress" 8 snapshot.pl_backlog.pb_running;
+      (* Its own count, not folded into the one above: the surface draws the
+         waiting Tasks beside the ones being worked. *)
+      Alcotest.(check int) "awaiting verification" 11
+        snapshot.pl_backlog.pb_awaiting_verification;
       Alcotest.(check int) "backlog done" 9 snapshot.pl_backlog.pb_done;
       Alcotest.(check int) "cancelled" 10 snapshot.pl_backlog.pb_cancelled;
       Alcotest.(check string) "generated at" "2026-08-21T05:06:07Z"
@@ -1047,12 +1057,13 @@ let test_decode_planning_snapshot_rejects_running_alias () =
 
 (* The shape the server actually sent while a keeper was failing to start,
    trimmed to the fields the TUI reads. *)
-let fleet_safety_json ?(missing = true) () =
+let fleet_safety_json ?(missing = true)
+    ?(blocker = "reaction_capacity_below_target") () =
   `Assoc
     [ ( "keeper_fleet_safety"
       , `Assoc
           ([ "status", `String "degraded"
-           ; "blocker", `String "reaction_capacity_below_target"
+           ; "blocker", `String blocker
            ; "operator_action_required", `Bool true
            ; "bootable_keeper_count", `Int 10
            ; "running_keeper_fiber_count", `Int 8
@@ -1067,6 +1078,7 @@ let fleet_safety_json ?(missing = true) () =
            ; "reaction_capacity_shortfall_count", `Int 1
            ; "active_task_owner_without_executable_fiber_count", `Int 1
            ; "completion_authority_pending_task_count", `Int 1
+           ; "active_task_owner_scan_error_count", `Int 2
            ]
            @ [ ( "bootable_keeper_names"
                , `List
@@ -1082,13 +1094,26 @@ let fleet_safety_json ?(missing = true) () =
              ]) )
     ]
 
+(* The scan errors ride the same section. A Keeper whose profile did not load
+   is left out of the owner count above and does not move [status], so the row
+   can only say the reading was short if this number reaches it. *)
+let test_decode_fleet_safety_carries_the_scan_shortfall () =
+  match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check int) "sources the scan could not read" 2
+        fleet.Tui_decode.fs_active_task_owner_scan_error_count
+
 let test_decode_fleet_safety_carries_both_name_lists () =
   match Tui_decode.decode_fleet_safety (fleet_safety_json ()) with
   | Error err -> Alcotest.fail err
   | Ok fleet ->
       Alcotest.(check string) "status" "degraded" fleet.fs_status;
-      Alcotest.(check (option string)) "blocker"
-        (Some "reaction_capacity_below_target") fleet.fs_blocker;
+      Alcotest.(check bool) "the blocker is read as the reason it names" true
+        (fleet.fs_blocker
+         = Some
+             (Tui_decode.Blocker
+                Keeper_fleet_blocker.Reaction_capacity_below_target));
       Alcotest.(check bool) "operator must act" true
         fleet.fs_operator_action_required;
       Alcotest.(check int) "bootable" 10 fleet.fs_bootable_count;
@@ -1135,6 +1160,20 @@ let test_decode_fleet_safety_requires_session_recovery_fields () =
       ; "official_client_recovery_required_keeper_names" ]
   | _ -> Alcotest.fail "fleet fixture must be an object"
 
+(* A newer server can name a reason this build has no constructor for. The
+   header still has something to say, so the name is kept rather than read as
+   no blocker at all. *)
+let test_decode_fleet_safety_keeps_an_unknown_blocker_by_name () =
+  match
+    Tui_decode.decode_fleet_safety
+      (fleet_safety_json ~blocker:"lane_capacity_withdrawn" ())
+  with
+  | Error err -> Alcotest.fail err
+  | Ok fleet ->
+      Alcotest.(check bool) "the unknown name is kept" true
+        (fleet.fs_blocker
+         = Some (Tui_decode.Unrecognised_blocker "lane_capacity_withdrawn"))
+
 let test_decode_fleet_safety_with_nothing_missing () =
   match Tui_decode.decode_fleet_safety (fleet_safety_json ~missing:false ()) with
   | Error err -> Alcotest.fail err
@@ -1163,6 +1202,7 @@ let metrics_common_fields ~kind ~channel =
 
 type usage_fixture =
   | Usage_trusted
+  | Usage_unpriced
   | Usage_untrusted
   | Usage_missing
   | Usage_mixed
@@ -1211,6 +1251,20 @@ let usage_fields = function
           ]
       , `Null
       , "missing"
+      , [] )
+  | Usage_unpriced ->
+      ( `Assoc
+          [ "input_tokens", `Int 10
+          ; "output_tokens", `Int 12
+          ; "cache_creation_tokens", `Int 3
+          ; "cache_read_tokens", `Int 4
+          ; "total_tokens", `Int 22
+          ; "usage_trust", `String "trusted"
+          ; "usage_anomaly", `Bool false
+          ; "usage_anomaly_reasons", `List []
+          ]
+      , `Null
+      , "trusted"
       , [] )
   | Usage_mixed ->
       ( `Assoc
@@ -1312,6 +1366,39 @@ let test_decode_current_turn_metrics () =
         entry.le_work_kind
   | Error err -> Alcotest.fail err
 
+(* Every turn row a live keeper wrote on 2026-09-23 carries the five counters
+   and no cost: the providers behind them price nothing, and the producer
+   writes the cost only where the provider's sample carried one
+   ([Keeper_unified_metrics_snapshot]'s [cost_json]). Read as a half-written
+   observation, those rows are dropped, and the Keeper pane's day reads as no
+   turns at all. *)
+let test_a_turn_priced_by_no_provider_is_still_a_turn () =
+  match
+    Tui_decode.decode_log_entry (current_turn_metrics ~usage:Usage_unpriced ())
+  with
+  | Error err -> Alcotest.failf "the live row shape was refused: %s" err
+  | Ok entry ->
+      Alcotest.(check bool) "turn kind" true
+        (entry.le_kind = Tui_decode.Log_turn);
+      Alcotest.(check (option int)) "input tokens" (Some 10)
+        entry.le_input_tokens;
+      Alcotest.(check (option int)) "output tokens" (Some 12)
+        entry.le_output_tokens;
+      Alcotest.(check (option (float 0.001))) "no cost was reported" None
+        entry.le_cost_usd
+
+(* The other way round is a row no producer writes: the cost comes off the
+   same sample as the counters. *)
+let test_a_cost_without_counters_is_refused () =
+  let priced_without_counters =
+    set_field "cost_usd" (`Float 0.25) (current_turn_metrics ~usage:Usage_missing ())
+  in
+  match Tui_decode.decode_log_entry priced_without_counters with
+  | Ok _ -> Alcotest.fail "a cost with no counters to price has to be refused"
+  | Error detail ->
+      Alcotest.(check string) "the refusal says what is missing"
+        "usage cost_usd without the counters it would price" detail
+
 let test_decode_current_turn_variants () =
   List.iter
     (fun (channel, expected_channel) ->
@@ -1359,10 +1446,9 @@ let test_decode_current_turn_variants () =
         (Some 12) entry.le_output_tokens
   | Error err -> Alcotest.fail err
 
-(* The six values are required fields carrying nullable values, so a row can
-   arrive with some of them null and the rest filled -- which is the branch 75
-   of 200 rows in a live keeper's log landed on, 37% of the window. The refusal
-   now says which side of the line each value fell on. *)
+(* The five counters are required fields carrying nullable values, so a row
+   can arrive with some of them null and the rest filled. The refusal says
+   which side of the line each value fell on. *)
 let test_a_row_with_some_values_null_names_them () =
   let null_in_usage key json =
     match json with
@@ -1383,8 +1469,8 @@ let test_a_row_with_some_values_null_names_them () =
    | Error detail ->
        Alcotest.(check string) "the refusal names the one that is null first"
          "usage unset=[total_tokens] set=[input_tokens, output_tokens, \
-          cache_creation_tokens, cache_read_tokens, cost_usd] is not one \
-          current atomic observation"
+          cache_creation_tokens, cache_read_tokens] is not one current atomic \
+          observation"
          detail);
   match
     Tui_decode.decode_log_entry
@@ -1976,25 +2062,44 @@ let system_log_snapshot_json entries =
 (* Verification requests. The shape is [Dashboard_verification.request_to_json]
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
+(* The queue's shape. The writer puts both [intent] and [cancellation_reason]
+   on every row and spells an absent one [`Null], so both keys are here; a
+   caller that wants the key gone passes [~omit_cancellation_reason:true],
+   which is the shape a build older than the reason copy wrote. *)
 let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
-    ?(evidence_error = `Null) () =
+    ?(evidence_error = `Null) ?(intent = `String "complete")
+    ?(cancellation_reason = `Null) ?(omit_cancellation_reason = false) () =
   `Assoc
-    [ ("request_id", `String "vr-1")
-    ; ("task_id", `String "task-470")
-    ; ("task_title", `String "wire the approval gate")
-    ; ("created_at", `String "2026-08-23T09:00:00Z")
-    ; ("submitted_by", `String "keeper.one")
-    ; ("completion_contract", `List [ `String "tests pass" ])
-    ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
-    ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
-    ; ("evidence_projection_error", evidence_error)
-    ]
+    ([ ("request_id", `String "vr-1")
+     ; ("task_id", `String "task-470")
+     ; ("task_title", `String "wire the approval gate")
+     ; ("created_at", `String "2026-08-23T09:00:00Z")
+     ; ("submitted_by", `String "keeper.one")
+     ; ("intent", intent)
+     ; ("completion_contract", `List [ `String "tests pass" ])
+     ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
+     ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
+     ; ("evidence_projection_error", evidence_error)
+     ]
+    @
+    if omit_cancellation_reason then []
+    else [ ("cancellation_reason", cancellation_reason) ])
 
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
-    ?(truncated = false) ?(unresolved = []) ?backlog_error ?backlog_recovery
-    requests =
+    ?(truncated = false) ?(unresolved = []) ?unresolved_total ?backlog_error
+    ?backlog_recovery requests =
+  (* Only the awaiting view joins the backlog, so only it counts what it could
+     not resolve; the list beside it is one page. *)
+  let unresolved_total_field =
+    match view, unresolved_total with
+    | "awaiting", None ->
+        [ ("awaiting_unresolved_total", `Int (List.length unresolved)) ]
+    | "awaiting", Some total -> [ ("awaiting_unresolved_total", `Int total) ]
+    | _, _ -> []
+  in
   `Assoc
-    ([ ("updated_at", `String "2026-08-23T09:00:01Z")
+    (unresolved_total_field
+     @ [ ("updated_at", `String "2026-08-23T09:00:01Z")
      ; ("total", `Int total)
      ; ("view", `String view)
      ; ("offset", `Int offset)
@@ -2646,7 +2751,14 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "skill_body_bytes", `Int 4981
       ; "skills_left_out", `List []
       ; "skill_resource_read_max_bytes", `Int 65536
-      ; "count", `Int 1
+      ; "count", `Int 2
+        (* The origin shape here mirrors what
+           Keeper_effective_tool_surface.origin_to_yojson actually emits, and
+           the values are the ones test_keeper_effective_tool_surface pins on
+           the producer side. The second tool splits the two branches: a
+           descriptor origin carries no skill_provenance at all, so its
+           source id must read as None rather than inheriting the first
+           tool's. *)
       ; ( "tools"
         , `List
             [ `Assoc
@@ -2654,9 +2766,26 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                 ; ( "origin"
                   , `Assoc
                       [ "kind", `String "composition_skill"
-                      ; "skill_source"
-                        , `String "skills/work-intake/SKILL.md"
+                      ; ( "skill_provenance"
+                        , `Assoc
+                            [ ( "identity"
+                              , `Assoc
+                                  [ "source_id", `String "shared-catalog"
+                                  ; "package_id", `String "work-intake"
+                                  ; "name", `String "work-intake"
+                                  ] )
+                            ; ( "directory"
+                              , `String "/srv/shared-agent-skills/work-intake" )
+                            ; ( "source"
+                              , `Assoc
+                                  [ "path", `String "/srv/shared-agent-skills" ]
+                              )
+                            ] )
                       ] )
+                ]
+            ; `Assoc
+                [ "name", `String "Read"
+                ; "origin", `Assoc [ "kind", `String "descriptor" ]
                 ] ] )
       ; "tool_surface_sha256", `String (String.make 64 'a')
       ]
@@ -2677,7 +2806,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                  ets_skill_discovery_bytes;
                  ets_skill_eager_body_bytes;
                  ets_skill_body_bytes;
-                 ets_tools = [ tool ];
+                 ets_tools = [ tool; bare_tool ];
                  ets_tool_surface_sha256 = Some digest;
                  _
                });
@@ -2691,6 +2820,17 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         (Skill_reference.list_to_yojson ets_instruction_skills
          |> Yojson.Safe.to_string);
       Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
+      (* Without this the Tools screen prints a bare "composition_skill" for
+         every skill tool: the decoder used to read origin.skill_source,
+         which no producer has emitted since the surface moved to
+         skill_provenance. *)
+      Alcotest.(check (option string))
+        "composition tool names its configured skill source"
+        (Some "shared-catalog") tool.et_skill_source_id;
+      Alcotest.(check string) "plain tool origin" "descriptor" bare_tool.et_origin;
+      Alcotest.(check (option string))
+        "a tool with no skill behind it names no source"
+        None bare_tool.et_skill_source_id;
       Alcotest.(check string) "profile name" "work-intake" profile.esp_name;
       Alcotest.(check string)
         "profile keeps the exact editable reference"
@@ -2715,8 +2855,10 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check int) "Skill discovery bytes" 369 ets_skill_discovery_bytes;
       Alcotest.(check int) "Skill eager bytes" 0 ets_skill_eager_body_bytes;
       Alcotest.(check int) "Skill body bytes" 4981 ets_skill_body_bytes;
-      Alcotest.(check (option string)) "SKILL.md source"
-        (Some "skills/work-intake/SKILL.md") tool.et_skill_source;
+      (* The skill source is asserted above, against the shape the producer
+         emits. This used to pin a SKILL.md path that no producer has sent
+         since the surface moved to skill_provenance -- the fixture was the
+         only thing still producing it. *)
       Alcotest.(check int) "digest length" 64 (String.length digest)
   | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
 
@@ -3111,6 +3253,7 @@ let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
    are the ones every connector emits. *)
 let connector_json ?(id = "slack") ?(available = `Bool true)
     ?(connected = `Bool true) ?(status = "connected")
+    ?(gateway_state = `String "connected") ?(poll_state = `Null)
     ?(channel = `String "#release-deployment")
     ?(pid = `Int 4242)
     ?(bindings =
@@ -3131,7 +3274,8 @@ let connector_json ?(id = "slack") ?(available = `Bool true)
     ; ("capabilities", `List [ `String "post" ])
     ; ("error", `String "")
     ; ("status_source", `String "in_process_gateway")
-    ; ("gateway_state", `String "connected")
+    ; ("gateway_state", gateway_state)
+    ; ("poll_state", poll_state)
     ; ("trigger_policy", `String "mention_only")
     ; ("gate_base_url", `Null)
     ; ("binding_store_path", `String ".gate/runtime/slack/bindings.json")
@@ -3185,6 +3329,11 @@ let test_decode_connector_snapshot_reads_the_live_shape () =
              c.Tui_decode.cn_bot_token_present;
            Alcotest.(check (option int)) "server pid" (Some 4242)
              c.Tui_decode.cn_pid;
+           Alcotest.(check bool) "typed gateway state" true
+             (c.Tui_decode.cn_gateway_state
+              = Some Tui_decode.Connector_gateway_connected);
+           Alcotest.(check bool) "no poll state" true
+             (c.Tui_decode.cn_poll_state = None);
            Alcotest.(check bool) "typed directory state" true
              (c.Tui_decode.cn_directory_state
               = Some Tui_decode.Connector_directory_partial);
@@ -3220,6 +3369,55 @@ let test_decode_connector_configured_but_unreachable () =
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+let test_decode_connector_reads_a_poll_state () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json ~gateway_state:`Null
+             ~poll_state:(`String "degraded") ()
+         ])
+  with
+  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "typed poll state" true
+        (c.Tui_decode.cn_poll_state = Some Tui_decode.Connector_poll_degraded);
+      Alcotest.(check bool) "no gateway state" true
+        (c.Tui_decode.cn_gateway_state = None)
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* A gateway or poll state the server's state machines never produce is not
+   read as some nearby state. The row that carries it is refused on its own:
+   the transports beside it still decode, and the refusal names the row. *)
+let test_decode_connector_refuses_only_the_row_with_an_unknown_state () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json ~id:"discord" ~gateway_state:(`String "half_open") ()
+         ; connector_json ~id:"imessage" ~gateway_state:`Null
+             ~poll_state:(`String "idle") ()
+         ; connector_json ~id:"slack" ()
+         ])
+  with
+  | Error err -> Alcotest.failf "one bad row failed the snapshot: %s" err
+  | Ok snapshot ->
+      Alcotest.(check (list string)) "the readable row still decodes"
+        [ "slack" ]
+        (List.map
+           (fun (c : Tui_decode.connector) -> c.cn_id)
+           snapshot.Tui_decode.cs_connectors);
+      Alcotest.(check (list (pair (option string) int)))
+        "each unreadable row is refused by name and position"
+        [ (Some "discord", 0); (Some "imessage", 1) ]
+        (List.map
+           (fun (r : Tui_decode.connector_refusal) ->
+              (r.cr_connector_id, r.cr_row))
+           snapshot.Tui_decode.cs_refused);
+      List.iter
+        (fun (r : Tui_decode.connector_refusal) ->
+           Alcotest.(check bool) "the refusal carries its reason" true
+             (String.length r.cr_reason > 0))
+        snapshot.Tui_decode.cs_refused
+
 let test_decode_connector_hides_nonpositive_pid () =
   match
     Tui_decode.decode_connector_snapshot
@@ -3248,14 +3446,21 @@ let test_decode_connector_absent_flags_are_off () =
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+(* A row the TUI cannot read is refused as that row, never drawn as a
+   connector and never dropped without a trace. *)
+let expect_only_row_refused label result =
+  match result with
+  | Error err -> Alcotest.failf "%s: one bad row failed the snapshot: %s" label err
+  | Ok { Tui_decode.cs_connectors = []; cs_refused = [ refusal ]; _ } ->
+      Alcotest.(check (option string)) (label ^ ": refusal names the row")
+        (Some "slack") refusal.Tui_decode.cr_connector_id
+  | Ok _ -> Alcotest.failf "%s: the row was not refused" label
+
 let test_decode_connector_rejects_contradictory_connection () =
-  match
-    Tui_decode.decode_connector_snapshot
-      (connector_snapshot_json
-         [ connector_json ~available:(`Bool false) ~connected:(`Bool true) () ])
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "connected while unavailable must be rejected"
+  expect_only_row_refused "connected while unavailable"
+    (Tui_decode.decode_connector_snapshot
+       (connector_snapshot_json
+          [ connector_json ~available:(`Bool false) ~connected:(`Bool true) () ]))
 
 let test_decode_connector_keeps_connected_but_unavailable_distinct () =
   match
@@ -3272,20 +3477,17 @@ let test_decode_connector_keeps_connected_but_unavailable_distinct () =
   | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_connector_rejects_a_malformed_binding () =
-  match
-    Tui_decode.decode_connector_snapshot
-      (connector_snapshot_json
-         [ connector_json
-             ~bindings:
-               (`List
-                 [ `Assoc
-                     [ ("keeper_name", `String "pinewood-pr-jira-checker") ]
-                 ])
-             ()
-         ])
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "a binding without channel_id must not disappear"
+  expect_only_row_refused "a binding without channel_id"
+    (Tui_decode.decode_connector_snapshot
+       (connector_snapshot_json
+          [ connector_json
+              ~bindings:
+                (`List
+                  [ `Assoc
+                      [ ("keeper_name", `String "pinewood-pr-jira-checker") ]
+                  ])
+              ()
+          ]))
 
 let test_decode_connector_order_is_stable () =
   match
@@ -3342,22 +3544,29 @@ let test_authenticated_name_page_enriches_connector () =
   | Ok _, Ok _ -> Alcotest.fail "expected one connector"
 
 (* Repositories. Shape is [repository_json] in the repositories route. *)
-let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true) () =
+let repository_json ?(keepers = [ "keeper.one" ]) ?(auto_sync = `Bool true)
+    ?(status = "active") ?error_message () =
+  let cause =
+    match error_message with
+    | None -> []
+    | Some message -> [ ("error_message", `String message) ]
+  in
   `Assoc
-    [ ("id", `String "repo-1")
-    ; ("name", `String "masc")
-    ; ("url", `String "https://github.com/jeong-sik/masc")
-    ; ("local_path", `String "workspace/yousleepwhen/masc")
-    ; ( "resolved_local_path"
-      , `String "/Users/dancer/me/workspace/yousleepwhen/masc" )
-    ; ("aliases", `List [])
-    ; ("default_branch", `String "main")
-    ; ("keepers", `List (List.map (fun k -> `String k) keepers))
-    ; ("status", `String "ready")
-    ; ("auto_sync", auto_sync)
-    ; ("sync_interval", `Int 300)
-    ; ("created_at", `String "2026-08-01T00:00:00Z")
-    ]
+    ([ ("id", `String "repo-1")
+     ; ("name", `String "masc")
+     ; ("url", `String "https://github.com/jeong-sik/masc")
+     ; ("local_path", `String "workspace/yousleepwhen/masc")
+     ; ( "resolved_local_path"
+       , `String "/Users/dancer/me/workspace/yousleepwhen/masc" )
+     ; ("aliases", `List [])
+     ; ("default_branch", `String "main")
+     ; ("keepers", `List (List.map (fun k -> `String k) keepers))
+     ; ("status", `String status)
+     ; ("auto_sync", auto_sync)
+     ; ("sync_interval", `Int 300)
+     ; ("created_at", `String "2026-08-01T00:00:00Z")
+     ]
+    @ cause)
 
 let repository_snapshot_json repos =
   `Assoc [ ("repositories", `List repos); ("total", `Int (List.length repos)) ]
@@ -3384,6 +3593,62 @@ let test_decode_repository_snapshot_reads_the_live_shape () =
              r.Tui_decode.rp_keepers;
            Alcotest.(check bool) "auto sync" true r.Tui_decode.rp_auto_sync
        | rs -> Alcotest.failf "expected one repository, got %d" (List.length rs))
+
+(* A repository whose clone or fetch failed keeps the cause in its status, and
+   the route writes that cause beside the word. The reading took the word and
+   left the cause on the wire, so the Workspace surface said "error" and the
+   screen held nothing that said what went wrong. *)
+let test_decode_repository_failure_keeps_its_cause () =
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json
+         [ repository_json ~status:"error"
+             ~error_message:"fatal: could not read from remote repository" () ])
+  with
+  | Ok { Tui_decode.rs_repositories = [ r ]; _ } ->
+      Alcotest.(check string) "the word the column draws" "error"
+        (Tui_decode.repository_status_word r.Tui_decode.rp_status);
+      Alcotest.(check (option string)) "and the cause behind it"
+        (Some "fatal: could not read from remote repository")
+        (Tui_decode.repository_status_reason r.Tui_decode.rp_status)
+  | Ok _ -> Alcotest.fail "expected one repository"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* Every other status has no cause to give. *)
+let test_decode_repository_active_has_no_cause () =
+  match
+    Tui_decode.decode_repository_snapshot
+      (repository_snapshot_json [ repository_json () ])
+  with
+  | Ok { Tui_decode.rs_repositories = [ r ]; _ } ->
+      Alcotest.(check string) "the word" "active"
+        (Tui_decode.repository_status_word r.Tui_decode.rp_status);
+      Alcotest.(check (option string)) "nothing to add" None
+        (Tui_decode.repository_status_reason r.Tui_decode.rp_status)
+  | Ok _ -> Alcotest.fail "expected one repository"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* A word this build does not know is drawn as it arrived rather than folded
+   into one of the four, and a failure that names no cause is one of those:
+   the reading cannot complete it, so the row says the word and adds nothing
+   it does not have. *)
+let test_decode_repository_keeps_a_word_it_cannot_place () =
+  let word json =
+    match Tui_decode.decode_repository_snapshot (repository_snapshot_json [ json ]) with
+    | Ok { Tui_decode.rs_repositories = [ r ]; _ } -> r.Tui_decode.rp_status
+    | Ok _ -> Alcotest.fail "expected one repository"
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  let unknown = word (repository_json ~status:"archived" ()) in
+  Alcotest.(check string) "drawn as it arrived" "archived"
+    (Tui_decode.repository_status_word unknown);
+  Alcotest.(check (option string)) "with no cause invented" None
+    (Tui_decode.repository_status_reason unknown);
+  let causeless = word (repository_json ~status:"error" ()) in
+  Alcotest.(check string) "a failure still says so" "error"
+    (Tui_decode.repository_status_word causeless);
+  Alcotest.(check (option string)) "and claims no cause" None
+    (Tui_decode.repository_status_reason causeless)
 
 let test_decode_repository_absent_auto_sync_is_off () =
   (* A repository that does not declare auto-sync is not syncing. Reading a
@@ -3432,6 +3697,14 @@ let test_decode_repository_requires_resolved_local_path () =
    failed Librarian with no ordinary snapshot may still have source evidence;
    the decoder must keep both axes instead of collapsing that row to
    memoryless. *)
+(* A keeper row that does not decode is refused on its own and the others
+   still decode, so "the payload is not accepted" is either a whole-snapshot
+   error or at least one refused row. *)
+let memory_health_rejects json =
+  match Tui_decode.decode_memory_health_snapshot json with
+  | Error _ -> true
+  | Ok snapshot -> snapshot.Tui_decode.mhs_refused_keepers <> []
+
 let empty_memory_context_cycle =
   `Assoc ["saved", `Null; "saved_read_error", `Null; "read_position", `Null;
     "read_position_read_error", `Null; "rewriting_through", `Null;
@@ -3585,7 +3858,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       | _ -> Alcotest.fail "synthesis stop or atom frontier lost")
    | Error detail -> Alcotest.fail detail);
   List.iter (fun invalid -> Alcotest.(check bool) "invalid synthesis cannot look caught up" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects (
       (context_payload (replace_field "synthesis" invalid cycle)))))
     [replace_field "state" (`String "drained") synthesis;
      replace_field "trace_id" `Null synthesis;
@@ -3606,7 +3879,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       | _ -> Alcotest.fail "absorbed position lost")
    | Error detail -> Alcotest.fail detail);
   List.iter (fun invalid -> Alcotest.(check bool) "invalid context observation rejected" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot (context_payload invalid))))
+    (memory_health_rejects ((context_payload invalid))))
     [ replace_field "prepared" (replace_field "input" (replace_field "frontier" frontier absorbed) prepared) cycle
     ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null absorbed) prepared) cycle
     ; replace_field "prepared" (replace_field "input" (replace_field "frontier" position input) prepared) cycle
@@ -3619,6 +3892,70 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     ; replace_field "prepared" (replace_field "input" (replace_field "kind" (`String "accepted") input) prepared) cycle
     ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null input) prepared) cycle
     ];
+  (* How the last Librarian pass ended is a closed set on both sides: a
+     stopped or crashed pass keeps the server's cause on its constructor, and
+     a spelling this build does not know fails the decode instead of reaching
+     the screen as a raw word. *)
+  let with_librarian ~stopped_keepers updates =
+    let with_row =
+      map_keeper 0
+        (fun keeper -> match keeper with
+         | `Assoc fields ->
+           `Assoc (List.map (fun (key, value) -> key,
+             if key = "librarian"
+             then List.fold_left (fun row (name, v) -> replace_field name v row) value updates
+             else value) fields)
+         | _ -> keeper)
+        json
+    in
+    match with_row with
+    | `Assoc fields ->
+      `Assoc (List.map (fun (key, value) -> key,
+        if key = "alert_summary"
+        then replace_field "librarian_stopped_keepers" (`Int stopped_keepers) value
+        else value) fields)
+    | other -> other
+  in
+  (match Tui_decode.decode_memory_health_snapshot
+           (with_librarian ~stopped_keepers:1
+              [ "state", `String "stopped"
+              ; "detail", `String "the range could not be read"
+              ; "last_failure_kind", `String "exact_execution_failure"
+              ]) with
+   | Ok snapshot ->
+     let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
+     Alcotest.(check bool) "a stopped pass keeps its cause" true
+       (librarian.mlh_state = Some (Tui_decode.Pass_stopped "the range could not be read"));
+     Alcotest.(check bool) "the failure kind is decoded" true
+       (librarian.mlh_last_failure_kind = Some Tui_decode.Failure_exact_execution)
+   | Error detail -> Alcotest.fail detail);
+  (* A row this build cannot read is refused on its own: the other keeper
+     still decodes and the refusal names the keeper and the reason, so a newer
+     server does not blank the pane. *)
+  List.iter
+    (fun (label, stopped_keepers, updates, reason) ->
+       match
+         Tui_decode.decode_memory_health_snapshot (with_librarian ~stopped_keepers updates)
+       with
+       | Error detail -> Alcotest.failf "%s: the whole snapshot was refused: %s" label detail
+       | Ok snapshot ->
+         Alcotest.(check (list string)) (label ^ ": the other keeper still decodes")
+           [ "healthy" ]
+           (List.map (fun keeper -> keeper.Tui_decode.mkh_keeper_id) snapshot.mhs_keepers);
+         (match snapshot.mhs_refused_keepers with
+          | [ { Tui_decode.mkr_keeper_id = Some "source-only"; mkr_reason } ] ->
+            Alcotest.(check bool) (label ^ ": the refusal says why") true
+              (String_util.contains_substring mkr_reason reason)
+          | _ -> Alcotest.failf "%s: expected one refusal naming source-only" label))
+    [ "a state this build does not know is refused", 1, [ "state", `String "paused" ],
+      "unsupported librarian state: paused"
+    ; "a stopped pass without its cause is refused", 1, [ "state", `String "stopped" ],
+      "missing its detail"
+    ; "a caught-up pass with a cause is refused", 0, [ "detail", `String "stray" ],
+      "carries a detail"
+    ; "a failure kind this build does not know is refused", 0,
+      [ "last_failure_kind", `String "quota" ], "unsupported librarian failure kind: quota"
+    ];
   let unknown_unread = map_keeper 0
       (fun keeper -> match keeper with
        | `Assoc fields ->
@@ -3626,7 +3963,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            if key = "librarian" then replace_field "unread_atom_turns" `Null value else value) fields)
        | _ -> keeper) json in
   Alcotest.(check bool) "unknown unread cannot report a zero fleet total" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot unknown_unread));
+    (memory_health_rejects (unknown_unread));
   let unknown_total = match unknown_unread with
     | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key,
         if key = "totals" then replace_field "librarian_unread_turns" `Null value else value) fields)
@@ -3652,7 +3989,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
         else value) fields)
     | json -> json in
   Alcotest.(check bool) "an unmeasured continuity lag cannot leave the fleet count at zero" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot (with_continuity `Null)));
+    (memory_health_rejects ((with_continuity `Null)));
   (match Tui_decode.decode_memory_health_snapshot
            (with_continuity_totals ~behind:0 ~unmeasured:1 (with_continuity `Null)) with
    | Ok snapshot ->
@@ -3672,9 +4009,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
        snapshot.mhs_total_librarian_continuity_unread_atoms
    | Error detail -> Alcotest.fail detail);
   Alcotest.(check bool) "a continuity sum that disagrees with the rows is refused" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot (with_continuity (`Int 4))));
+    (memory_health_rejects ((with_continuity (`Int 4))));
   Alcotest.(check bool) "a negative continuity lag is refused" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects (
        (with_continuity_totals ~behind:(-1) ~unmeasured:0 (with_continuity (`Int (-1))))));
   let mismatched_totals =
     match json with
@@ -3775,7 +4112,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   List.iter
     (fun (label, invalid) ->
        Alcotest.(check bool) label true
-         (Result.is_error (Tui_decode.decode_memory_health_snapshot invalid)))
+         (memory_health_rejects (invalid)))
     [ "fleet total mismatch rejects", mismatched_totals
     ; "negative unread turn count rejects", negative_unread
     ; "unknown librarian state rejects", unknown_librarian_state
@@ -3964,7 +4301,7 @@ let test_decode_memory_alert_keeps_the_code_contract () =
    | Error err -> Alcotest.failf "a well-formed alert failed to decode: %s" err);
   let rejected label json =
     Alcotest.(check bool) label true
-      (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
+      (memory_health_rejects (json))
   in
   rejected "an unknown code has no variant to decode into"
     (memory_alert_snapshot ~code:"librarian_on_fire" ~severity:"error"
@@ -4112,20 +4449,20 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
   (* Both halves of the disagreement: a marker with a number, and a rewrite
      target the cut already reached. *)
   Alcotest.(check bool) "a read error beside a position is refused" true
-    (Result.is_error
-       (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects
+       (
           (snapshot_with
              (cycle ~read_position:(Some 12887) ~read_error:(Some "progress_unreadable")
                 ~rewriting_through:None ()))));
   Alcotest.(check bool) "a rewrite target at the cut is refused" true
-    (Result.is_error
-       (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects
+       (
           (snapshot_with
              (cycle ~read_position:(Some 12887) ~read_error:None
                 ~rewriting_through:(Some 7694) ()))));
   Alcotest.(check bool) "a rewrite target without a cut is refused" true
-    (Result.is_error
-       (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects
+       (
           (snapshot_with
              (cycle ~saved:false ~read_position:(Some 12887) ~read_error:None
                 ~rewriting_through:(Some 12888) ()))))
@@ -4141,7 +4478,7 @@ let test_decode_memory_health_rejects_stale_schema () =
       ]
   in
   Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
+    (memory_health_rejects (json))
 
 let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound () =
   `Assoc
@@ -4237,6 +4574,60 @@ let test_decode_memory_fact_reads_the_use_record () =
           Alcotest.fail "a row without events must be rejected"
       | Tui_decode.Memory_store_absent -> Alcotest.fail "ordinary store absent")
 
+(* The server writes a fact's category through [category_to_string], so a
+   word outside the eight is a wire error -- not a ninth category for the
+   renderer to guess a colour for. *)
+let test_decode_memory_fact_refuses_an_unknown_category () =
+  let snapshot category =
+    Tui_decode.decode_memory_fact_snapshot
+      (memory_fact_snapshot_json
+         ~ordinary:
+           (`Assoc
+              [ "present", `Bool true
+              ; "revision", `Int 7
+              ; "updated_at", `Float 1_775_000_100.0
+              ; ( "facts"
+                , `List
+                    [ `Assoc
+                        [ "claim", `String "the deploy needs assets"
+                        ; "category", `String category
+                        ; "origin", `String "authored"
+                        ; "first_seen", `Float 1_775_000_000.0
+                        ; "last_seen", `Float 1_775_000_050.0
+                        ; "memory_id", `String "mem-1"
+                        ; "events", memory_fact_events_json ()
+                        ]
+                    ] )
+              ])
+         ~source_bound:(`Assoc [ "present", `Bool false ]) ())
+  in
+  let contains_substring text needle =
+    let n = String.length needle and h = String.length text in
+    let rec go i = i + n <= h && (String.sub text i n = needle || go (i + 1)) in
+    go 0
+  in
+  let refused_naming word = function
+    | Error error -> contains_substring error word
+    | Ok snapshot -> (
+        match snapshot.Tui_decode.mfs_ordinary with
+        | Tui_decode.Memory_store_read_error error ->
+            contains_substring error word
+        | Tui_decode.Memory_store_present _ | Tui_decode.Memory_store_absent ->
+            false)
+  in
+  Alcotest.(check bool) "a word the producer never writes is refused" true
+    (refused_naming "rule" (snapshot "rule"));
+  List.iter
+    (fun category ->
+      let word = Masc.Keeper_memory_os_types.category_to_string category in
+      match snapshot word with
+      | Ok { Tui_decode.mfs_ordinary = Tui_decode.Memory_store_present
+               { Tui_decode.mos_facts = [ fact ]; _ }; _ } ->
+          Alcotest.(check bool) (word ^ " round-trips") true
+            (fact.Tui_decode.mf_category = category)
+      | Ok _ | Error _ -> Alcotest.failf "%s did not decode" word)
+    Masc.Keeper_memory_os_types.all_categories
+
 let test_decode_memory_facts_keeps_both_stores () =
   let ordinary =
     `Assoc
@@ -4294,7 +4685,9 @@ let test_decode_memory_facts_keeps_both_stores () =
            (match store.Tui_decode.mos_facts with
             | [ fact ] ->
                 Alcotest.(check string) "category as the server spelled it"
-                  "lesson" fact.Tui_decode.mf_category;
+                  "lesson"
+                  (Masc.Keeper_memory_os_types.category_to_string
+                     fact.Tui_decode.mf_category);
                 Alcotest.(check string) "origin" "authored"
                   fact.Tui_decode.mf_origin
             | facts ->
@@ -4428,17 +4821,24 @@ let test_decode_project_changes_keeps_project_scope () =
 
 (* Keeper lane rows. Shape is the light projection the TUI reads from
    [GET /api/v1/keepers/composite]. *)
+let lane_conditions_json ?(launch_pending = false) ?(heartbeat_healthy = true)
+    ?(turn_healthy = true) () =
+  `Assoc
+    [ "launch_pending", `Bool launch_pending
+    ; "heartbeat_healthy", `Bool heartbeat_healthy
+    ; "turn_healthy", `Bool turn_healthy
+    ]
+
 let keeper_lane_json ?(phase = "running") ?(turn_phase = "executing")
     ?(idle_seconds = 75) ?(last_outcome = `Null)
-    ?(diagnosis = `String "running_fiber_alive") keeper =
+    ?(conditions = lane_conditions_json ()) keeper =
   `Assoc
     [ "keeper", `String keeper
     ; "phase", `String phase
     ; "turn_phase", `String turn_phase
     ; "idle_seconds", `Int idle_seconds
     ; "last_outcome", last_outcome
-    ; ( "phase_diagnosis"
-      , `Assoc [ "determining_condition", diagnosis ] )
+    ; "phase_diagnosis", `Assoc [ "conditions", conditions ]
     ]
 
 let keeper_lanes_json lanes =
@@ -4516,7 +4916,7 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
       (keeper_lanes_json
          [ keeper_lane_json ~last_outcome "alpha"
          ; keeper_lane_json ~phase:"future_phase" ~turn_phase:"future_turn"
-             ~diagnosis:`Null "beta"
+             ~conditions:(lane_conditions_json ~turn_healthy:false ()) "beta"
          ])
   with
   | Error err -> Alcotest.failf "decode failed: %s" err
@@ -4545,8 +4945,12 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
             | Tui_decode.Lane_turn_unknown raw ->
                 Alcotest.(check string) "unknown turn" "future_turn" raw
             | _ -> Alcotest.fail "future turn was folded into a known turn");
-           Alcotest.(check (option string)) "no determining condition" None
-             beta.kl_diagnosis
+           Alcotest.(check bool) "alpha's last turn is healthy" true
+             alpha.kl_conditions.Tui_decode.klc_turn_healthy;
+           Alcotest.(check bool) "beta's last turn failed" false
+             beta.kl_conditions.Tui_decode.klc_turn_healthy;
+           Alcotest.(check bool) "beta's heartbeat is healthy" true
+             beta.kl_conditions.Tui_decode.klc_heartbeat_healthy
        | lanes ->
            Alcotest.failf "expected two lane rows, got %d" (List.length lanes))
 
@@ -4557,7 +4961,7 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
       ; "phase", `String "running"
       ; "turn_phase", `String "idle"
       ; "last_outcome", `Null
-      ; "phase_diagnosis", `Assoc [ "determining_condition", `Null ]
+      ; "phase_diagnosis", `Assoc [ "conditions", lane_conditions_json () ]
       ]
   in
   match
@@ -4567,6 +4971,29 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
   | Error detail ->
       Alcotest.(check bool) "error names the missing field" true
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
+
+(* A reading of no conditions is not a healthy keeper. Each of the three
+   decides what the operations line says about the phase, so a lane without
+   one is refused rather than drawn as if the keeper were fine. *)
+let test_decode_keeper_lanes_requires_the_phase_conditions () =
+  List.iter
+    (fun field ->
+      let conditions =
+        match lane_conditions_json () with
+        | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+        | json -> json
+      in
+      match
+        Tui_decode.decode_keeper_lanes_snapshot
+          (keeper_lanes_json [ keeper_lane_json ~conditions "alpha" ])
+      with
+      | Ok _ -> Alcotest.failf "a lane without %s decoded" field
+      | Error detail ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%S names %s" detail field)
+            true
+            (Astring.String.is_infix ~affix:field detail))
+    [ "launch_pending"; "heartbeat_healthy"; "turn_healthy" ]
 
 let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ?(running = 0) ?(selected_slots = []) ?(configuration_state = "ready")
@@ -4601,6 +5028,9 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "last_outcome", (if retained = 0 then `Null else `String "succeeded")
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
+    ; ( "runs_without_slot"
+      , `Assoc
+          [ "vendor_system_one", `Int 0; "server_restarted", `Int 0; "no_slot", `Int 0 ] )
     ]
      @ jev)
 
@@ -4673,6 +5103,46 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
     Alcotest.(check bool) "the configuration reader is what refused it" true
       (String.starts_with
          ~prefix:"lanes[0]: standalone lane configuration: unknown value" detail)
+
+(* The lane detail line reads [obligation ^ " lane"], then this clause, then
+   the last run. The caller used to introduce the clause with a noun of its
+   own -- "configuration " ^ the word -- while three of the four words
+   already carry their subject, so the live screen read "configuration not
+   configured" over an unconfigured lane, and the other two would have read
+   "configuration no slot admitted" and "configuration registry unreadable".
+   Each state now says its own subject and the caller says none. *)
+let test_a_lane_configuration_clause_carries_its_own_subject () =
+  let clause = Tui_decode.standalone_lane_configuration_phrase in
+  Alcotest.(check string) "ready" "configuration ready"
+    (clause Tui_decode.Lane_ready);
+  Alcotest.(check string) "configured with nothing admitted"
+    "configured, but no slot admitted" (clause Tui_decode.Lane_slotless);
+  Alcotest.(check string) "unconfigured" "not configured"
+    (clause Tui_decode.Lane_unconfigured);
+  Alcotest.(check string) "registry unreadable" "registry unreadable"
+    (clause Tui_decode.Lane_registry_unavailable);
+  (* Read back in the shape the line draws them: none of the four names the
+     subject a second time. *)
+  List.iter
+    (fun state ->
+      let line =
+        Printf.sprintf "Required lane %s no run has finished" (clause state)
+      in
+      List.iter
+        (fun stutter ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%S does not read %S" line stutter)
+            false
+            (String_util.contains_substring line stutter))
+        [ "configuration not configured"
+        ; "configuration no slot"
+        ; "configuration registry"
+        ])
+    [ Tui_decode.Lane_ready
+    ; Tui_decode.Lane_slotless
+    ; Tui_decode.Lane_unconfigured
+    ; Tui_decode.Lane_registry_unavailable
+    ]
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
@@ -6181,6 +6651,29 @@ let test_decode_verification_separates_an_empty_queue_from_an_unreadable_one ()
       Alcotest.(check (list string)) "and so does what it could not resolve"
         [ "vrf-missing" ] snapshot.Tui_decode.vs_awaiting_unresolved
 
+(* The server sends one page of unresolved ids and the count of all of them.
+   The warning row's "(+N)" is read from the count, so a long list is not
+   reported as a short one. *)
+let test_decode_verification_counts_unresolved_beyond_the_page () =
+  (match
+     Tui_decode.decode_verification_snapshot
+       (verification_snapshot_json ~total:0 ~unresolved:[ "vrf-a" ]
+          ~unresolved_total:5 [])
+   with
+   | Error err -> Alcotest.failf "decode failed: %s" err
+   | Ok snapshot ->
+       Alcotest.(check int) "the count outlives the page" 5
+         snapshot.Tui_decode.vs_awaiting_unresolved_total);
+  let without_count =
+    match verification_snapshot_json ~total:0 [] with
+    | `Assoc fields ->
+        `Assoc (List.remove_assoc "awaiting_unresolved_total" fields)
+    | other -> other
+  in
+  match Tui_decode.decode_verification_snapshot without_count with
+  | Ok _ -> Alcotest.fail "an awaiting view without its count decoded"
+  | Error _ -> ()
+
 (* A queue built from a recovery snapshot holds real rows and is older than
    the workspace. Read as an ordinary queue it would be acted on as current,
    so it arrives on its own field rather than folded into the error. *)
@@ -6197,6 +6690,95 @@ let test_decode_verification_separates_a_stale_queue_from_a_failed_one () =
       Alcotest.(check (option string)) "but the queue says where it came from"
         (Some "read from backlog.json.last-good")
         snapshot.Tui_decode.vs_backlog_recovery
+
+(* The row says which verdict it waits on. A cancellation is cleared only by
+   an operator, so reading it as a completion hid the one row that needed
+   the operator most. [null] is the history view, and a name outside the
+   pair is refused rather than read as either. *)
+(* The row says which question it asks. Nothing read [intent], so the column
+   was blank on every row and the detail pane told every reader the row was
+   "not joined (history view)" -- on a live queue whose eight rows all carried
+   the field, seven of them "cancel".
+
+   [cancellation_reason] answers a different question and its absence answers
+   neither: a stop submitted before the record kept that copy has none, so
+   reading absence as "completion" would put a completion claim on a row that
+   is a stop. That is the shape the last case pins. *)
+let test_decode_verification_reads_which_verdict_the_row_waits_on () =
+  let decode json =
+    match Tui_decode.decode_verification_snapshot json with
+    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r
+    | Ok _ -> Alcotest.fail "expected one request"
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  let ask json = (decode json).Tui_decode.vr_ask in
+  let one request = verification_snapshot_json [ request ] in
+  Alcotest.(check bool) "a stop carries the case it makes" true
+    (ask
+       (one
+          (verification_request_json ~intent:(`String "cancel")
+             ~cancellation_reason:(`String "the issue it followed was closed")
+             ()))
+     = Tui_decode.Asks_cancellation (Some "the issue it followed was closed"));
+  Alcotest.(check bool) "a completion is the intent that says so" true
+    (ask (one (verification_request_json ())) = Tui_decode.Asks_completion);
+  Alcotest.(check bool) "a stop whose reason the record did not keep" true
+    (ask (one (verification_request_json ~intent:(`String "cancel") ()))
+     = Tui_decode.Asks_cancellation None);
+  Alcotest.(check bool) "and the same with the key gone" true
+    (ask
+       (one
+          (verification_request_json ~intent:(`String "cancel")
+             ~omit_cancellation_reason:true ()))
+     = Tui_decode.Asks_cancellation None)
+
+(* A row the backlog join found nothing for says so. Folding it into either
+   verdict is the queue inventing an answer the record does not hold, and on a
+   stop that answer is the one an operator acts on. *)
+let test_decode_verification_leaves_an_unjoined_row_unstated () =
+  let ask json =
+    match Tui_decode.decode_verification_snapshot json with
+    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r.Tui_decode.vr_ask
+    | Ok _ -> Alcotest.fail "expected one request"
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  Alcotest.(check bool) "a null intent states nothing" true
+    (ask (verification_snapshot_json [ verification_request_json ~intent:`Null () ])
+     = Tui_decode.Ask_unstated);
+  Alcotest.(check bool) "and neither does a missing key" true
+    (ask
+       (verification_snapshot_json
+          [ (match verification_request_json ~intent:`Null () with
+             | `Assoc fields ->
+                 `Assoc (List.filter (fun (k, _) -> k <> "intent") fields)
+             | other -> other)
+          ])
+     = Tui_decode.Ask_unstated);
+  (* A null intent beside a reason is still not a stop this build can claim:
+     the field that names the verdict is the one that was empty. *)
+  Alcotest.(check bool) "a reason does not supply the missing verdict" true
+    (ask
+       (verification_snapshot_json
+          [ verification_request_json ~intent:`Null
+              ~cancellation_reason:(`String "the issue it followed was closed")
+              ()
+          ])
+     = Tui_decode.Ask_unstated)
+
+(* A word outside the pair reaches the screen as that word rather than as
+   either verdict, so a vocabulary a newer server adds is visible here. *)
+let test_decode_verification_keeps_a_word_it_does_not_know () =
+  let ask json =
+    match Tui_decode.decode_verification_snapshot json with
+    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r.Tui_decode.vr_ask
+    | Ok _ -> Alcotest.fail "expected one request"
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  Alcotest.(check bool) "the word itself" true
+    (ask
+       (verification_snapshot_json
+          [ verification_request_json ~intent:(`String "supersede") () ])
+     = Tui_decode.Unrecognised_ask "supersede")
 
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could
@@ -10172,6 +10754,10 @@ let () =
           test_decode_connector_snapshot_reads_the_live_shape;
         Alcotest.test_case "configured is not reachable" `Quick
           test_decode_connector_configured_but_unreachable;
+        Alcotest.test_case "poll state is typed" `Quick
+          test_decode_connector_reads_a_poll_state;
+        Alcotest.test_case "unknown runtime state refuses only its row" `Quick
+          test_decode_connector_refuses_only_the_row_with_an_unknown_state;
         Alcotest.test_case "nonpositive pid is omitted" `Quick
           test_decode_connector_hides_nonpositive_pid;
         Alcotest.test_case "absent flags are off" `Quick
@@ -10193,6 +10779,12 @@ let () =
           test_decode_repository_snapshot_reads_the_live_shape;
         Alcotest.test_case "absent auto-sync is off" `Quick
           test_decode_repository_absent_auto_sync_is_off;
+        Alcotest.test_case "a failure keeps its cause" `Quick
+          test_decode_repository_failure_keeps_its_cause;
+        Alcotest.test_case "active has no cause" `Quick
+          test_decode_repository_active_has_no_cause;
+        Alcotest.test_case "a word it cannot place is kept" `Quick
+          test_decode_repository_keeps_a_word_it_cannot_place;
         Alcotest.test_case "a repository with no keepers" `Quick
           test_decode_repository_with_no_keepers;
         Alcotest.test_case "resolved path is required" `Quick
@@ -10209,8 +10801,12 @@ let () =
           test_decode_memory_alert_keeps_the_code_contract;
         Alcotest.test_case "standalone lane configuration is a closed set" `Quick
           test_decode_standalone_lane_configuration_is_a_closed_set;
+        Alcotest.test_case "a lane configuration clause carries its subject"
+          `Quick test_a_lane_configuration_clause_carries_its_own_subject;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
+        Alcotest.test_case "memory fact refuses an unknown category" `Quick
+          test_decode_memory_fact_refuses_an_unknown_category;
         Alcotest.test_case "memory fact row carries the use record" `Quick
           test_decode_memory_fact_reads_the_use_record;
         Alcotest.test_case "memory facts keep store states apart" `Quick
@@ -10229,6 +10825,8 @@ let () =
           test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
         Alcotest.test_case "requires the table fields" `Quick
           test_decode_keeper_lanes_requires_the_table_fields;
+        Alcotest.test_case "a lane without its phase conditions is refused" `Quick
+          test_decode_keeper_lanes_requires_the_phase_conditions;
         Alcotest.test_case "every known phase decodes to its own constructor"
           `Quick
           test_every_known_phase_decodes_to_its_own_constructor;
@@ -10342,10 +10940,18 @@ let () =
           test_decode_verification_carries_the_page_and_what_it_could_not_resolve;
         Alcotest.test_case "an empty queue is not an unreadable one" `Quick
           test_decode_verification_separates_an_empty_queue_from_an_unreadable_one;
+        Alcotest.test_case "unresolved ids are counted beyond the page" `Quick
+          test_decode_verification_counts_unresolved_beyond_the_page;
         Alcotest.test_case "a stale queue is not a failed one" `Quick
           test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
+        Alcotest.test_case "the row says which verdict it waits on" `Quick
+          test_decode_verification_reads_which_verdict_the_row_waits_on;
+        Alcotest.test_case "an unjoined row states no verdict" `Quick
+          test_decode_verification_leaves_an_unjoined_row_unstated;
+        Alcotest.test_case "a word it does not know is kept" `Quick
+          test_decode_verification_keeps_a_word_it_does_not_know;
       ] );
     ( "decode_system_logs",
       [
@@ -10433,8 +11039,12 @@ let () =
       [
         Alcotest.test_case "carries both name lists" `Quick
           test_decode_fleet_safety_carries_both_name_lists;
+        Alcotest.test_case "fleet safety carries the scan shortfall" `Quick
+          test_decode_fleet_safety_carries_the_scan_shortfall;
         Alcotest.test_case "session recovery fields are required" `Quick
           test_decode_fleet_safety_requires_session_recovery_fields;
+        Alcotest.test_case "an unknown blocker is kept by name" `Quick
+          test_decode_fleet_safety_keeps_an_unknown_blocker_by_name;
         Alcotest.test_case "a full fleet leaves the difference empty" `Quick
           test_decode_fleet_safety_with_nothing_missing;
         Alcotest.test_case "a body without the section is refused" `Quick
@@ -10479,6 +11089,10 @@ let () =
           test_decode_current_turn_variants;
         Alcotest.test_case "current heartbeat contract" `Quick
           test_decode_current_heartbeat_metrics;
+        Alcotest.test_case "a turn priced by no provider is still a turn" `Quick
+          test_a_turn_priced_by_no_provider_is_still_a_turn;
+        Alcotest.test_case "a cost without counters is refused" `Quick
+          test_a_cost_without_counters_is_refused;
         Alcotest.test_case "a row with some values null names them" `Quick
           test_a_row_with_some_values_null_names_them;
         Alcotest.test_case "retired and unknown rows fail closed" `Quick

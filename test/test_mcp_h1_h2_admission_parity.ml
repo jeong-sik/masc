@@ -699,6 +699,8 @@ let test_transport_guarded_paths_are_not_public_read () =
     ; "/api/v1/gate/connector/names"
     ; "/api/v1/board/curation"
     ; "/api/v1/board/hearths"
+    ; "/api/v1/board/sub-boards"
+    ; "/api/v1/board/sub-boards/some-board"
     ; "/api/v1/board/karma/ledger"
     ; "/api/v1/karma"
     ]
@@ -725,8 +727,8 @@ let test_h1_h2_read_gate_wiring_parity () =
     ~needle:"authorize_read_request" h2;
   assert_contains "H2 GET /graphql passes through the read gate"
     ~needle:"| `GET, \"/graphql\" ->\n          with_h2_read_auth h2_reqd" h2;
-  assert_contains "H2 POST /graphql passes through the read gate"
-    ~needle:"with_h2_read_auth h2_reqd (fun state ->\n              let response = Graphql_api.handle_request"
+  assert_contains "H2 POST /graphql passes through the read gate before its body"
+    ~needle:"| `POST, \"/graphql\" ->\n          with_h2_read_auth h2_reqd (fun state ->\n            h2_read_body h2_reqd"
     h2;
   assert_contains "H2 dashboard workspace mirrors H1 with_public_read"
     ~needle:"| `GET, \"/api/v1/dashboard/workspace\" ->\n          with_h2_public_read h2_reqd"
@@ -738,8 +740,8 @@ let test_h1_h2_read_gate_wiring_parity () =
   assert_not_contains "H2 /graphql no longer reads state without authorizing"
     ~needle:"with_h2_read_auth h2_reqd (fun _state ->\n            with_server_state" h2;
   (* The delegated module has no gate of its own; it takes this gateway's.
-     Five of its routes are with_public_read on HTTP/1 and ran unauthenticated
-     over h2c (#28161). *)
+     Each route below is with_public_read on HTTP/1 and must take the same
+     gate over h2c (#28161). *)
   let h2_extra = source_file "lib/server/server_h2_gateway_routes_extra.ml" in
   assert_contains "H2 hands the delegated routes its own public-read gate"
     ~needle:"~with_public_read:(fun f ->" h2;
@@ -755,11 +757,37 @@ let test_h1_h2_read_gate_wiring_parity () =
       "| `GET, \"/api/v1/board/curation\" ->\n      with_public_read"
     ; "/api/v1/board/hearths",
       "| `GET, \"/api/v1/board/hearths\" ->\n      with_public_read"
+    ; "/api/v1/board/sub-boards",
+      "| `GET, \"/api/v1/board/sub-boards\" ->\n      with_public_read"
     ; "/api/v1/board/karma/ledger",
       "| `GET, \"/api/v1/board/karma/ledger\" ->\n      with_public_read"
     ; "/api/v1/karma",
       "| `GET, \"/api/v1/karma\" ->\n      with_public_read"
+    ; "/api/v1/board",
+      "| `GET, \"/api/v1/board\" ->\n      with_public_read"
+    ; "/api/v1/board/sub-boards/<id>",
+      "| `GET, p when String.starts_with ~prefix:board_sub_board_detail_prefix p ->\n      with_public_read"
+    ; "/api/v1/board/<post_id>",
+      "&& String.length p > 14 ->\n      with_public_read"
     ];
+  (* The post-detail arm takes any remainder after /api/v1/board/, so the
+     sub-board detail arm must be tried first or sub-board paths are answered
+     as post lookups. *)
+  assert_order "H2 sub-board detail arm precedes the post-detail arm"
+    ~before:"~prefix:board_sub_board_detail_prefix p ->"
+    ~after:"&& String.length p > 14 ->"
+    h2_extra;
+  let h1_activity =
+    source_file "lib/server/server_routes_http_routes_activity.ml"
+  in
+  assert_contains "H1 sub-board detail uses the shared prefix and public-read gate"
+    ~needle:
+      "Http.Router.prefix_get board_sub_board_detail_prefix (fun request reqd ->\n       with_public_read"
+    h1_activity;
+  assert_contains "H1 sub-board detail answers through the shared handler"
+    ~needle:"board_sub_board_detail_json ~path:" h1_activity;
+  assert_contains "H2 sub-board detail answers through the shared handler"
+    ~needle:"board_sub_board_detail_json ~path:p" h2_extra;
   assert_contains "H2 openapi.json passes through the public-read gate"
     ~needle:"| `GET, \"/api/v1/openapi.json\" ->\n          (*"
     h2

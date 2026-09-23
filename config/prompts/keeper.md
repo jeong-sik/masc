@@ -388,6 +388,12 @@ Your own tool-call history could not be read this turn ({{detail}}). Do not trea
 ### world.own_recent_actions.turn_rejected_detail_row (vars: turn_id, tool, input, detail)
 - [turn {{turn_id}}] {{tool}} {{input}} -> REJECTED: {{detail}}
 
+### world.own_recent_actions.turn_deferred_row (vars: turn_id, tool)
+- [turn {{turn_id}}] {{tool}} -> deferred (not done yet)
+
+### world.own_recent_actions.turn_unrecorded_row (vars: turn_id, tool)
+- [turn {{turn_id}}] {{tool}} -> outcome not recorded
+
 ### world.pending_messages.heading (vars: count)
 ### Pending Messages ({{count}})
 

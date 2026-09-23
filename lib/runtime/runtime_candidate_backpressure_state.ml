@@ -5,7 +5,6 @@ type attempt_failure =
   | Server_error
   | Network_transient
   | Provider_timeout
-  | Access_refused
 
 type failed_attempt =
   | Failed_attempt of { noted_at : float; failure : attempt_failure }
@@ -22,8 +21,7 @@ let is_empty = function
   | { rate_limit = Some _; failed_attempt = _ } | { rate_limit = None; failed_attempt = Some _ } -> false
 
 let note_rate_limit ~noted_at ~retry_after current =
-  let retry_after = Option.bind retry_after (fun seconds ->
-    if Float.is_finite seconds && seconds >= 0. then Some seconds else None) in
+  let retry_after = Keeper_runtime_failure_route.usable_retry_after retry_after in
   match current.rate_limit with
   | Some (Unknown_scope_rate_limit existing) when existing.noted_at > noted_at -> current
   | Some (Unknown_scope_rate_limit _) | None ->

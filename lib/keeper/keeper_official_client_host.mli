@@ -25,17 +25,14 @@ type prepared_turn =
     [Whole_input_transmitted] carries the MASC-prepared messages handed to the
     client integration. It does not prove that the client placed every byte in
     the provider request or model context. Starts hand over the seed history.
-    On a Claude Code resume, MASC hands the canonical snapshot over as
-    replacement system-layer configuration, but the client may reuse the
-    session's original system prompt instead; this receipt records the handoff,
-    not what the model read. Codex resume behaviour needs its own evidence and
-    is not inferred from the Claude Code path. Client-owned native conversation
-    and tool history outside the snapshot are not included in this capture.
-    Do not use this receipt to compare per-lane model-input byte totals.
+    Codex resume behaviour needs its own evidence and is not inferred from the
+    Claude Code path. Client-owned native conversation and tool history outside
+    the snapshot are not included in this capture. Do not use this receipt to
+    compare per-lane model-input byte totals.
 
     [Held_by_client_session] means that the lane did not retransmit that
-    history, as on Antigravity resume. The current goal and ephemeral context
-    may still be sent. The accumulated client-owned history is not observable
+    history, as on Antigravity and Claude Code resumes. The current goal and
+    the composed per-turn context ({!resume_prompt}) may still be sent. The accumulated client-owned history is not observable
     here, so attributing the local prepared list would count bytes that were
     not sent. This distinction is not the [Start]/[Resume] distinction. *)
 type transmitted_model_input =
@@ -185,6 +182,40 @@ val invoke_turn_completion_hooks :
 (** Run the Agent Core [after_turn] and [on_stop] lifecycle for a completed
     official-client turn. Host-stop projections use the same hook order as a
     provider-emitted terminal before their durable session is settled. *)
+
+val is_composed_system_context : Agent_core.Types.message -> bool
+(** Whether this host composed the message for the provider instruction
+    surface: the per-turn context carrier or the Librarian working state.
+    Adapters keep such messages out of the canonical history snapshot and
+    re-send them on resume. *)
+
+val history_role_label : Agent_core.Types.role -> string
+(** The role line ([SYSTEM:], [USER:], ...) and its newline that an adapter
+    writes in front of one encoded message when it carries messages as prompt
+    text. *)
+
+val is_carried_on_resume : Agent_core.Types.message -> bool
+(** Whether a resume sends this message in front of its prompt: a message
+    {!is_composed_system_context} selects, or the historical task reference
+    ({!Keeper_official_task_reference.is_reference}). Both change per turn or
+    per operation, which the vendor session cannot already hold.
+
+    A resumed Claude Code session sends the system prompt it recorded at its
+    first launch, so a per-turn System message reaches a resumed session only
+    when it carries one of these markers. A new kind of per-turn System
+    context must be tagged with one; an untagged one lands in the system
+    prompt file only, which a resume does not read. *)
+
+val resume_prompt : goal:string -> Agent_core.Types.message list -> string
+(** The user prompt a lane sends when it resumes a vendor session that already
+    holds the conversation and the system prompt it recorded at its first
+    launch. The messages {!is_carried_on_resume} selects are rendered, in
+    order, each behind its {!history_role_label}, in front of [goal] and
+    separated from it by a blank line. Everything else in [messages] is left
+    out: the vendor session holds it. With none selected the prompt is [goal]
+    exactly. Antigravity and Claude Code resumes both send this; Antigravity
+    refuses a task reference before it composes, so on that lane the
+    selection is the composed context alone. *)
 
 val measure_message_bytes : Agent_core.Types.message -> int
 (** Bytes one message occupies in the canonical MASC encoding
@@ -337,6 +368,67 @@ val carried_start_range
     whose index this history does not open with the seed's message is
     dropped and reported, and the range starts over as with no seed. *)
 
+(** {1 One window, one decision (RFC-0460)} *)
+
+type windowed_range =
+  { carried : carried_start
+  ; sent : Agent_core.Types.message list  (** What goes out after the lane's window. *)
+  ; atoms_kept : int  (** How many of the range's durable atoms are in [sent]. *)
+  }
+
+val carried_atoms : carried_start -> int
+(** The durable atoms a range carries, before any window. *)
+
+val window_carried_range
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> capacity_bytes:int
+  -> reserved_bytes:int
+  -> ?source_projection:
+       (Agent_core.Types.message list
+        -> (Agent_core.Types.message list, Agent_core.Error.t) result)
+  -> carried_start
+  -> (windowed_range, Agent_core.Error.t) result
+(** The range under a declared ceiling. [source_projection] runs first, on
+    the range as composed. An omission preamble the range opened on is taken
+    off before the window, which charges one itself, and put back when the
+    window dropped nothing; a range that fit therefore goes exactly as cut.
+    [atoms_kept] counts the range's durable atoms only: what the source
+    projection appends is reached by a drop only after all of them. *)
+
+val read_seed_once
+  :  (unit -> Keeper_carried_front.seed_read) option
+  -> (unit -> Keeper_carried_front.seed_read) option
+(** The same seed read, taken at most once, for a lane that composes a range
+    more than once in a turn ({!compose_librarian_range}). Sequential use on
+    one fiber only. *)
+
+val windowed_projection : windowed_range -> Runtime_model_input_tail_window.projection
+(** The window reading counted against the whole history, for
+    {!Runtime_model_input_tail_window.observe}: the front it names is an atom
+    a later seed can reopen. *)
+
+val compose_librarian_range
+  :  keeper_name:string
+  -> runtime_id:string
+  -> compose:(librarian_position -> (windowed_range, Agent_core.Error.t) result)
+  -> librarian_position
+  -> (windowed_range, Agent_core.Error.t) result
+(** Compose and window the range from the turn's Librarian position, with
+    [compose] doing both the way the lane does them.
+
+    A working state goes out only where it displaces none of the atoms after
+    the range it leads. A [Librarian_snapshot] position is composed with it
+    first, and kept when the window left every atom of the range. Otherwise
+    the same position is composed alone ([Librarian_progress] at the
+    snapshot's end), and the working state goes only when the window kept at
+    least the newest atom and as many atoms with it as without it. When it
+    stays out, the request goes with the position alone, a WARN names the
+    reason and the first atom sent, and
+    [masc_keeper_librarian_working_state_not_carried_total] counts it -- the turn is not
+    refused, because that band is usually a Librarian that has not caught up
+    yet. A composition the position alone cannot carry is refused with its
+    own error. Other positions are composed once, as given. *)
+
 val prepare_turn :
   runtime_label:string ->
   keeper_name:string ->
@@ -361,7 +453,10 @@ val prepare_turn :
     The hook's [extra_system_context] is appended as a raw [System] message
     carrying {!Agent_core.Types.Extra_system_context_provenance}. Official
     adapters must keep that message on their provider instruction surface; it
-    is not an Agent Core synthetic User carrier.
+    is not an Agent Core synthetic User carrier. The Librarian working state
+    is a second [System] message on the same surface, tagged
+    {!Runtime_model_input_tail_window.working_state_metadata}; adapters select
+    both with {!is_composed_system_context}.
 
     The seed carries the projected history as-is. Nothing is cut here: the
     provider owns its context window and reports exceeding it as a typed

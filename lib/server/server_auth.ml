@@ -734,6 +734,7 @@ let http_status_of_auth_error = function
       | Masc_domain.Task_error.NotClaimed _
       | Masc_domain.Task_error.InvalidState _
       | Masc_domain.Task_error.InvalidId _) -> `Bad_request
+  | Masc_domain.Task (Masc_domain.Task_error.VerificationSuperseded _) -> `Conflict
   | Masc_domain.Agent (Masc_domain.Agent_error.InvalidName _) -> `Bad_request
   | Masc_domain.System _ -> `Bad_request
   | Masc_domain.RateLimitExceeded _ -> `Too_many_requests
@@ -855,9 +856,46 @@ let auth_error_cors_headers request =
      | None -> [ "vary", "Origin" ])
 ;;
 
-let respond_auth_error request reqd err =
+(* A 401/403 is about the credential the client presented, and the client is
+   not where it is decided: the TUI's refresh path reaches this responder (h1)
+   and the h2 gateway reaches its twin, so a refusal must name the endpoint
+   that produced it. /mcp already names its endpoint through
+   [record_mcp_auth_reject]. [auth_refusal_response] logs the path and status
+   and hands back the response parts, so every responder that answers a
+   refusal goes through one logging call and none can answer without a line.
+   The raw bearer is never logged — only the endpoint and the status. *)
+let auth_refusal_details ~protocol ~path ~status =
+  `Assoc [ "protocol", `String protocol; "path", `String path; "status", `Int status ]
+;;
+
+let auth_refusal_message ~protocol ~path ~status =
+  Printf.sprintf "HTTP auth rejected: %s %s -> %d" protocol path status
+;;
+
+let log_auth_refusal ~protocol ~path ~status =
+  Log.Auth.emit
+    Log.Warn
+    ~details:(auth_refusal_details ~protocol ~path ~status)
+    ~category:Log.Routine
+    (auth_refusal_message ~protocol ~path ~status)
+;;
+
+(* Log the refusal and hand back the status and body. Every responder that
+   answers a refusal — the h1 responder, the h2 gateway, and the h2 route
+   dispatcher — builds its response from here, so a refusal cannot be answered
+   without a line. *)
+let auth_refusal_response ~protocol ~path err =
   let status = http_status_of_auth_error err in
-  let body = auth_error_json err in
+  log_auth_refusal ~protocol ~path
+    ~status:(Httpun.Status.to_code (status :> Httpun.Status.t));
+  (status, auth_error_json err)
+;;
+
+let respond_auth_error request reqd err =
+  let status, body =
+    auth_refusal_response ~protocol:"h1"
+      ~path:(Http_server_eio.Request.path request) err
+  in
   let headers =
     Httpun.Headers.of_list
       (("content-length", string_of_int (String.length body))
@@ -1037,6 +1075,24 @@ let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority r
   let agent_name = request_authorization_actor_name actor in
   let* () = Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name in
   Ok agent_name
+
+type request_credential_standing =
+  | Operator_credential
+  | Agent_credential
+  | No_credential
+
+let request_credential_standing ~base_path request =
+  match token_of_request_auth_credential (request_auth_credential_from_request request) with
+  | None -> No_credential
+  | Some token when Auth.verify_internal_keeper_token base_path ~token -> (
+      match internal_keeper_agent_from_request request with
+      | Some _ -> Agent_credential
+      | None -> No_credential)
+  | Some token -> (
+      match Auth.find_credential_by_token base_path ~token with
+      | Ok { Masc_domain.role = Masc_domain.Admin; _ } -> Operator_credential
+      | Ok { Masc_domain.role = Masc_domain.Worker; _ } -> Agent_credential
+      | Error _ -> No_credential)
 
 let authorize_tool_request ~base_path ~tool_name ~request_authority request :
     (unit, Masc_domain.masc_error) result =

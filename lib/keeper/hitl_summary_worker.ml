@@ -1582,7 +1582,7 @@ let execute_prepared_flow_with_queue_ops_current
         | Error error ->
           Cancellation_exact_settlement_failed error)
       with
-      | exn ->
+      | exn -> (* cancel-guard-ok: the body is Eio.Cancel.protect *)
         Cancellation_settlement_raised
           ("cancellation settlement raised: " ^ Printexc.to_string exn)
     in

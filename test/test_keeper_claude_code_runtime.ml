@@ -1027,15 +1027,8 @@ let test_keeper_shrinks_history_after_statusless_context_error
         (if index mod 2 = 0 then User else Assistant)
         (Printf.sprintf "%03d:%s" index (String.make 1_024 'x')))
   in
-  let reset_shrink_state () =
-    Eio_main.run (fun _ ->
-      Keeper_context_overflow_shrink_state.For_testing.reset ())
-  in
-  reset_shrink_state ();
   Fun.protect
-    ~finally:(fun () ->
-      reset_shrink_state ();
-      cleanup_tree base_path)
+    ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        let official_client_continuation = if not native_gate then None else (
          with_fixture
@@ -1068,43 +1061,93 @@ let test_keeper_shrinks_history_after_statusless_context_error
                 ~goal:"SHRINK_HISTORY"
                 ()
             with
-            | Error error -> fail (Agent_core.Error.to_string error)
+            | Error error ->
+              if not native_gate then fail (Agent_core.Error.to_string error)
             | Ok turn ->
+              if native_gate then fail "a Gate resume refused for size completed the turn";
               check string
                 "Keeper response"
                 "MASC_CLAUDE_SHRUNK"
                 (keeper_response_text turn));
+       if native_gate then (
+         (* A resumed session is refused on the vendor's own conversation, and
+            the resume prompt is the same at every capacity, so shrinking
+            cannot help. A Gate must stay in its original session, so the turn
+            ends on the overflow instead of respawning the same input. *)
+         check bool "the Gate resume is not respawned" false
+           (Sys.file_exists second_prompt_marker);
+         let raw = In_channel.with_open_bin first_prompt_marker In_channel.input_line in
+         (match raw with
+          | None -> fail "native Gate fixture did not capture its resume input"
+          | Some raw ->
+            check string "a Gate resume sends only its new input"
+              "SHRINK_HISTORY" (content_of_wire_message raw));
+         check bool "resume system file carries no canonical snapshot" false
+           (String_util.contains_substring
+              (In_channel.with_open_bin first_system_marker In_channel.input_all)
+              "masc.official-client-canonical-context.v1");
+         let checkpoint = match official_client_continuation with
+           | Some checkpoint -> checkpoint
+           | None -> fail "native Gate seed produced no continuation" in
+         let full = load_state base_path in
+         let recovery_id = match full.phase with
+           | Recovery_required
+               { failure =
+                   Keeper_official_client_session_store.Vendor_session_full
+                     Keeper_official_client_session_store.No_activity_observed
+               ; recovery_id
+               ; _
+               } -> recovery_id
+           | _ -> fail "a Gate resume refused for size did not record Vendor_session_full" in
+         (* The operation fails with this cause: the Gate cannot continue in
+            any session other than the full one. *)
+         (match Keeper_direct_gate_continuation.session_full_cause ~checkpoint
+             ~approval_id:"approval-full" (Some full) with
+          | Some (Keeper_request_failure.Gate_session_full
+              { approval_id; runtime_id; session_id; recovery_id = recorded
+              ; activity = Keeper_internal_error.No_activity_observed }) ->
+            check string "the failure names the Gate" "approval-full" approval_id;
+            check string "the failure names the runtime" checkpoint.runtime_id runtime_id;
+            check string "the failure names the full session" checkpoint.session_id session_id;
+            check string "the failure names the session record" recovery_id recorded
+          | Some _ | None -> fail "a full Gate session did not end the operation with its cause");
+         check bool "the full session no longer admits the continuation" true
+           (Result.is_error
+              (Keeper_official_client_session_store.validate_continuation ~checkpoint
+                 ~expected:(Some full) ~client_kind:checkpoint.client_kind
+                 ~runtime_id:checkpoint.runtime_id
+                 ~tool_surface_sha256:checkpoint.tool_surface_sha256));
+         (match Eio_main.run (fun _ ->
+             Keeper_official_client_session_store.resolve_recovery ~base_path
+               ~keeper_name:"claude-fixture" ~expected:full ~recovery_id
+               ~resolution:Keeper_official_client_session_store.Retry_previous
+               ~resolved_by:"test"
+               ~resolved_at:(Unix.gettimeofday ())) with
+          | Error Keeper_official_client_session_store.Retry_previous_unavailable -> ()
+          | Error _ | Ok _ -> fail "a full session offered to resend the same resume");
+         (* The next ordinary turn is not held for an operator: it supersedes
+            the record and starts a new session. *)
+         with_fixture
+           [ Emit (assistant ~turn_id:"turn-fresh" "MASC_CLAUDE_FRESH")
+           ; Emit (result ~turn_id:"turn-fresh" "MASC_CLAUDE_FRESH") ]
+           (fun cli_path ->
+              match run_keeper_turn ~base_path ~cli_path ~goal:"AFTER_FULL" () with
+              | Ok turn ->
+                check string "the next turn answers" "MASC_CLAUDE_FRESH"
+                  (keeper_response_text turn)
+              | Error error -> fail (Agent_core.Error.to_string error));
+         let fresh = load_state base_path in
+         check int "the new session restarts the ordinal" 1 fresh.turn_count;
+         match fresh.phase with
+         | Settled { turn_id = "turn-fresh"; session_id } ->
+           check bool "the new session is not the full one" false
+             (String.equal session_id checkpoint.session_id)
+         | _ -> fail "the turn after a full Gate session did not settle a new session")
+       else (
        List.iter (fun marker ->
          let scoped_path = In_channel.with_open_bin (marker ^ ".path") In_channel.input_all in
          check bool "System file cleaned after rejected and successful turns" false (Sys.file_exists scoped_path))
          [first_system_marker; second_system_marker];
-       (if native_gate then (
-         let snapshot marker = In_channel.with_open_bin marker In_channel.input_all
-           |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string in
-         let full = snapshot first_system_marker and shrunk = snapshot second_system_marker in
-         let messages value = Yojson.Safe.Util.member "messages" value in
-         check string "large replacement file preserves full initial canonical snapshot"
-           (Yojson.Safe.to_string (`List (List.map Keeper_official_client_context_codec.to_json initial_messages)))
-           (Yojson.Safe.to_string (messages full));
-         check bool "projected retry is smaller in the replacement file" true
-           (List.length (Yojson.Safe.Util.to_list (messages shrunk)) < List.length initial_messages);
-         List.iter (fun value ->
-           let digest = messages value |> Yojson.Safe.to_string
-             |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-           check string "file transport preserves projected provenance hash" digest
-             Yojson.Safe.Util.(value |> member "snapshot_sha256" |> to_string)) [full; shrunk]
-       ));
-       (if native_gate then
-          (* A native continuation sends only its new input; the official
-             session already owns the prior history, including the Gate. *)
-          List.iter (fun path ->
-            let raw = In_channel.with_open_bin path In_channel.input_line in
-            match raw with
-            | None -> fail "native Gate fixture did not capture its resume input"
-            | Some raw -> check string "native Gate retry preserves the exact input delta"
-                "SHRINK_HISTORY" (content_of_wire_message raw))
-            [first_prompt_marker; second_prompt_marker]
-        else (
        let full_history = prompt_history first_prompt_marker in
        let shrunk_history = prompt_history second_prompt_marker in
        let full_count = List.length full_history in
@@ -1118,21 +1161,12 @@ let test_keeper_shrinks_history_after_statusless_context_error
        check bool
          "retry shrinks provider-bound history"
          true
-         (shrunk_count < full_count)
-        ));
+         (shrunk_count < full_count);
        let state = load_state base_path in
-       check int "retry preserves the native Gate turn ordinal"
-         (if native_gate then 2 else 1) state.turn_count;
-       (match official_client_continuation with
-        | None -> ()
-        | Some checkpoint ->
-          check bool "bound Gate resumes after shrink in original session" true
-            (Keeper_official_client_session_store.validate_completed_continuation
-              ~checkpoint ~expected:(Some state) = Ok ()));
-
+       check int "retry keeps the turn ordinal" 1 state.turn_count;
        match state.phase with
        | Settled { turn_id = "turn-shrunk"; _ } -> ()
-       | _ -> fail "shrunk Claude Code retry did not settle")
+       | _ -> fail "shrunk Claude Code retry did not settle"))
 ;;
 
 let test_post_effect_transport_enters_recovery () =
@@ -1292,6 +1326,32 @@ let test_keeper_settles_and_resumes () =
       {tool_use_id="native-call";content="completed native effect";outcome=Tool_succeeded;
        json=Some (`Assoc ["receipt",`String "native-proof"]);content_blocks=None}]] in
   let prompt_marker = Filename.concat base_path "resume-prompt.json" in
+  let start_system_marker = Filename.concat base_path "start-system.txt" in
+  (* The two messages the host composes for each turn: the per-turn context
+     carrier and the Librarian working state. *)
+  let carrier : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text "MASC_TURN_CONTEXT memory revision 903" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  let working_state : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text "MASC_WORKING_STATE two asks answered" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Runtime_model_input_tail_window.working_state_metadata
+    }
+  in
+  let rendered (message : Agent_core.Types.message) =
+    Keeper_official_client_host.history_role_label message.role
+    ^ Keeper_official_client_host.encode_history_message message
+  in
+  let has_canonical_snapshot wire =
+    String_util.contains_substring wire "masc.official-client-canonical-context.v1"
+  in
   (* What each turn reported about its own model input. The start/resume split
      the rest of this test pins on the wire has to be the same split the
      record carries, or the metrics row describes a request that was not
@@ -1313,6 +1373,7 @@ let test_keeper_settles_and_resumes () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
+         ~system_marker:start_system_marker
          [ Emit_and_read mcp_initialize; Emit mcp_initialized_notification;
            Emit_and_read mcp_list; Emit_and_read mcp_call;
            Emit (assistant ~turn_id:"turn-1" "MASC_CLAUDE_FIRST")
@@ -1323,7 +1384,8 @@ let test_keeper_settles_and_resumes () =
              run_keeper_turn
                ~tools:[tool]
                ~initial_messages:
-                 [ message User "earlier user"; message Assistant "earlier assistant" ]
+                 [ message User "earlier user"; message Assistant "earlier assistant"
+                 ; carrier ]
                ~base_path
                ~cli_path
                ~goal:"FIRST_GOAL"
@@ -1347,6 +1409,19 @@ let test_keeper_settles_and_resumes () =
             (List.length messages > 0)
         | Keeper_official_client_host.Held_by_client_session ->
           fail "a started conversation reported nothing to attribute");
+       (* A start still writes the composed context into the system prompt
+          the client records for the session. *)
+       let start_system_wire =
+         In_channel.with_open_bin start_system_marker In_channel.input_all
+       in
+       check bool "a start's system prompt carries the turn context" true
+         (String_util.contains_substring start_system_wire
+            (Keeper_official_client_host.encode_history_message carrier));
+       check bool "a start's system prompt carries no canonical snapshot" false
+         (has_canonical_snapshot start_system_wire);
+       (match (load_state base_path).context_frontier with
+        | Some { delivery = Prepared_start_context; _ } -> ()
+        | Some _ | None -> fail "a start did not record its prepared context");
        reports := [];
        let first = load_state base_path in
        let session_id =
@@ -1363,7 +1438,7 @@ let test_keeper_settles_and_resumes () =
            match
              run_keeper_turn
                ~tools:[tool]
-               ~initial_messages:native_history
+               ~initial_messages:(carrier :: working_state :: native_history)
                ~system_prompt:"Updated core instructions"
                ~base_path
                ~cli_path
@@ -1383,39 +1458,81 @@ let test_keeper_settles_and_resumes () =
        let raw =
          Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
        in
-       check string
-         "resume sends only current goal"
-         "SECOND_GOAL"
-         (content_of_wire_message raw);
+       (* Claude Code resumes with the system prompt it recorded at the
+          session's first launch, so what changes per turn rides in front of
+          the resume prompt and the conversation the session holds is not
+          sent again. *)
+       let resume_prompt = content_of_wire_message raw in
+       let position text =
+         match Astring.String.find_sub ~sub:text resume_prompt with
+         | Some index -> index
+         | None -> fail ("resume prompt is missing " ^ text)
+       in
+       check bool "resume prompt opens with the turn context" true
+         (String.starts_with ~prefix:(rendered carrier) resume_prompt);
+       check bool "the working state follows the turn context" true
+         (position (rendered carrier) < position (rendered working_state));
+       check bool "resume prompt ends with the goal" true
+         (String.ends_with ~suffix:"\n\nSECOND_GOAL" resume_prompt);
+       check bool "resume prompt does not replay the conversation" false
+         (String_util.contains_substring resume_prompt "Native correction");
        let system_wire = In_channel.with_open_bin system_marker In_channel.input_all in
        let scoped_path = In_channel.with_open_bin (system_marker ^ ".path") In_channel.input_all in
        check bool "replacement context file removed after child settles" false (Sys.file_exists scoped_path);
-       check bool "core instructions replace the prior prompt" true
+       check bool "core instructions lead the resume system prompt" true
          (String.starts_with ~prefix:"Updated core instructions" system_wire);
-       let snapshot = system_wire |> String.split_on_char '\n'
-         |> List.find_map (fun line -> match Yojson.Safe.from_string line with
-           | `Assoc fields as value when List.assoc_opt "schema" fields =
-               Some (`String "masc.official-client-canonical-context.v1") -> Some value
-           | _ -> None | exception Yojson.Json_error _ -> None)
-         |> function Some value -> value | None -> fail "missing canonical context on system wire" in
-       check string "native conversation and completed tool receipt stay exact"
-         (Yojson.Safe.to_string (`List (List.map Keeper_official_client_context_codec.to_json native_history)))
-         (snapshot |> Yojson.Safe.Util.member "messages" |> Yojson.Safe.to_string);
+       check bool "resume system prompt carries no canonical snapshot" false
+         (has_canonical_snapshot system_wire);
+       check bool "resume system prompt carries no conversation" false
+         (String_util.contains_substring system_wire "Native correction");
+       check bool "resume system prompt carries no composed context" false
+         (String_util.contains_substring system_wire "MASC_TURN_CONTEXT"
+          || String_util.contains_substring system_wire "MASC_WORKING_STATE");
        (match reported_input () with
-        | Keeper_official_client_host.Held_by_client_session -> fail "current canonical context was transmitted"
-        | Keeper_official_client_host.Whole_input_transmitted messages ->
-          check int "current canonical context is attributed" 2 (List.length messages));
+        | Keeper_official_client_host.Held_by_client_session -> ()
+        | Keeper_official_client_host.Whole_input_transmitted _ ->
+          fail "a resume reported the conversation the vendor session holds as sent");
        check int "resumed context does not repeat official tool effect" 1 !effect_count;
        let second = load_state base_path in
        (match second.context_frontier with
-        | Some {acknowledged_turn=Some receipt;delivery=Replaced_configuration;_} ->
-          check string "frontier bound to resumed vendor turn" "turn-2" receipt.turn_id
-        | Some _ | None -> fail "missing settled replacement context receipt");
+        | Some {acknowledged_turn=Some receipt;delivery=Held_by_vendor_session;message_count;_} ->
+          check string "frontier bound to resumed vendor turn" "turn-2" receipt.turn_id;
+          check int "frontier counts the canonical history, not the composed context"
+            (List.length native_history) message_count
+        | Some _ | None -> fail "a resume did not record that the vendor session holds the context");
        check int "durable cumulative turns" 2 second.turn_count;
        match second.phase with
        | Settled { session_id = settled_session; turn_id = "turn-2" } ->
          check string "settled session" session_id settled_session
        | _ -> fail "resumed Claude Code turn did not settle")
+;;
+
+(* The historical task reference only exists on a resume of the operation's
+   own vendor session, so it has to ride in the resume prompt too: the system
+   prompt file it used to land in is not what a resumed session reads. *)
+let test_resume_prompt_carries_the_task_reference () =
+  let reference : Agent_core.Types.message =
+    { (Agent_core.Types.system_msg "MASC_TASK_REFERENCE") with
+      metadata = [ "masc_official_historical_task", `String "v1" ] }
+  in
+  let carrier : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text "MASC_TURN_CONTEXT" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  check bool "the reference is recognised" true
+    (Keeper_official_task_reference.is_reference reference);
+  let rendered (message : Agent_core.Types.message) =
+    Keeper_official_client_host.history_role_label message.role
+    ^ Keeper_official_client_host.encode_history_message message
+  in
+  check string "reference, then turn context, then the goal; history left out"
+    (rendered reference ^ "\n\n" ^ rendered carrier ^ "\n\nGOAL")
+    (Keeper_official_client_host.resume_prompt ~goal:"GOAL"
+       [ reference; message User "held by the vendor session"; carrier ])
 ;;
 
 let test_pre_effect_provider_rejection_keeps_failover_open () =
@@ -1907,6 +2024,37 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
     true
 ;;
 
+(* A Gate continuation's resume refused as full ends the Gate whatever it did
+   first; the record keeps whether a response or tool effect came first. *)
+let test_gate_resume_overflow_is_session_full () =
+  let map = Keeper_claude_code_runtime.For_testing.recovery_failure_of_attempt in
+  let overflow ~tool_effect_attempted ~response_emitted =
+    Runtime_claude_code.Context_window_exceeded
+      { message = "Prompt is too long"; tool_effect_attempted; response_emitted }
+  in
+  let resume = Runtime_claude_code.Resume { session_id = "session-1" } in
+  check bool "no activity"
+    (map ~session_mode:resume ~gate_continuation:true
+       (overflow ~tool_effect_attempted:false ~response_emitted:false)
+     = Keeper_official_client_session_store.(Vendor_session_full No_activity_observed))
+    true;
+  check bool "after a tool effect"
+    (map ~session_mode:resume ~gate_continuation:true
+       (overflow ~tool_effect_attempted:true ~response_emitted:false)
+     = Keeper_official_client_session_store.(Vendor_session_full Activity_observed))
+    true;
+  check bool "after a response"
+    (map ~session_mode:resume ~gate_continuation:true
+       (overflow ~tool_effect_attempted:false ~response_emitted:true)
+     = Keeper_official_client_session_store.(Vendor_session_full Activity_observed))
+    true;
+  check bool "an ordinary resume keeps the input fence"
+    (map ~session_mode:resume ~gate_continuation:false
+       (overflow ~tool_effect_attempted:true ~response_emitted:false)
+     = Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true
+;;
+
 let test_native_action_observer_keeps_exact_provider_identity () =
   let seen = ref [] in
   let observe ~official_turn ~identity ~tool_name =
@@ -2079,7 +2227,7 @@ let agent_core_range ?(turn_start = 0) ~front messages =
      ~measure_message_bytes:(Keeper_context_core.message_measurer ())
      ~front
      ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
-     ~last_resort:false
+     ~current_turn_results:Keeper_turn_driver_try_provider.Current_turn_verbatim
      ~base_path:""
      ~demote_before:0
      ~turn_boundary:(Keeper_carried_front.Turn_boundary { end_atom = turn_start })
@@ -2332,11 +2480,21 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
   | Ok _ -> fail "a list the turn's choice no longer describes went out"
 ;;
 
-(* The declared ceiling cuts before the working state is known. A range that
-   carries one is windowed again at the ceiling: the atoms in front of the
-   working state go until it fits, the working state stays, and a ceiling
-   the working state and the newest atom do not fit refuses the request. *)
-let test_a_working_state_the_ceiling_did_not_measure_is_windowed_again () =
+let working_state_not_carried ~reason =
+  Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string WorkingStateNotCarried)
+    ~labels:
+      [ "keeper", "alpha"; "runtime", "claude_code.claude-sonnet-5"; "reason", reason ]
+    ()
+;;
+
+(* The declared ceiling cuts before the working state is known (RFC-0460).
+   A working state carried in front of a range the ceiling then has to cut
+   would push out atoms it does not cover, so it stays out and the
+   Librarian's position goes alone: the same range, every atom of it. The
+   turn is not refused, and the counter says the summary was left out and
+   why. *)
+let test_a_working_state_that_would_displace_atoms_stays_out () =
   let messages = start_seed_history () in
   let measure = Keeper_official_client_host.measure_message_bytes in
   let bytes lo hi =
@@ -2356,9 +2514,8 @@ let test_a_working_state_the_ceiling_did_not_measure_is_windowed_again () =
     | Some bytes -> bytes
     | None -> fail "the fixture history has no shrinkable atom"
   in
-  (* Room for the preamble and the twenty messages from atom 100, nothing
-     more: without a working state the ceiling cuts where the Librarian
-     read to. *)
+  (* Room for the preamble and the twenty messages from atom 100, where the
+     Librarian read to, and nothing for a working state on top. *)
   let capacity_bytes = preamble_bytes + bytes 100 120 in
   let observed = ref None in
   let project snapshot =
@@ -2377,37 +2534,222 @@ let test_a_working_state_the_ceiling_did_not_measure_is_windowed_again () =
     (not (Runtime_model_input_tail_window.is_synthetic_preamble message))
     && message.role <> Agent_core.Types.System
   in
+  let goes_alone ~reason snapshot =
+    let before = working_state_not_carried ~reason in
+    match project snapshot with
+    | Error error -> fail (Agent_core.Error.to_string error)
+    | Ok sent ->
+      let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+      check int "the working state stays out" 0
+        (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
+      check (list string) "and every atom from the Librarian's position goes"
+        (encoded (List.filteri (fun i _ -> i >= 100) messages))
+        (encoded (List.filter is_atom sent));
+      check bool "inside the ceiling" true
+        (List.fold_left (fun total m -> total + measure m) 0 sent <= capacity_bytes);
+      (match !observed with
+       | None -> fail "the projection reported no window"
+       | Some (observation : Runtime_model_input_tail_window.window_observation) ->
+         check int "the window reports the twenty atoms that went" 20
+           observation.transmitted_atoms;
+         check int "of the whole history" 120 observation.total_atoms);
+      check (float 0.) ("counted as " ^ reason) (before +. 1.)
+        (working_state_not_carried ~reason)
+  in
+  goes_alone ~reason:"displaces_atoms"
+    (snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far.");
+  (* A working state the ceiling cannot hold beside the pinned messages at
+     all is the same answer: the position goes alone. *)
+  goes_alone ~reason:"does_not_fit"
+    (snapshot_through ~messages ~end_atom:100 ~working_state:(String.make 4_000 'w'))
+;;
+
+(* A range the ceiling already fits goes out as it was cut. When the cut
+   lands on an assistant turn the range opens with the omission preamble,
+   and a window handed that list must charge the preamble once: it is the
+   message the window itself would put back, not an atom of the range.
+   Charged twice, a range that fit loses atoms at its front, and the reading
+   names a later front that the next turn's seed then holds. *)
+(* The live warning this pins: a Claude Code request that carried a working
+   state and the turn's own context carrier failed the composition check as a
+   repeated carrier, because both wore the carrier's tag. *)
+let test_a_working_state_beside_the_turn_carrier_passes_the_composition_check () =
+  let messages = start_seed_history () in
+  let measure = Keeper_official_client_host.measure_message_bytes in
   let snapshot =
     snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
   in
-  (match project snapshot with
-   | Error error -> fail (Agent_core.Error.to_string error)
-   | Ok sent ->
-     let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
-     check int "the working state stays, once" 1
-       (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
-     let atoms = List.filter is_atom sent in
-     let carried = List.length atoms in
-     check bool "atoms in front of the working state went, not all of them" true
-       (carried > 0 && carried < 20);
-     check (list string) "and what stays is the newest atoms"
-       (encoded (List.filteri (fun i _ -> i >= 120 - carried) messages))
-       (encoded atoms);
-     check bool "the request is inside the ceiling" true
-       (List.fold_left (fun total m -> total + measure m) 0 sent <= capacity_bytes);
-     (match !observed with
-      | None -> fail "the projection reported no window"
-      | Some (observation : Runtime_model_input_tail_window.window_observation) ->
-        check int "the window reports the atoms that went out" carried
-          observation.transmitted_atoms;
-        check int "of the whole history" 120 observation.total_atoms));
-  match project (snapshot_through ~messages ~end_atom:100 ~working_state:(String.make 4_000 'w')) with
-  | Error _ -> ()
+  let capacity_bytes =
+    List.fold_left (fun total message -> total + measure message) 0 messages * 2
+  in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes
+      ~librarian_front:(fun _ ->
+        Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
   | Ok sent ->
-    fail
-      (Printf.sprintf
-         "a working state the ceiling cannot hold beside the newest atom went out (%d messages)"
-         (List.length sent))
+    let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+    check int "the working state is sent" 1
+      (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
+    let carrier : Agent_core.Types.message =
+      { role = System
+      ; content = [ Text "turn context" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+      }
+    in
+    (match
+       Keeper_agent_prompt_metrics.provider_content_of_transmitted
+         ~prompt_context_present:true
+         ~messages:(sent @ [ carrier ])
+     with
+     | Ok retained ->
+       check int "only the carrier is removed" (List.length sent) (List.length retained)
+     | Error _ -> fail "the working state was read as a second carrier")
+;;
+
+let test_a_range_the_ceiling_fits_goes_as_cut () =
+  (* One ask in front of the fixture puts an assistant turn at atom 60, the
+     first multiple the window's quantized cut tries, and leaves 61 atoms
+     from there: more than one quantum, so a window that failed at 0 would
+     jump to 60 rather than drop the preamble alone. *)
+  let messages =
+    ({ role = User; content = [ Text "ask intro" ]; name = None; tool_call_id = None
+     ; metadata = [] }
+     : Agent_core.Types.message)
+    :: start_seed_history ()
+  in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let preamble_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        messages
+    with
+    | Some bytes -> bytes
+    | None -> fail "the fixture history has no shrinkable atom"
+  in
+  (* Exactly the preamble and the atoms from 60, an assistant turn. *)
+  let capacity_bytes =
+    preamble_bytes
+    + List.fold_left
+        (fun total message -> total + measure message)
+        0
+        (List.filteri (fun i _ -> i >= 60) messages)
+  in
+  let observed = ref None in
+  let project ?librarian_front () =
+    observed := None;
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes
+      ?librarian_front
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  in
+  let goes_as_cut label sent =
+    (match sent with
+     | head :: rest ->
+       check bool (label ^ ": the range opens with the preamble") true
+         (Runtime_model_input_tail_window.is_synthetic_preamble head);
+       check (list string) (label ^ ": and every atom from the cut follows")
+         (encoded (List.filteri (fun i _ -> i >= 60) messages))
+         (encoded rest)
+     | [] -> fail (label ^ ": nothing went out"));
+    match !observed with
+    | None -> fail (label ^ ": the projection reported no window")
+    | Some (observation : Runtime_model_input_tail_window.window_observation) ->
+      check int (label ^ ": the reading counts the sixty-one atoms") 61
+        observation.transmitted_atoms;
+      check (option string) (label ^ ": and names atom 60 as its front")
+        (Runtime_model_input_tail_window.atom_opening_digest messages 60)
+        (Some observation.front_atom_digest)
+  in
+  (match project () with
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok sent -> goes_as_cut "no Librarian position" sent);
+  (* A snapshot behind the cut does not win the range: the same range goes,
+     nothing is pinned, and nothing is counted as left out. *)
+  let before = working_state_not_carried ~reason:"displaces_atoms" in
+  match
+    project
+      ~librarian_front:(fun _ ->
+        Ok
+          (Keeper_turn_driver_try_provider.Librarian_snapshot
+             (snapshot_through ~messages ~end_atom:50 ~working_state:"Twenty-five asks.")))
+      ()
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok sent ->
+    goes_as_cut "a snapshot behind the cut" sent;
+    check (float 0.) "and no working state is counted as left out" before
+      (working_state_not_carried ~reason:"displaces_atoms")
+;;
+
+(* A ceiling that holds the working state and the whole range sends both. *)
+let test_a_working_state_that_displaces_nothing_goes () =
+  let messages = start_seed_history () in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let snapshot =
+    snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
+  in
+  let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+  let pinned : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text working_state ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Runtime_model_input_tail_window.working_state_metadata
+    }
+  in
+  (* Exactly the working state, the preamble and the twenty atoms from 100. *)
+  let capacity_bytes =
+    (match
+       Runtime_model_input_tail_window.minimum_capacity_bytes
+         ~measure_message_bytes:measure
+         (pinned :: messages)
+     with
+     | Some bytes -> bytes
+     | None -> fail "the fixture history has no shrinkable atom")
+    + List.fold_left
+        (fun total message -> total + measure message)
+        0
+        (List.filteri (fun i _ -> i >= 100) messages)
+  in
+  let before = working_state_not_carried ~reason:"displaces_atoms" in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection
+      ~capacity_bytes
+      ~librarian_front:(fun _ ->
+        Ok (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok sent ->
+    check int "the working state goes, once" 1
+      (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
+    check (list string) "with every atom it abuts"
+      (encoded (List.filteri (fun i _ -> i >= 100) messages))
+      (encoded
+         (List.filter
+            (fun (m : Agent_core.Types.message) ->
+               (not (Runtime_model_input_tail_window.is_synthetic_preamble m))
+               && m.role <> Agent_core.Types.System)
+            sent));
+    check (float 0.) "and nothing is counted as left out" before
+      (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 
 let () =
@@ -2422,11 +2764,13 @@ let () =
         ] )
     ; ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
+        ; test_case "resume prompt carries the task reference" `Quick
+            test_resume_prompt_carries_the_task_reference
         ; test_case
             "Agent Core checkpoint starts official-client turn"
             `Quick
             test_agent_core_checkpoint_starts_official_client_turn
-        ; test_case "native Gate retains its session across overflow shrink" `Quick
+        ; test_case "native Gate resume refused as full ends the Gate and frees the session" `Quick
             (test_keeper_shrinks_history_after_statusless_context_error
                ~native_gate:true
                ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
@@ -2469,6 +2813,8 @@ let () =
             "context overflow maps to input-rejected recovery"
             `Quick
             test_context_overflow_maps_to_input_rejected_recovery
+        ; test_case "Gate resume overflow is session-full" `Quick
+            test_gate_resume_overflow_is_session_full
         ; test_case
             "pre-effect provider rejection keeps failover open"
             `Quick
@@ -2547,9 +2893,21 @@ let () =
             `Quick
             test_the_librarian_front_reaches_the_list_and_its_error_refuses
         ; test_case
-            "a working state the ceiling did not measure is windowed again"
+            "a working state that would displace atoms stays out"
             `Quick
-            test_a_working_state_the_ceiling_did_not_measure_is_windowed_again
+            test_a_working_state_that_would_displace_atoms_stays_out
+        ; test_case
+            "a working state that displaces nothing goes"
+            `Quick
+            test_a_working_state_that_displaces_nothing_goes
+        ; test_case
+            "a working state beside the turn carrier passes the composition check"
+            `Quick
+            test_a_working_state_beside_the_turn_carrier_passes_the_composition_check
+        ; test_case
+            "a range the ceiling fits goes as cut"
+            `Quick
+            test_a_range_the_ceiling_fits_goes_as_cut
         ] )
     ]
 ;;

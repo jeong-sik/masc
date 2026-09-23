@@ -860,7 +860,7 @@ def goto_tools(page: Any, timeout: float) -> None:
         current = observed
     require(current == "Config", "TUI did not reach the Config surface")
     press(page, "t")
-    wait_screen(page, "MASC Tools", max(0.001, deadline - time.monotonic()))
+    wait_screen(page, "MASC Config / Tools", max(0.001, deadline - time.monotonic()))
 
 
 def selected_keeper_from_screen(value: str) -> str | None:
@@ -882,7 +882,7 @@ def selected_keeper_from_screen(value: str) -> str | None:
 
 def selected_tools_pane_from_screen(value: str) -> str | None:
     for line in value.splitlines():
-        if "MASC Tools" not in line:
+        if "MASC Config / Tools" not in line:
             continue
         for token in line.split():
             pane_token = token.lstrip("|")
@@ -967,7 +967,7 @@ def receipt_projection_revision(ledger_revision: str, skill_tool_use_id: str) ->
 
 def tools_surface_is_connected(value: str) -> bool:
     return any(
-        line.strip().startswith("MASC Tools ") and line.rstrip().endswith("[connected]")
+        line.strip().startswith("MASC Config / Tools ") and line.rstrip().endswith("[connected]")
         for line in value.splitlines()
     )
 

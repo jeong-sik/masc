@@ -1032,6 +1032,7 @@ let test_every_lane_has_one_row_with_its_own_spec () =
   in
   let rows = json |> Yojson.Safe.Util.member "lanes" |> Yojson.Safe.Util.to_list in
   let text name row = row |> Yojson.Safe.Util.member name |> Yojson.Safe.Util.to_string in
+  let required row = row |> Yojson.Safe.Util.member "required" |> Yojson.Safe.Util.to_bool in
   let ids lanes = lanes |> List.map Standalone_lane.to_id |> List.sort String.compare in
   let distinct values = List.length (List.sort_uniq String.compare values) in
   check (list string) "one row per lane, no lane twice" (ids Standalone_lane.all)
@@ -1042,11 +1043,11 @@ let test_every_lane_has_one_row_with_its_own_spec () =
     (distinct (List.map (text "purpose") rows));
   check (list string) "Board Attention and HITL Auto Judge are the required lanes"
     (ids [ Standalone_lane.Board_attention; Standalone_lane.Hitl_auto_judge ])
-    (rows
-     |> List.filter (fun row ->
-       row |> Yojson.Safe.Util.member "required" |> Yojson.Safe.Util.to_bool)
-     |> List.map (text "lane_id")
-     |> List.sort String.compare)
+    (rows |> List.filter required |> List.map (text "lane_id") |> List.sort String.compare);
+  let flags = List.map required rows in
+  check (list bool) "the required lanes are drawn first"
+    (List.sort (fun left right -> Bool.compare right left) flags)
+    flags
 
 let () =
   run

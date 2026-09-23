@@ -682,6 +682,12 @@ let test_the_registry_refuses_the_verifier_lane () =
   in
   check bool "a Verifier registration is refused" true refused;
   check int "and nothing is recorded" 0 (List.length (R.list_runs registry));
+  (* The same call on a lane the registry records goes through, so the lane is
+     what was refused, not the run id or the input. *)
+  R.register_running registry ~run_id:"verifier-run" ~lane:R.Librarian
+    ~actor:"keeper-a" ~started_at:1.0 ~input:(R.Exact_input `Null);
+  check int "the same call on a recorded lane is kept" 1
+    (List.length (R.list_runs registry));
   let read_and_refused lane =
     let path = fresh_log_path "exact-lane-verifier-row-" in
     Fs_compat.save_file path (registration_row lane ^ "\n");

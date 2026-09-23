@@ -19,7 +19,7 @@ val all : t list
 val to_id : t -> string
 (** The lane's id: its table key in the runtime file, the [lane_id] the
     standalone-lane projection serves, and the [lane] a run record carries.
-    This is the only place a lane id is spelled. *)
+    Code that sends, stores or compares a lane id takes it from here. *)
 
 val of_id : string -> t option
 (** The lane whose {!to_id} is the argument. An id no lane has is [None]. *)

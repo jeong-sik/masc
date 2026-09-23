@@ -570,8 +570,7 @@ status: reference
   `server_standalone_lane_projection.ml`의 `lane_spec`이 lane마다 이름·목적·필수
   여부를 적고, 표는 필수 lane 둘(`Board_attention`·`Hitl_auto_judge`)을 먼저
   그린다. 고른 lane의 상세 맨 아래 두 줄(Output meaning·Evidence)은
-  `Tui_decode.standalone_lane_answer`가 lane마다 따로 적는다. TUI가 모르는 lane
-  이름은 그 이름을 적은 줄로 따로 그린다.
+  `Tui_decode.standalone_lane_answer`가 lane마다 따로 적는다.
   → [tui_decode.mli](../../lib/tui_decode.mli)
 
 **Keeper Health Reading (Keeper 건강 판독)**

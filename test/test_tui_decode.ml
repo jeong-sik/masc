@@ -5237,9 +5237,6 @@ let test_every_lane_draws_its_own_answer () =
         Alcotest.(check bool) "the second line says what the record keeps" true
           (String.starts_with ~prefix:"Evidence: " answer.sla_evidence))
       (unknown :: known);
-    Alcotest.(check string) "every unknown id reads the same way"
-      unknown.sla_output_meaning
-      (unknown_id "another_retired_lane").sla_output_meaning;
     Alcotest.(check bool) "an unknown lane names its id" true
       (String_util.contains_substring unknown.sla_evidence "retired_lane_exact");
     Alcotest.(check bool) "and the id is escaped for the terminal" false

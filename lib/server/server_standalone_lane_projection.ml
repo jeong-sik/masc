@@ -886,9 +886,10 @@ let live_lane_configuration registry lane_id =
         (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
         selected_slots
     in
+    let typed_lane = Standalone_lane.of_id lane_id in
     let admitted_catalog_slots, admitted_cli_slots, slot_rejections =
       match
-        Standalone_lane.of_id lane_id,
+        typed_lane,
         Runtime_exact_output_registry.declared_lane registry ~lane_id
       with
       | Some Runtime.Verifier, Some declared ->
@@ -930,14 +931,19 @@ let live_lane_configuration registry lane_id =
                      "; "
                      (List.map Runtime.verifier_slot_rejection_to_string rejections)))
            | [], _ :: _ | _ :: _, [] | _ :: _, _ :: _ ->
-             if
-               String.equal lane_id Server_workspace_memory_curator.lane_id
-               && admitted_cli_slots <> []
-             then
-               Some
-                 "Workspace curator requires admitted exact-output slots; CLI tails \
-                  are not supported"
-             else None)
+             (match typed_lane, admitted_cli_slots with
+              | Some Standalone_lane.Workspace_curator, _ :: _ ->
+                Some
+                  "Workspace curator requires admitted exact-output slots; CLI tails \
+                   are not supported"
+              | Some Standalone_lane.Workspace_curator, []
+              | Some
+                  ( Standalone_lane.Librarian
+                  | Standalone_lane.Hitl_auto_judge
+                  | Standalone_lane.Board_attention
+                  | Standalone_lane.Verifier )
+                , _
+              | None, _ -> None))
       }
   | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
     Unconfigured

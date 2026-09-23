@@ -979,7 +979,8 @@ let fetch_latest_librarian_input ~(host : string) ~(port : int) :
   let* listing =
     get_json
       ~label:"exact lane run listing"
-      "/api/v1/dashboard/exact-lane-runs?limit=1&lane=librarian_exact"
+      ("/api/v1/dashboard/exact-lane-runs?limit=1&lane="
+       ^ Standalone_lane.to_id Standalone_lane.Librarian)
   in
   let* page = Masc.Tui_decode.decode_librarian_run_page listing in
   let* run_id =

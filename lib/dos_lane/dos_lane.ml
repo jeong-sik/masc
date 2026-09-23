@@ -26,14 +26,11 @@ type error =
   | No_machine
   | Invalid_request of string
   | Unreadable of string
-  | Not_kept of string
 
 let error_to_string = function
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
   | Invalid_request message -> message
   | Unreadable message -> message
-  | Not_kept message ->
-    "the machine moved, but a file the program wrote did not reach disk: " ^ message
 ;;
 
 (* The core runs about 24 million instructions a second on this hardware
@@ -61,6 +58,7 @@ type ran = {
   settled : bool;
   input_requests : int;
   keys_pressed : int;
+  unsaved : string list;
 }
 
 (* How far the machine runs between two screen readings. Measured on ZZT: the
@@ -195,6 +193,7 @@ let advance_blind st ~budget =
   ; settled = false
   ; input_requests = Dos_machine.input_requests st.m - before
   ; keys_pressed = 0
+  ; unsaved = []
   }
 ;;
 
@@ -233,6 +232,7 @@ let advance_until_ready st ~budget =
   ; settled = !settled
   ; input_requests = Dos_machine.input_requests m - requests_before
   ; keys_pressed = 0
+  ; unsaved = []
   }
 ;;
 
@@ -266,54 +266,72 @@ let rec mkdir_p dir =
   end
 ;;
 
-(* Writes every changed file, and records a file as kept only once it is on
-   disk, so a failed write is tried again after the next call. *)
-let keep_writes st =
-  let failures =
-    List.filter_map
-      (fun name ->
-        match Dos_machine.read_mounted st.m name with
-        | None -> None
-        | Some now ->
-          (match Hashtbl.find_opt st.kept name with
-           | Some before when String.equal before now -> None
-           | _ ->
-             (match
-                mkdir_p st.saves_dir;
-                write_atomically ~dir:st.saves_dir name now
-              with
-              | () ->
-                Hashtbl.replace st.kept name now;
-                None
-              | exception Sys_error message -> Some (name ^ ": " ^ message))))
-      (Dos_machine.mounted_names st.m)
-  in
-  match failures with
-  | [] -> Ok ()
-  | _ -> Error (Not_kept (String.concat "; " failures))
+(* A name a file may be kept under: one plain name, never a path or a drive.
+   The inventory's names pass the same test, and so does every name a guest
+   creates before it reaches [saves_dir] -- DOS accepts "/" as a separator,
+   and a guest asked for a save name will take "../../X". *)
+let escapes name =
+  String.contains name '/'
+  || String.contains name '\\'
+  || String.contains name ':'
+  || String.equal name ".."
+  || String.starts_with ~prefix:"." name
 ;;
 
-(* Every call that ran the guest ends here: the observation, once what the
-   guest wrote is on disk. *)
-let ran_then_kept st ran = Result.map (fun () -> (observe st, ran)) (keep_writes st)
+(* Writes every changed file and returns what did not reach disk, one line
+   per file. A file is recorded as kept only once it is on disk, so a failed
+   write is tried again after the next call. A name that is a path is never
+   written; it is recorded as seen so it is reported once, not on every call. *)
+let keep_writes st =
+  List.filter_map
+    (fun name ->
+      match Dos_machine.read_mounted st.m name with
+      | None -> None
+      | Some now ->
+        (match Hashtbl.find_opt st.kept name with
+         | Some before when String.equal before now -> None
+         | _ when escapes name ->
+           Hashtbl.replace st.kept name now;
+           Some (name ^ ": a path, not a file name; it stays in this machine only")
+         | _ ->
+           (match
+              mkdir_p st.saves_dir;
+              write_atomically ~dir:st.saves_dir name now
+            with
+            | () ->
+              Hashtbl.replace st.kept name now;
+              None
+            | exception Sys_error message -> Some (name ^ ": " ^ message))))
+    (Dos_machine.mounted_names st.m)
+;;
 
-(* The saves over the inventory, matched the way DOS matches names. *)
+(* Every call that ran the guest ends here. The guest has moved whatever the
+   disk did, so the observation always comes back; a save that did not reach
+   disk rides along in [unsaved] instead of turning the call into an error a
+   caller would answer by sending the same keys again. *)
+let ran_then_kept st ran = Ok (observe st, { ran with unsaved = keep_writes st })
+
+(* The saves over the inventory, matched the way DOS matches names. Read
+   under the machine's lock by [load], so a save the running machine writes
+   cannot land between this read and the new machine's first record of it. *)
 let with_saves ~saves_dir files =
-  let saved =
+  match
     if Sys.file_exists saves_dir && Sys.is_directory saves_dir then
       Sys.readdir saves_dir
       |> Array.to_list
-      |> List.filter (fun f -> not (String.starts_with ~prefix:"." f))
+      |> List.filter (fun f -> not (escapes f))
       |> List.filter (fun f -> not (Sys.is_directory (Filename.concat saves_dir f)))
       |> List.map (fun f ->
         (f, In_channel.with_open_bin (Filename.concat saves_dir f) In_channel.input_all))
     else []
-  in
-  let folded (name, _) = String.uppercase_ascii name in
-  let inventory_only =
-    List.filter (fun f -> not (List.exists (fun s -> folded s = folded f) saved)) files
-  in
-  inventory_only @ saved
+  with
+  | exception Sys_error message -> Error (Unreadable message)
+  | saved ->
+    let folded (name, _) = String.uppercase_ascii name in
+    let inventory_only =
+      List.filter (fun f -> not (List.exists (fun s -> folded s = folded f) saved)) files
+    in
+    Ok (inventory_only @ saved)
 ;;
 
 (* ---------- lifecycle ---------- *)
@@ -340,8 +358,10 @@ let is_mz image =
 ;;
 
 let load ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
-  let files = with_saves ~saves_dir files in
   locked (fun () ->
+    match with_saves ~saves_dir files with
+    | Error e -> Error e
+    | Ok files ->
     if String.length program_bytes = 0 then
       Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
     else
@@ -443,6 +463,7 @@ let press_resolved st ~who ~keys ~budget =
   ; settled = !last_settled
   ; input_requests = !requests
   ; keys_pressed = !pressed
+  ; unsaved = []
   }
 ;;
 
@@ -507,6 +528,7 @@ let click ~who ~x ~y ~buttons ~steps =
               ; settled = down.settled && up.settled
               ; input_requests = down.input_requests + up.input_requests
               ; keys_pressed = 0
+              ; unsaved = []
               }
         end)
 ;;

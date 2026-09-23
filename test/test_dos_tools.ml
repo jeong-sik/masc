@@ -323,15 +323,21 @@ let test_two_names_that_differ_only_in_case_are_refused () =
        mov ah,40h / mov cx,4 / mov dx,msg / int 21h / mov ah,3Eh / int 21h
    13C wait: mov ah,0 / int 16h / or ax,ax / jz wait / int 20h
    146 fname "SAVE.DAT",0   14F msg "NEW$"   153 buf 16 x "$" *)
-let saver_com =
-  "\xb8\x00\x3d\xba\x46\x01\xcd\x21\x72\x19"
-  ^ "\x89\xc3\xb4\x3f\xb9\x10\x00\xba\x53\x01\xcd\x21"
-  ^ "\xb4\x3e\xcd\x21\xb4\x09\xba\x53\x01\xcd\x21\xeb\x19"
-  ^ "\xb4\x3c\x31\xc9\xba\x46\x01\xcd\x21\x89\xc3"
-  ^ "\xb4\x40\xb9\x04\x00\xba\x4f\x01\xcd\x21\xb4\x3e\xcd\x21"
+let saver_com_named fname =
+  let word n = String.init 2 (fun i -> Char.chr ((n lsr (8 * i)) land 0xff)) in
+  let fname_at = 0x146 in
+  let msg_at = fname_at + String.length fname + 1 in
+  let buf_at = msg_at + 4 in
+  "\xb8\x00\x3d\xba" ^ word fname_at ^ "\xcd\x21\x72\x19"
+  ^ "\x89\xc3\xb4\x3f\xb9\x10\x00\xba" ^ word buf_at ^ "\xcd\x21"
+  ^ "\xb4\x3e\xcd\x21\xb4\x09\xba" ^ word buf_at ^ "\xcd\x21\xeb\x19"
+  ^ "\xb4\x3c\x31\xc9\xba" ^ word fname_at ^ "\xcd\x21\x89\xc3"
+  ^ "\xb4\x40\xb9\x04\x00\xba" ^ word msg_at ^ "\xcd\x21\xb4\x3e\xcd\x21"
   ^ "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20"
-  ^ "SAVE.DAT\000" ^ "NEW$" ^ String.make 16 '$'
+  ^ fname ^ "\000" ^ "NEW$" ^ String.make 16 '$'
 ;;
+
+let saver_com = saver_com_named "SAVE.DAT"
 
 let saves_of ~base_path name =
   Filename.concat
@@ -380,8 +386,15 @@ let test_a_save_is_mounted_over_the_inventory_copy () =
     check bool "the inventory copy is not what the guest opened" false (contains "OLD" text))
 ;;
 
-(* When the save cannot be written the call says so; the machine still moved
-   and stays loaded, and nothing pretends the save exists. *)
+let unsaved result =
+  match member "unsaved" (Tool_result.data result) with
+  | Some (`List items) -> List.map (function `String u -> u | _ -> fail "unsaved item") items
+  | _ -> fail (Printf.sprintf "no unsaved in %s" (Tool_result.message result))
+;;
+
+(* When the save cannot be written the call still returns what the guest did
+   -- it moved either way, and an error would be answered by sending the same
+   keys again -- and lists the save that did not reach disk. *)
 let test_a_save_that_cannot_be_written_is_reported () =
   with_workspace (fun base_path ->
     install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
@@ -389,11 +402,31 @@ let test_a_save_that_cannot_be_written_is_reported () =
     mkdir_p (Filename.dirname saves);
     write_file saves "a file where the save directory would be";
     let loaded = load ~base_path "quest" in
-    check bool "the call reports the lost save" false (is_completed loaded);
-    check bool "and names why" true
-      (contains "did not reach disk" (Tool_result.message loaded));
-    check bool "the machine is still there" true
-      (is_completed (dispatch ~base_path "masc_dos_screen" [])))
+    check bool "the call returns the screen" true (is_completed loaded);
+    (match unsaved loaded with
+     | [ line ] -> check bool "naming the save" true (contains "SAVE.DAT" line)
+     | lines -> fail (Printf.sprintf "expected one unsaved line, got %d" (List.length lines)));
+    let next = dispatch ~base_path "masc_dos_screen" [] in
+    check bool "the machine is still there" true (is_completed next))
+;;
+
+(* DOS takes "/" as a separator, so a guest asked for a save name can create
+   "../OUT.DAT". That name never reaches the host: it stays in the machine,
+   is reported once, and nothing lands beside the saves directory. *)
+let test_a_guest_path_never_reaches_the_host () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com_named "../OUT.DAT") ];
+    let loaded = load ~base_path "quest" in
+    check bool "the call returns" true (is_completed loaded);
+    check bool "the path is reported" true
+      (List.exists (contains "a path, not a file name") (unsaved loaded));
+    let saves = saves_of ~base_path "quest" in
+    check bool "nothing beside the saves directory" false
+      (Sys.file_exists (Filename.concat (Filename.dirname saves) "OUT.DAT"));
+    check bool "nothing in it either" false
+      (Sys.file_exists saves && Array.length (Sys.readdir saves) > 0);
+    let again = dispatch ~base_path "masc_dos_step" [ ("steps", `Int 1000) ] in
+    check (list string) "reported once, not on every call" [] (unsaved again))
 ;;
 
 let test_unknown_key_is_refused () =
@@ -490,6 +523,7 @@ let () =
         ; test_case "save over inventory" `Quick
             test_a_save_is_mounted_over_the_inventory_copy
         ; test_case "save not written" `Quick test_a_save_that_cannot_be_written_is_reported
+        ; test_case "guest path" `Quick test_a_guest_path_never_reaches_the_host
         ; test_case "unknown key" `Quick test_unknown_key_is_refused
         ; test_case "step cap" `Quick test_step_cap
         ; test_case "peek" `Quick test_peek_reads_the_text_page

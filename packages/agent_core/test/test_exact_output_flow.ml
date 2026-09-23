@@ -3716,6 +3716,23 @@ let test_context_overflow_refusal_advances_once_to_successor () =
       | _ -> fail "a GLM window refusal lost its typed context-overflow cause")
 ;;
 
+(* The same window refusal as an empty answer the provider stopped at its
+   window. [Retry.overflow_of_empty_completion] names which empty answers
+   those are; the flow reads them as the typed refusal above. *)
+let test_window_stopped_empty_answer_advances_once_to_successor () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"openai_compat"
+    ~label:"window-stopped-empty-answer"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 200
+      , {|{"id":"resp-window","model":"flow","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"model_context_window_exceeded"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}|}
+      )
+    ~assert_cause:(function
+      | EO.Provider_response_refused
+          { http_status = 200; refusal = EO.Context_overflow } -> ()
+      | _ -> fail "an empty answer stopped at the window lost its overflow cause")
+;;
+
 (* Which of its own deadlines the first candidate misses: the header deadline
    ([connect_timeout_s]) or the total deadline ([body_timeout_s]), which ends
    a request with no headers when it is the earlier one. *)
@@ -4786,6 +4803,8 @@ let () =
             test_payment_required_402_refusal_advances_once_to_successor
         ; test_case "a window refusal advances once to the declared successor" `Quick
             test_context_overflow_refusal_advances_once_to_successor
+        ; test_case "an empty answer stopped at the window advances once" `Quick
+            test_window_stopped_empty_answer_advances_once_to_successor
         ; test_case "HTTP 500 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 500)
         ; test_case "HTTP 503 advances once to the declared successor" `Quick

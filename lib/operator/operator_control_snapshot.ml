@@ -376,7 +376,10 @@ let keepers_json
                               [diagnostic.health_state]. Without it on the row
                               the briefing published health null for every
                               keeper, and the execution render rebuilt it from
-                              a second registry read. *)
+                              a second registry read. That render now reuses
+                              this one, so its health follows the cached
+                              snapshot (up to ten seconds old) and agrees with
+                              [status] on the same row. *)
                          ; "diagnostic", diagnostic
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")

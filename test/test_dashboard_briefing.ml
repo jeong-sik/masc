@@ -843,9 +843,46 @@ let test_briefing_ranks_a_failing_keeper_first () =
       (* Offline shares the top pressure rank with failing, but a pause is
          the operator's own decision, so the paused keeper ranks as no
          pressure at all and sorts below the idle one. *)
+      (* Only the three fixture keepers are ordered here; another row the
+         workspace seeds must not decide this case. *)
+      let fixture_names = [ "k-failing"; "k-running"; "k-paused" ] in
       check (list string) "failing first, then idle, then paused"
-        [ "k-failing"; "k-running"; "k-paused" ]
-        (List.map (fun row -> row |> member "name" |> to_string) briefs))
+        fixture_names
+        (briefs
+         |> List.map (fun row -> row |> member "name" |> to_string)
+         |> List.filter (fun name -> List.mem name fixture_names)))
+
+(* A paused keeper is not pressure on any axis. Its context ratio is left
+   over from before the pause and no turn will add to it, so a high ratio
+   must not lift it into the context-pressure rank above a working keeper. *)
+let test_paused_keeper_with_high_context_is_not_pressure () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      with_test_env @@ fun ~clock:_ ~sw:_ ->
+      let config = Workspace_utils.default_config dir in
+      let updated_at = Masc_domain.now_iso () in
+      let row name ~paused ~health ~context_ratio =
+        `Assoc
+          [ ("name", `String name)
+          ; ("agent_name", `String name)
+          ; ("paused", `Bool paused)
+          ; ("context_ratio", `Float context_ratio)
+          ; ("diagnostic", `Assoc [ ("health_state", `String health) ])
+          ; ("updated_at", `String updated_at)
+          ; ("latest_tool_names", `List [])
+          ]
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check (list string))
+        "an idle keeper outranks a paused one at context 0.9"
+        [ "k-idle"; "k-paused" ]
+        (Dashboard_briefing_assembly.build_keeper_briefs config
+           [ row "k-paused" ~paused:true ~health:"offline" ~context_ratio:0.9
+           ; row "k-idle" ~paused:false ~health:"idle" ~context_ratio:0.1
+           ]
+         |> List.map (fun row -> row |> member "name" |> to_string)))
 
 let () =
   Alcotest.run "Dashboard Mission"
@@ -886,6 +923,8 @@ let () =
             test_keeper_brief_publishes_health_and_phase;
           Alcotest.test_case "briefing ranks a failing keeper first" `Quick
             test_briefing_ranks_a_failing_keeper_first;
+          Alcotest.test_case "paused keeper with high context is not pressure"
+            `Quick test_paused_keeper_with_high_context_is_not_pressure;
           Alcotest.test_case "internal signals do not pair the two streams"
             `Quick test_internal_signals_do_not_pair_streams;
         ] );

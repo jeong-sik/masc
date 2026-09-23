@@ -8,8 +8,9 @@ source='all' adds absorbed originals and history. History requires a non-empty \
 query. Fact results name their store and original basis; current facts \
 include exact memory_id and category. Use a memory_id as a derived \
 conclusion's premise_id only for store='current_memory_snapshot'. \
-source='absorbed' finds facts merged into a newer claim: into names that \
-claim, and into_current=false means it is not current."""
+source='absorbed' finds facts merged into a newer claim: into names the \
+claim that holds it now, following later merges of that claim, and \
+into_current=false means that claim is not current."""
 additional_properties = false
 
 [[params]]

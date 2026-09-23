@@ -4,6 +4,7 @@ open Keeper_types_profile
 open Keeper_tool_shared_runtime
 open Keeper_context_runtime
 module StringSet = Set_util.StringSet
+module StringMap = Set_util.StringMap
 
 
 (* Issue #8484: Variant SSOT for memory search scope. Adding a new
@@ -198,6 +199,7 @@ let absorbed_store = "absorbed_memory"
 
 type absorbed_match =
   { row : Keeper_memory_absorbed.record
+  ; into : string
   ; into_current : bool
   }
 
@@ -222,15 +224,25 @@ let current_memory_ids facts =
    that failed leaves rows for a pass that never committed (RFC-0456 §4.2). Two of their
    shapes are exact to recognise: a row for a fact that is still current is
    not an absorption, and a row repeating another row's memory_id and into
-   states the same thing, kept once at its last write. The third -- an [into]
-   that never became current -- reads as [into_current = false], which is
-   what it is.
+   states the same thing, kept once at its last write.
+
+   A claim a pass made can itself be absorbed by a later pass, so a row's
+   [into] may name a claim that is gone too. The rows say where that claim
+   went, and [into] is followed along them to the claim at the end: a current
+   one, or the last one the rows name. A chain that comes back to a claim it
+   already passed stops there. Only a claim that never became current, or
+   whose own absorption has no row, ends as [into_current = false].
+
+   [answered_by] names the current claims that answer this search themselves.
+   A row whose claim is one of them says the same thing again and is left
+   out before [limit] is taken, so the rows sharing an answering claim do not
+   take the places of rows that reach a different one.
 
    Kept at the last write, [absorbed_at] is the time of the last row stating
    it: the retry's when a failed pass was retried, which is the usual order,
    and a pass that did not commit when a failed pass follows a committed one.
    No row says which of its passes committed. *)
-let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~query ~limit =
+let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~query ~limit =
   match
     Domain_pool_ref.submit_io_or_inline (fun () ->
       Keeper_memory_absorbed.read ~keepers_dir ~keeper_id)
@@ -269,19 +281,38 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~query ~limit =
         ~query
         statements
     in
-    let matched = whole_query @ fragments in
+    let into_of =
+      List.fold_left
+        (fun into_of (row : Keeper_memory_absorbed.record) ->
+           StringMap.add row.memory_id row.into into_of)
+        StringMap.empty
+        statements
+    in
+    let rec chain_end ~passed id =
+      if StringSet.mem id current_ids || StringSet.mem id passed
+      then id
+      else (
+        match StringMap.find_opt id into_of with
+        | None -> id
+        | Some next -> chain_end ~passed:(StringSet.add id passed) next)
+    in
+    let resolve (row : Keeper_memory_absorbed.record) =
+      let into = chain_end ~passed:(StringSet.singleton row.memory_id) row.into in
+      { row; into; into_current = StringSet.mem into current_ids }
+    in
     Ok
       { matches =
-          List.map
-            (fun (row : Keeper_memory_absorbed.record) ->
-               { row; into_current = StringSet.mem row.into current_ids })
-            (take limit matched)
+          whole_query @ fragments
+          |> List.map resolve
+          |> List.filter (fun (m : absorbed_match) ->
+            not (StringSet.mem m.into answered_by))
+          |> take limit
       ; candidates = List.length statements
       ; unreadable
       }
 ;;
 
-let absorbed_match_to_json { row; into_current } : Yojson.Safe.t =
+let absorbed_match_to_json { row; into; into_current } : Yojson.Safe.t =
   `Assoc
     [ "text", `String row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.claim
     ; ( "category"
@@ -290,7 +321,7 @@ let absorbed_match_to_json { row; into_current } : Yojson.Safe.t =
              row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.category) )
     ; "memory_id", `String row.Keeper_memory_absorbed.memory_id
     ; "basis", Keeper_memory_os_types.basis_to_json row.fact.basis
-    ; "into", `String row.Keeper_memory_absorbed.into
+    ; "into", `String into
     ; "into_current", `Bool into_current
     ; "absorbed_at", `Float row.Keeper_memory_absorbed.recorded_at
     ; "store", `String absorbed_store
@@ -576,6 +607,7 @@ let keeper_memory_search_with_outcome
                  ~extra_matches:[]
                  ~read_errors:false
                  ~read_error_fields:[]
+             , List.length fact_matches
              , List.filter_map
                  (fun (matched : fact_match) ->
                     match matched.identity with
@@ -596,12 +628,27 @@ let keeper_memory_search_with_outcome
         (match search_durable_facts ~config ~keepers_dir ~meta ~facts ~query ~limit with
          | Error _ as error -> error
          | Ok (fact_matches, fact_total) ->
+           (* A librarian made one claim of the rows it absorbed (RFC-0456
+              §4.2). When that claim answers this search too, the rows say
+              the same thing again and are left out, so the claim is not
+              undone by its own sources crowding the limit. A row whose claim
+              does not answer is the only way to what it says and stays. *)
+           let answering_claims =
+             List.fold_left
+               (fun ids (m : fact_match) ->
+                  match m.identity with
+                  | Ordinary_memory_id id -> StringSet.add id ids
+                  | Source_sha256 _ -> ids)
+               StringSet.empty
+               fact_matches
+           in
            let absorbed, unavailable =
              match
                search_absorbed_facts
                  ~keepers_dir
                  ~keeper_id:meta.name
                  ~current_ids:(current_memory_ids facts)
+                 ~answered_by:answering_claims
                  ~query
                  ~limit
              with
@@ -609,28 +656,9 @@ let keeper_memory_search_with_outcome
              | Error error -> { matches = []; candidates = 0; unreadable = [] }, Some error
            in
            let history = search_history ~config ~meta ~ctx_work ~query ~limit in
-           (* A librarian made one claim of the rows it absorbed (RFC-0456
-              §4.2). When that claim answers this search too, the rows say
-              the same thing again and are left out, so the claim is not
-              undone by its own sources crowding the limit. A row whose claim
-              does not answer is the only way to what it says and stays. *)
-           let answering_claims =
-             List.filter_map
-               (fun (m : fact_match) ->
-                  match m.identity with
-                  | Ordinary_memory_id id -> Some id
-                  | Source_sha256 _ -> None)
-               fact_matches
-           in
-           let absorbed_matches =
-             List.filter
-               (fun (m : absorbed_match) ->
-                  not (List.mem m.row.Keeper_memory_absorbed.into answering_claims))
-               absorbed.matches
-           in
            let candidates =
              List.map (fun match_ -> All_fact match_) fact_matches
-             @ List.map (fun match_ -> All_absorbed match_) absorbed_matches
+             @ List.map (fun match_ -> All_absorbed match_) absorbed.matches
              @ List.map (fun message -> All_history message) history.matches
            in
            let whole_query, fragments =
@@ -649,6 +677,7 @@ let keeper_memory_search_with_outcome
                  ~read_error_fields:
                    (absorbed_fields ~absorbed ~unavailable
                     @ history_read_error_fields history)
+             , List.length selected
              , List.filter_map ordinary_memory_id_of_all_match selected ))
     in
     let result =
@@ -667,6 +696,7 @@ let keeper_memory_search_with_outcome
                ]
                @ (if no_match then [ "no_match", `Bool true ] else [])
                @ history_read_error_fields history)
+          , List.length matches
           , [] )
       | All -> all_stores ()
       | Absorbed ->
@@ -680,6 +710,7 @@ let keeper_memory_search_with_outcome
                 ~keepers_dir
                 ~keeper_id:meta.name
                 ~current_ids:(current_memory_ids facts)
+                ~answered_by:StringSet.empty
                 ~query
                 ~limit
             with
@@ -693,6 +724,7 @@ let keeper_memory_search_with_outcome
                     ~extra_matches:[]
                     ~read_errors:(absorbed.unreadable <> [])
                     ~read_error_fields:(absorbed_fields ~absorbed ~unavailable:None)
+                , List.length absorbed.matches
                 , [] )))
       | Current -> current_stores ()
     in
@@ -708,7 +740,7 @@ let keeper_memory_search_with_outcome
              ; "detail", `String (durable_search_error_detail error)
              ]
            "keeper_memory_search could not read the durable memory store")
-    | Ok (result, matched_memory_ids) ->
+    | Ok (result, match_count, matched_memory_ids) ->
     (* Each ordinary fact the model was shown is a retrieval (RFC-0418): the
        event is what later says this memory was used. A sidecar that cannot be
        written does not take the results away from the model; it is said in
@@ -720,14 +752,6 @@ let keeper_memory_search_with_outcome
       ~kind:(Keeper_memory_os_events.Retrieved { query })
       matched_memory_ids;
     (* Day-1 search logging: append search event to decisions log. *)
-    let log_match_count =
-      match result with
-      | `Assoc fields ->
-        (match List.assoc_opt "match_count" fields with
-         | Some (`Int n) -> n
-         | _ -> 0)
-      | _ -> 0
-    in
     (try
        let log_entry =
          `Assoc
@@ -735,7 +759,7 @@ let keeper_memory_search_with_outcome
            ; "event", `String "memory_search"
            ; "query", `String query
            ; "source", `String source_label
-           ; "match_count", `Int log_match_count
+           ; "match_count", `Int match_count
            ; ( "matched_memory_ids"
              , `List (List.map (fun id -> `String id) matched_memory_ids) )
            ]

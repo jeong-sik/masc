@@ -1788,6 +1788,101 @@ let test_absorbed_facts_are_searchable () =
      = `Assoc [ "count", `Int 1; "first", `Int 5; "last", `Int 5 ])
 ;;
 
+(* A claim a librarian made can be absorbed by a later pass. A row naming it
+   is followed to the claim that holds it now, so it is not reported as lost.
+   And under source=all, rows whose claim already answers the search are left
+   out before the limit is taken, so they do not keep a row that reaches a
+   different claim from being shown. *)
+let test_absorbed_rows_follow_later_merges_and_leave_room () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let absorb ~keeper_id ~trace_id pairs new_claims =
+    match
+      Current.apply_disposition
+        ~keepers_dir
+        ~keeper_id
+        ~now:(Time_compat.now ())
+        ~source:{ Current.kind = Current.Librarian; trace_id }
+        ~absorbed:
+          (List.map
+             (fun (absorbed, into) ->
+                { Masc.Keeper_memory_os_types.absorbed = id absorbed; into = id into })
+             pairs)
+        ~new_claims
+        ()
+    with
+    | Ok _ -> ()
+    | Error detail -> Alcotest.fail detail
+  in
+  let search ~meta ~source ~limit =
+    Runtime.keeper_memory_search_json
+      ~config
+      ~meta
+      ~ctx_work:(empty_ctx ())
+      ~args:
+        (`Assoc
+            [ "query", `String "deploy"; "source", `String source; "limit", `Int limit ])
+    |> Yojson.Safe.from_string
+  in
+  let matches response =
+    match json_field "matches" response with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  let chained = make_meta "absorbed-chain" in
+  let alpha = fact "alpha deploys on tuesday" in
+  let beta = fact "beta deploys on tuesday" in
+  replace_current_facts ~keepers_dir ~keeper_id:chained.name [ alpha; beta ];
+  let first_merge = fact "alpha and beta ship on tuesday" in
+  let second_merge = fact "every team ships on tuesday" in
+  absorb
+    ~keeper_id:chained.name
+    ~trace_id:"first-pass"
+    [ alpha, first_merge; beta, first_merge ]
+    [ first_merge ];
+  absorb
+    ~keeper_id:chained.name
+    ~trace_id:"second-pass"
+    [ first_merge, second_merge ]
+    [ second_merge ];
+  let followed = matches (search ~meta:chained ~source:"absorbed" ~limit:10) in
+  Alcotest.(check (list string))
+    "both rows of the first pass are found"
+    [ "alpha deploys on tuesday"; "beta deploys on tuesday" ]
+    (List.map (string_field "text") followed);
+  List.iter
+    (fun matched ->
+       Alcotest.(check string) "into names the claim that holds it now" (id second_merge)
+         (string_field "into" matched);
+       Alcotest.(check bool) "and says it is current" true
+         (json_field "into_current" matched = `Bool true))
+    followed;
+  let crowded = make_meta "absorbed-crowded" in
+  let gamma = fact "gamma deploys on friday" in
+  replace_current_facts ~keepers_dir ~keeper_id:crowded.name [ alpha; beta; gamma ];
+  let answering_merge = fact "alpha and beta deploy on tuesday" in
+  let quiet_merge = fact "gamma ships on friday" in
+  absorb
+    ~keeper_id:crowded.name
+    ~trace_id:"answering-pass"
+    [ alpha, answering_merge; beta, answering_merge ]
+    [ answering_merge ];
+  absorb
+    ~keeper_id:crowded.name
+    ~trace_id:"quiet-pass"
+    [ gamma, quiet_merge ]
+    [ quiet_merge ];
+  Alcotest.(check (list string))
+    "the row reaching a claim that does not answer is shown beside the one that does"
+    [ "alpha and beta deploy on tuesday"; "gamma deploys on friday" ]
+    (List.map (string_field "text") (matches (search ~meta:crowded ~source:"all" ~limit:2)))
+;;
+
 (* A keeper asks in several words, and a claim rarely holds them as one run of
    text. A claim answers when it holds the whole query or every word of it, in
    any order. The whole-query answers come first, so a search the substring
@@ -2589,6 +2684,10 @@ let () =
             "absorbed facts are searchable"
             `Quick
             test_absorbed_facts_are_searchable
+        ; Alcotest.test_case
+            "absorbed rows follow later merges and leave room"
+            `Quick
+            test_absorbed_rows_follow_later_merges_and_leave_room
         ; Alcotest.test_case
             "a query of several words is answered"
             `Quick

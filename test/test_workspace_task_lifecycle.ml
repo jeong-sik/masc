@@ -289,7 +289,7 @@ let test_system_approval_of_cancel_claim_is_refused () =
       ~notes:"the upstream schema landed instead"
       ~read_cancellation_reason:producer_stated
   with
-  | Error L.Verdict_cancel_requires_operator -> ()
+  | Error (L.Verdict_invalid L.Verdict_cancel_requires_operator) -> ()
   | Ok _ | Error _ ->
     failwith "a system signature must not end a cancel claim as Cancelled"
 ;;
@@ -298,25 +298,21 @@ let test_system_approval_of_cancel_claim_is_refused () =
    holds it cannot give one, the approval is refused instead of ending the
    Task with no reason or with the operator's notes in its place. *)
 let test_approval_without_a_readable_reason_is_refused () =
-  List.iter
-    (fun read ->
-       match
-         L.decide_verdict
-           ~authority:(D.Human_operator { operator_id = "op-1" })
-           ~verdict:D.Verdict_approved
-           ~task_id:"task-1"
-           ~verification_id:"vrf-1"
-           ~task_status:awaiting_cancel
-           ~now
-           ~notes:"operator's own note"
-           ~read_cancellation_reason:(fun ~verification_id:_ -> read)
-       with
-       | Error (L.Verdict_cancellation_reason_unavailable _) -> ()
-       | Ok _ | Error _ ->
-         failwith "an approved stop must not end without the producer's reason")
-    [ Workspace_verification_store.Cancellation_reason_absent
-    ; Workspace_verification_store.Cancellation_reason_unreadable "no record"
-    ]
+  match
+    L.decide_verdict
+      ~authority:(D.Human_operator { operator_id = "op-1" })
+      ~verdict:D.Verdict_approved
+      ~task_id:"task-1"
+      ~verification_id:"vrf-1"
+      ~task_status:awaiting_cancel
+      ~now
+      ~notes:"operator's own note"
+      ~read_cancellation_reason:(fun ~verification_id:_ ->
+        Workspace_verification_store.Cancellation_reason_unreadable "no record")
+  with
+  | Error (L.Verdict_cancellation_reason_unreadable _) -> ()
+  | Ok _ | Error _ ->
+    failwith "an approved stop must not end without the producer's reason"
 ;;
 
 let test_operator_approval_still_cancels_a_cancel_claim () =
@@ -410,7 +406,7 @@ let test_contract4_three_judgements_of_a_cancel_claim () =
        ~notes:"the operator has not answered"
        ~read_cancellation_reason:producer_stated
    with
-   | Error L.Verdict_cancel_requires_operator -> ()
+   | Error (L.Verdict_invalid L.Verdict_cancel_requires_operator) -> ()
    | Ok _ | Error _ ->
      failwith "a system signature must not pre-empt the operator re-judgment")
 ;;
@@ -453,7 +449,7 @@ let test_verdict_requires_authority_and_reason () =
        ~notes:""
        ~read_cancellation_reason:producer_stated
    with
-   | Error L.Verdict_rejection_reason_required -> ()
+   | Error (L.Verdict_invalid L.Verdict_rejection_reason_required) -> ()
    | Ok _ | Error _ -> failwith "a blank rejection reason must be refused");
   (match
      L.decide_verdict
@@ -466,7 +462,7 @@ let test_verdict_requires_authority_and_reason () =
        ~notes:""
        ~read_cancellation_reason:producer_stated
    with
-   | Error L.Verdict_authority_identity_required -> ()
+   | Error (L.Verdict_invalid L.Verdict_authority_identity_required) -> ()
    | Ok _ | Error _ -> failwith "a blank authority identity must be refused");
   match
     L.decide_verdict
@@ -504,7 +500,7 @@ let test_verdict_rejects_stale_verification_id () =
       ~notes:""
       ~read_cancellation_reason:producer_stated
   with
-  | Error (L.Verification_id_mismatch { expected; actual })
+  | Error (L.Verdict_invalid (L.Verification_id_mismatch { expected; actual }))
     when String.equal expected "vrf-stale" && String.equal actual "vrf-1" -> ()
   | Ok _ | Error _ -> failwith "a stale verification verdict must be refused"
 ;;

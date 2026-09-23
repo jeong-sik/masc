@@ -256,11 +256,6 @@ let transition_task_outcome_r
                  (Masc_domain.Task_error.InvalidState
                     "a cancellation verdict requires an operator's signature \
                      (RFC-0417 §4.4)"))
-          | Error (Workspace_task_lifecycle.Verdict_cancellation_reason_unavailable detail) ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    ("an approved stop needs the producer's stated reason: " ^ detail)))
           | Error
               (Workspace_task_lifecycle.Verification_id_mismatch
                  { expected; actual }) ->
@@ -868,41 +863,54 @@ let commit_verdict_r
                       ~base_path:config.Workspace_utils_backend_setup.base_path)
              with
              | Ok decided -> Ok decided
-             | Error Workspace_task_lifecycle.Verdict_rejection_reason_required ->
+             | Error
+                 (Workspace_task_lifecycle.Verdict_invalid
+                    Workspace_task_lifecycle.Verdict_rejection_reason_required) ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
                        "a rejection verdict requires a non-empty reason explaining \
                         what must be fixed"))
-             | Error Workspace_task_lifecycle.Verdict_authority_identity_required ->
+             | Error
+                 (Workspace_task_lifecycle.Verdict_invalid
+                    Workspace_task_lifecycle.Verdict_authority_identity_required) ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
                         "a completion verdict requires a non-empty authenticated \
                         authority identity"))
-             | Error Workspace_task_lifecycle.Verdict_cancel_requires_operator ->
+             | Error
+                 (Workspace_task_lifecycle.Verdict_invalid
+                    Workspace_task_lifecycle.Verdict_cancel_requires_operator) ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
                         "a cancellation verdict requires an operator's signature \
                         (RFC-0417 §4.4)"))
              | Error
-                 (Workspace_task_lifecycle.Verdict_cancellation_reason_unavailable
+                 (Workspace_task_lifecycle.Verdict_cancellation_reason_unreadable
                     detail) ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState
                        ("an approved stop needs the producer's stated reason: " ^ detail)))
              | Error
-                 (Workspace_task_lifecycle.Verification_id_mismatch
-                    { expected; actual }) ->
+                 (Workspace_task_lifecycle.Verdict_invalid
+                    (Workspace_task_lifecycle.Verification_id_mismatch
+                       { expected; actual })) ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.VerificationSuperseded
                        { task_id; requested = expected; current = actual }))
-             | Error Workspace_task_lifecycle.Verification_pending_verdict
-             | Error Workspace_task_lifecycle.Verification_submission_required
-             | Error Workspace_task_lifecycle.Invalid_transition ->
+             | Error
+                 (Workspace_task_lifecycle.Verdict_invalid
+                    Workspace_task_lifecycle.Verification_pending_verdict)
+             | Error
+                 (Workspace_task_lifecycle.Verdict_invalid
+                    Workspace_task_lifecycle.Verification_submission_required)
+             | Error
+                 (Workspace_task_lifecycle.Verdict_invalid
+                    Workspace_task_lifecycle.Invalid_transition) ->
                Error
                  (Masc_domain.Task
                     (Masc_domain.Task_error.InvalidState

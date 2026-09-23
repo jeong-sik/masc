@@ -429,6 +429,159 @@ let judge ~evaluate ~facts ~new_claims ~absorbed =
       }
 ;;
 
+(* --- The reverse question (RFC-0463 section 2.8) --- *)
+
+type copy_not_judged =
+  | Gate_judgment_failed
+  | Continues_a_dropped_memory
+  | No_source_fits_the_state
+  | Statement_too_large
+  | Request_failed of string
+
+type copy_verdict =
+  | Copy of { statements : string list }
+  | Carries_new_statement of
+      { statements : int
+      ; not_conveyed : int
+      }
+  | Not_judged of copy_not_judged
+
+type copy_check =
+  { claim_id : string
+  ; sources : string list
+  ; verdict : copy_verdict
+  ; requests : int
+  }
+
+(* A new claim that named memories in [absorbs] and had none of them
+   applied, with the memories it named, in the answer's order. A claim with
+   one absorption applied is doing what it was written for; a claim that
+   named none never tried to fold anything. *)
+let copy_candidates ~new_claims ~absorbed ~applied =
+  let into claim_id (statement : Keeper_memory_os_types.absorbed_statement) =
+    String.equal statement.into claim_id
+  in
+  List.filter_map
+    (fun (claim : Keeper_memory_os_types.fact) ->
+       let claim_id = Keeper_memory_os_types.memory_id claim in
+       match
+         List.filter (into claim_id) absorbed, List.exists (into claim_id) applied
+       with
+       | [], (true | false) | _ :: _, true -> None
+       | (_ :: _ as tried), false ->
+         Some
+           ( claim
+           , List.map
+               (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
+                  statement.absorbed)
+               tried ))
+    new_claims
+;;
+
+let not_judged_checks candidates reason =
+  List.map
+    (fun ((claim : Keeper_memory_os_types.fact), sources) ->
+       { claim_id = Keeper_memory_os_types.memory_id claim
+       ; sources
+       ; verdict = Not_judged reason
+       ; requests = 0
+       })
+    candidates
+;;
+
+(* The sources' texts, joined in order into states of at most
+   {!state_bytes_limit} bytes: the bound the forward question puts on the
+   claim it sends as the state. A source over the bound on its own is left
+   out; leaving a source out can only make a statement look unconveyed,
+   which applies the claim, the side today already takes. *)
+let source_states texts =
+  let separator = "\n\n" in
+  let rec go current acc = function
+    | [] ->
+      List.rev
+        (match current with
+         | None -> acc
+         | Some state -> state :: acc)
+    | text :: rest when String.length text > state_bytes_limit -> go current acc rest
+    | text :: rest ->
+      (match current with
+       | None -> go (Some text) acc rest
+       | Some state
+         when String.length state + String.length separator + String.length text
+              <= state_bytes_limit -> go (Some (state ^ separator ^ text)) acc rest
+       | Some state -> go (Some text) (state :: acc) rest)
+  in
+  go None [] texts
+;;
+
+(* Every statement of [claim] asked of the sources' states in turn, the
+   statements already conveyed by an earlier state not asked again. A
+   statement is conveyed when one state conveys it; statements split across
+   two states therefore look unconveyed, which applies the claim. *)
+let judge_copy ~evaluate ~facts ((claim : Keeper_memory_os_types.fact), sources) =
+  let claim_id = Keeper_memory_os_types.memory_id claim in
+  let check verdict requests = { claim_id; sources; verdict; requests } in
+  let texts =
+    List.filter_map
+      (fun source ->
+         List.find_map
+           (fun (fact : Keeper_memory_os_types.fact) ->
+              if String.equal (Keeper_memory_os_types.memory_id fact) source
+              then Some fact.claim
+              else None)
+           facts)
+      sources
+  in
+  let claim_statements = statements claim.claim in
+  let numbered = List.mapi (fun k statement -> Printf.sprintf "c%d" k, statement) claim_statements in
+  let rec go ~remaining ~asked ~requests states =
+    match remaining, states with
+    | [], ([] | _ :: _) -> check (Copy { statements = claim_statements }) requests
+    | _ :: _, [] ->
+      if List.exists (fun (id, _) -> List.exists (String.equal id) asked) remaining
+      then
+        check
+          (Carries_new_statement
+             { statements = List.length claim_statements
+             ; not_conveyed = List.length remaining
+             })
+          requests
+      else check (Not_judged Statement_too_large) requests
+    | _ :: _, state :: rest ->
+      let budget = request_bytes_limit - String.length state in
+      let askable =
+        List.filter (fun (_, statement) -> question_bytes statement <= budget) remaining
+      in
+      let table, made, failure = ask ~evaluate ~claim:state askable in
+      (match failure with
+       | Some reason -> check (Not_judged (Request_failed reason)) (requests + made)
+       | None ->
+         let conveyed (id, _) =
+           match List.assoc_opt id table with
+           | Some noul -> noul >= conveyed_boundary
+           | None -> false
+         in
+         go
+           ~remaining:(List.filter (fun item -> not (conveyed item)) remaining)
+           ~asked:(List.map fst askable @ asked)
+           ~requests:(requests + made)
+           rest)
+  in
+  match source_states texts with
+  | [] -> check (Not_judged No_source_fits_the_state) 0
+  | states -> go ~remaining:numbered ~asked:[] ~requests:0 states
+;;
+
+let judge_copies ~evaluate ~facts ~new_claims ~superseding ~absorbed ~applied =
+  List.map
+    (fun (((claim : Keeper_memory_os_types.fact), sources) as candidate) ->
+       let claim_id = Keeper_memory_os_types.memory_id claim in
+       if List.exists (String.equal claim_id) superseding
+       then { claim_id; sources; verdict = Not_judged Continues_a_dropped_memory; requests = 0 }
+       else judge_copy ~evaluate ~facts candidate)
+    (copy_candidates ~new_claims ~absorbed ~applied)
+;;
+
 (* --- Entry point --- *)
 
 type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
@@ -447,6 +600,7 @@ type run_result =
       }
   | Evaluated of
       { outcome : outcome
+      ; copy_checks : copy_check list
       ; evaluations : evaluation list
       }
 
@@ -458,6 +612,64 @@ let absorbed_of_run = function
   | Skipped { absorbed; _ }
   | Evaluated { outcome = Failed { absorbed; _ }; _ }
   | Evaluated { outcome = Judged { absorbed; _ }; _ } -> absorbed
+;;
+
+let without_copies result claims =
+  let copies =
+    match result with
+    | Skipped _ -> []
+    | Evaluated { copy_checks; _ } ->
+      List.filter_map
+        (fun check ->
+           match check.verdict with
+           | Copy _ -> Some check.claim_id
+           | Carries_new_statement _ | Not_judged _ -> None)
+        copy_checks
+  in
+  List.filter
+    (fun claim ->
+       not
+         (List.exists (String.equal (Keeper_memory_os_types.memory_id claim)) copies))
+    claims
+;;
+
+let copy_not_judged_to_string = function
+  | Gate_judgment_failed -> "gate_judgment_failed"
+  | Continues_a_dropped_memory -> "continues_a_dropped_memory"
+  | No_source_fits_the_state -> "no_source_fits_the_state"
+  | Statement_too_large -> "statement_too_large"
+  | Request_failed _ -> "request_failed"
+;;
+
+let copy_check_to_yojson { claim_id; sources; verdict; requests } =
+  let verdict_fields =
+    match verdict with
+    | Copy { statements } ->
+      [ "verdict", `String "copy"
+      ; "statements", `List (List.map (fun statement -> `String statement) statements)
+      ]
+    | Carries_new_statement { statements; not_conveyed } ->
+      [ "verdict", `String "carries_new_statement"
+      ; "statements", `Int statements
+      ; "not_conveyed", `Int not_conveyed
+      ]
+    | Not_judged reason ->
+      [ "verdict", `String "not_judged"
+      ; "reason", `String (copy_not_judged_to_string reason)
+      ]
+      @ (match reason with
+         | Request_failed detail -> [ "detail", `String detail ]
+         | Gate_judgment_failed
+         | Continues_a_dropped_memory
+         | No_source_fits_the_state
+         | Statement_too_large -> [])
+  in
+  `Assoc
+    ([ "claim_id", `String claim_id
+     ; "sources", `List (List.map (fun source -> `String source) sources)
+     ]
+     @ verdict_fields
+     @ [ "requests", `Int requests ])
 ;;
 
 let evaluation_to_yojson { destinations; state; questions; result } =
@@ -531,7 +743,7 @@ let run_result_to_yojson result =
           | Unavailable reason -> Typesafeai_config.unavailable_reason_to_string reason)
       ; "applied_absorptions", absorptions absorbed
       ]
-    | Evaluated { outcome; evaluations } ->
+    | Evaluated { outcome; copy_checks; evaluations } ->
       let status, disposition =
         match outcome with
         | Failed { reason; absorbed; left; conveyed; unjudged; unjudgeable } ->
@@ -549,7 +761,8 @@ let run_result_to_yojson result =
            ; "requests", `Int judged.requests ])
       in
       status @ [ "conveyed_boundary", `Float conveyed_boundary ] @ disposition
-      @ [ "evaluations", `List (List.map evaluation_to_yojson evaluations) ]
+      @ [ "copy_checks", `List (List.map copy_check_to_yojson copy_checks)
+        ; "evaluations", `List (List.map evaluation_to_yojson evaluations) ]
   in
   `Assoc fields
 ;;
@@ -563,7 +776,66 @@ let observation_to_yojson = function
   | Complete result -> run_result_to_yojson result
 ;;
 
-let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
+(* One line for the reverse question, then one per claim it keeps out of
+   the store, with the statements the sources were found to convey, so a
+   person can read the discarded claims back (RFC-0463 section 6). *)
+let log_copy_checks ~keeper_id checks =
+  match checks with
+  | [] -> ()
+  | _ :: _ ->
+    let count predicate = List.length (List.filter predicate checks) in
+    let is_copy check =
+      match check.verdict with
+      | Copy _ -> true
+      | Carries_new_statement _ | Not_judged _ -> false
+    in
+    let carries check =
+      match check.verdict with
+      | Carries_new_statement _ -> true
+      | Copy _ | Not_judged _ -> false
+    in
+    let not_judged check =
+      match check.verdict with
+      | Not_judged _ -> true
+      | Copy _ | Carries_new_statement _ -> false
+    in
+    Log.Keeper.info
+      ~keeper_name:keeper_id
+      "librarian absorb gate reverse: %d claim(s) absorbed nothing; %d copy (not applied), \
+       %d carry a new statement, %d not judged (applied); %d request(s)"
+      (List.length checks)
+      (count is_copy)
+      (count carries)
+      (count not_judged)
+      (List.fold_left (fun n check -> n + check.requests) 0 checks);
+    List.iter
+      (fun check ->
+         match check.verdict with
+         | Copy { statements } ->
+           Log.Keeper.info
+             ~keeper_name:keeper_id
+             "librarian absorb gate reverse: claim %s not applied, sources %s convey \
+              every statement: %s"
+             check.claim_id
+             (String.concat "," check.sources)
+             (String.concat " | " statements)
+         | Not_judged reason ->
+           Log.Keeper.info
+             ~keeper_name:keeper_id
+             "librarian absorb gate reverse: claim %s applied unjudged (%s%s)"
+             check.claim_id
+             (copy_not_judged_to_string reason)
+             (match reason with
+              | Request_failed detail -> ": " ^ detail
+              | Gate_judgment_failed
+              | Continues_a_dropped_memory
+              | No_source_fits_the_state
+              | Statement_too_large -> "")
+         | Carries_new_statement _ -> ())
+      checks
+;;
+
+let run ?observe ?clock ~keeper_id ~facts ~new_claims ~superseding ~absorbed () =
   let publish observation = Option.iter (fun notify -> notify observation) observe in
   let complete result = publish (Complete result); result in
   match absorbed with
@@ -623,6 +895,20 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
          |> Result.map_error Typesafeai_client.failure_to_string
        in
        let outcome = judge ~evaluate ~facts ~new_claims ~absorbed in
+       (* The reverse question goes to the same judge through the same
+          [evaluate], so its requests are in [evaluations] beside the
+          forward ones. A forward judgment that failed leaves the lane in
+          doubt; the claims it would ask about are applied as today. *)
+       let copy_checks =
+         match outcome with
+         | Judged judged ->
+           judge_copies ~evaluate ~facts ~new_claims ~superseding ~absorbed
+             ~applied:judged.absorbed
+         | Failed { absorbed = applied; _ } ->
+           not_judged_checks
+             (copy_candidates ~new_claims ~absorbed ~applied)
+             Gate_judgment_failed
+       in
        let evaluations = List.rev !evaluations in
        let shas () = String.concat ","
          (List.filter_map (fun evaluation -> match evaluation.result with
@@ -657,5 +943,6 @@ let run ?observe ?clock ~keeper_id ~facts ~new_claims ~absorbed () =
             (List.length judged.unjudgeable)
             judged.requests
             (shas ()));
-       complete (Evaluated { outcome; evaluations }))
+       log_copy_checks ~keeper_id copy_checks;
+       complete (Evaluated { outcome; copy_checks; evaluations }))
 ;;

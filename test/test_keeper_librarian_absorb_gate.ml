@@ -686,7 +686,7 @@ let test_a_conveyed_verdict_survives_a_later_failure () =
   in
   let outcome = Gate.judge ~evaluate ~facts:[ first; second ]
       ~new_claims:[ merged; other ] ~absorbed in
-  let run = Gate.Evaluated { outcome; evaluations = [] } in
+  let run = Gate.Evaluated { outcome; copy_checks = []; evaluations = [] } in
   Alcotest.(check (list string)) "only completed positive absorptions apply"
     [ id first ]
     (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) (Gate.absorbed_of_run run));
@@ -708,7 +708,7 @@ let test_failure_preserves_unjudged_from_unvisited_groups () =
   let absorbed = absorbed_into merged [ source ] @ [ missing_source; missing_claim ] in
   let outcome = Gate.judge ~evaluate:(fun ~state:_ ~questions:_ -> Error "HTTP 503")
       ~facts:[ source ] ~new_claims:[ merged ] ~absorbed in
-  let run = Gate.Evaluated { outcome; evaluations = [] } in
+  let run = Gate.Evaluated { outcome; copy_checks = []; evaluations = [] } in
   Alcotest.(check int) "all unconfirmed sources remain current" 0
     (List.length (Gate.absorbed_of_run run));
   let report = Gate.run_result_to_yojson run in
@@ -842,7 +842,7 @@ let test_run_records_the_destination_passed_over () =
     } @@ fun () ->
   let first = fact (List.nth sources 0) in
   let absorbed = absorbed_into merged [ first ] in
-  let run = Gate.run ~clock ~keeper_id:"reserve-fixture" ~facts:[ first ]
+  let run = Gate.run ~clock ~keeper_id:"reserve-fixture" ~superseding:[] ~facts:[ first ]
       ~new_claims:[ merged ] ~absorbed () in
   let report = Gate.run_result_to_yojson run in
   match J.member "evaluations" report |> J.to_list with
@@ -899,7 +899,7 @@ let test_run_uses_one_destination_and_model_snapshot () =
   let other = fact "beta ships on fridays and pages the operator" in
   let absorbed = absorbed_into merged [ first ] @ absorbed_into other [ second ] in
   let observations = ref [] in
-  let run = Gate.run ~clock ~keeper_id:"snapshot-fixture" ~facts:[ first; second ]
+  let run = Gate.run ~clock ~keeper_id:"snapshot-fixture" ~superseding:[] ~facts:[ first; second ]
       ~observe:(fun observation -> observations := observation :: !observations)
       ~new_claims:[ merged; other ] ~absorbed () in
   (match run with
@@ -979,7 +979,7 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
     (try
        Eio.Cancel.sub (fun cancellation ->
          Eio.Promise.resolve resolve_context cancellation;
-         match Gate.run ~clock ~keeper_id:"cancel-observation-fixture"
+         match Gate.run ~clock ~keeper_id:"cancel-observation-fixture" ~superseding:[]
              ~observe:(fun observation -> observed := observation :: !observed)
              ~facts:[ first; second ] ~new_claims:[ merged; other ]
              ~absorbed:(absorbed_into merged [ first ] @ absorbed_into other [ second ]) () with
@@ -1036,7 +1036,7 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
 
 let test_skipped_run_publishes_its_completed_observation () =
   let observed = ref [] in
-  let run = Gate.run ~keeper_id:"empty-observation-fixture" ~facts:[] ~new_claims:[]
+  let run = Gate.run ~keeper_id:"empty-observation-fixture" ~superseding:[] ~facts:[] ~new_claims:[]
       ~absorbed:[] ~observe:(fun value -> observed := value :: !observed) () in
   match !observed with
   | [ Gate.Complete result ] ->
@@ -1061,7 +1061,7 @@ let test_an_excluded_keeper_is_applied_as_answered_without_a_request () =
     ; absorb_gate = true
     ; excluded_keepers = [ "kept-home" ]
     } @@ fun () ->
-  match Gate.run ~keeper_id:"kept-home" ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~keeper_id:"kept-home" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Keeper_excluded; absorbed = applied } ->
     Alcotest.(check int) "every absorption is applied" (List.length absorbed) (List.length applied)
   | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
@@ -1084,7 +1084,7 @@ let test_a_gate_declared_on_without_a_lane_keeps_the_sources_current () =
         , [] )
     ; absorb_gate = true
     } @@ fun () ->
-  match Gate.run ~keeper_id:"meant-to-judge" ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~keeper_id:"meant-to-judge" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Lane_disabled; absorbed = applied } ->
     Alcotest.(check int) "no absorption is applied" 0 (List.length applied);
     Alcotest.(check bool) "there was something to withhold" true (absorbed <> [])
@@ -1102,7 +1102,7 @@ let test_a_gate_declared_off_applies_as_answered_even_without_a_lane () =
   Masc_test_deps.with_typesafeai_policy
     { Runtime_schema.default_typesafeai with lane_enabled = false; absorb_gate = false }
   @@ fun () ->
-  match Gate.run ~keeper_id:"told-not-to" ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~keeper_id:"told-not-to" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Absorb_gate_disabled; absorbed = applied } ->
     Alcotest.(check int) "every absorption is applied" (List.length absorbed) (List.length applied)
   | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
@@ -1133,7 +1133,7 @@ let test_rejected_response_retains_every_typed_answer () =
   @@ fun () ->
   let facts = List.map fact sources in
   List.iter (fun (label, expected) ->
-    let run = Gate.run ~clock ~keeper_id:"invalid-answer-fixture" ~facts
+    let run = Gate.run ~clock ~keeper_id:"invalid-answer-fixture" ~superseding:[] ~facts
         ~new_claims:[ merged ] ~absorbed:(absorbed_into merged facts) () in
     Alcotest.(check int) "invalid responses cannot authorize absorption" 0
       (List.length (Gate.absorbed_of_run run));

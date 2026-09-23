@@ -1,5 +1,6 @@
 [@@@warning "-32-69"]
 module Tui_decode = Masc.Tui_decode
+module Memory_category = Masc.Keeper_memory_os_types
 module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
 
@@ -3579,13 +3580,13 @@ let next_memory_sort = function
 
 type memory_category_filter =
   | Category_all
-  | Category_ordinary of string
+  | Category_ordinary of Memory_category.category
   | Category_source
   | Category_dropped
 
 let memory_category_filter_label = function
   | Category_all -> "All"
-  | Category_ordinary cat -> cat
+  | Category_ordinary cat -> Memory_category.category_to_string cat
   | Category_source -> "source"
   | Category_dropped -> "dropped"
 
@@ -8536,8 +8537,9 @@ let surface_search_query surface query =
 
 let memory_fact_search_text = function
   | Memory_row_fact f ->
-      f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
-      ^ f.Tui_decode.mf_origin
+      f.Tui_decode.mf_claim ^ " "
+      ^ Memory_category.category_to_string f.Tui_decode.mf_category
+      ^ " " ^ f.Tui_decode.mf_origin
   | Memory_row_source_fact f ->
       f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
   | Memory_row_invalidation f ->
@@ -8709,7 +8711,7 @@ let memory_fact_rows (state : state) : memory_fact_row list =
               | Category_ordinary category ->
                   List.filter
                     (fun (fact : Tui_decode.memory_fact) ->
-                      String.equal fact.Tui_decode.mf_category category)
+                      fact.Tui_decode.mf_category = category)
                     store.Tui_decode.mos_facts
               | Category_source | Category_dropped -> []
             in
@@ -8804,7 +8806,8 @@ let memory_fact_rows (state : state) : memory_fact_row list =
            List.sort
              (fun a b ->
                let cat = function
-                 | Memory_row_fact f -> (0, f.Tui_decode.mf_category)
+                 | Memory_row_fact f ->
+                     (0, Memory_category.category_to_string f.Tui_decode.mf_category)
                  | Memory_row_source_fact _ -> (1, "source")
                  | Memory_row_invalidation _ -> (2, "dropped")
                in

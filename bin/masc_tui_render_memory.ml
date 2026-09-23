@@ -7,6 +7,7 @@ module Message_layout = Masc_tui_message_layout
 module Terminal_text = Masc_tui_ansi.Terminal_text
 module Theme = Masc_tui_ansi.Theme
 module Rows = Masc_tui_rows
+module Memory_category = Masc.Keeper_memory_os_types
 
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
@@ -332,40 +333,47 @@ let memory_row_line columns (k : memory_keeper_health) =
       ; mrow_delta = delta
       }
 
-(* What a row wears in its first cell. A category is the producer's word --
-   the keeper chose it when it wrote the fact, and the set is open: the fleet
-   spells eight of them today and nothing stops a ninth. The other two are
-   this pane's own words for rows that are not ordinary facts, and the call
-   sites know which they are drawing, so they say so rather than handing over
-   a string to be recognised. *)
+(* What a row wears in its first cell. The category is the librarian
+   taxonomy, a closed sum the producer writes and the model's schema enum is
+   built from ([Keeper_memory_os_types.category]); the other two are this
+   pane's own words for rows that are not ordinary facts, and the call sites
+   know which they are drawing, so they say so rather than handing over a
+   string to be recognised. *)
 type memory_row_badge =
-  | Badge_category of string
+  | Badge_category of Memory_category.category
   | Badge_source
   | Badge_dropped
 
-(* The category is drawn as the store spells it. A table used to answer both
-   the word and its colour from the word itself, and it did neither well:
-   across the fleet's 1768 facts it recognised 749 (lesson and preference) and
-   let 1019 fall through, so [blocker] -- the one category that names an alarm
-   -- drew in the same receded style as everything it did not know, while
-   [lesson] drew in the colour of something going right. Nine of its eleven
-   spellings (rule, rules, persona, identity, user, architecture, system, and
-   the two the callers passed as literals) matched nothing any keeper writes.
-   And [preference] was the one value it renamed: the row read PREF while the
-   detail under it and the category strip above both read "preference".
+(* The word comes from [category_to_string], the one place that spells the
+   taxonomy, so the badge, the category strip and the detail all read one
+   value. A table used to answer both the word and its colour by matching the
+   string: across the fleet's 1768 facts it recognised 749 and let 1019 fall
+   through a catch-all, nine of its eleven spellings matched nothing any
+   keeper writes, and [preference] was renamed to PREF on the row while the
+   detail under it read "preference".
 
-   So the badge no longer claims to know what a category means. The word is in
-   the cell, the strip above counts each one, and a colour that has to guess
-   is a colour that says nothing. *)
+   Only [Blocker] is dressed, because it is the one category whose name is an
+   alarm; the table used to draw it in the same receded style as every word it
+   did not know. The rest share one style: which of them matters is the
+   reader's question, not this cell's. *)
 let format_row_badge badge =
   let cat_style, label =
     match badge with
     | Badge_source -> (Theme.info (), "SOURCE")
     | Badge_dropped -> (Theme.bad (), "DROPPED")
-    | Badge_category cat ->
-        ( Theme.recede ()
+    | Badge_category category ->
+        let style =
+          match category with
+          | Memory_category.Blocker -> Theme.warn ()
+          | Memory_category.Code_change | Memory_category.Fact
+          | Memory_category.Preference | Memory_category.Goal
+          | Memory_category.Constraint | Memory_category.Validated_approach
+          | Memory_category.Lesson ->
+              Theme.recede ()
+        in
+        ( style
         , String.uppercase_ascii
-            (Terminal_text.single_line (String.trim cat)) )
+            (Memory_category.category_to_string category) )
   in
   let cat_str =
     if Message_layout.display_width label > 10 then
@@ -540,7 +548,8 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
       in
       [ Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset ]
       @ claim_lines
-      @ [ detail_field "Category:" fact.mf_category
+      @ [ detail_field "Category:"
+            (Memory_category.category_to_string fact.mf_category)
         ; detail_field "Origin:"
             (Printf.sprintf "%-15s %sTimeline:%s   First: %s · Last: %s"
                fact.mf_origin (Theme.recede ()) Ansi.reset

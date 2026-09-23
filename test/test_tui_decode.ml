@@ -4621,7 +4621,9 @@ let test_decode_memory_facts_keeps_both_stores () =
            (match store.Tui_decode.mos_facts with
             | [ fact ] ->
                 Alcotest.(check string) "category as the server spelled it"
-                  "lesson" fact.Tui_decode.mf_category;
+                  "lesson"
+                  (Masc.Keeper_memory_os_types.category_to_string
+                     fact.Tui_decode.mf_category);
                 Alcotest.(check string) "origin" "authored"
                   fact.Tui_decode.mf_origin
             | facts ->

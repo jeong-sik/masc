@@ -115,7 +115,8 @@ let operator_token_cell = ref None
 
 (* Carry out [Masc_tui_credential.plan]. The environment wins so a single run
    can be pointed at a different credential; otherwise the bearer comes from the
-   workspace, and a workspace that demands one but holds none gets one minted.
+   workspace, and a workspace that demands one but holds none it can use --
+   nothing stored, or a stored one that has expired -- gets one minted.
 
    Minting grants nothing this process did not already have: the credential
    store is a directory under the workspace, so anything that can read the
@@ -127,6 +128,31 @@ let operator_token_cell = ref None
    Admin because that is the role [masc login] issues for this agent, and the
    keeper lifecycle routes the TUI already offers require it -- minting a
    narrower role would leave working surfaces failing. *)
+(* The persisted bearer, checked against its credential record the way the
+   server checks it, so an expired one is replaced here rather than refused on
+   every read. Only expiry is acted on: it is the one verdict this client can
+   answer by itself, with the mint below. Any other objection -- a record that
+   no longer matches the file, say -- is left for the server to make, whose
+   refusal names [masc login]. *)
+let stored_operator_token ~base_path : Masc_tui_credential.stored_token =
+  match
+    Auth_login.read_persisted_token ~base_path ~agent_name:default_agent_name
+  with
+  | None -> Masc_tui_credential.Not_stored
+  | Some token -> (
+      match
+        Auth.verify_token base_path ~agent_name:default_agent_name ~token
+      with
+      | Ok _ -> Masc_tui_credential.Stored token
+      | Error err -> (
+          match Auth_error_kind.classify err with
+          | Auth_error_kind.Token_expired -> Masc_tui_credential.Stored_expired
+          | Auth_error_kind.Token_mismatch | Auth_error_kind.Unauthorized
+          | Auth_error_kind.Forbidden | Auth_error_kind.Agent_not_found
+          | Auth_error_kind.Io_error | Auth_error_kind.Invalid_json
+          | Auth_error_kind.Other ->
+              Masc_tui_credential.Stored token))
+
 let install_operator_token ~base_path ~host ~port =
   let cfg = Auth.load_auth_config base_path in
   (* The auth directory, not the config file: a missing config reads as the
@@ -144,9 +170,7 @@ let install_operator_token ~base_path ~host ~port =
     match
       Masc_tui_credential.plan
         ~env_token:(first_nonempty_env [ Masc_tui_credential.token_env_var ])
-        ~workspace_token:
-          (Auth_login.read_persisted_token ~base_path
-             ~agent_name:default_agent_name)
+        ~workspace_token:(stored_operator_token ~base_path)
         ~workspace_requires_token:(cfg.enabled && cfg.require_token)
         ~workspace_initialized
     with
@@ -159,7 +183,7 @@ let install_operator_token ~base_path ~host ~port =
     | Masc_tui_credential.No_workspace ->
         operator_token_cell := None;
         Masc_tui_credential.Workspace_pending
-    | Masc_tui_credential.Mint -> (
+    | Masc_tui_credential.Mint reason -> (
         match
           Auth_login.mint ~base_path ~host ~port
             ~agent_name:default_agent_name ~role:Masc_domain.Admin
@@ -171,7 +195,7 @@ let install_operator_token ~base_path ~host ~port =
         with
         | Ok report ->
             operator_token_cell := Some report.bearer_token;
-            Masc_tui_credential.Minted
+            Masc_tui_credential.Minted reason
         | Error err ->
             operator_token_cell := None;
             Masc_tui_credential.Mint_failed

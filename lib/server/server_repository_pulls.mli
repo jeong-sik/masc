@@ -101,6 +101,50 @@ type reader =
       (** The Keeper exists but its GitHub CLI holds no github.com token. *)
   | Reader_ready of { keeper : string }
 
+(** {1 Keepers on a pull request's branch (RFC-0465 §0.2)} *)
+
+type keeper_checkouts =
+  { keeper : string
+  ; checkouts : (Keeper_sandbox_control.freshness_row list, string) result
+      (** [Error] when the Keeper's metadata or its playground could not be
+          read: any of its checkouts may be on any branch. *)
+  }
+
+type fleet_checkouts = (keeper_checkouts list, string) result
+(** Every Keeper's checkouts, or why the Keeper list could not be read. *)
+
+type keeper_on_repository =
+  { on_keeper : string
+  ; branches : string list
+      (** Branches of this Keeper's checkouts whose origin names this
+          repository. *)
+  ; unread : string list
+      (** Why a checkout that may be of this repository has no branch: the
+          Keeper's playground was not read, a checkout's origin or the
+          catalog was not read, or the branch probe failed. *)
+  }
+
+type repository_keepers =
+  | Keepers_not_inspected
+      (** No pull request of this repository was read, so no checkout was
+          inspected for it. *)
+  | Keepers_unlisted of string  (** The Keeper list could not be read. *)
+  | Keepers_listed of keeper_on_repository list
+      (** Only Keepers with a branch or an unread reason for this
+          repository. *)
+
+type keeper_join =
+  | Join_not_inspected
+  | Join_keepers_unlisted of string
+  | Join_read of
+      { keepers : string list
+          (** Keepers with a checkout of the repository on the pull
+              request's head branch, compared with [String.equal]. *)
+      ; keepers_unread : int
+          (** Keepers not in [keepers] with a checkout that may be of this
+              repository but whose branch is unknown. *)
+      }
+
 (** {1 Snapshot} *)
 
 type repository_entry =
@@ -108,7 +152,12 @@ type repository_entry =
   ; url : string
   ; slug : string option  (** [owner/repo] when the remote is on github.com. *)
   ; pulls : repository_pulls
+  ; keepers : repository_keepers
   }
+
+val pull_keepers : repository_entry -> pull_request -> keeper_join
+(** The Keepers whose checkout of the entry's repository is on the pull
+    request's head branch. *)
 
 type snapshot =
   { reader : reader
@@ -157,9 +206,16 @@ val read_repository :
     next page. *)
 
 val refresh :
-  now:(unit -> float) -> http_post:http_post -> base_path:string -> previous:snapshot -> snapshot
+  now:(unit -> float) ->
+  http_post:http_post ->
+  inspect_checkouts:(unit -> fleet_checkouts) ->
+  base_path:string ->
+  previous:snapshot ->
+  snapshot
 (** One full read: resolve the reader, load the registered repositories and
-    read each GitHub one. A repository whose previous answer was
+    read each GitHub one. [inspect_checkouts] runs once, and only when at
+    least one repository's pull requests were read; every pull request of
+    this refresh is joined against that one answer. A repository whose previous answer was
     [Token_rejected] for the same token, or [Rate_limited] with a reset time
     still ahead of [now], keeps that answer and is not fetched. When the
     reader is not ready, nothing is fetched and
@@ -174,6 +230,14 @@ val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 val current : unit -> snapshot
 (** The latest refresh, or {!initial} before the first one ends. *)
 
-val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
+val inspect_fleet_checkouts : config:Workspace.config -> unit -> fleet_checkouts
+(** {!Keeper_sandbox_control.checkout_freshness_rows} for every persisted
+    Keeper. A shared-mount Keeper costs up to six git calls per checkout
+    (origin, branch, HEAD, status, and for a registered checkout the
+    upstream ref and ahead/behind); an endpoint-owned Keeper costs one
+    remote probe. *)
+
+val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> config:Workspace.config -> unit
 (** Forks the refresh loop under [sw]: one {!refresh} immediately, then one
-    every 60 seconds. Cancelled with [sw]. *)
+    every 60 seconds, joined with {!inspect_fleet_checkouts}. Cancelled with
+    [sw]. *)

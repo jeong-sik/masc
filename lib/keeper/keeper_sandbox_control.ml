@@ -478,6 +478,7 @@ let checkout_json (inspection : checkout_inspection) =
 type freshness_row = {
   row_checkout_path : string;
   row_branch : string option;
+  row_catalog : catalog_resolution;
   row_changed_files : int option;
   row_freshness : checkout_freshness;
 }
@@ -500,6 +501,7 @@ let freshness_row_of_inspection (inspection : checkout_inspection) =
   { row_checkout_path =
       inspection.inspected.Keeper_playground_checkouts.relative_path
   ; row_branch = row_branch_of_probe inspection.branch
+  ; row_catalog = inspection.catalog_resolution
   ; row_changed_files =
       (match inspection.dirty with
        | Ok (_, changed_files) -> Some changed_files

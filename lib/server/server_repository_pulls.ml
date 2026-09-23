@@ -54,11 +54,38 @@ type reader =
       }
   | Reader_ready of { keeper : string }
 
+type keeper_checkouts =
+  { keeper : string
+  ; checkouts : (Keeper_sandbox_control.freshness_row list, string) result
+  }
+
+type fleet_checkouts = (keeper_checkouts list, string) result
+
+type keeper_on_repository =
+  { on_keeper : string
+  ; branches : string list
+  ; unread : string list
+  }
+
+type repository_keepers =
+  | Keepers_not_inspected
+  | Keepers_unlisted of string
+  | Keepers_listed of keeper_on_repository list
+
+type keeper_join =
+  | Join_not_inspected
+  | Join_keepers_unlisted of string
+  | Join_read of
+      { keepers : string list
+      ; keepers_unread : int
+      }
+
 type repository_entry =
   { repository_id : string
   ; url : string
   ; slug : string option
   ; pulls : repository_pulls
+  ; keepers : repository_keepers
   }
 
 type snapshot =
@@ -466,7 +493,75 @@ let is_token_rejected = function
   | Pulls_failed { failure = Token_rejected; _ } -> true
   | Pulls_not_read | Pulls_not_github | Pulls_read _ | Pulls_failed _ -> false
 
-let refresh ~now ~http_post ~base_path ~previous =
+(* --- Keepers on a pull request's branch (RFC-0465 §0.2) --- *)
+
+(* What one checkout row says about one repository. *)
+type row_evidence =
+  | Row_on of string
+  | Row_unread of string
+  | Row_elsewhere
+
+let row_evidence ~repository_id (row : Keeper_sandbox_control.freshness_row) =
+  let of_this_repository () =
+    match row.row_branch with
+    | Some branch -> Row_on branch
+    | None -> Row_unread (row.row_checkout_path ^ ": branch probe failed")
+  in
+  match row.row_catalog with
+  | Keeper_sandbox_control.Registered repo
+    when String.equal repo.Repo_manager_types.id repository_id -> of_this_repository ()
+  (* The origin equals the URL of every id listed, this one among them. *)
+  | Ambiguous ids when List.exists (String.equal repository_id) ids -> of_this_repository ()
+  | Registered _ | Ambiguous _ | Unregistered -> Row_elsewhere
+  | Catalog_unavailable reason ->
+    Row_unread (row.row_checkout_path ^ ": repository catalog unavailable: " ^ reason)
+  | Origin_unavailable reason ->
+    Row_unread (row.row_checkout_path ^ ": origin unavailable: " ^ reason)
+
+let keeper_on_repository ~repository_id ({ keeper; checkouts } : keeper_checkouts) =
+  let branches, unread =
+    match checkouts with
+    | Error reason -> [], [ reason ]
+    | Ok rows ->
+      List.fold_right
+        (fun row (branches, unread) ->
+          match row_evidence ~repository_id row with
+          | Row_on branch -> branch :: branches, unread
+          | Row_unread reason -> branches, reason :: unread
+          | Row_elsewhere -> branches, unread)
+        rows
+        ([], [])
+  in
+  match branches, unread with
+  | [], [] -> None
+  | _ -> Some { on_keeper = keeper; branches; unread }
+
+let repository_keepers ~(fleet : fleet_checkouts Lazy.t) ~repository_id = function
+  | Pulls_read _ ->
+    (match Lazy.force fleet with
+     | Error reason -> Keepers_unlisted reason
+     | Ok keepers ->
+       Keepers_listed (List.filter_map (keeper_on_repository ~repository_id) keepers))
+  | Pulls_not_read | Pulls_failed _ | Pulls_not_github -> Keepers_not_inspected
+
+let pull_keepers entry pull =
+  match entry.keepers with
+  | Keepers_not_inspected -> Join_not_inspected
+  | Keepers_unlisted reason -> Join_keepers_unlisted reason
+  | Keepers_listed on_repository ->
+    let on_branch k = List.exists (String.equal pull.head_branch) k.branches in
+    let keepers =
+      List.filter_map
+        (fun k -> if on_branch k then Some k.on_keeper else None)
+        on_repository
+    in
+    let keepers_unread =
+      List.length
+        (List.filter (fun k -> (not (on_branch k)) && not (List.is_empty k.unread)) on_repository)
+    in
+    Join_read { keepers; keepers_unread }
+
+let refresh ~now ~http_post ~inspect_checkouts ~base_path ~previous =
   let now_s = now () in
   let credential = resolve_reader ~base_path in
   let reader =
@@ -489,6 +584,9 @@ let refresh ~now ~http_post ~base_path ~previous =
       | Some entry -> entry.pulls
       | None -> Pulls_not_read
     in
+    (* One inspection per refresh, shared by every repository, and none when
+       no pull request was read. *)
+    let fleet = lazy (inspect_checkouts ()) in
     let entry (repo : Repo_manager_types.repository) =
       let slug = github_slug_of_remote repo.url in
       let pulls =
@@ -508,7 +606,8 @@ let refresh ~now ~http_post ~base_path ~previous =
            longer vouch for; [reader] says why nothing is read now. *)
         | Some _, Error _ -> Pulls_not_read
       in
-      { repository_id = repo.id; url = repo.url; slug; pulls }
+      let keepers = repository_keepers ~fleet ~repository_id:repo.id pulls in
+      { repository_id = repo.id; url = repo.url; slug; pulls; keepers }
     in
     let repositories = List.map entry repos in
     let rejected_token_digest =
@@ -534,9 +633,22 @@ let review_state_to_string = function
   | Review_waiting -> "waiting"
   | Review_none -> "none"
 
-let pull_request_to_yojson pull =
+let keeper_join_fields = function
+  | Join_read { keepers; keepers_unread } ->
+    [ "keepers", `List (List.map (fun k -> `String k) keepers)
+    ; "keepers_unread", `Int keepers_unread
+    ]
+  | Join_keepers_unlisted reason ->
+    [ "keepers", `Null; "keepers_unread", `Null; "keepers_error", `String reason ]
+  | Join_not_inspected ->
+    [ "keepers", `Null
+    ; "keepers_unread", `Null
+    ; "keepers_error", `String "Keeper checkouts were not inspected"
+    ]
+
+let pull_request_to_yojson ~join pull =
   `Assoc
-    [ "repo_slug", `String pull.repo_slug
+    ([ "repo_slug", `String pull.repo_slug
     ; "number", `Int pull.number
     ; "title", `String pull.title
     ; "head_branch", `String pull.head_branch
@@ -544,7 +656,8 @@ let pull_request_to_yojson pull =
     ; "checks", `String (check_state_to_string pull.checks)
     ; "review", `String (review_state_to_string pull.review)
     ; "updated_at", `Float pull.updated_at
-    ]
+     ]
+     @ keeper_join_fields join)
 
 let failure_to_yojson = function
   | Repository_not_visible -> `Assoc [ "kind", `String "repository_not_visible" ]
@@ -566,14 +679,14 @@ let failure_to_yojson = function
   | Response_unreadable message ->
     `Assoc [ "kind", `String "response_unreadable"; "message", `String message ]
 
-let repository_pulls_to_yojson = function
+let repository_pulls_to_yojson ~join = function
   | Pulls_not_read -> `Assoc [ "state", `String "not_read" ]
   | Pulls_not_github -> `Assoc [ "state", `String "not_github" ]
   | Pulls_read { observed_at; pulls; undecodable } ->
     `Assoc
       [ "state", `String "read"
       ; "observed_at", `Float observed_at
-      ; "pulls", `List (List.map pull_request_to_yojson pulls)
+      ; "pulls", `List (List.map (fun pull -> pull_request_to_yojson ~join:(join pull) pull) pulls)
       ; "undecodable", `Int undecodable
       ]
   | Pulls_failed { observed_at; failure } ->
@@ -594,12 +707,33 @@ let reader_to_yojson = function
       [ "state", `String "token_unavailable"; "keeper", `String keeper; "reason", `String reason ]
   | Reader_ready { keeper } -> `Assoc [ "state", `String "ready"; "keeper", `String keeper ]
 
+let repository_keepers_to_yojson = function
+  | Keepers_not_inspected -> `Assoc [ "state", `String "not_inspected" ]
+  | Keepers_unlisted reason ->
+    `Assoc [ "state", `String "unlisted"; "error", `String reason ]
+  | Keepers_listed on_repository ->
+    let strings values = `List (List.map (fun v -> `String v) values) in
+    `Assoc
+      [ "state", `String "listed"
+      ; ( "keepers"
+        , `List
+            (List.map
+               (fun k ->
+                 `Assoc
+                   [ "keeper", `String k.on_keeper
+                   ; "branches", strings k.branches
+                   ; "unread", strings k.unread
+                   ])
+               on_repository) )
+      ]
+
 let entry_to_yojson entry =
   `Assoc
     [ "repository_id", `String entry.repository_id
     ; "url", `String entry.url
     ; ("slug", match entry.slug with Some slug -> `String slug | None -> `Null)
-    ; "pulls", repository_pulls_to_yojson entry.pulls
+    ; "pulls", repository_pulls_to_yojson ~join:(pull_keepers entry) entry.pulls
+    ; "keeper_checkouts", repository_keepers_to_yojson entry.keepers
     ]
 
 let snapshot_to_yojson snapshot =
@@ -623,7 +757,26 @@ let current () = Atomic.get projection
    5000 GraphQL points an hour. *)
 let poll_interval_s = 60.0
 
-let start ~sw ~clock ~base_path =
+let inspect_fleet_checkouts ~(config : Workspace.config) () =
+  match Keeper_meta_store.keeper_names_result config with
+  | Error reason -> Error reason
+  | Ok names ->
+    Ok
+      (List.map
+         (fun keeper ->
+           let checkouts =
+             match Keeper_meta_store.read_effective_meta config keeper with
+             | Error reason -> Error ("Keeper metadata: " ^ reason)
+             | Ok None -> Error "Keeper metadata is absent or not decodable"
+             | Ok (Some meta) ->
+               Keeper_sandbox_control.checkout_freshness_rows ~config ~meta ()
+               |> Result.map_error Keeper_playground_checkouts.scan_error_to_string
+           in
+           ({ keeper; checkouts } : keeper_checkouts))
+         names)
+
+let start ~sw ~clock ~(config : Workspace.config) =
+  let base_path = config.base_path in
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       (try
@@ -631,6 +784,7 @@ let start ~sw ~clock ~base_path =
            refresh
              ~now:(fun () -> Eio.Time.now clock)
              ~http_post:default_http_post
+             ~inspect_checkouts:(inspect_fleet_checkouts ~config)
              ~base_path
              ~previous:(current ())
          in

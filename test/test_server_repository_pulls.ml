@@ -77,6 +77,9 @@ let recording_stub answers =
 let never_called ~url:_ ~token:_ ~body:_ =
   failf "the reader must not reach GitHub in this case"
 
+(* No Keeper holds a checkout. *)
+let no_checkouts () = Ok []
+
 let read_or_fail = function
   | Pulls.Pulls_read { pulls; undecodable; _ } -> pulls, undecodable
   | Pulls.Pulls_failed _ -> failf "expected Pulls_read, got Pulls_failed"
@@ -228,7 +231,7 @@ let test_reader_not_declared_reads_nothing () =
   let base_path = temp_base_path () in
   register base_path;
   let snapshot =
-    Pulls.refresh ~now ~http_post:never_called ~base_path ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post:never_called ~inspect_checkouts:no_checkouts ~base_path ~previous:Pulls.initial
   in
   (match snapshot.reader with
    | Pulls.Reader_not_declared -> ()
@@ -244,7 +247,7 @@ let test_reader_keeper_missing () =
     (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
     "[repositories]\npr_reader = \"nobody-here\"\n";
   let snapshot =
-    Pulls.refresh ~now ~http_post:never_called ~base_path ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post:never_called ~inspect_checkouts:no_checkouts ~base_path ~previous:Pulls.initial
   in
   match snapshot.reader with
   | Pulls.Reader_keeper_missing { keeper = "nobody-here" } -> ()
@@ -256,7 +259,7 @@ let test_unknown_key_is_refused () =
     (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
     "[repositories]\npr_raeder = \"edgar\"\n";
   let snapshot =
-    Pulls.refresh ~now ~http_post:never_called ~base_path ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post:never_called ~inspect_checkouts:no_checkouts ~base_path ~previous:Pulls.initial
   in
   match snapshot.reader with
   | Pulls.Reader_declaration_invalid _ -> ()
@@ -315,7 +318,7 @@ let test_reader_ready_reads_with_the_keeper_token () =
   let http_post, calls, tokens =
     counting_stub (ok_response (page ~has_next:false ~cursor:None []))
   in
-  let snapshot = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  let snapshot = Pulls.refresh ~now ~http_post ~inspect_checkouts:no_checkouts ~base_path ~previous:Pulls.initial in
   (match snapshot.reader with
    | Pulls.Reader_ready { keeper } -> Alcotest.(check string) "reader" reader_keeper keeper
    | _ -> failf "a declared Keeper with a hosts.yml token must be ready");
@@ -331,9 +334,9 @@ let test_rejected_token_is_not_sent_again () =
     Ok { Pulls.status = 401; body = "{}"; rate_limit_remaining = None; rate_limit_reset = None }
   in
   let http_post, calls, _ = counting_stub rejected in
-  let first = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  let first = Pulls.refresh ~now ~http_post ~inspect_checkouts:no_checkouts ~base_path ~previous:Pulls.initial in
   let later () = now () +. 60. in
-  let second = Pulls.refresh ~now:later ~http_post ~base_path ~previous:first in
+  let second = Pulls.refresh ~now:later ~http_post ~inspect_checkouts:no_checkouts ~base_path ~previous:first in
   Alcotest.(check int) "the same refused token is sent once" 1 !calls;
   (match masc_pulls second with
    | Pulls.Pulls_failed { failure = Pulls.Token_rejected; observed_at } ->
@@ -344,7 +347,7 @@ let test_rejected_token_is_not_sent_again () =
      Alcotest.(check bool) "the digest is not the token" false (String.equal digest "gho_revoked")
    | None -> failf "the refused token's digest must be kept");
   write_reader_token base_path "gho_new_login";
-  let _third = Pulls.refresh ~now:later ~http_post ~base_path ~previous:second in
+  let _third = Pulls.refresh ~now:later ~http_post ~inspect_checkouts:no_checkouts ~base_path ~previous:second in
   Alcotest.(check int) "a new token is asked about" 2 !calls
 
 let test_rate_limit_waits_for_reset () =
@@ -359,17 +362,139 @@ let test_rate_limit_waits_for_reset () =
       }
   in
   let http_post, calls, _ = counting_stub limited in
-  let first = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
+  let first = Pulls.refresh ~now ~http_post ~inspect_checkouts:no_checkouts ~base_path ~previous:Pulls.initial in
   let before_reset () = reset_at -. 1. in
-  let second = Pulls.refresh ~now:before_reset ~http_post ~base_path ~previous:first in
+  let second = Pulls.refresh ~now:before_reset ~http_post ~inspect_checkouts:no_checkouts ~base_path ~previous:first in
   Alcotest.(check int) "no call before GitHub's reset" 1 !calls;
   (match masc_pulls second with
    | Pulls.Pulls_failed { failure = Pulls.Rate_limited { reset_at = Some at }; _ } ->
      Alcotest.(check (float 0.)) "the reset time stands" reset_at at
    | _ -> failf "the limit must stay on screen until its reset");
   let after_reset () = reset_at in
-  let _third = Pulls.refresh ~now:after_reset ~http_post ~base_path ~previous:second in
+  let _third = Pulls.refresh ~now:after_reset ~http_post ~inspect_checkouts:no_checkouts ~base_path ~previous:second in
   Alcotest.(check int) "asked again at the reset" 2 !calls
+
+(* --- RFC-0465 §0.2: a pull request belongs to the Keepers whose checkout of
+   its repository is on its head branch. --- *)
+
+module Control = Masc.Keeper_sandbox_control
+
+let checkout_row ~path ~catalog branch : Control.freshness_row =
+  { Control.row_checkout_path = path
+  ; row_branch = branch
+  ; row_catalog = catalog
+  ; row_changed_files = None
+  ; row_freshness = Control.Freshness_unavailable "not measured in this case"
+  }
+
+let masc_repo = Control.Registered (repository ~id:"masc" ~url:"https://github.com/jeong-sik/masc.git")
+
+let two_pull_page =
+  ok_response
+    (page
+       ~has_next:false
+       ~cursor:None
+       [ pull_node ~number:1 ~branch:"feat/join" ~draft:false ~review:"null" ~rollup:"null"
+       ; pull_node ~number:2 ~branch:"feat/other" ~draft:true ~review:"null" ~rollup:"null"
+       ])
+
+let fleet : Pulls.fleet_checkouts =
+  Ok
+    [ { Pulls.keeper = "alpha"
+      ; checkouts = Ok [ checkout_row ~path:"repos/masc" ~catalog:masc_repo (Some "feat/join") ]
+      }
+    ; { Pulls.keeper = "beta"; checkouts = Error "playground root is missing" }
+    ; { Pulls.keeper = "gamma"
+      ; checkouts =
+          Ok
+            [ checkout_row ~path:"repos/masc" ~catalog:masc_repo (Some "main")
+            ; checkout_row
+                ~path:"repos/other"
+                ~catalog:(Control.Origin_unavailable "git remote get-url timed out")
+                None
+            ]
+      }
+    ; { Pulls.keeper = "delta"
+      ; checkouts =
+          Ok [ checkout_row ~path:"repos/fork" ~catalog:Control.Unregistered (Some "feat/join") ]
+      }
+    ; { Pulls.keeper = "epsilon"
+      ; checkouts = Ok [ checkout_row ~path:"repos/masc" ~catalog:masc_repo (Some "feat/Join") ]
+      }
+    ; { Pulls.keeper = "zeta"
+      ; checkouts = Ok [ checkout_row ~path:"masc" ~catalog:masc_repo (Some "feat/other") ]
+      }
+    ]
+
+let json_pulls snapshot =
+  let json = Pulls.snapshot_to_yojson snapshot in
+  let open Yojson.Safe.Util in
+  match json |> member "repositories" |> to_list with
+  | [ repo ] -> repo |> member "pulls" |> member "pulls" |> to_list
+  | _ -> failf "expected the one registered repository in the JSON"
+
+let join_of json =
+  let open Yojson.Safe.Util in
+  ( json |> member "number" |> to_int
+  , json |> member "keepers" |> to_option (fun ks -> List.map to_string (to_list ks))
+  , ( json |> member "keepers_unread" |> to_int_option
+    , json |> member "keepers_error" |> to_string_option ) )
+
+let join_testable =
+  Alcotest.(list (triple int (option (list string)) (pair (option int) (option string))))
+
+let test_keepers_join_by_exact_branch () =
+  let base_path = ready_base_path ~token:"gho_join" in
+  let http_post, _, _ = counting_stub two_pull_page in
+  let inspections = ref 0 in
+  let inspect_checkouts () =
+    incr inspections;
+    fleet
+  in
+  let snapshot =
+    Pulls.refresh ~now ~http_post ~inspect_checkouts ~base_path ~previous:Pulls.initial
+  in
+  Alcotest.(check int) "checkouts are inspected once per refresh" 1 !inspections;
+  (* alpha and zeta are on the head branches. beta's playground and one of
+     gamma's origins were not read, so each may be on either branch. delta's
+     checkout is another repository, epsilon's branch differs in case. *)
+  Alcotest.check
+    join_testable
+    "keepers per pull request"
+    [ 1, Some [ "alpha" ], (Some 2, None); 2, Some [ "zeta" ], (Some 2, None) ]
+    (List.map join_of (json_pulls snapshot))
+
+let test_unlisted_keepers_say_so () =
+  let base_path = ready_base_path ~token:"gho_join" in
+  let http_post, _, _ = counting_stub two_pull_page in
+  let snapshot =
+    Pulls.refresh
+      ~now
+      ~http_post
+      ~inspect_checkouts:(fun () -> Error "keepers directory unreadable")
+      ~base_path
+      ~previous:Pulls.initial
+  in
+  Alcotest.check
+    join_testable
+    "no pull request reads as having no Keeper"
+    [ 1, None, (None, Some "keepers directory unreadable")
+    ; 2, None, (None, Some "keepers directory unreadable")
+    ]
+    (List.map join_of (json_pulls snapshot))
+
+let test_no_read_means_no_inspection () =
+  let base_path = temp_base_path () in
+  register base_path;
+  let _snapshot =
+    Pulls.refresh
+      ~now
+      ~http_post:never_called
+      ~inspect_checkouts:(fun () -> failf "no pull request was read, so no checkout is inspected")
+      ~base_path
+      ~previous:Pulls.initial
+  in
+  ()
 
 let test_github_slug () =
   List.iter
@@ -413,5 +538,16 @@ let () =
             `Quick
             test_rejected_token_is_not_sent_again
         ; Alcotest.test_case "rate limit waits for reset" `Quick test_rate_limit_waits_for_reset
+        ] )
+    ; ( "keepers on branch"
+      , [ Alcotest.test_case
+            "joined by exact branch"
+            `Quick
+            test_keepers_join_by_exact_branch
+        ; Alcotest.test_case "unlisted keepers say so" `Quick test_unlisted_keepers_say_so
+        ; Alcotest.test_case
+            "no read means no inspection"
+            `Quick
+            test_no_read_means_no_inspection
         ] )
     ]

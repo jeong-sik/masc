@@ -2227,7 +2227,7 @@ let agent_core_range ?(turn_start = 0) ~front messages =
      ~measure_message_bytes:(Keeper_context_core.message_measurer ())
      ~front
      ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
-     ~last_resort:false
+     ~current_turn_results:Keeper_turn_driver_try_provider.Current_turn_verbatim
      ~base_path:""
      ~demote_before:0
      ~turn_boundary:(Keeper_carried_front.Turn_boundary { end_atom = turn_start })

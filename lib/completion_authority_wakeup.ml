@@ -128,7 +128,8 @@ let release_failure_is_permanent (error : Masc_domain.masc_error) =
      | Masc_domain.Task_error.NotFound _
      | Masc_domain.Task_error.AlreadyClaimed _
      | Masc_domain.Task_error.NotClaimed _
-     | Masc_domain.Task_error.InvalidState _ -> false)
+     | Masc_domain.Task_error.InvalidState _
+     | Masc_domain.Task_error.VerificationSuperseded _ -> false)
   (* Spelled out rather than left to a catch-all: the release cannot raise
      these today, and a change that makes it raise one has to decide here
      instead of inheriting "retry forever". *)

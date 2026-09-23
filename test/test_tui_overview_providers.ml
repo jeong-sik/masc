@@ -123,13 +123,13 @@ let test_section_draws_three_line_shapes () =
       check bool "claude 5h row" true
         (contains ~affix:"claude_code" five_hour
          && contains ~affix:"5h" five_hour
-         && contains ~affix:"0.67" five_hour
+         && contains ~affix:"67%" five_hour
          && contains ~affix:"\xe2\x86\xbb " five_hour
          && contains ~affix:" in 4h12m" five_hour
          && contains ~affix:"heard 3m ago" five_hour);
       check bool "claude 7d row: same report, no second age" true
         (contains ~affix:"7d" seven_day
-         && contains ~affix:"0.44" seven_day
+         && contains ~affix:"44%" seven_day
          && (not (contains ~affix:"heard" seven_day))
          && not (contains ~affix:"claude_code" seven_day));
       let meter, cells = meter_of five_hour in
@@ -184,6 +184,19 @@ let test_meter_uses_eighth_blocks () =
   check string "zero cells draw nothing" "" (Providers.meter ~cells:0 0.5);
   check string "negative cells draw nothing" "" (Providers.meter ~cells:(-3) 0.5)
 
+let test_values_read_in_one_unit () =
+  List.iter
+    (fun (label, utilization, expected) ->
+      check string label expected (Providers.utilization_text utilization))
+    [ ("a fraction reads as a percent", Tui_decode.Utilization_fraction 0.67, "67%")
+    ; ("binary noise does not lose a percent", Tui_decode.Utilization_fraction 0.29, "29%")
+    ; ("just under full is not full", Tui_decode.Utilization_fraction 0.9999, "99%")
+    ; ("a full fraction is 100%", Tui_decode.Utilization_fraction 1.0, "100%")
+    ; ("past full is not clamped", Tui_decode.Utilization_fraction 1.4, "140%")
+    ; ("a percent reads as reported", Tui_decode.Utilization_percent 100, "100%")
+    ; ("a percent past full as reported", Tui_decode.Utilization_percent 140, "140%")
+    ]
+
 let test_failed_read_is_one_line () =
   match
     Providers.section ~providers:(Types.Providers_failed "connection refused")
@@ -205,6 +218,7 @@ let () =
     [ ( "providers"
       , [ test_case "three line shapes" `Quick test_section_draws_three_line_shapes
         ; test_case "eighth-block meter" `Quick test_meter_uses_eighth_blocks
+        ; test_case "values read in one unit" `Quick test_values_read_in_one_unit
         ; test_case "failed read is one line" `Quick test_failed_read_is_one_line
         ; test_case "unknown state is rejected" `Quick test_unknown_state_is_rejected
         ] )

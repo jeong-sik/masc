@@ -31,6 +31,11 @@ val section :
     ["providers unavailable: <reason>"]. [width] is the cells a row may use;
     the meters take what the other columns leave. *)
 
+val utilization_text : Masc.Tui_decode.provider_usage_utilization -> string
+(** The value as a whole percent, so accounts read in one unit. A percent is
+    shown as reported; a fraction is multiplied by 100 and floored, so
+    [0.9999] reads [99%] and never [100%]. *)
+
 val meter : cells:int -> float -> string
 (** A meter [cells] cells wide filled to the given share of full, drawn with
     eighth-block glyphs so the fill moves by an eighth of a cell. The fill is

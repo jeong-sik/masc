@@ -334,13 +334,13 @@ the full backlog rows, not the active projection.
 
 The Providers section sits between the Team block and the tasks. It reads
 `provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
-strip per provider account: a meter per usage window, the value in the unit
-the provider reported, the reset time, and how long ago the provider said so.
+strip per provider account: a meter per usage window, the value as a whole
+percent (a fraction is multiplied by 100 and floored), the reset time, and how long ago the provider said so.
 
 ```
  Providers  reported by the provider · since server start 22:39
- claude_code  5h ▕██████████▋     ▏ 0.67  ↻ 18:10 in 4h12m        heard 3m ago
-              7d ▕███████         ▏ 0.44  ↻ 09-29 13:00 in 5d23h
+ claude_code  5h ▕██████████▋     ▏  67%  ↻ 18:10 in 4h12m        heard 3m ago
+              7d ▕███████         ▏  44%  ↻ 09-29 13:00 in 5d23h
  codex        no report since server start
 ```
 

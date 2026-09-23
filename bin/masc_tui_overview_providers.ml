@@ -87,8 +87,25 @@ let at_or_past_full = function
   | Tui_decode.Utilization_fraction value -> value >= 1.0
   | Tui_decode.Utilization_percent value -> value >= percent_of_full
 
-let value_text = function
-  | Tui_decode.Utilization_fraction value -> Printf.sprintf "%g" value
+(* Twelve significant digits cut binary noise such as 0.29 *. 100. =
+   28.999999999999996 before the floor, and still keep 0.9999 below 100. *)
+let percent_digits = 12
+
+(* One unit on screen, so two accounts read side by side. A fraction becomes
+   a whole percent, floored like the meter: 0.9999 reads 99%, never 100%. The
+   decoded value is unchanged. *)
+let percent_of_fraction value =
+  let hundredths =
+    float_of_string (Printf.sprintf "%.*g" percent_digits (value *. float_of_int percent_of_full))
+  in
+  int_of_float (Float.floor hundredths)
+
+let utilization_text = function
+  | Tui_decode.Utilization_fraction value when Float.is_finite value ->
+      Printf.sprintf "%d%%" (percent_of_fraction value)
+  | Tui_decode.Utilization_fraction value ->
+      (* Not a number to convert: shown as it came. *)
+      Printf.sprintf "%g" value
   | Tui_decode.Utilization_percent value -> Printf.sprintf "%d%%" value
 
 let minutes_per_hour = 60
@@ -232,7 +249,7 @@ let draw_rows ~now ~width rows =
   let label_w = window_cells window_label in
   let value_w =
     window_cells (fun (window : Tui_decode.provider_usage_window) ->
-        value_text window.puw_utilization)
+        utilization_text window.puw_utilization)
   in
   let reset_w =
     window_cells (fun (window : Tui_decode.provider_usage_window) ->
@@ -298,7 +315,7 @@ let draw_rows ~now ~width rows =
               (meter_open
               ^ meter ~cells:meter_cells (share_of_full window.puw_utilization)
               ^ meter_close ^ " "
-              ^ pad_left (value_text window.puw_utilization) value_w)
+              ^ pad_left (utilization_text window.puw_utilization) value_w)
           ^ tag_part tagged ^ tag_pad ^ gap
           ^ styled reset_tone (pad_right reset reset_w)
           ^ heard_part)

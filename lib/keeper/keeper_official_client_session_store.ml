@@ -1075,13 +1075,12 @@ let validate_unchanged_context ~expected ~snapshot_sha256 =
 
 let reconcile_context plan ~expected ~snapshot_sha256 =
   match plan.previous_settlement with
-  | None -> Ok plan
+  | None -> plan
   | Some _ ->
     (match validate_unchanged_context ~expected ~snapshot_sha256 with
-     | Ok () -> Ok plan
-     | Error Canonical_context_changed ->
-       Ok { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None }
-     | Error Context_frontier_missing as error -> error)
+     | Ok () -> plan
+     | Error (Canonical_context_changed | Context_frontier_missing) ->
+       { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None })
 
 let context_admission_error_to_string = function
   | Context_frontier_missing ->
@@ -1099,12 +1098,11 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
     |> Result.map_error claim_error_to_string
   in
   let plan = reconcile_tool_surface plan ~tool_surface_sha256 in
-  let* plan = match context_frontier with
+  let plan = match context_frontier with
     | Some {delivery=Canonical_source_guard; snapshot_sha256; _} ->
       reconcile_context plan ~expected ~snapshot_sha256
-      |> Result.map_error context_admission_error_to_string
     | Some {delivery=(Prepared_start_context | Replaced_configuration | Held_by_vendor_session); _}
-    | None -> Ok plan
+    | None -> plan
   in
   let last_recovery_resolution =
     Option.bind expected (fun binding -> binding.last_recovery_resolution)

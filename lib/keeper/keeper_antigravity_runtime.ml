@@ -461,12 +461,11 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         |> Result.map (fun () -> claim_plan)
         |> Result.map_error admission_error
       | Some _ | None ->
-        Session_store.reconcile_context claim_plan ~expected:stored_session ~snapshot_sha256
-        |> Result.map_error admission_error in
+        Ok (Session_store.reconcile_context claim_plan ~expected:stored_session ~snapshot_sha256) in
     (match claim_plan.previous_settlement, reconciled_plan.previous_settlement with
      | Some { session_id; _ }, None ->
        Log.Keeper.info
-         "antigravity: keeper=%s canonical history or system prompt changed since vendor session %s settled; starting a fresh session"
+         "antigravity: keeper=%s vendor session %s did not settle against the current canonical history and system prompt; starting a fresh session"
          keeper_name session_id
      | Some _, Some _ | None, (Some _ | None) -> ());
     let claim_plan = reconciled_plan in

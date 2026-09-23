@@ -1630,16 +1630,13 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
       |> Result.get_ok in
     check bool "control: the released session is a resume" true
       (resumable_plan.previous_settlement <> None);
-    (match reconcile_context resumable_plan ~expected:(Some released)
-             ~snapshot_sha256:frontier.snapshot_sha256 with
-     | Ok plan -> check bool "unchanged source keeps resuming" true (plan.previous_settlement <> None)
-     | Error _ -> fail "unchanged source was refused");
-    (match reconcile_context resumable_plan ~expected:(Some released)
-             ~snapshot_sha256:(String.make 64 'b') with
-     | Ok plan ->
-       check bool "changed source drops the settlement" true (plan.previous_settlement = None);
-       check int "changed source starts at ordinal 1" 1 plan.turn_count
-     | Error _ -> fail "changed source was refused instead of starting fresh");
+    let unchanged = reconcile_context resumable_plan ~expected:(Some released)
+        ~snapshot_sha256:frontier.snapshot_sha256 in
+    check bool "unchanged source keeps resuming" true (unchanged.previous_settlement <> None);
+    let changed = reconcile_context resumable_plan ~expected:(Some released)
+        ~snapshot_sha256:(String.make 64 'b') in
+    check bool "changed source drops the settlement" true (changed.previous_settlement = None);
+    check int "changed source starts at ordinal 1" 1 changed.turn_count;
     let state_path = path ~base_path ~keeper_name |> Result.get_ok in
     let unbound_json = match Yojson.Safe.from_file state_path with
       | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
@@ -1649,11 +1646,15 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     | Ok (Some binding) ->
       check bool "absent optional proof preserves session without fabricating acknowledgement" true
         (binding.context_frontier = None && binding.phase = released.phase);
-      check bool "a settled session with no acknowledged frontier is still refused" true
-        (Result.is_error (claim_with_context_frontier
+      (* Nothing shows what this session settled against, so it is not
+         resumed; a fresh session starts instead of refusing every cycle. *)
+      (match claim_with_context_frontier
           ~context_frontier:(Some {frontier with delivery=Canonical_source_guard; acknowledged_turn=None})
           ~base_path ~keeper_name ~expected:(Some binding) ~client_kind:Codex ~owner_epoch
-          ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:9.))
+          ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:9. with
+       | Ok {phase=Start {previous_settlement=None; _}; turn_count=1; _} -> ()
+       | Ok _ -> fail "a session with no acknowledged frontier was resumed"
+       | Error detail -> fail ("a session with no acknowledged frontier was refused: " ^ detail))
     | Ok None -> fail "existing vendor session disappeared with optional proof"
     | Error detail -> fail detail)
 ;;

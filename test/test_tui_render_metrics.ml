@@ -522,6 +522,57 @@ let test_session_block_lists_newest_last () =
           (Render_metrics.render_section_fleet ~cols:120 state)))
 ;;
 
+(* A frame too short for the whole log keeps the newest line in view: the
+   block drops its oldest rows behind a "+N earlier" row instead of running
+   past the bottom, and the rows it keeps still read oldest to newest. *)
+let test_session_block_keeps_the_newest_line_in_a_short_frame () =
+  let state = make_state () in
+  state.metrics_section <- Types.Section_fleet;
+  state.events <-
+    List.init 11 (fun index ->
+        let n = 10 - index in
+        ({ timestamp = Printf.sprintf "10:00:%02d" n
+         ; event_type = "system"
+         ; content = Printf.sprintf "event-%02d" n
+         } : Types.event));
+  let lines = ref [] in
+  let push line = lines := Masc_tui_theme.strip_sgr line :: !lines in
+  Render_metrics.render_metrics_body ~cols:120 ~budget:16 state
+    ~report_scroll:(fun _ -> ())
+    ~push ~push_styled:(fun ~style:_ line -> push line)
+    ~push_selected:push ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  let drawn = List.rev !lines in
+  let index_of needle =
+    let rec go i = function
+      | [] -> None
+      | line :: rest -> if contains line needle then Some i else go (i + 1) rest
+    in
+    go 0 drawn
+  in
+  check bool "the block does fold" true
+    (Option.is_some (index_of " earlier"));
+  check bool "the newest line is drawn" true
+    (Option.is_some (index_of "event-10"));
+  check bool "the oldest line is the one left out" true
+    (Option.is_none (index_of "event-00"));
+  (match index_of " earlier", index_of "event-09", index_of "event-10" with
+   | Some earlier, Some older, Some newest ->
+     check bool "the count leads, then oldest to newest" true
+       (earlier < older && older < newest)
+   | _ -> fail "the kept rows are not all drawn");
+  let tall = ref [] in
+  Render_metrics.render_metrics_body ~cols:120 ~budget:60 state
+    ~report_scroll:(fun _ -> ())
+    ~push:(fun line -> tall := Masc_tui_theme.strip_sgr line :: !tall)
+    ~push_styled:(fun ~style:_ line -> tall := line :: !tall)
+    ~push_selected:(fun line -> tall := line :: !tall)
+    ~push_divider:(fun () -> ()) ~push_empty:(fun () -> ());
+  check bool "a frame with room draws the whole log" true
+    (List.exists (fun line -> contains line "event-00") !tall
+     && not (List.exists (fun line -> contains line " earlier") !tall))
+;;
+
 let test_section_resources_lines () =
   let state = make_state () in
   let lines = Render_metrics.render_section_resources ~cols:90 state in
@@ -811,6 +862,8 @@ let () =
             test_transport_block_reads_the_feed
         ; test_case "session block lists newest last" `Quick
             test_session_block_lists_newest_last
+        ; test_case "session block keeps the newest line in a short frame" `Quick
+            test_session_block_keeps_the_newest_line_in_a_short_frame
         ; test_case "fleet_populated" `Quick test_section_fleet_populated
         ; test_case "resources_populated" `Quick test_section_resources_populated
         ; test_case "tools_populated" `Quick test_section_tools_populated

@@ -306,7 +306,9 @@ from. `Esc` closes the detail, and a second `Esc` lets go of the list.
 This TUI's own session log is on Metrics (`m`), first in the Engine &
 Scheduler section under `TUI session`: what the TUI did and what it was told,
 oldest first so the newest line is last. It keeps eleven lines, and a run of
-the same line folds into one row with a `×N` tail. An error event wears the
+the same line folds into one row with a `×N` tail. When the frame is too
+short for all of it, the block keeps its newest rows under a `+N earlier`
+row, so the newest line stays in view. An error event wears the
 `✗` the chat pane uses for a failure, just after the clock; every other level
 keeps that cell for its text. The mark is a shape rather than a colour alone,
 so it holds under `NO_COLOR`.

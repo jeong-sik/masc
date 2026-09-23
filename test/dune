@@ -2856,6 +2856,8 @@
 
 (include stanzas/test_keeper_tool_approval_mode_actor_log.inc)
 
+(include stanzas/test_keeper_decision_actor_log.inc)
+
 (include stanzas/test_keeper_toml_parser.inc)
 
 (include stanzas/test_keeper_toml_loader.inc)
@@ -5289,6 +5291,11 @@
  (name test_tui_fleet_line)
  (modules test_tui_fleet_line)
  (libraries alcotest masc masc_tui_fleet_line))
+
+(test
+ (name test_tui_client_rows)
+ (modules test_tui_client_rows)
+ (libraries alcotest masc masc_tui_types))
 
 (test
  (name test_tui_table)

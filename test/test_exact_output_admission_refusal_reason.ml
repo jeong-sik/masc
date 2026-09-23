@@ -49,7 +49,7 @@ thinking-support = true
        (List.map
           (fun lane ->
              Printf.sprintf
-               "[runtime.exact_output_lanes.%s]\nslots = [\"openrouter.probe\"]"
+               "[runtime.exact_output_lanes.%s]\nslots = [\"openrouter.probe\"]\nmax_output_tokens = 4096"
                lane)
           (List.sort_uniq
              String.compare

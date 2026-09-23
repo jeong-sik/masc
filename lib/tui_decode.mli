@@ -1285,6 +1285,14 @@ val keeper_phase_is_running : keeper_phase -> bool
     silences the word for it and spells out every other phase; exhaustive in
     the implementation so a new phase cannot silently count as not-running. *)
 
+(** Which Overview Team band a phase puts a Keeper in (RFC-0464). A stuck
+    Keeper's turns are failing or its fiber crashed; an alive one can take a
+    turn now or is between runs; a parked one was stopped or never started.
+    Exhaustive in the implementation, so a new phase has to choose a band. *)
+type keeper_phase_band = Phase_stuck | Phase_alive | Phase_parked
+
+val keeper_phase_band : keeper_phase -> keeper_phase_band
+
 type keeper_health
 (** A validated keeper health reading — whether the keeper's keepalive is
     running, whether it has turned yet, and whether its turns are failing.

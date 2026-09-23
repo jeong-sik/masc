@@ -264,7 +264,11 @@ let test_fit_splits_only_oversized_work_unit () = with_source @@ fun _env config
   let messages = List.init 8 (fun index -> message (String.make (index + 1) 'x')) in
   save messages; boundary ~fresh:true 1 messages;
   let prepared = prepare config |> some in
-  let original = P.prompt_json prepared |> Yojson.Safe.to_string in
+  (* A candidate as the pass reads it: the prior state and the exact source
+     atoms of its range. *)
+  let view candidate = Yojson.Safe.to_string (`List [ P.prompt_json candidate;
+    `List (List.map Agent_core.Checkpoint.message_to_json (P.messages candidate)) ]) in
+  let original = view prepared in
   let visited = ref [] in
   let whole = P.fit ~fits:(fun candidate ->
     visited := P.end_atom candidate :: !visited; Ok true) prepared |> get |> some in
@@ -273,7 +277,7 @@ let test_fit_splits_only_oversized_work_unit () = with_source @@ fun _env config
   let first = P.narrow prepared |> some in
   ignore (commit config first "Prior work preserved.");
   let suffix = prepare config |> some in
-  let exact_size candidate = P.prompt_json candidate |> Yojson.Safe.to_string |> String.length in
+  let exact_size candidate = view candidate |> String.length in
   let room_for_more = P.prepare ~end_atom:7 ~config ~keeper_name ~trace_id () |> get |> some in
   let limit = exact_size room_for_more in
   let expected = P.narrow suffix |> some in
@@ -283,9 +287,8 @@ let test_fit_splits_only_oversized_work_unit () = with_source @@ fun _env config
       Ok (exact_size candidate <= limit)) suffix |> get |> some in
   check int "split work unit stops below capacity even with room for another atom" 6 (P.end_atom fitted);
   check (list int) "no capacity-filling search after a fitting split" [8;6] !visited;
-  check string "exact suffix and prior state preserved" (P.prompt_json expected |> Yojson.Safe.to_string)
-    (P.prompt_json fitted |> Yojson.Safe.to_string);
-  check string "frozen original unaffected" original (P.prompt_json prepared |> Yojson.Safe.to_string);
+  check string "exact suffix and prior state preserved" (view expected) (view fitted);
+  check string "frozen original unaffected" original (view prepared);
   let minimum_seen = ref false in
   check bool "no indivisible atom fits" true
     (P.fit ~fits:(fun candidate ->

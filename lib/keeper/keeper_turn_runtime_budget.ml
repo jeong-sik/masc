@@ -121,6 +121,20 @@ let current_keeper_meta ~(config : Workspace.config) ~(fallback_meta : keeper_me
   | Some entry -> entry.meta
   | None -> fallback_meta
 
+(* The briefing is pinned, so it is bounded here rather than left to the
+   model input projection, which can only cut the conversation window. The
+   briefing is rendered once, before the lane walk picks a candidate, and a
+   failed head is demoted behind its siblings, so a fallback can serve the
+   turn. The budget is therefore a share of the smallest ceiling any
+   candidate of the route declares; see
+   {!Runtime.smallest_max_prompt_bytes_of_route} for what a candidate that
+   declares none means. A route whose candidates declare none gets no bound,
+   the same answer its projection gives it. *)
+let world_state_briefing_budget_bytes ~route =
+  Runtime.smallest_max_prompt_bytes_of_route route
+  |> Option.map (fun cap ->
+    cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
+
 let runtime_budget_logged : unit StringMap.t Atomic.t =
   Atomic.make StringMap.empty
 

@@ -800,21 +800,8 @@ let run_keeper_cycle
                      (Keeper_playground_checkouts.scan_error_to_string scan_error);
                    []
                in
-               (* The briefing is pinned, so it is bounded here rather than
-                  left to the model input projection, which can only cut the
-                  conversation window. Sized from the runtime's own declared
-                  input ceiling: a runtime that declares none gets no bound,
-                  the same answer its projection gives it. Rotation to a larger
-                  lane only makes this conservative. *)
                let context_budget_bytes =
-                 (* [effective_runtime_id] is a routing label; the ceiling is
-                    declared by a binding, so resolve the lane's entry
-                    candidate before asking for one. *)
-                 Option.bind
-                   (Runtime.entry_runtime_id_of_route effective_runtime_id)
-                   Runtime.max_prompt_bytes_of_runtime_id
-                 |> Option.map (fun cap ->
-                   cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
+                 world_state_briefing_budget_bytes ~route:effective_runtime_id
                in
                let render_prompt observation =
                  Keeper_unified_prompt.build_prompt

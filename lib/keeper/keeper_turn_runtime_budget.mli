@@ -59,6 +59,12 @@ val current_keeper_meta :
 (** Read the latest meta from the registry, falling back to the given
     [fallback_meta] when the registry entry is missing. *)
 
+val world_state_briefing_budget_bytes : route:string -> int option
+(** Byte budget for the pinned world-state briefing of a turn on [route]:
+    [keeper.context.briefing.share_percent] of the smallest [max-prompt-bytes]
+    any candidate the route may walk declares, so the briefing fits whichever
+    candidate serves the turn. [None] when no candidate declares a ceiling. *)
+
 val resolved_max_context_for_turn
   :  meta:keeper_meta
   -> Keeper_context_runtime.max_context_resolution

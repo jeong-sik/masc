@@ -180,6 +180,75 @@ max-concurrent = 1
 max-concurrent = 1
 |}
 
+(* The head declares a large prompt ceiling, the fallback a small one, and a
+   third binding declares none. [roomy] and [tight] are the declared
+   ceilings the briefing-budget tests read back. *)
+let roomy_max_prompt_bytes = 1_048_576
+let tight_max_prompt_bytes = 131_072
+
+let runtime_toml_with_uneven_prompt_ceilings =
+  Printf.sprintf
+    {|
+[runtime]
+default = "primary.roomy_model"
+
+[runtime.lanes.uneven]
+candidates = [ "primary.roomy_model", "fallback.tight_model" ]
+
+[runtime.lanes.undeclared_head]
+candidates = [ "open.open_model", "fallback.tight_model" ]
+
+[runtime.lanes.undeclared_only]
+candidates = [ "open.open_model" ]
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[providers.open]
+display-name = "Open Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:3"
+
+[models.roomy_model]
+api-name = "roomy-model"
+max-context = 200000
+max-prompt-bytes = %d
+tools-support = true
+streaming = true
+
+[models.tight_model]
+api-name = "tight-model"
+max-context = 200000
+max-prompt-bytes = %d
+tools-support = true
+streaming = true
+
+[models.open_model]
+api-name = "open-model"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[primary.roomy_model]
+is-default = true
+max-concurrent = 1
+
+[fallback.tight_model]
+max-concurrent = 1
+
+[open.open_model]
+max-concurrent = 1
+|}
+    roomy_max_prompt_bytes
+    tight_max_prompt_bytes
+
 let runtime_toml_quota_lane_with_shared_credential shared_credential =
   Printf.sprintf
     {|
@@ -616,6 +685,60 @@ let test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens () =
       "the lane name itself names no binding, which is why this exists"
       true
       (Option.is_none (Runtime.get_runtime_by_id "resilient")))
+
+(* The briefing is rendered before the lane walk picks a candidate, and a
+   failed head is demoted behind its siblings, so the fallback can serve the
+   turn. Its budget must fit the smallest ceiling the lane declares, not the
+   head's: sized from the head, the fallback receives a briefing no cut of
+   history can bring under its own ceiling. *)
+let briefing_share_of cap =
+  cap * Masc.Keeper_config.keeper_context_briefing_share_percent () / 100
+
+let test_briefing_budget_fits_the_smallest_lane_ceiling () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    Alcotest.(check (option int))
+      "the lane's smallest declared ceiling"
+      (Some tight_max_prompt_bytes)
+      (Runtime.smallest_max_prompt_bytes_of_route "uneven");
+    match
+      Masc.Keeper_turn_runtime_budget.world_state_briefing_budget_bytes
+        ~route:"uneven"
+    with
+    | None -> Alcotest.fail "a lane whose candidates declare ceilings is bounded"
+    | Some budget ->
+      Alcotest.(check int)
+        "the briefing is a share of the fallback's ceiling"
+        (briefing_share_of tight_max_prompt_bytes)
+        budget;
+      Alcotest.(check bool)
+        "the briefing fits the fallback's ceiling"
+        true
+        (budget <= tight_max_prompt_bytes))
+
+(* A candidate that declares no ceiling has none in any admission path. It
+   adds no bound, and it must not erase the bound a sibling declares. *)
+let test_briefing_budget_an_undeclared_candidate_adds_no_bound () =
+  with_runtime_config runtime_toml_with_uneven_prompt_ceilings (fun () ->
+    Alcotest.(check (option int))
+      "an undeclared head does not erase the fallback's ceiling"
+      (Some (briefing_share_of tight_max_prompt_bytes))
+      (Masc.Keeper_turn_runtime_budget.world_state_briefing_budget_bytes
+         ~route:"undeclared_head");
+    Alcotest.(check (option int))
+      "a lane whose candidates declare none gets no bound"
+      None
+      (Masc.Keeper_turn_runtime_budget.world_state_briefing_budget_bytes
+         ~route:"undeclared_only");
+    Alcotest.(check (option int))
+      "a bare runtime route is bounded by its own ceiling"
+      (Some (briefing_share_of roomy_max_prompt_bytes))
+      (Masc.Keeper_turn_runtime_budget.world_state_briefing_budget_bytes
+         ~route:"primary.roomy_model");
+    Alcotest.(check (option int))
+      "a route that names nothing gets no bound"
+      None
+      (Masc.Keeper_turn_runtime_budget.world_state_briefing_budget_bytes
+         ~route:"no-such-route"))
 
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
@@ -4990,6 +5113,14 @@ let () =
             "entry_runtime_id_of_route resolves a route to the binding it opens"
             `Quick
             test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
+          Alcotest.test_case
+            "the briefing budget fits the smallest lane ceiling"
+            `Quick
+            test_briefing_budget_fits_the_smallest_lane_ceiling;
+          Alcotest.test_case
+            "an undeclared candidate adds no bound and erases none"
+            `Quick
+            test_briefing_budget_an_undeclared_candidate_adds_no_bound;
           Alcotest.test_case
             "a bare runtime assignment walks only itself"
             `Quick

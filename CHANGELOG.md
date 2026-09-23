@@ -4,10 +4,6 @@
 
 ### Added
 
-- The Skill editor publishes a Keeper's validated draft by reference. `POST /api/v1/skills/editor/create` and `/save` accept `draft`, the same `{artifact, package_id}` pair `keeper_skill_validate` takes and returns, in place of pasted `source_text`. The server reads the exported bytes itself, refusing a blob that is absent, a different size, or no longer hashes to the reference, and passes them through the unchanged editor path, so validation, `CanAdmin` authorization, the size limit and snapshot publication are the ones pasted text gets. Before this the operator copied the validated text by hand, and nothing tied the published bytes to the ones the Keeper checked (#38104).
-
-### Added
-
 - The model catalog and the seed runtime config carry the three models released on 2026-09-22. `claude-opus-5-5` gets its own catalog row (1M/128K, $4/$20, cache read 0.05x, forced tool use refused) — without it the id lands on the `claude-opus-5` row and bills cache reads at double the real rate — plus Claude Code subscription bindings at low..max. `gpt-6-sol` and `gpt-6-luna` get bare catalog rows (efforts `none`,`low`..`max`, from a /v1/responses parameter probe) and Codex subscription bindings at low..max. Release evidence entries for all three (#38118).
 
 ### Changed

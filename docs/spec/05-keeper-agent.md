@@ -102,7 +102,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_meta_contract.ml
 
 직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증한다.
 
-Generation semantics are operational, not genealogical: a successful rollover keeps the same keeper identity but commits a new `trace_id`, increments `generation`, and appends the old trace to `trace_history`.
+A successful rollover keeps the same keeper identity, commits a new `trace_id`, and appends the old trace to `trace_history`.
 
 ### 3.2 working_context
  

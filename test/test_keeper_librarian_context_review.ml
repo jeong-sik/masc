@@ -199,6 +199,17 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
   if scenario = Cancel_absorb || scenario = Cancel_review || scenario = Context_only then
     Alcotest.(check string) "Context commit is independent of uncommitted Memory"
       memory_before (Fs_compat.load_file memory_path);
+  (* The Memory pass and the pending-input pass render one working_contexts
+     rule, so both requests carry its text. *)
+  if scenario = Faithful || scenario = Context_only then (
+    let rule_line = match Prompt_registry.render_prompt_template
+        Prompt_names.librarian_working_contexts_rule [] with
+      | Ok rule -> List.hd (String.split_on_char '\n' (String.trim rule))
+      | Error detail -> Alcotest.fail detail in
+    List.iter (fun body ->
+      Alcotest.(check bool) "the request carries the shared working_contexts rule" true
+        (contains ~sub:rule_line body))
+      (Fixture.request_bodies librarian));
   if scenario = Context_only then (
     List.iter (fun body ->
       Alcotest.(check bool) "Context-only request asks for no Memory judgment" false

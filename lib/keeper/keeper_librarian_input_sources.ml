@@ -90,3 +90,25 @@ let counterpart_observations_between_offloaded ~base_dir ~keeper_name ~after ~be
   Domain_pool_ref.submit_io_or_inline (fun () ->
     counterpart_observations_between ~base_dir ~keeper_name ~after ~before)
 ;;
+
+let goal_context_for_task ~config = function
+  | None -> Keeper_librarian.No_task
+  | Some task ->
+    let task_id = Keeper_id.Task_id.to_string task in
+    let ( let* ) = Result.bind in
+    let criteria =
+      let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
+      let ids = List.filter_map (fun (goal_id, tasks) ->
+        if List.mem task_id tasks then Some goal_id else None) links in
+      let* goals =
+        Result.map_error Goal_store.unavailable_to_string
+          (Goal_store.list_goals_result config ())
+      in
+      List.fold_right (fun id rest ->
+        let* rest = rest in
+        match List.find_opt (fun (goal : Goal_store.goal) -> String.equal goal.id id) goals with
+        | None -> Error ("Linked Goal is missing: " ^ id)
+        | Some goal -> Ok ((id, goal.phase, Goal_store.criterion_of_goal goal) :: rest)) ids (Ok [])
+    in
+    Keeper_librarian.Task_goals { task_id; criteria }
+;;

@@ -4,7 +4,7 @@ module Tui_decode = Masc.Tui_decode
 type group = Needs_you | Working | Idle | Parked
 
 type detail =
-  | Blocker of { summary : string; held : int }
+  | Blocker of { summary : string; item : Types.attention_item; held : int }
   | Phase_word of { word : string; held : int }
   | Working_on of { task : Tui_decode.task; more : int; awaiting : int }
   | No_open_task of { awaiting : int }
@@ -55,13 +55,20 @@ let first_blocker ~attention name =
       match item.ai_target with
       | Types.Attention_keeper target
         when String.equal target name && asks_for_the_operator item ->
-          Some (Option.value ~default:item.ai_summary item.ai_blocker_summary)
+          Some item
       | Types.Attention_keeper _ | Types.Attention_other _ -> None)
     attention
 
+let blocker ~holding (item : Types.attention_item) =
+  Blocker
+    { summary = Option.value ~default:item.ai_summary item.ai_blocker_summary
+    ; item
+    ; held = held holding
+    }
+
 let stuck ~attention ~holding ~word name =
   match first_blocker ~attention name with
-  | Some summary -> Blocker { summary; held = held holding }
+  | Some item -> blocker ~holding item
   | None -> Phase_word { word; held = held holding }
 
 let alive holding =
@@ -95,7 +102,7 @@ let classify ~attention ~holding (keeper : Types.overview_keeper) =
          not seen yet is what the attention list says, so the row follows
          it. *)
       match first_blocker ~attention name with
-      | Some summary -> Some (Needs_you, Blocker { summary; held = held holding })
+      | Some item -> Some (Needs_you, blocker ~holding item)
       | None -> None)
 
 let band = function Needs_you -> 0 | Working -> 1 | Idle -> 2 | Parked -> 3
@@ -149,6 +156,41 @@ let count t group =
   | Parked -> List.length t.parked
   | Needs_you | Working | Idle ->
       List.length (List.filter (fun row -> row.group = group) t.rows)
+
+let drawn_items t ~rows =
+  List.filter (fun row -> row.group = Needs_you) t.rows
+  |> List.filteri (fun index _ -> index < rows)
+  |> List.filter_map (fun row ->
+         match row.detail with
+         | Blocker { item; _ } -> Some item
+         | Phase_word _ | Working_on _ | No_open_task _ -> None)
+
+(* Removes the one instance each drawn row carries, by identity: a second
+   item naming the same Keeper is a different item even when its words are
+   the same, and it has no other place on screen. *)
+let rec without_instance item = function
+  | [] -> []
+  | head :: rest when head == item -> rest
+  | head :: rest -> head :: without_instance item rest
+
+let settle t ~attention ~allocate ~team_rows =
+  (* Fewer panel items never shrink the Team block (the panel is sized
+     before the block and only by its item count), so starting from the
+     budget that keeps every item and handing the drawn rows' items over
+     only ever grows the rows drawn: each step's items are still drawn after
+     the next allocation, and the rows stop growing within [drawn_rows t]
+     steps. *)
+  let rec go rows =
+    let panel =
+      List.fold_left
+        (fun remaining item -> without_instance item remaining)
+        attention (drawn_items t ~rows)
+    in
+    let budget = allocate panel in
+    let drawn = team_rows budget in
+    if drawn <= rows then (panel, budget) else go drawn
+  in
+  go (team_rows (allocate attention))
 
 let phase_word (keeper : Types.overview_keeper) =
   match keeper.okp_phase with

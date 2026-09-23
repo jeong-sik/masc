@@ -28,11 +28,15 @@ val goal_verification_lookup : string
 (** Goal completion proof review (RFC-0387 B3): did the goal's declared
     metric reach its declared target value? *)
 
-val verification_lookup_none : string
 val verification_lookup_producer_tree : string
 val verification_lookup_root_layout_empty : string
-val verification_lookup_root_layout_absent : string
 (** The line a readable-but-empty lookup root produces in the root layout. *)
+
+val verification_lookup_producer_root_absent : string
+(** The Task lookup section for a workspace producer with no playground tree:
+    it names the tools that producer's review holds and says there is no tree
+    under them. *)
+
 val verification_contract : string
 val verification_required_evidence : string
 val verification_evidence_posture_note_only : string
@@ -83,6 +87,11 @@ val librarian_continuity : string
 (** A pending-input organization pass: the answer is the working contexts
     alone. *)
 val librarian_working_context : string
+
+(** The [working_contexts] writing rule that [librarian] and
+    [librarian.working_context] both render into their
+    [working_contexts_rule] variable, so the rule has one text. *)
+val librarian_working_contexts_rule : string
 
 val workspace_memory_curator : string
 

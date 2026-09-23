@@ -179,10 +179,21 @@ let render_prompt key variables =
   | Error message -> Error (Printf.sprintf "%s: %s" key message)
 ;;
 
+(* The [working_contexts] rule is one fragment both prompts that ask for
+   [working_contexts] render, so the Memory pass and the pending-input pass
+   cannot be handed two different rules. *)
+let working_contexts_rule_variable = "working_contexts_rule"
+
+let with_working_contexts_rule variables =
+  Result.map
+    (fun rule -> (working_contexts_rule_variable, rule) :: variables)
+    (render_prompt Prompt_names.librarian_working_contexts_rule [])
+;;
+
 let render_librarian_prompt input =
-  render_prompt
-    Prompt_names.librarian
-    (Keeper_librarian.prompt_variables input)
+  Result.bind
+    (with_working_contexts_rule (Keeper_librarian.prompt_variables input))
+    (render_prompt Prompt_names.librarian)
 ;;
 
 type librarian_prompt_material =
@@ -235,12 +246,20 @@ let prompt_variables_of_pass pass input =
 let resolve_librarian_prompt pass input =
   let input = input_for_pass pass input in
   let variables = prompt_variables_of_pass pass input in
-  ( variables
-  , Result.map
-      (fun (resolution, rendered) -> { resolution; rendered })
-      (Prompt_registry.resolve_and_render_prompt_template
-         (prompt_key_of_pass pass)
-         variables) )
+  let variables_with_rule =
+    match pass with
+    | Memory_pass _ | Working_context_pass -> with_working_contexts_rule variables
+    | Continuity_state_pass _ -> Ok variables
+  in
+  match variables_with_rule with
+  | Error detail -> variables, Error detail
+  | Ok variables ->
+    ( variables
+    , Result.map
+        (fun (resolution, rendered) -> { resolution; rendered })
+        (Prompt_registry.resolve_and_render_prompt_template
+           (prompt_key_of_pass pass)
+           variables) )
 ;;
 
 let prompt_and_input_for_librarian (inp : Keeper_librarian.input) =
@@ -621,16 +640,19 @@ let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
   else Keeper_librarian_continuity.fit prepared ~fits:(fun continuity ->
     let input = {input with Keeper_librarian.messages =
       Keeper_librarian_continuity.messages continuity} in
-    (* Fitted against the Memory pass's prompt and schema. Whether this range's
-       Memory is already committed is read after the fit, on the fitted range;
-       a continuity-only request for the same range is shorter, so a range
-       that fits here also fits then. *)
-    let pass = Memory_pass (Some continuity) in
-    let* material = snd (resolve_librarian_prompt pass input) in
-    let prompt = Keeper_lane_cli_oneshot.prompt_with_schema
-      ~requirement:(output_requirement_of_pass pass) ~prompt:material.rendered in
-    let* actual_chars = Runtime_codex_app_server.prompt_char_count prompt in
-    Ok (actual_chars <= capacity.capacity.max_chars))
+    (* Whether this range's Memory is already committed is read after the
+       fit, so either pass may run on the fitted range. The range fits only
+       when both requests fit: an operator override can make either prompt
+       the longer one. *)
+    let pass_fits pass =
+      let* material = snd (resolve_librarian_prompt pass input) in
+      let prompt = Keeper_lane_cli_oneshot.prompt_with_schema
+        ~requirement:(output_requirement_of_pass pass) ~prompt:material.rendered in
+      let* actual_chars = Runtime_codex_app_server.prompt_char_count prompt in
+      Ok (actual_chars <= capacity.capacity.max_chars)
+    in
+    let* memory_fits = pass_fits (Memory_pass (Some continuity)) in
+    if memory_fits then pass_fits (Continuity_state_pass continuity) else Ok false)
 ;;
 
 let exact_execution_error ~semantic_rejections error =

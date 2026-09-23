@@ -17,10 +17,12 @@ let goal_verification_lookup = "goal_verification.lookup"
    the operator layer, and so a code change cannot leave the instructions
    stale: [Anti_rationalization] supplies the data and picks the key, and holds
    no review prose of its own. *)
-let verification_lookup_none = "verification.lookup.none"
 let verification_lookup_producer_tree = "verification.lookup.producer_tree"
 let verification_lookup_root_layout_empty = "verification.lookup.root_layout_empty"
-let verification_lookup_root_layout_absent = "verification.lookup.root_layout_absent"
+
+let verification_lookup_producer_root_absent =
+  "verification.lookup.producer_root_absent"
+;;
 let verification_contract = "verification.contract"
 let verification_required_evidence = "verification.required_evidence"
 
@@ -80,6 +82,7 @@ let keeper_skills_unavailable_diagnostic = "keeper.skills.unavailable_diagnostic
 let librarian = "librarian"
 let librarian_continuity = "librarian.continuity"
 let librarian_working_context = "librarian.working_context"
+let librarian_working_contexts_rule = "librarian.working_contexts_rule"
 let workspace_memory_curator = "workspace_memory_curator"
 
 (* Runtime-owned instruction assets.  A caller may supply data to these

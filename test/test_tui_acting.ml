@@ -222,7 +222,7 @@ let test_turns_do_not_readmit_what_the_scope_hides () =
 
 (* Telemetry is a quiet member: it may refresh a chunk that exists, but a
    keeper the feed knows nothing else about must not gain a ghost
-   [turn ? | running] row from it (#32208, live capture 2026-09-01). *)
+   [turn | running] row from it (#32208, live capture 2026-09-01). *)
 let test_telemetry_alone_conjures_no_turn () =
   let events_oldest_first =
     [ agent_core ~kind:Observer.Telemetry "analyst" ]
@@ -611,7 +611,7 @@ let test_an_observation_leaves_the_ring_with_its_calls () =
   | chunks ->
       failf "alpha drew %d turns: %s" (List.length chunks)
         (String.concat ", "
-           (List.map (fun chunk -> Acting.turn_text chunk.Acting.ck_turn) chunks))
+           (List.map (fun chunk -> Acting.turn_label chunk.Acting.ck_turn) chunks))
 
 (* [turn] on an agent-core frame or a ledger call is the agent session's
    ordinal for the provider call, and [turn N] on this surface names a keeper
@@ -740,6 +740,17 @@ let test_keeper_rows_say_what_the_keeper_did () =
   check string "a settlement carries tokens, cost, and calls"
     "\xe2\x96\xa0 largo turn done | turn 2086 \xc2\xb7 in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None (settled "largo")));
+  (* A settle that carried no number drops the turn from the detail rather
+     than drawing [turn ?] there. Each part carries no separator of its own,
+     so the figures do not open with one when the turn is the missing part. *)
+  check string "an unnumbered settlement opens on its figures"
+    "\xe2\x96\xa0 largo turn done | in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
+    (text
+       (Acting.row_of_event ~at:100. ~duration_ms:None
+          (match settled "largo" with
+           | Observer.Keeper_turn_complete t ->
+               Observer.Keeper_turn_complete { t with Observer.tc_turn = None }
+           | other -> other)));
   check string "a heartbeat in a turn says how long it has been in it"
     "  bandleader heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None (heartbeat "bandleader")))
@@ -1107,7 +1118,7 @@ let test_a_new_keeper_turn_after_a_settle_opens_its_own_row () =
   in
   check (list string)
     "the new turn has no number yet; the settled one keeps its own"
-    [ "\xe2\x96\xb6 alpha turn ? | running"
+    [ "\xe2\x96\xb6 alpha turn | running"
     ; "\xe2\x96\xa0 alpha turn 7 | 1 call \xc2\xb7 in 10 out 2 \xc2\xb7 $0.0010"
     ]
     (List.map text
@@ -1136,11 +1147,14 @@ let test_a_restarted_session_keeps_each_call_on_its_own_keeper_turn () =
        (Acting.chunk_rows ~traces:[] (entries_of events_oldest_first)))
 
 (* With no observation at all -- a feed that opened on a call in flight --
-   the row says it does not know the keeper's number rather than borrowing
-   the session's. *)
+   the row names the event without a number rather than borrowing the
+   session's. It used to draw [turn ?]: on a live-only feed the settle that
+   carries the number is usually outside the held window, so that question
+   was the common reading, not the odd one, and no answer to it was ever
+   coming from this row. *)
 let test_without_an_observation_a_running_turn_has_no_number () =
-  check (list string) "turn ? while the number is unknown"
-    [ "\xe2\x96\xb6 analyst turn ? | running" ]
+  check (list string) "the row names the turn without inventing a number"
+    [ "\xe2\x96\xb6 analyst turn | running" ]
     (List.map text
        (Acting.chunk_rows ~traces:[]
           (entries_of [ agent_core ~kind:Observer.Turn_ready ~turn:7 "analyst" ])))

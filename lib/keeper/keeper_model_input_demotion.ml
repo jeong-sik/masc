@@ -76,9 +76,9 @@ let saturating_marker ~bytes =
     None
 ;;
 
-let plan ~measure_message_bytes ~demote_before messages =
+let plan ?(demote_from = 0) ~measure_message_bytes ~demote_before messages =
   let labelled, _atom_count = Runtime_model_input_tail_window.annotate messages in
-  if demote_before <= 0
+  if demote_before <= demote_from
   then { messages; pending = [] }
   else (
     let pending = ref [] in
@@ -89,7 +89,8 @@ let plan ~measure_message_bytes ~demote_before messages =
            let aged =
              match label with
              | Runtime_model_input_tail_window.Pinned -> false
-             | Runtime_model_input_tail_window.Atom index -> index < demote_before
+             | Runtime_model_input_tail_window.Atom index ->
+               demote_from <= index && index < demote_before
            in
            if not aged
            then message

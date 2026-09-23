@@ -1980,6 +1980,23 @@ val decode_tool_approval_mode_overrides :
     read through {!Keeper_tool_approval_mode.mode_of_string}; a word it does
     not know fails the read. *)
 
+(* The detail pane is where an operator reads the request whole. A row whose
+   input is an object draws it key by key; one whose input is not draws the
+   server's flattened preview under a label that says it is the flattened
+   preview, because sitting a possibly-truncated wall under "input" promised
+   a whole it never was. *)
+type gate_input_rows =
+  | Rows of (string * string) list
+      (** One field per key of the stored input object: the key is the label,
+          the value is what the producer stored -- strings whole, every other
+          value as compact JSON. The order is the producer's, because a
+          producer that leads with the field the operator reads is making a
+          statement the serializer must not rearrange. *)
+  | Flattened of string option
+      (** The server's flattened preview, with the fact that this input never
+          was an object. [None] means the server recorded no preview either;
+          the pane says so rather than drawing nothing. *)
+
 type gate_pending_phase =
   | Gate_queued
   | Gate_judging
@@ -2000,10 +2017,14 @@ type gate_pending = {
           the remote tool name read out of the stored input; otherwise the
           operation itself. *)
   gp_input_preview : string option;
-      (** What the row shows about the request. A [tool_execute] row shows the
-          command it would run, read out of the arguments the producer stored;
-          every other operation, and any shape this does not recognise, shows
-          the server's flattened preview. *)
+      (** The one-line summary the queue row and the approvals payload line
+          show. A [tool_execute] row leads with the command it would run;
+          every other operation keeps the server's flattened preview. *)
+  gp_input_rows : gate_input_rows;
+      (** The detail pane's copy of the input, uncut. [Rows] is one field per
+          key of the stored input object -- strings whole, other values as
+          compact JSON. [Flattened] says this input never was an object, so
+          the pane draws the server preview under a label that names it. *)
   gp_execution_cwd : string option;
       (** The working directory a [tool_execute] request would run in.
           [None] for operations that carry no execution context. *)

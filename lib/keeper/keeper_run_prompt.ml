@@ -111,9 +111,10 @@ let build_turn_context
   let ctx_work = ctx.Keeper_run_context.ctx_work in
   let session = ctx.Keeper_run_context.session in
   let shared_context = ctx.Keeper_run_context.shared_context in
-  (* 5. Build final turn system prompt via caller callback. *)
-  let { Keeper_agent_prompt_metrics.system_prompt = turn_system_prompt
-      ; dynamic_context
+  (* 5. The turn sends the run context's base prompt, direct or autonomous;
+     the caller's callback supplies only the dynamic context (#38354). *)
+  let turn_system_prompt = base_system_prompt in
+  let { Keeper_agent_prompt_metrics.dynamic_context
       ; dynamic_context_for_tools
       } =
     build_turn_prompt

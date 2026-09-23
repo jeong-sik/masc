@@ -1106,7 +1106,7 @@ let test_batch_preserves_original_user_history_once () =
       ~continuation_channel ~surface:(Masc.Surface_ref.Dashboard {session_id=None})
       ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
       ~conversation_id:None ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
-      ~user_row_origin:History.Needs_append |> ok in
+      ~sender_keeper:None ~user_row_origin:History.Needs_append |> ok in
     let ids = List.map (fun id -> Keeper_chat_operation.Operation_id.of_string id |> ok)
       ["batch-original-one"; "batch-original-two"] in
     List.iter2 (fun operation_id message ->

@@ -176,14 +176,13 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
   in
   loop 0
 
-let resolved_actor_for_args ?actor_hint (ctx : 'a context) args =
-  let payload_actor = get_string_opt args "actor" |> Option.map String.trim in
-  let hinted_actor = actor_hint |> Option.map String.trim in
-  Ok
-    (normalized_actor ~context_actor:ctx.agent_name
-       (match hinted_actor with
-       | Some actor when actor <> "" -> Some actor
-       | _ -> payload_actor))
+(* The actor is who the request authenticated as, never a name in its body:
+   a confirm compares it with the actor that staged the action, and a body
+   field would let any caller name the stager. HTTP passes the token-bound
+   actor as [actor_hint]; MCP's [ctx.agent_name] is bound to the session's
+   token. *)
+let resolved_actor ?actor_hint (ctx : 'a context) =
+  normalized_actor ~context_actor:ctx.agent_name actor_hint
 
 let action_request_of_args ?actor_hint (ctx : 'a context) args =
   let action_type =
@@ -193,7 +192,7 @@ let action_request_of_args ?actor_hint (ctx : 'a context) args =
   let raw_target_type =
     get_string args "target_type" "" |> String.trim |> String.lowercase_ascii
   in
-  let* actor = resolved_actor_for_args ?actor_hint ctx args in
+  let actor = resolved_actor ?actor_hint ctx in
   Ok
     {
       actor;

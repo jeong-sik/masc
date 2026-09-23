@@ -56,9 +56,21 @@ type source_read_failure =
       { actual_bytes : int
       ; max_bytes : int
       }
+  | Source_over_limit of { max_bytes : int }
+      (** Read inside a sandbox, which stops one byte past [max_bytes] and so
+          knows the source is larger without knowing by how much. *)
   | Source_io_failed of string
 
 val source_read_failure_to_string : source_read_failure -> string
+
+(** The command a source read runs on an endpoint-owned tree (microVM,
+    remote): at most [max_bytes] of [path], exiting
+    [endpoint_source_missing_exit] when the path does not exist and
+    [endpoint_source_not_regular_exit] when it is not a regular file. *)
+val endpoint_source_argv : path:string -> max_bytes:int -> string list
+
+val endpoint_source_missing_exit : int
+val endpoint_source_not_regular_exit : int
 
 type write_error =
   | Source_read_failed of source_read_failure

@@ -880,6 +880,37 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     (match_texts replacement_search)
 ;;
 
+(* An endpoint-owned tree (microVM, remote) is read by running this argv on
+   the endpoint. Running it here checks the shell text: the bytes, the byte
+   bound, and that absence and a non-file come back as exit statuses rather
+   than as stderr text to parse. *)
+let run_endpoint_source path ~max_bytes =
+  let argv = Masc.Keeper_memory_source_current.endpoint_source_argv ~path ~max_bytes in
+  let ic = Unix.open_process_args_in (List.hd argv) (Array.of_list argv) in
+  let out = In_channel.input_all ic in
+  (Unix.close_process_in ic, out)
+;;
+
+let test_endpoint_source_read_reports_by_exit_status () =
+  with_temp_dir
+  @@ fun dir ->
+  let file = Filename.concat dir "source.txt" in
+  Out_channel.with_open_bin file (fun oc -> output_string oc "authoritative value\n");
+  let exit_of code = Unix.WEXITED code in
+  let module S = Masc.Keeper_memory_source_current in
+  (match run_endpoint_source file ~max_bytes:64 with
+   | Unix.WEXITED 0, out -> Alcotest.(check string) "file bytes" "authoritative value\n" out
+   | _, out -> Alcotest.fail ("file read failed: " ^ out));
+  (match run_endpoint_source file ~max_bytes:5 with
+   | Unix.WEXITED 0, out -> Alcotest.(check string) "byte bound" "autho" out
+   | _, out -> Alcotest.fail ("bounded read failed: " ^ out));
+  Alcotest.(check bool) "missing path exits with the missing status" true
+    (fst (run_endpoint_source (Filename.concat dir "absent.txt") ~max_bytes:64)
+     = exit_of S.endpoint_source_missing_exit);
+  Alcotest.(check bool) "a directory exits with the not-regular status" true
+    (fst (run_endpoint_source dir ~max_bytes:64) = exit_of S.endpoint_source_not_regular_exit)
+;;
+
 let test_source_bound_write_is_not_gated_by_recall_size () =
   with_temp_dir
   @@ fun base_path ->
@@ -2793,6 +2824,10 @@ let () =
             "unreadable source path is the caller's to fix"
             `Quick
             test_unreadable_source_path_is_the_callers_to_fix
+        ; Alcotest.test_case
+            "endpoint source read reports absence by exit status"
+            `Quick
+            test_endpoint_source_read_reports_by_exit_status
         ] )
     ]
 ;;

@@ -48,6 +48,7 @@ type source_read_failure =
       { actual_bytes : int
       ; max_bytes : int
       }
+  | Source_over_limit of { max_bytes : int }
   | Source_io_failed of string
 
 let source_read_failure_to_string = function
@@ -59,6 +60,8 @@ let source_read_failure_to_string = function
       "source_path exceeds byte limit actual_bytes=%d max_bytes=%d"
       actual_bytes
       max_bytes
+  | Source_over_limit { max_bytes } ->
+    Printf.sprintf "source_path exceeds byte limit max_bytes=%d" max_bytes
   | Source_io_failed detail -> "source_path read failed: " ^ detail
 ;;
 
@@ -336,6 +339,61 @@ let read_for_keepers_dir ~keepers_dir ~keeper_id =
     Error (Printf.sprintf "source-bound memory read failed path=%s: %s" path message)
 ;;
 
+(* A microVM or remote Keeper writes its files on the endpoint, not on the
+   host, so a host stat of the resolved path always answered ENOENT: on
+   2026-09-17..23 every one of 86 microVM source_path writes failed and no
+   source-bound fact existed on any Keeper. The endpoint tree is read through
+   the same backend Read uses; a tree shared with the host (a Docker mount)
+   is read on the host as before.
+
+   The endpoint reports a missing path or a non-file by exit status, so the
+   caller's mistake (wrong path) stays apart from an endpoint that did not
+   answer without parsing its stderr. *)
+let endpoint_source_missing_exit = 3
+let endpoint_source_not_regular_exit = 4
+
+let endpoint_source_argv ~path ~max_bytes =
+  [ "sh"
+  ; "-c"
+  ; Printf.sprintf
+      {|if [ ! -e "$1" ]; then exit %d; fi; if [ ! -f "$1" ]; then exit %d; fi; exec head -c "$2" "$1"|}
+      endpoint_source_missing_exit
+      endpoint_source_not_regular_exit
+  ; "sh"
+  ; path
+  ; string_of_int max_bytes
+  ]
+;;
+
+let read_endpoint_source ~config ~meta ~resolved =
+  let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read () in
+  (* One byte past the limit tells an over-limit source from one exactly at it. *)
+  let fetch_bytes = max_source_bytes + 1 in
+  match Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path:resolved with
+  | Error detail -> Error (Source_io_failed detail)
+  | Ok path ->
+    (match
+       Keeper_sandbox_read_runner.run_command_with_status
+         ~ok_exit_codes:[ 0; endpoint_source_missing_exit; endpoint_source_not_regular_exit ]
+         ~config
+         ~meta
+         ~command_argv:(endpoint_source_argv ~path ~max_bytes:fetch_bytes)
+         ~max_bytes:fetch_bytes
+         ~timeout_sec
+         ()
+     with
+     | Error detail -> Error (Source_io_failed detail)
+     | Ok (Unix.WEXITED code, _) when code = endpoint_source_missing_exit ->
+       Error Source_missing
+     | Ok (Unix.WEXITED code, _) when code = endpoint_source_not_regular_exit ->
+       Error Source_not_a_regular_file
+     | Ok (Unix.WEXITED 0, content) when String.length content > max_source_bytes ->
+       Error (Source_over_limit { max_bytes = max_source_bytes })
+     | Ok (Unix.WEXITED 0, content) -> Ok content
+     | Ok ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _) ->
+       Error (Source_io_failed "endpoint source read ended outside its declared exits"))
+;;
+
 let read_source ~config ~meta ~source_path =
   match
     Keeper_tool_shared_runtime.resolve_keeper_read_path
@@ -345,6 +403,12 @@ let read_source ~config ~meta ~source_path =
   with
   | Error reason -> Error (Source_path_rejected reason)
   | Ok resolved ->
+  match
+    Keeper_types_profile_sandbox.tree_location_of_profile
+      meta.Keeper_meta_contract.sandbox_profile
+  with
+  | Keeper_types_profile_sandbox.Endpoint_owned -> read_endpoint_source ~config ~meta ~resolved
+  | Keeper_types_profile_sandbox.Shared_mount ->
   try
     let stats = Unix.stat resolved in
     if stats.st_kind <> Unix.S_REG

@@ -48,7 +48,8 @@ status: reference
     그 Keeper를 적는다. Keeper 자신의 세션은 Keeper 이름으로 접수되므로 그 행에서는
     이름을 되풀이하지 않는다(`client_acting_for`가 `keeper_name = name`이면 `None`).
     그런 행이 하나도 없으면 열 자체를 그리지 않는다(`clients_act_for_others`) — 빈 열이
-    행 끝 시계를 잘라 먹기 때문이다.
+    행 끝 시계를 잘라 먹기 때문이다. **그래서 열이 안 보이는 것은 결함이 아니라 정보이다
+    — 남을 대신하는 클라이언트가 없다는 뜻이다.**
   → [Tui_decode.client_row](../../lib/tui_decode.mli),
   [Masc_tui_types.client_acting_for](../../bin/masc_tui_types.ml)
 

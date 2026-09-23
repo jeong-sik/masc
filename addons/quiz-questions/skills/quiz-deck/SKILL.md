@@ -26,5 +26,8 @@ refuses any fact whose answer is not in words the record actually contains.
 
 ## What this does not prove
 The record hash is of your saved copy, not of the Board's stored bytes. The
-check establishes answer ⊂ quote ⊂ saved record, not that you picked the
-important facts.
+check establishes that the answer is a whole word of the quote and the quote is
+in the saved record. It does not catch a negation elsewhere in the quote
+("원인은 unmerged 가 아니라 merged"), and it does not show you picked the
+important facts. Quiz scores split by the answerer's own label, not by the
+authenticated requester.

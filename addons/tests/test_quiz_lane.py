@@ -196,7 +196,7 @@ class Grader(unittest.TestCase):
         score = next(r for r in results[3]["structuredContent"]["output"]["rows"]
                      if r["lane_id"] == "quiz/score")["fields"]
         self.assertEqual((score["answered"], score["correct"]), (2, 1))
-        self.assertEqual(score["by_answerer"], {"masc-tui": {"answered": 1, "correct": 0, "about_self": 0},
+        self.assertEqual(score["by_claimed_label"], {"masc-tui": {"answered": 1, "correct": 0, "about_self": 0},
                                                 "lane-smith": {"answered": 1, "correct": 1, "about_self": 0}})
 
     def test_answering_a_question_about_yourself_is_counted_apart(self):
@@ -210,8 +210,9 @@ class Grader(unittest.TestCase):
         self.assertEqual([g["fields"]["correct"] for g in grades], [True, True])
         score = next(r for r in rows if r["lane_id"] == "quiz/score")["fields"]
         self.assertEqual((score["answered"], score["correct"]), (2, 2))
-        self.assertEqual(score["excluding_about_answerer"], {"answered": 1, "correct": 1})
-        self.assertEqual(score["by_answerer"]["code-reviewer"]["about_self"], 1)
+        self.assertEqual(score["excluding_claimed_about_answerer"], {"answered": 1, "correct": 1})
+        self.assertEqual(score["answerer_basis"], "self_claimed_label")
+        self.assertEqual(score["by_claimed_label"]["code-reviewer"]["about_self"], 1)
 
     def test_answers_outside_the_question_are_refused_before_effect(self):
         foreign = ("lane_act", {"context": CONTEXT, "request_id": "r9", "action": {
@@ -242,6 +243,32 @@ class Grader(unittest.TestCase):
         results = run("quiz-grader", [self.observe(), other])
         self.assertEqual(results[1]["structuredContent"]["status"], "failed_before_effect")
         self.assertIn("different worker incarnation", results[1]["structuredContent"]["result"]["reason"])
+
+
+class BuildDeckTest(unittest.TestCase):
+    """The deck builder's entrance check (code-reviewer on #38433)."""
+
+    def build(self, quote, answer):
+        import importlib.util, tempfile
+        path = ADDONS / "quiz-questions" / "skills" / "quiz-deck" / "scripts" / "build_deck.py"
+        spec = importlib.util.spec_from_file_location("build_deck", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "record.txt").write_text(f"header\n{quote}\nfooter\n")
+            candidate = {"id": "f1", "field": "status", "subject": "s", "answer": answer,
+                         "quote": quote, "record": {"uri": "masc://board/p-x", "file": "record.txt"}}
+            deck, rejected = module.build([candidate], Path(tmp), "deck-test")
+        return [o["answer"] for o in deck["observations"]], rejected
+
+    def test_an_answer_inside_a_longer_word_is_refused(self):
+        accepted, rejected = self.build("status: unmerged", "merged")
+        self.assertEqual(accepted, [])
+        self.assertIn("whole word", rejected[0])
+
+    def test_a_whole_word_next_to_punctuation_or_a_particle_is_accepted(self):
+        self.assertEqual(self.build("status: merged.", "merged"), (["merged"], []))
+        self.assertEqual(self.build("code-reviewer가 맡았다", "code-reviewer"), (["code-reviewer"], []))
 
 
 if __name__ == "__main__":

@@ -65,6 +65,8 @@ def observe(binding: dict, sources: tuple[Source, ...]) -> dict:
         facts = [item for item in source.observations if item.get("kind") == "fact"]
         skipped_kinds = {str(item.get("kind", "untyped")) for item in source.observations
                          if item.get("kind") != "fact"}
+        # Fail-closed on purpose: one fact without a record refuses the whole observe,
+        # because the Keeper re-exports the deck and a partial deck would hide the gap.
         parsed = [(item, fact(item)) for item in facts]
         pool: dict[str, list[str]] = {}
         for _, value in parsed:

@@ -81,15 +81,19 @@ class Grader:
                  "observed_at": self.grades[-1]["observed_at"] if self.grades else time.time(),
                  "subject_id": "quiz/score", "clock": None, "actor": None,
                  "fields": {"answered": answered, "correct": correct,
-                            "excluding_about_answerer": {
+                            "excluding_claimed_about_answerer": {
                                 "answered": len(others),
                                 "correct": sum(row["fields"]["correct"] for row in others)},
-                            "by_answerer": self.by_answerer(),
+                            "by_claimed_label": self.by_claimed_label(),
+                            # Labels are what answerers wrote about themselves; the host keeps
+                            # the authenticated requester but does not pass it to the worker
+                            # (lane_addon_runtime.ml enqueue_action). Not a measurement of who.
+                            "answerer_basis": "self_claimed_label",
                             "scope": "this grader incarnation"},
                  "evidence": [], "related_ids": [row["id"] for row in self.grades]}
         return {"rows": [*self.grades, score], "coverage": self.coverage}
 
-    def by_answerer(self):
+    def by_claimed_label(self):
         table: dict[str, dict] = {}
         for row in self.grades:
             name = row["fields"]["answerer_claimed"] or "(unnamed)"

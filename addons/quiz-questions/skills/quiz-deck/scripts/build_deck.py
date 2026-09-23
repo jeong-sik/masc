@@ -7,8 +7,11 @@ Each candidate: {"id", "field", "subject", "answer", "quote",
                  "record": {"uri", "file"}}
 `file` names a text file in RECORD_DIR holding the record exactly as it was read
 (for Board: the masc_board_post_get text). A candidate is accepted only when
-  answer ⊂ quote ⊂ record bytes
-so the right answer is literally in the words the record says. The deck keeps
+  answer ⊂ quote ⊂ record bytes, with the answer a whole word of the quote
+so the right answer is literally in the words the record says. "Whole word"
+means the characters on both sides are not ASCII letters, digits, `-` or `_`:
+`merged` is refused inside `unmerged` but accepted in `merged.`, and a Hangul
+particle (`code-reviewer가`) does not count as part of the word. The deck keeps
 the record file's SHA-256; it does not claim that the file equals the Board's
 stored bytes, only that this capture was what the Keeper read.
 Rejected candidates are listed in the deck's `detail` and make it incomplete.
@@ -20,6 +23,19 @@ import json
 import sys
 import time
 from pathlib import Path
+
+
+def word_char(c: str) -> bool:
+    return c.isascii() and (c.isalnum() or c in "-_")
+
+
+def whole_word_in(answer: str, quote: str) -> bool:
+    # code-reviewer on #38433: a substring check let "merged" through from "unmerged",
+    # and the grader then marked the choice that contradicts the record as correct.
+    end = len(answer)
+    return any((at == 0 or not word_char(quote[at - 1]))
+               and (at + end == len(quote) or not word_char(quote[at + end]))
+               for at in range(len(quote)) if quote.startswith(answer, at))
 
 
 def build(candidates: list[dict], record_dir: Path, deck_id: str) -> tuple[dict, list[str]]:
@@ -34,8 +50,8 @@ def build(candidates: list[dict], record_dir: Path, deck_id: str) -> tuple[dict,
                 raise ValueError("empty quote or answer")
             if quote.encode() not in data:
                 raise ValueError("quote is not in the record")
-            if answer not in quote:
-                raise ValueError("answer is not in the quote")
+            if not whole_word_in(answer, quote):
+                raise ValueError("answer is not a whole word of the quote")
             facts.append({"id": ident, "kind": "fact", "observed_at": time.time(),
                           "actor": item.get("actor"), "field": item["field"],
                           "subject": item["subject"], "answer": answer, "quote": quote,

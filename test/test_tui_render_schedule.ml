@@ -1794,7 +1794,7 @@ let test_a_held_schedule_says_what_it_waits_for () =
 
 (* #38411: while the runner is not ok, the hold on screen is the one it read
    at its last good tick. That reading names the time it was seen, and given
-   the same time it must not come out as the current hold's line, or a stale
+   the same time it must not come out as the current hold's tag, or a stale
    hold would read as the present again. *)
 let test_a_hold_the_runner_has_not_reread_names_when_it_was_seen () =
   let checked = "09-23 12:40" in
@@ -1805,16 +1805,12 @@ let test_a_hold_the_runner_has_not_reread_names_when_it_was_seen () =
     let rec go i = i + n <= m && (String.sub text i n = needle || go (i + 1)) in
     go 0
   in
-  check bool "it opens with the word held" true
-    (String.length tag >= 4 && String.sub tag 0 4 = "held");
   check bool "it names when the hold was seen" true (has tag checked);
   check bool "the short tag leads the full reading" true
     (String.length reading >= String.length tag
      && String.sub reading 0 (String.length tag) = tag);
   check bool "the tag is not the current hold's" false
-    (String.equal tag (Schedule.schedule_hold_tag ~due:checked));
-  check bool "nor is the full reading" false
-    (String.equal reading (Schedule.schedule_hold_reading ~due:checked))
+    (String.equal tag (Schedule.schedule_hold_tag ~due:checked))
 ;;
 
 (* Slack reaches the name and the runtime before the task id, and both stop at

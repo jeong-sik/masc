@@ -1317,8 +1317,13 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
    no second screen. This is that screen. *)
 let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_row) buf =
   let width = max 8 (cols - 6) in
-  let fields =
-    match row with
+  (* The fields are handed to [Approval_detail.of_fields] as they are built,
+     not bound first: it is where every value is made terminal-safe, and the
+     field guard in test_tui_http_ast.ml reads a wire field as sanitised only
+     inside that call. *)
+  let lines =
+    Approval_detail.of_fields ~width
+      (match row with
     | Keeper_tool_row held ->
       [ "keeper", held.Tui_decode.kta_keeper
       ; "tool", held.Tui_decode.kta_tool
@@ -1340,8 +1345,7 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
           [ ( "reason"
             , Option.value
                 ~default:"(the server recorded no detail)"
-                pending.Tui_decode.gp_auto_judge_detail
-              |> Keeper_chat.terminal_safe_text ~preserve_newlines:true )
+                pending.Tui_decode.gp_auto_judge_detail )
           ; ( "next"
             , match pending.Tui_decode.gp_retry_request with
               | Some _ -> "R: retry Auto Judge; y/n: decide now"
@@ -1368,9 +1372,7 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
       @ (match pending.Tui_decode.gp_input_rows with
          | Tui_decode.Rows (_ :: _ as fields) ->
            List.map
-             (fun (key, value) ->
-               ( Terminal_text.single_line key
-               , Keeper_chat.terminal_safe_text ~preserve_newlines:true value ))
+             (fun (key, value) -> (Terminal_text.single_line key, value))
              fields
          | Tui_decode.Rows [] -> [ "input", "(the stored input object is empty)" ]
          | Tui_decode.Flattened preview ->
@@ -1385,9 +1387,8 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
       ; "summary", a.Masc_tui_operator_projection.ap_summary
       ; "payload",
         Yojson.Safe.pretty_to_string a.Masc_tui_operator_projection.ap_payload
-      ]
+      ])
   in
-  let lines = Approval_detail.of_fields ~width fields in
   box_top buf cols;
   (* Opens on MASC and its name, like every other surface; the way out is the
      footer's to say, and saying it here too spelled the same key twice in two

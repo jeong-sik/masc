@@ -116,6 +116,56 @@ let test_a_narrow_pane_still_produces_rows () =
   let lines = Detail.of_fields ~width:1 [ "args", "abc def" ] in
   check_bool "width 1 does not loop or vanish" true (lines <> [])
 
+(* The ask is a model's text. [kta_question] is "Run <tool> on <subject>?"
+   with the subject lifted from the command the model wrote, and a command
+   carrying ESC [ 1 A ESC [ 2 K moves the cursor up and clears the row the
+   operator already read. What is approved is what the store holds, so the
+   pane must print these bytes as inert text, never hand them to the
+   terminal. The summary is an operator ask's, and the label a wire key's. *)
+let cursor_up_and_erase = "\x1b[1A\x1b[2K"
+let csi_c1 = "\xc2\x9b"
+
+let has_control_byte text =
+  String.exists
+    (fun c ->
+      let code = Char.code c in
+      (code < 0x20 && c <> '\n') || code = 0x7f)
+    text
+
+let test_an_escape_in_a_field_never_reaches_the_terminal () =
+  let question = "Run Bash on echo ok" ^ cursor_up_and_erase ^ "rm -rf /?" in
+  let summary =
+    "namespace_pause on workspace" ^ csi_c1 ^ "2Kforged\nsecond line\x07"
+  in
+  let lines =
+    Detail.of_fields ~width:60
+      [ "question", question
+      ; "summary", summary
+      ; "key" ^ cursor_up_and_erase, "value"
+      ]
+  in
+  List.iter
+    (fun (line : Detail.line) ->
+      check_bool ("no control byte in row: " ^ String.escaped line.Detail.text)
+        false (has_control_byte line.Detail.text);
+      check_bool "no C1 CSI in row" false (contains line.Detail.text csi_c1);
+      Option.iter
+        (fun label ->
+          check_bool ("no control byte in label: " ^ String.escaped label)
+            false (has_control_byte label))
+        line.Detail.label)
+    lines;
+  let all = joined lines in
+  List.iter
+    (fun fragment ->
+      check_bool ("the words around the escape stay: " ^ fragment) true
+        (contains all fragment))
+    [ "echo ok"; "rm -rf /?"; "namespace_pause"; "2Kforged"; "second line" ];
+  check_bool "the value's own newline is still a row break" true
+    (List.exists
+       (fun (line : Detail.line) -> String.trim line.Detail.text = "second line")
+       lines)
+
 let () =
   Alcotest.run "tui_approval_detail"
     [ ( "the whole ask"
@@ -137,5 +187,7 @@ let () =
             test_a_long_line_wraps_rather_than_running_off
         ; Alcotest.test_case "a narrow pane still produces rows" `Quick
             test_a_narrow_pane_still_produces_rows
+        ; Alcotest.test_case "an escape in a field never reaches the terminal"
+            `Quick test_an_escape_in_a_field_never_reaches_the_terminal
         ] )
     ]

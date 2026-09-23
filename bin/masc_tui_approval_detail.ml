@@ -1,4 +1,5 @@
 module Message_layout = Masc_tui_message_layout
+module Keeper_chat = Masc_tui_keeper_chat_projection
 
 type line =
   { label : string option
@@ -39,6 +40,20 @@ let label_column_cells = 16
    label column, and a field that is present and empty has to draw a row that
    says so. *)
 let of_fields ~width fields =
+  (* Every value is a Keeper's, a model's or another operator's text, and this
+     is the one place a row of the pane is built, so it is the one place the
+     bytes are made safe to print. A value carrying ESC [ 1 A ESC [ 2 K would
+     otherwise move the cursor and rub out rows the operator already read, and
+     [y] would approve what the store holds rather than what the screen
+     showed. The newlines are kept -- they are how the ask was written -- and
+     a label is a single row, so it keeps none. *)
+  let fields =
+    List.map
+      (fun (label, value) ->
+        ( Keeper_chat.terminal_safe_text label
+        , Keeper_chat.terminal_safe_text ~preserve_newlines:true value ))
+      fields
+  in
   let label_cells =
     List.fold_left
       (fun widest (label, _) -> max widest (Message_layout.display_width label))

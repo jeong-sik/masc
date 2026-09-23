@@ -2397,6 +2397,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          it). It reads the stamp rather than drawing it, which is why it is a
          wrapper and not a [Terminal_text] call. *)
     ; "Masc_tui_wire_age.text"
+      (* Also a boundary: every label and value it is handed goes through
+         [Keeper_chat.terminal_safe_text] before a row is built, and its row
+         type is private, so nothing else can make one
+         (masc_tui_approval_detail.mli). Naming it exempts its whole argument,
+         which is what it sanitises. *)
+    ; "Approval_detail.of_fields"
     ]
   in
   let fixture_path = "test/fixtures/tui_terminal_text_ast_fixture.ml" in
@@ -2521,6 +2527,27 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      summary both moved into [approval_detail_line], and the guard follows
      the field rather than the surface's name. *)
   check_fields "approval_detail_line" [ "ap_summary" ];
+  (* The whole-ask screen draws what the list row cuts, and none of it was on
+     this list: a model's command reached the terminal through [kta_question]
+     with its escapes intact. Every field goes through [of_fields] now. *)
+  check_fields "approval_detail_pane"
+    [ "kta_keeper"
+    ; "kta_tool"
+    ; "kta_tool_call_id"
+    ; "kta_question"
+    ; "kta_args"
+    ; "gp_keeper"
+    ; "gp_display_tool"
+    ; "gp_operation"
+    ; "gp_auto_judge_detail"
+    ; "gp_id"
+    ; "gp_execution_sandbox"
+    ; "gp_execution_cwd"
+    ; "ap_actor"
+    ; "ap_action_type"
+    ; "ap_target_type"
+    ; "ap_summary"
+    ];
   check_fields "render_approvals"
     [ "aps_actor_filter"
     ; "approvals_error"

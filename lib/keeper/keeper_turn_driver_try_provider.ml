@@ -236,6 +236,33 @@ let working_state_text (snapshot : Librarian_continuity_snapshot.t) =
   ^ snapshot.working_state
 ;;
 
+(* Why the request did not start at a saved snapshot. [Not_saved] and
+   [Does_not_fit] are the history moving on, [Unusable] names a file to fix
+   ([continuity_for_request] warns on it). The texts are for the log line
+   alone; nothing branches on them. *)
+type snapshot_passed_over =
+  | Not_saved
+  | Does_not_fit of { why : string }
+  | Unusable of { why : string }
+
+(* What the Librarian's durable position said once no snapshot was used. *)
+type progress_reading =
+  | Progress_unreadable of { detail : string }
+  | No_place_in_history
+  | At_position of { end_atom : int }
+
+type continuity_account =
+  | Snapshot_fits
+  | Snapshot_passed_over of
+      { snapshot : snapshot_passed_over
+      ; progress : progress_reading
+      }
+
+let snapshot_passed_over_reason = function
+  | Not_saved -> "no continuity snapshot is saved"
+  | Does_not_fit { why } | Unusable { why } -> why
+;;
+
 (* Where a request starts, from what the keeper's files say (RFC
    keeper-context-window-in-tokens §13.4, §13.6): a snapshot that fits this
    history, else the Librarian's durable position when it is a place in this
@@ -248,53 +275,39 @@ let working_state_text (snapshot : Librarian_continuity_snapshot.t) =
    turn also ran no Librarian round, so a snapshot whose covered bytes changed
    was never written again. A snapshot file or a boundary log that cannot be
    read stops the Librarian's continuity pass as well, so those stay until the
-   file is fixed; they are warnings because each names a file to fix rather
-   than a history that moved on. A covered prefix or a read position that
-   changes while the request is in flight is still refused, by
-   [validate_continuity].
+   file is fixed. A covered prefix or a read position that changes while the
+   request is in flight is still refused, by [validate_continuity].
+
+   The decision writes nothing and logs nothing: the turn logs its account
+   ([continuity_for_request]), and the next-request forecast, which the TUI
+   asks for often, takes the same decision silently.
 
    [lines] is read only when a snapshot is saved. *)
-let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~progress =
-  let absorbed_or_turn_start ~why =
-    let absorbed =
+let choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress =
+  let absorbed_or_turn_start passed_over =
+    let reading, continuity =
       match progress () with
-      | Ok (Some progress) -> absorbed_history ~trace_id ~messages progress
-      | Ok None -> None
-      | Error detail ->
-        Log.Keeper.warn ~keeper_name
-          "Librarian progress unreadable while no continuity snapshot fits (%s): %s"
-          why detail;
-        None
+      | Error detail -> Progress_unreadable { detail }, Without_snapshot
+      | Ok None -> No_place_in_history, Without_snapshot
+      | Ok (Some progress) ->
+        (match absorbed_history ~trace_id ~messages progress with
+         | Some (end_atom, continuity) -> At_position { end_atom }, continuity
+         | None -> No_place_in_history, Without_snapshot)
     in
-    match absorbed with
-    | Some (end_atom, continuity) ->
-      Log.Keeper.info ~keeper_name
-        "no Librarian continuity snapshot fits the current history (%s); starting at the Librarian's position, atom %d"
-        why end_atom;
-      continuity
-    | None ->
-      Log.Keeper.info ~keeper_name
-        "no Librarian continuity snapshot fits the current history (%s); the request starts at this turn's own boundary"
-        why;
-      Without_snapshot
-  in
-  let unusable ~why =
-    Log.Keeper.warn ~keeper_name
-      "Librarian continuity snapshot cannot be used (%s); the request starts without it"
-      why;
-    absorbed_or_turn_start ~why
+    continuity, Snapshot_passed_over { snapshot = passed_over; progress = reading }
   in
   match snapshot with
-  | Error detail -> unusable ~why:("snapshot unreadable: " ^ detail)
-  | Ok None -> absorbed_or_turn_start ~why:"no continuity snapshot is saved"
+  | Error detail -> absorbed_or_turn_start (Unusable { why = "snapshot unreadable: " ^ detail })
+  | Ok None -> absorbed_or_turn_start Not_saved
   | Ok (Some snapshot) ->
     (match lines () with
-     | Error detail -> unusable ~why:("turn boundaries unreadable: " ^ detail)
+     | Error detail ->
+       absorbed_or_turn_start (Unusable { why = "turn boundaries unreadable: " ^ detail })
      | Ok lines ->
        (match prepare_continuity ~trace_id ~lines ~messages snapshot with
         | Ok restored ->
           (match snapshot.Librarian_continuity_snapshot.catch_up_end_atom with
-           | None -> restored
+           | None -> restored, Snapshot_fits
            | Some target ->
              (* A rewrite from atom 0 that fits but has not reached where a
                 request starts without it, as of the Librarian's last round:
@@ -302,9 +315,12 @@ let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~pr
                 after its end again. Checked after the fit, so a snapshot
                 that also stopped fitting is logged as not fitting. *)
              absorbed_or_turn_start
-               ~why:(Printf.sprintf
-                       "the snapshot is being rewritten from atom 0 and ends at atom %d, short of %d"
-                       snapshot.Librarian_continuity_snapshot.end_atom target))
+               (Does_not_fit
+                  { why =
+                      Printf.sprintf
+                        "the snapshot is being rewritten from atom 0 and ends at atom %d, short of %d"
+                        snapshot.Librarian_continuity_snapshot.end_atom target
+                  }))
         | Error
             ((Librarian_continuity_snapshot.Trace_mismatch
              | Librarian_continuity_snapshot.History_changed
@@ -314,14 +330,50 @@ let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~pr
              position may still fit: goo-yang-bong's did on 2026-09-22 while
              its snapshot did not, and the keeper sent its 12,720 atoms,
              16.4 MB, 44 cycles in a row until the position was used. *)
-          absorbed_or_turn_start ~why:(Librarian_continuity_snapshot.error_to_string mismatch)
+          absorbed_or_turn_start
+            (Does_not_fit { why = Librarian_continuity_snapshot.error_to_string mismatch })
         | Error
             ((Librarian_continuity_snapshot.Prefix_changed
              | Librarian_continuity_snapshot.Invalid_snapshot _
              | Librarian_continuity_snapshot.Range_stopped _
              | Librarian_continuity_snapshot.Read_failed _
              | Librarian_continuity_snapshot.Write_failed _) as error) ->
-          unusable ~why:(Librarian_continuity_snapshot.error_to_string error)))
+          absorbed_or_turn_start
+            (Unusable { why = Librarian_continuity_snapshot.error_to_string error })))
+;;
+
+let log_continuity_account ~keeper_name = function
+  | Snapshot_fits -> ()
+  | Snapshot_passed_over { snapshot; progress } ->
+    let why = snapshot_passed_over_reason snapshot in
+    (match snapshot with
+     | Unusable _ ->
+       Log.Keeper.warn ~keeper_name
+         "Librarian continuity snapshot cannot be used (%s); the request starts without it"
+         why
+     | Not_saved | Does_not_fit _ -> ());
+    (match progress with
+     | Progress_unreadable { detail } ->
+       Log.Keeper.warn ~keeper_name
+         "Librarian progress unreadable while no continuity snapshot fits (%s): %s"
+         why detail;
+       Log.Keeper.info ~keeper_name
+         "no Librarian continuity snapshot fits the current history (%s); the request starts at this turn's own boundary"
+         why
+     | No_place_in_history ->
+       Log.Keeper.info ~keeper_name
+         "no Librarian continuity snapshot fits the current history (%s); the request starts at this turn's own boundary"
+         why
+     | At_position { end_atom } ->
+       Log.Keeper.info ~keeper_name
+         "no Librarian continuity snapshot fits the current history (%s); starting at the Librarian's position, atom %d"
+         why end_atom)
+;;
+
+let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~progress =
+  let continuity, account = choose_continuity ~trace_id ~messages ~snapshot ~lines ~progress in
+  log_continuity_account ~keeper_name account;
+  continuity
 ;;
 
 (** Explicit context record for the extracted [try_provider] function.
@@ -2978,7 +3030,6 @@ module For_testing = struct
   let evict_at_turn_boundary = evict_at_turn_boundary
   let halve_front = halve_front
   let message_measurement_hash = Agent_core.Types.Message_value.hash
-  let compose_carried_model_input = compose_carried_model_input
   let request_view = request_view
   let current_turn_demotion = current_turn_demotion
   let offload_model_input_cpu = offload_model_input_cpu

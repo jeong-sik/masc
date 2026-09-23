@@ -1,9 +1,12 @@
 (* Keeper_next_request_forecast — what the next Agent Core request would
    carry, computed from the same values a turn uses, without a turn.
 
-   The arithmetic is the turn driver's (RFC keeper-context-window-in-tokens
-   §10.4): the carried range from the pair's front, over the durable history
-   with the wake line appended as the newest atom. The front, the marks and
+   The range is the turn driver's own composition
+   ([Keeper_turn_driver_try_provider.compose_carried_model_input], RFC
+   keeper-context-window-in-tokens §10.4, §13.6), run over the durable
+   history with the wake line appended as the newest atom: the Librarian
+   continuity the turn would choose first, then the pair's front, then the
+   turn start. The continuity, the front, the marks and
    the request-body cap are read live; R (tool schemas + keeper
    instructions) and the pinned blocks (memory recall, dynamic context, ...)
    are taken from the turn records of completed turns on the same runtime,
@@ -79,6 +82,7 @@ type carried =
   ; kept_atoms : int
   ; transmitted_bytes : int
   ; preamble_bytes : int option
+  ; working_state_bytes : int option
   ; origin : Keeper_carried_front.origin
   ; counted_tokens : int option
   }
@@ -87,6 +91,7 @@ type slot =
   | System_prompt of { bytes : int }
   | Tools of { bytes : int }
   | Preamble of { bytes : int }
+  | Working_state of { bytes : int }
   | History of { atoms : int; of_atoms : int; bytes : int }
   | Wake_line of { bytes : int }
   | System_context of { bytes : int; blocks : (Prompt_block_id.t * int) list }
@@ -140,61 +145,58 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let carry ~measure ~front ~turn_start ~counted_tokens messages =
-  let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
-  let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
-  let first_atom, origin, counted_tokens =
-    match Option.map (Keeper_carried_front.for_history ~digest_at) front with
-    | Some (Ok (seed : Keeper_carried_front.seed)) ->
-      ( Keeper_carried_front.clamp ~atom_count seed.first_atom
-      , Keeper_carried_front.Carried seed.source
-      , counted_tokens )
-    | Some (Error (Keeper_carried_front.Front_atom_missing | Keeper_carried_front.Front_message_differs))
-    | None ->
-      (* No front: this turn's own atoms, from the end of the last completed
-         turn on this history (RFC keeper-context-window-in-tokens §13.4);
-         the newest atom alone when that boundary could not be read. *)
-      (match turn_start with
-       | Keeper_carried_front.Turn_boundary { end_atom } ->
-         ( Keeper_carried_front.clamp ~atom_count end_atom
-         , Keeper_carried_front.Turn_start { end_atom }
-         , None )
-       | Keeper_carried_front.Turn_boundary_unknown { reason } ->
-         ( Keeper_carried_front.newest_atom ~atom_count
-         , Keeper_carried_front.Turn_start_unknown { reason }
-         , None ))
-  in
-  let projection, transmitted_bytes =
-    Runtime_model_input_tail_window.project_from_atom
+(* The range is the one [compose_carried_model_input] composes for a
+   request: the forecast keeps no selection of its own. Nothing is demoted
+   ([demote_before] 0), so the bytes are the history's own. The preamble and
+   the working state are in the projected list only when the composition put
+   them there; each is measured with the same encoder so it can be taken
+   back out of [transmitted_bytes]. The ledger's count describes the range
+   its front opened, so it rides along only when the composition carried
+   that front. *)
+let carry ~measure ?continuity ~front ~turn_start ~counted_tokens messages =
+  let composed =
+    Keeper_turn_driver_try_provider.compose_carried_model_input
+      ?continuity
       ~measure_message_bytes:measure
-      ~first_atom
+      ~front
+      ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+      ~current_turn_results:Keeper_turn_driver_try_provider.Current_turn_verbatim
+      ~base_path:""
+      ~demote_before:0
+      ~turn_boundary:turn_start
       messages
   in
-  (* The preamble is in the projected list only when the range opens on a
-     message that cannot open a conversation; measured with the same encoder
-     so it can be taken back out of [transmitted_bytes]. *)
-  let preamble_bytes =
+  let projection = composed.Keeper_turn_driver_try_provider.projection in
+  let measured_if predicate =
     List.find_map
-      (fun message ->
-        if Runtime_model_input_tail_window.is_synthetic_preamble message
-        then Some (measure message)
-        else None)
+      (fun message -> if predicate message then Some (measure message) else None)
       projection.Runtime_model_input_tail_window.messages
+  in
+  let counted_tokens =
+    match composed.Keeper_turn_driver_try_provider.origin with
+    | Keeper_carried_front.Carried _ -> counted_tokens
+    | Keeper_carried_front.Librarian_snapshot _
+    | Keeper_carried_front.Librarian_progress _
+    | Keeper_carried_front.Turn_start _
+    | Keeper_carried_front.Turn_start_unknown _ -> None
   in
   { first_atom = projection.Runtime_model_input_tail_window.dropped_atoms
   ; kept_atoms =
       projection.Runtime_model_input_tail_window.atom_count
       - projection.Runtime_model_input_tail_window.dropped_atoms
-  ; transmitted_bytes
-  ; preamble_bytes
-  ; origin
+  ; transmitted_bytes = composed.Keeper_turn_driver_try_provider.transmitted_bytes
+  ; preamble_bytes = measured_if Runtime_model_input_tail_window.is_synthetic_preamble
+  ; working_state_bytes = measured_if Runtime_model_input_tail_window.is_working_state
+  ; origin = composed.Keeper_turn_driver_try_provider.origin
   ; counted_tokens
   }
 ;;
 
 (* The request in travel order. The system prompt and the tool array are
    request fields beside the messages; among the messages the preamble comes
-   first when the range prepended one, then the carried atoms oldest first,
+   first when the range prepended one, then the Librarian working state when
+   a fitting snapshot stands in for the atoms before the range, then the
+   carried atoms oldest first,
    then the wake line as the newest atom, and last the "[system context]"
    message [Agent_turn.prepare_messages] appends so the conversation prefix
    stays byte-identical for provider caches. The wake line is the newest of
@@ -206,14 +208,21 @@ let assembly ~wake_bytes ~history_atoms (parts : measured_parts) (carried : carr
     | Some bytes -> Some (Preamble { bytes }), bytes
     | None -> None, 0
   in
+  let working_state, working_state_bytes =
+    match carried.working_state_bytes with
+    | Some bytes -> Some (Working_state { bytes }), bytes
+    | None -> None, 0
+  in
   [ Some (System_prompt { bytes = parts.instructions_bytes })
   ; Some (Tools { bytes = parts.schemas_bytes })
   ; preamble
+  ; working_state
   ; Some
       (History
          { atoms = carried.kept_atoms - 1
          ; of_atoms = history_atoms - 1
-         ; bytes = carried.transmitted_bytes - preamble_bytes - wake_bytes
+         ; bytes =
+             carried.transmitted_bytes - preamble_bytes - working_state_bytes - wake_bytes
          })
   ; Some (Wake_line { bytes = wake_bytes })
   ; Some (System_context { bytes = parts.pinned_bytes; blocks = parts.pinned_blocks })
@@ -399,6 +408,7 @@ let candidate
       ~records_read
       ~seed
       ~turn_start
+      ~continuity
       ~place
       runtime_id
   =
@@ -418,20 +428,27 @@ let candidate
          here and dropped by the turn driver's next composition. *)
       let front, counted_tokens =
         match
+          Keeper_turn_driver_try_provider.continuity_choice continuity,
           Keeper_model_input_ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:trace_id
         with
-        | Some ledger when Keeper_model_input_ledger.holds ~digest_at ledger ->
+        (* A Librarian point replaces the front, as it does on the turn;
+           neither the ledger nor the seed is read for it. *)
+        | Keeper_turn_driver_try_provider.Chose_a_librarian_point, _ -> None, None
+        | Keeper_turn_driver_try_provider.Chose_no_point, Some ledger
+          when Keeper_model_input_ledger.holds ~digest_at ledger ->
           let projected =
             match marks with
             | None -> ledger
             | Some marks -> fst (Keeper_carried_range.apply_turn_boundary ~marks ledger)
           in
           Keeper_carried_front.of_ledger projected, ledger.Keeper_model_input_ledger.total_tokens
-        | Some _ | None -> Lazy.force seed, None
+        | Keeper_turn_driver_try_provider.Chose_no_point, (Some _ | None) ->
+          Lazy.force seed, None
       in
       Some
         (carry
            ~measure:(Keeper_context_core.message_measurer ())
+           ~continuity
            ~front
            ~turn_start
            ~counted_tokens
@@ -484,6 +501,21 @@ let forecast ~config ~keeper_name =
          Keeper_turn_driver_try_provider.turn_start
            ~config ~keeper_name ~trace_id ~messages:history
        in
+       (* The Librarian continuity the next turn would start from, chosen
+          once for every candidate as the turn chooses it once for every
+          lane. Silent: the turn logs its own choice, and the TUI asks for
+          this forecast often. *)
+       let continuity, (_ : Keeper_turn_driver_try_provider.continuity_account) =
+         let keepers_dir = Workspace.keepers_runtime_dir config in
+         Keeper_turn_driver_try_provider.choose_continuity
+           ~trace_id
+           ~messages:history
+           ~snapshot:(Keeper_librarian_continuity.read ~config ~keeper_name)
+           ~lines:(fun () -> Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:keeper_name)
+           ~progress:(fun () ->
+             Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name
+             |> Result.map_error Keeper_librarian_progress.read_error_to_string)
+       in
        (* Stdlib lazy: private to this synchronous candidate walk, never
           shared across fibers. A valid warm ledger needs no store scan;
           cold candidates share the one read when they need it. *)
@@ -508,6 +540,7 @@ let forecast ~config ~keeper_name =
                     ~records_read
                     ~seed
                     ~turn_start
+                    ~continuity
                     ~place:
                       { walks_at
                       ; declared_at = declared_at ~declared runtime_id
@@ -543,6 +576,8 @@ let slot_to_json = function
   | System_prompt { bytes } -> `Assoc [ "slot", `String "system_prompt"; "bytes", `Int bytes ]
   | Tools { bytes } -> `Assoc [ "slot", `String "tools"; "bytes", `Int bytes ]
   | Preamble { bytes } -> `Assoc [ "slot", `String "preamble"; "bytes", `Int bytes ]
+  | Working_state { bytes } ->
+    `Assoc [ "slot", `String "working_state"; "bytes", `Int bytes ]
   | History { atoms; of_atoms; bytes } ->
     `Assoc
       [ "slot", `String "history"
@@ -562,6 +597,7 @@ let carried_to_json (carried : carried) =
     ; "kept_atoms", `Int carried.kept_atoms
     ; "transmitted_bytes", `Int carried.transmitted_bytes
     ; "preamble_bytes", option_json (fun n -> `Int n) carried.preamble_bytes
+    ; "working_state_bytes", option_json (fun n -> `Int n) carried.working_state_bytes
     ; "origin", Keeper_carried_front.origin_to_json carried.origin
     ; "counted_tokens", option_json (fun n -> `Int n) carried.counted_tokens
     ]
@@ -630,7 +666,7 @@ let walk_to_json (walk : walk) =
 
 let to_json forecast =
   `Assoc
-    [ "schema", `String "masc.keeper.next-request-forecast.v5"
+    [ "schema", `String "masc.keeper.next-request-forecast.v6"
     ; "keeper", `String forecast.keeper
     ; "trace_id", `String forecast.trace_id
     ; "checkpoint_messages", `Int forecast.checkpoint_messages

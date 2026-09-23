@@ -1,9 +1,14 @@
 (** Keeper_next_request_forecast — what the next Agent Core request would
     carry, computed from the same values a turn uses, without a turn.
 
-    RFC keeper-context-window-in-tokens §10.4, run forward: the carried
-    range from the pair's front over the durable checkpoint with the
-    autonomous wake line appended as the newest atom. A valid pair ledger
+    RFC keeper-context-window-in-tokens §10.4, run forward: the range
+    {!Keeper_turn_driver_try_provider.compose_carried_model_input} composes
+    over the durable checkpoint with the autonomous wake line appended as
+    the newest atom. The Librarian continuity comes first, chosen as the
+    turn chooses it ({!Keeper_turn_driver_try_provider.choose_continuity}):
+    a fitting snapshot opens the range at its end with its working state
+    prepended, and the Librarian's read position opens it there. With no
+    Librarian point, the pair's front. A valid pair ledger
     is projected through the same high/low-water decision the driver applies
     at the next turn boundary; this calculation leaves the observed ledger
     unchanged. [counted_tokens] remains its last measured total, not the
@@ -76,6 +81,12 @@ type carried =
             when the oldest carried atom is not a user message, as the same
             encoder counts it; [None] when none rides. Part of
             [transmitted_bytes]. *)
+  ; working_state_bytes : int option
+        (** The Librarian working state the range carries in place of the
+            atoms a fitting snapshot covers
+            ({!Keeper_turn_driver_try_provider.working_state_text}), as the
+            same encoder counts it; [None] when the range does not open at a
+            snapshot. Part of [transmitted_bytes]. *)
   ; origin : Keeper_carried_front.origin
   ; counted_tokens : int option
         (** The ledger's measured total for its last sample, a request
@@ -85,7 +96,8 @@ type carried =
 
 (** One piece of the request in the position it travels. The order is the
     turn's: the system prompt and the tool array ride beside the messages;
-    the messages are the preamble when the range prepended one, the carried
+    the messages are the preamble when the range prepended one, the
+    Librarian working state when a snapshot opens the range, the carried
     history oldest first, the wake line, and last the ["[system context]"]
     message that {!Agent_core.Agent_turn.prepare_messages} appends so the
     conversation prefix stays byte-identical for provider caches. *)
@@ -93,10 +105,11 @@ type slot =
   | System_prompt of { bytes : int }
   | Tools of { bytes : int }
   | Preamble of { bytes : int }
+  | Working_state of { bytes : int }
   | History of { atoms : int; of_atoms : int; bytes : int }
       (** [atoms] carried of [of_atoms] in the checkpoint, the wake line
           not counted on either side; [bytes] is what the range transmits
-          less the preamble and the wake line. *)
+          less the preamble, the working state and the wake line. *)
   | Wake_line of { bytes : int }
   | System_context of { bytes : int; blocks : (Prompt_block_id.t * int) list }
       (** [blocks] in the order the assembly concatenates them. *)
@@ -168,17 +181,20 @@ val declared_at : declared:string list -> string -> int option
 
 val carry
   :  measure:(Agent_core.Types.message -> int)
+  -> ?continuity:Keeper_turn_driver_try_provider.continuity
   -> front:Keeper_carried_front.seed option
   -> turn_start:Keeper_carried_front.turn_start
   -> counted_tokens:int option
   -> Agent_core.Types.message list
   -> carried
-(** The pure arithmetic, for tests: {!Runtime_model_input_tail_window.project_from_atom}
-    from the seeded front, once {!Keeper_carried_front.for_history} admits it
-    against this history (the index opens with the seed's message); without
-    one, or with one it drops, from [turn_start]: the end of the last
-    completed turn on this history (RFC keeper-context-window-in-tokens
-    §13.4), or the newest atom alone when that boundary is unknown. *)
+(** The range {!Keeper_turn_driver_try_provider.compose_carried_model_input}
+    composes, read as the forecast reports it, with nothing demoted: a
+    [continuity] with a Librarian point opens it there; without one the
+    seeded front, once {!Keeper_carried_front.for_history} admits it against
+    this history; without that [turn_start]: the end of the last completed
+    turn on this history (RFC keeper-context-window-in-tokens §13.4), or the
+    newest atom alone when that boundary is unknown. [counted_tokens] rides
+    along only when the range opened at [front]. *)
 
 
 type composition =

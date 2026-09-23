@@ -2223,7 +2223,7 @@ let seed_read_of records =
 (* What the Agent Core path composes for the same front, so the assertion is
    "the same range", not "this many atoms". *)
 let agent_core_range ?(turn_start = 0) ~front messages =
-  (Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
+  (Keeper_turn_driver_try_provider.compose_carried_model_input
      ~measure_message_bytes:(Keeper_context_core.message_measurer ())
      ~front
      ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)

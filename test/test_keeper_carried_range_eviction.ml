@@ -469,7 +469,7 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
         in
         if Option.is_some stale then incr dropped;
         let composed =
-          Try_provider.For_testing.compose_carried_model_input
+          Try_provider.compose_carried_model_input
             ~measure_message_bytes:(fun _ -> 1)
             ~front
             ~history_digest_at:digest_at
@@ -560,7 +560,7 @@ let test_a_refused_front_survives_candidate_changes ?(fallback_atoms = 16) ~bloc
               ~after_refusal:!held ~cold:(fun () -> None)
           in
           let composed =
-            Try_provider.For_testing.compose_carried_model_input
+            Try_provider.compose_carried_model_input
               ~measure_message_bytes:(fun _ -> 1) ~front
               ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim
               ~base_path:"" ~demote_before:0 ~turn_boundary:(Front.Turn_boundary { end_atom = 0 }) history
@@ -720,7 +720,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
               ~after_refusal:!held ~cold:(fun () -> None)
           in
           let composed =
-            Try_provider.For_testing.compose_carried_model_input
+            Try_provider.compose_carried_model_input
               ?continuity ~measure_message_bytes:(fun _ -> 1) ~front
               ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim ~base_path:""
               ~demote_before:boundary

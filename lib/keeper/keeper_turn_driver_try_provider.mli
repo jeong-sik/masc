@@ -156,6 +156,54 @@ val working_state_text : Librarian_continuity_snapshot.t -> string
     context, not new instructions. Every lane that carries a working state
     sends this text. *)
 
+(** Why a request did not start at a saved snapshot. The texts are for the
+    log line alone. *)
+type snapshot_passed_over =
+  | Not_saved
+  | Does_not_fit of { why : string }
+      (** The history moved on from the snapshot, or a rewrite from atom 0
+          has not reached its catch-up target yet. *)
+  | Unusable of { why : string }
+      (** The snapshot or the boundary log cannot be read, or the snapshot
+          cannot be checked against the history: a file to fix. *)
+
+(** What the Librarian's durable position said once no snapshot was used. *)
+type progress_reading =
+  | Progress_unreadable of { detail : string }
+  | No_place_in_history
+      (** No position is saved, or it is no place in this history
+          ({!absorbed_history}). *)
+  | At_position of { end_atom : int }
+
+(** How {!choose_continuity} arrived at its answer, for the log. *)
+type continuity_account =
+  | Snapshot_fits
+  | Snapshot_passed_over of
+      { snapshot : snapshot_passed_over
+      ; progress : progress_reading
+      }
+
+val choose_continuity :
+  trace_id:string ->
+  messages:Agent_core.Types.message list ->
+  snapshot:(Librarian_continuity_snapshot.t option, string) result ->
+  lines:
+    (unit ->
+     ((int * (Keeper_turn_boundaries.record, Keeper_turn_boundaries.read_error) result) list,
+      string)
+     result) ->
+  progress:(unit -> (Keeper_librarian_progress.t option, string) result) ->
+  continuity * continuity_account
+(** The decision {!continuity_for_request} logs, taken without a log line or
+    a write: the next-request forecast, which the TUI asks for often, takes
+    it silently so its range is the one the next turn composes. *)
+
+val log_continuity_account : keeper_name:string -> continuity_account -> unit
+(** The turn's log lines for an account: a warning for an {!Unusable}
+    snapshot and for an unreadable position, and one line saying where the
+    request starts whenever no snapshot was used. Nothing for
+    {!Snapshot_fits}. *)
+
 val continuity_for_request :
   keeper_name:string ->
   trace_id:string ->
@@ -183,7 +231,8 @@ val continuity_for_request :
     ([Librarian_continuity_snapshot.t.catch_up_end_atom]); until then the
     request starts as it would with no snapshot, so the rewrite never moves
     the start back.
-    [lines] is read only when a snapshot is saved. *)
+    [lines] is read only when a snapshot is saved.
+    {!choose_continuity} followed by {!log_continuity_account}. *)
 
 type try_provider_ctx =
   { runtime_id : string
@@ -591,12 +640,33 @@ type composed =
         (** The boundary the demotion applied: 0 when demotion is off, the
             refused request's atom count under {!Current_turn_demoted}. *)
   }
-(** One request as {!For_testing.compose_carried_model_input} composes it
+(** One request as {!compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
     atoms older than [demote_before], joined under {!Current_turn_demoted} by
     this turn's atoms up to the refused request's end, then the carried range from [front], or from
     [turn_boundary] without one (§13.4). Nothing here measures the
     request against a limit. *)
+
+val compose_carried_model_input :
+  ?input_policy:Keeper_input_policy.t ->
+  ?continuity:continuity ->
+  measure_message_bytes:(Agent_core.Types.message -> int) ->
+  front:Keeper_carried_front.seed option ->
+  history_digest_at:(int -> string option) ->
+  current_turn_results:current_turn_results ->
+  base_path:string ->
+  demote_before:int ->
+  turn_boundary:Keeper_carried_front.turn_start ->
+  Agent_core.Types.message list ->
+  composed
+(** The range selection every Agent Core request goes through, and the one
+    the next-request forecast runs forward
+    ({!Keeper_next_request_forecast.carry}): a [continuity] with a Librarian
+    point opens the range there, a fitting snapshot's working state
+    prepended ({!working_state_text}); without one, [front] once
+    {!Keeper_carried_front.for_history} admits it; without that,
+    [turn_boundary]. Pure: it reads no file and logs nothing. An empty
+    [base_path] demotes nothing. *)
 
 type request_view =
   { composed : composed
@@ -677,19 +747,6 @@ module For_testing : sig
     (Agent_core.Types.message -> int) -> Agent_core.Types.message -> int
 
   val message_measurement_hash : Agent_core.Types.message -> int
-
-  val compose_carried_model_input :
-    ?input_policy:Keeper_input_policy.t ->
-    ?continuity:continuity ->
-    measure_message_bytes:(Agent_core.Types.message -> int) ->
-    front:Keeper_carried_front.seed option ->
-    history_digest_at:(int -> string option) ->
-    current_turn_results:current_turn_results ->
-    base_path:string ->
-    demote_before:int ->
-    turn_boundary:Keeper_carried_front.turn_start ->
-    Agent_core.Types.message list ->
-    composed
 
   val request_view :
     ?input_policy:Keeper_input_policy.t ->

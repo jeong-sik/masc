@@ -704,7 +704,7 @@ let compose ~base_path ~front ~current_turn_results ~demote_before messages =
     | Some digest -> digest
     | None -> Alcotest.fail "the front is an atom of the history"
   in
-  Try_provider.For_testing.compose_carried_model_input
+  Try_provider.compose_carried_model_input
     ~measure_message_bytes
     ~front:
       (Some
@@ -1023,7 +1023,7 @@ let only_the_current_turn_is_demoted () =
   in
   let base_path = Filename.temp_dir "demote" "" in
   let compose_with turn_boundary =
-    Try_provider.For_testing.compose_carried_model_input
+    Try_provider.compose_carried_model_input
       ~input_policy:Masc.Keeper_input_policy.Wide
       ~measure_message_bytes
       ~front:
@@ -1099,7 +1099,7 @@ let still_oversized_after_demotion_is_transmitted_demoted () =
 let a_front_the_history_shrank_under_starts_over () =
   let _, messages, _ = oversized_newest_history () in
   let composed =
-    Try_provider.For_testing.compose_carried_model_input
+    Try_provider.compose_carried_model_input
       ~measure_message_bytes
       ~front:
         (Some
@@ -1129,7 +1129,7 @@ let a_front_the_history_shrank_under_starts_over () =
 let a_front_that_opens_with_another_message_starts_over () =
   let _, messages, _ = oversized_newest_history () in
   let composed =
-    Try_provider.For_testing.compose_carried_model_input
+    Try_provider.compose_carried_model_input
       ~measure_message_bytes
       ~front:
         (Some

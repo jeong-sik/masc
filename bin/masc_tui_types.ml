@@ -1931,7 +1931,13 @@ type pulls_reader =
 
 type overview_pulls_reading =
   | Overview_pulls_unread
-  | Overview_pulls_read of { reader: pulls_reader; repositories: repository_pulls_row list }
+  | Overview_pulls_read of {
+      reader: pulls_reader;
+      repositories_error: string option;
+          (** The server could not list the registered repositories; the rows
+              are the last list it could, so they may be out of date. *)
+      repositories: repository_pulls_row list;
+    }
   | Overview_pulls_failed of string
 
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The

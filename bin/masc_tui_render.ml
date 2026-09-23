@@ -381,7 +381,16 @@ let overview_pulls_lines (state : state) =
       [ dim ("\xe2\x87\x85 pull requests unread: " ^ Terminal_text.single_line err) ]
   | Overview_pulls_read { reader = Pulls_reader_not_ready reason; _ } ->
       [ dim ("\xe2\x87\x85 pull requests not read: " ^ Terminal_text.single_line reason) ]
-  | Overview_pulls_read { reader = Pulls_reader_ready _; repositories } ->
+  | Overview_pulls_read
+      { reader = Pulls_reader_ready _; repositories_error; repositories } ->
+      let stale =
+        match repositories_error with
+        | None -> []
+        | Some err ->
+            [ Printf.sprintf "%s\xe2\x87\x85 repository list unread, rows may be old: %s%s"
+                (Theme.warn ()) (Terminal_text.single_line err) Ansi.reset ]
+      in
+      let rows =
       List.filter_map
         (fun (row : repository_pulls_row) ->
           let repository = Terminal_text.single_line row.rp_repository in
@@ -429,6 +438,12 @@ let overview_pulls_lines (state : state) =
                    repository
                    (String.concat " \xc2\xb7 " parts)))
         repositories
+      in
+      (* A ready reader with nothing on GitHub to read says so; drawing no
+         line would look the same as not having loaded. *)
+      match stale @ rows with
+      | [] -> [ dim "\xe2\x87\x85 pull requests: no registered GitHub repository" ]
+      | lines -> lines
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so

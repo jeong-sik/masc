@@ -1246,16 +1246,34 @@ let decode_repository_pulls json =
     | "failed" ->
         let* failure = required_object_field pulls "failure" in
         let* kind = required_string_field failure "kind" in
-        let* message = optional_string_field failure "message" in
+        (* The detail each kind carries: when a rate limit lifts, the HTTP
+           status, the first GraphQL message, or a transport message. *)
+        let member key = Yojson.Safe.Util.member key failure in
+        let reset_at =
+          match member "reset_at" with
+          | `Float at -> Some at
+          | `Int seconds -> Some (float_of_int seconds)
+          | _ -> None
+        in
+        let detail =
+          match (reset_at, member "status", member "messages", member "message") with
+          | Some at, _, _, _ ->
+              let tm = Unix.gmtime at in
+              Some (Printf.sprintf "resets %02d:%02dZ" tm.Unix.tm_hour tm.Unix.tm_min)
+          | None, `Int status, _, _ -> Some (Printf.sprintf "HTTP %d" status)
+          | None, _, `List (`String first :: _), _ -> Some first
+          | None, _, _, `String message -> Some message
+          | None, _, _, _ -> None
+        in
         Ok
           (Repo_pulls_failed
-             (match message with Some m -> kind ^ ": " ^ m | None -> kind))
+             (match detail with Some d -> kind ^ ": " ^ d | None -> kind))
     | other -> Error ("unknown repository pulls state " ^ other)
   in
   Ok { rp_repository; rp_state }
 
 let load_repository_pulls ~(host : string) ~(port : int) :
-    (pulls_reader * repository_pulls_row list, string) result =
+    (pulls_reader * string option * repository_pulls_row list, string) result =
   match Masc_tui_http.fetch_repository_pulls ~host ~port with
   | Error err -> Error ("pull requests load failed: " ^ err)
   | Ok json ->
@@ -1267,7 +1285,9 @@ let load_repository_pulls ~(host : string) ~(port : int) :
             let* keeper = required_string_field reader_json "keeper" in
             Ok (Pulls_reader_ready keeper)
         | "not_declared" ->
-            Ok (Pulls_reader_not_ready "no [repositories] pr_reader in runtime.toml")
+            Ok
+              (Pulls_reader_not_ready
+                 "not_declared (no [repositories] pr_reader read yet)")
         | "declaration_invalid" | "keeper_missing" | "token_unavailable" ->
             let* reason = optional_string_field reader_json "reason" in
             let* keeper = optional_string_field reader_json "keeper" in
@@ -1279,15 +1299,24 @@ let load_repository_pulls ~(host : string) ~(port : int) :
         | other -> Error ("unknown pull request reader state " ^ other)
       in
       let* rows = required_list_field json "repositories" in
-      let* repositories =
-        List.fold_right
-          (fun row acc ->
-            let* acc = acc in
-            let* decoded = decode_repository_pulls row in
-            Ok (decoded :: acc))
-          rows (Ok [])
+      (* Row by row: one repository this build cannot read says so on its own
+         line instead of blanking every other repository's line. *)
+      let repositories =
+        List.mapi
+          (fun index row ->
+            match decode_repository_pulls row with
+            | Ok decoded -> decoded
+            | Error err ->
+                let rp_repository =
+                  match Yojson.Safe.Util.member "repository_id" row with
+                  | `String id -> id
+                  | _ -> Printf.sprintf "repository #%d" (index + 1)
+                in
+                { rp_repository; rp_state = Repo_pulls_failed ("unreadable: " ^ err) })
+          rows
       in
-      Ok (reader, repositories)
+      let* repositories_error = optional_string_field json "repositories_error" in
+      Ok (reader, repositories_error, repositories)
 
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :

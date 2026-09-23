@@ -699,13 +699,14 @@ let test_a_keeper_whose_row_raises_is_reported_unread () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_test_env @@ fun ~clock ~sw ->
-      (match Runtime.get_default_runtime_id () with
+      (* The row resolves an unassigned keeper through the default route. *)
+      (match Runtime.get_default_route () with
        | exception Failure _ -> ()
-       | id ->
+       | route ->
          failf
            "precondition: this case needs building a row to raise, but a \
-            default runtime %S is initialized"
-           id);
+            default route %S is initialized"
+           route);
       let config = Workspace_utils.default_config dir in
       ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
       let meta =

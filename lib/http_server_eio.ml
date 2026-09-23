@@ -465,11 +465,11 @@ module Request = struct
     let response = Httpun.Response.create ~headers status in
     safe_respond_with_string reqd response body
 
+  let too_large_body max_bytes =
+    Printf.sprintf "413 Request Entity Too Large (max %d bytes)" max_bytes
+
   let respond_too_large reqd max_bytes =
-    let body = Printf.sprintf
-      "413 Request Entity Too Large (max %d bytes)" max_bytes
-    in
-    respond_error reqd `Payload_too_large body
+    respond_error reqd `Payload_too_large (too_large_body max_bytes)
 
   let respond_internal_error reqd exn =
     let body = Printf.sprintf

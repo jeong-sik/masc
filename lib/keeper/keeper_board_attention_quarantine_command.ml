@@ -778,6 +778,14 @@ let json_float_opt fields name =
      | None -> Error (name ^ " must be a number or null"))
 ;;
 
+let json_string_opt fields name =
+  let* value = json_field fields name in
+  match value with
+  | `Null -> Ok None
+  | `String text -> Ok (Some text)
+  | _ -> Error (name ^ " must be a string or null")
+;;
+
 let attempt_provenance_of_json = function
   | `Null -> Ok None
   | `Assoc fields ->
@@ -814,6 +822,7 @@ let inventory_item_of_json = function
     let* attempt_provenance = attempt_provenance_of_json provenance_json in
     let* quarantined_at = json_float fields "quarantined_at" in
     let* requested_at = json_float_opt fields "requested_at" in
+    let* requested_by = json_string_opt fields "requested_by" in
     let* requeued_at = json_float_opt fields "requeued_at" in
     Ok
       ({ keeper_name
@@ -825,6 +834,7 @@ let inventory_item_of_json = function
        ; attempt_provenance
        ; quarantined_at
        ; requested_at
+       ; requested_by
        ; requeued_at
        }
        : inventory_item)

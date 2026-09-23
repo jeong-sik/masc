@@ -25,6 +25,7 @@ let item ?(phase = Command.Inventory_quarantined)
         }
   ; quarantined_at
   ; requested_at
+  ; requested_by = None
   ; requeued_at
   }
 ;;

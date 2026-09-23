@@ -33,4 +33,5 @@ val section :
 val meter : cells:int -> float -> string
 (** A meter [cells] cells wide filled to the given share of full, drawn with
     eighth-block glyphs so the fill moves by an eighth of a cell. The share is
-    held to [0, 1] for drawing only. *)
+    held to [0, 1] for drawing only; a share that is not a number draws an
+    empty meter, and the row's value text still prints it as reported. *)

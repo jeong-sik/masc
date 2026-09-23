@@ -142,11 +142,11 @@ let clock_text ~now at =
    window: the server keeps the last report until a newer one arrives, so the
    meter still shows what the provider last said. *)
 let reset_text ~now = function
-  | None -> (Ansi.dim, "reset time not reported")
+  | None -> (Some Ansi.dim, "reset time not reported")
   | Some at when at <= now ->
-      (Theme.warn (), "reset time passed \xc2\xb7 no newer report")
+      (Some (Theme.warn ()), "reset time passed \xc2\xb7 no newer report")
   | Some at ->
-      ( ""
+      ( None
       , Printf.sprintf "\xe2\x86\xbb %s in %s" (clock_text ~now at)
           (span_text (at -. now)) )
 
@@ -214,13 +214,9 @@ let account_rows ~runtimes ~now (account : Tui_decode.provider_usage_account) =
 let widest cells_of_row rows =
   List.fold_left (fun widest row -> max widest (cells_of_row row)) 0 rows
 
-let tail_text ~heard ~tagged =
-  match (heard, tagged) with
-  | None, false -> ""
-  | Some heard, false -> heard
-  | None, true -> exhausted_tag
-  | Some heard, true -> heard ^ "  " ^ exhausted_tag
-
+(* Columns left to right by what a narrow row can least afford to lose: the
+   box cuts a row from the right, so the observed exhaustion tag sits beside
+   the value, and the hearing age, the least of them, comes last. *)
 let draw_rows ~now ~width rows =
   let name_w =
     widest (function Window_row { name; _ } | Silent_row { name; _ } -> cells_of name) rows
@@ -237,52 +233,70 @@ let draw_rows ~now ~width rows =
     window_cells (fun (window : Tui_decode.provider_usage_window) ->
         snd (reset_text ~now window.puw_resets_at))
   in
-  let tail_w =
+  let gap = "  " in
+  let tag_cell = gap ^ exhausted_tag in
+  let tag_w =
     widest
       (function
-        | Window_row { heard; tagged; _ } -> cells_of (tail_text ~heard ~tagged)
-        | Silent_row _ -> 0)
+        | Window_row { tagged; _ } | Silent_row { tagged; _ } ->
+            if tagged then cells_of tag_cell else 0)
       rows
   in
-  (* Leading space, name, gap, label, space, two meter edges, space, value,
-     gap, reset, gap, tail: what is left is the meter's. *)
+  let heard_w =
+    widest
+      (function
+        | Window_row { heard = Some heard; _ } -> cells_of gap + cells_of heard
+        | Window_row { heard = None; _ } | Silent_row _ -> 0)
+      rows
+  in
+  (* Every cell of a window row but the meter: leading space, name, gap,
+     label, space, the meter's two edges, space, value, tag, gap, reset,
+     heard. *)
   let columns =
-    1 + name_w + 2 + label_w + 1 + 2 + 1 + value_w + 2 + reset_w + 2 + tail_w
+    1 + name_w + cells_of gap + label_w + 1 + cells_of meter_open
+    + cells_of meter_close + 1 + value_w + tag_w + cells_of gap + reset_w
+    + heard_w
   in
   let meter_cells = max 1 (width - columns) in
-  let tag_styled = Theme.bad () ^ exhausted_tag ^ Ansi.reset in
+  let tag_part tagged =
+    if tagged then
+      gap ^ Theme.bad () ^ exhausted_tag ^ Ansi.reset
+    else ""
+  in
+  let styled style text =
+    match style with
+    | None -> text
+    | Some style -> style ^ text ^ Ansi.reset
+  in
   List.map
     (function
       | Silent_row { name; tagged } ->
-          Printf.sprintf " %s  %sno report since server start%s%s"
-            (pad_right name name_w) Ansi.dim Ansi.reset
-            (if tagged then "  " ^ tag_styled else "")
+          " " ^ pad_right name name_w ^ gap
+          ^ styled (Some Ansi.dim) "no report since server start"
+          ^ tag_part tagged
       | Window_row { name; window; heard; tagged } ->
-          let full = at_or_past_full window.puw_utilization in
-          let tone = if full then Theme.bad () else "" in
-          let untone = if full then Ansi.reset else "" in
+          let tone =
+            if at_or_past_full window.puw_utilization then Some (Theme.bad ())
+            else None
+          in
           let reset_tone, reset = reset_text ~now window.puw_resets_at in
           let heard_part =
             match heard with
             | None -> ""
-            | Some heard -> Ansi.dim ^ heard ^ Ansi.reset
+            | Some heard -> gap ^ styled (Some Ansi.dim) heard
           in
-          let tag_part =
-            match (heard, tagged) with
-            | _, false -> ""
-            | None, true -> tag_styled
-            | Some _, true -> "  " ^ tag_styled
-          in
-          Printf.sprintf " %s  %s %s%s%s%s %s%s  %s%s%s  %s%s"
-            (pad_right name name_w)
-            (pad_right (window_label window) label_w)
-            tone meter_open
-            (meter ~cells:meter_cells (share_of_full window.puw_utilization))
-            meter_close
-            (pad_left (value_text window.puw_utilization) value_w)
-            untone reset_tone (pad_right reset reset_w)
-            (if String.equal reset_tone "" then "" else Ansi.reset)
-            heard_part tag_part)
+          let tag_pad = String.make (tag_w - cells_of (if tagged then tag_cell else "")) ' ' in
+          " " ^ pad_right name name_w ^ gap
+          ^ pad_right (window_label window) label_w
+          ^ " "
+          ^ styled tone
+              (meter_open
+              ^ meter ~cells:meter_cells (share_of_full window.puw_utilization)
+              ^ meter_close ^ " "
+              ^ pad_left (value_text window.puw_utilization) value_w)
+          ^ tag_part tagged ^ tag_pad ^ gap
+          ^ styled reset_tone (pad_right reset reset_w)
+          ^ heard_part)
     rows
 
 let title_text ?note () =

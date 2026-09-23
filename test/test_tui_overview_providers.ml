@@ -63,6 +63,15 @@ let plain = Masc_tui_theme.strip_sgr
 let meter_open = "\xe2\x96\x95"
 let meter_close = "\xe2\x96\x8f"
 
+(* Every glyph this section draws is one cell wide. *)
+let code_points text =
+  String.fold_left
+    (fun count byte ->
+      if Char.code byte land 0xC0 = 0x80 then count else count + 1)
+    0 text
+
+let width = 120
+
 (* The meter between the row's opening edge and its last closing edge, and
    its width in cells (one code point per cell). *)
 let meter_of row =
@@ -77,13 +86,7 @@ let meter_of row =
     | Some _ | None -> failf "no closed meter in %S" row
   in
   let meter = String.sub row start (stop - start) in
-  let cells =
-    String.fold_left
-      (fun count byte ->
-        if Char.code byte land 0xC0 = 0x80 then count else count + 1)
-      0 meter
-  in
-  (meter, cells)
+  (meter, code_points meter)
 
 let test_section_draws_three_line_shapes () =
   let windows =
@@ -100,12 +103,17 @@ let test_section_draws_three_line_shapes () =
   let section =
     match
       Providers.section ~providers:(Types.Providers_read windows) ~runtimes ~now
-        ~width:100
+        ~width
     with
     | Some section -> section
     | None -> fail "a read draws a section"
   in
   let lines = List.map plain section.lines in
+  List.iter
+    (fun line ->
+      if code_points line > width then
+        failf "row is %d cells, wider than %d: %S" (code_points line) width line)
+    lines;
   check bool "title says whose numbers and since when" true
     (contains ~affix:"reported by the provider" (plain section.title)
      && contains ~affix:"since server start" (plain section.title));
@@ -133,6 +141,14 @@ let test_section_draws_three_line_shapes () =
          && contains ~affix:"100%" kimi
          && contains ~affix:"5h" kimi
          && contains ~affix:"exhausted (observed)" kimi);
+      (* The box cuts from the right, so the tag sits before the reset text. *)
+      check bool "the tag comes before the reset text" true
+        (match
+           ( Astring.String.find_sub ~sub:"exhausted (observed)" kimi
+           , Astring.String.find_sub ~sub:"reset time passed" kimi )
+         with
+         | Some tag, Some reset -> tag < reset
+         | _ -> false);
       let kimi_meter, kimi_cells = meter_of kimi in
       check string "a value at its full value fills the meter" kimi_meter
         (String.concat "" (List.init kimi_cells (fun _ -> "\xe2\x96\x88")));

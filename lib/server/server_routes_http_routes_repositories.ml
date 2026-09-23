@@ -519,6 +519,15 @@ let add_routes router =
   router
   |> Http.Router.get "/api/v1/repositories" (fun request reqd ->
        with_public_read handle_list_repositories request reqd)
+  (* Exact, so it is found before the [/:id] prefix route below. *)
+  |> Http.Router.get "/api/v1/repositories/pulls" (fun request reqd ->
+       with_public_read
+         (fun _state req reqd ->
+           Http.Response.json_value ~request:req
+             (Server_repository_pulls.snapshot_to_yojson
+                (Server_repository_pulls.current ()))
+             reqd)
+         request reqd)
   |> Http.Router.prefix_get repositories_prefix (fun request reqd ->
        with_public_read handle_get_repository_path request reqd)
   |> Http.Router.post "/api/v1/repositories" (fun request reqd ->

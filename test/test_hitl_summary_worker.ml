@@ -118,10 +118,16 @@ let pending_entry
   | None -> fail "pending approval disappeared"
 ;;
 
-let publish_lane ?(cli_slot_ids = []) slot_ids snapshot =
+let publish_lane ?(cli_slot_ids = []) ?(max_output_tokens = Some 4_096) slot_ids snapshot =
   match
     Runtime.publish_exact_output_registry
-      ~lanes:[ { Runtime_schema.id = Worker.For_testing.lane_id; slot_ids; cli_slot_ids } ]
+      ~lanes:
+        [ { Runtime_schema.id = Worker.For_testing.lane_id
+          ; slot_ids
+          ; cli_slot_ids
+          ; max_output_tokens
+          }
+        ]
       snapshot
   with
   | Ok _ -> ()

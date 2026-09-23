@@ -77,6 +77,25 @@ let test_corruption () =
   ignore (Api.get ~base_path ~id:None |> expect `Service_unavailable);
   ignore (Api.post ~base_path (Yojson.Safe.to_string (fixture ())) |> expect `Service_unavailable);
   ignore (Api.get ~base_path ~id:(Some "../elsewhere") |> expect `Bad_request)
+(* The curator discards superseded proposals on another domain while a keeper
+   or the dashboard may be listing: a name the directory read returned but
+   whose file is gone by the per-file read is left out, not a storage error. *)
+let test_listing_skips_a_proposal_removed_after_the_directory_read () =
+  let base_path = Filename.temp_dir "workspace-proposals-race" "" in
+  let kept = Api.post ~base_path (Yojson.Safe.to_string (fixture ())) |> expect `OK |> get_id in
+  let second = fixture () |> replace "context_sha256" (str (String.make 64 'b')) in
+  let removed = Api.post ~base_path (Yojson.Safe.to_string second) |> expect `OK |> get_id in
+  let names = List.sort String.compare [kept ^ ".json"; removed ^ ".json"] in
+  let listed () = Store.collect_listed ~read:(fun id -> Store.read ~base_path ~id) names in
+  (match Store.discard ~base_path ~id:removed with
+   | Ok () -> ()
+   | Error (Store.Invalid detail | Store.Unavailable detail) -> Alcotest.fail detail);
+  (match listed () with
+   | Ok rows -> Alcotest.(check (list string)) "the remaining proposal is listed" [kept] (List.map fst rows)
+   | Error (Store.Invalid detail | Store.Unavailable detail) -> Alcotest.fail detail);
+  let path = Filename.concat base_path (Common.masc_dirname ^ "/workspace-memory/proposals/" ^ kept ^ ".json") in
+  let ch = open_out_bin path in output_string ch "{broken"; close_out ch;
+  Alcotest.(check bool) "a corrupt proposal still fails the listing" true (Result.is_error (listed ()))
 let test_evidence_bindings () =
   let base_path = Filename.temp_dir "workspace-proposals-bindings" "" in
   let input = fixture () in
@@ -215,6 +234,8 @@ let () = Alcotest.run "workspace memory proposals" ["behavior", [
   Alcotest.test_case "submit, restart read, attribution and idempotence" `Quick test_persist;
   Alcotest.test_case "malformed references refused before persistence" `Quick test_invalid;
   Alcotest.test_case "missing and corruption remain distinct" `Quick test_corruption;
+  Alcotest.test_case "listing skips a proposal removed after the directory read" `Quick
+    test_listing_skips_a_proposal_removed_after_the_directory_read;
   Alcotest.test_case "unique evidence bindings and zero-fact retractions" `Quick test_evidence_bindings;
   Alcotest.test_case "real saved local curator proposal" `Quick test_real_curator;
   Alcotest.test_case "unavailable gap requires preserved detail" `Quick test_unavailable_gap]]

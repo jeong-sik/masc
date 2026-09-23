@@ -299,6 +299,13 @@ type exact_output_lane_decl =
             fallbacks AFTER every catalog slot is exhausted
             (RFC cli-runtimes-as-lane-slots). Empty keeps the lane
             HTTP-only. *)
+  ; max_output_tokens : int option
+        (** [max_output_tokens] — the output budget the lane's requests
+            declare as [max_tokens]. [None] means the declaration named no
+            budget: the requests carry no [max_tokens] of their own, so the
+            provider's default applies (or, on a wire that requires the
+            field, the catalog maximum). The catalog's [max_output_tokens]
+            is a validation bound and is never sent in its place. *)
   }
 [@@deriving show, eq]
 

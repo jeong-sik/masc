@@ -337,7 +337,7 @@ let handle_keeper_tool_approval ~actor state request reqd =
             match
               Keeper_late_approval.remember_late
                 (Keeper_late_approval.shared ())
-                ~keeper_name ~tool_call_id ~actor:(Some actor) decision ()
+                ~keeper_name ~tool_call_id ~actor decision ()
             with
             | Keeper_late_approval.Remembered _ -> true
             | Keeper_late_approval.No_matching_ask -> false
@@ -688,7 +688,11 @@ let handle_keeper_turn_interrupt ~actor state request reqd =
           Log.Keeper.info ~keeper_name ~turn_id
             "keeper_turn_interrupt: exact turn cancelled actor=%s" actor;
           respond_json_value_with_cors ~status:`OK request reqd
-            (`Assoc [ ("signalled", `Bool true); ("turn_id", `Int turn_id) ])
+            (`Assoc
+               [ ("signalled", `Bool true)
+               ; ("turn_id", `Int turn_id)
+               ; ("actor", `String actor)
+               ])
         | Keeper_registry.Exact_no_turn_in_flight ->
           respond_json_value_with_cors ~status:`OK request reqd
             (`Assoc

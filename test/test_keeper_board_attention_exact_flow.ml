@@ -497,11 +497,14 @@ let test_prepare_resumable_status_gate () =
     (quarantined Candidate.Quarantined);
   expect_candidate_not_pending
     "requeue-requested candidate"
-    (quarantined (Candidate.Requeue_requested { requested_at = 3.0 }));
+    (quarantined
+       (Candidate.Requeue_requested
+          { requested_at = 3.0; requested_by = "operator-test" }));
   expect_network_unavailable "normal pending candidate" pending;
   expect_network_unavailable
     "authorized requeued candidate"
-    (quarantined (Candidate.Requeued { requeued_at = 4.0 }))
+    (quarantined
+       (Candidate.Requeued { requeued_at = 4.0; requested_by = "operator-test" }))
 ;;
 
 

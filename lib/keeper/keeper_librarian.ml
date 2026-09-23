@@ -78,6 +78,11 @@ let kept_fields_from_to_string = function
   | First_claim -> "first_claim"
 ;;
 
+type working_contexts_answer =
+  | Working_contexts_organized of Keeper_librarian_context.pocket list
+  | Working_contexts_missing
+  | Working_contexts_invalid of string
+
 type selection =
   { new_claims : fact list
   ; restated : fact list
@@ -87,7 +92,7 @@ type selection =
   ; facts : fact list
   ; revisions : revision list
   ; working_state : string option
-  ; working_contexts : Keeper_librarian_context.pocket list
+  ; working_contexts : working_contexts_answer
   }
 
 let wire_field_new_claims = "new_claims"
@@ -856,10 +861,15 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
          | None | Some `Null -> Ok None
          | Some (`String text) when String.trim text <> "" -> Ok (Some text)
          | Some _ -> Error (Working_state_invalid "working_state must be nonblank text or null") in
-       let* working_contexts =
+       (* The organization is judged apart from the Memory decision: a slip
+          in it costs this pass's organization, not the memory it decided. *)
+       let working_contexts =
          match List.assoc_opt wire_field_working_contexts fields with
-         | None -> Error Missing_required_fields
-         | Some json -> working_contexts_of_json inp json
+         | None -> Working_contexts_missing
+         | Some json ->
+           (match Keeper_librarian_context.select inp.working_context json with
+            | Ok pockets -> Working_contexts_organized pockets
+            | Error detail -> Working_contexts_invalid detail)
        in
        (match
           List.assoc_opt wire_field_new_claims fields

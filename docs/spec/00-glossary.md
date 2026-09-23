@@ -1171,7 +1171,7 @@ status: reference
 : Librarian이 Keeper가 아직 처리하지 않은 event·chat 요청을 묶어, 원본 요청에 맥락과
   다음 행동 제안을 붙여 둔 것. 실행 권한도 checkpoint 이력도 아니다. 정리 하나가
   pocket(`Keeper_librarian_context.pocket`)이고, 지금 저장된 pocket 묶음이
-  `Keeper_librarian.selection.working_contexts`다. Keeper 이름에 묶인다. cluster 사이에서
+  `Keeper_librarian_context.snapshot`의 `pockets`다. Keeper 이름에 묶인다. cluster 사이에서
   무엇을 같이 쓰는지는 **Cluster** 항목에 적었다.
   **다른 뜻**: 코드의 `Keeper_types.working_context`는 이 묶음이 아니라 실행 중인
   Keeper가 쥔 Checkpoint 하나를 감싼 값이다(**Checkpoint** 항목). 이름만 같다.
@@ -1181,6 +1181,8 @@ status: reference
   `insufficient_evidence`는 검증 통과가 아니며 기존 저장 검사를 유지한다.
   실행 상세의 `context_review`는 판정, `context_write`는 정리 저장 결과다.
   `outcome_unconfirmed`는 저장 도중 중단되어 저장 여부를 확인하지 못한 상태다.
+  `answer_missing`·`answer_refused`는 기억 회차의 답이 정리를 빠뜨렸거나 검사에서
+  거절돼 그 회차의 정리를 건너뛴 상태다. 같은 답의 Memory 변경은 그대로 저장한다.
   원본 요청 처리·Memory 변경·Checkpoint 저장 결과와 구분한다.
   → [Keeper_librarian_context](../../lib/keeper/keeper_librarian_context.mli)
 

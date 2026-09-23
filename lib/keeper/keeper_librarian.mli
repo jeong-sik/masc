@@ -93,6 +93,15 @@ type ignored_fields =
 val claim_field_to_string : claim_field -> string
 val kept_fields_from_to_string : kept_fields_from -> string
 
+(** How the Memory answer organized the pending input. The Memory decision in
+    the same answer stands either way: a slip in the organization skips it for
+    this pass instead of refusing the memory decision with it. *)
+type working_contexts_answer =
+  | Working_contexts_organized of Keeper_librarian_context.pocket list
+  | Working_contexts_missing
+  | Working_contexts_invalid of string
+      (** The pending-input selector's reason. *)
+
 type selection =
   { new_claims : Keeper_memory_os_types.fact list
     (** The memories the answer adds. A claim that writes a current memory
@@ -120,7 +129,7 @@ type selection =
   ; facts : Keeper_memory_os_types.fact list
   ; revisions : revision list
   ; working_state : string option
-  ; working_contexts : Keeper_librarian_context.pocket list
+  ; working_contexts : working_contexts_answer
   }
 
 val wire_field_new_claims : string

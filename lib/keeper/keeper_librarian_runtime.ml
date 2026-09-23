@@ -1096,6 +1096,8 @@ let failed_output = function
 
 type context_write =
   | Not_attempted
+  | Answer_missing
+  | Answer_refused of string
   | Withheld
   | Outcome_unconfirmed
   | Committed of Keeper_librarian_context.version
@@ -1103,6 +1105,9 @@ type context_write =
 
 let context_write_json = function
   | Not_attempted -> `Assoc ["status", `String "not_attempted"]
+  | Answer_missing -> `Assoc ["status", `String "answer_missing"]
+  | Answer_refused detail ->
+    `Assoc ["status", `String "answer_refused"; "detail", `String detail]
   | Withheld -> `Assoc ["status", `String "withheld"]
   | Outcome_unconfirmed -> `Assoc ["status", `String "outcome_unconfirmed"]
   | Committed (generation, revision) -> `Assoc ["status", `String "committed";
@@ -1182,18 +1187,27 @@ let run_best_effort
           let output = match continuity, output with
             | Some _, `Assoc fields -> `Assoc (("continuity_write", !continuity_write) :: fields)
             | _ -> output in
-          let output = match !observed_context_review, output with
-            | None, _ -> output
-            | Some review, `Assoc fields ->
-              let context = [
-                "context_write", context_write_json !context_write;
-                "context_review", Keeper_librarian_context_review.observation_to_yojson review] in
+          (* An organization the answer left out or got wrong never reaches
+             review, so its write status is the only evidence of the skip. *)
+          let context =
+            match !observed_context_review, !context_write with
+            | Some review, write ->
+              [ "context_write", context_write_json write
+              ; "context_review", Keeper_librarian_context_review.observation_to_yojson review ]
+            | None, ((Answer_missing | Answer_refused _) as write) ->
+              [ "context_write", context_write_json write ]
+            | None, (Not_attempted | Withheld | Outcome_unconfirmed | Committed _ | Write_failed _) ->
+              []
+          in
+          let output = match context, output with
+            | [], _ -> output
+            | context, `Assoc fields ->
               (* Keep the existing absorption report first; both derived-context
                  evidence and Memory's receipt survive any later cancellation. *)
               (match fields with
                | (("absorb_gate", _) as gate) :: rest -> `Assoc (gate :: context @ rest)
                | _ -> `Assoc (context @ fields))
-            | Some _, _ -> output
+            | _ :: _, _ -> output
           in
           let elapsed_s = Eio.Time.now clock -. started_at_monotonic in
           let completion =
@@ -1327,9 +1341,25 @@ let run_best_effort
                Ok (`Context_organized (exact_output, selected_slot))
              | Memory_answer { selection; continuity_answer } ->
              (* A continuity range owns no pending input; only a Memory pass
-                without one organizes the working context. *)
+                without one organizes the working context. An organization the
+                answer left out or got wrong is skipped for this pass; the
+                Memory decision below is kept. *)
              (match continuity_answer with
-              | Memory_only -> organize_working_context selection.working_contexts
+              | Memory_only ->
+                (match selection.working_contexts with
+                 | Keeper_librarian.Working_contexts_organized pockets ->
+                   organize_working_context pockets
+                 | Keeper_librarian.Working_contexts_missing ->
+                   context_write := Answer_missing;
+                   Log.Keeper.warn
+                     ~keeper_name:keeper_id
+                     "memory os librarian kept the memory answer; it named no working_contexts, so pending input was not organized"
+                 | Keeper_librarian.Working_contexts_invalid detail ->
+                   context_write := Answer_refused detail;
+                   Log.Keeper.warn
+                     ~keeper_name:keeper_id
+                     "memory os librarian kept the memory answer; its working_contexts were refused, so pending input was not organized: %s"
+                     detail)
               | Continuity _ -> ());
              (* The decision goes to the store, not the whole set it projects
                 to. [selection.facts] is that projection, taken against the

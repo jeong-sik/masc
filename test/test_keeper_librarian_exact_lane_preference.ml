@@ -292,6 +292,112 @@ let test_context_commits_when_memory_store_fails () =
        journal)
 ;;
 
+(* The mirror of the case above: a Memory answer whose working contexts fail
+   the selector still commits its Memory decision on the slot that answered.
+   The pending input stays unorganized for a later pass, and the run record
+   says why. On the live Librarian lane (2026-09-21) one slot answered this
+   way 219 times, and each time the Memory decision was thrown away with it. *)
+let test_memory_commits_when_working_contexts_are_refused () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env
+    ~net
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+  @@ fun () ->
+  with_temp_base "librarian-refused-context" @@ fun base_path ->
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir (prompt_root ());
+  Prompt_defaults.init ();
+  let keeper_id = "librarian-refused-context" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  (* [selection_output] organizes no source, so it cannot account for the one
+     pending source below. *)
+  let answering =
+    Fixture.start_server ~sw ~net ~clock
+      (Fixture.Reply (Fixture.openai_response selection_output))
+  in
+  let successor =
+    Fixture.start_server ~sw ~net ~clock
+      (Fixture.Reply (Fixture.openai_response selection_output))
+  in
+  let snapshot =
+    Fixture.resolver_snapshot
+      ~source:"librarian-refused-context"
+      [ { Fixture.id = "librarian-answering"; base_url = answering.base_url }
+      ; { Fixture.id = "librarian-successor"; base_url = successor.base_url }
+      ]
+  in
+  (match
+     Runtime_exact_output_registry.publish
+       ~lanes:
+         [ { Runtime_schema.id = "librarian_exact"
+           ; slot_ids = [ "librarian-answering"; "librarian-successor" ]
+           ; cli_slot_ids = []
+           ; max_output_tokens = Some 4_096
+           } ]
+       snapshot
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Runtime_exact_output_registry.publication_error_to_string error));
+  let source : Keeper_librarian_context.source =
+    { reference = "event:campaign:pending-source"
+    ; content = `Assoc [ "request", `String "Check the campaign status." ]
+    }
+  in
+  let inp =
+    { (input ()) with
+      working_context =
+        { Keeper_librarian_context.empty with sources = [ source ] }
+    }
+  in
+  Runtime.run_best_effort
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None inp;
+  check int "the slot that answered is called once" 1 (Fixture.post_count answering);
+  check int "the answer is not re-asked of the successor" 0
+    (Fixture.post_count successor);
+  (match
+     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
+   with
+   | Ok (Some snapshot) ->
+     check (list string) "the Memory decision is committed"
+       [ "preferred librarian committed" ]
+       (List.map (fun (fact : Memory.fact) -> fact.claim) snapshot.facts)
+   | Ok None -> fail "a refused organization threw away the Memory decision"
+   | Error detail -> fail detail);
+  (match Keeper_librarian_context.read ~keepers_dir ~keeper_id with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "a refused organization was committed"
+   | Error detail -> fail detail);
+  let registry = Exact_lane_run_registry.global () in
+  let run =
+    match
+      List.filter
+        (fun (run : Exact_lane_run_registry.run) -> String.equal run.actor keeper_id)
+        (Exact_lane_run_registry.list_runs registry)
+    with
+    | [ run ] -> Exact_lane_run_registry.get registry ~run_id:run.run_id
+    | runs -> failf "expected one Librarian run, found %d" (List.length runs)
+  in
+  match run with
+  | Some { status = Exact_lane_run_registry.Completed { output; _ }; _ } ->
+    let write = Yojson.Safe.Util.member "context_write" output in
+    check string "the run record names the refusal" "answer_refused"
+      (Yojson.Safe.Util.(member "status" write |> to_string));
+    check bool "and carries the selector's reason" true
+      (contains
+         ~needle:"working context must account for every source exactly once"
+         (Yojson.Safe.Util.(member "detail" write |> to_string)))
+  | Some { status = Exact_lane_run_registry.Running; _ }
+  | Some { status = Exact_lane_run_registry.Completion_persistence_failed _; _ } ->
+    fail "the Librarian run did not complete"
+  | None -> fail "the Librarian run disappeared"
+;;
+
 (* 2026-09-11 regression: a failover slot whose request cannot be projected
    at all -- a structural refusal, not a size -- must not fail the lane's
    pre-flight. The appended openrouter.openrouter-deepseek-v4-flash refused
@@ -457,6 +563,10 @@ let () =
             "working context commits despite Memory OS store failure"
             `Quick
             test_context_commits_when_memory_store_fails
+        ; test_case
+            "Memory commits when its working contexts are refused"
+            `Quick
+            test_memory_commits_when_working_contexts_are_refused
         ; test_case "excluded last slot preserves domain failure" `Quick
             test_excluded_last_slot_preserves_domain_failure
         ; test_case "an empty ladder reports nothing" `Quick

@@ -1043,6 +1043,43 @@ let test_a_selection_without_the_dropped_field_rejects () =
   | Ok _ -> fail "selection without dropped field accepted"
 ;;
 
+(* The pending-input organization is judged apart from the Memory decision
+   (#38422): an answer that leaves it out or gets it wrong keeps its drop, and
+   only the organization is set aside. *)
+let test_a_working_context_slip_keeps_the_memory_decision () =
+  let memory_answer working_contexts =
+    `Assoc
+      (working_contexts
+       @ [ Librarian.wire_field_new_claims, `List []
+         ; Librarian.wire_field_dropped, `List [ dropped_json "m2" ]
+         ])
+  in
+  let organization label working_contexts =
+    match parse (memory_answer working_contexts) with
+    | Error error ->
+      failf "%s: the Memory answer was refused: %s" label
+        (Librarian.parse_error_to_string error)
+    | Ok selection ->
+      check (list string) (label ^ ": the drop of B stands") [ current_b_id ]
+        (List.map (fun (d : Memory.dropped_statement) -> d.memory_id) selection.dropped);
+      selection.working_contexts
+  in
+  (match organization "empty" [ "working_contexts", `List [] ] with
+   | Librarian.Working_contexts_organized [] -> ()
+   | Librarian.Working_contexts_organized _ -> fail "an empty organization gained pockets"
+   | Librarian.Working_contexts_missing | Librarian.Working_contexts_invalid _ ->
+     fail "a valid empty organization was not taken");
+  (match organization "invalid" [ "working_contexts", `String "not a list" ] with
+   | Librarian.Working_contexts_invalid detail ->
+     check string "the selector's reason" "working context requires an array" detail
+   | Librarian.Working_contexts_organized _ | Librarian.Working_contexts_missing ->
+     fail "an invalid organization was not reported as invalid");
+  match organization "missing" [] with
+  | Librarian.Working_contexts_missing -> ()
+  | Librarian.Working_contexts_organized _ | Librarian.Working_contexts_invalid _ ->
+    fail "an absent organization was not reported as missing"
+;;
+
 let test_dropped_statements_validate () =
   (match
      parse (selection_json ~dropped:[ dropped_json "missing" ] ())
@@ -2003,6 +2040,8 @@ let () =
             test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current
         ; test_case "selection without dropped field rejects" `Quick
             test_a_selection_without_the_dropped_field_rejects
+        ; test_case "a working-context slip keeps the Memory decision" `Quick
+            test_a_working_context_slip_keeps_the_memory_decision
         ; test_case "dropped statements validate" `Quick
             test_dropped_statements_validate
         ; test_case "strict JSON boundary" `Quick test_strict_json_boundary

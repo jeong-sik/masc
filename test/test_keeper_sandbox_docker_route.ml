@@ -1790,7 +1790,7 @@ let test_docker_shell_projects_keeper_secret_dir () =
      Alcotest.(check bool) "env-file cleaned after docker run" false
        (Sys.file_exists env_file))
 
-let test_docker_shell_does_not_synthesize_git_author_identity () =
+let test_docker_shell_names_the_keeper_as_git_author_only () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -1798,12 +1798,12 @@ let test_docker_shell_does_not_synthesize_git_author_identity () =
   let line =
     run_docker_shell_command ~config ~meta ~playground ~log_path
   in
-  Alcotest.(check bool) "does not synthesize git author name" false
-    (String_util.contains_substring line "GIT_AUTHOR_NAME=");
+  Alcotest.(check bool) "git author name is the keeper" true
+    (String_util.contains_substring line ("GIT_AUTHOR_NAME=" ^ meta.name));
   Alcotest.(check bool) "does not synthesize git author email" false
     (String_util.contains_substring line "GIT_AUTHOR_EMAIL=");
-  Alcotest.(check bool) "does not synthesize git committer name" false
-    (String_util.contains_substring line "GIT_COMMITTER_NAME=");
+  Alcotest.(check bool) "git committer name is the keeper" true
+    (String_util.contains_substring line ("GIT_COMMITTER_NAME=" ^ meta.name));
   Alcotest.(check bool) "does not synthesize git committer email" false
     (String_util.contains_substring line "GIT_COMMITTER_EMAIL=")
 
@@ -2570,8 +2570,8 @@ let () =
             "docker shell projects keeper secret directory"
             `Quick test_docker_shell_projects_keeper_secret_dir;
           Alcotest.test_case
-            "docker shell does not synthesize git author identity"
-            `Quick test_docker_shell_does_not_synthesize_git_author_identity;
+            "docker shell names the keeper as git author, no email"
+            `Quick test_docker_shell_names_the_keeper_as_git_author_only;
           Alcotest.test_case
             "turn runtime projects keeper secret directory"
             `Quick test_turn_runtime_projects_keeper_secret_dir;

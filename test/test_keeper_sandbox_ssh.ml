@@ -231,6 +231,8 @@ let test_argv_frame_stream_and_exit () =
        "injected identity env first, then allowlisted caller env; ambient GH_TOKEN absent"
        [ "GH_CONFIG_DIR", "/srv/masc/playground/keeper-a/.config/gh"
        ; "GIT_TERMINAL_PROMPT", "0"
+       ; "GIT_AUTHOR_NAME", "keeper-a"
+       ; "GIT_COMMITTER_NAME", "keeper-a"
        ; "LANG", "C"
        ]
        request.env)

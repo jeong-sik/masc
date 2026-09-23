@@ -179,25 +179,56 @@ type librarian_prompt_material =
   ; rendered : string
   }
 
+(* What one pass asks the model for, and so which prompt it reads and which
+   answer it accepts.
+
+   [Memory_pass] judges Memory, with the continuity state as well when a
+   continuity range is attached. The two context-only passes never write
+   Memory, so they do not ask for a Memory judgment at all: a continuity pass
+   over a range whose Memory the durable pass already committed answers the
+   working state alone, and a pending-input organization pass answers the
+   working contexts alone. Asking them for the judgment only produced output
+   that was thrown away, and a slip in it refused the part that was kept. *)
+type pass =
+  | Memory_pass of Keeper_librarian_continuity.prepared option
+  | Continuity_state_pass of Keeper_librarian_continuity.prepared
+  | Working_context_pass
+
+let prompt_key_of_pass = function
+  | Memory_pass _ -> Prompt_names.librarian
+  | Continuity_state_pass _ -> Prompt_names.librarian_continuity
+  | Working_context_pass -> Prompt_names.librarian_working_context
+;;
+
 (* Completed-history synthesis and pending-input organization own different
    sources and stores. A continuity pass must neither organize nor publish the
    live queue; its source is the exact prepared checkpoint interval. *)
-let input_for_continuity continuity (input : Keeper_librarian.input) =
-  match continuity with
-  | None -> input
-  | Some _ -> { input with working_context = Keeper_librarian_context.empty }
+let input_for_pass pass (input : Keeper_librarian.input) =
+  match pass with
+  | Memory_pass None | Working_context_pass -> input
+  | Memory_pass (Some _) | Continuity_state_pass _ ->
+    { input with working_context = Keeper_librarian_context.empty }
 
-let resolve_librarian_prompt ?continuity input =
-  let input = input_for_continuity continuity input in
-  let variables = Keeper_librarian.prompt_variables input in
-  let variables = match continuity with None -> variables | Some prepared ->
+let prompt_variables_of_pass pass input =
+  match pass with
+  | Memory_pass None -> Keeper_librarian.prompt_variables input
+  | Memory_pass (Some prepared) ->
     ("continuity", Yojson.Safe.to_string (Keeper_librarian_continuity.prompt_json prepared))
-    :: List.remove_assoc "continuity" variables in
+    :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input)
+  | Continuity_state_pass prepared ->
+    Keeper_librarian.continuity_prompt_variables input
+      ~continuity:(Keeper_librarian_continuity.prompt_json prepared)
+  | Working_context_pass -> Keeper_librarian.working_context_prompt_variables input
+;;
+
+let resolve_librarian_prompt pass input =
+  let input = input_for_pass pass input in
+  let variables = prompt_variables_of_pass pass input in
   ( variables
   , Result.map
       (fun (resolution, rendered) -> { resolution; rendered })
       (Prompt_registry.resolve_and_render_prompt_template
-         Prompt_names.librarian
+         (prompt_key_of_pass pass)
          variables) )
 ;;
 
@@ -242,10 +273,14 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let librarian_output_requirement continuity =
-  let schema = match continuity with
-    | None -> Keeper_structured_output_schema.librarian_current_output_schema
-    | Some _ -> Keeper_structured_output_schema.librarian_continuity_output_schema in
+let output_requirement_of_pass pass =
+  let schema = match pass with
+    | Memory_pass None -> Keeper_structured_output_schema.librarian_current_output_schema
+    | Memory_pass (Some _) -> Keeper_structured_output_schema.librarian_continuity_output_schema
+    | Continuity_state_pass _ ->
+      Keeper_structured_output_schema.librarian_continuity_state_output_schema
+    | Working_context_pass ->
+      Keeper_structured_output_schema.librarian_working_context_output_schema in
   Exact_output.make_output_requirement ~schema
     ~minimum_guarantee:Exact_output.Json_syntax
 ;;
@@ -575,9 +610,14 @@ let fit_continuity ~capacity ~base_path ~keeper_id ~input prepared =
   else Keeper_librarian_continuity.fit prepared ~fits:(fun continuity ->
     let input = {input with Keeper_librarian.messages =
       Keeper_librarian_continuity.messages continuity} in
-    let* material = snd (resolve_librarian_prompt ~continuity input) in
+    (* Fitted against the Memory pass's prompt and schema. Whether this range's
+       Memory is already committed is read after the fit, on the fitted range;
+       a continuity-only request for the same range is shorter, so a range
+       that fits here also fits then. *)
+    let pass = Memory_pass (Some continuity) in
+    let* material = snd (resolve_librarian_prompt pass input) in
     let prompt = Keeper_lane_cli_oneshot.prompt_with_schema
-      ~requirement:(librarian_output_requirement (Some continuity)) ~prompt:material.rendered in
+      ~requirement:(output_requirement_of_pass pass) ~prompt:material.rendered in
     let* actual_chars = Runtime_codex_app_server.prompt_char_count prompt in
     Ok (actual_chars <= capacity.capacity.max_chars))
 ;;
@@ -648,14 +688,37 @@ let validate_selection ?continuity selected_input output =
       "continuity requires a nonblank working_state")
 ;;
 
+(* The accepted answer of each pass. A context-only answer carries no
+   selection, so nothing downstream can reach a Memory field it never asked
+   for. *)
+type answer =
+  | Memory_answer of accepted
+  | Continuity_state_answer of
+      { prepared : Keeper_librarian_continuity.prepared
+      ; working_state : string
+      }
+  | Working_context_answer of Keeper_librarian_context.pocket list
+
+let validate_answer pass selected_input output =
+  match pass with
+  | Memory_pass continuity ->
+    validate_selection ?continuity selected_input output
+    |> Result.map (fun accepted -> Memory_answer accepted)
+  | Continuity_state_pass prepared ->
+    Keeper_librarian.working_state_of_json_result output
+    |> Result.map (fun working_state -> Continuity_state_answer { prepared; working_state })
+  | Working_context_pass ->
+    Keeper_librarian.working_contexts_of_json_result selected_input output
+    |> Result.map (fun pockets -> Working_context_answer pockets)
+;;
+
 let try_cli_slots
       ~requirement
-      ~continuity
+      ~validate
       ~keeper_id
       ~base_path
       ~cli_runner
       ~cli_slots
-      ~(selected_input : Keeper_librarian.input)
       ~messages
   =
   match cli_slots with
@@ -673,8 +736,8 @@ let try_cli_slots
             ~requirement
             ~prompt
             ~validate:(fun output ->
-              validate_selection ?continuity selected_input output
-              |> Result.map (fun selection -> selection, output)
+              validate output
+              |> Result.map (fun answer -> answer, output)
               |> Result.map_error Keeper_librarian.parse_error_to_string)
             ~on_failure:(fun failure ->
               Log.Keeper.warn ~keeper_name:keeper_id
@@ -698,27 +761,26 @@ let with_cli_failure prior_error = function
     Cli_prompt_unavailable { prior_error = Some prior_error }
 ;;
 
-let execute_exact_output_classified
-      ~continuity
+let execute_answer
+      ~requirement
+      ~validate
       ?cli_runner
       ~clock
       ~net
       ~base_path
       ~keeper_id
-      ~(selected_input : Keeper_librarian.input)
       ~messages
       ()
   =
   let open Result.Syntax in
   let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
-  let requirement = librarian_output_requirement continuity in
   match selected_slots with
   | [] ->
     (* Registry publication rejects a lane with neither transport, and lane
        resolution rejects a lane with no admitted transport. Keep this final
        classification defensive in case either upstream contract changes. *)
-    (match try_cli_slots ~requirement ~continuity ~keeper_id ~base_path ~cli_runner ~cli_slots
-       ~selected_input ~messages with
+    (match try_cli_slots ~requirement ~validate ~keeper_id ~base_path ~cli_runner ~cli_slots
+       ~messages with
      | Ok (runtime_id, selection, output) -> Ok ((selection, output), runtime_id)
      | Error No_cli_slots -> Error No_transport_declared
      | Error (Slot_failures failures) ->
@@ -730,8 +792,8 @@ let execute_exact_output_classified
   | Error error ->
     (* No API slot can project this request. The independently admitted CLI
        slots still own a chance to answer, just as after API exhaustion. *)
-    (match try_cli_slots ~requirement ~continuity ~keeper_id ~base_path ~cli_runner ~cli_slots
-       ~selected_input ~messages with
+    (match try_cli_slots ~requirement ~validate ~keeper_id ~base_path ~cli_runner ~cli_slots
+       ~messages with
      | Ok (runtime_id, selection, output) ->
        Log.Keeper.warn ~keeper_name:keeper_id
          "librarian lane=%s every API slot refused projection; answered by cli slot=%s: %s"
@@ -745,14 +807,10 @@ let execute_exact_output_classified
        exact_lane_id
        (slot_reason_pairs ~sep:", " preflight.unusable));
   let* attempt = prepare_attempt ~requirement ~selected_slots:preflight.selected_slots messages in
-  let validate flow_success =
+  let validate_flow flow_success =
     let output = Exact_output.flow_success_output flow_success in
-    match
-      validate_selection ?continuity
-        selected_input
-        output.output
-    with
-    | Ok selection -> Exact_output.Accept (selection, output.output)
+    match validate output.output with
+    | Ok answer -> Exact_output.Accept (answer, output.output)
     | Error error -> Exact_output.Reject_and_advance error
   in
   match
@@ -763,7 +821,7 @@ let execute_exact_output_classified
       ~on_measurement_terminal:(fun _ -> Ok ())
       ~before_dispatch:(fun _ -> Ok ())
       ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-      ~validate
+      ~validate:validate_flow
       attempt
   with
   | Ok success ->
@@ -791,12 +849,11 @@ let execute_exact_output_classified
        (match
           try_cli_slots
             ~requirement
-            ~continuity
+            ~validate
             ~keeper_id
             ~base_path
             ~cli_runner
             ~cli_slots
-            ~selected_input
             ~messages
         with
         | Ok (runtime_id, selection, output) ->
@@ -820,12 +877,11 @@ let execute_exact_output_classified
     (match
        try_cli_slots
          ~requirement
-         ~continuity
+         ~validate
          ~keeper_id
          ~base_path
          ~cli_runner
          ~cli_slots
-         ~selected_input
          ~messages
      with
      | Ok (runtime_id, selection, output) ->
@@ -836,6 +892,24 @@ let execute_exact_output_classified
             (Domain_output_invalid
                (Keeper_librarian.parse_error_to_string rejection.rejection))
             cli_failure))
+;;
+
+(* The Memory pass alone, for the tests that walk its answer contract. *)
+let execute_exact_output_classified
+      ~continuity
+      ?cli_runner
+      ~clock
+      ~net
+      ~base_path
+      ~keeper_id
+      ~(selected_input : Keeper_librarian.input)
+      ~messages
+      ()
+  =
+  execute_answer
+    ~requirement:(output_requirement_of_pass (Memory_pass continuity))
+    ~validate:(validate_selection ?continuity selected_input)
+    ?cli_runner ~clock ~net ~base_path ~keeper_id ~messages ()
 ;;
 
 (* A failure while no current snapshot exists means the keeper is running
@@ -888,10 +962,10 @@ let current_selection_registry_summary = function
       ]
 ;;
 
-let prompt_material_payload = function
+let prompt_material_payload ~key = function
   | Ok ({ resolution; rendered } : librarian_prompt_material) ->
     `Assoc
-      [ "key", `String Prompt_names.librarian
+      [ "key", `String key
       ; ( "source"
         , `String
             (Prompt_registry.prompt_source_to_string resolution.source) )
@@ -906,12 +980,13 @@ let prompt_material_payload = function
       ]
   | Error detail ->
     `Assoc
-      [ "key", `String Prompt_names.librarian
+      [ "key", `String key
       ]
 ;;
 
 let exact_input_payload
       (inp : Keeper_librarian.input)
+      ~prompt_key
       ~(prompt_variables : (string * string) list)
       (prompt_material : (librarian_prompt_material, string) result)
   =
@@ -919,7 +994,7 @@ let exact_input_payload
     [ "turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
     ; "goal_context", Keeper_librarian.goal_context_to_json inp.goal_context
     ; "keeper_instructions", `String inp.keeper_instructions
-    ; "prompt", prompt_material_payload prompt_material
+    ; "prompt", prompt_material_payload ~key:prompt_key prompt_material
     ; ( "rendered_prompt_variables"
       , `Assoc
           (List.map
@@ -1015,9 +1090,15 @@ let run_best_effort
           | None -> 0
           | Some current -> List.length current.facts
         in
-        let prompt_input = input_for_continuity continuity inp in
+        let pass =
+          match write_scope, continuity with
+          | Context_and_memory, continuity -> Memory_pass continuity
+          | Context_only, Some prepared -> Continuity_state_pass prepared
+          | Context_only, None -> Working_context_pass
+        in
+        let prompt_input = input_for_pass pass inp in
         let prompt_variables, prompt_material =
-          resolve_librarian_prompt ?continuity prompt_input
+          resolve_librarian_prompt pass prompt_input
         in
         Exact_lane_run_registry.register_running
           registry
@@ -1028,7 +1109,8 @@ let run_best_effort
           ~input:
             (Exact_lane_run_registry.Exact_input
                (`Assoc
-                  [ "actual_input", exact_input_payload prompt_input ~prompt_variables
+                  [ "actual_input", exact_input_payload prompt_input
+                      ~prompt_key:(prompt_key_of_pass pass) ~prompt_variables
                       prompt_material
                   ; "message_count", `Int (List.length prompt_input.messages)
                   ; "current_fact_count", `Int current_fact_count
@@ -1085,15 +1167,15 @@ let run_best_effort
                |> Result.map (fun material -> material.rendered)
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
-             let* ({ selection; continuity_answer }, exact_output), selected_slot =
-               execute_exact_output_classified
-                 ~continuity
+             let* (answer, exact_output), selected_slot =
+               execute_answer
+                 ~requirement:(output_requirement_of_pass pass)
+                 ~validate:(validate_answer pass prompt_input)
                  ?cli_runner
                  ~clock
                  ~net
                  ~base_path
                  ~keeper_id
-                 ~selected_input:prompt_input
                  ~messages:[ message Agent_core.Types.User prompt ]
                  ()
              in
@@ -1101,18 +1183,16 @@ let run_best_effort
              (* Working context is advisory and has its own revision. A stale
                 or failed context write cannot roll back memory or block the
                 Keeper; original sources remain pending throughout. *)
-             (match continuity with
-             | Some _ -> ()
-             | None ->
+             let organize_working_context (proposed : Keeper_librarian_context.pocket list) =
              let context_review = Keeper_librarian_context_review.run
                ~observe:(fun observation -> observed_context_review := Some observation)
                ~clock ~keeper_id ~input:inp.working_context
-               ~proposed:selection.working_contexts () in
+               ~proposed () in
              if not (Keeper_librarian_context_review.permits_publication context_review) then (
                context_write := Withheld;
                Log.Keeper.info ~keeper_name:keeper_id
                  "working context withheld by review: pockets=%d"
-                 (List.length selection.working_contexts))
+                 (List.length proposed))
              else (
              context_write := Outcome_unconfirmed;
              (try match Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -1122,10 +1202,10 @@ let run_best_effort
                   ?observed_sources:(if inp.working_context.unavailable = []
                     then Some inp.working_context.sources else None)
                   ~sources:(let references = List.concat_map
-                    (fun (p : Keeper_librarian_context.pocket) -> p.sources) selection.working_contexts in
+                    (fun (p : Keeper_librarian_context.pocket) -> p.sources) proposed in
                     List.filter (fun (s : Keeper_librarian_context.source) ->
                       List.mem s.reference references) inp.working_context.sources)
-                  selection.working_contexts) with
+                  proposed) with
               | Ok working ->
                 context_write := Committed (Keeper_librarian_context.version working);
                 (match Domain_pool_ref.submit_io_or_inline (fun () ->
@@ -1151,11 +1231,9 @@ let run_best_effort
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn -> Log.Keeper.warn ~keeper_name:keeper_id
-                  "working context commit failed independently of memory: %s" (Printexc.to_string exn))));
-             let publish_continuity () =
-               match continuity_answer with
-              | Memory_only -> ()
-              | Continuity { prepared; working_state } ->
+                  "working context commit failed independently of memory: %s" (Printexc.to_string exn)))
+             in
+             let publish_continuity prepared working_state =
                 continuity_write := `Assoc ["status", `String "outcome_unconfirmed"];
                 commit_continuity
                   ~commit:(fun () ->
@@ -1179,11 +1257,19 @@ let run_best_effort
                      };
                    Log.Keeper.warn ~keeper_name:keeper_id "continuity state not committed: %s" detail)
              in
-             match write_scope with
-             | Context_only ->
-               publish_continuity ();
+             match answer with
+             | Working_context_answer proposed ->
+               organize_working_context proposed;
                Ok (`Context_organized (exact_output, selected_slot))
-             | Context_and_memory ->
+             | Continuity_state_answer { prepared; working_state } ->
+               publish_continuity prepared working_state;
+               Ok (`Context_organized (exact_output, selected_slot))
+             | Memory_answer { selection; continuity_answer } ->
+             (* A continuity range owns no pending input; only a Memory pass
+                without one organizes the working context. *)
+             (match continuity_answer with
+              | Memory_only -> organize_working_context selection.working_contexts
+              | Continuity _ -> ());
              (* The decision goes to the store, not the whole set it projects
                 to. [selection.facts] is that projection, taken against the
                 snapshot this pass read before its provider turn; writing it
@@ -1248,7 +1334,10 @@ let run_best_effort
              in
              (* Only saved Memory authorizes publishing the corresponding
                 continuity frontier. A failed disposition leaves input intact. *)
-             publish_continuity ();
+             (match continuity_answer with
+              | Memory_only -> ()
+              | Continuity { prepared; working_state } ->
+                publish_continuity prepared working_state);
              (* The snapshot is committed; each supersede the answer stated is
                 now a Revised event on the old id (RFC-0418). A sidecar that
                 cannot be written is said here and does not undo the pass. *)

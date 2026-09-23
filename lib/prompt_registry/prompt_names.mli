@@ -75,6 +75,15 @@ val keeper_observation_rejected_digest_row : string
     metric/target reachable in principle? *)
 
 val librarian : string
+
+(** A continuity pass over a range whose Memory is already committed: the
+    answer is the working state alone. *)
+val librarian_continuity : string
+
+(** A pending-input organization pass: the answer is the working contexts
+    alone. *)
+val librarian_working_context : string
+
 val workspace_memory_curator : string
 
 val fusion_judge : string

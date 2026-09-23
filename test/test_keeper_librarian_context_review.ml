@@ -14,6 +14,10 @@ let member = Yojson.Safe.Util.member
 let text = Yojson.Safe.Util.to_string
 let check_json label expected actual =
   Alcotest.(check string) label (Yojson.Safe.to_string expected) (Yojson.Safe.to_string actual)
+let contains ~sub text =
+  let n = String.length sub and m = String.length text in
+  let rec at i = i + n <= m && (String.sub text i n = sub || at (i + 1)) in
+  at 0
 
 type scenario = Faithful | Rejected | Uncertain | Missing | Invalid | Http_failure
   | Excluded | Stale | Cancel_absorb | Cancel_review | Context_only | Conversation_queue
@@ -94,10 +98,13 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
   let claims = if scenario = Cancel_absorb then
       [`Assoc ["claim", `String "Publication of the draft needs prior approval.";
         "category", `String "fact"; "absorbs", `List [`String "m1"]]] else [] in
-  let dropped = if scenario = Context_only || scenario = Conversation_queue then
+  let dropped = if scenario = Conversation_queue then
     [`Assoc ["memory_id", `String "m1"; "reason", `String "The note is outdated."]] else [] in
-  let answer = `Assoc ["new_claims", `List claims; "dropped", `List dropped;
-    "working_contexts", `List [proposal]] in
+  (* A Context-only pass asks for the working contexts alone, so its answer
+     has no Memory field to carry. *)
+  let answer = if scenario = Context_only then `Assoc ["working_contexts", `List [proposal]]
+    else `Assoc ["new_claims", `List claims; "dropped", `List dropped;
+      "working_contexts", `List [proposal]] in
   let librarian = Fixture.start_server ~sw ~net ~clock
       (Fixture.Reply (Fixture.openai_response answer)) in
   let requests = ref [] in
@@ -193,6 +200,10 @@ let test_case ~base_path ~registry ?fixture_dir scenario () =
     Alcotest.(check string) "Context commit is independent of uncommitted Memory"
       memory_before (Fs_compat.load_file memory_path);
   if scenario = Context_only then (
+    List.iter (fun body ->
+      Alcotest.(check bool) "Context-only request asks for no Memory judgment" false
+        (contains ~sub:Keeper_librarian.wire_field_new_claims body))
+      (Fixture.request_bodies librarian);
     Alcotest.(check (option string)) "Context-only preserves Memory journal" journal_before
       (Fs_compat.load_file_opt journal_path);
     Alcotest.(check (option string)) "Context-only preserves Memory receipt" receipt_before

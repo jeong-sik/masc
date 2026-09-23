@@ -194,6 +194,25 @@ cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
 [[models]]
+# Claude Opus 5.5. Limits and thinking mode from the Claude Platform model
+# overview (checked 2026-09-23): thinking is adaptive and always on — a
+# {"type":"disabled"} or a manual budget request is 400 invalid_request_error,
+# so the row declares always_adaptive, the strongest form (disabling is not
+# possible at all). Default effort is medium. Context 1M / max output 128K.
+# Pricing $4/$20 per 1M; 5m cache write $5 (1.25x), cache read $0.20 (0.05x —
+# below the 0.1x every other Claude row uses, so it is called out here).
+id_prefix = "claude-opus-5-5"
+base = "anthropic"
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 4.0
+output_per_million = 20.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.05
+
+[[models]]
 id_prefix = "claude-sonnet-5"
 base = "anthropic"
 anthropic_thinking_control = "adaptive_default"
@@ -2525,6 +2544,57 @@ output_per_million = 50.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.1
 
+# GPT-6 Sol / Luna. Specs from the OpenAI model docs
+# (developers.openai.com/api/docs/models/gpt-6-sol and /gpt-6-luna, checked
+# 2026-09-23): context 1,050,000 / max output 128,000, reasoning.effort
+# none|low|medium|high|xhigh|max (default medium) — the gpt-6-astra ladder
+# plus "none". Prices per 1M: Sol $2/$10 (cached input $0.20, cache write
+# $2.50), Luna $0.10/$0.50 (cached input $0.01, cache write $0.125). These are
+# the gpt-6 ids, not the older gpt-5.6-sol/-luna rows above. The sampling
+# suppression is inherited from the gpt-6-astra live measurement on the same
+# wire (2026-09-07); it was not re-probed for these two ids.
+[[models]]
+id_prefix = "gpt-6-sol"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+ignored_sampling_parameters = ["temperature", "top_p"]
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 2.0
+output_per_million = 10.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
+[[models]]
+id_prefix = "gpt-6-luna"
+base = "openai_chat_extended"
+provider_name = "openai-responses"
+ignored_sampling_parameters = ["temperature", "top_p"]
+thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+supports_reasoning = true
+max_context_tokens = 1050000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_parallel_tool_calls = true
+supports_native_streaming = true
+input_per_million = 0.1
+output_per_million = 0.5
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.1
+
 
 [[providers]]
 id = "gemini"
@@ -2756,6 +2826,37 @@ supports_response_format_json = true
 # Xiaomi documents structured output as JSON mode (`json_object`) and directs
 # clients to validate schema conformance locally. Do not advertise native
 # json_schema structured output from the chat-completions catalog row.
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_audio_input = false
+supports_video_input = false
+supports_native_streaming = true
+
+# MiMo-V2.6 (Xiaomi). Specs from the vendor release page
+# (mimo.mi.com/docs/en-US/news/latest/v2-6) and the HF model card
+# (XiaomiMiMo/MiMo-V2.6-Pro-RL), checked 2026-09-23: 1.02T total / 42B active
+# MoE, MIT, 1M context; AA Intelligence Index 46 (independently matched). It
+# rides the same openai_chat wire and thinking_object_only control as
+# mimo-v2.5-pro. No price is declared: the vendor's "1/20~1/60" figure has no
+# independent source. Multimodal stays off like the sibling row — the vendor
+# advertises visual coding, but no probe here sent an image.
+[[models]]
+id_prefix = "mimo-v2.6"
+base = "openai_chat"
+provider_name = "mimo"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_reasoning = true
+thinking_control_format = "thinking_object_only"
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta:reasoning_content"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_response_format_json = true
 supports_structured_output = false
 supports_multimodal_inputs = false
 supports_image_input = false

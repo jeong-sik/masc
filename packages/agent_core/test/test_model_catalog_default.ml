@@ -132,6 +132,7 @@ let test_subscription_models_admit_their_reasoning_efforts () =
    whichever change starts running them. *)
 let anthropic_cache_pricing_rows =
   [ "claude-opus-5", 1.25, 0.1
+  ; "claude-opus-5-5", 1.25, 0.05
   ; "claude-sonnet-5", 1.25, 0.1
   ; "claude-fable-5", 1.25, 0.1
   ; "claude-fable-5-1", 1.25, 0.025

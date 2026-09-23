@@ -285,13 +285,30 @@ type schedule_row_values = {
 
 val schedule_minimum_recurrence_width : int
 
+val schedule_minimum_delivery_width : int
+val schedule_maximum_delivery_width : int
+
+val schedule_delivery_width : string list -> int
+(** Cells the delivery column needs for [words]: the widest of them, never
+    under {!schedule_minimum_delivery_width} -- what the column drew before it
+    was measured -- and never over {!schedule_maximum_delivery_width}, so one
+    long word cannot take the recurrence's room. *)
+
 val schedule_recurrence_width :
-  inner_width:int -> target_width:int -> wake_width:int -> int
+  inner_width:int ->
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  int
 (** Cells the recurrence may occupy: what the named columns leave, never below
     {!schedule_minimum_recurrence_width}. *)
 
 val schedule_header_row :
-  target_width:int -> wake_width:int -> recurrence_width:int -> string
+  target_width:int ->
+  wake_width:int ->
+  delivery_width:int ->
+  recurrence_width:int ->
+  string
 
 val schedule_row :
   ?status_style:string ->
@@ -299,6 +316,7 @@ val schedule_row :
   ?recurrence_style:string ->
   target_width:int ->
   wake_width:int ->
+  delivery_width:int ->
   recurrence_width:int ->
   schedule_row_values ->
   string

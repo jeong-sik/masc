@@ -740,7 +740,26 @@ let verification_row ~submitter_width ~title_width values =
    carries the timezone. *)
 let schedule_status_width = 12
 let schedule_due_width = 19
-let schedule_delivery_width = 12
+(* What the delivery column drew before it was measured. It never goes under
+   this, so a page of short words keeps the table it had. *)
+let schedule_minimum_delivery_width = 12
+
+(* And never past this, so one long word cannot take the recurrence's room. *)
+let schedule_maximum_delivery_width = 20
+
+(* The delivery column, measured from the words on the page.
+
+   It was a literal 12. The projection's own words run past that --
+   [turn_finished] is thirteen cells and drew as "tur...finished" on the live
+   fleet, [terminal_cancelled] is eighteen and
+   [conflicting_terminal_evidence] twenty-nine -- and unlike the wake column
+   beside it there is no contract list to measure once and be done (#38350),
+   so the page is what it has to fit. *)
+let schedule_delivery_width words =
+  List.fold_left
+    (fun widest word -> max widest (Masc_tui_message_layout.display_width word))
+    schedule_minimum_delivery_width words
+  |> min schedule_maximum_delivery_width
 let schedule_minimum_recurrence_width = 12
 
 type schedule_row_values = {
@@ -762,37 +781,39 @@ let schedule_no_values =
   }
 
 let schedule_cells ?(status_style = "") ?(wake_style = "")
-      ?(recurrence_style = "") ~target_width ~wake_width ~recurrence_width
-      values =
+      ?(recurrence_style = "") ~target_width ~wake_width ~delivery_width
+      ~recurrence_width values =
   [ Table.cell ~style:status_style ~header:"STATUS" ~width:schedule_status_width
       values.srow_status
   ; Table.cell ~header:"DUE" ~width:schedule_due_width values.srow_due
   ; Table.cell ~header:"TARGET" ~width:target_width values.srow_target
   ; Table.cell ~style:wake_style ~header:"WAKE" ~width:wake_width
       values.srow_wake
-  ; Table.cell ~header:"DELIVERY" ~width:schedule_delivery_width
-      values.srow_delivery
+  ; Table.cell ~header:"DELIVERY" ~width:delivery_width values.srow_delivery
   ; Table.cell ~style:recurrence_style ~header:"RECURRENCE"
       ~width:recurrence_width values.srow_recurrence
   ]
 
-let schedule_recurrence_width ~inner_width ~target_width ~wake_width =
+let schedule_recurrence_width ~inner_width ~target_width ~wake_width
+      ~delivery_width =
   let named =
     Table.used_width
-      (schedule_cells ~target_width ~wake_width ~recurrence_width:0
-         schedule_no_values)
+      (schedule_cells ~target_width ~wake_width ~delivery_width
+         ~recurrence_width:0 schedule_no_values)
   in
   max schedule_minimum_recurrence_width (inner_width - named)
 
-let schedule_header_row ~target_width ~wake_width ~recurrence_width =
+let schedule_header_row ~target_width ~wake_width ~delivery_width
+      ~recurrence_width =
   Table.header_row
-    (schedule_cells ~target_width ~wake_width ~recurrence_width
+    (schedule_cells ~target_width ~wake_width ~delivery_width ~recurrence_width
        schedule_no_values)
 
 let schedule_row ?status_style ?wake_style ?recurrence_style ~target_width
-      ~wake_width ~recurrence_width values =
+      ~wake_width ~delivery_width ~recurrence_width values =
   Table.row
     (schedule_cells ?status_style ?wake_style ?recurrence_style ~target_width
+       ~delivery_width
        ~wake_width ~recurrence_width values)
 
 (* Lane run columns.

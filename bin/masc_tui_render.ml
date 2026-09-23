@@ -4034,15 +4034,29 @@ let render_schedule_list (state : state) =
              |> min 40
            in
            let wake_width = schedule_wake_word_cells in
+           (* Measured, like the target beside it. The column was a literal
+              12, and the words the projection sends run past it: live,
+              [turn_finished] drew as [tur...finished], and
+              [terminal_cancelled] and [conflicting_terminal_evidence] are
+              longer still. The wake column next to it takes its width from
+              the contract's own list; this one has no such list to read
+              (#38350), so it is measured from the rows on the page. *)
+           let delivery_width =
+             Render_schedule.schedule_delivery_width
+               (List.map
+                  (fun row ->
+                    Terminal_text.single_line (schedule_delivery_word row))
+                  snapshot.scs_rows)
+           in
            let recurrence_width =
              Render_schedule.schedule_recurrence_width
                ~inner_width:(max 1 (framed_inner_width cols - 2))
-               ~target_width:subject_width ~wake_width
+               ~target_width:subject_width ~wake_width ~delivery_width
            in
            c.push_styled ~style:(Theme.recede ())
              ("  "
              ^ Render_schedule.schedule_header_row ~target_width:subject_width
-                 ~wake_width ~recurrence_width);
+                 ~wake_width ~delivery_width ~recurrence_width);
            c.push_divider ();
            (* The column names and the rule under them, the two rows every
               other list on this screen already spends to say what it draws. *)
@@ -4101,7 +4115,7 @@ let render_schedule_list (state : state) =
                  Render_schedule.schedule_row ~status_style:status_color
                    ~wake_style:(schedule_status_color last_wake)
                    ~recurrence_style:Ansi.dim ~target_width:subject_width
-                   ~wake_width ~recurrence_width
+                   ~wake_width ~delivery_width ~recurrence_width
                    { Render_schedule.srow_status =
                        bracketed ~max_cells:10 row.sch_status
                    ; srow_due = due

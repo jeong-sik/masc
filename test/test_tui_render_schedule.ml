@@ -1233,14 +1233,14 @@ let schedule_empty : Schedule.schedule_row_values =
 
 let test_schedule_rows_stay_on_the_header_columns () =
   for inner_width = 60 to 240 do
-    let target_width = 16 and wake_width = 9 in
+    let target_width = 16 and wake_width = 9 and delivery_width = 12 in
     let recurrence_width =
-      Schedule.schedule_recurrence_width ~inner_width ~target_width ~wake_width
+      Schedule.schedule_recurrence_width ~inner_width ~target_width ~wake_width ~delivery_width
     in
     let width text = Masc_tui_message_layout.display_width text in
     let header =
       width
-        (Schedule.schedule_header_row ~target_width ~wake_width
+        (Schedule.schedule_header_row ~target_width ~wake_width ~delivery_width
            ~recurrence_width)
     in
     List.iter
@@ -1249,7 +1249,7 @@ let test_schedule_rows_stay_on_the_header_columns () =
           (Printf.sprintf "inner %d: %s matches the header" inner_width what)
           header
           (width
-             (Schedule.schedule_row ~target_width ~wake_width ~recurrence_width
+             (Schedule.schedule_row ~target_width ~wake_width ~delivery_width ~recurrence_width
                 values)))
       [ "an overlong row", schedule_probe; "an empty row", schedule_empty ];
     (* The styles a schedule row wears -- the state's colour, the wake's, the
@@ -1260,20 +1260,41 @@ let test_schedule_rows_stay_on_the_header_columns () =
       (width
          (Schedule.schedule_row ~status_style:"\027[33m" ~wake_style:"\027[31m"
             ~recurrence_style:"\027[2m" ~target_width ~wake_width
-            ~recurrence_width schedule_probe))
+            ~delivery_width ~recurrence_width schedule_probe))
   done
+
+(* The delivery column was a literal 12, and the projection's own words run
+   past it: [turn_finished] is thirteen cells and drew as "tur...finished" on
+   the live fleet, [terminal_cancelled] is eighteen and
+   [conflicting_terminal_evidence] twenty-nine. The wake column beside it
+   takes its width from the contract's list of wake words; this one has no
+   such list (#38350), so it is measured from the page. *)
+let test_the_delivery_column_holds_the_words_on_the_page () =
+  check int "a long word is held whole" (String.length "turn_finished")
+    (Schedule.schedule_delivery_width [ "stimulus"; "turn_finished" ]);
+  check int "short words keep the column the table had"
+    Schedule.schedule_minimum_delivery_width
+    (Schedule.schedule_delivery_width [ "stimulus"; "not_found" ]);
+  check int "an empty page keeps it too"
+    Schedule.schedule_minimum_delivery_width
+    (Schedule.schedule_delivery_width []);
+  (* One very long word does not take the recurrence's room. *)
+  check int "the column stops at its ceiling"
+    Schedule.schedule_maximum_delivery_width
+    (Schedule.schedule_delivery_width [ "conflicting_terminal_evidence" ])
+
 
 (* The recurrence takes what the named columns leave, down to a floor. It is
    the column that carries the timezone, and the one the pane was cutting. *)
 let test_schedule_recurrence_takes_the_remainder () =
   for inner_width = 20 to 300 do
-    let target_width = 16 and wake_width = 9 in
+    let target_width = 16 and wake_width = 9 and delivery_width = 12 in
     let recurrence_width =
-      Schedule.schedule_recurrence_width ~inner_width ~target_width ~wake_width
+      Schedule.schedule_recurrence_width ~inner_width ~target_width ~wake_width ~delivery_width
     in
     let drawn =
       Masc_tui_message_layout.display_width
-        (Schedule.schedule_header_row ~target_width ~wake_width
+        (Schedule.schedule_header_row ~target_width ~wake_width ~delivery_width
            ~recurrence_width)
     in
     if recurrence_width > Schedule.schedule_minimum_recurrence_width then
@@ -1289,19 +1310,19 @@ let test_schedule_recurrence_takes_the_remainder () =
 
 (* Six names above the rows, and none of them left inside a row. *)
 let test_schedule_names_its_columns_once () =
-  let target_width = 16 and wake_width = 9 in
+  let target_width = 16 and wake_width = 9 and delivery_width = 12 in
   let recurrence_width =
     Schedule.schedule_recurrence_width ~inner_width:120 ~target_width
-      ~wake_width
+      ~wake_width ~delivery_width
   in
   let header =
-    Schedule.schedule_header_row ~target_width ~wake_width ~recurrence_width
+    Schedule.schedule_header_row ~target_width ~wake_width ~delivery_width ~recurrence_width
   in
   List.iter
     (fun name -> check bool (name ^ " names a column") true (holds name header))
     [ "STATUS"; "DUE"; "TARGET"; "WAKE"; "DELIVERY"; "RECURRENCE" ];
   let row =
-    Schedule.schedule_row ~target_width ~wake_width ~recurrence_width
+    Schedule.schedule_row ~target_width ~wake_width ~delivery_width ~recurrence_width
       { schedule_probe with srow_recurrence = "every 30 minutes" }
   in
   List.iter
@@ -2215,6 +2236,8 @@ let () =
             test_verification_names_its_columns_in_capitals
         ; test_case "verification title takes the remainder" `Quick
             test_verification_title_takes_the_remainder
+        ; test_case "the delivery column holds the words on the page" `Quick
+            test_the_delivery_column_holds_the_words_on_the_page
         ; test_case "schedule rows stay on the header columns" `Quick
             test_schedule_rows_stay_on_the_header_columns
         ; test_case "schedule recurrence takes the remainder" `Quick

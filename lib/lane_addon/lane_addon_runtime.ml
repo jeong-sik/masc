@@ -152,9 +152,19 @@ let fork_isolated ~sw f = Eio.Fiber.fork ~sw (fun () ->
   try f () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Log.Misc.error "Lane Add-on background boundary: %s" (Printexc.to_string exn))
+(* A worker that never created a container and never committed an observation
+   leaves nothing for Inspect, Slice or Evidence to read; its Acquire_failed
+   resource event already records why it did not start. Keeping the binding
+   would only add a record that every reconciliation reads again, and a
+   startup that keeps failing adds one per maintenance beat. *)
+let retains_history e = e.seq > 0 || Option.is_some e.connection
 let release_detached m e =
-  if e.phase = Detached && not e.running && not e.cleanup_running
-  then (Hashtbl.remove m.entries e.instance_id; wake_dependents m e; m.configuration_nudge ())
+  if e.phase = Detached && not e.running && not e.cleanup_running then (
+    if not (retains_history e) then
+      (match offload (fun () -> Lane_addon_store.remove_binding m.store ~instance_id:e.instance_id) with
+       | Ok () -> ()
+       | Error message -> Log.Misc.error "Lane empty binding removal: %s" message);
+    Hashtbl.remove m.entries e.instance_id; wake_dependents m e; m.configuration_nudge ())
 let publish_resource lifecycle e container_id detail =
   Lane_addon_resource_events.publish lifecycle
     { instance_id = e.instance_id; run_id = e.run_id;

@@ -133,6 +133,10 @@ let read_jsonl t reference =
   Ok (String.concat "" records)
 let binding_path instance_id = Filename.concat "bindings" (digest instance_id ^ ".json")
 let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojson.Safe.to_string json)
+let remove_binding t ~instance_id = protect (fun () ->
+  (try Unix.unlink (Filename.concat t.root (binding_path instance_id))
+   with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+  Ok ())
 let action_path ~instance_id ~request_id =
   Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_action t ~instance_id ~request_id json =

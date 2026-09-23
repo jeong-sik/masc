@@ -521,6 +521,8 @@ let test_startup_dependency_recovers_without_editing_toml () =
       end
     in
     advance_until_started ();
+    check bool "a startup that never created a container leaves no retained record" false
+      (instances config |> List.exists (fun value -> text "instance_id" value = failed_id));
     let id = declared_instance config "observer" |> text "instance_id" in
     await_ready real_clock config id;
     check string "recovered worker receives the original binding" "initial"

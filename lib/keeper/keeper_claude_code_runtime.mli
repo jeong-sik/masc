@@ -154,8 +154,19 @@ val run :
     session's first launch, not the [--system-prompt-file] this process
     writes, until the conversation is compacted. The resume prompt is
     therefore {!Keeper_official_client_host.resume_prompt}: the per-turn
-    context carrier and the Librarian working state in front of the goal.
-    The canonical conversation is not sent, and the session's context
-    frontier records [Held_by_vendor_session]. A [Start] is unchanged: the
-    system prompt file carries the Keeper prompt and every System message,
-    and the prompt carries the history and the goal. *)
+    context carrier, the Librarian working state and the historical task
+    reference in front of the goal. Any other per-turn System message must
+    carry one of the markers {!Keeper_official_client_host.is_carried_on_resume}
+    reads, or a resumed session never sees it. The canonical conversation is
+    not sent, and the session's context frontier records
+    [Held_by_vendor_session]. A resume reports no window observation and no
+    carried front: the range the projection measures is not what it sends.
+
+    A context overflow on a [Resume] is the vendor's own conversation, which a
+    smaller range does not change. Without a continuation the shrink retry
+    starts fresh and carries the shrunk range; a Gate continuation, bound to
+    its original session, ends the turn on the typed overflow instead.
+
+    A [Start] is unchanged: the system prompt file carries the Keeper prompt
+    and every System message, and the prompt carries the history and the
+    goal. *)

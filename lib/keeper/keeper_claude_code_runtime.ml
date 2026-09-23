@@ -502,9 +502,11 @@ end
    recoveries are never resolved here because an effect-observed overflow is
    never retry-safe. A failed resolution is not retried here; the next
    attempt's claim surfaces the refusal instead. *)
-(* A Gate is bound to its previous settlement. An observation-free rejected
-   input may retry there, but may never discard that session for a fresh one. *)
-let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_path ~keeper_name ~runtime_id ()
+(* The retry is always a fresh start. A resume sends the vendor session the
+   same prompt at every capacity, so only a start carries the shrunk range;
+   an attempt bound to its previous session (a Gate continuation) is never
+   authorized to shrink-retry, see [context_overflow_retry_safe]. *)
+let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ()
   =
   match Session_store.load ~base_path ~keeper_name with
   | Error _ -> ()
@@ -525,9 +527,7 @@ let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_
          ~keeper_name
          ~expected
          ~recovery_id
-         ~resolution:(match official_client_continuation with
-           | Some _ -> Session_store.Retry_previous
-           | None -> Session_store.Restart_fresh)
+         ~resolution:Session_store.Restart_fresh
          ~resolved_by:"context-overflow-shrink-retry"
          ~resolved_at:(Time_compat.now ())
      with
@@ -538,7 +538,7 @@ let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_
 
 let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
-    ~tools ~initial_messages ~model_input_projection
+    ~tools ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
@@ -646,7 +646,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         ~system_prompt
         ~tools
         ~initial_messages
-        ~model_input_projection
+        ~model_input_projection:(model_input_projection_for session_mode)
         ~hooks:(Some hooks)
     in
     let* () = Keeper_official_task_reference.require_preserved
@@ -678,8 +678,9 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     (* Claude Code resumes with the system prompt it recorded at the session's
        first launch ([--system-prompt-snapshot], default on): every later
        request and resume sends that record as-is until the conversation is
-       compacted, whatever [--system-prompt-file] holds. The composed per-turn
-       context -- the context carrier and the Librarian working state -- is
+       compacted, whatever [--system-prompt-file] holds. What changes per turn
+       or per operation -- the context carrier, the Librarian working state
+       and the historical task reference ({!Host.is_carried_on_resume}) -- is
        therefore sent in front of the resume prompt, and the canonical
        conversation, which the vendor session already holds, is not sent. The
        frontier and the input report say so. *)
@@ -701,9 +702,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       | Runtime_claude_code.Resume _ -> Host.resume_prompt ~goal prepared.messages
     in
     (* A resume file only takes effect once the conversation is compacted and
-       the client records a new prompt. It keeps the composed context out, so
-       that record never holds a stale copy of what each resume prompt carries
-       fresh. *)
+       the client records a new prompt. It keeps out what the resume prompt
+       carries, so that record never holds a stale copy of it. *)
     let system_file_messages =
       match session_mode with
       | Runtime_claude_code.Start -> system_messages
@@ -711,7 +711,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
         prepared.messages
         |> List.filter_map (fun (message : Agent_core.Types.message) ->
           match message.role with
-          | Agent_core.Types.System when not (Host.is_composed_system_context message) ->
+          | Agent_core.Types.System when not (Host.is_carried_on_resume message) ->
             Some (Host.encode_history_message message)
           | Agent_core.Types.System
           | Agent_core.Types.User
@@ -1123,10 +1123,19 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             | _, Some detail -> Error (internal_error detail)
             | _, None -> settle_host_stop ~usage stop)
          | Error error ->
+           (* A resumed session is refused on the vendor's own conversation,
+              which a smaller masc range does not change: the resume prompt is
+              the same at every capacity. The retry is therefore a fresh start
+              carrying the shrunk range, which a Gate continuation forbids --
+              it must stay in its original session -- so that turn ends on the
+              typed overflow instead of respawning the same refused input. *)
            context_overflow_retry_safe :=
-             (match error with
-              | Runtime_claude_code.Context_window_exceeded
-                  { tool_effect_attempted = false; response_emitted = false; _ } ->
+             (match session_mode, official_client_continuation, error with
+              | Runtime_claude_code.Resume _, Some _, _ -> false
+              | ( (Runtime_claude_code.Start | Runtime_claude_code.Resume _)
+                , (Some _ | None)
+                , Runtime_claude_code.Context_window_exceeded
+                    { tool_effect_attempted = false; response_emitted = false; _ } ) ->
                 true
               | _ -> false);
            (* A provider can reject after the child process spawned but
@@ -1368,7 +1377,7 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
               ~capacity)
         ~on_shrink_retry:
           (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
-            resolve_input_rejected_for_shrink_retry ~official_client_continuation
+            resolve_input_rejected_for_shrink_retry
               ~base_path
               ~keeper_name
               ~runtime_id
@@ -1391,20 +1400,30 @@ let run ?official_task_reference ~accepts_image_input ?required_native_posture ?
             ~system_prompt
             ~tools
             ~initial_messages
-            ~model_input_projection:
-              (Some
-                 (model_input_projection_for_capacity
-                    ~capacity_bytes
-                    ~observed_next_shrink_capacity_bytes
-                    ~observed_floor_capacity_bytes
-                    ?on_model_input_window_observation
-                    ?carried_front_seed
-                    ?librarian_front
-                    ?on_carried_front
-                    ~turn_start
-                    ~keeper_name
-                    ~runtime_id
-                    model_input_projection))
+            (* A resume still projects: the Librarian working state it
+               carries in front of the prompt is placed by this projection.
+               It reports no window and no carried front, though -- the range
+               it measures is not what a resume sends. *)
+            ~model_input_projection_for:(fun session_mode ->
+              let observed callback =
+                match session_mode with
+                | Runtime_claude_code.Start -> callback
+                | Runtime_claude_code.Resume _ -> None
+              in
+              Some
+                (model_input_projection_for_capacity
+                   ~capacity_bytes
+                   ~observed_next_shrink_capacity_bytes
+                   ~observed_floor_capacity_bytes
+                   ?on_model_input_window_observation:
+                     (observed on_model_input_window_observation)
+                   ?carried_front_seed
+                   ?librarian_front
+                   ?on_carried_front:(observed on_carried_front)
+                   ~turn_start
+                   ~keeper_name
+                   ~runtime_id
+                   model_input_projection))
             (* Reported inside the attempt rather than from the projection.
                The projection cannot see [session_mode], and on this lane that
                is the whole question: it runs on every turn, but only a [Start]

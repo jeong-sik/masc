@@ -142,10 +142,14 @@ let history_role_label = function
 (* A blank line between rendered messages and before the goal. *)
 let resume_section_separator = "\n\n"
 
+let is_carried_on_resume message =
+  is_composed_system_context message || Keeper_official_task_reference.is_reference message
+;;
+
 let resume_prompt ~goal messages =
   let context =
     messages
-    |> List.filter is_composed_system_context
+    |> List.filter is_carried_on_resume
     |> List.map (fun (message : Agent_core.Types.message) ->
       history_role_label message.role ^ encode_history_message message)
     |> String.concat resume_section_separator

@@ -194,14 +194,28 @@ val history_role_label : Agent_core.Types.role -> string
     writes in front of one encoded message when it carries messages as prompt
     text. *)
 
+val is_carried_on_resume : Agent_core.Types.message -> bool
+(** Whether a resume sends this message in front of its prompt: a message
+    {!is_composed_system_context} selects, or the historical task reference
+    ({!Keeper_official_task_reference.is_reference}). Both change per turn or
+    per operation, which the vendor session cannot already hold.
+
+    A resumed Claude Code session sends the system prompt it recorded at its
+    first launch, so a per-turn System message reaches a resumed session only
+    when it carries one of these markers. A new kind of per-turn System
+    context must be tagged with one; an untagged one lands in the system
+    prompt file only, which a resume does not read. *)
+
 val resume_prompt : goal:string -> Agent_core.Types.message list -> string
 (** The user prompt a lane sends when it resumes a vendor session that already
     holds the conversation and the system prompt it recorded at its first
-    launch. The messages {!is_composed_system_context} selects are rendered,
-    each behind its {!history_role_label}, in front of [goal] and separated
-    from it by a blank line. Everything else in [messages] is left out: the
-    vendor session holds it. With no composed message the prompt is [goal]
-    exactly. Antigravity and Claude Code resumes both send this. *)
+    launch. The messages {!is_carried_on_resume} selects are rendered, in
+    order, each behind its {!history_role_label}, in front of [goal] and
+    separated from it by a blank line. Everything else in [messages] is left
+    out: the vendor session holds it. With none selected the prompt is [goal]
+    exactly. Antigravity and Claude Code resumes both send this; Antigravity
+    refuses a task reference before it composes, so on that lane the
+    selection is the composed context alone. *)
 
 val measure_message_bytes : Agent_core.Types.message -> int
 (** Bytes one message occupies in the canonical MASC encoding

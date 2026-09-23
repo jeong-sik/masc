@@ -1068,37 +1068,39 @@ let test_keeper_shrinks_history_after_statusless_context_error
                 ~goal:"SHRINK_HISTORY"
                 ()
             with
-            | Error error -> fail (Agent_core.Error.to_string error)
+            | Error error ->
+              if not native_gate then fail (Agent_core.Error.to_string error)
             | Ok turn ->
+              if native_gate then fail "a Gate resume refused for size completed the turn";
               check string
                 "Keeper response"
                 "MASC_CLAUDE_SHRUNK"
                 (keeper_response_text turn));
+       if native_gate then (
+         (* A resumed session is refused on the vendor's own conversation, and
+            the resume prompt is the same at every capacity, so shrinking
+            cannot help. A Gate must stay in its original session, so the turn
+            ends on the overflow instead of respawning the same input. *)
+         check bool "the Gate resume is not respawned" false
+           (Sys.file_exists second_prompt_marker);
+         let raw = In_channel.with_open_bin first_prompt_marker In_channel.input_line in
+         (match raw with
+          | None -> fail "native Gate fixture did not capture its resume input"
+          | Some raw ->
+            check string "a Gate resume sends only its new input"
+              "SHRINK_HISTORY" (content_of_wire_message raw));
+         check bool "resume system file carries no canonical snapshot" false
+           (String_util.contains_substring
+              (In_channel.with_open_bin first_system_marker In_channel.input_all)
+              "masc.official-client-canonical-context.v1");
+         match (load_state base_path).phase with
+         | Recovery_required _ -> ()
+         | _ -> fail "a Gate resume refused for size did not keep its session for recovery")
+       else (
        List.iter (fun marker ->
          let scoped_path = In_channel.with_open_bin (marker ^ ".path") In_channel.input_all in
          check bool "System file cleaned after rejected and successful turns" false (Sys.file_exists scoped_path))
          [first_system_marker; second_system_marker];
-       (if native_gate then
-          (* A resume sends no canonical snapshot on either attempt: the
-             vendor session holds the conversation and reuses the system
-             prompt it recorded at its first launch. *)
-          List.iter (fun marker ->
-            check bool "resume system file carries no canonical snapshot" false
-              (String_util.contains_substring
-                 (In_channel.with_open_bin marker In_channel.input_all)
-                 "masc.official-client-canonical-context.v1"))
-            [first_system_marker; second_system_marker]);
-       (if native_gate then
-          (* A native continuation sends only its new input; the official
-             session already owns the prior history, including the Gate. *)
-          List.iter (fun path ->
-            let raw = In_channel.with_open_bin path In_channel.input_line in
-            match raw with
-            | None -> fail "native Gate fixture did not capture its resume input"
-            | Some raw -> check string "native Gate retry preserves the exact input delta"
-                "SHRINK_HISTORY" (content_of_wire_message raw))
-            [first_prompt_marker; second_prompt_marker]
-        else (
        let full_history = prompt_history first_prompt_marker in
        let shrunk_history = prompt_history second_prompt_marker in
        let full_count = List.length full_history in
@@ -1112,21 +1114,12 @@ let test_keeper_shrinks_history_after_statusless_context_error
        check bool
          "retry shrinks provider-bound history"
          true
-         (shrunk_count < full_count)
-        ));
+         (shrunk_count < full_count);
        let state = load_state base_path in
-       check int "retry preserves the native Gate turn ordinal"
-         (if native_gate then 2 else 1) state.turn_count;
-       (match official_client_continuation with
-        | None -> ()
-        | Some checkpoint ->
-          check bool "bound Gate resumes after shrink in original session" true
-            (Keeper_official_client_session_store.validate_completed_continuation
-              ~checkpoint ~expected:(Some state) = Ok ()));
-
+       check int "retry keeps the turn ordinal" 1 state.turn_count;
        match state.phase with
        | Settled { turn_id = "turn-shrunk"; _ } -> ()
-       | _ -> fail "shrunk Claude Code retry did not settle")
+       | _ -> fail "shrunk Claude Code retry did not settle"))
 ;;
 
 let test_post_effect_transport_enters_recovery () =
@@ -1465,6 +1458,34 @@ let test_keeper_settles_and_resumes () =
        | Settled { session_id = settled_session; turn_id = "turn-2" } ->
          check string "settled session" session_id settled_session
        | _ -> fail "resumed Claude Code turn did not settle")
+;;
+
+(* The historical task reference only exists on a resume of the operation's
+   own vendor session, so it has to ride in the resume prompt too: the system
+   prompt file it used to land in is not what a resumed session reads. *)
+let test_resume_prompt_carries_the_task_reference () =
+  let reference : Agent_core.Types.message =
+    { (Agent_core.Types.system_msg "MASC_TASK_REFERENCE") with
+      metadata = [ "masc_official_historical_task", `String "v1" ] }
+  in
+  let carrier : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text "MASC_TURN_CONTEXT" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  check bool "the reference is recognised" true
+    (Keeper_official_task_reference.is_reference reference);
+  let rendered (message : Agent_core.Types.message) =
+    Keeper_official_client_host.history_role_label message.role
+    ^ Keeper_official_client_host.encode_history_message message
+  in
+  check string "reference, then turn context, then the goal; history left out"
+    (rendered reference ^ "\n\n" ^ rendered carrier ^ "\n\nGOAL")
+    (Keeper_official_client_host.resume_prompt ~goal:"GOAL"
+       [ reference; message User "held by the vendor session"; carrier ])
 ;;
 
 let test_pre_effect_provider_rejection_keeps_failover_open () =
@@ -2665,11 +2686,13 @@ let () =
         ] )
     ; ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
+        ; test_case "resume prompt carries the task reference" `Quick
+            test_resume_prompt_carries_the_task_reference
         ; test_case
             "Agent Core checkpoint starts official-client turn"
             `Quick
             test_agent_core_checkpoint_starts_official_client_turn
-        ; test_case "native Gate retains its session across overflow shrink" `Quick
+        ; test_case "native Gate resume refused for size ends the turn in its session" `Quick
             (test_keeper_shrinks_history_after_statusless_context_error
                ~native_gate:true
                ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])

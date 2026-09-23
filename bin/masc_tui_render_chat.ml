@@ -694,12 +694,29 @@ let tool_block_style (_projection : Keeper_chat_transcript.tool_projection) =
 
 ;;
 
+(* The mark says whether the row is still moving. Two states are:
+   [Skill_calling] is the read or the run, [Skill_served_pending] is waiting
+   on the delivery record. Every other state is a skill's life at rest.
+
+   [Skill_delivered] -- "전달됨, 도구 안 씀" -- was drawn live, so a settled
+   history line wore the hollow diamond and read as a turn still working. It
+   weighed more after #36870 took the SKILL word off the row and left the
+   mark as the only signal of that axis.
+
+   The same line is already drawn elsewhere: [skill_block_state] ranks the
+   states "what went wrong, then what is still moving, then how far a
+   finished one got", and puts [Skill_delivered] in the finished group. Two
+   places said which states are moving and only one of them was right. *)
 let skill_tone_of_state :
     Keeper_chat_transcript.skill_state -> Message_layout.skill_tone = function
   | Keeper_chat_transcript.Skill_calling
-  | Keeper_chat_transcript.Skill_served_pending
-  | Keeper_chat_transcript.Skill_delivered -> Message_layout.Skill_live
-  | Keeper_chat_transcript.Skill_used -> Message_layout.Skill_used
+  | Keeper_chat_transcript.Skill_served_pending -> Message_layout.Skill_live
+  (* Delivered and used are the two ends of one life, and both are reached.
+     Which one it is, the row spells in words; the mark says the life is
+     over. [Skill_served_only] is finished too, but without the delivery
+     record it should have, and that is what the attention mark is for. *)
+  | Keeper_chat_transcript.Skill_delivered
+  | Keeper_chat_transcript.Skill_used -> Message_layout.Skill_settled
   | Keeper_chat_transcript.Skill_served_only
   | Keeper_chat_transcript.Skill_evidence_missing -> Message_layout.Skill_attention
   | Keeper_chat_transcript.Skill_failed

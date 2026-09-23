@@ -5206,10 +5206,13 @@ type state = {
   mutable github_identity_view_error: string option;
   mutable github_token_input: string option;
   mutable github_token_save_status: string option;
-  (* The scopes the next [L] login asks for beyond gh's minimum. Off until the
-     operator ticks one: [workflow] lets the token change CI, which runs with
-     the repository's secrets. *)
-  mutable github_login_scopes: Masc.Keeper_github_identity.login_scope list;
+  (* The scopes the next [L] login asks for beyond gh's minimum, and the
+     Keeper they were ticked for. Off until the operator ticks one: [workflow]
+     lets the token change CI, which runs with the repository's secrets, so a
+     tick made on one Keeper must not ride along to the next Keeper's login.
+     Read through [github_login_scopes_for]. *)
+  mutable github_login_scopes:
+    (string * Masc.Keeper_github_identity.login_scope list) option;
   (* The Identity tab. Stamped with the keeper it was fetched for, like the
      other fetched tabs, so the pane shows loading rather than another
      keeper's answer. The providers are held rather than pre-rendered lines
@@ -7373,7 +7376,7 @@ let create_state
   github_identity_view = None;
   github_token_input = None;
   github_token_save_status = None;
-  github_login_scopes = [];
+  github_login_scopes = None;
   identity_view = None;
   identity_view_error = None;
   identity_login = None;
@@ -10714,3 +10717,8 @@ let voice_wizard_cycle_section session =
     ; vws_replace_on_type = true
     ; vws_status = None
     }
+
+let github_login_scopes_for (state : state) ~keeper_name =
+  match state.github_login_scopes with
+  | Some (owner, scopes) when String.equal owner keeper_name -> scopes
+  | Some _ | None -> []

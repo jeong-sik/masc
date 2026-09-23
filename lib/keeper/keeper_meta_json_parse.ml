@@ -108,7 +108,7 @@ let parse_trace_id raw =
 
 let parse_trace_history fields =
   let* history = string_list_field fields "trace_history" in
-  match List.find_opt (fun trace_id -> not (validate_name trace_id)) history with
+  match List.find_opt (fun trace_id -> not (Safe_identifier.is_portable_name trace_id)) history with
   | None -> Ok history
   | Some trace_id -> invalidf "trace_history contains invalid trace id %S" trace_id
 ;;
@@ -376,7 +376,7 @@ let decode_current_meta fields =
      same bound on every read, so the bound is carried here rather than
      relaxed. Absence is already rejected because [int_field] goes through
      [required_field]. *)
-  else if not (validate_name (Keeper_id.Trace_id.to_string trace_id))
+  else if not (Safe_identifier.is_portable_name (Keeper_id.Trace_id.to_string trace_id))
   then invalidf "trace_id is invalid: %S" trace_id_raw
   else
     let usage : usage_metrics =

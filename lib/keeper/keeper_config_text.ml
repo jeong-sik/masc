@@ -37,13 +37,25 @@ let bool_of_env_opt name =
 
 (* ── Name validation ────────────────────────────────────────── *)
 
-let validate_name = Safe_identifier.is_portable_name
+(* A keeper's directory is [keepers/<name>], beside the stores kept directly
+   under [keepers/]; a keeper named like one of them would share its
+   directory. [Keeper_id.Keeper_name.of_string] refuses the same names. *)
+let is_keepers_root_store_name = Common.is_keepers_root_store_dirname
+
+let validate_name name =
+  Safe_identifier.is_portable_name name && not (is_keepers_root_store_name name)
 
 let invalid_name_error name =
-  Printf.sprintf
-    "invalid keeper name %S: %s"
-    name
-    (Safe_identifier.portable_name_error ~field:"keeper name")
+  if Safe_identifier.is_portable_name name && is_keepers_root_store_name name
+  then
+    Printf.sprintf
+      "invalid keeper name %S: keepers/%s is a runtime store directory, not a keeper"
+      name name
+  else
+    Printf.sprintf
+      "invalid keeper name %S: %s"
+      name
+      (Safe_identifier.portable_name_error ~field:"keeper name")
 ;;
 
 (* ── UTF-8 string processing ────────────────────────────────── *)

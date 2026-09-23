@@ -48,12 +48,16 @@ val redacted_tool_output_json : tool_name:string -> string -> Yojson.Safe.t opti
 
 val truncate_json_document : ?max_len:int -> string -> string
 (** Truncate a tool-output string to at most [max_len] bytes (default 200)
-    without breaking a JSON document. When the input parses as JSON, the
-    document is shrunk at member/element boundaries — a cut object carries a
-    top-level [_truncated] key, a cut array ends with a ["..."] element, and a
-    cut string is shortened with no marker — and the serialized result is
+    without breaking a JSON document. When the input parses as JSON, secrets
+    are redacted per string value and sensitive key, never on the serialized
+    text, so the result always parses. A document within [max_len] that
+    carries nothing to redact is returned as it came (trimmed). A longer one
+    is shrunk at member/element boundaries — each cut object ends with a
+    [_truncated] member, each cut array ends with a [{_truncated: true}]
+    element, and a cut string is shortened with no marker, so a reader cannot
+    tell a cut string from the value itself — and the serialized result is
     measured and shrunk again until it fits, so the bound holds even when
-    escaping or redaction would have grown it. A non-JSON input falls back to
+    escaping would have grown it. A non-JSON input falls back to
     {!redact_preview}, whose result may exceed [max_len] by the length of its
     ["...(truncated)"] suffix. *)
 

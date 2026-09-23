@@ -397,8 +397,9 @@ let test_truncate_json_document_string_leaf_fits () =
    | exception Yojson.Json_error e ->
      Alcotest.fail ("stored value is not JSON: " ^ e))
 
-(* An array is shrunk at element boundaries and ends with the sentinel; the
-   serialized result fits the budget. *)
+(* An array is shrunk at element boundaries and ends with a [_truncated]
+   element, the same marker a cut object carries; the serialized result fits
+   the budget. *)
 let test_truncate_json_document_list_fits () =
   let doc =
     `List (List.init 200 (fun i -> `String (Printf.sprintf "element-%d" i)))
@@ -409,7 +410,10 @@ let test_truncate_json_document_list_fits () =
     (Printf.sprintf "an array fits the budget (%d bytes)" (String.length out))
     true (String.length out <= 200);
   (match Yojson.Safe.from_string out with
-   | `List _ -> ()
+   | `List items ->
+     Alcotest.(check string) "the cut array ends with the marker element"
+       {|{"_truncated":true}|}
+       (Yojson.Safe.to_string (List.nth items (List.length items - 1)))
    | _ -> Alcotest.fail "stored value is not a JSON array"
    | exception Yojson.Json_error e ->
      Alcotest.fail ("stored value is not JSON: " ^ e))

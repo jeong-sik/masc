@@ -97,16 +97,16 @@ let redacted_tool_output_json ~tool_name:_ output =
   in
   Some redacted
 
-(* The marker a shrunk object carries. The budget must leave room for its
-   serialized length, so that length is measured rather than guessed. *)
-let truncated_marker = ("_truncated", `Bool true)
+(* The marker a shrunk object carries as its last member, and a shrunk array
+   as its last element. The budget must leave room for its serialized length,
+   so that length is measured rather than guessed. *)
+let truncated_key = "_truncated"
 
-let marker_len =
-  String.length (Yojson.Safe.to_string (`Assoc [ truncated_marker ]))
+let truncated_marker = (truncated_key, `Bool true)
 
-(* A shrunk array ends with this element; it is what tells a reader the tail
-   was dropped. *)
-let list_truncation_sentinel = `String "..."
+let truncated_element = `Assoc [ truncated_marker ]
+
+let marker_len = String.length (Yojson.Safe.to_string truncated_element)
 
 (* A serialized string is wrapped in two quote characters, so a string cut to
    [budget] bytes must leave room for them. *)
@@ -135,6 +135,9 @@ let rec shrink_json_to_budget (budget : int) (json : Yojson.Safe.t) : Yojson.Saf
           then keep acc' budget rest
           else List.rev acc
       in
+      (* A member already named [_truncated] would appear twice once the
+         marker is appended, so it gives way to the marker. *)
+      let fields = List.filter (fun (key, _) -> key <> truncated_key) fields in
       `Assoc
         (keep [] (max min_budget (budget - marker_len)) fields @ [ truncated_marker ])
     | `List items ->
@@ -149,7 +152,7 @@ let rec shrink_json_to_budget (budget : int) (json : Yojson.Safe.t) : Yojson.Saf
       in
       `List
         (keep [] (max min_budget (budget - marker_len)) items
-        @ [ list_truncation_sentinel ])
+        @ [ truncated_element ])
     | `String s ->
       let cut =
         String_util.utf8_char_boundary s
@@ -159,23 +162,27 @@ let rec shrink_json_to_budget (budget : int) (json : Yojson.Safe.t) : Yojson.Saf
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as scalar -> scalar
 ;;
 
+(* A JSON document is redacted leaf by leaf ([redact_json_strings]): each
+   string value is scanned on its own, and sensitive keys are masked. The
+   serialized document is never scanned as one text. [url_credential] runs
+   from [://] to the next [@], and a serialized document has no spaces, so on
+   the whole text it spans from one member's URL to another member's e-mail
+   address and replaces the quotes and commas between them — the stored value
+   stops parsing and the members in between are lost. *)
 let truncate_json_document ?(max_len = default_max_len) (s : string) : string =
-  if String.length s <= max_len then redact_preview ~max_len s
-  else
-    match Yojson.Safe.from_string s with
-    | exception Yojson.Json_error _ -> redact_preview ~max_len s
-    | json ->
-      let redacted = redact_json_value json in
+  match Yojson.Safe.from_string s with
+  | exception Yojson.Json_error _ -> redact_preview ~max_len s
+  | json ->
+    let redacted = redact_json_strings json in
+    if String.length s <= max_len && redacted = json then String.trim s
+    else
       (* [shrink_json_to_budget] bounds the document it returns, but the
          serialized form can still grow past that bound: a string leaf spends
-         two characters per escaped byte, and [redact_patterns] runs after the
-         budget is spent. Measure the result and shrink again on a smaller
-         budget until it fits — halving reaches a string, which always fits. *)
+         two characters per escaped byte. Measure the result and shrink again
+         on a smaller budget until it fits — halving reaches a string, which
+         always fits. *)
       let rec fit budget =
-        let out =
-          shrink_json_to_budget budget redacted
-          |> Yojson.Safe.to_string |> redact_patterns
-        in
+        let out = shrink_json_to_budget budget redacted |> Yojson.Safe.to_string in
         if String.length out <= max_len || budget <= 1 then out
         else fit (budget / 2)
       in

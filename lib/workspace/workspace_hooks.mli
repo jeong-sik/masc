@@ -202,6 +202,14 @@ val verification_submitted_fn :
 val goal_verification_pending_fn :
   (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
 
+(** Tell the goal verifier lane that an operator Drop or Reopen moved a Goal,
+    so a review still running for it is cancelled and its claim released. A
+    verdict such a review would deliver is refused anyway, because the Goal is
+    no longer in [Verifying]. With no lane installed there is no review to
+    cancel, and the default does nothing. *)
+val goal_verification_abandoned_fn :
+  (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
+
 (** Publishes the completion-verdict notification after the task status
     commit. A missing runtime adapter is logged explicitly by the default.
     [producer] is the evidence author whose verdict this is — the identity a

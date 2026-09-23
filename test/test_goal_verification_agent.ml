@@ -1121,6 +1121,66 @@ let test_wake_after_deferred_persist_survives_active_scan () =
   check string "new proof completed without another external wake" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
+(* A verifier lane that never answers must not keep its slot or the Goal's
+   claim once the operator takes the Goal out of verifying. The first review
+   hangs; Reopen cancels it and frees the claim, and the next request is
+   reviewed and committed without any other wake. *)
+let test_reopen_from_verifying_cancels_a_hung_review () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Verifier never answers" in
+  ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
+  let entered, resolve_entered = Eio.Promise.create () in
+  let hanging_reviewer =
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
+        ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
+      ignore (Eio.Promise.try_resolve resolve_entered ());
+      let never, _ = Eio.Promise.create () in
+      Eio.Promise.await never
+  in
+  let calls = ref [] in
+  let registry = Goal_verification_run_registry.global () in
+  let finished, resolve_finished = Eio.Promise.create () in
+  let saved_observer = Atomic.get Goal_verification_run_registry.change_observer_fn in
+  let observer () =
+    let committed =
+      reviews_of_goal registry goal_id
+      |> List.exists (fun (run : Goal_verification_run_registry.run) ->
+        match run.status with
+        | Goal_verification_run_registry.Completed
+            { outcome = Goal_verification_run_registry.Committed; _ } -> true
+        | Goal_verification_run_registry.Completed _
+        | Goal_verification_run_registry.Running -> false)
+    in
+    if committed then ignore (Eio.Promise.try_resolve resolve_finished ())
+  in
+  Fun.protect ~finally:(fun () -> Atomic.set Goal_verification_run_registry.change_observer_fn saved_observer)
+    (fun () ->
+      Atomic.set Goal_verification_run_registry.change_observer_fn observer;
+      with_lane_and_reviewer ~slots:(fun () -> Ok ["verifier-a"])
+        ~reviewer:hanging_reviewer
+        (fun () ->
+          Eio.Switch.run (fun sw ->
+            Goal_verification_agent.start ~sw ~config;
+            Eio.Promise.await entered;
+            Atomic.set AR.run_llm_reviewer_fn
+              (recording_reviewer calls ["verifier-a", Stub_approve "measured after reopen"]);
+            let reopened = must_succeed "reopen from verifying" (transition ctx goal_id "reopen") in
+            check string "reopen leaves verifying" "executing" (json_state reopened [ "goal"; "phase" ]);
+            ignore (must_succeed "new request" (transition ctx goal_id "request_complete"));
+            Eio.Promise.await finished)));
+  let runs = reviews_of_goal registry goal_id in
+  check bool "the hung review was cancelled" true
+    (List.exists (fun (run : Goal_verification_run_registry.run) ->
+       match run.status with
+       | Goal_verification_run_registry.Completed
+           { outcome = Goal_verification_run_registry.Review_cancelled _; _ } -> true
+       | Goal_verification_run_registry.Completed _
+       | Goal_verification_run_registry.Running -> false) runs);
+  check int "the new request was reviewed once" 1 (List.length !calls);
+  check string "the new request committed" "awaiting_confirmation" (stored_phase config goal_id)
+;;
+
 let test_pending_before_phase_waits_for_explicit_request () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
@@ -1290,6 +1350,8 @@ let () =
             test_wake_after_deferred_persist_survives_active_scan
         ; test_case "pending before phase waits for explicit retry" `Quick
             test_pending_before_phase_waits_for_explicit_request
+        ; test_case "reopen from verifying cancels a hung review" `Quick
+            test_reopen_from_verifying_cancels_a_hung_review
         ; test_case "new request rejects an old answer for identical criteria" `Quick
             test_new_request_rejects_old_answer_for_same_criterion
         ; test_case "proof pending drains to completed" `Quick

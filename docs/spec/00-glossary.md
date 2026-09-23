@@ -535,9 +535,14 @@ status: reference
   `Connector_connected_unavailable`·`Connector_disconnected`·`Connector_offline`·
   `Connector_stale`. 배지가 철자하는 단어는 `CONNECTED`·`CONNECTED / UNAVAILABLE`·
   `DISCONNECTED`·`UNAVAILABLE`·`STALE`(`Masc_tui_connector_state.badge_word`). 같은 판이
-  gateway·poll 상태를 따로 그리는데, 그 값이 배지가 이미 철자한 단어와 같으면(대소문자·
-  앞뒤 공백 무시) 그리지 않는다 — Discord 행이 `Connection ● CONNECTED` 위에
-  `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한 번만 그린다.
+  gateway 상태(`connector_gateway_state`, 닫힌 일곱 값)나 poll 상태
+  (`connector_poll_state`, 닫힌 세 값)를 따로 그린다. 서버가 모르는 값을 보내면 그 커넥터
+  행만 읽지 못한 행(`connector_refusal`)으로 남고, 판은 그 행을 이름과 이유 한 줄로 그린다.
+  나머지 행은 그대로 읽힌다. 배지가 이미 말한 상태는 그리지 않는다. 그 판정은 문자열 비교가 아니라 생성자
+  짝으로 한다: `Connector_connected` 아래 `Connector_gateway_connected`,
+  `Connector_disconnected` 아래 `Connector_gateway_disconnected` 두 짝뿐이다 — Discord 행이
+  `Connection ● CONNECTED` 위에 `Runtime state connected`를 겹쳐 읽던 자리다. 연결은 한
+  번만 그린다.
   → [Masc_tui_connector_state.mli](../../bin/masc_tui_connector_state.mli),
   [Tui_decode.connector_connection](../../lib/tui_decode.mli)
 
@@ -604,7 +609,9 @@ status: reference
   `Awaiting_confirmation`, `Completed`, `Dropped`다. 완료를 요청하면
   `Verifying`으로 들어가고, verifier가 증명을 통과시킨 뒤 사람이 확인해야
   `Completed`가 된다(`lib/goal/goal_phase.mli`). `Verifying` 중에도 연결된
-  Task는 계속 진행할 수 있다. 완료 verdict는 verifier가 기록하고, 사람의
+  Task는 계속 진행할 수 있다. verifier가 답하지 않으면 운영자가 `Verifying`에서
+  `drop`으로 `Dropped`로, `reopen`으로 `Executing`으로 옮길 수 있다. 그 뒤에
+  도착한 verdict는 거절된다. 완료 verdict는 verifier가 기록하고, 사람의
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
   `admits_self_directed_progress`가 이 경계를 정의한다.
 
@@ -690,6 +697,18 @@ status: reference
 **Gate**
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
   경계. pending 판정은 다른 작업을 막지 않는다.
+
+**HITL Delivery Occasion (HITL 전달 계기)**
+: 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
+  (`Keeper_approval_queue.delivery_occasion`). `First_commit` 은 운영자가 결정을 처음
+  커밋한 경우, `Boot_replay` 는 아직 소비되지 않은 전달을 부팅 때 다시 하는 경우,
+  `Same_request_resubmitted` 는 운영자가 같은 요청을 다시 낸 경우다.
+  승인 원장의 `Resolved` 행과 SSE `resolved` 는 계기와 상관없이 결정이 저널에 적힐 때
+  한 번 나간다. 전달보다 먼저라서 첫 전달이 실패해도 결정은 원장에 있다.
+  계기는 전달만 가른다. `Boot_replay` 와 `Same_request_resubmitted` 는 wake 를 다시 보내고
+  `hitl resolution redelivered approval=… occasion=…` 로그를 남길 뿐 행을 적지 않는다.
+  채팅의 결정 행은 wake 가 살아 있는 Keeper 에게 닿을 때 한 번만 적힌다.
+  → [Keeper_approval_queue.delivery_occasion](../../lib/keeper/keeper_approval_queue.ml)
 
 ## Task Lifecycle
 

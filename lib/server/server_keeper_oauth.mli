@@ -53,7 +53,7 @@ val set_client :
 
 val start :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  base_path:string ->
+  config:Workspace.config ->
   keeper:string ->
   provider_id:string ->
   now:float ->
@@ -90,7 +90,7 @@ type attached = {
 
 val refresh_tools :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  base_path:string ->
+  config:Workspace.config ->
   keeper:string ->
   provider_id:string ->
   now:float ->
@@ -110,7 +110,7 @@ val attached_tools_json : base_path:string -> keeper:string -> Yojson.Safe.t
 
 val finish :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  base_path:string ->
+  config:Workspace.config ->
   state:string ->
   code:string ->
   now:float ->

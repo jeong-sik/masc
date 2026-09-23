@@ -2852,6 +2852,7 @@ type verification_snapshot = {
   vs_awaiting_unresolved : string list;
       (** Request ids the backlog waits on that name no record. A task holding
           one of these is waiting on something that is not there. *)
+  vs_awaiting_unresolved_total : int;  (** all such ids; the list is one page *)
   vs_backlog_error : string option;
       (** Why the queue could not be resolved. An empty list carrying this is
           not an empty queue. *)

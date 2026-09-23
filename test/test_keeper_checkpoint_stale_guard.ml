@@ -605,7 +605,9 @@ let test_unreadable_constitution_stops_turn_and_the_next_tick_resumes () =
       ~build_turn_prompt:(fun ~base_system_prompt:_ ~messages:_ ->
         prompt_built := true;
         fail "an unreadable constitution reached prompt construction")
-      ~user_message:"continue the saved work" ~turn_kind:Turn_record.Direct
+      ~user_message:"continue the saved work"
+      ~input_speaker:(Keeper_input_speaker.Person Keeper_input_speaker.Owner)
+      ~turn_kind:Turn_record.Direct
       ~skill_snapshot:(Skill_catalog_snapshot.config_unreadable ~detail:"unused fixture")
       ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
       ~runtime_id:"unconfigured-test-runtime" ()

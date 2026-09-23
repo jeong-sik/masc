@@ -176,6 +176,9 @@ type stream_event =
   | Dynamic_tool_finished of { call_id : string }
   | Native_tool_started of Runtime_native_tools.observation
   | Native_tool_finished of Runtime_native_tools.observation
+  | Usage_windows_reported of Runtime_provider_usage_window.report
+      (** The windows a [rate_limit_event] reported, for the operator
+          projection only; nothing that routes or retries reads it. *)
   | Turn_finished of { text : string }
 
 val dynamic_tool_bytes : dynamic_tool list -> int

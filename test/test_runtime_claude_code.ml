@@ -772,6 +772,51 @@ let test_non_overflow_terminal_reason_is_a_turn_failure () =
     | Ok _ -> fail "a failed terminal was reported as completion")
 ;;
 
+(* The measured Claude Code 2.1.280 line
+   (test/fixtures/claude-code-2.1.280-rate-limit-event.jsonl) with the fixture
+   session, followed by one whose window cannot be read. The readable one
+   reaches the host as a usage report; the unreadable one is logged, and
+   neither changes how the turn ends. *)
+let rate_limit_with_windows =
+  {|{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1790187000,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.67,"resetsAt":1790187000},"seven_day":{"utilization":0.44,"resetsAt":1790640000}}},"uuid":"30a86046-da90-41bd-a609-ef1641070ebd","session_id":"__SESSION__"}|}
+;;
+
+let rate_limit_with_unreadable_window =
+  {|{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":"67%"}}},"uuid":"limit-bad","session_id":"__SESSION__"}|}
+;;
+
+let test_usage_windows_are_reported_without_changing_the_turn () =
+  let reports = ref [] in
+  let on_stream_event = function
+    | Runtime_claude_code.Usage_windows_reported report -> reports := report :: !reports
+    | Turn_started _ | Text_delta _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+    | Native_tool_started _ | Native_tool_finished _ | Turn_finished _ -> ()
+  in
+  with_fixture
+    [ Emit rate_limit_with_windows
+    ; Emit rate_limit_with_unreadable_window
+    ; Emit assistant
+    ; Emit result
+    ]
+    (fun path ->
+       match run_fixture ~on_stream_event path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn ->
+         check string "turn completes" "MASC_CLAUDE_OK" turn.text;
+         (match !reports with
+          | [ { Runtime_provider_usage_window.source = Claude_code_rate_limit_event
+              ; windows =
+                  [ { kind = Five_hour; utilization = Fraction five; resets_at = Some 1790187000; _ }
+                  ; { kind = Seven_day; utilization = Fraction seven; resets_at = Some 1790640000; _ }
+                  ]
+              }
+            ] ->
+            check (float 0.0) "five-hour utilization as reported" 0.67 five;
+            check (float 0.0) "seven-day utilization as reported" 0.44 seven
+          | reports ->
+            failf "expected one readable usage report, got %d" (List.length reports)))
+;;
+
 let test_quota_is_structurally_classified () =
   with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun path ->
     match run_fixture path with
@@ -929,7 +974,7 @@ let test_api_diagnostic_preserves_native_effects () =
                 (function
                   | Runtime_claude_code.Native_tool_started _ | Native_tool_finished _ ->
                     true
-                  | Turn_started _ -> false
+                  | Turn_started _ | Usage_windows_reported _ -> false
                   | Text_delta _
                   | Dynamic_tool_started _
                   | Dynamic_tool_finished _
@@ -2089,6 +2134,8 @@ let () =
             test_quota_is_structurally_classified
         ; test_case "quota after native tool records effect" `Quick
             test_quota_after_native_tool_records_effect
+        ; test_case "usage windows are reported without changing the turn" `Quick
+            test_usage_windows_are_reported_without_changing_the_turn
         ; test_case
             "rejected rate limit overrides success flag"
             `Quick

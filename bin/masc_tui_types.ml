@@ -6305,6 +6305,28 @@ let text_input_target (state : state) ~compact_viewport =
   else None
 ;;
 
+(* Whether the quit key is a quit key right now. A field taking typed text
+   owns every printable key it is handed, [q] with them, so the answer is no
+   while any of them is open.
+
+   Written out rather than closed with [Some _]: the list is the whole
+   vocabulary of typing places, and a field added to it has to be walked past
+   here before it reaches an operator. It was three names and a catch-all, and
+   the other ten -- the command palette among them -- let a typed [q] arm the
+   exit instead of landing in the field. Two of the ten were caught again by a
+   condition spelled at the quit branch itself, which is the shape this
+   function exists to stop. *)
+let quit_key_allowed_for = function
+  | Some
+      ( Text_browser_url | Text_ask_answer | Text_fusion_launch
+      | Text_preset_name | Text_runtime_lane_name | Text_runtime_param
+      | Text_voice_wizard | Text_palette | Text_row_search
+      | Text_identity_app_form | Text_identity_filter | Text_github_token
+      | Text_board_draft ) ->
+      false
+  | None -> true
+;;
+
 (* One reading of the state for both the send path and the footer; the order
    and the reasoning live in [Masc_tui_send_disposition]. *)
 type send_disposition =

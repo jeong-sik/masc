@@ -1102,7 +1102,7 @@ class InvalidWorkspaceDiagnostic(StepByStep):
     def broken(self):
         return observation('/workspace', (
             ('workspace', 'satisfied', 'Workspace found.'),
-            ('model_connection', 'invalid', 'The workspace runtime.toml is unreadable.'),
+            ('runtime_configuration', 'invalid', 'The workspace runtime.toml is unreadable.'),
             ('keeper_persistence', 'satisfied', 'Persisted Keeper history: imp.')))
 
     def test_invalid_check_is_named_with_its_reason(self):
@@ -1111,7 +1111,7 @@ class InvalidWorkspaceDiagnostic(StepByStep):
                 patch.object(SETUP, 'pick', return_value=[2]), \
                 contextlib.redirect_stderr(errors):
             SETUP.journey('masc', '/workspace', None, 30, resume=True)
-        self.assertIn('model_connection', errors.getvalue())
+        self.assertIn('runtime_configuration', errors.getvalue())
         self.assertIn('unreadable', errors.getvalue())
 
     def test_invalid_check_still_offers_another_workspace(self):

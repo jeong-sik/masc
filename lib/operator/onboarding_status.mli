@@ -8,6 +8,7 @@ type condition = Satisfied | Needs_setup | Needs_verification | Invalid
 
 type check_id =
   | Workspace
+  | Runtime_configuration
   | Model_connection
   | Keeper_declaration
   | Sandbox
@@ -15,7 +16,10 @@ type check_id =
   | Browser_lane
 
 (** Whether an [Invalid] check keeps the workspace's existing history from opening.
-    [Advisory] checks are reported but never send the operator back into setup. *)
+    [Required_to_open]: the workspace, a loadable runtime.toml and Keeper
+    metadata the boot admits. [Advisory] checks — imp's model binding,
+    declaration and sandbox, and the browser lane — are reported but never
+    send the operator back into setup. *)
 type role = Required_to_open | Advisory
 
 (** What a bare [masc] does with this observation: open the workspace's

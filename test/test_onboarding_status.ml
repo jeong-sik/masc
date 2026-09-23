@@ -77,7 +77,7 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
     write runtime_path invalid;
     let state = Onboarding_status.inspect ~base_path:(Some base) in
     check bool "invalid runtime references are not merely unverified" true
-      (condition Onboarding_status.Model_connection state = Onboarding_status.Invalid);
+      (condition Onboarding_status.Runtime_configuration state = Onboarding_status.Invalid);
     check string "invalid config preserved" invalid (read runtime_path)) invalid_configs;
   (* RFC-0456: an assignment may name a declared lane. The doctor resolves the
      lane's entry candidate, so a lane-bound imp reads as declared but
@@ -107,7 +107,7 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
   write runtime_path "[providers.secret]\napi_key = \"DO_NOT_PROJECT\"\ninvalid = [";
   let broken = Onboarding_status.inspect ~base_path:(Some base) in
   check bool "bad config remains inspectable" true
-    (condition Onboarding_status.Model_connection broken = Onboarding_status.Invalid);
+    (condition Onboarding_status.Runtime_configuration broken = Onboarding_status.Invalid);
   let serialized = Yojson.Safe.to_string (Onboarding_status.to_json broken) in
   check bool "credential-bearing parser input is not exposed" false
     (String_util.contains_substring serialized "DO_NOT_PROJECT")
@@ -126,16 +126,16 @@ let a_load_failure_says_what_failed () = with_workspace @@ fun base ->
   let assignment = Onboarding_status.inspect ~base_path:(Some base) in
   check bool "an unresolved assignment names the site it was written at" true
     (String_util.contains_substring
-       (message Onboarding_status.Model_connection assignment)
+       (message Onboarding_status.Runtime_configuration assignment)
        "[runtime.assignments]");
 
   write runtime_path (without_table "[models.deepseek-v4-flash]" fixture);
   let dangling = Onboarding_status.inspect ~base_path:(Some base) in
   check bool "a binding without its declaration needs the file edited" true
-    (condition Onboarding_status.Model_connection dangling = Onboarding_status.Invalid);
+    (condition Onboarding_status.Runtime_configuration dangling = Onboarding_status.Invalid);
   check bool "the message names the binding that cannot resolve" true
     (String_util.contains_substring
-       (message Onboarding_status.Model_connection dangling)
+       (message Onboarding_status.Runtime_configuration dangling)
        "ollama_cloud.deepseek-v4-flash")
 
 (* The launcher and, when [declared], the launch.json install-host.sh writes
@@ -230,10 +230,10 @@ let a_stale_browser_lane_does_not_hold_imp_history_closed () =
   write (Filename.concat config "runtime.toml")
     "[providers.secret]\napi_key = \"x\"\ninvalid = [";
   let unresolved_model = Onboarding_status.inspect ~base_path:(Some base) in
-  check bool "imp history is readable again, so only the model can hold it closed" true
+  check bool "imp history is readable again, so only runtime.toml can hold it closed" true
     (condition Onboarding_status.Keeper_persistence unresolved_model
      = Onboarding_status.Satisfied);
-  check bool "a model binding imp needs keeps the journey" true
+  check bool "a runtime.toml the server cannot load keeps the journey" true
     (Onboarding_status.opening unresolved_model = Onboarding_status.Needs_journey)
 
 (* A workspace whose Keepers were declared by hand never had imp, and bare
@@ -259,6 +259,17 @@ let a_workspace_without_imp_opens_its_keepers_history () =
     (condition Onboarding_status.Keeper_persistence observed = Onboarding_status.Satisfied);
   check bool "the workspace opens without imp" true
     (Onboarding_status.opening observed = Onboarding_status.Open_existing_history);
+  (* The server skips an imp it cannot load and boots every other Keeper, so a
+     broken imp declaration is reported beside the history, not in its way. *)
+  let keepers = Filename.concat root "config/keepers" in
+  Unix.mkdir keepers 0o700;
+  write (Filename.concat keepers "imp.toml") "[keeper\nbroken";
+  let broken_imp = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "a broken imp declaration is reported" true
+    (condition Onboarding_status.Keeper_declaration broken_imp = Onboarding_status.Invalid);
+  check bool "and does not close the other Keepers' history" true
+    (Onboarding_status.opening broken_imp = Onboarding_status.Open_existing_history);
+  Sys.remove (Filename.concat keepers "imp.toml");
   (* The server's boot reconcile refuses every Keeper when one metadata file
      cannot be read, so the readable ones do not make the workspace openable. *)
   write (Filename.concat metadata_dir "broken-one.json") "{broken";
@@ -273,17 +284,19 @@ let a_workspace_without_imp_opens_its_keepers_history () =
   check string "observation does not repair it" "{broken"
     (read (Filename.concat metadata_dir "broken-one.json"))
 
-(* Only the browser lane is advisory. Pinned per id so moving a check imp needs
-   to Advisory fails here instead of silently opening a broken conversation. *)
-let only_the_browser_lane_is_advisory () =
+(* Only what every Keeper shares holds history closed; imp's own checks and the
+   browser lane are advisory. Pinned per id so moving a check across fails here
+   instead of silently changing what a bare `masc` opens. *)
+let only_shared_checks_hold_history_closed () =
   List.iter (fun (id, expected) ->
       check bool (Onboarding_status.check_id_name id) true
         (Onboarding_status.role id = expected))
     Onboarding_status.[ Workspace, Required_to_open;
-                        Model_connection, Required_to_open;
-                        Keeper_declaration, Required_to_open;
-                        Sandbox, Required_to_open;
+                        Runtime_configuration, Required_to_open;
                         Keeper_persistence, Required_to_open;
+                        Model_connection, Advisory;
+                        Keeper_declaration, Advisory;
+                        Sandbox, Advisory;
                         Browser_lane, Advisory ];
   check bool "no workspace never opens history" true
     (Onboarding_status.opening (Onboarding_status.inspect ~base_path:None)
@@ -305,5 +318,5 @@ let () = run "Onboarding observations"
                    a_stale_browser_lane_does_not_hold_imp_history_closed;
                  test_case "a workspace without imp opens its Keepers' history" `Quick
                    a_workspace_without_imp_opens_its_keepers_history;
-                 test_case "only the browser lane is advisory" `Quick
-                   only_the_browser_lane_is_advisory]]
+                 test_case "only checks every Keeper shares hold history closed" `Quick
+                   only_shared_checks_hold_history_closed]]

@@ -188,6 +188,36 @@ val dynamic_tool_bytes : dynamic_tool list -> int
     each name, description, and serialized input schema; the protocol wrapper
     keys are excluded because they are fixed per tool. *)
 
+(** The provider's own classification of a failed turn: [CodexErrorInfo] in
+    the app-server's generated protocol schema (codex-cli 0.156.0), minus
+    [contextWindowExceeded], which arrives as {!error.Context_window_exceeded}.
+    A value the schema does not name is carried whole in [Unrecognized]. *)
+module Codex_error_info : sig
+  type non_steerable_turn_kind =
+    | Review
+    | Compact
+
+  type t =
+    | Session_budget_exceeded
+    | Usage_limit_exceeded
+    | Rate_limit_exceeded
+    | Server_overloaded
+    | Cyber_policy
+    | Misalignment_policy_violation
+    | Internal_server_error
+    | Unauthorized
+    | Bad_request
+    | Thread_rollback_failed
+    | Sandbox_error
+    | Other
+    | Http_connection_failed of { http_status_code : int option }
+    | Response_stream_connection_failed of { http_status_code : int option }
+    | Response_stream_disconnected of { http_status_code : int option }
+    | Response_too_many_failed_attempts of { http_status_code : int option }
+    | Active_turn_not_steerable of { turn_kind : non_steerable_turn_kind }
+    | Unrecognized of Yojson.Safe.t
+end
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -211,7 +241,11 @@ type error =
       { message : string
       ; tool_effect_attempted : bool
       }
-  | Turn_failed of string
+  | Turn_failed of
+      { detail : string
+      ; codex_error_info : Codex_error_info.t option
+        (** [None] when the failed turn carried no [codexErrorInfo]. *)
+      }
   | Stopped_by_host of host_stop
   | Turn_interrupted
   | Runtime_shutting_down

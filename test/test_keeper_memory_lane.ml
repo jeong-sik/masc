@@ -704,6 +704,51 @@ let test_boot_catchup_submits_one_unit_per_unlaunched_keeper () =
        Lane.For_testing.await_idle ~base_path:root ~keeper_name:"c")
 ;;
 
+(* The purge cancels the running catch-up and discards wakes while it runs.
+   A stopped Keeper ends no turn, so the backlog is put back on the lane after
+   every purge exit: applied, refused (for unread atoms), and raised. The
+   durable unit publishes a measurement whether or not the Librarian is
+   enabled, so the measurement is the evidence that the unit ran. *)
+let test_purge_resubmits_the_librarian_on_every_exit () =
+  Lane.For_testing.reset ();
+  let root = temp_dir "test-purge-catchup-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Config_dir_resolver.reset ();
+      Lane.For_testing.reset ();
+      remove_tree root)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Masc_test_deps.init_eio_clock env;
+       let config = Masc.Workspace.default_config root in
+       ignore (Masc.Workspace.init config ~agent_name:None);
+       Config_dir_resolver.reset ();
+       Eio.Switch.run @@ fun sw ->
+       Lane.init ~sw;
+       let caught_up keeper_name =
+         Lane.For_testing.await_idle ~base_path:root ~keeper_name;
+         Option.is_some (Queue_refresh.last_measurement ~config ~keeper_name)
+       in
+       let purge keeper_name action =
+         Queue_refresh.with_purge_then_catch_up ~base_path:root ~keeper_name action
+       in
+       Alcotest.(check bool) "no measurement before any purge" false
+         (Option.is_some (Queue_refresh.last_measurement ~config ~keeper_name:"applied"));
+       (match purge "applied" (fun () -> Ok ()) with
+        | Ok (Ok ()) -> ()
+        | _ -> Alcotest.fail "applied purge result was changed");
+       Alcotest.(check bool) "applied purge resubmits" true (caught_up "applied");
+       (match purge "refused" (fun () -> Error "unread atoms present") with
+        | Ok (Error "unread atoms present") -> ()
+        | _ -> Alcotest.fail "refused purge result was changed");
+       Alcotest.(check bool) "refused purge resubmits" true (caught_up "refused");
+       (match purge "raised" (fun () -> raise Test_boom) with
+        | exception Test_boom -> ()
+        | _ -> Alcotest.fail "purge exception was swallowed");
+       Alcotest.(check bool) "raised purge resubmits" true (caught_up "raised"))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
@@ -758,6 +803,10 @@ let () =
             "boot catch-up submits one unit per unlaunched keeper"
             `Quick
             test_boot_catchup_submits_one_unit_per_unlaunched_keeper
+        ; Alcotest.test_case
+            "purge resubmits the Librarian on every exit"
+            `Quick
+            test_purge_resubmits_the_librarian_on_every_exit
         ; Alcotest.test_case
             "finished switch drops without leak"
             `Quick

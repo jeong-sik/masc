@@ -473,11 +473,11 @@ let core_provider_error_fields error =
     ; "provider", `String provider
     ; "detail", `String detail
     ]
-  | Llm_provider.Error.ProviderTerminal { provider; reason; detail } ->
+  | Llm_provider.Error.ProviderTerminal { provider; kind; detail } ->
     [ "variant", `String "provider_terminal"
     ; "message", `String message
     ; "provider", `String provider
-    ; "reason", `String reason
+    ; "reason", `String (Llm_provider.Error.provider_terminal_reason kind)
     ; "detail", `String detail
     ]
 ;;

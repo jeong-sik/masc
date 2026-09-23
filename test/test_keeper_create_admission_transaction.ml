@@ -201,6 +201,60 @@ let test_shutdown_rejection_precedes_all_creation_writes () =
        | None -> fail "creating over a reservation cleared it")
 ;;
 
+(* #38354: a Keeper is not created with a prompt that lacks the world's
+   articles. The refusal comes before any configuration, metadata or
+   checkpoint is written, so creating it again once the ledger reads is a
+   clean retry. The refusal is counted like the other create refusals. *)
+let test_unreadable_constitution_refuses_create_before_any_write () =
+  with_workspace @@ fun ~env ~sw ~config ~keepers_dir ~runtime_path:_ ->
+  let keeper_name = "constitution-unreadable-probe" in
+  let toml_path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
+  let ledger = Masc.World_constitution_store.ledger_path ~base_path:config.base_path in
+  mkdir_p ledger;
+  let labels =
+    [ ("keeper", keeper_name); ("event", "create_constitution_unreadable") ]
+  in
+  let rejections () =
+    Masc.Otel_metric_store.get_metric_value
+      Keeper_metrics.(to_string LifecycleDispatchRejections)
+      ~labels ()
+    |> Option.value ~default:0.0
+  in
+  let before = rejections () in
+  let ctx : _ Profile.context =
+    { config
+    ; agent_name = "test-agent"
+    ; sw
+    ; clock = Eio.Stdenv.clock env
+    ; proc_mgr = None
+    ; net = None
+    ; publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider
+    }
+  in
+  let result =
+    Turn_up.handle_keeper_up
+      ctx
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "instructions", `String "must not be persisted"
+        ; "sandbox_profile", `String "docker"
+        ; "runtime_id", `String "test_provider.test_model"
+        ; "activation_mode", `String "manual"
+        ])
+  in
+  let body = Profile.tool_result_body result in
+  check bool "the create is refused" false (Profile.tool_result_success result);
+  check bool ("the refusal names the ledger: " ^ body) true
+    (String_util.string_contains_substring ~needle:ledger body);
+  check bool "no declarative config was written" false (Sys.file_exists toml_path);
+  (match Store.read_meta config keeper_name with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "a refused create wrote Keeper metadata"
+   | Error detail -> fail detail);
+  check bool "the refusal is counted" true (rejections () > before)
+;;
+
 let test_create_wins_intake_fence_overlap_through_production_handoff () =
   with_workspace @@ fun ~env ~sw ~config ~keepers_dir ~runtime_path:_ ->
   let keeper_name = "admission-handoff-probe" in
@@ -446,6 +500,10 @@ let () =
     "production create keeps create-wins intake admission through lane fork"
     `Quick
     test_create_wins_intake_fence_overlap_through_production_handoff
+        ; test_case
+            "an unreadable constitution refuses create before any write"
+            `Quick
+            test_unreadable_constitution_refuses_create_before_any_write
         ; test_case
             "config-only declarative Keeper materializes without rewrite"
             `Quick

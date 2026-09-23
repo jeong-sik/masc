@@ -93,6 +93,7 @@ let make_gate_pending ~id ~keeper : Decode.gate_pending =
   ; gp_operation = "tool_execute"
   ; gp_display_tool = "bash"
   ; gp_input_preview = Some "echo test"
+  ; gp_input_rows = Decode.Flattened None
   ; gp_execution_cwd = None
   ; gp_execution_sandbox = None
   ; gp_waiting_s = Some 10.0

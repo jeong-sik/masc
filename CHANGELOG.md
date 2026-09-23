@@ -726,6 +726,7 @@
   cannot show what it settled against, also starts fresh instead of being
   refused every cycle. A Gate continuation still refuses before dispatch,
   since it must settle in its original session (#38336).
+- The Lanes table's SLOTS cell says slots. It drew the reason a lane could not admit, which is a sentence, in a column of slot names measured by the widest of them: at the live width a reader got the first twenty-two characters of it, stopped mid-word, under a header promising slot names, and that string set every other row's slot column too. It was drawn there because nothing else drew it (#31395); the detail pane has drawn it whole under `Admission error:` since #32194, and STATUS beside the cell says `unavailable` or `degraded` -- the projection now reads a lane that could not admit as `degraded` whatever its slot list holds, so a curator lane misconfigured with cli tails is not silent about it. A lane that could not admit has no slot list, so the cell is now the dash the table already uses for a column with no value, while `no admitted slot` and `cli-only` -- facts about the lane's own slot configuration -- are unchanged (#38321).
 
 ### Documentation
 

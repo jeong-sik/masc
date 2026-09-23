@@ -487,7 +487,6 @@ let checkout_json (inspection : checkout_inspection) =
 type freshness_row = {
   row_checkout_path : string;
   row_branch : string option;
-  row_catalog : catalog_resolution;
   row_changed_files : int option;
   row_freshness : checkout_freshness;
 }
@@ -510,7 +509,6 @@ let freshness_row_of_inspection (inspection : checkout_inspection) =
   { row_checkout_path =
       inspection.inspected.Keeper_playground_checkouts.relative_path
   ; row_branch = row_branch_of_probe inspection.branch
-  ; row_catalog = inspection.catalog_resolution
   ; row_changed_files =
       (match inspection.dirty with
        | Ok (_, changed_files) -> Some changed_files
@@ -667,23 +665,13 @@ let repository_checkouts_json ~config ~meta =
     ~meta
 ;;
 
-type checkout_scan = {
-  scan_rows : freshness_row list;
-  scan_truncated : Keeper_playground_checkouts.limit option;
-}
-
-let truncation_of_discovery = function
-  | Keeper_playground_checkouts.Complete _ -> None
-  | Partial { limit; found = _ } -> Some limit
-;;
-
-let checkout_scan
+let checkout_freshness_rows
     ?(inspection_budget_sec = Repo_git.inspection_timeout_sec)
-    ~catalog
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ()
   =
+  let catalog = Repo_store.load_all ~base_path:config.base_path in
   match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
   | Shared_mount ->
     let sandbox_abs =
@@ -696,12 +684,9 @@ let checkout_scan
          Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
        in
        Ok
-         { scan_rows =
-             Keeper_playground_checkouts.found discovery
-             |> List.map (fun checkout ->
-               freshness_row_of_inspection (inspect_checkout ~budget ~catalog checkout))
-         ; scan_truncated = truncation_of_discovery discovery
-         })
+         (Keeper_playground_checkouts.found discovery
+          |> List.map (fun checkout ->
+            freshness_row_of_inspection (inspect_checkout ~budget ~catalog checkout))))
   | Endpoint_owned ->
     match
       Keeper_sandbox_remote_checkouts.discover_and_inspect
@@ -712,25 +697,14 @@ let checkout_scan
         ()
     with
     | Error scan_err -> Error scan_err
-    | Ok (Error scan_err, _) -> Error scan_err
-    | Ok (Ok discovery, remote_inspections) ->
-      Ok
-        { scan_rows =
-            List.map
-              (fun inspected ->
-                freshness_row_of_inspection
-                  (checkout_inspection_of_remote ~catalog inspected))
-              remote_inspections
-        ; scan_truncated = truncation_of_discovery discovery
-        }
-;;
-
-(* The turn context shows the rows it has; a truncated scan still yields a
-   real, partial list there. *)
-let checkout_freshness_rows ?inspection_budget_sec ~config ~meta () =
-  let catalog = Repo_store.load_all ~base_path:config.Workspace.base_path in
-  checkout_scan ?inspection_budget_sec ~catalog ~config ~meta ()
-  |> Result.map (fun scan -> scan.scan_rows)
+    | Ok (scan_res, remote_inspections) ->
+      (match scan_res with
+       | Error scan_err -> Error scan_err
+       | Ok _ ->
+         let inspections =
+           List.map (checkout_inspection_of_remote ~catalog) remote_inspections
+         in
+         Ok (List.map freshness_row_of_inspection inspections))
 ;;
 
 module For_testing = struct

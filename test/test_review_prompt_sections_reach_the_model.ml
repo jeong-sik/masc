@@ -51,19 +51,29 @@ let schemas =
 
 let dispatch ~name ~args:_ = Tool_result.ok ~tool_name:name ~start_time:0.0 ""
 
+let lookup = { AR.schemas; dispatch }
+
+(* The status block inside each lookup section names the slot that rendered.
+   It is data, so checking it pins which slot a root chose without pinning a
+   sentence. *)
+let lookup_status slot =
+  Printf.sprintf {|{"lookup_surface":"%s","evidence_lookup_succeeded":false}|} slot
+;;
+
+let render_task_prompt lookup_root req =
+  AR.build_prompt
+    ~question:{ AR.completion_contract = None
+       ; required_evidence = []
+       ; evidence_posture = AR.Note_only
+       ; few_shot_block = ""
+       }
+    ~lookup
+    ~lookup_root
+    req
+;;
+
 let rendered_with_lookup () =
-  let lookup =
-    AR.Lookup_tools { schemas; dispatch; root_layout = [ marker "root_layout" ] }
-  in
-  match
-    AR.build_prompt
-      ~question:{ AR.completion_contract = None
-         ; required_evidence = []
-         ; evidence_posture = AR.Note_only
-         ; few_shot_block = ""
-         }
-      ~lookup
-      request
+  match render_task_prompt (AR.Producer_tree [ marker "root_layout" ]) request
   with
   | Ok text -> text
   | Error detail -> failf "task prompt render failed: %s" detail
@@ -82,25 +92,22 @@ let test_lookup_section_reaches_the_task_prompt () =
        text)
 ;;
 
-let test_no_lookup_surface_exposes_that_no_lookup_can_succeed () =
+(* A workspace producer with no playground renders its own lookup section:
+   the absent-root status and the root it names, and none of the producer-tree
+   section. *)
+let test_absent_root_renders_its_own_lookup_section () =
   init ();
-  match
-    AR.build_prompt
-      ~question:
-        { AR.completion_contract = None
-        ; required_evidence = []
-        ; evidence_posture = AR.Note_only
-        ; few_shot_block = ""
-        }
-      ~lookup:AR.No_lookup_surface
-      request
-  with
+  match render_task_prompt (AR.Producer_root_absent { root = marker "root" }) request with
   | Error detail -> failf "task prompt render failed: %s" detail
   | Ok text ->
-    check bool "the no-lookup status reaches the judge" true
-      (Astring.String.is_infix
-         ~affix:{|{"lookup_surface":"none","evidence_lookup_succeeded":false}|}
-         text)
+    check bool "the absent-root status reaches the judge" true
+      (Astring.String.is_infix ~affix:(lookup_status "producer_root_absent") text);
+    check bool "the missing root is named" true
+      (Astring.String.is_infix ~affix:(marker "root") text);
+    check bool "the held tools are named" true
+      (Astring.String.is_infix ~affix:"tool_read_file" text);
+    check bool "the producer-tree section is absent" false
+      (Astring.String.is_infix ~affix:(lookup_status "producer_tree") text)
 ;;
 
 let test_supplied_evidence_refs_reach_the_task_prompt () =
@@ -128,17 +135,7 @@ let test_image_evidence_section_reaches_the_task_prompt () =
     }
   in
   let text =
-    match
-      AR.build_prompt
-        ~question:
-          { AR.completion_contract = None
-         ; required_evidence = []
-         ; evidence_posture = AR.Note_only
-         ; few_shot_block = ""
-         }
-        ~lookup:AR.No_lookup_surface
-        image_request
-    with
+    match render_task_prompt (AR.Producer_tree []) image_request with
     | Ok text -> text
     | Error detail -> failf "task prompt render failed: %s" detail
   in
@@ -167,17 +164,18 @@ let test_every_section_template_renders () =
        were translated (#32133) and the check went silently stale: it had been
        asserting prose no template could produce. A tag is what the section is
        called, so it survives an edit to what the section says. *)
-    [ "no lookup surface", AR.No_lookup_surface, "<no_lookup_surface>"
-    ; "one producer tree",
-      AR.Lookup_tools { schemas; dispatch; root_layout = [ "repos/masc" ] },
-      "<live_lookup>"
+    [ "one producer tree", AR.Producer_tree [ "repos/masc" ], lookup_status "producer_tree"
+    ; "an absent producer root",
+      AR.Producer_root_absent { root = "playground/mcp-client" },
+      lookup_status "producer_root_absent"
     ]
   in
   List.iter
-    (fun (label, lookup, affix) ->
+    (fun (label, lookup_root, affix) ->
        match
          AR.build_prompt
            ~lookup
+           ~lookup_root
            ~question:
              { AR.completion_contract = Some [ marker "contract_item" ]
              ; required_evidence = [ marker "evidence_item" ]
@@ -240,6 +238,7 @@ let test_goal_lookup_template_renders_the_surface () =
       Prompt_names.goal_verification_lookup
       [ "lookup_tools", marker "lookup_tools"
       ; "lookup_root_layout", marker "root_layout"
+      ; "submitted_sources", marker "submitted_sources"
       ]
   with
   | Error detail -> failf "goal lookup prompt render failed: %s" detail
@@ -247,7 +246,9 @@ let test_goal_lookup_template_renders_the_surface () =
     check bool "the tools are named" true
       (Astring.String.is_infix ~affix:(marker "lookup_tools") text);
     check bool "the root listing is placed" true
-      (Astring.String.is_infix ~affix:(marker "root_layout") text)
+      (Astring.String.is_infix ~affix:(marker "root_layout") text);
+    check bool "the submitted sources are placed" true
+      (Astring.String.is_infix ~affix:(marker "submitted_sources") text)
 ;;
 
 (* Two code comments (completion_authority_agent.ml, workspace_verification_store.ml)
@@ -269,18 +270,7 @@ let test_the_producer_tree_slot_teaches_the_checkout_prefix () =
    execution receipt behind a build claim. *)
 let test_the_completion_lookup_asks_for_evidence () =
   let text =
-    match
-      AR.build_prompt
-        ~question:
-          { AR.completion_contract = None
-         ; required_evidence = []
-         ; evidence_posture = AR.Note_only
-         ; few_shot_block = ""
-         }
-        ~lookup:
-          (AR.Lookup_tools { schemas; dispatch; root_layout = [ marker "root_layout" ] })
-        request
-    with
+    match render_task_prompt (AR.Producer_tree [ marker "root_layout" ]) request with
     | Ok text -> text
     | Error detail -> failf "completion prompt render failed: %s" detail
   in
@@ -302,9 +292,9 @@ let () =
             `Quick
             test_lookup_section_reaches_the_task_prompt
         ; test_case
-            "no lookup surface exposes the unsuccessful lookup state"
+            "an absent producer root renders its own lookup section"
             `Quick
-            test_no_lookup_surface_exposes_that_no_lookup_can_succeed
+            test_absent_root_renders_its_own_lookup_section
         ; test_case
             "evidence_refs is rendered where evidence is judged"
             `Quick

@@ -327,47 +327,42 @@ let test_goal_proof_reads_the_workspace_playground () =
   let reviewer =
     fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-      match lookup with
-      | AR.No_lookup_surface ->
-        fail "the Goal proof judge was handed no lookup surface"
-      | AR.Lookup_tools { schemas; dispatch; root_layout } ->
-        check bool "the read tool is advertised" true
-          (List.exists
-             (fun (schema : Masc_domain.tool_schema) ->
-                String.equal schema.name "tool_read_file")
-             schemas);
-        check bool "the web tool is advertised" true
-          (List.exists
-             (fun (schema : Masc_domain.tool_schema) ->
-                String.equal schema.name "masc_web_fetch")
-             schemas);
-        check bool "the prompt names the tools the judge holds" true
-          (String_util.contains_substring prompt "tool_read_file");
-        check bool "the prompt lists the root the tools resolve against" true
-          (List.exists
-             (fun entry -> String_util.contains_substring prompt entry)
-             root_layout);
-        let path = Filename.concat "some-keeper" "measurement.txt" in
-        let read =
-          dispatch
-            ~name:"tool_read_file"
-            ~args:(`Assoc [ "file_path", `String path ])
-          |> lookup_text
-        in
-        (match read with
-         | Error detail -> fail ("the judge could not read the measurement: " ^ detail)
-         | Ok output ->
-           reads := !reads + 1;
-           check bool "the judge read the measurement itself" true
-             (String_util.contains_substring output "pass rate: 100%"));
-        let input =
-          `Assoc [ "verdict", `String "APPROVE"; "reason", `String stated_reason ]
-        in
-        on_tool_result
-          ~input
-          (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
-             "recorded");
-        Ok {AR.selected_runtime_id="verifier-a";verdict=Some (AR.Approve stated_reason)}
+      let { AR.schemas; dispatch } = lookup in
+      check bool "the read tool is advertised" true
+        (List.exists
+           (fun (schema : Masc_domain.tool_schema) ->
+              String.equal schema.name "tool_read_file")
+           schemas);
+      check bool "the web tool is advertised" true
+        (List.exists
+           (fun (schema : Masc_domain.tool_schema) ->
+              String.equal schema.name "masc_web_fetch")
+           schemas);
+      check bool "the prompt names the tools the judge holds" true
+        (String_util.contains_substring prompt "tool_read_file");
+      check bool "the prompt lists the root the tools resolve against" true
+        (String_util.contains_substring prompt "some-keeper");
+      let path = Filename.concat "some-keeper" "measurement.txt" in
+      let read =
+        dispatch
+          ~name:"tool_read_file"
+          ~args:(`Assoc [ "file_path", `String path ])
+        |> lookup_text
+      in
+      (match read with
+       | Error detail -> fail ("the judge could not read the measurement: " ^ detail)
+       | Ok output ->
+         reads := !reads + 1;
+         check bool "the judge read the measurement itself" true
+           (String_util.contains_substring output "pass rate: 100%"));
+      let input =
+        `Assoc [ "verdict", `String "APPROVE"; "reason", `String stated_reason ]
+      in
+      on_tool_result
+        ~input
+        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
+           "recorded");
+      Ok {AR.selected_runtime_id="verifier-a";verdict=Some (AR.Approve stated_reason)}
   in
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])
@@ -397,11 +392,7 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
   let reviewer =
     fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-      let dispatch =
-        match lookup with
-        | AR.Lookup_tools { dispatch; _ } -> dispatch
-        | AR.No_lookup_surface -> fail "the judge was handed no lookup surface"
-      in
+      let { AR.dispatch; _ } = lookup in
       let read =
         dispatch
           ~name:"tool_read_file"
@@ -497,13 +488,11 @@ let test_goal_proof_surface_survives_a_crowded_playground () =
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   let reached = ref false in
-  let layout_seen = ref [] in
+  let prompt_seen = ref "" in
   let reviewer =
-    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
-        ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-      (match lookup with
-       | AR.No_lookup_surface -> fail "the crowded root produced no lookup surface"
-       | AR.Lookup_tools { root_layout; _ } -> layout_seen := root_layout);
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_
+        ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
+      prompt_seen := prompt;
       reached := true;
       on_tool_result
         ~input:
@@ -520,7 +509,12 @@ let test_goal_proof_surface_survives_a_crowded_playground () =
     (fun () -> drain config);
   check bool "the evaluator was reached rather than deferred" true !reached;
   check bool "every producer is listed, none dropped by a cap" true
-    (List.length !layout_seen >= checkouts);
+    (List.for_all
+       (fun index ->
+          String_util.contains_substring
+            !prompt_seen
+            (Printf.sprintf "producer-%02d" index))
+       (List.init checkouts Fun.id));
   check string "the review produced a verdict" "executing"
     (stored_phase config goal_id)
 ;;

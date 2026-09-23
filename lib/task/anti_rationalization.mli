@@ -25,37 +25,38 @@ type review_request =
   ; evidence_images : evidence_image list
   }
 
-(** What the evaluator may look at besides the submitted evidence snapshot
-    (RFC-0361 D1).
-
-    Stated per review rather than defaulted, because the two cases differ in
-    what a verdict means. With [No_lookup_surface] nothing the request asserts
-    can be checked against the producer's tree: a completion is judged on the
-    submitted excerpt alone, and a stop on its stated reason alone. Both are
-    described to the judge in their own question's words, so the surface is
-    the same value and the prose about it is not. This module deliberately
-    does not build the surface itself: the tools that read a producer's tree
-    belong above the containment primitives, not inside the review protocol.
-    Every advertised filesystem tool is bound to the one producer named by the
-    review request. *)
+(** The read-only tools the evaluator holds besides the submitted evidence
+    snapshot (RFC-0361 D1). Every review is handed one: both lanes build the
+    surface before the review runs and defer when they cannot, so there is no
+    tool-less review to describe. This module deliberately does not build the
+    surface itself: the tools that read a producer's tree belong above the
+    containment primitives, not inside the review protocol. Every advertised
+    filesystem tool is bound to the one producer named by the review
+    request. *)
 type lookup_surface =
-  | No_lookup_surface
-  | Lookup_tools of
-      { schemas : Types_core.tool_schema list
-      ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result
-      ; root_layout : string list
-            (** Paths the lookup tools actually resolve against, listed from
-                disk at review time and relative to the root they are rooted
-                at. The evaluator is otherwise told only that the tools point
-                at "the producer's tree" and has to guess the shape: an
-                evaluator that assumed a repository root spent 77 consecutive
-                failed reads on [dune-project], [.git], [lib/], [README.md],
-                [Makefile], [src] and [bin] against a sandbox root whose real
-                entries were [repos/], [artifacts/], [mind/] and [poc/]
-                (masc task-403, vrf-8bac5f46, 2026-08-21). Empty when the
-                root could not be listed — the prompt then says so rather
-                than implying an empty tree. *)
-      }
+  { schemas : Types_core.tool_schema list
+  ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result
+  }
+
+(** Where the Task lane's file tools resolve, as the judge is told about it.
+    Each case renders its own [verification.lookup.*] slot, so the prose
+    about a root describes that root's case and no other. *)
+type lookup_root =
+  | Producer_tree of string list
+      (** Paths the lookup tools actually resolve against, listed from disk at
+          review time and relative to the root they are rooted at. The
+          evaluator is otherwise told only that the tools point at "the
+          producer's tree" and has to guess the shape: an evaluator that
+          assumed a repository root spent 77 consecutive failed reads on
+          [dune-project], [.git], [lib/], [README.md], [Makefile], [src] and
+          [bin] against a sandbox root whose real entries were [repos/],
+          [artifacts/], [mind/] and [poc/] (masc task-403, vrf-8bac5f46,
+          2026-08-21). Empty means the root was read and holds nothing; an
+          unreadable root never reaches here, the lane defers instead. *)
+  | Producer_root_absent of { root : string }
+      (** A workspace producer (not a Keeper) whose playground [root] does not
+          exist. Nothing creates that directory for such a producer, so the
+          judge is told there is no tree to read and which tools remain. *)
 
 (** Both outcomes carry the reviewer's stated reason. The string may be empty:
     the tool schema asks for one on either outcome, but only [Reject] is
@@ -170,6 +171,7 @@ val review
   -> ?sw:Eio.Switch.t option
   -> question:verdict_question
   -> lookup:lookup_surface
+  -> lookup_root:lookup_root
   -> base_path:string
   -> review_request
   -> review_result
@@ -191,12 +193,13 @@ val review
     override (RFC-0417 section 4.3). *)
 
 (** Render the review prompt {!Prompt_names.verification} with the sections
-    the [question] and the [lookup] surface supply.
+    the [question], the [lookup] surface and its [lookup_root] supply.
 
     There is no inline fallback prompt; an error keeps the Task nonterminal. *)
 val build_prompt
   :  question:verdict_question
   -> lookup:lookup_surface
+  -> lookup_root:lookup_root
   -> review_request
   -> (string, string) result
 

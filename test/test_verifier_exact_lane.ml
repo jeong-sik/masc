@@ -17,6 +17,18 @@ let request : AR.review_request =
   }
 ;;
 
+(* Every review is handed a lookup surface. The reviewer is stubbed here, so
+   the surface is carried and never dispatched. *)
+let lookup : AR.lookup_surface =
+  { schemas = []
+  ; dispatch =
+      (fun ~name ~args:_ ->
+         Alcotest.failf "lookup %s dispatched under a stubbed reviewer" name)
+  }
+;;
+
+let lookup_root = AR.Producer_tree []
+
 let configure_prompt_registry () =
   Prompt_registry.set_markdown_dir
     (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts")
@@ -43,7 +55,8 @@ let review_with (req : AR.review_request) () =
       ; evidence_posture = AR.Note_only
       ; few_shot_block = ""
       }
-    ~lookup:AR.No_lookup_surface
+    ~lookup
+    ~lookup_root
     ~base_path:(Filename.get_temp_dir_name ())
     req
 ;;
@@ -306,7 +319,8 @@ let test_explicit_override_never_consults_the_lane () =
        let result =
          AR.review
            ~evaluator_runtime:"explicit-runtime"
-           ~lookup:AR.No_lookup_surface
+           ~lookup
+           ~lookup_root
            ~question:
              { AR.completion_contract = None
              ; required_evidence = []

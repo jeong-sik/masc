@@ -103,9 +103,7 @@ let test_review ?(shadow_lane=false) mode =
   write (Filename.concat proof_root "proof.png") (Base64.decode_exn png);
   let lookup_tools = match VAT.create_goal_proof ~submitted_evidence:[] ~config with
     | Ok tools -> tools | Error detail -> fail detail in
-  let lookup = AR.Lookup_tools
-    { schemas = VAT.schemas lookup_tools; dispatch = VAT.dispatch lookup_tools
-    ; root_layout = ["proof.txt"] } in
+  let lookup = { AR.schemas = VAT.schemas lookup_tools; dispatch = VAT.dispatch lookup_tools } in
   let command, capture = fixture_script root ~mode in
   let config_path = Filename.concat root "runtime.toml" in
   let forbidden_capture = Filename.concat root "forbidden-client-called" in
@@ -258,6 +256,11 @@ let test_unsafe_slots_refused_before_spawn () =
   Unix.unlink root; Unix.mkdir root 0o700;
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
   let command, capture = fixture_script root ~mode:"must-not-run" in
+  let lookup =
+    match VAT.create_goal_proof ~submitted_evidence:[] ~config:(Workspace.default_config root) with
+    | Ok tools -> { AR.schemas = VAT.schemas tools; dispatch = VAT.dispatch tools }
+    | Error detail -> fail detail
+  in
   let config_path = Filename.concat root "runtime.toml" in
   let replace needle replacement text =
     let length = String.length needle in
@@ -293,7 +296,7 @@ let test_unsafe_slots_refused_before_spawn () =
       ~render_prompt:(fun () -> Ok "A prose approval must never authorize this review.")
       ~goal_blocks:[Agent_core.Types.Image
         { media_type="image/png"; data=png; source_type=Base64 }]
-      ~lookup:AR.No_lookup_surface ~base_path:root () in
+      ~lookup ~base_path:root () in
     check bool (label ^ " explicit override cannot bypass admission") true
       (result.verdict = None && result.gate = AR.Evaluator_unavailable);
     check bool (label ^ " no client invocation") false (Sys.file_exists capture)) cases

@@ -178,7 +178,17 @@ status: reference
   `keeper.identity` → `keeper.workspace` → `<role>`.
   `keeper.worldview`는 이 세계가 무엇을 잘한 일로 치는가다. 운영자가 덮어쓰며, 배포
   기본값은 "따로 정한 가치관이 없다 — 각 Keeper의 역할이 정한다"이다. 슬롯은 항상 렌더된다.
-  `keeper.constitution`은 세계가 쓴 규범(RFC-0442)이고, 조항이 없으면 통째로 빠진다.
+  `keeper.constitution`은 세계가 쓴 규범(RFC-0442)이다. 원장 파일이 아직 없는 세계(`Missing`)는
+  조항 없이 통째로 빠진다. 반면 원장 파일이 실재하는데 읽을 수 없는 상태(`Unreadable`)는
+  조항 없는 프롬프트로 턴을 돌리지 않고 `prepare_run_context` 단계에서 `prepare_error`
+  (`Constitution_unreadable`)로 즉시 거절(`not-dispatched`)한다. 규범 없이 임의 실행되는
+  것을 막고, 프롬프트 해시 변경으로 인한 벤더 세션 불필요 소모·재시작을 방지하기 위함이다(#38354·#38427).
+  프롬프트 단일 권위(Single Authority): 직접(direct) 턴과 자율(autonomous) 턴 모두
+  `Keeper_run_context.prepare_run_context`가 조립한 단일 `base_system_prompt`만 모델로 보낸다
+  (`build_prompt`는 더 이상 별도 시스템 프롬프트를 렌더하지 않으며 `turn_prompt`의 `system_prompt`
+  필드는 제거됨). 대시보드 및 TUI 설정 표면에서는 `prompt.system_prompt`가 닫힌 세 상태
+  (`available`·`unavailable: constitution_unreadable`·`decode_failed`)로 투영되어
+  오류 사유와 파일 경로를 직접 드러낸다.
   `<role>`은 그 Keeper의 `instructions`(Keeper TOML)를 적힌 그대로 감싸며 앞에 제목을
   붙이지 않는다.
   `keeper.identity`·`keeper.workspace`는 각각 Keeper 이름과 샌드박스 루트를 받는다.
@@ -192,7 +202,8 @@ status: reference
   경계: 여기의 "role"은 Message의 role(`System`·`User`·`Assistant`·`Tool`)도, Board
   Interest 판정의 `keeper_role {name, board_interests}`도, Fusion 심판의 `judge_role`
   (Fusion Judge Role)도 아니다.
-  → [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
+  → [Keeper_run_context.prepare_run_context](../../lib/keeper/keeper_run_context.mli),
+  [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
 
 **Board Interest**
 : Keeper가 직접 지목되지 않은 Board post와 comment를
@@ -355,6 +366,15 @@ status: reference
 : 저장된 Keeper 이력을 읽는 단계. 파일 없음은 새 이력을 뜻하지만 읽기·파싱 오류는
   새 이력을 허용하지 않는다. 명시적인 checkpoint 버전 교체만 기존 파일을 남겨 두고
   새 이력을 시작하며, 첫 저장이 받아들여진 뒤 재시작을 기록한다.
+
+**Prepare Error (준비 오류)**
+: Keeper turn이 모델에 파견(dispatch)되기 전, 실행 컨텍스트를 구성하는 단계(`Keeper_run_context.prepare_run_context`)에서
+  발생하는 닫힌 둘의 실패 사유(`type prepare_error = Checkpoint_unread of checkpoint_load_error | Constitution_unreadable of read_error`).
+  `Checkpoint_unread`는 기존 이력 체크포인트를 불러오지 못한 경우이고, `Constitution_unreadable`은 세계의 헌법 원장
+  파일이 실재하지만 권한·I/O 오류 등으로 읽지 못한 경우다.
+  준비 오류가 발생하면 턴은 모델을 호출하지 않고 `not-dispatched` 실패 경로로 즉시 거절된다. 이 거절은 영수증(receipt)을
+  남기지 않고 트랜스크립트에도 기록되지 않으므로, 다음 턴이 헌법 원장이나 체크포인트를 다시 읽어 정상 회복을 시도한다(#38354·#38427).
+  → [Keeper_run_context.prepare_error](../../lib/keeper/keeper_run_context.mli)
 
 **agent core Turn**
 : 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한

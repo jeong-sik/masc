@@ -42,8 +42,12 @@ val create_candidate : binding:candidate_binding -> candidate
     not introduce a dispatch gate, but cannot prove continuity on reload. *)
 
 val same_candidate_binding : candidate -> candidate -> bool
-(** Compare only frozen authoritative identities. Unknown identities never
-    establish equality. Used at catalog publication to preserve unchanged rows. *)
+(** Compare only frozen authoritative identities. An HTTP identity that could
+    not be built never establishes equality. An official client has no HTTP
+    identity: its dispatch is built from the provider and model alone, so two
+    official-client candidates are the same binding here and the caller's
+    provider, model and binding equality decides. Used at catalog publication
+    to preserve unchanged rows. *)
 
 val note_rate_limit : candidate:candidate -> retry_after:float option -> unit
 (** Record coarse HTTP/Provider rate-limit evidence for this attempted runtime

@@ -43,7 +43,7 @@ def run(executable: str) -> None:
 
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=10)
-        h.palette_go(process, fd, output, b"go schedules", b"MASC Schedules")
+        h.palette_go(process, fd, output, b"go schedules", b"MASC Keepers / Schedules")
         drawn = h.resize_and_wait(process, fd, output, rows=24, columns=110,
                                   needle=EMPTY, controls=(h.FULL_REDRAW,))
         row = empty_row(h.screen_rows(drawn))

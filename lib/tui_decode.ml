@@ -2168,8 +2168,7 @@ type inventory_freshness =
 type effective_tool = {
   et_name : string;
   et_origin : string;
-  et_group : string option;
-  et_skill_source : string option;
+  et_skill_source_id : string option;
 }
 
 type effective_tool_delivery =
@@ -2301,6 +2300,20 @@ type connector_directory_state =
   | Connector_directory_complete
   | Connector_directory_partial
 
+type connector_gateway_state =
+  | Connector_gateway_disconnected
+  | Connector_gateway_awaiting_hello
+  | Connector_gateway_identifying
+  | Connector_gateway_resuming
+  | Connector_gateway_connected
+  | Connector_gateway_reconnect_pending
+  | Connector_gateway_failed
+
+type connector_poll_state =
+  | Connector_poll_not_started
+  | Connector_poll_polling
+  | Connector_poll_degraded
+
 type connector = {
   cn_id : string;
   cn_display_name : string;
@@ -2311,8 +2324,8 @@ type connector = {
   cn_channel : string option;
   cn_error : string option;
   cn_status_source : string option;
-  cn_gateway_state : string option;
-  cn_poll_state : string option;
+  cn_gateway_state : connector_gateway_state option;
+  cn_poll_state : connector_poll_state option;
   cn_endpoint : string option;
   cn_status_path : string option;
   cn_binding_store_path : string option;
@@ -2361,8 +2374,15 @@ type connector_name_page = {
   cnp_mappings : connector_name_mapping list;
 }
 
+type connector_refusal = {
+  cr_row : int;
+  cr_connector_id : string option;
+  cr_reason : string;
+}
+
 type connector_snapshot = {
   cs_connectors : connector list;
+  cs_refused : connector_refusal list;
   cs_total : int;
   cs_active : int;
 }
@@ -2838,9 +2858,28 @@ let decode_effective_tool json =
   let* et_name = required_string_field json "name" in
   let* origin = required_object_field json "origin" in
   let* et_origin = required_string_field origin "kind" in
-  let* et_group = optional_string_field origin "group" in
-  let* et_skill_source = optional_string_field origin "skill_source" in
-  Ok { et_name; et_origin; et_group; et_skill_source }
+  (* Which configured skill source supplied this tool.
+     Keeper_effective_tool_surface.origin_to_yojson carries it as
+     origin.skill_provenance.identity.source_id, and only for composition
+     skills: for every other origin the key is absent, and for a composition
+     skill whose provenance is unknown it is null. Both mean "no source to
+     name", not a malformed payload, so each step is optional.
+
+     This used to read origin.group and origin.skill_source. No producer has
+     emitted either since the surface moved to skill_provenance, so the
+     Tools screen printed a bare "composition_skill" for every skill tool
+     and never said which skill it came from. *)
+  let* provenance = optional_object_field origin "skill_provenance" in
+  let* et_skill_source_id =
+    match provenance with
+    | None -> Ok None
+    | Some provenance ->
+      let* identity = optional_object_field provenance "identity" in
+      (match identity with
+       | None -> Ok None
+       | Some identity -> optional_string_field identity "source_id")
+  in
+  Ok { et_name; et_origin; et_skill_source_id }
 
 let decode_skill_reference_list json field =
   let* values = required_list_field json field in
@@ -3777,19 +3816,6 @@ let decode_connector_binding json =
   let* cb_keeper_name = required_string_field json "keeper_name" in
   Ok { cb_channel_id; cb_channel_name = nonblank_option cb_channel_name; cb_keeper_name }
 
-let decode_connector_name_mapping json =
-  let* raw_kind = required_string_field json "kind" in
-  let* cnm_kind =
-    match raw_kind with
-    | "channel" -> Ok Connector_channel_name
-    | "person" -> Ok Connector_person_name
-    | "server" -> Ok Connector_server_name
-    | unknown -> Error (Printf.sprintf "unknown connector name kind %S" unknown)
-  in
-  let* cnm_id = required_string_field json "id" in
-  let* cnm_name = required_string_field json "name" in
-  Ok { cnm_kind; cnm_id; cnm_name }
-
 let decode_connector_connection ~status ~available ~connected =
   match status, available, connected with
   | "connected", true, true -> Ok Connector_connected
@@ -3819,8 +3845,30 @@ let decode_connector json =
   let* cn_channel = optional_string_field json "channel" in
   let* cn_error = optional_string_field json "error" in
   let* cn_status_source = optional_string_field json "status_source" in
-  let* cn_gateway_state = optional_string_field json "gateway_state" in
-  let* cn_poll_state = optional_string_field json "poll_state" in
+  let* raw_gateway_state = optional_string_field json "gateway_state" in
+  let* cn_gateway_state =
+    match nonblank_option raw_gateway_state with
+    | None -> Ok None
+    | Some "disconnected" -> Ok (Some Connector_gateway_disconnected)
+    | Some "awaiting_hello" -> Ok (Some Connector_gateway_awaiting_hello)
+    | Some "identifying" -> Ok (Some Connector_gateway_identifying)
+    | Some "resuming" -> Ok (Some Connector_gateway_resuming)
+    | Some "connected" -> Ok (Some Connector_gateway_connected)
+    | Some "reconnect_pending" -> Ok (Some Connector_gateway_reconnect_pending)
+    | Some "failed" -> Ok (Some Connector_gateway_failed)
+    | Some unknown ->
+      Error (Printf.sprintf "unknown connector gateway state %S" unknown)
+  in
+  let* raw_poll_state = optional_string_field json "poll_state" in
+  let* cn_poll_state =
+    match nonblank_option raw_poll_state with
+    | None -> Ok None
+    | Some "not_started" -> Ok (Some Connector_poll_not_started)
+    | Some "polling" -> Ok (Some Connector_poll_polling)
+    | Some "degraded" -> Ok (Some Connector_poll_degraded)
+    | Some unknown ->
+      Error (Printf.sprintf "unknown connector poll state %S" unknown)
+  in
   let* cn_endpoint = optional_string_field json "gate_base_url" in
   let* cn_status_path = optional_string_field json "status_path" in
   let* cn_binding_store_path = optional_string_field json "binding_store_path" in
@@ -3881,13 +3929,6 @@ let decode_connector json =
     optional_string_field json "directory_updated_at"
   in
   let* cn_workspace_id = optional_string_field json "workspace_id" in
-  let* cn_server_names_path = optional_string_field json "server_names_path" in
-  let* cn_channel_names_path = optional_string_field json "channel_names_path" in
-  let* cn_people_names_path = optional_string_field json "people_names_path" in
-  let* name_mappings_json = optional_list_field json "name_mappings" in
-  let* cn_name_mappings =
-    decode_list "name_mappings" decode_connector_name_mapping name_mappings_json
-  in
   let* bindings_json = required_list_field json "configured_bindings" in
   let* cn_bindings =
     decode_list "configured_bindings" decode_connector_binding bindings_json
@@ -3902,8 +3943,8 @@ let decode_connector json =
     ; cn_channel = nonblank_option cn_channel
     ; cn_error = nonblank_option cn_error
     ; cn_status_source = nonblank_option cn_status_source
-    ; cn_gateway_state = nonblank_option cn_gateway_state
-    ; cn_poll_state = nonblank_option cn_poll_state
+    ; cn_gateway_state
+    ; cn_poll_state
     ; cn_endpoint = nonblank_option cn_endpoint
     ; cn_status_path = nonblank_option cn_status_path
     ; cn_binding_store_path = nonblank_option cn_binding_store_path
@@ -3933,10 +3974,18 @@ let decode_connector json =
     ; cn_directory_errors
     ; cn_directory_updated_at = nonblank_option cn_directory_updated_at
     ; cn_workspace_id = nonblank_option cn_workspace_id
-    ; cn_server_names_path = nonblank_option cn_server_names_path
-    ; cn_channel_names_path = nonblank_option cn_channel_names_path
-    ; cn_people_names_path = nonblank_option cn_people_names_path
-    ; cn_name_mappings
+      (* Name evidence does not travel on the connector object. It arrives as
+         one connector name page per kind, and connector_with_name_pages
+         fills these in from those pages -- which is already why the two
+         fields below start empty. The connector used to be read for
+         server_names_path, channel_names_path, people_names_path and
+         name_mappings as well, but no producer has emitted any of them since
+         the page vocabulary landed, so those reads only claimed a source
+         that does not exist. *)
+    ; cn_server_names_path = None
+    ; cn_channel_names_path = None
+    ; cn_people_names_path = None
+    ; cn_name_mappings = []
     ; cn_name_mapping_scope = None
     ; cn_names_error = None
     ; cn_bindings
@@ -4041,8 +4090,25 @@ let connector_with_name_pages connector ~pages ~error =
 
 let decode_connector_snapshot json =
   let* connectors_json = required_list_field json "connectors" in
-  let* cs_connectors =
-    decode_list "connectors" decode_connector connectors_json
+  let row_connector_id = function
+    | `Assoc fields -> (
+        match List.assoc_opt "connector_id" fields with
+        | Some (`String id) -> nonblank_option (Some id)
+        | Some _ | None -> None)
+    | _ -> None
+  in
+  let cs_connectors, cs_refused =
+    connectors_json
+    |> List.mapi (fun row item ->
+           match decode_connector item with
+           | Ok connector -> Either.Left connector
+           | Error reason ->
+               Either.Right
+                 { cr_row = row
+                 ; cr_connector_id = row_connector_id item
+                 ; cr_reason = reason
+                 })
+    |> List.partition_map Fun.id
   in
   let cs_connectors =
     List.sort
@@ -4051,7 +4117,7 @@ let decode_connector_snapshot json =
   in
   let* cs_total = required_int_field json "total" in
   let* cs_active = required_int_field json "active_count" in
-  Ok { cs_connectors; cs_total; cs_active }
+  Ok { cs_connectors; cs_refused; cs_total; cs_active }
 
 let runtime_probe_refresh_state_to_string = function
   | Runtime_probe_fresh -> "fresh"

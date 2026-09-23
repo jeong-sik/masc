@@ -4594,7 +4594,6 @@ describe('fetchRuntimeProviders', () => {
           message: 'runtime catalog degraded boot',
           config_path: '/tmp/masc-test/runtime.toml',
           configured_default_runtime_id: 'runpod_mtp.qwen',
-          effective_default_runtime_id: 'runpod_mtp.qwen',
           missing_catalog_model_count: 1,
           missing_catalog_models: [
             {
@@ -4607,16 +4606,6 @@ describe('fetchRuntimeProviders', () => {
           disabled_runtime_ids: ['mimo.mimo-v2.5-pro'],
           unavailable_assignments: [
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
-          ],
-          dropped_routes: [
-            { route_name: 'runtime.default', runtime_id: 'mimo.mimo-v2.5-pro' },
-          ],
-          dropped_media_failover: ['mimo.mimo-v2.5-pro'],
-          dropped_lane_candidates: [
-            { lane_id: 'coding', runtime_ids: ['mimo.mimo-v2.5-pro'] },
-          ],
-          dropped_lanes: [
-            { lane_id: 'mimo-only', runtime_ids: ['mimo.mimo-v2.5-pro'] },
           ],
           next_action: 'Add a row for each to the AGENT_CORE embedded catalog.',
         },
@@ -4703,12 +4692,10 @@ describe('fetchRuntimeProviders', () => {
     expect(result.assignment_status?.assignments[0]?.keeper).toBe('budgettest')
     expect(result.startup_degradation?.status).toBe('degraded')
     expect(result.startup_degradation?.terminal_reason).toBe('missing_agent_core_catalog_models')
-    expect(result.startup_degradation?.effective_default_runtime_id).toBe('runpod_mtp.qwen')
+    expect(result.startup_degradation?.configured_default_runtime_id).toBe('runpod_mtp.qwen')
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
     expect(result.startup_degradation?.unavailable_assignments[0]?.keeper_name).toBe('budgettest')
-    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.default')
-    expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 
   it('preserves thinking-control wires without duplicating the server enum', async () => {

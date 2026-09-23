@@ -11837,50 +11837,10 @@ let render_runtime (state : state) =
              ])
           probe_status probe_read timestamp (connection_badge state)
   in
-  let authority_line =
-    match state.runtime_surface with
-    | None ->
-        "  SSOT: runtime.toml  projections: /api/v1/runtime/resolved + runtime-probe"
-    | Some snapshot ->
-        let config =
-          Terminal_text.single_line_or ~default:"config path unavailable"
-            snapshot.rss_resolved.rrs_config_path
-        in
-        let summary_text =
-          match snapshot.Masc.Tui_decode.rss_probe with
-          | None -> "probe unavailable"
-          | Some probe ->
-              let summary = probe.rps_summary in
-              Printf.sprintf "%d reachable / %d failed / %d skipped"
-                summary.rpsu_reachable summary.rpsu_failed summary.rpsu_skipped
-        in
-        let probe_note =
-          match snapshot.rss_probe_error, snapshot.rss_probe with
-          | Some detail, _ -> "  probe: " ^ Terminal_text.single_line detail
-          | None, Some probe ->
-              (match probe.rps_errors with
-               | detail :: _ -> "  probe: " ^ Terminal_text.single_line detail
-               | [] -> "")
-          | None, None -> ""
-        in
-        let probe_only_note =
-          match snapshot.rss_unassigned_probe_count with
-          | 0 -> ""
-          | count -> Printf.sprintf "  %d probe-only" count
-        in
-        let fleet_note =
-          let total_keepers = List.length state.keepers in
-          if total_keepers > 0 then
-            let turns, tokens, cost = aggregate_keeper_stats state.keepers in
-            Printf.sprintf "  fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
-              total_keepers turns (format_context_tokens tokens) cost
-          else ""
-        in
-        Printf.sprintf
-          "  SSOT: runtime.toml  projections: resolved + probe  %s%s  %s%s%s"
-          summary_text fleet_note config probe_only_note probe_note
-  in
-  let chrome_rows = runtime_surface_listing_chrome state in
+  let authority_rows = Masc_tui_types.runtime_authority_rows ~cols state in
+  (* The budget counts the rows this screen draws, so it comes from the same
+     call the drawing reads rather than a fixed one. *)
+  let chrome_rows = runtime_surface_listing_chrome ~cols state in
   let content_height = max 0 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
@@ -11901,7 +11861,7 @@ let render_runtime (state : state) =
     | Some snapshot when Option.is_some snapshot.rss_probe_error -> (Theme.warn ())
     | Some _ | None -> Ansi.dim
   in
-  c.push_styled ~style:authority_style authority_line;
+  List.iter (fun row -> c.push_styled ~style:authority_style row) authority_rows;
   c.push_divider ();
   (* The two routes that are not lanes. They hold runtime ids and nothing
      dispatches a keeper turn to them, so they sit above the lane table rather

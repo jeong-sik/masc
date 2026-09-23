@@ -3045,17 +3045,22 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let lanes_listing_chrome ~load_error ~action_error =
   listing_chrome ~error:load_error + if Option.is_some action_error then 2 else 0
 
+(* [authority_rows] is how many rows the line naming the SSOT and the last
+   probe took at this width. It wraps at clause marks
+   ([runtime_authority_rows]), so a narrow frame spends more than one row on it
+   and a count fixed at one puts the footer past the frame's last row. *)
 let runtime_listing_chrome
       ?(stale_rows = 0)
       ?(route_rows = 0)
       ?(editor_rows = None)
+      ~authority_rows
       ~error
       ~action_error
       ~prompt
       ~picker_rows
       ()
   =
-  listing_chrome ~error + 2
+  listing_chrome ~error + 1 + max 1 authority_rows
   + (if Option.is_some action_error then 2 else 0)
   + (if stale_rows > 0 then stale_rows + 1 else 0)
   + (if prompt then 2 else 0)
@@ -9829,8 +9834,97 @@ let runtime_pick_column_widths ~cols items =
   in
   target, shared - target
 
-let runtime_surface_listing_chrome state =
-  runtime_listing_chrome ~error:state.runtime_surface_error
+(* The authority line under the Runtime title: where every reading on this
+   screen comes from, and what the last probe found. It is one sentence of
+   clauses, and with a fleet on screen it asked for about 197 cells with every
+   count a single digit -- the frame gives 96 at the 100 columns the PTY
+   harness opens and 136 at 140, so it was cut mid-word at every width a
+   terminal is likely to have. What the cut took was the tail: the config path
+   this whole screen is a reading of, and a cut path names a file that does not
+   exist.
+
+   The shape is the Memory fleet header's (#36497): pack at clause marks rather
+   than at any space, continuation rows under the same indent. A clause carries
+   its own qualifier -- "2 probe-only" counts runtimes the probe reached and
+   the config does not name, so a row ending at "2" claims something else. *)
+let runtime_authority_rows ~cols (state : state) : string list =
+  let single_line = Tui_decode.sanitize_terminal_text in
+  let clauses =
+    match state.runtime_surface with
+    | None ->
+        [ "SSOT: runtime.toml"
+        ; "projections: /api/v1/runtime/resolved + runtime-probe"
+        ]
+    | Some snapshot ->
+        let config =
+          match snapshot.Tui_decode.rss_resolved.Tui_decode.rrs_config_path with
+          | None -> "config path unavailable"
+          | Some path -> single_line path
+        in
+        let summary_text =
+          match snapshot.Tui_decode.rss_probe with
+          | None -> "probe unavailable"
+          | Some probe ->
+              let summary = probe.Tui_decode.rps_summary in
+              Printf.sprintf "%d reachable / %d failed / %d skipped"
+                summary.Tui_decode.rpsu_reachable
+                summary.Tui_decode.rpsu_failed
+                summary.Tui_decode.rpsu_skipped
+        in
+        let probe_note =
+          match
+            snapshot.Tui_decode.rss_probe_error, snapshot.Tui_decode.rss_probe
+          with
+          | Some detail, _ -> [ "probe: " ^ single_line detail ]
+          | None, Some probe ->
+              (match probe.Tui_decode.rps_errors with
+               | detail :: _ -> [ "probe: " ^ single_line detail ]
+               | [] -> [])
+          | None, None -> []
+        in
+        let probe_only_note =
+          match snapshot.Tui_decode.rss_unassigned_probe_count with
+          | 0 -> []
+          | count -> [ Printf.sprintf "%d probe-only" count ]
+        in
+        let fleet_note =
+          match state.keepers with
+          | [] -> []
+          | keepers ->
+              let turns =
+                List.fold_left
+                  (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_turns)
+                  0 keepers
+              in
+              let tokens =
+                List.fold_left
+                  (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_tokens)
+                  0 keepers
+              in
+              let cost =
+                List.fold_left
+                  (fun acc (k : Tui_decode.keeper) -> acc +. k.Tui_decode.k_total_cost_usd)
+                  0.0 keepers
+              in
+              [ Printf.sprintf
+                  "fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
+                  (List.length keepers) turns (format_context_tokens tokens) cost
+              ]
+        in
+        [ "SSOT: runtime.toml"; "projections: resolved + probe"; summary_text ]
+        @ fleet_note @ [ config ] @ probe_only_note @ probe_note
+  in
+  let indent = "  " in
+  let room =
+    max 1 (Masc_tui_frame.inner_width ~cols - String.length indent)
+  in
+  Masc_tui_message_layout.pack_clauses ~max_cells:room clauses
+  |> List.map (fun line -> indent ^ line)
+
+let runtime_surface_listing_chrome ~cols state =
+  runtime_listing_chrome
+    ~authority_rows:(List.length (runtime_authority_rows ~cols state))
+    ~error:state.runtime_surface_error
     ~action_error:state.runtime_lane_notice
     ~stale_rows:(List.length (runtime_lane_stale_lines state))
     ~prompt:(Option.is_some (runtime_lane_prompt state))
@@ -9846,6 +9940,27 @@ let runtime_surface_listing_chrome state =
     ~picker_rows:(Option.map (fun picker -> List.length picker.rlp_choices)
       (runtime_picker_projection state))
     ()
+
+(* The Runtime listing's bound. Its chrome depends on the terminal width, so
+   the caller passes the width it drew at and the keys move through the same
+   count the frame drew with. *)
+let runtime_scrolled ~cols (state : state) : scrolled option =
+  if Option.is_some state.runtime_detail_target then None
+  else
+    Some
+      { sc_count =
+          (* The two views draw different lists, and the scroll bound is the
+             list being drawn. Reading candidates in both stopped the roster
+             at the slot count and left the runtimes past it unreachable. *)
+          (match state.runtime_surface, state.runtime_mode with
+           | None, _ -> 0
+           | Some s, Runtime_lanes -> List.length s.Tui_decode.rss_candidates
+           | Some s, Runtime_all ->
+               List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
+      ; sc_chrome = runtime_surface_listing_chrome ~cols state
+      ; sc_overflow_takes_row = false
+      ; sc_preview_keep = None
+      }
 
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
@@ -9979,23 +10094,10 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         (match state.connectors with
          | None -> 0
          | Some s -> List.length s.Tui_decode.cs_connectors)
-  | Runtime ->
-      if Option.is_some state.runtime_detail_target then None
-      else Some
-        { sc_count =
-            (* The two views draw different lists, and the scroll bound is the
-               list being drawn. Reading candidates in both stopped the roster
-               at the slot count and left the runtimes past it unreachable. *)
-            (match state.runtime_surface, state.runtime_mode with
-             | None, _ -> 0
-             | Some s, Runtime_lanes ->
-                 List.length s.Tui_decode.rss_candidates
-             | Some s, Runtime_all ->
-                 List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
-        ; sc_chrome = runtime_surface_listing_chrome state
-        ; sc_overflow_takes_row = false
-        ; sc_preview_keep = None
-        }
+  (* The authority row above the list is wrapped to the terminal width, which
+     this arm does not read. [Masc_tui.scrolled_surface] answers Runtime from
+     [runtime_scrolled] with the width, as it does for the Memory overview. *)
+  | Runtime -> None
   | Config when state.config_pane = Config_runtime && state.runtime_config_status_open -> None
   | Config when state.config_pane = Config_runtime ->
       Some

@@ -4266,6 +4266,9 @@ let start_code_lsp_question state ~mailbox ~(question : string)
 let launch_github_login state ~mailbox keeper_name =
   let host = server_peer_host in
   let port = state.port in
+  (* Read once, at the key press: ticking another scope while the device flow
+     waits on the browser must not change what this login asked for. *)
+  let scopes = state.github_login_scopes in
   let run () =
     match Eio_context.get_clock_opt () with
     | None ->
@@ -4317,7 +4320,7 @@ let launch_github_login state ~mailbox keeper_name =
         let result =
           try
             Masc_tui_http.post_keeper_github_login_streaming ~clock ~host
-              ~port ~keeper_name
+              ~port ~keeper_name ~scopes
               ~on_chunk:(fun chunk ->
                 Buffer.add_string pending chunk;
                 flush_lines ())
@@ -20661,10 +20664,42 @@ and is loaded on demand through keeper_skill.
               && state.detail_tab = Detail_github ->
            (match selected_keeper state with
             | Some keeper ->
+                let asked =
+                  match state.github_login_scopes with
+                  | [] -> "gh's default scopes"
+                  | scopes ->
+                      "+"
+                      ^ String.concat ", +"
+                          (List.map
+                             Masc.Keeper_github_identity.login_scope_to_string
+                             scopes)
+                in
                 state.github_identity_view <-
-                  Some (keeper.k_name, [ "# github login"; "(starting gh device flow\xe2\x80\xa6)" ]);
+                  Some
+                    ( keeper.k_name,
+                      [ "# github login";
+                        "(starting gh device flow with " ^ asked ^ "\xe2\x80\xa6)" ] );
                 launch_github_login state ~mailbox:async_messages keeper.k_name
             | None -> ())
+       | Some digit
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_github
+              && String.length digit = 1
+              && digit.[0] >= '1'
+              && digit.[0] <= '9' -> (
+           (* The digit the tab printed beside the scope. Both sides index
+              [all_login_scopes], so what the screen numbered and what this
+              ticks are the same list. *)
+           match
+             List.nth_opt Masc.Keeper_github_identity.all_login_scopes
+               (Char.code digit.[0] - Char.code '1')
+           with
+           | Some scope ->
+               state.github_login_scopes <-
+                 (if List.mem scope state.github_login_scopes then
+                    List.filter (fun s -> s <> scope) state.github_login_scopes
+                  else scope :: state.github_login_scopes)
+           | None -> ())
        | Some ("P" | "p")
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->

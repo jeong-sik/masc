@@ -5206,6 +5206,10 @@ type state = {
   mutable github_identity_view_error: string option;
   mutable github_token_input: string option;
   mutable github_token_save_status: string option;
+  (* The scopes the next [L] login asks for beyond gh's minimum. Off until the
+     operator ticks one: [workflow] lets the token change CI, which runs with
+     the repository's secrets. *)
+  mutable github_login_scopes: Masc.Keeper_github_identity.login_scope list;
   (* The Identity tab. Stamped with the keeper it was fetched for, like the
      other fetched tabs, so the pane shows loading rather than another
      keeper's answer. The providers are held rather than pre-rendered lines
@@ -7369,6 +7373,7 @@ let create_state
   github_identity_view = None;
   github_token_input = None;
   github_token_save_status = None;
+  github_login_scopes = [];
   identity_view = None;
   identity_view_error = None;
   identity_login = None;

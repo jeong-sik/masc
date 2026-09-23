@@ -7336,7 +7336,28 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             | Some status -> [ "  " ^ status; "" ]
             | None -> []
           in
-          input_lines @ status_lines @ base
+          (* What the next [L] asks for, ticked with the digit printed beside
+             it. Drawn from the server's own list so the number and the scope
+             the key toggles cannot disagree. *)
+          let scope_lines =
+            (Ansi.dim ^ "  Login scopes (digit toggles, L logs in with them)"
+             ^ Ansi.reset)
+            :: List.mapi
+                 (fun index scope ->
+                   let ticked = List.mem scope state.github_login_scopes in
+                   let note =
+                     match scope with
+                     | Masc.Keeper_github_identity.Workflow ->
+                         "may change .github/workflows, which run with repo secrets"
+                   in
+                   Printf.sprintf "  %d %s %s %s— %s%s" (index + 1)
+                     (if ticked then "[x]" else "[ ]")
+                     (Masc.Keeper_github_identity.login_scope_to_string scope)
+                     Ansi.dim note Ansi.reset)
+                 Masc.Keeper_github_identity.all_login_scopes
+            @ [ "" ]
+          in
+          input_lines @ status_lines @ scope_lines @ base
       | Detail_identity ->
           stamped_or
             (Option.map

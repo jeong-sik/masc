@@ -590,6 +590,7 @@
  ; draw in their first column; the sheet this module builds is where a
  ; reader looks up what one means.
  (libraries
+  masc
   masc_tui_types
   masc_tui_keeper_mark
   masc_tui_board_kind_mark

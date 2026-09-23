@@ -3,7 +3,6 @@ open Keeper_approval_queue_rules_types
 type read_stage =
   | Read_recent
   | List_recent_resolved
-  | Find_resolution
 
 type read_error =
   { stage : read_stage
@@ -13,7 +12,6 @@ type read_error =
 let read_stage_to_string = function
   | Read_recent -> "read_recent"
   | List_recent_resolved -> "list_recent_resolved"
-  | Find_resolution -> "find_resolution"
 ;;
 
 let read_error_to_string error =
@@ -532,60 +530,6 @@ let read_recent ~base_path ?keeper_name ?(n = 20) ()
                String.equal name (Safe_ops.json_string ~default:"" "keeper" json))
          in
          Ok (filtered |> List.rev |> List.filteri (fun idx _ -> idx < n))))
-;;
-
-type resolution_evidence =
-  | Resolution_recorded
-  | Resolution_not_recorded
-
-(* The row an approval's history ends on, read newest-first. A [Resolved]
-   row for the id is the recorded decision. Its [Pending] row is where that
-   history starts, so reaching it first proves no decision was recorded after
-   the request; the scan stops there instead of reading older days. Every
-   other event for the id says nothing about the decision and is passed over.
-   A ledger with neither row for the id (its [Pending] append failed, or the
-   day file was pruned) has no recorded decision either. *)
-let resolution_evidence_of_row ~id = function
-  | Dated_jsonl.Malformed_json _ -> None
-  | Dated_jsonl.Parsed (`Assoc fields) ->
-    (match List.assoc_opt "id" fields, List.assoc_opt "event" fields with
-     | Some (`String row_id), Some (`String event) when String.equal row_id id ->
-       (match event_of_string event with
-        | Some Resolved -> Some Resolution_recorded
-        | Some Pending -> Some Resolution_not_recorded
-        | Some
-            ( Summary_updated
-            | Rule_created
-            | Rule_deleted
-            | Grant_consumed
-            | Gate_allowed
-            | Gate_exact_rule_expired
-            | Gate_exact_rule_store_degraded
-            | Gate_grant_unavailable
-            | Auto_judge_operator_retry_started
-            | Auto_judge_block_observation_superseded
-            | Auto_judge_restart_worker_recovered
-            | Auto_judge_restart_judgment_recovered )
-        | None -> None)
-     | _ -> None)
-  | Dated_jsonl.Parsed _ -> None
-;;
-
-let find_resolution ~base_path ~id : (resolution_evidence, read_error) result =
-  match get_audit_store ~base_path () with
-  | Error detail -> Error ({ stage = Find_resolution; detail } : read_error)
-  | Ok store ->
-    (match
-       Dated_jsonl.find_latest_entry_result store (resolution_evidence_of_row ~id)
-     with
-     | Error error ->
-       Error
-         ({ stage = Find_resolution
-          ; detail = Dated_jsonl.read_error_to_string error
-          }
-          : read_error)
-     | Ok (Some evidence) -> Ok evidence
-     | Ok None -> Ok Resolution_not_recorded)
 ;;
 
 let resolved_history_event json =

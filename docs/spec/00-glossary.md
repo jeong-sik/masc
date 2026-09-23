@@ -666,16 +666,15 @@ status: reference
   (`Keeper_approval_queue.delivery_occasion`). `First_commit` 은 운영자가 결정을 처음
   커밋한 경우, `Boot_replay` 는 아직 소비되지 않은 전달을 부팅 때 다시 하는 경우,
   `Same_request_resubmitted` 는 운영자가 같은 요청을 다시 낸 경우다.
-  승인 원장의 `Resolved` 행은 계기가 아니라 원장이 정한다. 그 승인의 `Resolved` 행이
-  원장에 없으면 적고, 있으면 적지 않는다. 계기는 그걸 원장에 물어야 하는지만 가른다.
-  `First_commit` 은 방금 pending 에서 빠진 승인이라 행이 있을 수 없으니 읽지 않는다.
-  나머지 둘은 앞선 전달이 끝났는지 모르니 원장을 최신 줄부터 읽는다. 그 승인의
-  `Resolved` 행이나 `Pending` 행 중 먼저 나오는 쪽에서 멈춘다.
+  계기는 승인 원장의 `Resolved` 행을 적을지 정하지 않는다. 그건 전달 기록의
+  `resolution_recorded` 가 정한다. 저널이 `false` 로 만들고, `Resolved` 행을 적은 뒤
+  `true` 로 바꾼다. `false` 인 동안에는 어떤 계기든, grant 가 이미 소비됐든 행을 적는다.
+  계기는 이미 적힌 결정을 다시 전달할 때
+  `hitl resolution redelivered approval=… occasion=…` 로그에 남는다.
   두 가지 사고가 이 규칙을 만들었다. 부팅마다 행을 적었을 때는 오프라인 Keeper 의 승인
   하나가 부팅 스물한 번에 `Resolved` 행 열아홉 개를 남겼다(#37964). 첫 커밋에서만 적었을
   때는 첫 전달이 실패하면 결정이 원장에 영영 남지 않았다.
-  → [Keeper_approval_queue.delivery_occasion](../../lib/keeper/keeper_approval_queue.ml),
-  [Keeper_approval.Audit.find_resolution](../../lib/keeper_approval/audit.mli)
+  → [Keeper_approval_queue.delivery_occasion](../../lib/keeper/keeper_approval_queue.ml)
 
 ## Task Lifecycle
 

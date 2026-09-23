@@ -3,7 +3,6 @@ open Keeper_approval_queue_rules_types
 type read_stage =
   | Read_recent
   | List_recent_resolved
-  | Find_resolution
 
 type read_error =
   { stage : read_stage
@@ -98,18 +97,6 @@ val read_recent :
   ?n:int ->
   unit ->
   (Yojson.Safe.t list, read_error) result
-
-type resolution_evidence =
-  | Resolution_recorded
-  | Resolution_not_recorded
-
-(** Whether the ledger holds a [Resolved] row for approval [id]. Scans
-    newest-first and stops at the id's [Resolved] row or at its [Pending]
-    row, whichever comes first; the latter means no decision was recorded
-    after the request. Storage failures are returned, not read as either
-    answer. *)
-val find_resolution :
-  base_path:string -> id:string -> (resolution_evidence, read_error) result
 
 val day_string_of_ts : float -> string
 

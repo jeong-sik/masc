@@ -144,6 +144,11 @@ type persisted_delivery =
   ; rule_expires_at : float option
   ; created_by : string option
   ; grant_consumed : bool
+  ; resolution_recorded : bool
+    (* Whether the operator's decision is on the approval audit ledger as a
+       [Resolved] row. The journal writes [false]; the store update that
+       follows a successful [Resolved] append writes [true]. Every completion
+       of the delivery writes the row exactly when this is [false]. *)
   ; replay_outcome : resolution_replay_outcome option
   }
 
@@ -337,7 +342,10 @@ let install_error_to_string = function
    before its last rewrite are recognised as stale. A binary that knows only
    v9 must not open a v10 store and show a resolved approval as pending, so
    the version moved (RFC main-domain-scheduler-latency §8.5, P4e). *)
-let pending_store_version = 10
+(* 11: every delivery carries [resolution_recorded]. A v10 store has no
+   answer for it, so the loader refuses v10 like any other version and the
+   operator resets the gate store before restarting. *)
+let pending_store_version = 11
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_version = 1
 let replay_results_store_surface = "keeper_gate_replay_results"
@@ -596,6 +604,7 @@ let persisted_delivery_to_yojson delivery =
     ; "rule_expires_at", Json_util.float_opt_to_json delivery.rule_expires_at
     ; "created_by", Json_util.string_opt_to_json delivery.created_by
     ; "grant_consumed", `Bool delivery.grant_consumed
+    ; "resolution_recorded", `Bool delivery.resolution_recorded
     ]
 ;;
 
@@ -1448,6 +1457,7 @@ let persisted_delivery_of_yojson ~base_path json =
           ; "rule_expires_at"
           ; "created_by"
           ; "grant_consumed"
+          ; "resolution_recorded"
           ]
         fields
     in
@@ -1475,6 +1485,12 @@ let persisted_delivery_of_yojson ~base_path json =
       | Some _ -> Error (surface ^ ".grant_consumed must be a boolean")
       | None -> Error (surface ^ ".grant_consumed is required")
     in
+    let* resolution_recorded =
+      match List.assoc_opt "resolution_recorded" fields with
+      | Some (`Bool value) -> Ok value
+      | Some _ -> Error (surface ^ ".resolution_recorded must be a boolean")
+      | None -> Error (surface ^ ".resolution_recorded is required")
+    in
     let* () =
       match decision, grant_consumed with
       | Decision.Approve, (true | false) -> Ok ()
@@ -1490,6 +1506,7 @@ let persisted_delivery_of_yojson ~base_path json =
       ; rule_expires_at
       ; created_by
       ; grant_consumed
+      ; resolution_recorded
       ; replay_outcome = None
       }
   | _ -> Error "gate_pending.delivery must be a JSON object"
@@ -4211,6 +4228,7 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~rule_expires_at ~cr
         ; rule_expires_at
         ; created_by
         ; grant_consumed = false
+        ; resolution_recorded = false
         ; replay_outcome = None
         }
       in
@@ -4324,22 +4342,17 @@ let remember_rule_for_delivery delivery =
   | Decision.Reject _, true -> Ok (None, [])
 ;;
 
-(* Why a delivery is being completed. The occasion decides how the ledger is
-   asked whether the operator's decision is already recorded, not whether it
-   is recorded: the [Resolved] row is written exactly when the ledger has none
-   for the approval.
+(* Why a delivery is being completed. It names the redelivery in the log; it
+   does not decide whether the decision reaches the audit ledger. The
+   delivery's [resolution_recorded] decides that: a [Resolved] row is written
+   exactly while it is [false], whatever the occasion.
 
-   On the first commit the journal has just moved the approval out of
-   [pending], and only [complete_delivery] writes [Resolved], so no row can
-   exist yet and none is read. A boot replay or a same-request resubmission
-   finds a delivery that an earlier completion may or may not have finished.
-   Recording on every such occasion counted one click as many decisions --
+   Recording on every occasion counted one click as many decisions --
    nineteen rows for one approval on 2026-09-22 while its keeper was offline
    across twenty-one boots (#37964). Recording only on the first commit lost
    the decision whenever that completion failed after the journal: the
-   operator's second press and every boot replay then found no pending entry,
-   delivered the wake, and never wrote the row. So these occasions read the
-   ledger. *)
+   operator's second press and every boot replay found no pending entry and
+   never wrote the row. *)
 type delivery_occasion =
   | First_commit
   | Boot_replay
@@ -4351,66 +4364,99 @@ let delivery_occasion_to_string = function
   | Same_request_resubmitted -> "same_request_resubmitted"
 ;;
 
-let resolution_evidence ~(occasion : delivery_occasion) delivery =
-  match occasion with
-  | First_commit -> Keeper_approval.Audit.Resolution_not_recorded
-  | Boot_replay | Same_request_resubmitted ->
-    (match
-       Keeper_approval.Audit.find_resolution
-         ~base_path:delivery.entry.audit_base_path
-         ~id:delivery.entry.id
-     with
-     | Ok evidence -> evidence
-     | Error error ->
-       (* An unreadable ledger cannot show the row is there. A second row is
-          a decision counted twice; a missing one leaves the approval shown
-          as waiting for the operator forever. The second is the worse
-          reading, so the row is written. *)
-       Log.Keeper.warn
-         ~keeper_name:delivery.entry.keeper_name
-         "approval_queue: could not read the ledger for a recorded decision \
-          approval=%s occasion=%s; recording it: %s"
-         delivery.entry.id
-         (delivery_occasion_to_string occasion)
-         (Keeper_approval.Audit.read_error_to_string error);
-       Keeper_approval.Audit.Resolution_not_recorded)
+(* Flips [resolution_recorded] on the stored delivery, not on the caller's
+   copy: a grant consumption may have replaced the stored record since the
+   caller read it. A delivery already retired has nothing left to replay. *)
+let mark_resolution_recorded delivery =
+  with_pending_store_lock (fun () ->
+    let delivery_map = Atomic.get deliveries in
+    match SMap.find_opt delivery.entry.id delivery_map with
+    | None -> Ok ()
+    | Some current ->
+      let updated_deliveries =
+        SMap.add
+          current.entry.id
+          { current with resolution_recorded = true }
+          delivery_map
+      in
+      (match
+         persist_snapshot_unlocked
+           ~base_path:current.entry.audit_base_path
+           ~pending_map:(Atomic.get pending)
+           ~delivery_map:updated_deliveries
+       with
+       | Error _ as error -> error
+       | Ok () ->
+         Atomic.set deliveries updated_deliveries;
+         Ok ()))
+;;
+
+(* The ledger row for the decision. It is written while the delivery says it
+   is not yet recorded, and the flag moves only after the append succeeded,
+   so a failed append is written again by the next completion. When the row
+   is already there, the log says so and no receipt is returned: there is no
+   new evidence to hand back. *)
+let record_resolution_once ~(occasion : delivery_occasion) ~project_chat delivery =
+  if delivery.resolution_recorded
+  then (
+    Log.Keeper.info
+      ~keeper_name:delivery.entry.keeper_name
+      "hitl resolution redelivered approval=%s occasion=%s"
+      delivery.entry.id
+      (delivery_occasion_to_string occasion);
+    [])
+  else (
+    let actor =
+      match delivery.created_by with
+      | Some actor when String.trim actor <> "" -> Some actor
+      | Some _ | None -> None
+    in
+    let receipt =
+      resolve_entry
+        ~project_chat
+        ~base_path:delivery.entry.audit_base_path
+        delivery.entry
+        ~source:delivery.source
+        ?actor
+        delivery.decision
+    in
+    (match receipt.Keeper_approval.Audit.write_result with
+     | Error _ -> ()
+     | Ok () ->
+       (match mark_resolution_recorded delivery with
+        | Ok () -> ()
+        | Error storage_error ->
+          (* The row is on the ledger but the delivery still says it is not;
+             the next completion of this delivery writes a second row. *)
+          Log.Keeper.warn
+            ~keeper_name:delivery.entry.keeper_name
+            "approval_queue: resolution recorded but its flag was not stored \
+             approval=%s occasion=%s: %s"
+            delivery.entry.id
+            (delivery_occasion_to_string occasion)
+            (storage_error_to_string storage_error)));
+    [ receipt ])
 ;;
 
 let complete_delivery ~(occasion : delivery_occasion) delivery =
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
-  let actor =
-    match delivery.created_by with
-    | Some actor when String.trim actor <> "" -> Some actor
-    | Some _ | None -> None
-  in
-  (* The ledger row for the decision, written once. When the ledger already
-     holds it, the log says so and no receipt is returned: there is no new
-     evidence to hand back. *)
   let record_resolution ~project_chat =
-    match resolution_evidence ~occasion delivery with
-    | Keeper_approval.Audit.Resolution_not_recorded ->
-      [ resolve_entry
-          ~project_chat
-          ~base_path
-          delivery.entry
-          ~source:delivery.source
-          ?actor
-          delivery.decision
-      ]
-    | Keeper_approval.Audit.Resolution_recorded ->
-      Log.Keeper.info
-        ~keeper_name:delivery.entry.keeper_name
-        "hitl resolution redelivered approval=%s occasion=%s"
-        id
-        (delivery_occasion_to_string occasion);
-      []
+    record_resolution_once ~occasion ~project_chat delivery
   in
   match resolve_store_readiness_error ~base_path ~approval_id:id with
   | Error _ as error -> error
   | Ok () ->
     if delivery.grant_consumed
-    then Ok { remembered_rule = None; audit_receipts = [] }
+    then
+      (* The keeper already used the grant, so no wake is sent. The decision
+         may still be missing from the ledger: the first completion can fail
+         after the journal and the keeper's retried call consume the grant
+         before any later completion runs. *)
+      Ok
+        { remembered_rule = None
+        ; audit_receipts = record_resolution ~project_chat:true
+        }
     else
       (match deliver_resolution ~base_path delivery.entry delivery.decision with
        | Error Keeper_registry_event_queue.Hitl_recipient_absent ->
@@ -4418,7 +4464,11 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
             no consumer — ever. Record the resolution evidence and retire the
             durable delivery; keeping it would replay the same permanent
             failure at every boot. No always-allow rule is written: the
-            operator approved a grant for a Keeper that is gone. *)
+            operator approved a grant for a Keeper that is gone. The row
+            goes first: once the delivery is retired nothing completes it
+            again, so a row written after the removal would be lost to a
+            crash between the two. *)
+         let audit_receipts = record_resolution ~project_chat:false in
          (match remove_delivery_from_store delivery with
           | Error storage_error ->
             Error (Persistence_failed { approval_id = id; storage_error })
@@ -4427,10 +4477,7 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
               ~keeper_name:delivery.entry.keeper_name
               "hitl delivery retired: no such keeper approval=%s"
               id;
-            Ok
-              { remembered_rule = None
-              ; audit_receipts = record_resolution ~project_chat:false
-              })
+            Ok { remembered_rule = None; audit_receipts })
        | Error (Keeper_registry_event_queue.Hitl_enqueue_failed reason) ->
          Error (Delivery_failed { approval_id = id; reason })
        | Ok () ->
@@ -4633,10 +4680,19 @@ let install_persistence_internal ~after_load ~base_path =
           ; replay_projection_error
           }
       | delivery :: rest ->
-        if delivery.grant_consumed
-        then replay count failures rest
-        else if delivery_wake_was_observed delivery
-        then replay count failures rest
+        if delivery.grant_consumed || delivery_wake_was_observed delivery
+        then (
+          (* No wake is sent again. A decision whose first completion failed
+             before its row was written still gets the row. *)
+          (if not delivery.resolution_recorded
+           then
+             ignore
+               (record_resolution_once
+                  ~occasion:Boot_replay
+                  ~project_chat:true
+                  delivery
+                : Keeper_approval.Audit.receipt list));
+          replay count failures rest)
         else
           (match complete_delivery ~occasion:Boot_replay delivery with
            | Ok _ -> replay (count + 1) failures rest

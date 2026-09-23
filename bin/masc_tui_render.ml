@@ -5286,7 +5286,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
      did work. *)
   let obligation = if lane.sl_required then "Required" else "Optional" in
   let configuration =
-    Tui_decode.standalone_lane_configuration_to_string
+    Tui_decode.standalone_lane_configuration_phrase
       lane.sl_configuration_state
   in
   let last_run =
@@ -5373,7 +5373,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
        (Terminal_text.single_line purpose))
   @ wrap state_style
-      (Printf.sprintf "%s lane · configuration %s · %s" obligation
+      (Printf.sprintf "%s lane · %s · %s" obligation
          configuration last_run)
   @ wrap Ansi.dim
       (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"

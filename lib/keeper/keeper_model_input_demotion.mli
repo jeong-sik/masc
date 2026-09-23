@@ -42,7 +42,8 @@ type plan_result =
   }
 
 val plan
-  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  :  ?demote_from:int
+  -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> demote_before:int
   -> Agent_core.Types.message list
   -> plan_result
@@ -61,18 +62,20 @@ val plan
       demoted; [Invalid_marker] is marker-shaped content that failed to parse
       and is left exactly as-is rather than being stored as a blob, which would
       make a corrupt payload content-addressed and permanent.
-    - its atom index is below [demote_before], an atom index into this same
-      unmodified message list. The caller owns where that boundary sits and
+    - its atom index is at or above [demote_from] (default 0) and below
+      [demote_before], atom indices into this same unmodified message list.
+      [demote_from] lets a size refusal demote one turn's atoms without
+      touching the earlier turns a policy keeps verbatim. The caller owns where that boundary sits and
       owns the consequence: a boundary that moves on every message rewrites the
       transmitted prefix on every request and costs the provider's prompt
       cache, so callers pick one that moves at the rate the conversation
       itself does. The keeper's assembly uses the turn — results the current
       turn produced are what it is reasoning over, results from earlier turns
       were already reported elsewhere — which moves once per turn. One
-      exception: when the raw cut refuses because the newest atom alone
-      exceeds the budget, the assembly retries once with the boundary past
-      the newest atom, so the turn's own results leave as markers rather than
-      failing the turn (#28845).
+      exception: after a size refusal the assembly resends once with the
+      current turn's atoms, from the turn boundary to the refused request's
+      end, as the range ([demote_from] to [demote_before]), so the turn's own results leave as markers rather than failing
+      the turn (#28845).
     - the placeholder measures strictly smaller than the message does now.
       This replaces a size threshold: the encoded marker runs from about 125
       bytes to 1,154 depending on the preview's bytes, because

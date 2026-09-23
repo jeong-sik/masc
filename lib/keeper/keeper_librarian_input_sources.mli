@@ -1,4 +1,5 @@
-(** Durable counterpart inputs for the range-based Librarian consumer. *)
+(** Durable inputs a Librarian pass reads from disk: counterpart evidence for
+    the range-based consumer and the Goal context of a task. *)
 
 type read_error =
   | Chat_store_unreadable of string
@@ -24,3 +25,14 @@ val counterpart_observations_between_offloaded
   -> after:float option
   -> before:float
   -> (Keeper_counterpart_observation.t list, read_error) result
+
+(** The Goal criteria linked to [task], read from the authoritative
+    goal-task link index and the Goal store. [None] is [No_task]. A task with
+    no linked Goal is [Task_goals] with [Ok []]; an unreadable index, an
+    unreadable store, or a link naming a missing Goal is [Task_goals] with
+    [Error], so a read failure never looks like a goalless task. Reads disk;
+    a caller on the main domain offloads it. *)
+val goal_context_for_task
+  :  config:Workspace.config
+  -> Keeper_id.Task_id.t option
+  -> Keeper_librarian.goal_context

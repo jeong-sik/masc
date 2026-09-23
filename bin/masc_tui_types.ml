@@ -2764,6 +2764,18 @@ type surface =
   | Tools
   | System_logs
 
+(** The Keeper roster or one Keeper's detail: where the selected Keeper is
+    the one on screen, so a key can be read as meaning that Keeper. Every
+    constructor is named so a new surface has to decide. *)
+let shows_selected_keeper = function
+  | Keepers (Keeper_list | Keeper_detail) -> true
+  | Keepers (Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories
+  | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+  | System_logs ->
+      false
+
 (** The Activity screen is two surfaces under one tab strip: the event
     feed and the system logs, reached from each other with 1 and 2. A
     rule about "the Activity screen" reads this rather than [Acting]
@@ -5872,6 +5884,16 @@ type state = {
   mutable connector_unbind_all_armed:
     (string * Masc_tui_connector_unbind.target list) option;
   mutable connector_unbind_all_inflight: bool;
+  (* A Keeper the operator just paused or shut down, waiting for a fresh
+     connector read to learn whether it still holds bindings to offer to
+     remove. *)
+  mutable connector_unbind_offer_pending: string list;
+  (* The offer after a pause or shutdown, while it waits for its one key.
+     Separate from the unbind-all arm: that arm answers [U], and on the
+     Keeper list [U] is the runtime picker. *)
+  mutable connector_unbind_offer: Masc_tui_connector_unbind.offer option;
+  (* Frames the terminal accepted with changed output. *)
+  mutable frames_presented: int;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
@@ -7857,6 +7879,9 @@ let create_state
   connector_unbind_armed = None;
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
+  connector_unbind_offer_pending = [];
+  connector_unbind_offer = None;
+  frames_presented = 0;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;

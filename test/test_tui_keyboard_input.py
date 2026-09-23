@@ -11580,6 +11580,81 @@ def run_keeper_unbind_all_channels_regression(executable: str) -> None:
     )
 
 
+def run_pause_offers_channel_unbind_regression(executable: str) -> None:
+    """Pausing a Keeper that holds bindings offers to remove them, once.
+
+    #38167: a paused Keeper still routes its Discord channels to itself and
+    answers on them as soon as it runs again. After the pause is accepted the
+    footer names the channels and the one key that removes them. y takes the
+    offer; any other key leaves the bindings. U is not that key: on the list
+    it opens the runtime picker, and "pause, then pick another runtime" must
+    not remove the Keeper's channels.
+    """
+
+    def pause_alpha(process: subprocess.Popen[bytes], master_fd: int,
+                    output: bytearray) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        # Pause is not a two-press action; one p sends it.
+        send_and_wait(process, master_fd, output, b"p",
+                      b"y: also unbind alpha's 2 channels")
+
+    def unbinds(requests: HttpRequests) -> list[tuple[str, str]]:
+        return sorted(
+            (json.loads(body)["channel_id"], json.loads(body)["keeper_name"])
+            for path, body in requests
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        )
+
+    def fixtures() -> HttpFixtures:
+        served = connector_unbind_all_fixtures()
+        served["/api/v1/keepers/alpha/directive"] = (200, {"ok": True})
+        return served
+
+    taken: HttpRequests = []
+
+    def take_offer(process: subprocess.Popen[bytes], master_fd: int,
+                   _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        pause_alpha(process, master_fd, output)
+        send_and_wait(process, master_fd, output, b"y",
+                      b"unbind all of alpha: 1 removed, 1 kept, 0 not found, 0 failed")
+        if unbinds(taken) != [("111", "alpha"), ("333", "alpha")]:
+            raise AssertionError(
+                f"the offer did not send exactly alpha's two bindings: {unbinds(taken)!r}"
+            )
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="y after a pause removes the paused Keeper's channel bindings",
+        interact=take_offer,
+        http_fixtures=fixtures(),
+        http_requests=taken,
+    )
+
+    declined: HttpRequests = []
+
+    def decline_offer(process: subprocess.Popen[bytes], master_fd: int,
+                      _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        pause_alpha(process, master_fd, output)
+        # U straight after the offer is the runtime picker, not a yes.
+        send_and_wait(process, master_fd, output, b"U", b"\xe2\x96\xb8 runtime")
+        if unbinds(declined):
+            raise AssertionError(
+                f"a declined offer still sent unbinds: {unbinds(declined)!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="U after a pause opens the runtime picker and keeps the bindings",
+        interact=decline_offer,
+        http_fixtures=fixtures(),
+        http_requests=declined,
+    )
+
+
 def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
     """Beside the acting pane the row is 92 cells; a strip wider than that
     used to be cut from the right, so the Keeper detail's Runs tab and
@@ -13672,8 +13747,9 @@ def fusion_live_reload_interaction(
 
 
 # The hook's per-call observation names the keeper turn (total_turns + 1)
-# the session-numbered call below belongs to; without it the row would say
-# "turn ?". The session ordinal (7) and the keeper turn (42) differ, so a
+# the session-numbered call below belongs to; without it the row would name
+# the turn with no number. The session ordinal (7) and the keeper turn (42)
+# differ, so a
 # needle can tell which of the two numbers a row drew.
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"
@@ -14720,6 +14796,7 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_tab_strip_keeps_current_entry_regression(executable)
     run_keeper_unbind_all_channels_regression(executable)
+    run_pause_offers_channel_unbind_regression(executable)
     run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()

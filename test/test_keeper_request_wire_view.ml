@@ -61,7 +61,7 @@ let view ~front history : Try_provider.request_view =
     ~measure_message_bytes
     ~front
     ~history_digest_at:(Window.atom_opening_digest history)
-    ~last_resort:false
+    ~current_turn_results:Try_provider.Current_turn_verbatim
     ~base_path:""
     ~demote_before:0
     ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })

@@ -72,8 +72,19 @@ type blocked_reason =
   | Candidate_membership_conflict of string
   | Durable_partition_invariant of string
   | Exact_setup_unavailable of string
-  | Exact_flow_replayed
-  | Exact_execution_terminal
+  | Exact_flow_replayed of running_progress option
+  | Exact_lane_exhausted of
+      { detail : string
+      ; progress : running_progress option
+      }
+  | Exact_flow_bookkeeping_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+  | Exact_completion_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
   | Domain_output_invalid of
       { detail : string
       ; progress : running_progress option
@@ -82,8 +93,12 @@ type blocked_reason =
       { detail : string
       ; progress : running_progress option
       }
-  | Unexpected_worker_failure of string
+  | Unexpected_worker_failure of
+      { detail : string
+      ; progress : running_progress option
+      }
   | Exact_execution_quarantined of running_progress
+  | Exact_execution_interrupted of running_progress
 
 type running_state =
   { worker_epoch : Worker_epoch.t
@@ -185,6 +200,19 @@ let running_progress_to_yojson = function
       ]
 ;;
 
+let optional_progress_to_yojson = function
+  | Some progress -> running_progress_to_yojson progress
+  | None -> `Null
+;;
+
+let classified_failure_to_yojson ~kind detail progress =
+  `Assoc
+    [ "kind", `String kind
+    ; "detail", `String detail
+    ; "progress", optional_progress_to_yojson progress
+    ]
+;;
+
 let blocked_reason_to_yojson = function
   | Candidate_membership_conflict detail ->
     `Assoc [ "kind", `String "candidate_membership_conflict"; "detail", `String detail ]
@@ -192,32 +220,31 @@ let blocked_reason_to_yojson = function
     `Assoc [ "kind", `String "durable_partition_invariant"; "detail", `String detail ]
   | Exact_setup_unavailable detail ->
     `Assoc [ "kind", `String "exact_setup_unavailable"; "detail", `String detail ]
-  | Exact_flow_replayed -> `Assoc [ "kind", `String "exact_flow_replayed" ]
-  | Exact_execution_terminal ->
-    `Assoc [ "kind", `String "exact_execution_terminal" ]
+  | Exact_flow_replayed progress ->
+    `Assoc
+      [ "kind", `String "exact_flow_replayed"
+      ; "progress", optional_progress_to_yojson progress
+      ]
+  | Exact_lane_exhausted { detail; progress } ->
+    classified_failure_to_yojson ~kind:"exact_lane_exhausted" detail progress
+  | Exact_flow_bookkeeping_failed { detail; progress } ->
+    classified_failure_to_yojson ~kind:"exact_flow_bookkeeping_failed" detail progress
+  | Exact_completion_failed { detail; progress } ->
+    classified_failure_to_yojson ~kind:"exact_completion_failed" detail progress
   | Domain_output_invalid { detail; progress } ->
-    `Assoc
-      [ "kind", `String "domain_output_invalid"
-      ; "detail", `String detail
-      ; ( "progress"
-        , match progress with
-          | Some progress -> running_progress_to_yojson progress
-          | None -> `Null )
-      ]
+    classified_failure_to_yojson ~kind:"domain_output_invalid" detail progress
   | Execution_provenance_mismatch { detail; progress } ->
-    `Assoc
-      [ "kind", `String "execution_provenance_mismatch"
-      ; "detail", `String detail
-      ; ( "progress"
-        , match progress with
-          | Some progress -> running_progress_to_yojson progress
-          | None -> `Null )
-      ]
-  | Unexpected_worker_failure detail ->
-    `Assoc [ "kind", `String "unexpected_worker_failure"; "detail", `String detail ]
+    classified_failure_to_yojson ~kind:"execution_provenance_mismatch" detail progress
+  | Unexpected_worker_failure { detail; progress } ->
+    classified_failure_to_yojson ~kind:"unexpected_worker_failure" detail progress
   | Exact_execution_quarantined progress ->
     `Assoc
       [ "kind", `String "exact_execution_quarantined"
+      ; "progress", running_progress_to_yojson progress
+      ]
+  | Exact_execution_interrupted progress ->
+    `Assoc
+      [ "kind", `String "exact_execution_interrupted"
       ; "progress", running_progress_to_yojson progress
       ]
 ;;
@@ -413,6 +440,27 @@ let running_progress_of_yojson json =
   | value -> Error (Printf.sprintf "unknown Board attention exact progress %S" value)
 ;;
 
+(* A classified failure never retains [Unbound]: an execution that bound no
+   provider call has no progress worth keeping, so it is written as [None]. *)
+let optional_progress_field ~context fields =
+  let* progress_json = field ~context "progress" fields in
+  match progress_json with
+  | `Null -> Ok None
+  | json ->
+    let* progress = running_progress_of_yojson json in
+    (match progress with
+     | Unbound -> Error "classified execution failure cannot retain unbound progress"
+     | Bound _ | Advancing _ -> Ok (Some progress))
+;;
+
+let classified_failure_fields ~context fields =
+  let* () = exact_fields ~context [ "kind"; "detail"; "progress" ] fields in
+  let* detail_json = field ~context "detail" fields in
+  let* detail = string_json ~context:(context ^ ".detail") detail_json in
+  let* progress = optional_progress_field ~context fields in
+  Ok (detail, progress)
+;;
+
 let blocked_reason_of_yojson json =
   let context = "Board attention blocked reason" in
   let* fields = assoc ~context json in
@@ -435,44 +483,27 @@ let blocked_reason_of_yojson json =
     let* detail = string_json ~context:(context ^ ".detail") detail_json in
     Ok (Exact_setup_unavailable detail)
   | "exact_flow_replayed" ->
-    let* () = exact_fields ~context [ "kind" ] fields in
-    Ok Exact_flow_replayed
-  | "exact_execution_terminal" ->
-    let* () = exact_fields ~context [ "kind" ] fields in
-    Ok Exact_execution_terminal
+    let* () = exact_fields ~context [ "kind"; "progress" ] fields in
+    let* progress = optional_progress_field ~context fields in
+    Ok (Exact_flow_replayed progress)
+  | "exact_lane_exhausted" ->
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Exact_lane_exhausted { detail; progress })
+  | "exact_flow_bookkeeping_failed" ->
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Exact_flow_bookkeeping_failed { detail; progress })
+  | "exact_completion_failed" ->
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Exact_completion_failed { detail; progress })
   | "domain_output_invalid" ->
-    let* () = exact_fields ~context [ "kind"; "detail"; "progress" ] fields in
-    let* detail_json = field ~context "detail" fields in
-    let* detail = string_json ~context:(context ^ ".detail") detail_json in
-    let* progress_json = field ~context "progress" fields in
-    let* progress =
-      match progress_json with
-      | `Null -> Ok None
-      | json -> running_progress_of_yojson json |> Result.map Option.some
-    in
-    (match progress with
-     | Some Unbound -> Error "classified execution failure cannot retain unbound progress"
-     | Some (Bound _ | Advancing _) | None ->
-       Ok (Domain_output_invalid { detail; progress }))
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Domain_output_invalid { detail; progress })
   | "execution_provenance_mismatch" ->
-    let* () = exact_fields ~context [ "kind"; "detail"; "progress" ] fields in
-    let* detail_json = field ~context "detail" fields in
-    let* detail = string_json ~context:(context ^ ".detail") detail_json in
-    let* progress_json = field ~context "progress" fields in
-    let* progress =
-      match progress_json with
-      | `Null -> Ok None
-      | json -> running_progress_of_yojson json |> Result.map Option.some
-    in
-    (match progress with
-     | Some Unbound -> Error "classified execution failure cannot retain unbound progress"
-     | Some (Bound _ | Advancing _) | None ->
-       Ok (Execution_provenance_mismatch { detail; progress }))
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Execution_provenance_mismatch { detail; progress })
   | "unexpected_worker_failure" ->
-    let* () = exact_fields ~context [ "kind"; "detail" ] fields in
-    let* detail_json = field ~context "detail" fields in
-    let* detail = string_json ~context:(context ^ ".detail") detail_json in
-    Ok (Unexpected_worker_failure detail)
+    let* detail, progress = classified_failure_fields ~context fields in
+    Ok (Unexpected_worker_failure { detail; progress })
   | "exact_execution_quarantined" ->
     let* () = exact_fields ~context [ "kind"; "progress" ] fields in
     let* progress_json = field ~context "progress" fields in
@@ -480,6 +511,13 @@ let blocked_reason_of_yojson json =
     (match progress with
      | Bound _ | Advancing _ -> Ok (Exact_execution_quarantined progress)
      | Unbound -> Error "unbound execution cannot be quarantined")
+  | "exact_execution_interrupted" ->
+    let* () = exact_fields ~context [ "kind"; "progress" ] fields in
+    let* progress_json = field ~context "progress" fields in
+    let* progress = running_progress_of_yojson progress_json in
+    (match progress with
+     | Bound _ | Advancing _ -> Ok (Exact_execution_interrupted progress)
+     | Unbound -> Error "unbound execution cannot be interrupted")
   | value -> Error (Printf.sprintf "unknown Board attention blocked reason %S" value)
 ;;
 
@@ -1202,15 +1240,17 @@ let validate_blocked_reason = function
     nonempty "durable partition invariant detail" detail
   | Exact_setup_unavailable detail ->
     nonempty "exact setup unavailable detail" detail
-  | Exact_flow_replayed -> Ok ()
-  | Exact_execution_terminal -> Ok ()
-  | Domain_output_invalid { detail; progress } ->
+  | Exact_flow_replayed (Some progress) -> validate_durable_progress progress
+  | Exact_flow_replayed None -> Ok ()
+  | Exact_lane_exhausted { detail; progress }
+  | Exact_flow_bookkeeping_failed { detail; progress }
+  | Exact_completion_failed { detail; progress }
+  | Domain_output_invalid { detail; progress }
+  | Execution_provenance_mismatch { detail; progress }
+  | Unexpected_worker_failure { detail; progress } ->
     validate_classified_failure detail progress
-  | Execution_provenance_mismatch { detail; progress } ->
-    validate_classified_failure detail progress
-  | Unexpected_worker_failure detail ->
-    nonempty "unexpected worker failure detail" detail
   | Exact_execution_quarantined progress -> validate_durable_progress progress
+  | Exact_execution_interrupted progress -> validate_durable_progress progress
 ;;
 
 let advance_state partition state =
@@ -1348,15 +1388,24 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
                     let* released = advance_state partition Ready in
                     Ok (recovered + 1, released :: latest)
                   | Running ({ progress = (Bound _ | Advancing _) as progress; _ }) ->
-                    let* quarantined =
+                    (* A restart interrupting a bound execution is not a
+                       judgment about this candidate: the judgment lane is a
+                       read-only model call, so re-running it after recovery
+                       spends tokens and nothing else. Blocking as
+                       [Exact_execution_interrupted] keeps the provenance as
+                       evidence while staying requeueable: [Blocked -> Ready]
+                       is a legal transition that the operator requeue
+                       reaches. Nothing reopens it automatically —
+                       [ensure_roots] leaves a Blocked root as it is. *)
+                    let* blocked =
                       advance_state
                         partition
                         (Blocked
-                           { reason = Exact_execution_quarantined progress
+                           { reason = Exact_execution_interrupted progress
                            ; blocked_at = now
                            })
                     in
-                    Ok (recovered + 1, quarantined :: latest)
+                    Ok (recovered + 1, blocked :: latest)
                   | Ready | Completed _ | Settled _ | Abandoned _ | Blocked _ ->
                     Ok (recovered, partition :: latest))
                (Ok (0, []))

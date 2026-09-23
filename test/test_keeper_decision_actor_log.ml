@@ -291,6 +291,35 @@ let test_interrupt_stamps_the_token_owner ~sw ~clock ~base_path:_ ~state ~token 
   check string "the response echoes the token owner as actor" "probe-operator"
     (U.member "actor" json |> U.to_string)
 
+(* A turn is in flight, so the route takes its success arm: the cancelled
+   turn's response carries the actor like the two refusal arms do. The turn
+   runs in its own sub-switch so failing it does not cancel the test fiber
+   (the shape test_keeper_turn_interrupt.ml uses). *)
+let test_cancelled_turn_response_carries_the_actor ~sw ~clock ~base_path ~state ~token ~keeper =
+  Masc.Keeper_registry.mark_turn_started ~base_path
+    ~wake:Masc.Keeper_registry.Proactive_tick keeper;
+  let registered, set_registered = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    try
+      Eio.Switch.run (fun turn_sw ->
+        Masc.Keeper_registry.set_turn_switch ~base_path keeper (Some turn_sw);
+        Eio.Promise.resolve set_registered ();
+        Eio.Time.sleep clock 10.0)
+    with
+    | Masc.Keeper_registry.Operator_interrupt -> ()
+    | Eio.Cancel.Cancelled _ -> ());
+  Eio.Promise.await registered;
+  let body = Printf.sprintf {|{"name":%S}|} keeper in
+  let response =
+    dispatch_post ~sw ~clock ~state ~token ~path:"/api/v1/keepers/turn/interrupt" ~body
+  in
+  check int "turn-interrupt POST succeeds" 200 (status_of_response response);
+  let json = Yojson.Safe.from_string (body_of_response response) in
+  check bool "the in-flight turn was signalled" true
+    (U.member "signalled" json |> U.to_bool);
+  check string "the response echoes the token owner as actor" "probe-operator"
+    (U.member "actor" json |> U.to_string)
+
 let () =
   run "keeper_decision_actor_log"
     [ ( "decision actor"
@@ -301,5 +330,8 @@ let () =
             (fun () -> with_actor_test_setup test_tool_approval_stamps_the_token_owner)
         ; test_case "turn-interrupt stamps the token owner" `Quick
             (fun () -> with_actor_test_setup test_interrupt_stamps_the_token_owner)
+        ; test_case "a cancelled turn's response carries the actor" `Quick
+            (fun () ->
+               with_actor_test_setup test_cancelled_turn_response_carries_the_actor)
         ] )
     ]

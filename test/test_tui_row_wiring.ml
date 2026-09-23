@@ -235,6 +235,22 @@ let test_the_summary_row_does_not_count_the_panel_below_it () =
        ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"load_overview"
        ~literals:[ "attention_items" ])
 
+(* The briefing's command_focus repeats the first incident under
+   "top_attention". The loader decoded it into a field of its own, and no
+   screen ever drew that field: the Attention panel lists the incidents
+   themselves, first one first, so the repeat had no row to go to.
+
+   It was not free. [decode_attention_item] refuses an item that is missing a
+   required field, and that refusal came back as the whole overview load
+   failing -- the fleet counts, the health word and the panel itself, blanked
+   over a value nothing reads. The load now stops opening command_focus at
+   all. *)
+let test_the_overview_load_stops_reading_a_field_no_screen_draws () =
+  Alcotest.(check int) "the load no longer opens command_focus" 0
+    (Ast_grep.count_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"load_overview"
+       ~literals:[ "command_focus"; "top_attention" ])
+
 (* The briefing has always carried a liveness word per Keeper, written through
    the control plane's own printer. The Overview row read only how many rows
    there were, so a fleet with two Keepers that had stopped doing anything and
@@ -443,6 +459,21 @@ let test_the_two_p50s_on_the_lanes_screen_agree () =
     (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
        ~binding_name:"standalone_lane_detail_lines"
        ~needle:" \xc2\xb7 p50 latency %.2fs")
+
+(* The configuration clause is written once, in [Tui_decode]. This line used
+   to introduce it with a noun of its own -- "configuration " ^ a word that
+   three of the four states already give a subject -- so an unconfigured lane
+   read "configuration not configured". The caller draws the clause as it
+   comes. *)
+let test_the_lane_line_writes_no_noun_of_its_own () =
+  Alcotest.(check int) "the line takes the clause whole" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:"%s lane \xc2\xb7 %s \xc2\xb7 %s");
+  Alcotest.(check int) "and no longer names the subject itself" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:"%s lane \xc2\xb7 configuration %s \xc2\xb7 %s")
 
 let test_board_lane_detail_draws_typed_jev_readiness () =
   Alcotest.(check int) "the detail reads the decoded JEV field" 1
@@ -850,6 +881,46 @@ let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
   Alcotest.(check int) "the title asks what the board holds" 1
     (asks "board_list_count_text")
 
+(* The slot history and the run total sit one line apart in the lane detail,
+   and the slots cover only the runs that named one -- on the live Board
+   Attention lane, 357 of 489, most of the rest Vendor System One answers.
+   The runs without a slot are drawn by the one function that reads the
+   server's reasons, rather than spelled again beside the line. *)
+let test_the_lane_slot_history_says_what_it_does_not_cover () =
+  Alcotest.(check int) "the detail asks for the runs that named no slot" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~callee:"standalone_lane_runs_without_slot_parts")
+
+(* A stamp that can be older than today is drawn as a span, not as a clock.
+
+   Both of these sit beside the screen's own clock and used to draw the hour
+   alone, on the reading that the header gives them a distance. That holds
+   only while the two are the same day: the Clients roster drew a session last
+   seen on 2026-09-21 as "11:49:28" under a 2026-09-23 header, and the
+   planning baseline is the first read of the process and is never replaced,
+   so a screen left open overnight named a moment on a day nobody could
+   identify.
+
+   Counted rather than read off a screen, because the two are days apart from
+   the clock a test would have to wait for. *)
+let test_a_stamp_that_can_outlive_today_is_drawn_as_a_span () =
+  let asks ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render ~binding_name
+      ~callee
+  in
+  List.iter
+    (fun binding_name ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s asks for the span" binding_name)
+        true
+        (asks ~binding_name ~callee:"Masc_tui_wire_age.text" > 0);
+      Alcotest.(check int)
+        (Printf.sprintf "%s draws no bare clock" binding_name)
+        0
+        (asks ~binding_name ~callee:"Terminal_text.clock_timestamp"))
+    [ "render_clients"; "render_planning_list" ]
+
 (* The runtime detail opens from two doors: a lane's candidate row and the
    catalog row. Both answer "Used by lanes", and the lane door used to answer
    it with the one lane the reader arrived through -- a runtime seven lanes
@@ -897,6 +968,8 @@ let () =
             `Quick test_the_overview_row_counts_every_approval_list
         ; Alcotest.test_case "the summary row does not count the panel below"
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
+        ; Alcotest.test_case "the load stops reading a field no screen draws"
+            `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
         ; Alcotest.test_case "the fleet row reads the control plane's word"
             `Quick test_the_fleet_row_reads_the_control_planes_own_word
         ; Alcotest.test_case "the operation is compared before repeating"
@@ -912,6 +985,8 @@ let () =
             test_a_detail_heading_is_spelled_the_way_a_heading_is
         ; Alcotest.test_case "the two p50s on the Lanes screen agree" `Quick
             test_the_two_p50s_on_the_lanes_screen_agree
+        ; Alcotest.test_case "the lane line writes no noun of its own" `Quick
+            test_the_lane_line_writes_no_noun_of_its_own
         ; Alcotest.test_case "Board lane detail draws typed JEV readiness" `Quick
             test_board_lane_detail_draws_typed_jev_readiness
         ; Alcotest.test_case "the Code tree draws one folder arrow" `Quick
@@ -954,6 +1029,11 @@ let () =
             `Quick test_the_approvals_title_counts_what_the_badge_counts
         ; Alcotest.test_case "the Board title counts through the helper" `Quick
             test_the_board_title_counts_through_the_helper_that_knows_the_board
+        ; Alcotest.test_case "a stamp that can outlive today is a span" `Quick
+            test_a_stamp_that_can_outlive_today_is_drawn_as_a_span
+        ; Alcotest.test_case
+            "the lane slot history says what it does not cover" `Quick
+            test_the_lane_slot_history_says_what_it_does_not_cover
         ; Alcotest.test_case
             "both doors into the runtime detail ask the same lane list" `Quick
             test_both_doors_into_the_runtime_detail_ask_the_same_lane_list

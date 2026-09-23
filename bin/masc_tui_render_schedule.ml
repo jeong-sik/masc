@@ -173,6 +173,7 @@ end
 
 type overview_allocation = {
   attention_rows : int;
+  team_rows : int;
   task_error_rows : int;
   task_rows : int;
   filler_rows : int;
@@ -183,8 +184,11 @@ type overview_allocation = {
    are scrolled to, not read at a glance. *)
 let overview_panel_row_cap = 6
 
+(* The Team block's title row and the divider under it. *)
+let overview_team_chrome_rows = 2
+
 let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
-    ~task_count ~has_task_error =
+    ~team_count ~task_count ~has_task_error =
   (* Ten rows are invariant chrome; the cluster/project row is present only
      after a briefing has loaded. What is left is shared by the Attention /
      Recent Events panel and the task block, and whatever neither needs becomes
@@ -227,17 +231,51 @@ let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
   let attention_rows =
     min desired_panel_rows (max 0 (available - reserved_task_rows))
   in
+  (* The Team block answers who is doing what, which the backlog below it
+     cannot: it is sized by its keeper rows, after the one task row held back
+     above, and it is drawn whole or not at all -- a title and a divider with
+     no row between them would be chrome that says nothing. *)
+  let team_rows =
+    if team_count <= 0 then 0
+    else
+      let room =
+        available - attention_rows - reserved_task_rows
+        - overview_team_chrome_rows
+      in
+      if room <= 0 then 0 else min team_count room
+  in
+  let team_block_rows =
+    if team_rows > 0 then team_rows + overview_team_chrome_rows else 0
+  in
   let task_block_rows =
-    min desired_task_block_rows (max 0 (available - attention_rows))
+    min desired_task_block_rows
+      (max 0 (available - attention_rows - team_block_rows))
   in
   let task_error_rows = min desired_task_error_rows task_block_rows in
   let task_rows =
     min desired_task_rows (max 0 (task_block_rows - task_error_rows))
   in
   let filler_rows =
-    max 0 (available - attention_rows - task_error_rows - task_rows)
+    max 0
+      (available - attention_rows - team_block_rows - task_error_rows
+     - task_rows)
   in
-  { attention_rows; task_error_rows; task_rows; filler_rows }
+  { attention_rows; team_rows; task_error_rows; task_rows; filler_rows }
+
+(* Detail lines under the Team block (a repository's pull requests) are worth
+   drawing but not worth a backlog row: they take only rows that would
+   otherwise be blank. *)
+let spend_spare_rows_on_team (allocation : overview_allocation) ~extra =
+  let chrome =
+    if allocation.team_rows > 0 then 0 else overview_team_chrome_rows
+  in
+  let rows = min (max 0 extra) (max 0 (allocation.filler_rows - chrome)) in
+  if rows = 0 then allocation
+  else
+    { allocation with
+      team_rows = allocation.team_rows + rows
+    ; filler_rows = allocation.filler_rows - rows - chrome
+    }
 
 (* Keeper roster columns.
 

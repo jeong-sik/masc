@@ -170,15 +170,17 @@ let test_the_model_not_answering_keeps_the_sources () =
   | Gate.Judged _ -> Alcotest.fail "an answer without the questions is not a judgment"
 ;;
 
-let test_an_absorption_the_pass_cannot_place_goes_through_unjudged () =
+(* Only a complete positive verdict removes a memory, on the success path as on
+   the failure path: an absorption the gate could not judge stays current. *)
+let test_an_absorption_the_pass_cannot_place_stays_current () =
   let facts = [ fact (List.hd sources) ] in
   let stranger = fact "a memory the pass did not carry" in
   let absorbed = absorbed_into merged (facts @ [ stranger ]) in
-  let evaluate, _, asked = table ~noul_of:(fun _ -> 0.0) in
+  let evaluate, _, asked = table ~noul_of:(fun _ -> 0.9) in
   let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check (list string))
-    "the stranger goes through, the judged memory is kept current"
-    [ id stranger ]
+    "the conveyed memory is absorbed, the unjudged stranger stays current"
+    [ id (List.hd facts) ]
     (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) j.absorbed);
   Alcotest.(check int) "reported as unjudged" 1 (List.length j.unjudged);
   Alcotest.(check bool) "the stranger's text was never asked about" true
@@ -417,7 +419,10 @@ let run_runtime_evidence ?fixture_dir () =
       [ { Fixture.id = "librarian-absorb-fixture"; base_url = librarian.base_url } ] in
     (match Runtime_exact_output_registry.publish
       ~lanes:[ { Runtime_schema.id = "librarian_exact"
-               ; slot_ids = [ "librarian-absorb-fixture" ]; cli_slot_ids = [] } ] resolver with
+               ; slot_ids = [ "librarian-absorb-fixture" ]
+               ; cli_slot_ids = []
+               ; max_output_tokens = Some 4_096
+               } ] resolver with
      | Ok _ -> ()
      | Error error -> Alcotest.fail
          (Runtime_exact_output_registry.publication_error_to_string error));
@@ -1252,8 +1257,8 @@ let () =
         ; Alcotest.test_case "the boundary is inclusive" `Quick test_the_boundary_is_inclusive
         ; Alcotest.test_case "the model not answering preserves the originals" `Quick
             test_the_model_not_answering_keeps_the_sources
-        ; Alcotest.test_case "an absorption the pass cannot place goes through unjudged" `Quick
-            test_an_absorption_the_pass_cannot_place_goes_through_unjudged
+        ; Alcotest.test_case "an absorption the pass cannot place stays current" `Quick
+            test_an_absorption_the_pass_cannot_place_stays_current
         ; Alcotest.test_case "an absorption into a restated memory is judged" `Quick
             test_an_absorption_into_a_restated_memory_is_judged
         ; Alcotest.test_case "statements are asked in bounded requests" `Quick

@@ -124,9 +124,12 @@ case "${1-}:${2-}" in
     printf '%s\n' "github.com:" "  user: stored-user" "  oauth_token: fixture-token" > "$GH_CONFIG_DIR/hosts.yml"
     ;;
   api:--hostname)
+    # [--include] puts the status line and headers first, as real gh does.
+    # The projected token answers like a fine-grained PAT: no scopes header.
     if [ -n "${GH_TOKEN-}" ]; then
-      printf '%s\n' "token-user"
+      printf 'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n%s\n' "token-user"
     elif [ -f "$GH_CONFIG_DIR/stored-login" ]; then
+      printf 'HTTP/2.0 200 OK\r\nX-Oauth-Scopes: gist, read:org, repo, workflow\r\n\r\n'
       cat "$GH_CONFIG_DIR/stored-login"
     else
       echo "not authenticated" >&2
@@ -178,6 +181,11 @@ let test_fake_gh_login_and_effective_identity () =
            (Some "stored-user") observation.stored.login;
          Alcotest.(check (option string)) "effective identity uses projected token"
            (Some "token-user") observation.effective.login;
+         Alcotest.(check (option (list string))) "stored token scopes come from the header"
+           (Some [ "gist"; "read:org"; "repo"; "workflow" ]) observation.stored.scopes;
+         Alcotest.(check (option (list string)))
+           "a token GitHub lists no scopes for is not given an empty list"
+           None observation.effective.scopes;
          Alcotest.(check (list string)) "effective token source is observable by name"
            [ "GH_TOKEN" ] observation.projected_token_env_names;
          Alcotest.(check string) "effective probe is explicitly host-scoped"
@@ -314,8 +322,13 @@ let test_tool_projection_is_nonblocking_without_identity () =
     (Sys.file_exists first_snapshot && Sys.is_directory first_snapshot);
   Alcotest.(check bool) "missing host identity remains unprovisioned" false
     (Sys.file_exists host_dir);
-  Alcotest.(check (list string)) "docker config path is mounted read-only"
+  Alcotest.(check (list string))
+    "an unconfigured keeper still commits under its name; config is read-only"
     [ "--env"
+    ; "GIT_AUTHOR_NAME=missing-identity"
+    ; "--env"
+    ; "GIT_COMMITTER_NAME=missing-identity"
+    ; "--env"
     ; "GH_CONFIG_DIR=/tmp/masc-runtime/.masc/keepers/missing-identity/github-cli"
     ; "-v"
     ; first_snapshot
@@ -449,6 +462,60 @@ let test_observe_does_not_provision_missing_identity () =
     (Sys.file_exists config_dir)
 ;;
 
+let commit_name_args keeper_name =
+  [ "--env"
+  ; "GIT_AUTHOR_NAME=" ^ keeper_name
+  ; "--env"
+  ; "GIT_COMMITTER_NAME=" ^ keeper_name
+  ]
+;;
+
+let test_persistent_container_commits_under_the_keeper_name_without_login () =
+  with_temp_base @@ fun _base_path config ->
+  let keeper_name = "persistent-unconfigured" in
+  match
+    Github.docker_args_persistent
+      ~config
+      ~keeper_name
+      ~container_masc_dir:"/tmp/masc-runtime/.masc"
+  with
+  | Error message -> Alcotest.fail message
+  | Ok args ->
+    Alcotest.(check (list string))
+      "a keeper with no GitHub login gets only its commit names"
+      (commit_name_args keeper_name)
+      args
+;;
+
+let test_persistent_container_commits_under_the_keeper_name_with_login () =
+  with_temp_base @@ fun _base_path config ->
+  let keeper_name = "persistent-configured" in
+  let host_dir =
+    match Github.ensure_config_dir ~config ~keeper_name with
+    | Error message -> Alcotest.fail message
+    | Ok path -> path
+  in
+  let hosts = Filename.concat host_dir "hosts.yml" in
+  write_file hosts "github.com:\n  user: stored-user\n  oauth_token: stored-token\n";
+  Unix.chmod hosts 0o600;
+  let container_masc_dir = "/tmp/masc-runtime/.masc" in
+  let container_dir = Github.container_config_dir ~container_masc_dir ~keeper_name in
+  match Github.docker_args_persistent ~config ~keeper_name ~container_masc_dir with
+  | Error message -> Alcotest.fail message
+  | Ok args ->
+    Alcotest.(check (list string))
+      "commit names, then the live config mount and its git wiring"
+      (commit_name_args keeper_name
+       @ [ "--env"
+         ; "GH_CONFIG_DIR=" ^ container_dir
+         ; "-v"
+         ; host_dir ^ ":" ^ container_dir ^ ":ro"
+         ; "--env"
+         ; "GIT_CONFIG_GLOBAL=" ^ Filename.concat container_dir "gitconfig"
+         ])
+      args
+;;
+
 let test_tool_projection_uses_safe_existing_identity () =
   with_temp_base @@ fun base_path config ->
   let keeper_name = "configured-identity" in
@@ -475,8 +542,13 @@ let test_tool_projection_uses_safe_existing_identity () =
   let docker_snapshot = docker_projection.host_snapshot_dir in
   Alcotest.(check bool) "Docker never receives the operator-owned path" true
     (not (String.equal docker_snapshot host_dir));
-  Alcotest.(check (list string)) "safe identity snapshot is mounted read-only"
+  Alcotest.(check (list string))
+    "commit names are the keeper's; safe identity snapshot is mounted read-only"
     [ "--env"
+    ; "GIT_AUTHOR_NAME=" ^ keeper_name
+    ; "--env"
+    ; "GIT_COMMITTER_NAME=" ^ keeper_name
+    ; "--env"
     ; "GH_CONFIG_DIR=" ^ container_dir
     ; "-v"
     ; docker_snapshot ^ ":" ^ container_dir ^ ":ro"
@@ -701,7 +773,14 @@ let test_login_argv_carries_only_chosen_scopes () =
     | _ :: rest -> after rest
     | [] -> None
   in
-  Alcotest.(check (option string)) "workflow is named once" (Some "workflow") (after argv)
+  Alcotest.(check (option string)) "workflow is named once" (Some "workflow") (after argv);
+  Alcotest.(check (option string))
+    "two scopes are one argument, in the offered order"
+    (Some "workflow,write:packages")
+    (after
+       (Github.login_argv
+          ~hostname:"github.com"
+          ~scopes:[ Github.Write_packages; Github.Workflow ]))
 ;;
 
 (* The request names scopes by string. Every offered scope reads back as
@@ -742,6 +821,35 @@ let test_login_scopes_of_query () =
        go 0)
 ;;
 
+(* The probe's stdout read on its own, over the shapes gh can hand back. Only
+   the login and the scopes header leave the parser, and header text never
+   becomes a login. *)
+let test_probe_output_shapes () =
+  let dir = Filename.temp_dir "masc-gh-probe-" "" in
+  let read stdout =
+    Github.auth_result_of_probe ~base_path:dir ~keeper_name:"probe"
+      (Unix.WEXITED 0, stdout, "")
+  in
+  let scopes = Alcotest.(option (list string)) in
+  let crlf = read "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo, workflow\r\n\r\noctocat\n" in
+  Alcotest.(check (option string)) "CRLF login" (Some "octocat") crlf.login;
+  Alcotest.check scopes "CRLF scopes" (Some [ "repo"; "workflow" ]) crlf.scopes;
+  let lf = read "HTTP/2.0 200 OK\nx-oauth-scopes: gist\n\noctocat\n" in
+  Alcotest.(check (option string)) "LF login" (Some "octocat") lf.login;
+  Alcotest.check scopes "header name in any case" (Some [ "gist" ]) lf.scopes;
+  let empty = read "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: \r\n\r\noctocat\n" in
+  Alcotest.check scopes "an empty header is an empty list, not an absent one" (Some []) empty.scopes;
+  let accepted =
+    read "HTTP/2.0 200 OK\r\nX-Accepted-Oauth-Scopes: admin:org\r\n\r\noctocat\n"
+  in
+  Alcotest.check scopes "the accepted-scopes header is not the token's" None accepted.scopes;
+  let headers_only = read "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo\r\n" in
+  Alcotest.(check bool) "headers with no body are not a login" false headers_only.authenticated;
+  let plain = read "octocat\n" in
+  Alcotest.(check (option string)) "output without headers is the login" (Some "octocat") plain.login;
+  Alcotest.check scopes "and names no scopes" None plain.scopes
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
@@ -752,6 +860,7 @@ let () =
             `Quick
             test_login_argv_carries_only_chosen_scopes
         ; Alcotest.test_case "login scopes from the query" `Quick test_login_scopes_of_query
+        ; Alcotest.test_case "probe output shapes" `Quick test_probe_output_shapes
         ; Alcotest.test_case
             "fake gh login and effective identity"
             `Quick
@@ -848,6 +957,14 @@ let () =
             "stored_token reads the cluster directory"
             `Quick
             test_stored_token_reads_the_cluster_directory
+        ; Alcotest.test_case
+            "persistent container commits under the keeper name without login"
+            `Quick
+            test_persistent_container_commits_under_the_keeper_name_without_login
+        ; Alcotest.test_case
+            "persistent container commits under the keeper name with login"
+            `Quick
+            test_persistent_container_commits_under_the_keeper_name_with_login
         ] )
     ]
 ;;

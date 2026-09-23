@@ -48,6 +48,8 @@ let test_runtime_identity_env_survives_empty_allowlist () =
       ~request_env:
         [ "GH_CONFIG_DIR", "/srv/masc/playground/keeper-a/.config/gh"
         ; "GIT_TERMINAL_PROMPT", "0"
+        ; "GIT_AUTHOR_NAME", "keeper-a"
+        ; "GIT_COMMITTER_NAME", "keeper-a"
         ; "LANG", "C"
         ]
   in
@@ -56,6 +58,10 @@ let test_runtime_identity_env_survives_empty_allowlist () =
     (List.assoc_opt "GH_CONFIG_DIR" env);
   check (option string) "runtime prompt guard kept" (Some "0")
     (List.assoc_opt "GIT_TERMINAL_PROMPT" env);
+  check (option string) "runtime commit author kept" (Some "keeper-a")
+    (List.assoc_opt "GIT_AUTHOR_NAME" env);
+  check (option string) "runtime commit committer kept" (Some "keeper-a")
+    (List.assoc_opt "GIT_COMMITTER_NAME" env);
   check (option string) "ordinary caller env still needs allowlisting" None
     (List.assoc_opt "LANG" env)
 
@@ -357,6 +363,8 @@ let test_env_file_rejects () =
     ; "a GitHub Enterprise token", "GITHUB_ENTERPRISE_TOKEN=x\n"
     ; "the runner's GitHub config dir", "GH_CONFIG_DIR=/root/.config/gh\n"
     ; "the runner's prompt guard", "GIT_TERMINAL_PROMPT=1\n"
+    ; "the runner's commit author", "GIT_AUTHOR_NAME=someone\n"
+    ; "the runner's commit committer", "GIT_COMMITTER_NAME=someone\n"
     ]
 
 let test_endpoint_env_overlays_the_base () =

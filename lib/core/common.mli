@@ -92,6 +92,10 @@ type keeper_runtime_store_placement =
   | Keeper_scoped_rotated
       (** [keepers/<name>/<store>/<file>.jsonl] plus numeric rotations. The
           flat-file pass owns these, not the dated one. *)
+  | Keepers_root_scoped
+      (** [keepers/<store>/<file>]: beside the keeper directories, so a reader
+          that walks [keepers/] must not take it for a keeper. No retention
+          pass owns it. *)
   | Workspace_scoped
       (** [<masc root>/<store>]: named here for the dirname, but not written
           under [keepers/]. *)

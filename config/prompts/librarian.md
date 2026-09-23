@@ -246,6 +246,8 @@ template_variables: [continuity, working_context, current_memory, conversation_h
 ### 현재 Task에 연결된 Goal 기준
 {{goal_context}}
 
+Goal 기준이 오면 성공 조건 중 아직 증거가 없는 것을 기억할 가치와 중요도를 정하는 데
+쓰세요. 조건 자체를 claim 으로 옮기지는 마세요.
 목표 자체를 완료 증거로 취급하지 마세요. phase가 `completed`나 `dropped`인
 목표는 지난 작업의 맥락이며 새 실행 의무가 아닙니다. `unavailable`은 목표 자료를
 받지 못했다는 뜻이지 목표가 없다는 뜻이 아닙니다. `no_task`는 이번 입력에 연결된

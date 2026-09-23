@@ -13,6 +13,12 @@ type decoded_source =
   ; external_message_id : string option
   ; workspace_id : string option
   ; extra_mentions : Keeper_identity.Keeper_id.t list
+  ; sender_keeper : Keeper_identity.Keeper_id.t option
+      (** The registered Keeper that sent this operation, decided where the
+          operation was submitted by an exact Keeper registry match on the
+          submitter. [None] for the operator and for connector speakers.
+          Written as ["sender_keeper"] (string or null); the field is
+          required on read (RFC-0468 §3.2). *)
   ; user_row_origin : Keeper_chat_store.user_row_origin
   }
 
@@ -37,6 +43,7 @@ val source_to_json :
   external_message_id:string option ->
   workspace_id:string option ->
   extra_mentions:Keeper_identity.Keeper_id.t list ->
+  sender_keeper:Keeper_identity.Keeper_id.t option ->
   user_row_origin:Keeper_chat_store.user_row_origin ->
   (Yojson.Safe.t, string) result
 

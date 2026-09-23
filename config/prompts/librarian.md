@@ -138,7 +138,8 @@ claim의 `absorbs`에 넣지 마세요. `absorbs`는 그 claim이 재료의 내�
   보이면 증거 한 건입니다. 반복이나 확신의 근거로 중복 계산하지 마세요.
 - 호스트 필드에서 가장 안정적인 참조로 사람을 구분합니다. 외부 화자는
   `channel + workspace_id + user_id`로 식별하고, `user_name`은 표시 이름으로만
-  씁니다. 대화에 보이는 `[External channel context]` 블록과 충돌하면 typed
+  씁니다. `authority`가 `keeper`이면 등록된 다른 Keeper이고, `user_id`가 그
+  Keeper의 이름입니다. 대화에 보이는 `[External channel context]` 블록과 충돌하면 typed
   observation을 따릅니다. 안정 참조가 없으면 `authority`로 owner와 외부
   화자만 가를 수 있고, 외부 화자끼리는 구분하지 못합니다. 이때
   ID를 지어내거나 같은 이름의 사람을 합치지 마세요.

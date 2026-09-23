@@ -349,7 +349,14 @@ let pending_user_lines ?ack_id (messages : Keeper_chat_store.chat_message list) 
 
 let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
   match m.speaker with
-  | Some (s : Keeper_chat_store.speaker) -> s.speaker_authority = Keeper_chat_store.Owner
+  | Some (s : Keeper_chat_store.speaker) ->
+    (match s.speaker_authority with
+     | Keeper_chat_store.Owner -> true
+     (* Another Keeper's line is not the operator addressing this Keeper
+        without an "@name". Unmentioned, it is standing context and falls
+        to the fleet layer below, which already reads [Surface_ref.Agent]
+        rows as direct Keeper-to-Keeper delivery. *)
+     | Keeper_chat_store.External | Keeper_chat_store.Keeper -> false)
   | None -> false
 ;;
 

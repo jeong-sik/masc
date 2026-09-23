@@ -81,6 +81,7 @@ def operation_source(submitted_by="proof-operator"):
         "external_message_id": None,
         "workspace_id": None,
         "extra_mentions": [],
+        "sender_keeper": None,
         "user_row_origin": "needs_append",
     }
 

@@ -112,6 +112,7 @@ def receipt():
                     "external_message_id": None,
                     "workspace_id": None,
                     "extra_mentions": [],
+                    "sender_keeper": None,
                     "user_row_origin": "needs_append",
                 },
                 "input": None,

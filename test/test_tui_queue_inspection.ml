@@ -85,7 +85,8 @@ let test_dashboard_sender_uses_typed_route () =
     "surface", `Assoc ["kind",`String "dashboard"]; "channel",`String "";
     "channel_user_id",`String ""; "channel_user_name",`String ""; "channel_workspace_id",`String "";
     "conversation_id",`Null; "external_message_id",`Null; "workspace_id",`Null;
-    "extra_mentions",`List []; "user_row_origin",`String "needs_append"] in
+    "extra_mentions",`List []; "sender_keeper",`Null;
+    "user_row_origin",`String "needs_append"] in
   let input = Masc.Keeper_chat_operation_payload.input_to_json ~message:"hello"
     ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
   let output = get (Inbox.operation_lines (`Assoc ["operations",`List [`Assoc [

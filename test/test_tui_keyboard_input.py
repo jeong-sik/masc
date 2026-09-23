@@ -6210,7 +6210,8 @@ class AtomicChatFixture:
                     "thread_id": "keeper:alpha", "continuation_channel": {"kind": "dashboard", "thread_id": "keeper:alpha"},
                     "surface": {"kind": "dashboard"}, "channel": "", "channel_user_id": "", "channel_user_name": "",
                     "channel_workspace_id": "", "conversation_id": None, "external_message_id": None,
-                    "workspace_id": None, "extra_mentions": [], "user_row_origin": "needs_append"},
+                    "workspace_id": None, "extra_mentions": [], "sender_keeper": None,
+                    "user_row_origin": "needs_append"},
                 # The server keeps the input as submitted, so a later /queue edit
                 # reads the staged media and attachments back from here.
                 "input": {"schema": "masc.keeper_chat_operation.input.v1", "message": request["message"],

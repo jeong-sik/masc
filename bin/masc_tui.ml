@@ -11529,7 +11529,7 @@ let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbo
     let result =
       try
         Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id
-          ~answers ~actor_id:None ~session_id:None
+          ~answers ~session_id:None
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -11547,7 +11547,7 @@ let start_ask_answer state ~keeper_name ~ask_id ~answered_label ~answers ~mailbo
       let result =
         try
           Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id
-            ~answers ~actor_id:None ~session_id:None
+            ~answers ~session_id:None
         with exn -> Error (Printexc.to_string exn)
       in
       let asks =

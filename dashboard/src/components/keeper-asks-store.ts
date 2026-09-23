@@ -56,7 +56,7 @@ export function draftForRow(row: AskRow): AskDraft {
   return draftFor(askDraft.value, row) ?? emptyDraft(row.askId)
 }
 
-export async function submitAnswer(row: AskRow, actorId: string | null): Promise<boolean> {
+export async function submitAnswer(row: AskRow): Promise<boolean> {
   const draft = draftFor(askDraft.value, row)
   const state = readiness(draft, row)
   if (state.state === 'not-open') {
@@ -73,7 +73,7 @@ export async function submitAnswer(row: AskRow, actorId: string | null): Promise
   askError.value = null
   askConflict.value = null
   try {
-    await answerKeeperAsk(answerRequestBody(row, state.answers, { actorId }))
+    await answerKeeperAsk(answerRequestBody(row, state.answers))
     closeAsk()
     await refreshKeeperAsks()
     return true

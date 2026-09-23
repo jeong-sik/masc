@@ -61,7 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- A Keeper the operator snapshot could not read is reported, not dropped. When building one Keeper's row raised, or its stored metadata did not read, the snapshot logged one line and left the Keeper out, so it vanished from the briefing, the execution render and the TUI Overview with nothing saying so; #38072's first CI run lost all three fixture Keepers that way. The snapshot's `keepers` section now carries `unread` beside its rows, the briefing and execution render expose it as `keepers_unread`, the briefing sections basis carries `keeper_unread_count` beside `keeper_count`, and the Overview counts such a Keeper and names it unreadable (`Keepers: 1 (1 unreadable)`). A Keeper whose metadata is gone is still left out: it was removed, not unread (#38113).
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result

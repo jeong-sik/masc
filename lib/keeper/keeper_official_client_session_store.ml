@@ -120,7 +120,11 @@ type transient_release_record =
   ; released_at : float
   }
 
-type context_delivery = Prepared_start_context | Replaced_configuration | Canonical_source_guard
+type context_delivery =
+  | Prepared_start_context
+  | Replaced_configuration
+  | Canonical_source_guard
+  | Held_by_vendor_session
 
 type context_frontier =
   { snapshot_sha256 : string
@@ -647,7 +651,8 @@ let context_frontier_to_yojson = function
       ; "delivery", `String (match frontier.delivery with
           | Prepared_start_context -> "prepared_start_context"
           | Replaced_configuration -> "replaced_configuration"
-          | Canonical_source_guard -> "canonical_source_guard")
+          | Canonical_source_guard -> "canonical_source_guard"
+          | Held_by_vendor_session -> "held_by_vendor_session")
       ; "acknowledged_turn", settlement_opt_to_yojson frontier.acknowledged_turn ]
 
 let context_frontier_of_yojson = function
@@ -661,6 +666,7 @@ let context_frontier_of_yojson = function
          | "prepared_start_context" -> Ok Prepared_start_context
          | "replaced_configuration" -> Ok Replaced_configuration
          | "canonical_source_guard" -> Ok Canonical_source_guard
+         | "held_by_vendor_session" -> Ok Held_by_vendor_session
          | _ -> Error "invalid context frontier delivery" in
        let* acknowledged_turn = settlement_opt_of_yojson acknowledged in
        Ok (Some {snapshot_sha256; message_count; delivery; acknowledged_turn})
@@ -1077,8 +1083,9 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
     | Some {delivery=Canonical_source_guard; snapshot_sha256; _}, Some _ ->
       validate_unchanged_context ~expected ~snapshot_sha256
       |> Result.map_error context_admission_error_to_string
-    | Some {delivery=(Prepared_start_context | Replaced_configuration | Canonical_source_guard); _}, None
-    | Some {delivery=(Prepared_start_context | Replaced_configuration); _}, Some _
+    | Some {delivery=(Prepared_start_context | Replaced_configuration | Canonical_source_guard
+                     | Held_by_vendor_session); _}, None
+    | Some {delivery=(Prepared_start_context | Replaced_configuration | Held_by_vendor_session); _}, Some _
     | None, _ -> Ok ()
   in
   let last_recovery_resolution =
@@ -1289,7 +1296,8 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
         phase = restored_phase previous_settlement
       ; context_frontier = Option.map (fun frontier -> match frontier.delivery with
           | Canonical_source_guard -> {frontier with acknowledged_turn=previous_settlement}
-          | Prepared_start_context | Replaced_configuration -> frontier) expected.context_frontier
+          | Prepared_start_context | Replaced_configuration | Held_by_vendor_session -> frontier)
+          expected.context_frontier
       ; turn_count
       ; last_transient_release = Some { failure; owner_epoch; released_at }
       ; updated_at = released_at

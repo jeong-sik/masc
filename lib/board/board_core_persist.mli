@@ -72,6 +72,9 @@ val append_comment : comment -> (unit, board_error) result
 
 val sub_board_access_to_string : sub_board_access -> string
 val sub_board_access_of_string_opt : string -> sub_board_access option
+val sub_board_access_field_of_yojson
+  :  Yojson.Safe.t
+  -> (sub_board_access option, board_error) result
 val sub_board_post_counts_unlocked : store -> (string, int) Hashtbl.t
 (* [sub_board_post_count_from_counts] is the lookup both
    [sub_board_with_post_count] and its _unlocked twin perform on the table

@@ -161,29 +161,6 @@ let test_no_tools_route_drift () =
       expected
       registered)
 
-let test_schedule_write_actor_is_stamped_from_auth () =
-  let open Yojson.Safe.Util in
-  let stamped =
-    Server_routes_http_routes_activity.schedule_stamp_operator_actor
-      ~agent_name:"tui-operator"
-      (`Assoc
-        [ "scheduled_by_id", `String "spoofed"
-        ; "requested_by_kind", `String "system"
-        ; "message", `String "keep me"
-        ])
-  in
-  check string "scheduled actor" "tui-operator"
-    (stamped |> member "scheduled_by_id" |> to_string);
-  check string "requested actor" "tui-operator"
-    (stamped |> member "requested_by_id" |> to_string);
-  check string "scheduled kind" "human_operator"
-    (stamped |> member "scheduled_by_kind" |> to_string);
-  check string "requested kind" "human_operator"
-    (stamped |> member "requested_by_kind" |> to_string);
-  check string "form fields survive" "keep me"
-    (stamped |> member "message" |> to_string)
-;;
-
 let rec remove_tree path =
   match Unix.lstat path with
   | { Unix.st_kind = Unix.S_DIR; _ } ->
@@ -316,7 +293,40 @@ let with_authenticated_activity_router ~prefix ~agent_name f =
        f ~base_path ~config ~state ~sw ~clock ~router ~token)
 ;;
 
-let test_schedule_cancel_actor_is_stamped_from_auth () =
+(* The schedule tools record the caller auth resolved and refuse a body that
+   names someone else. The HTTP boundary no longer stamps -- the tool owns the
+   actor -- so these drive the real routes. *)
+let test_schedule_write_actor_is_the_authenticated_caller () =
+  with_authenticated_activity_router
+    ~prefix:"schedule-write-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  let body =
+    `Assoc
+      [ "schedule_id", `String "sched-http-write-actor"
+      ; "due_at_unix", `Float 4_102_444_800.0
+      ; "keeper_name", `String "schedule-keeper"
+      ; "message", `String "actor binding"
+      ; "requested_by_id", `String "forged-body-actor"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let status, response =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_schedule_create"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
+  in
+  let open Yojson.Safe.Util in
+  check int "a body naming another actor is refused" 400 status;
+  check bool "the refusal names the forged actor" true
+    (let message = response |> member "message" |> to_string in
+     let needle = "forged-body-actor" in
+     let n = String.length needle and h = String.length message in
+     let rec loop i = i + n <= h && (String.sub message i n = needle || loop (i + 1)) in
+     loop 0)
+;;
+
+let test_schedule_cancel_actor_is_the_authenticated_caller () =
   with_authenticated_activity_router
     ~prefix:"schedule-cancel-http-actor-"
     ~agent_name:"credential-owner"
@@ -342,11 +352,26 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
     | Ok schedule -> schedule
     | Error error -> fail (Schedule_service.service_error_to_string error)
   in
-  let body =
+  let forged =
     `Assoc
       [ "schedule_id", `String schedule.schedule_id
       ; "cancelled_by_id", `String "forged-body-actor"
-      ; "cancelled_by_kind", `String "system"
+      ; "reason", `String "duplicate"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let status, response =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_schedule_cancel"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body:forged ()
+  in
+  let open Yojson.Safe.Util in
+  check int "a body naming another actor is refused" 400 status;
+  check string "the refusal is typed" "actor_mismatch"
+    (response |> member "data" |> member "error_kind" |> to_string);
+  let body =
+    `Assoc
+      [ "schedule_id", `String schedule.schedule_id
       ; "reason", `String "duplicate"
       ]
     |> Yojson.Safe.to_string
@@ -356,12 +381,11 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
       ~path:"/api/v1/tools/masc_schedule_cancel"
       ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
   in
-       let open Yojson.Safe.Util in
-       check int "cancel accepted" 200 status;
-       check string "credential owner is the canceller" "credential-owner"
-         (response |> member "data" |> member "cancelled_by" |> member "id"
-          |> to_string);
-       check string "terminal bridge uses typed human operator" "human_operator"
+  check int "cancel accepted" 200 status;
+  check string "credential owner is the canceller" "credential-owner"
+    (response |> member "data" |> member "cancelled_by" |> member "id"
+     |> to_string);
+  check string "the kind is the action's default" "human_operator"
     (response |> member "data" |> member "cancelled_by" |> member "kind"
      |> to_string)
 ;;
@@ -624,6 +648,99 @@ let test_sub_board_routes_use_authenticated_owner () =
   check int "canonical owner can delete despite forged header" 200 status;
   check bool "own sub-board deleted" true
     (deleted |> member "deleted" |> to_bool)
+;;
+
+(* An operator who asks for members-only with the wrong spelling gets a 400
+   naming the accepted values, not an Open board; an update with an unknown
+   value is a 400 that leaves the stored access alone. *)
+let test_sub_board_routes_reject_unknown_access () =
+  with_authenticated_activity_router
+    ~prefix:"sub-board-http-access-"
+    ~agent_name:"access-owner"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let request ?meth path fields =
+    dispatch_json ?meth ~router ~token ~path ~extra_headers:[]
+      ~body:(Yojson.Safe.to_string (`Assoc fields)) ()
+  in
+  let open Yojson.Safe.Util in
+  let error_names_value body value =
+    String_util.contains_substring (body |> member "error" |> to_string) value
+  in
+  let status, body =
+    request "/api/v1/board/sub-boards"
+      [ "slug", `String "wrong-case"
+      ; "name", `String "Wrong case"
+      ; "access", `String "Members_only"
+      ]
+  in
+  check int "unknown access on create is 400" 400 status;
+  check bool "create error names members_only" true
+    (error_names_value body "members_only");
+  check bool "no sub-board was created" true
+    (Result.is_error
+       (Masc.Board_dispatch.get_sub_board ~sub_board_id:"wrong-case"));
+  let status, body =
+    request "/api/v1/board/sub-boards"
+      [ "slug", `String "numeric-access"
+      ; "name", `String "Numeric"
+      ; "access", `Int 1
+      ]
+  in
+  check int "non-string access on create is 400" 400 status;
+  check bool "non-string error names open" true (error_names_value body "open");
+  let status, created =
+    request "/api/v1/board/sub-boards"
+      [ "slug", `String "members-board"
+      ; "name", `String "Members"
+      ; "access", `String "members_only"
+      ]
+  in
+  check int "known access on create accepted" 200 status;
+  check string "stored access" "members_only"
+    (created |> member "access" |> to_string);
+  let sub_board_id = created |> member "id" |> to_string in
+  let status, body =
+    request ~meth:"PUT" ("/api/v1/board/sub-boards/" ^ sub_board_id)
+      [ "access", `String "private" ]
+  in
+  check int "unknown access on update is 400" 400 status;
+  check bool "update error names owner_only" true
+    (error_names_value body "owner_only");
+  match Masc.Board_dispatch.get_sub_board ~sub_board_id with
+  | Error error -> fail (Board_tool.board_error_to_string error)
+  | Ok sub_board ->
+    check string "update left access unchanged" "members_only"
+      (Masc.Board.sub_board_access_to_string sub_board.access)
+;;
+
+(* Strict HTTP auth covers the sub-board reads like every other Board read. *)
+let test_sub_board_reads_require_auth_in_strict_mode () =
+  with_authenticated_activity_router
+    ~prefix:"sub-board-http-strict-read-"
+    ~agent_name:"strict-reader"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1")
+  @@ fun () ->
+  let get ?token path =
+    dispatch_json ~meth:"GET" ?token ~router ~path ~extra_headers:[] ~body:"" ()
+  in
+  (match
+     Masc.Board_dispatch.create_sub_board ~slug:"strict-read" ~name:"Strict"
+       ~description:"" ~owner:"strict-reader" ~members:[] ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Board_tool.board_error_to_string error));
+  List.iter
+    (fun path ->
+       let status, _ = get path in
+       check int (path ^ " without a token") 401 status;
+       let status, _ = get ~token path in
+       check int (path ^ " with a token") 200 status)
+    [ "/api/v1/board/sub-boards"; "/api/v1/board/sub-boards/strict-read" ]
 ;;
 
 let test_board_context_inference_uses_current_owner_contract_and_actor () =
@@ -1023,15 +1140,19 @@ let () =
             `Quick
             test_no_tools_route_drift
         ; test_case "schedule write actor comes from auth" `Quick
-            test_schedule_write_actor_is_stamped_from_auth
+            test_schedule_write_actor_is_the_authenticated_caller
         ; test_case "schedule cancel actor comes from auth" `Quick
-            test_schedule_cancel_actor_is_stamped_from_auth
+            test_schedule_cancel_actor_is_the_authenticated_caller
         ; test_case "goal transition actor comes from auth" `Quick
             test_goal_transition_uses_authenticated_actor
         ; test_case "board write actors come from auth" `Quick
             test_board_write_routes_use_authenticated_actor
         ; test_case "sub-board owner comes from auth" `Quick
             test_sub_board_routes_use_authenticated_owner
+        ; test_case "sub-board unknown access is a 400" `Quick
+            test_sub_board_routes_reject_unknown_access
+        ; test_case "sub-board reads follow strict auth" `Quick
+            test_sub_board_reads_require_auth_in_strict_mode
         ; test_case "context inference uses typed Owner receipt and authenticated actor" `Quick
             test_board_context_inference_uses_current_owner_contract_and_actor
         ; test_case

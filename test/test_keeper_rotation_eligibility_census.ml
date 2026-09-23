@@ -235,6 +235,35 @@ let serialization_parse_error =
   Agent_core.Error.Serialization
     (Agent_core.Error.JsonParseError { detail = "result event: field missing" })
 
+(* Three provider failures the walk and the route must read the same way:
+   a terminal the provider ended its stream with, a stream whose bytes broke
+   the wire format, and a 5xx the provider marked as permanent. *)
+let provider_terminal =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.ProviderTerminal
+       { provider = "claude_code"
+       ; kind = Llm_provider.Http_client.Session_conflict
+       ; detail = "session already in use"
+       })
+
+let provider_wire_malformed_payload =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.ProviderWireError
+       { provider = "glm"
+       ; format = Llm_provider.Http_client.Sse
+       ; kind = Llm_provider.Http_client.Malformed_payload
+       ; detail = "malformed SSE payload"
+       })
+
+let provider_server_error_not_transient =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.ServerError
+       { provider = "ollama_cloud"
+       ; code = 500
+       ; transient = false
+       ; detail = "internal error"
+       })
+
 let config_invalid =
   Agent_core.Error.Config
     (Agent_core.Error.InvalidConfig
@@ -263,6 +292,9 @@ let census_rows =
   ; "provider:rate_limit", provider_rate_limit, 0
   ; "provider:unavailable", provider_unavailable, 0
   ; "provider:server_error_transient", provider_server_error_transient, 0
+  ; "provider:server_error_not_transient", provider_server_error_not_transient, 0
+  ; "provider:terminal", provider_terminal, 0
+  ; "provider:wire_malformed_payload", provider_wire_malformed_payload, 0
   ; "api:network_error", api_network_error, 0
   ; "api:payment_required", api_payment_required, 0
   ; "api:rate_limited", api_rate_limited, 0
@@ -341,6 +373,9 @@ let expected_rotation =
   ; "provider:rate_limit", true
   ; "provider:unavailable", true
   ; "provider:server_error_transient", true
+  ; "provider:server_error_not_transient", true
+  ; "provider:terminal", false
+  ; "provider:wire_malformed_payload", true
   ; "api:network_error", true
   ; "api:payment_required", true
   ; "api:rate_limited", true
@@ -378,16 +413,24 @@ let test_census_and_baseline_agree_on_rows () =
     census_labels
     baseline_labels
 
-(* The failure route and the walk read the same error, in two places. For the
-   classes below the route says a different runtime is tried in this turn,
-   which is a statement about the walk, so the walk has to reach the second
-   candidate. The other rotate classes make no claim this two-candidate walk
-   can check: a resumable CLI session moves to a recovery lane rather than to
-   the next declared candidate, filtered candidates and an exhausted runtime
-   describe a whole walk rather than one failure, and the no-progress classes
-   pass through the caller's accept-no-progress admission. The match is
-   exhaustive so a new [rotate_class] does not compile until it takes a side. *)
-let route_says_this_walk_rotates = function
+(* The failure route and the walk read the same error, in two places. What
+   the route says about the walk is one of three things. A retry class is
+   observed on a candidate the walk moves past, and a rotate class below says
+   a different runtime is tried in this turn: both claim the walk reaches the
+   second candidate. A terminal route claims it stops. The other rotate
+   classes make no claim this two-candidate walk can check: a resumable CLI
+   session moves to a recovery lane rather than to the next declared
+   candidate, filtered candidates and an exhausted runtime describe a whole
+   walk rather than one failure, and the no-progress classes pass through the
+   caller's accept-no-progress admission. The match is exhaustive so a new
+   class does not compile until it takes a side. *)
+type route_claim =
+  | Walk_rotates
+  | Walk_stops
+  | No_claim_this_walk_checks
+
+let route_claim = function
+  | Keeper_runtime_failure_route.Retry_after_observed _ -> Walk_rotates
   | Keeper_runtime_failure_route.Rotate_now
       { rotate =
           ( Keeper_runtime_failure_route.Auth_failed
@@ -395,8 +438,11 @@ let route_says_this_walk_rotates = function
           | Keeper_runtime_failure_route.Refusal_body_not_received
           | Keeper_runtime_failure_route.Generation_repeated
           | Keeper_runtime_failure_route.Attempt_rejected
-          | Keeper_runtime_failure_route.Provider_reported_failure )
-      } -> true
+          | Keeper_runtime_failure_route.Provider_reported_failure
+          | Keeper_runtime_failure_route.Request_refused
+          | Keeper_runtime_failure_route.Provider_wire_defect
+          | Keeper_runtime_failure_route.Server_error_not_transient )
+      } -> Walk_rotates
   | Keeper_runtime_failure_route.Rotate_now
       { rotate =
           ( Keeper_runtime_failure_route.Resumable_cli_session
@@ -405,42 +451,105 @@ let route_says_this_walk_rotates = function
           | Keeper_runtime_failure_route.No_progress_empty
           | Keeper_runtime_failure_route.No_progress_thinking_only
           | Keeper_runtime_failure_route.No_progress_truncated )
-      }
-  | Keeper_runtime_failure_route.Retry_after_observed _
-  | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> false
+      } -> No_claim_this_walk_checks
+  | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> Walk_stops
 
 let route_of error =
   Keeper_runtime_failure_route.route_of_error
     ~boundary:Keeper_runtime_failure_route.Agent_core_execution
     error
 
+(* Rows where the walk and the route answer differently on purpose, with the
+   reason. A context overflow ends this candidate's attempt, and the route
+   reports it as a terminal fact about the turn's size; the walk still asks
+   a later candidate whose window may be larger ([lane_should_retry]). *)
+let walk_and_route_differ_on_purpose =
+  [ "api:context_overflow", "overflow: the walk tries a larger window"
+  ; "projection:capacity_refusal", "overflow: the walk tries a larger window"
+  ]
+
 let test_walk_rotates_where_the_route_says_it_does () =
-  let claimed =
-    List.filter
-      (fun (_label, error, _count) -> route_says_this_walk_rotates (route_of error))
-      census_rows
+  (* Rows the check must cover on each side. Without them the loop below
+     could pass by checking nothing. *)
+  let claims_of label =
+    match List.find_opt (fun (l, _, _) -> String.equal l label) census_rows with
+    | Some (_, error, _) -> route_claim (route_of error)
+    | None -> Alcotest.failf "census has no row %S" label
   in
-  (* The rows this test exists for. Without them in [claimed] the loop below
-     passes by checking nothing. *)
   List.iter
     (fun label ->
       Alcotest.(check bool)
         (Printf.sprintf "%s is routed as a same-turn rotation" label)
         true
-        (List.exists (fun (claimed_label, _, _) -> String.equal claimed_label label) claimed))
+        (claims_of label = Walk_rotates))
     [ "api:auth_error"
     ; "provider:authorization_error"
     ; "api:not_found"
     ; "provider:not_found"
     ; "provider:reported_error"
+    ; "api:invalid_request"
+    ; "api:invalid_request_vendor_400"
+    ; "provider:wire_malformed_payload"
+    ; "provider:server_error_not_transient"
     ];
   List.iter
-    (fun (label, error, _count) ->
+    (fun label ->
       Alcotest.(check bool)
-        (Printf.sprintf "%s: the route rotates, so the walk reaches the second candidate" label)
+        (Printf.sprintf "%s is routed as a stop" label)
         true
-        (rotates error))
-    claimed
+        (claims_of label = Walk_stops))
+    [ "provider:terminal"; "provider:parse_error"; "config:invalid" ];
+  (* Every named difference names a census row, and that row's route makes a
+     claim the walk can be compared with; otherwise the entry excuses
+     nothing and stays in the list unnoticed. *)
+  List.iter
+    (fun (label, _reason) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s names a census row" label)
+        true
+        (List.exists (fun (l, _, _) -> String.equal l label) census_rows);
+      Alcotest.(check bool)
+        (Printf.sprintf "%s routes to a class the walk can be compared with" label)
+        true
+        (claims_of label <> No_claim_this_walk_checks))
+    walk_and_route_differ_on_purpose;
+  List.iter
+    (fun (label, error, _count) ->
+      let walked = rotates error in
+      let claim = route_claim (route_of error) in
+      match List.assoc_opt label walk_and_route_differ_on_purpose with
+      | Some reason ->
+        (* A named difference that no longer differs is removed from the
+           list rather than left to excuse a future one. *)
+        let agrees =
+          match claim with
+          | Walk_rotates -> walked
+          | Walk_stops -> not walked
+          | No_claim_this_walk_checks ->
+            Alcotest.failf "%s has no claim to differ from" label
+        in
+        Alcotest.(check bool)
+          (Printf.sprintf "%s still differs on purpose (%s)" label reason)
+          false
+          agrees
+      | None ->
+        (match claim with
+         | Walk_rotates ->
+           Alcotest.(check bool)
+             (Printf.sprintf "%s: the route rotates, so the walk reaches the second candidate" label)
+             true
+             walked
+         | Walk_stops ->
+           Alcotest.(check bool)
+             (Printf.sprintf "%s: the route stops, so the walk stays on the first candidate" label)
+             false
+             walked
+         | No_claim_this_walk_checks ->
+           Alcotest.failf
+             "%s routes to a class this walk cannot check; name it in \
+              walk_and_route_differ_on_purpose with its reason"
+             label))
+    census_rows
 
 let test_request_refusal_preserves_retry_authority () =
   let refusal = Agent_core.Error.Api
@@ -497,7 +606,7 @@ let () =
             `Quick
             test_rotation_matches_baseline
         ; Alcotest.test_case
-            "the walk rotates where the failure route says it does"
+            "the walk rotates exactly where the failure route says it does"
             `Quick
             test_walk_rotates_where_the_route_says_it_does
         ] )

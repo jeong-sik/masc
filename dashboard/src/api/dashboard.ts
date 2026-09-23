@@ -195,8 +195,6 @@ export type {
   DashboardRuntimeAssignmentStatus,
   DashboardRuntimeStartupDegradation,
   DashboardRuntimeStartupUnavailableAssignment,
-  DashboardRuntimeStartupDroppedLane,
-  DashboardRuntimeStartupDroppedRoute,
   DashboardRuntimeStartupMissingCatalogModel,
   DashboardRuntimeProvidersResponse,
   BucketMetric,

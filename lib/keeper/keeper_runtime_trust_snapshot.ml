@@ -317,10 +317,15 @@ let trust_model_of_observations ~pending_approval_projection
 ;;
 
 let trust_model_json_fields (model : Trust_core.t) =
+  let operator_disposition, operator_disposition_reason =
+    match model.receipt_operator_disposition with
+    | Some (disposition, reason) -> `String disposition, `String reason
+    | None -> `Null, `Null
+  in
   [ "disposition", `String model.disposition
   ; "disposition_reason", `String model.disposition_reason
-  ; "operator_disposition", `String model.operator_disposition
-  ; "operator_disposition_reason", `String model.operator_disposition_reason
+  ; "operator_disposition", operator_disposition
+  ; "operator_disposition_reason", operator_disposition_reason
   ; "needs_attention", `Bool model.needs_attention
   ; "attention_reason", Json_util.string_opt_to_json model.attention_reason
   ; "next_human_action", Json_util.string_opt_to_json model.next_human_action

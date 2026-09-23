@@ -16,47 +16,24 @@ type raw =
 type t =
   { disposition : string
   ; disposition_reason : string
-  ; operator_disposition : string
-  ; operator_disposition_reason : string
+  ; receipt_operator_disposition : (string * string) option
   ; needs_attention : bool
   ; attention_reason : string option
   ; next_human_action : string option
   }
 
-(* The snapshot's own verdict when it shows no receipt verdict: the approval
-   queue or a runtime blocker decides, or nothing is wrong. Closed, so the
-   operator disposition is chosen per verdict below instead of being parsed
-   back out of a display label. *)
-type fallback_verdict =
-  | Fallback_pass
-  | Fallback_alert
-
-let fallback_display = function
-  | Fallback_pass -> "Pass"
-  | Fallback_alert -> "Alert"
-;;
-
 let fallback_disposition raw =
   match raw.approval_queue with
-  | Approval_queue_unavailable -> Fallback_alert, "approval_queue_unavailable"
+  | Approval_queue_unavailable -> "Alert", "approval_queue_unavailable"
   | Approval_queue_available pending_approval_count when pending_approval_count > 0 ->
-    Fallback_alert, "pending_operator_decision"
+    "Alert", "pending_operator_decision"
   | Approval_queue_available _ ->
     (match raw.runtime_blocker_class with
      | Some (Ok (Keeper_meta_contract.Runtime_exhausted _)) ->
-       Fallback_alert, "runtime_exhausted"
-     | Some (Ok _) -> Fallback_alert, "critical_block"
-     | Some (Error _) -> Fallback_alert, "unknown_runtime_blocker"
-     | None -> Fallback_pass, "healthy")
-;;
-
-(* Every alert above names its cause in the reason and asks a person to act on
-   it: decide the pending approval, repair the queue store the snapshot cannot
-   read, or clear the runtime blocker. [Disp_unknown] reports a receipt the
-   classifier could not place, which none of these is. *)
-let fallback_operator_disposition = function
-  | Fallback_pass -> Keeper_execution_receipt.Disp_pass
-  | Fallback_alert -> Keeper_execution_receipt.Disp_operator_action_required
+       "Alert", "runtime_exhausted"
+     | Some (Ok _) -> "Alert", "critical_block"
+     | Some (Error _) -> "Alert", "unknown_runtime_blocker"
+     | None -> "Pass", "healthy")
 ;;
 
 let display_disposition_requires_attention = function
@@ -64,29 +41,30 @@ let display_disposition_requires_attention = function
   | _ -> false
 ;;
 
-let effective_disposition raw ~fallback ~fallback_reason =
+(* Only a shown receipt has an operator disposition to relay. The snapshot's
+   own verdict comes from the approval queue or a runtime blocker, and nothing
+   classifies those into an operator disposition: the same [turn_failures]
+   blocker follows a fenced turn and a soft failure the Keeper retries. Any
+   kind picked here would be a guess, so the fallback reports none. *)
+let effective_disposition raw ~fallback_disposition ~fallback_reason =
   match raw.approval_queue, raw.receipt_operator_disposition with
-  | Approval_queue_available 0, Some (operator_disposition, operator_reason) ->
+  | ( Approval_queue_available 0
+    , (Some (operator_disposition, operator_reason) as receipt_operator_disposition) )
+    ->
     let disposition, disposition_reason =
       Keeper_operator_disposition_display.of_wire
         ~operator_disposition
         ~operator_disposition_reason:operator_reason
     in
-    disposition, disposition_reason, operator_disposition, operator_reason
+    disposition, disposition_reason, receipt_operator_disposition
   | Approval_queue_unavailable, _
-  | Approval_queue_available _, _ ->
-    ( fallback_display fallback
-    , fallback_reason
-    , Keeper_execution_receipt.operator_disposition_kind_to_string
-        (fallback_operator_disposition fallback)
-    , fallback_reason )
+  | Approval_queue_available _, _ -> fallback_disposition, fallback_reason, None
 ;;
 
 let decide raw =
-  let fallback, fallback_reason = fallback_disposition raw in
-  let disposition, disposition_reason, operator_disposition,
-      operator_disposition_reason =
-    effective_disposition raw ~fallback ~fallback_reason
+  let fallback_disposition, fallback_reason = fallback_disposition raw in
+  let disposition, disposition_reason, receipt_operator_disposition =
+    effective_disposition raw ~fallback_disposition ~fallback_reason
   in
   let needs_attention =
     raw.attention_needs_attention
@@ -106,8 +84,7 @@ let decide raw =
   in
   { disposition
   ; disposition_reason
-  ; operator_disposition
-  ; operator_disposition_reason
+  ; receipt_operator_disposition
   ; needs_attention
   ; attention_reason
   ; next_human_action

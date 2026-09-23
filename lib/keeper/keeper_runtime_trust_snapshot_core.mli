@@ -22,8 +22,12 @@ type raw =
 type t =
   { disposition : string
   ; disposition_reason : string
-  ; operator_disposition : string
-  ; operator_disposition_reason : string
+  ; receipt_operator_disposition : (string * string) option
+  (** The operator disposition and reason of the receipt the snapshot shows,
+      as that receipt wrote them. [None] when the snapshot shows its own
+      verdict instead (a pending approval, an unreadable approval queue, a
+      runtime blocker, or no receipt): it has no classifier of its own, so it
+      reports no operator disposition rather than a guessed one. *)
   ; needs_attention : bool
   ; attention_reason : string option
   ; next_human_action : string option

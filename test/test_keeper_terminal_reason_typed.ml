@@ -829,7 +829,8 @@ let () =
    that returns it is the one that pairs it with [Reason_unmapped_runtime_state]
    and counts [ReceiptUnmappedDisposition]. So for every receipt the three
    agree. A known cause that returns [Disp_unknown] from its own arm breaks the
-   agreement: its arm names its own reason and counts nothing (#38414). *)
+   agreement: its arm names its own reason and counts nothing (#38414). The
+   walk covers every receipt field the classifier branches on. *)
 let () =
   let unmapped_metric = Keeper_metrics.(to_string ReceiptUnmappedDisposition) in
   let shown_disagreements = 10 in
@@ -840,34 +841,54 @@ let () =
          (fun outcome ->
             List.iter
               (fun runtime_outcome ->
-                 let receipt =
-                   { base_receipt with
-                     terminal_reason_code = code
-                   ; outcome
-                   ; runtime_outcome
-                   }
-                 in
-                 let before =
-                   Masc.Otel_metric_store.metric_value_or_zero unmapped_metric ()
-                 in
-                 let disposition, reason = R.operator_disposition receipt in
-                 let after =
-                   Masc.Otel_metric_store.metric_value_or_zero unmapped_metric ()
-                 in
-                 let unknown = disposition = R.Disp_unknown in
-                 let unmapped_reason = reason = R.Reason_unmapped_runtime_state in
-                 let counted = not (Float.equal before after) in
-                 if not (unknown = unmapped_reason && unknown = counted)
-                 then
-                   disagreements
-                   := Printf.sprintf
-                        "code=%S out=%s ro=%s got=%s counted=%b"
-                        code
-                        (R.outcome_kind_to_string outcome)
-                        (R.runtime_outcome_to_string runtime_outcome)
-                        (disp_pair_to_string (disposition, reason))
-                        counted
-                      :: !disagreements)
+                 List.iter
+                   (fun degraded ->
+                      List.iter
+                        (fun runtime_fallback_applied ->
+                           let degraded_retry_applied, degraded_retry_deferred =
+                             degraded_lanes_of_case degraded
+                           in
+                           let receipt =
+                             { base_receipt with
+                               terminal_reason_code = code
+                             ; outcome
+                             ; runtime_outcome
+                             ; degraded_retry_applied
+                             ; degraded_retry_deferred
+                             ; runtime_fallback_applied
+                             }
+                           in
+                           let before =
+                             Masc.Otel_metric_store.metric_value_or_zero
+                               unmapped_metric
+                               ()
+                           in
+                           let disposition, reason = R.operator_disposition receipt in
+                           let after =
+                             Masc.Otel_metric_store.metric_value_or_zero
+                               unmapped_metric
+                               ()
+                           in
+                           let unknown = disposition = R.Disp_unknown in
+                           let unmapped_reason =
+                             reason = R.Reason_unmapped_runtime_state
+                           in
+                           let counted = not (Float.equal before after) in
+                           if not (unknown = unmapped_reason && unknown = counted)
+                           then
+                             disagreements
+                             := Printf.sprintf
+                                  "code=%S out=%s ro=%s deg=%s fb=%b got=%s counted=%b"
+                                  code
+                                  (R.outcome_kind_to_string outcome)
+                                  (R.runtime_outcome_to_string runtime_outcome)
+                                  (degraded_lane_label degraded)
+                                  runtime_fallback_applied
+                                  (disp_pair_to_string (disposition, reason))
+                                  counted
+                                :: !disagreements)
+                        fallback_bools)
+                   degraded_cases)
               runtime_outcomes)
          outcomes)
     codes;

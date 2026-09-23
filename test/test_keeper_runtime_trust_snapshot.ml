@@ -131,22 +131,51 @@ let test_trust_blocker_uses_structured_state () =
   let healthy = decide None in
   Alcotest.(check string) "no blocker is healthy" "healthy"
     healthy.disposition_reason;
-  Alcotest.(check string) "no blocker leaves nothing for the operator" "pass"
-    healthy.operator_disposition;
   let blocked = decide (Some (Ok Masc.Keeper_meta_contract.Internal_bridge_exception)) in
   Alcotest.(check string) "bridge failure is not a guessed sandbox violation"
     "critical_block" blocked.disposition_reason;
   Alcotest.(check bool) "blocker requires attention" true blocked.needs_attention;
-  (* A blocker the snapshot names is a cause it knows. "unknown" is the
-     receipt classifier's word for a turn it could not place. *)
-  Alcotest.(check string) "a named blocker asks the operator to act"
-    "operator_action_required" blocked.operator_disposition;
   let unknown = decide (Some (Error "unknown_sandbox_status")) in
   Alcotest.(check string) "unknown class is visible without prose classification"
     "unknown_runtime_blocker" unknown.disposition_reason;
   Alcotest.(check bool) "unknown class remains visible" true unknown.needs_attention;
-  Alcotest.(check string) "an undecoded blocker still asks the operator to act"
-    "operator_action_required" unknown.operator_disposition
+  (* No receipt is shown in any of the three, so there is no operator
+     disposition to relay. A kind derived from the blocker would be a guess. *)
+  List.iter
+    (fun (label, (model : Core.t)) ->
+       Alcotest.(check (option (pair string string)))
+         (label ^ " relays no operator disposition")
+         None
+         model.receipt_operator_disposition)
+    [ "no blocker", healthy; "named blocker", blocked; "undecoded blocker", unknown ]
+;;
+
+let test_trust_relays_only_a_shown_receipt_operator_disposition () =
+  let module Core = Masc.Keeper_runtime_trust_snapshot_core in
+  let fenced_receipt = "effect_review_required", "provider_attempt_effect_fenced" in
+  let decide approval_queue =
+    Core.decide
+      { approval_queue
+      ; runtime_blocker_class = None
+      ; receipt_operator_disposition = Some fenced_receipt
+      ; attention_needs_attention = false
+      ; attention_reason = None
+      ; attention_next_human_action = None
+      ; terminal_next_human_action = None
+      }
+  in
+  let shown = decide (Core.Approval_queue_available 0) in
+  Alcotest.(check (option (pair string string)))
+    "a shown receipt's operator disposition is relayed as written"
+    (Some fenced_receipt) shown.receipt_operator_disposition;
+  Alcotest.(check string) "an effect review shows as an alert" "Alert" shown.disposition;
+  Alcotest.(check bool) "an effect review needs attention" true shown.needs_attention;
+  let pending = decide (Core.Approval_queue_available 2) in
+  Alcotest.(check string) "a pending approval takes the display"
+    "pending_operator_decision" pending.disposition_reason;
+  Alcotest.(check (option (pair string string)))
+    "a receipt the snapshot does not show is not relayed"
+    None pending.receipt_operator_disposition
 ;;
 
 let test_active_blocker_overrides_success_until_cleared () =
@@ -752,9 +781,6 @@ let test_operator_disposition_display_uses_typed_parser () =
   check_case ~operator_disposition:"effect_review_required"
     ~operator_disposition_reason:"" ~expected_disposition:"Alert"
     ~expected_reason:"effect_review_required";
-  check_case ~operator_disposition:"effect_review_required"
-    ~operator_disposition_reason:"provider_attempt_effect_fenced"
-    ~expected_disposition:"Alert" ~expected_reason:"provider_attempt_effect_fenced";
   check_case ~operator_disposition:"blocked_runtime" ~operator_disposition_reason:""
     ~expected_disposition:"Alert" ~expected_reason:"unmapped_operator_disposition";
   check_case ~operator_disposition:"<missing operator_disposition field>"
@@ -1021,10 +1047,14 @@ let test_approval_queue_failure_remains_typed_unavailable () =
          "unavailable queue keeps typed reason"
          "approval_queue_unavailable"
          (snapshot |> member "disposition_reason" |> to_string);
-       Alcotest.(check string)
+       Alcotest.(check bool)
          "unavailable queue overrides stale receipt disposition"
-         "operator_action_required"
-         (snapshot |> member "operator_disposition" |> to_string);
+         true
+         (snapshot |> member "operator_disposition" = `Null);
+       Alcotest.(check bool)
+         "unavailable queue relays no stale receipt reason"
+         true
+         (snapshot |> member "operator_disposition_reason" = `Null);
        Alcotest.(check bool)
          "unavailable queue needs attention"
          true
@@ -1050,6 +1080,9 @@ let () =
             test_active_blocker_overrides_success_until_cleared
         ; Alcotest.test_case "trust follows structured blocker state" `Quick
             test_trust_blocker_uses_structured_state
+        ; Alcotest.test_case "trust relays only a shown receipt's operator disposition"
+            `Quick
+            test_trust_relays_only_a_shown_receipt_operator_disposition
         ; Alcotest.test_case
             "missing runtime attempt does not fabricate active_model"
             `Quick

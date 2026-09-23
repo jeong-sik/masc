@@ -184,9 +184,10 @@ status: reference
   (`Constitution_unreadable`)로 즉시 거절(`not-dispatched`)한다. 규범 없이 임의 실행되는
   것을 막고, 프롬프트 해시 변경으로 인한 벤더 세션 불필요 소모·재시작을 방지하기 위함이다(#38354·#38427).
   프롬프트 단일 권위(Single Authority): 직접(direct) 턴과 자율(autonomous) 턴 모두
-  `Keeper_run_context.prepare_run_context`가 조립한 단일 `base_system_prompt`만 모델로 보낸다
-  (`build_prompt`는 더 이상 별도 시스템 프롬프트를 렌더하지 않으며 `turn_prompt`의 `system_prompt`
-  필드는 제거됨). 대시보드 및 TUI 설정 표면에서는 `prompt.system_prompt`가 닫힌 세 상태
+  `Keeper_run_context.prepare_run_context`가 조립한 단일 `base_system_prompt`만 모델로 보낸다.
+  `Keeper_unified_prompt.build_prompt`는 관찰 프레임과 사용자 메시지만 만들며(`turn_prompt_parts`),
+  별도 시스템 프롬프트를 렌더하지 않는다(`turn_prompt`의 `system_prompt` 필드는 제거됨).
+  대시보드 및 TUI 설정 표면에서는 `prompt.system_prompt`가 닫힌 세 상태
   (`available`·`unavailable: constitution_unreadable`·`decode_failed`)로 투영되어
   오류 사유와 파일 경로를 직접 드러낸다.
   `<role>`은 그 Keeper의 `instructions`(Keeper TOML)를 적힌 그대로 감싸며 앞에 제목을
@@ -203,6 +204,7 @@ status: reference
   Interest 판정의 `keeper_role {name, board_interests}`도, Fusion 심판의 `judge_role`
   (Fusion Judge Role)도 아니다.
   → [Keeper_run_context.prepare_run_context](../../lib/keeper/keeper_run_context.mli),
+  [Keeper_unified_prompt](../../lib/keeper/keeper_unified_prompt.mli),
   [Keeper_prompt](../../lib/keeper/keeper_prompt.mli)
 
 **Board Interest**

@@ -18,7 +18,7 @@ Overview Team 블록(RFC-0464)은 누가 어떤 Task 를 잡았는지까지 말�
 서버에 PR 을 읽는 코드가 없기 때문이다.
 
 1. 서버가 등록된 GitHub 저장소(`/api/v1/repositories` 의 `url`)마다 열린 PR 을 주기적으로 읽는다.
-2. PR 을 Keeper 에 붙이는 기준은 **PR 마지막 커밋의 author 이름**이다(§2.1).
+2. PR 을 Keeper 에 붙이는 기준은 **PR 에서 부모가 하나인 가장 최근 커밋의 author 이름**이다(§2.1). 머지 커밋은 건너뛴다.
    런타임이 Keeper 의 git author 이름을 Keeper 이름으로 정해 두므로, 그 이름이
    등록된 Keeper 이름과 정확히 같으면 그 Keeper 의 PR 이다.
 3. TUI 는 Team 행 끝에 PR 번호와 상태(CI 통과·실패·진행, 리뷰 대기, 충돌, draft)를 붙이고,
@@ -55,10 +55,12 @@ type pull_request = {
   title : string;
   head_branch : string;
   draft : bool;
-  checks : check_state;       (* statusCheckRollup.state 를 디코드 경계에서 한 번 변환 *)
+  checks : check_state;       (* PR head 커밋(commits(last:1))의 statusCheckRollup.state 를 디코드 경계에서 한 번 변환 *)
   review : review_state;      (* reviewDecision 을 같은 방식으로 *)
   merge : merge_state;        (* mergeable: MERGEABLE | CONFLICTING | UNKNOWN *)
-  last_commit_author : string option;  (* commits(last:1) 의 author.name. 커밋이 없으면 None *)
+  last_commit_author : string option;
+    (* 부모가 하나인 커밋 중 가장 최근 것의 author.name (§2.1).
+       읽는 창 안에 그런 커밋이 없거나 author 이름이 없으면 None *)
   updated_at : float;
 }
 
@@ -78,8 +80,13 @@ GitHub 가 모르는 값을 보내면 그 PR 행은 `Checks_none` 으로 접지 
 
 - 비교하는 값: `last_commit_author` 와 등록된 Keeper 이름(`<base-path>/.masc/config/keepers/<name>.toml`).
   문자열이 정확히 같을 때만 붙인다. 대소문자를 무시하거나 앞부분만 맞춰 보지 않는다.
-- PR 하나는 많아야 Keeper 하나에 붙는다. 마지막 커밋의 author 가 그 Keeper 다.
+- PR 하나는 많아야 Keeper 하나에 붙는다. 부모가 하나인 커밋 중 가장 최근 것의 author 가 그 Keeper 다.
   리뷰어 Keeper 가 그 branch 에 커밋을 올리면 PR 은 리뷰어 쪽으로 옮겨 간다.
+- 머지 커밋(부모가 둘 이상)은 author 로 보지 않는다. GitHub 의 "Update branch", pr-updater 의
+  `update-branch`, 로컬 `git merge origin/main` 은 모두 부모가 둘인 커밋을 만들고, 그 author 는
+  base 를 따라가게 한 계정이나 Keeper 다. 그 커밋이 head 여도 PR 은 마지막으로 코드를 쓴 Keeper 에 남는다.
+- CI 상태는 author 와 따로 PR head 커밋에서 읽는다. head 가 머지 커밋이어도 GitHub 가 CI 를 돌린 것은 head 다.
+  author 를 찾은 커밋의 CI 는 지난 상태라 쓰지 않는다.
   한 PR 을 두 Keeper 행에 나눠 보이지 않는다.
 - author 가 어느 Keeper 이름과도 같지 않거나 `None` 이면 그 PR 은 버리지 않는다.
   저장소 요약 줄에 "Keeper PR 아님" 수로 센다.
@@ -91,9 +98,30 @@ GitHub 가 모르는 값을 보내면 그 PR 행은 `Checks_none` 으로 접지 
 | 2 | `fix/b` 로 옮겨 커밋 후 PR #2 를 연다 | #1 리뷰 대기, #2 CI 진행 | K · #1 #2 |
 | 3 | `main` 으로 돌아가 다음 Task 를 본다 | #1 충돌, #2 리뷰 대기 | K · #1 #2 |
 
-알고 있는 대가: 런타임이 author 이름을 정하기 전에 올라간 PR 은 author 가 Keeper 이름이 아니다.
-그 PR 들은 새 커밋이 올라가기 전까지 "Keeper PR 아님" 으로 센다. 지금 masc 열린 PR 52개 중 51개가 여기에 든다(§1).
-GitHub 화면의 "Update branch" 로 만든 merge 커밋도 author 가 운영자 계정이라 같은 일이 생긴다.
+#### author 를 찾는 창
+
+GraphQL 은 커밋의 부모 수를 `Commit.parents` 연결의 `totalCount` 로 준다
+([GitHub GraphQL `Commit`](https://docs.github.com/en/graphql/reference/commits)).
+PR 마다 `commits(last:10){nodes{commit{parents{totalCount} author{name}}}}` 를 읽고,
+최근 것부터 거슬러 올라가 `parents.totalCount = 1` 인 첫 커밋의 author 를 쓴다.
+
+창의 크기 10 의 근거(2026-09-23, jeong-sik/masc 열린 PR 23개의 마지막 30커밋을 잼):
+
+- 머지 커밋이 head 에서부터 연달아 쌓인 가장 긴 길이는 1이었다(#38168, #38268).
+- 어디서든 머지 커밋이 연달아 나온 가장 긴 길이는 4였다(#38168).
+- 비용: `rateLimit { cost }` 로 잰 값이 `commits(last:1)` 만 읽을 때 1, `commits(last:10)` 를 더하면 2 다.
+  `parents(first:0)` 처럼 pagination 인자를 주면 12 로 뛰므로 인자 없이 `totalCount` 만 읽는다.
+
+창 안이 전부 머지 커밋이면 `None` 이고 "Keeper PR 아님" 으로 센다. 틀린 Keeper 에 붙지 않고 덜 붙는 쪽으로 틀린다.
+이 숫자는 Keeper 흐름을 제어하지 않는다. 화면에 붙이는 범위만 정한다.
+
+알고 있는 대가:
+
+- 런타임이 author 이름을 정하기 전에 올라간 PR 은 author 가 Keeper 이름이 아니다.
+  그 PR 들은 새 커밋이 올라가기 전까지 "Keeper PR 아님" 으로 센다. 지금 masc 열린 PR 52개 중 51개가 여기에 든다(§1).
+- pr-updater 가 공통 조상이 없는 PR 을 main 위에 커밋을 다시 만들어 올리면, 그 커밋은 부모가 하나다.
+  원 author 를 유지하지 않으면 PR 은 pr-updater 행으로 옮겨 간다. base 를 따라가게 하는 쪽은
+  다시 만든 커밋에 원 author 를 남겨야 한다(`git cherry-pick`·`git rebase` 는 author 를 유지한다).
 
 ## 3. 읽기
 
@@ -111,7 +139,7 @@ GitHub 화면의 "Update branch" 로 만든 merge 커밋도 author 가 운영자
 
 rate limit 은 이 서버만의 몫이 아니다. `pr_reader` 계정 하나의 몫이고, 같은 계정을 쓰는
 Keeper 들의 `gh` 호출과 나눠 쓴다. 폴링은 3개 저장소 × 시간당 60회 = 180 point 로,
-시간당 5000 point 의 약 4% 다.
+시간당 5000 point 의 약 4% 다. §2.1 의 author 창을 더하면 한 번에 2 point 라 360 point, 약 7% 다.
 
 - GitHub 가 `retry-after` 를 보내면 그 시간을 먼저 따른다. 403 에 `retry-after` 가 붙으면
   secondary rate limit 으로 본다.
@@ -152,12 +180,12 @@ B 에서 꼬일 수 있는 지점과 처리:
 | 1 | 런타임이 Keeper 의 도구 프로세스에 `GH_CONFIG_DIR` 과 함께 `GIT_AUTHOR_NAME`·`GIT_COMMITTER_NAME` 을 Keeper 이름으로 넘긴다(별도 PR) |
 | 2 | 쓰는 곳 없는 `pr_history` 필드와 감사 스크립트의 같은 이름 읽기 제거 |
 | 3 | `[repositories] pr_reader` 선언, GraphQL 읽기, `repository_pulls` 투영, `GET /api/v1/repositories/pulls` |
-| 4 | GraphQL 에 `mergeable` 과 `commits(last:1){nodes{commit{author{name}}}}` 을 더하고 §2.1 규칙으로 Keeper 를 붙인다 |
+| 4 | GraphQL 에 `mergeable`, head 의 CI(`commits(last:1)`), author 창(`commits(last:10){nodes{commit{parents{totalCount} author{name}}}}`)을 더하고 §2.1 규칙으로 Keeper 를 붙인다 |
 | 5 | TUI: Team 행 끝 PR 표시(충돌 포함)와 저장소별 한 줄 요약("Keeper PR 아님" 수 포함) |
 
 ## 6. 하지 않는 것
 
-- Task 와 PR 을 제목·본문 문자열로 잇지 않는다. 마지막 커밋 author 이름과 Keeper 이름의 정확한 비교만 한다.
+- Task 와 PR 을 제목·본문 문자열로 잇지 않는다. 부모가 하나인 가장 최근 커밋의 author 이름과 Keeper 이름의 정확한 비교만 한다.
 - Keeper 의 checkout 이 지금 어느 branch 에 있는지(`Keeper_sandbox_control.checkout_scan`)로 PR 을 잇지 않는다.
   checkout 은 지금 HEAD 하나만 말하고, Keeper 가 다음 branch 로 옮기면 PR 이 떨어져 나간다.
 - PR 을 서버가 만들거나 머지하지 않는다. 읽기만 한다.

@@ -3881,6 +3881,23 @@ let schedule_wake_word_cells =
     (fun widest word -> max widest (Message_layout.display_width word))
     0 Schedule_contract_values.wake_status_strings
 
+(* The same rule for the schedule's own status. [sch_status] arrives as a
+   string rather than the contract's variant, so the cell is cut to this
+   width as well: a word the contract does not name cannot push the columns
+   beside it out of line. *)
+let schedule_status_word_cells =
+  List.fold_left
+    (fun widest word -> max widest (Message_layout.display_width word))
+    0 Schedule_contract_values.schedule_status_strings
+
+(* A recurrence summary has no vocabulary to measure -- "cron 0 */2 * * * UTC"
+   is as long as its expression -- so this column is a layout choice, and a
+   value past it is cut with the mark rather than left to shift the summary
+   beside it. Measured on the live fleet's 676 requests, two are past this:
+   geek-scout's "daily 09:25:00 +09:00" at 21 cells and polisher's
+   "cron 0 */2 * * * UTC" at 20. *)
+let schedule_recurrence_cells = 18
+
 (* What became of the wake, for a list row that has one line to say it in.
 
    The word is the server's own [projection_status], not a reading of it.
@@ -7721,10 +7738,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                       are one line drawn twenty times, and the three that read
                       "#36319 리뷰 등기 (dispatch 결과 확인 후)" were asked for
                       at 13:39:53, 13:43:50 and 13:45:04 on the same day. *)
-                   Printf.sprintf "  %-12s %s  %-18s %s"
-                     (Terminal_text.single_line row.sch_status)
+                   Printf.sprintf "  %s %s  %s %s"
+                     (fit_width
+                        (Terminal_text.single_line row.sch_status)
+                        schedule_status_word_cells)
                      (Terminal_text.short_timestamp row.sch_requested_at_iso)
-                     (Terminal_text.single_line row.sch_recurrence_summary)
+                     (fit_width
+                        (Terminal_text.single_line row.sch_recurrence_summary)
+                        schedule_recurrence_cells)
                      (Terminal_text.single_line
                         (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
                 rows

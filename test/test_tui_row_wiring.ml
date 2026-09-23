@@ -1068,6 +1068,31 @@ let test_an_automation_row_says_when_it_was_asked_for () =
        ~binding_name:"automation_lines" ~callee:"Terminal_text.short_timestamp")
 ;;
 
+(* The two wire values beside the clock sat in [%-12s] and [%-18s]. Printf
+   pads such a column to its width and never cuts it, so a longer value pushes
+   everything after it to the right on that row alone. Measured on the live
+   fleet's 676 schedule requests: geek-scout's "daily 09:25:00 +09:00" is 21
+   cells and polisher's "cron 0 */2 * * * UTC" is 20, both in the 18-cell
+   recurrence column. [%-Ns] also counts bytes, so any non-ASCII value would
+   miss its width even inside the column.
+
+   Both cells are now cut to a width measured in cells: the status to the
+   widest word the schedule contract names, the recurrence to a declared
+   budget. *)
+let test_the_automation_row_cuts_the_columns_it_draws () =
+  Alcotest.(check int) "both wire cells are cut to a width" 2
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"automation_lines" ~callee:"fit_width");
+  Alcotest.(check int) "and no column is padded by Printf" 0
+    (Ast_grep.count_string_literals_containing_in_value_binding
+       ~module_path:render ~binding_name:"automation_lines" ~needle:"%-");
+  (* The status column is the contract's vocabulary, not a number typed here,
+     so a new status word moves the column with it. *)
+  Alcotest.(check int) "the status width is read off the contract" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"schedule_status_word_cells" ~callee:"List.fold_left")
+;;
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -1162,5 +1187,7 @@ let () =
             test_the_board_age_column_reads_the_sort_once
         ; Alcotest.test_case "an automation row says when it was asked for"
             `Quick test_an_automation_row_says_when_it_was_asked_for
+        ; Alcotest.test_case "the automation row cuts the columns it draws"
+            `Quick test_the_automation_row_cuts_the_columns_it_draws
         ] )
     ]

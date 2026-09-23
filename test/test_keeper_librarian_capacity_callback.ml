@@ -310,7 +310,7 @@ let test_prefit_real_continuity ~base_path () =
   let fact = Keeper_memory_os_types.observed ~claim:("New fact " ^ String.make 200 'f')
     ~category:Keeper_memory_os_types.Fact ~now:1001.
     ~origin:{kind=Keeper_memory_os_types.Authored;trace_id} in
-  ignore (Current.apply_disposition ~keepers_dir ~keeper_id ~now:1001.
+  ignore (Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:1001.
     ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[fact] () |> get);
   let next = prepare () in
   Alcotest.(check bool) "new state and Memory overhead make former atom count exceed limit"

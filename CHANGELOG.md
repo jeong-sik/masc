@@ -4,6 +4,12 @@
 
 ### Changed
 
+- The TUI reads a connector's `gateway_state` and `poll_state` as closed
+  variants instead of strings, rejects a value the server's state machines
+  never produce, and decides whether the Channels pane's Runtime state row
+  repeats the connection badge by matching constructors rather than comparing
+  lowercased words. The runtime picker's kind badge width is measured from
+  the badge strings instead of being written as 7 in three places (#38050).
 - The runtime failover concept is now named the **Runtime Candidate Order** in
   the TUI: the lane key help and status strings say "candidate order" where
   they said "failover" — the `e` key help and its label on the lane sheet

@@ -5983,7 +5983,7 @@
 (test
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
- (libraries alcotest masc yojson))
+ (libraries alcotest masc unix yojson))
 
 (test
  (name test_tui_image_mosaic)

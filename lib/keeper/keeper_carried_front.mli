@@ -49,6 +49,11 @@ type source =
       (** With no Librarian point, the provider refused the range a seed
           opened as too large: the front moved to the turn boundary, and the
           turn shares that position with its later candidates and lanes. *)
+  | Turn_start_after_librarian_refusal
+      (** With a Librarian point, the provider refused as too large a range
+          that opened before the turn boundary -- at the point, or at the
+          accepted start past it: the front moved to the turn boundary for
+          the rest of the turn (RFC librarian-lifecycle §4.10, rule 1). *)
 
 type seed =
   { first_atom : int
@@ -86,6 +91,13 @@ type origin =
           read into memory, and nothing in the request summarizes them. Taken
           when no saved continuity snapshot fits this history and the
           position does (RFC keeper-context-window-in-tokens §13.6). *)
+  | Past_librarian_point of { librarian_end_atom : int; source : source }
+      (** A Librarian point at [librarian_end_atom], and a later start the
+          provider accepted on this history ([source]: the newest
+          response-observed turn record, or this turn's boundary after a
+          size refusal). The range opens at that start; the atoms from the
+          point up to it are in neither the request nor memory (RFC
+          librarian-lifecycle §4.10, rules 2 and 3). *)
   | Turn_start of { end_atom : int }
       (** No absorbed point and no seed: the range begins where the last
           completed turn on this history ended, so only this turn's own
@@ -248,6 +260,9 @@ val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind], one per constructor: [ledger];
     [turn_record] with [turn]; [halved_after_refusal] or
     [evicted_after_refusal] with [retry]; [turn_start_after_seed_refusal];
+    [turn_start_after_librarian_refusal];
     [librarian_snapshot] with [end_atom] and [boundary_line];
-    [librarian_progress] with [end_atom]; [turn_start] with [end_atom]; or
+    [librarian_progress] with [end_atom]; [past_librarian_point] with
+    [librarian_end_atom] and [front], the {!Carried} object of its source;
+    [turn_start] with [end_atom]; or
     [turn_start_unknown] with [reason]. *)

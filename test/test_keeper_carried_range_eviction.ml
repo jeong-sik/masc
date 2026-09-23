@@ -471,7 +471,7 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
         let composed =
           Try_provider.For_testing.compose_carried_model_input
             ~measure_message_bytes:(fun _ -> 1)
-            ~front
+            ~accepted:None ~front
             ~history_digest_at:digest_at
             ~current_turn_results:Try_provider.Current_turn_verbatim
             ~base_path:""
@@ -561,7 +561,7 @@ let test_a_refused_front_survives_candidate_changes ?(fallback_atoms = 16) ~bloc
           in
           let composed =
             Try_provider.For_testing.compose_carried_model_input
-              ~measure_message_bytes:(fun _ -> 1) ~front
+              ~measure_message_bytes:(fun _ -> 1) ~accepted:None ~front
               ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim
               ~base_path:"" ~demote_before:0 ~turn_boundary:(Front.Turn_boundary { end_atom = 0 }) history
           in
@@ -702,7 +702,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
     let working = ref (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id) in
     let last = ref None and sent = ref [] and resent = ref 0 in
     let outcome =
-      Try_provider.seed_refusal_sequence
+      Try_provider.turn_boundary_resend_sequence
         ~same_run_retry_authorized:(fun () -> true)
         ~refused_range:(fun () -> !last)
         ~turn_start_front:(fun () ->
@@ -721,7 +721,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
           in
           let composed =
             Try_provider.For_testing.compose_carried_model_input
-              ?continuity ~measure_message_bytes:(fun _ -> 1) ~front
+              ?continuity ~measure_message_bytes:(fun _ -> 1) ~accepted:None ~front
               ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim ~base_path:""
               ~demote_before:boundary
               ~turn_boundary:(Front.Turn_boundary { end_atom = boundary })

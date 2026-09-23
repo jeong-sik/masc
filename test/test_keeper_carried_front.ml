@@ -527,7 +527,7 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
     Masc.Keeper_next_request_forecast.carry
       ~measure:(Masc.Keeper_context_core.message_measurer ())
       ~continuity:(Some Masc.Keeper_turn_driver_try_provider.without_snapshot)
-      ~front:read.Front.seed
+      ~accepted:None ~front:read.Front.seed
       ~turn_start:(Front.Turn_boundary { end_atom = 0 })
       ~counted_tokens:None
       next_tick

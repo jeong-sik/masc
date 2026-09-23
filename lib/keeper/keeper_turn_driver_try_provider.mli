@@ -47,7 +47,8 @@ val without_snapshot : continuity
     turn record joined to a response -- when one is valid for this history
     ({!Keeper_carried_front.for_history}), and otherwise at the turn's own
     boundary ({!Keeper_carried_front.Turn_start}). A size refusal of the seed
-    range is answered once from that boundary ({!seed_refusal_sequence}). *)
+    range is answered once from that boundary
+    ({!turn_boundary_resend_sequence}). *)
 
 type continuity_choice =
   | Chose_no_point
@@ -224,8 +225,13 @@ val read_keeper_continuity :
     log and Librarian progress file. The turn driver logs the notes; the
     next-request forecast, which only looks, does not. *)
 
+(** The Librarian point a request with a continuity stands on. *)
+type librarian_point =
+  | At_snapshot of Librarian_continuity_snapshot.t
+  | At_read_position of { end_atom : int }
+
 (** Where a request's carried range opens (RFC keeper-context-window-in-tokens
-    §13.4, §13.6). *)
+    §13.4, §13.6; RFC librarian-lifecycle §4.10). *)
 type range_start =
   | From_snapshot of Librarian_continuity_snapshot.t
       (** A snapshot fits: its working state rides in place of the atoms
@@ -233,6 +239,15 @@ type range_start =
   | From_read_position of { end_atom : int }
       (** No snapshot fits and the Librarian's read position does: the atoms
           before [end_atom] are not sent, and nothing stands in for them. *)
+  | Past_librarian_point of
+      { point : librarian_point
+      ; accepted : Keeper_carried_front.seed
+      }
+      (** A Librarian point, and a later start the provider accepted on this
+          history, at most this turn's boundary: the range opens at
+          [accepted]. A snapshot's working state still rides ahead of it.
+          The atoms from the point up to [accepted] are the gap: in neither
+          the request nor memory until the Librarian reads them. *)
   | From_seed of Keeper_carried_front.seed
       (** No Librarian point, and a seed this history opens with the same
           message ({!Keeper_carried_front.for_history}). *)
@@ -249,16 +264,25 @@ type start_choice =
 val choose_range_start :
   continuity:continuity option ->
   front:Keeper_carried_front.seed option ->
+  accepted:Keeper_carried_front.seed option ->
   history_digest_at:(int -> string option) ->
   turn_boundary:Keeper_carried_front.turn_start ->
   start_choice
 (** The one rule for where a request starts: a snapshot that fits, else the
     Librarian's read position, else [front] when [history_digest_at] opens
-    its index with the same message, else [turn_boundary]. [continuity] is
-    [None] for a request with no trace or one composed from a recovery view,
-    and is then read as {!without_snapshot}. Pure: the caller reads the
-    files. The turn's composition and {!Keeper_next_request_forecast} both
-    call it, so the forecast shows the start the request will have. *)
+    its index with the same message, else [turn_boundary]. A Librarian point
+    yields to [accepted] when this history opens its index with the same
+    message and it lies after the point ({!Past_librarian_point}): the start
+    the provider last accepted, read from the newest response-observed turn
+    record, or the turn boundary a size refusal moved this turn to (RFC
+    librarian-lifecycle §4.10, rules 1, 2 and 5). An [accepted] past a known
+    [turn_boundary] is moved back to it (rule 7). [accepted] is not read
+    without a Librarian point, and [front] is not read with one.
+    [continuity] is [None] for a request with no trace or one composed from
+    a recovery view, and is then read as {!without_snapshot}. Pure: the
+    caller reads the files. The turn's composition and
+    {!Keeper_next_request_forecast} both call it, so the forecast shows the
+    start the request will have. *)
 
 val range_start_origin : range_start -> Keeper_carried_front.origin
 
@@ -281,8 +305,11 @@ type try_provider_ctx =
             keeper-context-window-in-tokens §10.5), as the binding declares
             them; [None] leaves eviction to a refusal. *)
   ; carried_front_seed : unit -> Keeper_carried_front.seed_read
-        (** The durable seed, read only when neither the pair's ledger nor a
-            refusal in this turn supplies the front. *)
+        (** The durable seed: with no Librarian point, read only when
+            neither the pair's ledger nor a refusal in this turn supplies the
+            front; with one, the accepted start {!choose_range_start} weighs
+            against the point, read unless a refusal in this turn supplies
+            it. *)
   ; continuity : continuity option
   ; input_policy : Keeper_input_policy.t
   ; turn_boundary : Keeper_carried_front.turn_start
@@ -569,7 +596,7 @@ val carried_range_eviction_sequence :
     that was refused. Every other error ends it at once, as does a refusal
     once [same_run_retry_authorized] is [false]. *)
 
-val seed_refusal_sequence :
+val turn_boundary_resend_sequence :
   same_run_retry_authorized:(unit -> bool) ->
   refused_range:(unit -> (Keeper_carried_front.origin * int) option) ->
   turn_start_front:(unit -> Keeper_carried_front.seed option) ->
@@ -578,13 +605,16 @@ val seed_refusal_sequence :
   attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
   unit ->
   ('ok, Agent_core.Error.t) result
-(** The retry policy of a turn with no Librarian point ({!without_snapshot}),
-    over an injected [attempt] (RFC keeper-context-window-in-tokens §13.4).
-    When [attempt] fails with a refusal {!carried_range_eviction_sequence}
-    would move the front for, [refused_range] reports that the refused range
-    opened on a seed ({!Keeper_carried_front.Carried}) at its first atom,
-    [turn_start_front] names the turn boundary strictly after that atom
-    ({!Keeper_carried_front.Turn_start_after_seed_refusal}), and
+(** The retry policy of a turn with a continuity choice, over an injected
+    [attempt] (RFC keeper-context-window-in-tokens §13.4; RFC
+    librarian-lifecycle §4.10, rule 1). When [attempt] fails with a refusal
+    {!carried_range_eviction_sequence} would move the front for,
+    [refused_range] reports that the refused range opened on a seed
+    ({!Keeper_carried_front.Carried}), a Librarian point, or an accepted
+    start past one, at its first atom, [turn_start_front] names the turn
+    boundary strictly after that atom
+    ({!Keeper_carried_front.Turn_start_after_seed_refusal} or
+    {!Keeper_carried_front.Turn_start_after_librarian_refusal}), and
     [same_run_retry_authorized] holds, the boundary is given to [hold_front]
     as the turn's front, [on_turn_start] is told, and [attempt] runs once
     more; its result is returned as it is. Every other failure is returned
@@ -632,9 +662,8 @@ val run_try_provider_with_carried_range_eviction :
     marks are judged against the pair's ledger once for the turn: the
     eviction moves the pair's ledger front, the halving holds a seed for the
     rest of this attempt, and each retry is recorded on the runtime
-    manifest. A turn with no Librarian point runs under
-    {!seed_refusal_sequence} instead, and a turn with an absorbed point runs
-    one attempt. Whatever the continuity, a size refusal left after that is
+    manifest. A turn with a continuity choice, with or without a Librarian
+    point, runs under {!turn_boundary_resend_sequence} instead. Whatever the continuity, a size refusal left after that is
     answered by {!current_turn_demotion_sequence} on the same candidate,
     when the Keeper is offered the artifact reader the markers name. A
     recovery view runs one attempt. *)
@@ -770,6 +799,7 @@ module For_testing : sig
     ?continuity:continuity ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
+    accepted:Keeper_carried_front.seed option ->
     history_digest_at:(int -> string option) ->
     current_turn_results:current_turn_results ->
     base_path:string ->
@@ -784,6 +814,7 @@ module For_testing : sig
     provider_config:Agent_core.Llm_provider.Provider_config.t ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
+    accepted:Keeper_carried_front.seed option ->
     history_digest_at:(int -> string option) ->
     current_turn_results:current_turn_results ->
     base_path:string ->

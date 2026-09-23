@@ -36,7 +36,7 @@ let view ?front snapshot messages =
   let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
     | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
   Driver.For_testing.request_view ~continuity ~provider_config
-    ~measure_message_bytes:measure ~front
+    ~measure_message_bytes:measure ~accepted:None ~front
     ~history_digest_at:(Window.atom_opening_digest messages)
     ~current_turn_results:Driver.Current_turn_verbatim
     ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
@@ -101,7 +101,7 @@ let test_without_snapshot_seed_demotes_earlier_tool_bodies () =
   let planned = ref 0 in
   let seeded =
     Driver.For_testing.request_view ~continuity:Driver.without_snapshot
-      ~provider_config ~measure_message_bytes:measure ~front:(Some front)
+      ~provider_config ~measure_message_bytes:measure ~accepted:None ~front:(Some front)
       ~history_digest_at ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end
       ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
@@ -192,7 +192,7 @@ let test_without_snapshot_starts_at_the_turn_start () =
   let completed_end = snd (Window.annotate source) in
   let project ?front ~turn_boundary () =
     Driver.For_testing.request_view ~continuity:Driver.without_snapshot
-      ~provider_config ~measure_message_bytes:measure ~front
+      ~provider_config ~measure_message_bytes:measure ~accepted:None ~front
       ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:completed_end ~turn_boundary
       ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered demotion") messages in
@@ -323,7 +323,7 @@ let progress ~trace_id ~end_atom ~last_atom_digest : Progress.t =
 
 let absorbed_view continuity messages =
   Driver.For_testing.request_view ~continuity ~provider_config ~measure_message_bytes:measure
-    ~front:None ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
+    ~accepted:None ~front:None ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
     ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:max_int
     (* Unread under a position: the range starts at the position itself. *)
     ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
@@ -421,12 +421,12 @@ let test_the_forecast_takes_the_drivers_start () =
   List.iter (fun (name, continuity, front, turn_boundary, expected) ->
     let driver =
       Driver.For_testing.request_view ~continuity ~provider_config
-        ~measure_message_bytes:measure ~front ~history_digest_at:digest_at
+        ~measure_message_bytes:measure ~accepted:None ~front ~history_digest_at:digest_at
         ~current_turn_results:Driver.Current_turn_verbatim
         ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0 ~turn_boundary
         ~materialize:(fun ~pending:_ messages -> messages) messages in
     let forecast =
-      Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~front
+      Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~accepted:None ~front
         ~turn_start:turn_boundary ~counted_tokens:None messages in
     check bool (name ^ ": the driver takes the start this case names") true
       (expected driver.composed.origin);
@@ -474,7 +474,7 @@ let test_small_externalizes_only_completed_bodies () =
   let carried = pinned :: (older @ current) in
   let project ?(base_path = base_path) ?(continuity = Some behind) policy =
     Driver.For_testing.request_view ~input_policy:policy ?continuity
-      ~provider_config ~measure_message_bytes:measure ~front:None
+      ~provider_config ~measure_message_bytes:measure ~accepted:None ~front:None
       ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
       ~materialize:(fun ~pending messages ->
@@ -533,7 +533,7 @@ let test_failed_externalization_keeps_raw_body () =
   let reverted = ref 0 in
   let projected = Driver.For_testing.request_view ~input_policy:Small
     ~continuity:behind ~provider_config ~measure_message_bytes:measure
-    ~front:None ~history_digest_at:(Window.atom_opening_digest messages)
+    ~accepted:None ~front:None ~history_digest_at:(Window.atom_opening_digest messages)
     ~current_turn_results:Driver.Current_turn_verbatim ~base_path ~demote_before:completed_end ~turn_boundary:(Front.Turn_boundary { end_atom = completed_end })
     ~materialize:(fun ~pending messages ->
       let outcome = Masc.Keeper_model_input_demotion.materialize

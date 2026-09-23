@@ -329,7 +329,7 @@ let overview_team (state : state) =
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
-let overview_team_lines (team : Overview_team.t) ~team_rows =
+let overview_team_lines (team : Overview_team.t) ~team_rows ~flow =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -423,9 +423,30 @@ let overview_team_lines (team : Overview_team.t) ~team_rows =
   let window =
     if team_rows < total then Printf.sprintf " %d/%d" team_rows total else ""
   in
+  (* Completions per UTC day over the flow's span, oldest first, so the last
+     glyph is today. Scaled from zero: a quiet day is the lowest bar, not the
+     baseline of whatever the busiest fortnight happened to be. *)
+  let throughput =
+    match flow with
+    | None -> ""
+    | Some (flow : Masc_tui_task_flow.t) -> (
+        let per_day =
+          List.map (fun (day : Masc_tui_task_flow.day) -> day.d_completed)
+            flow.daily
+        in
+        match List.rev per_day with
+        | [] -> ""
+        | today :: _ ->
+            Printf.sprintf "   %sdone %dd%s %s%s%s today %d \xc2\xb7 peak %d"
+              Ansi.dim (List.length per_day) Ansi.reset (Theme.ok ())
+              (Chart.sparkline ~min:0 per_day)
+              Ansi.reset today
+              (List.fold_left max 0 per_day))
+  in
   let title =
-    Printf.sprintf " %sTeam%s%s  %s" Ansi.bold Ansi.reset window
+    Printf.sprintf " %sTeam%s%s  %s%s" Ansi.bold Ansi.reset window
       (String.concat " \xc2\xb7 " counts)
+      throughput
   in
   (title, List.filteri (fun index _ -> index < team_rows) rows)
 
@@ -768,6 +789,7 @@ let render_overview (state : state) =
    | Some team when row_budget.team_rows > 0 ->
        let title, lines =
          overview_team_lines team ~team_rows:row_budget.team_rows
+           ~flow:state.task_flow
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;

@@ -1398,6 +1398,11 @@ let listing_rows_below_the_body = 3
    [selected] indexes [labels]; the pane scrolls to keep that row drawn.
    [focused] says whether the arrow keys are pointed here, which is a
    different question from which row is open. *)
+(* The widest lead a row draws before its label: the caret row's " ${caret} ".
+   Every row folds to the room that leaves, so the fold does not move when
+   the cursor does. *)
+let sidebar_row_lead_cells = 3
+
 let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
   framed_top buf cols;
   (* Focus wears a caret, not a key list: which keys work is the footer's
@@ -1418,8 +1423,23 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
     | Some label ->
       (* A separate name for the sanitized text. Shadowing [label] left four
          uses that read as raw ones to anything checking by name, the reader
-         included. *)
-      let drawn = Terminal_text.single_line label in
+         included.
+
+         Folded from the middle, the way a table folds a name: the frame
+         cuts a tail, and a reader's index is a column of names whose ends
+         are what part them. Measured on the live Board, 50 posts: a tail cut
+         left nine rows in three groups a reader could not tell apart -- four
+         read "#verification Approved task...", three "#verification Verify:
+         wkbl ..." -- and folding from the middle leaves all fifty distinct.
+
+         Every row folds to the same room whether or not the cursor is on it.
+         The caret takes two cells more than the plain lead, so a label
+         fitted to the wider room re-folded as the cursor passed over it. *)
+      let drawn =
+        Message_layout.fit_middle
+          (max 1 (framed_inner_width cols - sidebar_row_lead_cells))
+          (Terminal_text.single_line label)
+      in
       framed_line buf cols
         (if first + i = selected then
            if focused then

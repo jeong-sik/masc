@@ -27,13 +27,15 @@ type server_reason =
       (** The bearer was accepted but is not allowed to make this request.
           Usually its role, though the server sends the same code for every
           Forbidden. *)
-  | Rejected  (** Any other refusal, including one whose body names no code. *)
+  | Rejected  (** Any other code, or a code this build does not know. *)
 
-val server_reason_of_body : string -> server_reason
+val server_reason_of_body : string -> server_reason option
 (** The server's reason, read from the [auth_error_code] of a 401/403 body --
     at the top of a REST body, or under [error.data] of a JSON-RPC one -- and
-    decoded with [Masc_error.Auth_error_code.of_string]. A body that is not
-    JSON, or carries no code this client acts on, is {!Rejected}. *)
+    decoded with [Masc_error.Auth_error_code.of_string]. [None] when the body
+    names no code, JSON or not: the auth layer writes one on every refusal, so
+    a 401 or 403 without it is a handler refusing the request, and its caller
+    should show the server's own words rather than a credential remedy. *)
 
 val refusal_cause : credential_sent:bool -> server_reason -> string
 (** Why the server refused, as a lowercase clause a caller can place in its own

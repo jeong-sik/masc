@@ -32,6 +32,27 @@ let test_breaks_at_the_edges_are_dropped () =
     [ "body" ]
     (rows ~max_cells:40 "\n\nbody\n\n")
 
+(* CRLF is one terminator. The carriage return that ends a line belongs to
+   the break, so it is not spelled at the end of every row. *)
+let test_a_crlf_break_leaves_no_carriage_return () =
+  check (list string) "two clean lines"
+    [ "first"; "second" ]
+    (rows ~max_cells:40 "first\r\nsecond")
+
+(* One that is not ending a line still is not a break: it would move the
+   cursor back over what was drawn, so it keeps its spelling. *)
+let test_a_carriage_return_inside_a_line_is_still_spelled () =
+  let drawn = rows ~max_cells:80 "a\rb" in
+  check int "one row" 1 (List.length drawn);
+  check bool
+    (Printf.sprintf "%S carries no CR byte" (List.hd drawn))
+    false
+    (String.contains (List.hd drawn) '\r');
+  check bool
+    (Printf.sprintf "%S spells it instead" (List.hd drawn))
+    true
+    (Astring.String.is_infix ~affix:"\\x0D" (List.hd drawn))
+
 let test_a_blank_text_draws_nothing () =
   check (list string) "nothing to draw" [] (rows ~max_cells:40 "\n\n")
 
@@ -54,16 +75,6 @@ let test_an_escape_sequence_is_still_neutralised () =
     true
     (Astring.String.is_infix ~affix:"\\x1B" drawn)
 
-(* A carriage return is not a line break: it would move the cursor to the
-   start of the row it is on and overwrite what was drawn there. *)
-let test_a_carriage_return_is_not_a_break () =
-  let drawn = rows ~max_cells:80 "a\rb" in
-  check int "one row" 1 (List.length drawn);
-  check bool
-    (Printf.sprintf "%S carries no CR byte" (List.hd drawn))
-    false
-    (String.contains (List.hd drawn) '\r')
-
 let () =
   run "tui text block"
     [ ( "a block keeps the rows its text asks for"
@@ -78,7 +89,9 @@ let () =
             test_each_line_wraps_to_the_width
         ; test_case "an escape sequence is still neutralised" `Quick
             test_an_escape_sequence_is_still_neutralised
-        ; test_case "a carriage return is not a break" `Quick
-            test_a_carriage_return_is_not_a_break
+        ; test_case "a crlf break leaves no carriage return" `Quick
+            test_a_crlf_break_leaves_no_carriage_return
+        ; test_case "a carriage return inside a line is still spelled" `Quick
+            test_a_carriage_return_inside_a_line_is_still_spelled
         ] )
     ]

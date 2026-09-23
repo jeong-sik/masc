@@ -1623,7 +1623,7 @@
   masc_tui_acting
   masc_tui_command
   masc_tui_gate_text
-   masc_tui_text_block
+  masc_tui_text_block
   masc_tui_preset_text
   masc_tui_mcp
   masc_tui_keeper_chat_transcript

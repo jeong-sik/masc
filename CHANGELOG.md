@@ -23,11 +23,7 @@
 
 ### Fixed
 
-- Task 상세의 `what`·`handoff`·`done-when` 같은 본문 블록이 줄바꿈을 줄로 그려요.
-  지금까지는 여러 줄 글을 한 줄용 읽기로 먼저 통과시켜서, 줄바꿈이 `\x0A` 네 글자로
-  문장 한가운데 섞여 들어갔어요. 이 작업공간의 태스크 718개 중 406개가 줄바꿈이 있는
-  글이라 전부 그렇게 보였습니다. 이제 줄마다 따로 접고, 가운데 빈 줄은 그대로 두고,
-  앞뒤 빈 줄만 버려요. 남이 쓴 글의 escape 를 막는 읽기는 줄마다 그대로 거칩니다.
+- A task body block draws the line breaks it was written with. The single-line reader spells a break as the four characters `\x0A`, so a one-row field cannot swallow one, and it is what neutralises an escape sequence in text someone else wrote. The task detail handed it the whole description and then wrapped the result, so every break landed inside the sentence: of 718 tasks on this workspace 406 are written with breaks, and all 406 drew them that way. Each line now goes through that reader on its own. A break in the middle keeps its blank row, the way the operator ask pane already draws one; a run at either end is dropped, because a leading blank would take the row the label sits on. `what`, `why`, `next`, `failure`, `handoff`, `done-when`, `evidence` and `file` share the helper and are fixed together (#38030).
 
 - The chat status area no longer reserves a row it does not draw. The pane skips the in-flight row for the request the live transcript is already drawing — that transcript says the phase, the age and the tools, and a second row put a second age and an opaque request id above the `ACTIVE TURN` line — but the row budget counted every in-flight request. With one message in flight, which is the ordinary case, the area held a row nobody drew: a blank line under the status rows and the footer one row off from what was on screen. The pane and the budget now read the same list (#37741).
 - The Keepers fleet row says when its task-owner scan came up short. The scan reports what it could not read, and only a backlog failure moves the fleet status off `ok`, so a Keeper whose profile did not load left its tasks out of the count with nothing on the row saying so. The count now carries its own shortfall: `task owner without fiber 0 (2 sources unread)` (#38012).

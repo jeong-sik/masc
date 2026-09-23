@@ -16,9 +16,20 @@ let rec drop_leading_blank = function
 let trim_blank_edges rows =
   rows |> drop_leading_blank |> List.rev |> drop_leading_blank |> List.rev
 
+(* CRLF is one line terminator, so the carriage return that ends a line
+   belongs to the break rather than to the text. Left in place the sanitiser
+   spells it "\x0D" at the end of every line, which is the same noise this
+   module exists to drop. A carriage return anywhere else is not a break and
+   keeps its spelling: it would move the cursor back over what was drawn. *)
+let drop_line_terminator line =
+  let length = String.length line in
+  if length > 0 && line.[length - 1] = '\r' then String.sub line 0 (length - 1)
+  else line
+
 let rows_of_line ~max_cells line =
   match
-    Message_layout.wrap_words ~max_cells (Masc.Tui_decode.sanitize_terminal_text line)
+    Message_layout.wrap_words ~max_cells
+      (Masc.Tui_decode.sanitize_terminal_text (drop_line_terminator line))
   with
   (* [wrap_words] answers nothing for a line with no words. The break was
      written, so the blank row it asks for is drawn. *)

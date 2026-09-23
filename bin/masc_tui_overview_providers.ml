@@ -45,9 +45,14 @@ let meter ~cells share =
   let share =
     if Float.is_nan share then 0.0 else Float.min 1.0 (Float.max 0.0 share)
   in
+  (* Floor, so only a share at or past full fills the last eighth; a share
+     above zero that floors to nothing still draws the thinnest glyph. *)
   let filled =
-    int_of_float
-      (Float.round (share *. float_of_int (cells * eighths_per_cell)))
+    match
+      int_of_float (Float.floor (share *. float_of_int (cells * eighths_per_cell)))
+    with
+    | 0 when share > 0.0 && cells > 0 -> 1
+    | filled -> filled
   in
   let whole = filled / eighths_per_cell in
   let part = filled mod eighths_per_cell in
@@ -326,14 +331,6 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
           puws_accounts
       in
       let rows = List.concat_map (account_rows ~runtimes ~now) ordered in
-      let body =
-        match rows with
-        | [] ->
-            [ Printf.sprintf " %sno provider account in the runtime catalogue%s"
-                Ansi.dim Ansi.reset
-            ]
-        | _ :: _ -> draw_rows ~now ~width rows
-      in
       (* Without the runtime rows the exhausted tag cannot be drawn; the
          section says so instead of drawing every account untagged. *)
       let runtimes_note =
@@ -344,6 +341,11 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
             ]
         | Types.Quota_unread | Types.Quota_read _ -> []
       in
+      (* A catalogue with no runtime has no provider account: an empty mixer
+         has no strip, and the section takes no row from the tasks. *)
+      match rows with
+      | [] -> None
+      | _ :: _ ->
       Some
         { title =
             title_text
@@ -352,5 +354,5 @@ let section ~(providers : Types.overview_providers_reading) ~runtimes ~now ~widt
                    "reported by the provider \xc2\xb7 since server start %s"
                    (clock_text ~now puws_since))
               ()
-        ; lines = body @ runtimes_note
+        ; lines = draw_rows ~now ~width rows @ runtimes_note
         }

@@ -339,7 +339,7 @@ the provider reported, the reset time, and how long ago the provider said so.
 
 ```
  Providers  reported by the provider · since server start 22:39
- claude_code  5h ▕██████████▊     ▏ 0.67  ↻ 18:10 in 4h12m        heard 3m ago
+ claude_code  5h ▕██████████▋     ▏ 0.67  ↻ 18:10 in 4h12m        heard 3m ago
               7d ▕███████         ▏ 0.44  ↻ 09-29 13:00 in 5d23h
  codex        no report since server start
 ```

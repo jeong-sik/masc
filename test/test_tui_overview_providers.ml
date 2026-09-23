@@ -162,12 +162,27 @@ let test_section_draws_three_line_shapes () =
         [ ("codex", codex); ("ollama_cloud", ollama) ]
   | _ -> failf "expected five rows, got %d" (List.length lines)
 
+let full_cells n = String.concat "" (List.init n (fun _ -> "\xe2\x96\x88"))
+
 let test_meter_uses_eighth_blocks () =
-  check string "0.67 of 16 cells is 10 whole cells and six eighths"
-    "\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x88\xe2\x96\x8a     "
+  check string "0.67 of 16 cells is 10 whole cells and five eighths"
+    (full_cells 10 ^ "\xe2\x96\x8b" ^ "     ")
     (Providers.meter ~cells:16 0.67);
-  check string "past full draws full, not wider" "\xe2\x96\x88\xe2\x96\x88"
-    (Providers.meter ~cells:2 1.4)
+  check string "zero is empty" "    " (Providers.meter ~cells:4 0.0);
+  check string "some use never reads as none" ("\xe2\x96\x8f" ^ "   ")
+    (Providers.meter ~cells:4 0.001);
+  check string "just under full is not full"
+    (full_cells 15 ^ "\xe2\x96\x89")
+    (Providers.meter ~cells:16 0.9999);
+  check string "exactly full is full" (full_cells 16)
+    (Providers.meter ~cells:16 1.0);
+  (* Percent 100 and 140 as the section normalizes them for drawing. *)
+  check string "percent 100 is full" (full_cells 16)
+    (Providers.meter ~cells:16 (float_of_int 100 /. 100.0));
+  check string "percent 140 draws full, not wider" (full_cells 16)
+    (Providers.meter ~cells:16 (float_of_int 140 /. 100.0));
+  check string "zero cells draw nothing" "" (Providers.meter ~cells:0 0.5);
+  check string "negative cells draw nothing" "" (Providers.meter ~cells:(-3) 0.5)
 
 let test_failed_read_is_one_line () =
   match

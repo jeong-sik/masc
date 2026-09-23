@@ -243,6 +243,8 @@ def test_http_endpoint(
                 fixture = fixtures[path_only]
             elif path_only == DASHBOARD_GOALS_PATH:
                 fixture = empty_goals_fixture()
+            elif path_only == RUNTIME_RESOLVED_PATH:
+                fixture = empty_runtime_resolved_fixture()
             else:
                 fixture = (503, {"error": "fixture endpoint unavailable"})
             if isinstance(fixture, RequestHttpResponse):
@@ -1206,6 +1208,30 @@ def empty_goals_fixture() -> HttpResponse:
             "done_tasks": 0,
             "pending_approvals": 0,
         },
+    })
+
+
+def empty_runtime_resolved_fixture() -> HttpResponse:
+    """A runtime catalogue with no runtime, the shape the server sends for a
+    workspace that configured none.
+
+    The Overview reads it for its Providers section. Unmocked, the 503
+    sentinel would draw "providers unavailable" in every Overview scenario
+    and take its rows from the tasks. With no provider account the section
+    draws nothing. A scenario that is about runtimes keys this path itself.
+    """
+    return (200, {
+        "generated_at_iso": "2026-09-23T00:00:00Z",
+        "source": RUNTIME_RESOLVED_PATH,
+        "config_path": None,
+        "default_runtime": None,
+        "media_failover": [],
+        "media_failover_declared": [],
+        "runtimes": [],
+        "lanes": [],
+        "assignments": [],
+        "provider_usage_windows_since": 1790179140.2,
+        "provider_usage_windows": [],
     })
 
 

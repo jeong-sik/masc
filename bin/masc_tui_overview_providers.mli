@@ -26,12 +26,15 @@ val section :
   now:float ->
   width:int ->
   section option
-(** [None] before the first read. A failed read is one line,
+(** [None] before the first read and when the catalogue names no provider
+    account. A failed read is one line,
     ["providers unavailable: <reason>"]. [width] is the cells a row may use;
     the meters take what the other columns leave. *)
 
 val meter : cells:int -> float -> string
 (** A meter [cells] cells wide filled to the given share of full, drawn with
-    eighth-block glyphs so the fill moves by an eighth of a cell. The share is
+    eighth-block glyphs so the fill moves by an eighth of a cell. The fill is
+    rounded down, so only a share at or past full draws a full meter, and a
+    share above zero draws at least one eighth. The share is
     held to [0, 1] for drawing only; a share that is not a number draws an
     empty meter, and the row's value text still prints it as reported. *)

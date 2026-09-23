@@ -93,11 +93,19 @@ type quarantine_failure_category =
   | Durable_partition_invariant
   | Exact_setup_unavailable
   | Exact_flow_replayed
-  | Exact_execution_terminal
+  | Exact_lane_exhausted
+      (** Every HTTP slot refused and the CLI tail had none to walk, or
+          refused too. *)
+  | Exact_flow_bookkeeping_failed
+  | Exact_completion_failed
   | Domain_output_invalid
   | Execution_provenance_mismatch
   | Unexpected_worker_failure
   | Exact_execution_quarantined
+  | Exact_execution_interrupted
+      (** A process restart cut a bound execution. Requeueable: the judgment
+          lane is a read-only model call, so redispatch spends tokens and
+          nothing else. *)
 
 type attempt_provenance =
   { slot_id : string

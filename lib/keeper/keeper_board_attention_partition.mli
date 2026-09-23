@@ -58,12 +58,32 @@ type running_progress =
       ; next : candidate_visit
       }
 
+(** Each cause is its own constructor and carries the durable progress it
+    had, so the cause is never overwritten by the progress and a reader
+    tells the causes apart by constructor, not by [detail] text. *)
 type blocked_reason =
   | Candidate_membership_conflict of string
   | Durable_partition_invariant of string
   | Exact_setup_unavailable of string
-  | Exact_flow_replayed
-  | Exact_execution_terminal
+  | Exact_flow_replayed of running_progress option
+      (** The exact flow for this partition had already started: a
+          concurrent duplicate reached it. *)
+  | Exact_lane_exhausted of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** Every HTTP slot refused and the CLI tail had none to walk, or
+          refused too. [detail] is the flow's own sentence. *)
+  | Exact_flow_bookkeeping_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** The flow could not record its own run bookkeeping. *)
+  | Exact_completion_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** The judgment arrived but persisting the completion failed. *)
   | Domain_output_invalid of
       { detail : string
       ; progress : running_progress option
@@ -72,8 +92,17 @@ type blocked_reason =
       { detail : string
       ; progress : running_progress option
       }
-  | Unexpected_worker_failure of string
+  | Unexpected_worker_failure of
+      { detail : string
+      ; progress : running_progress option
+      }
   | Exact_execution_quarantined of running_progress
+  | Exact_execution_interrupted of running_progress
+      (** A process restart cut a bound execution. Not a judgment about the
+          candidate: the judgment lane is a read-only model call, so
+          redispatch spends tokens and nothing else. [Blocked -> Ready] is
+          legal, so the operator requeue reaches it; nothing reopens it
+          automatically. *)
 
 type running_state =
   { worker_epoch : Worker_epoch.t
@@ -149,9 +178,11 @@ val ensure_roots :
 val recover_for_process_start :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result
 (** Canonically compact the append ledger. Only [Running Unbound] returns to
-    [Ready]. [Bound] executions become terminal
-    [Blocked (Exact_execution_quarantined _)] and can never be redispatched.
-    The return value is the number of Running roots terminalized or released.
+    [Ready]. [Bound] executions become
+    [Blocked (Exact_execution_interrupted _)] — requeueable, not terminal:
+    the judgment lane is a read-only model call, so redispatch spends tokens
+    and nothing else (see [execute]'s doc). The return value is the number of
+    Running roots terminalized or released.
     Old schema rows and non-tail malformed JSON are rejected without migration.
     A torn final append is truncated under the ledger lock. *)
 

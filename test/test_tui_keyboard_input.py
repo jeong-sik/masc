@@ -3505,7 +3505,7 @@ def assert_row_budgeted_surfaces(
         process,
         master_fd,
         output,
-        rows=16,
+        rows=15,
         columns=100,
         needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
@@ -3513,9 +3513,9 @@ def assert_row_budgeted_surfaces(
     )
     for expected in (b"attention-1", b"attention-2", b"task-1", b"q:quit"):
         if expected not in overview:
-            raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
+            raise AssertionError(f"13-row Overview omitted {expected!r}: {overview!r}")
     if b"attention-3" in overview:
-        raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
+        raise AssertionError(f"13-row Overview exceeded its row budget: {overview!r}")
 
     resize_and_wait(
         process,

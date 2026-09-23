@@ -8,6 +8,19 @@
 
 ### Changed
 
+- The Librarian reads a new claim that repeats a current memory word for word
+  as that memory instead of refusing the whole pass as
+  `duplicate_selected_memory_id`: the stored fact keeps its first sighting and
+  its fields, its `absorbs` go into the existing id, a self-absorb does
+  nothing, and two claims with the same text merge. Restating a memory another
+  claim absorbs is a no-op, so the common answer that restates every memory
+  and adds one merged claim now applies the merge. Dropping and restating a
+  memory in one answer, including a `supersedes` whose text repeats the memory
+  it corrects, stays refused as `dropped_memory_id_recreated` (RFC-0397 D3). A
+  restated memory that an absorption goes into is handed to the store again,
+  so a keeper retraction during the pass no longer leaves absorbed rows
+  pointing into a missing id. A restatement whose category or basis differs is
+  logged at INFO with its `memory_id` and the field, not refused (#38048).
 - The keeper failure route and the runtime candidate walk now give the same
   answer for every error the rotation census covers (#38045). A provider's own
   400/413 refusal, a malformed/unknown/oversized wire payload and a

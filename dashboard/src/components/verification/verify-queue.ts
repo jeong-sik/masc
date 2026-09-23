@@ -564,7 +564,7 @@ export function VerifyQueue() {
   const resource = useManagedAsyncResource<VerificationRequestsResponse>()
 
   useEffect(() => {
-    const load = () => resource.load(signal => fetchVerificationRequests({ limit: REQUESTS_LIMIT, signal }))
+    const load = () => resource.load(signal => fetchVerificationRequests({ view: 'awaiting', limit: REQUESTS_LIMIT, signal }))
     void load()
     const id = setInterval(() => void load(), AUTO_REFRESH_MS)
     return () => {

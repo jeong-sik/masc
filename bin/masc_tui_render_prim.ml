@@ -1398,10 +1398,15 @@ let listing_rows_below_the_body = 3
    [selected] indexes [labels]; the pane scrolls to keep that row drawn.
    [focused] says whether the arrow keys are pointed here, which is a
    different question from which row is open. *)
-(* The widest lead a row draws before its label: the caret row's " ${caret} ".
-   Every row folds to the room that leaves, so the fold does not move when
-   the cursor does. *)
-let sidebar_row_lead_cells = 3
+(* What a row draws before its label when the cursor is on it. The fold below
+   measures this instead of counting its cells here, so the two cannot drift
+   apart, and the mark is the one the rest of the file draws rather than a
+   second spelling of its bytes. *)
+let sidebar_caret_lead = " " ^ Masc_tui_theme.Glyph.current_entry ^ " "
+
+(* Every row folds to the room the widest lead leaves, so the fold does not
+   move when the cursor does. *)
+let sidebar_row_lead_cells = Message_layout.display_width sidebar_caret_lead
 
 let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
   framed_top buf cols;
@@ -1409,7 +1414,9 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
      sentence; which pane hears them is this one glyph. *)
   framed_line buf cols
     ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " %s%s (%d)" (if focused then "\xe2\x96\xb8 " else "") title
+     ^ Printf.sprintf " %s%s (%d)"
+         (if focused then Masc_tui_theme.Glyph.current_entry ^ " " else "")
+         title
          (List.length labels)
      ^ Ansi.reset);
   framed_divider buf cols;
@@ -1448,7 +1455,7 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
                  (max 0 (cols - 5 - Message_layout.display_width drawn))
                  ' '
              ^ Ansi.reset
-           else Ansi.bold ^ " \xe2\x96\xb8 " ^ drawn ^ Ansi.reset
+           else Ansi.bold ^ sidebar_caret_lead ^ drawn ^ Ansi.reset
          else " " ^ drawn)
     | None -> framed_empty buf cols
   done;

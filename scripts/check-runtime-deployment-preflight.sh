@@ -248,6 +248,7 @@ run_gate() {
     reject_symlinks_below "$candidates_root" "board attention candidate store"
     local candidate_ledger_path
     local stale_row_report
+    local unattributed_requeue_rows
     while IFS= read -r -d '' candidate_ledger_path; do
       [[ -f "$candidate_ledger_path" && ! -L "$candidate_ledger_path" ]] \
         || fail "board attention candidate ledger is not an exact regular file: $candidate_ledger_path"
@@ -262,6 +263,20 @@ run_gate() {
         || fail "board attention candidate ledger could not be inspected: $candidate_ledger_path"
       [[ -z "$stale_row_report" ]] \
         || fail "board attention candidate ledger requires schema_version=$BOARD_ATTENTION_SCHEMA_VERSION; incompatible or unreadable row ($stale_row_report): $candidate_ledger_path"
+      # A requeue row must name its requester. The runtime reader rejects one
+      # without [requested_by]; the candidate then reads as its earlier row
+      # while the partition is already Ready, and no command can finish it.
+      unattributed_requeue_rows="$(jq -Rn \
+        '[inputs | select(test("\\S")) | (try fromjson catch null)
+          | select(type == "object") | .status
+          | select(type == "object"
+                   and (.kind == "requeue_requested" or .kind == "requeued"))
+          | select((.requested_by | type) != "string"
+                   or ((.requested_by | test("\\S")) | not))] | length' \
+        "$candidate_ledger_path")" \
+        || fail "board attention candidate ledger could not be inspected: $candidate_ledger_path"
+      [[ "$unattributed_requeue_rows" == "0" ]] \
+        || fail "board attention candidate ledger has $unattributed_requeue_rows requeue_requested/requeued row(s) without requested_by: $candidate_ledger_path"
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
   fi
 
@@ -476,6 +491,28 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     expect_failure_contains rejected_board_attention_version \
       "$version_candidate_root" "requires schema_version=$BOARD_ATTENTION_SCHEMA_VERSION"
   done
+
+  # A requeue row without its requester is refused and counted; the same row
+  # with a requester, and a row of another kind, pass.
+  unattributed_requeue_root="$fixture_root/candidate-unattributed-requeue"
+  write_schedules "$unattributed_requeue_root" running
+  mkdir -p "$unattributed_requeue_root/.masc/board_attention_candidates"
+  printf '%s\n' \
+    "{\"schema_version\": $BOARD_ATTENTION_SCHEMA_VERSION, \"status\": {\"kind\": \"requeue_requested\", \"requested_at\": 1.0}}" \
+    "{\"schema_version\": $BOARD_ATTENTION_SCHEMA_VERSION, \"status\": {\"kind\": \"requeued\", \"requeued_at\": 2.0, \"requested_by\": \" \"}}" \
+    >"$unattributed_requeue_root/.masc/board_attention_candidates/fixture.jsonl"
+  expect_failure_contains unattributed_board_attention_requeue \
+    "$unattributed_requeue_root" "has 2 requeue_requested/requeued row(s) without requested_by" \
+    "fixture.jsonl"
+
+  attributed_requeue_root="$fixture_root/candidate-attributed-requeue"
+  write_schedules "$attributed_requeue_root" running
+  mkdir -p "$attributed_requeue_root/.masc/board_attention_candidates"
+  printf '%s\n' \
+    "{\"schema_version\": $BOARD_ATTENTION_SCHEMA_VERSION, \"status\": {\"kind\": \"requeued\", \"requeued_at\": 2.0, \"requested_by\": \"operator\"}}" \
+    "{\"schema_version\": $BOARD_ATTENTION_SCHEMA_VERSION, \"status\": {\"kind\": \"quarantined\"}}" \
+    >"$attributed_requeue_root/.masc/board_attention_candidates/fixture.jsonl"
+  "$0" --base-path "$attributed_requeue_root" >/dev/null
 
   for malformed_row in '{}' '[]' 'null' '"row"' '{broken'; do
     malformed_candidate_root="$fixture_root/candidate-malformed-row"

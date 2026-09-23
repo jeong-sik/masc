@@ -258,6 +258,52 @@ let test_terminal_text_is_idempotent_and_single_line () =
   Alcotest.(check string) "sanitization is idempotent" once
     (Tui_decode.sanitize_terminal_text once)
 
+let test_terminal_text_escapes_invisible_codepoints () =
+  (* #38445: a terminal draws bidi controls and zero-width characters as
+     nothing, so the glyphs an operator reads can differ from the bytes an
+     approval hash covers (Trojan Source, CVE-2021-42574). *)
+  let contains_substring hay needle =
+    let n = String.length needle and h = String.length hay in
+    let rec scan i =
+      i + n <= h && (String.sub hay i n = needle || scan (i + 1))
+    in
+    n = 0 || scan 0
+  in
+  let rlo = "\xe2\x80\xae" in
+  let escaped = Tui_decode.sanitize_terminal_text ("a" ^ rlo ^ "b") in
+  Alcotest.(check string) "the bidi override is drawn as its escape text"
+    "a\\u202Eb" escaped;
+  Alcotest.(check bool) "the raw RLO bytes are gone" false
+    (contains_substring escaped rlo);
+  Alcotest.(check string) "escape_invisible is the one rule" "a\\u202Eb"
+    (Tui_decode.escape_invisible ("a" ^ rlo ^ "b"));
+  List.iter
+    (fun (label, bytes, expected) ->
+       Alcotest.(check string) label expected
+         (Tui_decode.escape_invisible bytes))
+    [ "ALM", "\xd8\x9c", "\\u061C"
+    ; "ZWSP", "\xe2\x80\x8b", "\\u200B"
+    ; "ZWNJ", "\xe2\x80\x8c", "\\u200C"
+    ; "ZWJ", "\xe2\x80\x8d", "\\u200D"
+    ; "LRM", "\xe2\x80\x8e", "\\u200E"
+    ; "RLM", "\xe2\x80\x8f", "\\u200F"
+    ; "LRE", "\xe2\x80\xaa", "\\u202A"
+    ; "RLE", "\xe2\x80\xab", "\\u202B"
+    ; "PDF", "\xe2\x80\xac", "\\u202C"
+    ; "LRO", "\xe2\x80\xad", "\\u202D"
+    ; "RLO", "\xe2\x80\xae", "\\u202E"
+    ; "LRI", "\xe2\x81\xa6", "\\u2066"
+    ; "RLI", "\xe2\x81\xa7", "\\u2067"
+    ; "FSI", "\xe2\x81\xa8", "\\u2068"
+    ; "PDI", "\xe2\x81\xa9", "\\u2069"
+    ; "BOM", "\xef\xbb\xbf", "\\uFEFF"
+    ];
+  Alcotest.(check string) "an ordinary string is unchanged" "café"
+    (Tui_decode.escape_invisible "café");
+  Alcotest.(check string) "the escape is idempotent" "a\\u202Eb"
+    (Tui_decode.escape_invisible
+       (Tui_decode.escape_invisible ("a" ^ rlo ^ "b")))
+
 let test_preview_line_marks_breaks_and_escapes_the_rest () =
   let mark = "\xe2\x8f\x8e" in
   Alcotest.(check string) "a break is one return mark" ("a" ^ mark ^ "b")
@@ -11194,6 +11240,8 @@ let () =
           test_terminal_text_preserves_printable_utf8
       ; Alcotest.test_case "escapes malformed UTF-8 bytes" `Quick
           test_terminal_text_escapes_malformed_utf8_bytes
+      ; Alcotest.test_case "escapes invisible codepoints" `Quick
+          test_terminal_text_escapes_invisible_codepoints
       ; Alcotest.test_case "is idempotent and single-line" `Quick
           test_terminal_text_is_idempotent_and_single_line
       ; Alcotest.test_case "preview marks breaks and escapes the rest" `Quick

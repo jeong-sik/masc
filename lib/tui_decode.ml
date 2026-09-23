@@ -883,6 +883,43 @@ let decode_task json =
   let* task = Masc_domain.task_of_yojson json in
   Ok (task_of_domain task)
 
+(* #38445: a terminal draws bidi controls and zero-width characters as
+   nothing, so the glyphs an operator reads can differ from the bytes the
+   approval hash covers (Trojan Source, CVE-2021-42574). Both terminal
+   sanitizers route those codepoints through here, so the rule lives in one
+   place: the codepoint is drawn as its own escape text, never dropped. *)
+let is_invisible_codepoint code =
+  code = 0x061C
+  || (code >= 0x200B && code <= 0x200F)
+  || (code >= 0x202A && code <= 0x202E)
+  || (code >= 0x2066 && code <= 0x2069)
+  || code = 0xFEFF
+;;
+
+let escape_invisible text =
+  let output = Buffer.create (String.length text) in
+  let length = String.length text in
+  let rec walk index =
+    if index < length
+    then (
+      let decoded = String.get_utf_8_uchar text index in
+      let step = Uchar.utf_decode_length decoded in
+      let scalar = Uchar.utf_decode_uchar decoded in
+      if
+        Uchar.utf_decode_is_valid decoded
+        && is_invisible_codepoint (Uchar.to_int scalar)
+      then (
+        Buffer.add_string output
+          (Printf.sprintf "\\u%04X" (Uchar.to_int scalar));
+        walk (index + step))
+      else (
+        Buffer.add_substring output text index step;
+        walk (index + step)))
+  in
+  walk 0;
+  Buffer.contents output
+;;
+
 let sanitize_terminal_text text =
   let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
   let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
@@ -963,7 +1000,7 @@ let sanitize_terminal_text text =
           append (index + 1))
   in
   append 0;
-  Buffer.contents output
+  escape_invisible (Buffer.contents output)
 ;;
 
 (* One row of a text that has rows. The terminal boundary escapes control

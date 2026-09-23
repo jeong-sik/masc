@@ -799,6 +799,24 @@ let test_terminal_text_sanitization () =
   check bool "visible payload retained" true
     (String.starts_with ~prefix:" [31mred [0m" safe)
 
+let test_terminal_text_escapes_invisible_codepoints () =
+  (* #38445: the Keeper chat boundary must draw bidi controls and zero-width
+     characters as text, not pass them through, so what the operator reads
+     matches the bytes the value carries. *)
+  let rlo = "\xe2\x80\xae" in
+  let safe = Chat.terminal_safe_text ("a" ^ rlo ^ "b") in
+  check string "the bidi override is drawn as its escape text" "a\\u202Eb" safe;
+  check bool "the raw RLO bytes are gone" false
+    (let n = String.length rlo and h = String.length safe in
+     let rec scan i =
+       i + n <= h && (String.sub safe i n = rlo || scan (i + 1))
+     in
+     scan 0);
+  check string "a zero-width space is drawn as its escape text" "a\\u200Bb"
+    (Chat.terminal_safe_text "a\xe2\x80\x8bb");
+  check string "an ordinary string is unchanged" "café"
+    (Chat.terminal_safe_text "café")
+
 let test_request_labels_keep_random_suffix () =
   let prefix = "tui-019d0000-0000-7000-8000-" in
   let first = Chat.compact_request_id (prefix ^ "aaaaaaaaaaaa") in
@@ -1525,6 +1543,8 @@ let () =
             test_protocol_errors_preserve_acceptance_provenance
         ; test_case "terminal text sanitization" `Quick
             test_terminal_text_sanitization
+        ; test_case "terminal text escapes invisible codepoints" `Quick
+            test_terminal_text_escapes_invisible_codepoints
         ; test_case "request labels keep random suffix" `Quick
             test_request_labels_keep_random_suffix
         ; test_case "typed error certainty" `Quick test_error_certainty

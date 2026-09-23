@@ -36,10 +36,11 @@ type t =
   ; selected_model : string option
   }
 
-(** [keeper_persistence] is Satisfied when at least one Keeper's metadata
-    decodes strictly as current and names its own file, whichever Keeper that
-    is. No metadata is Needs_setup; metadata of which none reads is Invalid.
-    Persistence does not establish model, sandbox or running health. *)
+(** [keeper_persistence] is Satisfied when the workspace holds Keeper
+    metadata, whichever Keepers they are, and every file passes the check the
+    server's boot reconcile applies. No metadata is Needs_setup; any file that
+    fails it is Invalid, because the server refuses to boot on it. Persistence
+    does not establish model, sandbox or running health. *)
 val inspect : base_path:string option -> t
 
 (** The wire name of a check, as serialized in [id]. *)

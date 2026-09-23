@@ -99,10 +99,6 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
   check bool "persisted history is not sandbox proof" true
     (condition Onboarding_status.Sandbox persisted = Onboarding_status.Needs_verification);
   check string "metadata observation is read-only" valid_meta (read metadata_path);
-  write metadata_path (Yojson.Safe.to_string (Masc_test_deps.current_meta_json_fixture ~name:"someone-else" ()));
-  let wrong_owner = Onboarding_status.inspect ~base_path:(Some base) in
-  check bool "metadata naming another Keeper is not its file's history" true
-    (condition Onboarding_status.Keeper_persistence wrong_owner = Onboarding_status.Invalid);
   write metadata_path "{broken";
   let corrupt = Onboarding_status.inspect ~base_path:(Some base) in
   check bool "corrupt metadata is invalid, not absent" true
@@ -263,22 +259,19 @@ let a_workspace_without_imp_opens_its_keepers_history () =
     (condition Onboarding_status.Keeper_persistence observed = Onboarding_status.Satisfied);
   check bool "the workspace opens without imp" true
     (Onboarding_status.opening observed = Onboarding_status.Open_existing_history);
+  (* The server's boot reconcile refuses every Keeper when one metadata file
+     cannot be read, so the readable ones do not make the workspace openable. *)
   write (Filename.concat metadata_dir "broken-one.json") "{broken";
   let one_broken = Onboarding_status.inspect ~base_path:(Some base) in
-  check bool "one unreadable Keeper does not close the others" true
-    (Onboarding_status.opening one_broken = Onboarding_status.Open_existing_history);
+  check bool "one unreadable Keeper is invalid history" true
+    (condition Onboarding_status.Keeper_persistence one_broken = Onboarding_status.Invalid);
+  check bool "and keeps the journey, as boot would refuse" true
+    (Onboarding_status.opening one_broken = Onboarding_status.Needs_journey);
   check bool "the unreadable Keeper is named" true
     (String_util.contains_substring
        (message Onboarding_status.Keeper_persistence one_broken) "broken-one");
   check string "observation does not repair it" "{broken"
-    (read (Filename.concat metadata_dir "broken-one.json"));
-  List.iter (fun name -> Sys.remove (Filename.concat metadata_dir (name ^ ".json")))
-    ["geek-scout"; "glossary-maniac"];
-  let only_broken = Onboarding_status.inspect ~base_path:(Some base) in
-  check bool "history of which nothing reads is invalid" true
-    (condition Onboarding_status.Keeper_persistence only_broken = Onboarding_status.Invalid);
-  check bool "and keeps the journey" true
-    (Onboarding_status.opening only_broken = Onboarding_status.Needs_journey)
+    (read (Filename.concat metadata_dir "broken-one.json"))
 
 (* Only the browser lane is advisory. Pinned per id so moving a check imp needs
    to Advisory fails here instead of silently opening a broken conversation. *)

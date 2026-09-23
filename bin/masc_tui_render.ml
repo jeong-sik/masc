@@ -2350,9 +2350,22 @@ let board_hearth_census_line ~cols (state : state) =
          to fit beside it, which is a different question from the one the row
          asks. *)
       let banded = Magnitude.of_counts census in
-      let entry (name, count, band) =
+      (* Each hearth's text is made printable once, here, and the budget below
+         and [entry] both read that one string. Measured as it arrived, a name
+         with a control byte in it counts that byte as no cells, and the row
+         draws it as a four-cell escape. The name as it arrived stays beside
+         the text for the selection check, since [board_hearth] holds it in
+         that form. *)
+      let hearths =
+        List.map
+          (fun (name, count, band) ->
+             ( name
+             , Printf.sprintf "%s %d" (Terminal_text.single_line name) count
+             , band ))
+          banded
+      in
+      let entry (name, text, band) =
         let selected = Option.equal String.equal state.board_hearth (Some name) in
-        let text = Printf.sprintf "%s %d" (Terminal_text.single_line name) count in
         (* Selection wins over size: which hearth is being read is a different
            axis from how big it is, and the reverse block says the first
            without leaving the second unsaid -- the count is in the text. *)
@@ -2375,31 +2388,49 @@ let board_hearth_census_line ~cols (state : state) =
         Printf.sprintf "   %s" (Masc_tui_message_layout.count_noun total "post")
       in
       let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
-      (* Room for the widest note the row could end on: any hearth but the
-         first may be the one that does not fit. *)
-      let room =
-        max 8
-          (framed_inner_width cols - cells lead - cells tail
-          - cells (dropped_note (List.length census)))
+      let room = framed_inner_width cols - cells lead - cells tail in
+      (* The hearths that fit in [budget] cells, in census order, and how many
+         are left over. *)
+      let take budget =
+        let rec go kept used = function
+          | [] -> (List.rev kept, 0)
+          | ((_, text, _) as hearth) :: rest ->
+              let width =
+                cells text + if kept = [] then 0 else cells census_separator
+              in
+              if used + width > budget then (List.rev kept, 1 + List.length rest)
+              else go (hearth :: kept) (used + width) rest
+        in
+        go [] 0 hearths
       in
-      let rec take kept used = function
-        | [] -> (List.rev kept, 0)
-        | ((name, count, _) as banded_entry) :: rest ->
-            let width =
-              cells (Printf.sprintf "%s %d" name count)
-              + if kept = [] then 0 else cells census_separator
-            in
-            if used + width > room then (List.rev kept, 1 + List.length rest)
-            else take (banded_entry :: kept) (used + width) rest
+      (* The note is drawn only when a hearth is dropped, so it takes room only
+         then. Setting it aside before filling would, at a width that holds
+         every hearth but not the note as well, drop the last hearth and draw
+         "+1" for a hearth that had room.
+
+         So the first pass sets nothing aside. A pass that drops hearths runs
+         again with room for the note that drop needs. Dropping more can add a
+         digit to the count, and a pass whose note is wider than what it set
+         aside runs once more with that width. Each pass sets aside more than
+         the one before, and no note is wider than the one for the whole
+         census, so this ends. *)
+      let rec fit ~note_cells =
+        match take (room - note_cells) with
+        | kept, 0 -> (kept, None)
+        | kept, dropped ->
+            let note = dropped_note dropped in
+            if cells note <= note_cells then (kept, Some note)
+            else fit ~note_cells:(cells note)
       in
-      let kept, dropped = take [] 0 banded in
+      let kept, note = fit ~note_cells:0 in
       let shown =
         List.map entry kept
         |> String.concat (Ansi.dim ^ census_separator ^ Ansi.reset)
       in
       Printf.sprintf "  %s%s%s %s%s%s" Ansi.dim label Ansi.reset shown
-        (if dropped = 0 then ""
-         else Printf.sprintf "%s%s%s" Ansi.dim (dropped_note dropped) Ansi.reset)
+        (match note with
+         | None -> ""
+         | Some note -> Printf.sprintf "%s%s%s" Ansi.dim note Ansi.reset)
         (Printf.sprintf "%s%s%s" Ansi.dim tail Ansi.reset)
 
 let render_board_list (state : state) =

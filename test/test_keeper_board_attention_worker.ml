@@ -1885,7 +1885,8 @@ let test_requested_blocked_recovery_and_sequential_cas_converge () =
          ~candidate:quarantined
          ~partition_id:partition.partition_id
          ~expected_quarantine_id:quarantine.quarantine_id
-         ~requested_at:20.0)
+         ~requested_at:20.0
+         ~requested_by:"operator-test")
   in
   (match requested.status with
    | A.Quarantine { phase = A.Requeue_requested _; _ } -> ()
@@ -1901,6 +1902,7 @@ let test_requested_blocked_recovery_and_sequential_cas_converge () =
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -1960,7 +1962,8 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
          ~candidate:quarantined
          ~partition_id:blocked.partition_id
          ~expected_quarantine_id:quarantine.quarantine_id
-         ~requested_at:30.0)
+         ~requested_at:30.0
+         ~requested_by:"operator-test")
   in
   let execute_calls = ref 0 in
   let execute_before_authorization ~before_dispatch:_ ~before_advance:_ _candidate =
@@ -2060,6 +2063,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2148,7 +2152,8 @@ let test_ready_requested_recovery_fails_closed () =
           ~candidate:quarantined
           ~partition_id:blocked.partition_id
           ~expected_quarantine_id:quarantine.quarantine_id
-          ~requested_at:40.0)
+          ~requested_at:40.0
+          ~requested_by:"operator-test")
      : A.candidate);
   let ready =
     match
@@ -2177,6 +2182,7 @@ let test_ready_requested_recovery_fails_closed () =
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2224,6 +2230,7 @@ let test_stale_quarantine_generation_is_rejected () =
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:blocked.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2244,6 +2251,68 @@ let test_stale_quarantine_generation_is_rejected () =
     when String.equal current.quarantine_id quarantine.quarantine_id ->
     ()
   | _ -> Alcotest.fail "stale generation rejection mutated durable state"
+;;
+
+(* #38060: the requeue row names who asked for it. The command carries the
+   authenticated principal onto [Requeue_requested], finishing the requeue
+   keeps it on [Requeued], the row survives its own codec, and the operator
+   inventory shows it. *)
+let test_requeue_records_requesting_principal () =
+  with_temp_base "board-attention-worker-requeue-principal" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  (match
+     ok
+       "create durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture candidate was not Quarantined"
+  in
+  let request : Q.request =
+    { candidate_id = quarantined.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"alpha"
+        ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-requeuer"
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "manual command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:60.0 ~base_path command with
+   | Ok _ -> ()
+   | Error error -> Alcotest.failf "requeue failed: %s" (Q.execution_error_label error));
+  let requeued = load_one_candidate ~base_path in
+  (match requeued.status with
+   | A.Quarantine { phase = A.Requeued { requested_by; _ }; _ } ->
+     Alcotest.(check string) "Requeued names the requester"
+       "operator-requeuer" requested_by
+   | _ -> Alcotest.fail "candidate did not reach Requeued");
+  Alcotest.(check bool) "requested_by survives the candidate codec" true
+    (ok "decode requeued candidate" (A.candidate_of_json (A.candidate_to_json requeued))
+     = requeued);
+  let inventory = Q.inventory ~base_path ~keeper_names:[ "alpha" ] in
+  match inventory.items with
+  | [ item ] ->
+    Alcotest.(check (option string)) "inventory shows the requester"
+      (Some "operator-requeuer") item.requested_by
+  | items -> Alcotest.failf "expected one inventory item, got %d" (List.length items)
 ;;
 
 let test_same_quarantine_command_cas_loser_converges () =
@@ -2277,6 +2346,7 @@ let test_same_quarantine_command_cas_loser_converges () =
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2346,6 +2416,7 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
       Q.make
         ~keeper_name:"alpha"
         ~raw_partition_id:partition.partition_id
+        ~requested_by:"operator-test"
         request
     with
     | Ok command -> command
@@ -2890,6 +2961,10 @@ let () =
             "same quarantine command CAS loser converges"
             `Quick
             test_same_quarantine_command_cas_loser_converges
+        ; Alcotest.test_case
+            "requeue records the requesting principal"
+            `Quick
+            test_requeue_records_requesting_principal
         ; Alcotest.test_case
             "same-timestamp newer Blocked generation is rejected"
             `Quick

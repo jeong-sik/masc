@@ -462,11 +462,12 @@ let test_quarantine_tool_rejects_retired_schema_field () =
        ]
        @ extra_fields)
   in
-  (match Command.parse_tool_command (command []) with
+  (match Command.parse_tool_command ~requested_by:"operator-test" (command []) with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Command.input_error_to_string error));
   match
     Command.parse_tool_command
+      ~requested_by:"operator-test"
       (command
          [ ( "schema"
            , `String "keeper.board_attention.quarantine.recovery.command.v1" ) ])

@@ -5,7 +5,6 @@ type attempt_failure =
   | Server_error
   | Network_transient
   | Provider_timeout
-  | Access_refused
 
 type failed_attempt =
   | Failed_attempt of { noted_at : float; failure : attempt_failure }

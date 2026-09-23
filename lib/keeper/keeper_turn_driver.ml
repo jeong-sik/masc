@@ -887,17 +887,16 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Capacity_backpressure; retry_after = _ } ->
           ()
-        (* A credential denial says this candidate could not answer, while a
-           sibling may use another credential. Preserve that typed route into
-           the next walk without inventing an expiry or excluding the path. *)
-        | Keeper_runtime_failure_route.Rotate_now
-            { rotate = Keeper_runtime_failure_route.Auth_failed } ->
-          note_failed_attempt Runtime_candidate_backpressure.Access_refused
         (* These candidates answered, or the failure says nothing durable
-           about their ability to answer a later turn. *)
+           about their ability to answer a later turn (RFC-0458 §3.4, §6).
+           A credential denial rotates to the next candidate within this
+           turn only. Held as evidence it would stay until the head itself
+           answered, which it never gets to do while a sibling answers, so
+           every new turn starts again from the head. *)
         | Keeper_runtime_failure_route.Rotate_now
             { rotate =
-                ( Keeper_runtime_failure_route.Model_unavailable
+                ( Keeper_runtime_failure_route.Auth_failed
+                | Keeper_runtime_failure_route.Model_unavailable
                 | Keeper_runtime_failure_route.Resumable_cli_session
                 | Keeper_runtime_failure_route.Candidates_filtered
                 | Keeper_runtime_failure_route.Runtime_exhausted

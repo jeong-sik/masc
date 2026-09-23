@@ -1625,12 +1625,14 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     check bool "transient spawn failure preserves verified unchanged source"
       true (validate_unchanged_context ~expected:(Some released)
         ~snapshot_sha256:frontier.snapshot_sha256 = Ok ());
-    check bool "changed source cannot claim the unchanged-source channel" true
-      (Result.is_error (claim_with_context_frontier
-        ~context_frontier:(Some {frontier with delivery=Canonical_source_guard;
-          snapshot_sha256=String.make 64 'b'; acknowledged_turn=None})
-        ~base_path ~keeper_name ~expected:(Some released) ~client_kind:Codex ~owner_epoch
-        ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:8.));
+    let released_plan = plan_claim ~expected:(Some released) ~client_kind:Codex
+      ~runtime_id:"codex.default" |> Result.get_ok in
+    check bool "changed source is not resumed through the unchanged-source channel" true
+      (match reconcile_canonical_context released_plan ~expected:(Some released)
+               ~snapshot_sha256:(String.make 64 'b') with
+       | {previous_settlement = None; turn_count = 1; _},
+         Context_superseded {reason = Canonical_context_changed; _} -> true
+       | _ -> false);
     let state_path = path ~base_path ~keeper_name |> Result.get_ok in
     let unbound_json = match Yojson.Safe.from_file state_path with
       | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
@@ -1643,11 +1645,89 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
     | Error detail -> fail detail)
 ;;
 
+(* #38328: a settled session whose canonical snapshot moved was refused on
+   every cycle, forever -- [Settled] never becomes [Recovery_required], so the
+   resolve endpoint had nothing to act on and the stored hash never changed. *)
+let test_changed_canonical_context_starts_fresh () =
+  with_workspace "masc-official-client-store-context-" (fun base_path ->
+    let keeper_name = "context" in
+    let runtime_id = "antigravity.gemini" in
+    let stored_hash = String.make 64 'a' in
+    let changed_hash = String.make 64 'b' in
+    let guard snapshot_sha256 =
+      { snapshot_sha256; message_count = 2; delivery = Canonical_source_guard;
+        acknowledged_turn = None } in
+    let claimed = claim_with_context_frontier ~context_frontier:(Some (guard stored_hash))
+      ~base_path ~keeper_name ~expected:None ~client_kind:Antigravity ~owner_epoch
+      ~runtime_id ~tool_surface_sha256:empty_surface ~updated_at:1. |> Result.get_ok in
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"conversation-1" ~updated_at:2. |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"conversation-1" ~updated_at:3. |> Result.get_ok in
+    let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"conversation-1" ~turn_id:"conversation-1:ordinal:1"
+      ~turn_count:starting.turn_count ~updated_at:4. |> Result.get_ok in
+    let settled = settle ~base_path ~keeper_name ~expected:started
+      ~session_id:"conversation-1" ~turn_id:"conversation-1:ordinal:1" ~updated_at:5.
+      |> Result.get_ok in
+    let plan = plan_claim ~expected:(Some settled) ~client_kind:Antigravity ~runtime_id
+      |> Result.get_ok in
+    (* Control: an unchanged snapshot still resumes, so the cases below cannot
+       pass by making every plan fresh. *)
+    (match reconcile_canonical_context plan ~expected:(Some settled) ~snapshot_sha256:stored_hash with
+     | { previous_settlement = Some { session_id = "conversation-1"; _ }; turn_count = 2; _ },
+       Context_unchanged -> ()
+     | _ -> fail "an unchanged snapshot must resume the settled conversation");
+    let fresh, reconciliation =
+      reconcile_canonical_context plan ~expected:(Some settled) ~snapshot_sha256:changed_hash in
+    check bool "a changed snapshot takes the fresh-session plan" true
+      (fresh = { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None });
+    (match reconciliation with
+     | Context_superseded
+         { settled = { session_id = "conversation-1"; turn_id = "conversation-1:ordinal:1" }
+         ; reason = Canonical_context_changed } -> ()
+     | Context_superseded _ | Context_unchanged | Context_fresh_plan ->
+       fail "a changed snapshot must name the superseded conversation and its reason");
+    check bool "without a pending Gate the fresh start is admitted" true
+      (admit_continuation_context ~continuation:None reconciliation = Ok ());
+    let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
+      { client_kind = Antigravity
+      ; runtime_id
+      ; session_id = "conversation-1"
+      ; turn_id = "conversation-1:ordinal:1"
+      ; tool_surface_sha256 = empty_surface
+      ; frame = Keeper_repetition_snapshot.empty
+      }
+    in
+    check bool "a pending Gate continuation still refuses a changed snapshot" true
+      (admit_continuation_context ~continuation:(Some checkpoint) reconciliation
+       = Error Canonical_context_changed);
+    check bool "a pending Gate continuation resumes an unchanged snapshot" true
+      (admit_continuation_context ~continuation:(Some checkpoint) Context_unchanged = Ok ());
+    (match reconcile_canonical_context plan
+             ~expected:(Some { settled with context_frontier = None })
+             ~snapshot_sha256:stored_hash with
+     | { previous_settlement = None; turn_count = 1; _ },
+       Context_superseded { reason = Context_frontier_missing; _ } -> ()
+     | _ -> fail "a settled session without an acknowledged snapshot must start fresh");
+    match claim_with_context_frontier ~context_frontier:(Some (guard changed_hash))
+            ~base_path ~keeper_name ~expected:(Some settled) ~client_kind:Antigravity
+            ~owner_epoch:next_owner_epoch ~runtime_id ~tool_surface_sha256:empty_surface
+            ~updated_at:6. with
+    | Ok { phase = Start { previous_settlement = None; _ }; turn_count = 1;
+           context_frontier = Some { snapshot_sha256; _ }; _ } ->
+      check string "the fresh claim records the new snapshot" changed_hash snapshot_sha256
+    | Ok _ -> fail "the claim after a changed snapshot did not start fresh"
+    | Error detail -> fail ("the claim after a changed snapshot must succeed: " ^ detail))
+;;
+
 let () =
   run
     "official client session store"
     [ ( "durable owner"
       , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
+        ; test_case "changed canonical context starts fresh" `Quick
+            test_changed_canonical_context_starts_fresh
         ; test_case "clear missing state without creating store" `Quick
             test_clear_missing_state_does_not_create_store
         ; test_case "clear removes stale epoch claim" `Quick

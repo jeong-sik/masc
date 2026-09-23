@@ -542,26 +542,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       check int
                         "provider cumulative turn count"
                         73
-                        resumed.turns;
-                      let preserved_prompt = In_channel.with_open_bin
-                        (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
-                      List.iter (fun (system_prompt, initial_messages) ->
-                        match Keeper_turn_driver.run_named
-                          ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
-                          ~base_path ~goal:"New goal must not run with stale context"
-                          ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
-                          ~initial_messages ~hooks ~context:(Agent_core.Context.create ())
-                          ~sw ~net:(Eio.Stdenv.net env) () with
-                        | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
-                          check string "changed context has explicit admission reason"
-                            "official_client_session.context_admission" field
-                        | Error error -> fail (Agent_core.Error.to_string error)
-                        | Ok _ -> fail "Antigravity resumed stale canonical context")
-                        ["changed core instructions", large_history;
-                         "pre-dispatch fixture system prompt", large_history @ [Agent_core.Types.user_msg "new native correction"]];
-                      check string "rejected context never reaches CLI prompt"
-                        preserved_prompt (In_channel.with_open_bin
-                          (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all)))));
+                        resumed.turns))));
       (match List.rev !transmitted_inputs with
        | [ Keeper_official_client_host.Whole_input_transmitted messages;
            Keeper_official_client_host.Held_by_client_session ] ->
@@ -1778,6 +1759,105 @@ let test_fixed_sections_at_capacity_are_refused () =
   | Ok _ -> fail "fixed sections filled the declared capacity"
 ;;
 
+(* #38328: a keeper prompt edit moved the canonical snapshot hash of every
+   settled Antigravity conversation at the next restart, and each later cycle
+   refused with canonical_context_changed. The second run below is the
+   control: the same prompt and history resume the conversation, so the third
+   run cannot start fresh for any reason other than the changed prompt. *)
+let test_changed_system_prompt_starts_a_fresh_conversation () =
+  let base_path = temp_workspace () |> Unix.realpath in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+      Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path ~sandbox_profile:None "antigravity-fixture";
+      let oauth_source = Filename.concat base_path "operator-oauth-token" in
+      write_file ~mode:0o600 oauth_source "operator-oauth-fixture";
+      let cli_path = fixture_script ~base_path in
+      let runtime_path = Filename.concat base_path "runtime.toml" in
+      write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+      let marker_param : Agent_core.Types.tool_param =
+        { name = "marker"
+        ; description = "Fixture marker"
+        ; param_type = String
+        ; required = true
+        }
+      in
+      let tool =
+        Agent_core.Tool.create
+          ~name:"masc_probe"
+          ~description:"Return a deterministic fixture marker"
+          ~parameters:[ marker_param ]
+          (fun _ ->
+            Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+      in
+      let history =
+        [ Agent_core.Types.user_msg "history-00: earlier keeper conversation" ]
+      in
+      let prompt_path = Filename.concat base_path "antigravity-prompt.txt" in
+      let settled_turn () =
+        let session =
+          Keeper_official_client_session_store.load
+            ~base_path
+            ~keeper_name:"antigravity-fixture"
+          |> Result.get_ok
+          |> Option.get
+        in
+        match session.phase with
+        | Settled { turn_id; _ } -> turn_id, session.turn_count
+        | _ -> fail "Antigravity conversation did not settle"
+      in
+      let runtime_snapshot = Runtime.For_testing.snapshot () in
+      Fun.protect
+        ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+        (fun () ->
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              Eio_context.set_env env;
+              Eio_context.with_test_env
+                ~net:(Eio.Stdenv.net env)
+                ~clock:(Eio.Stdenv.clock env)
+                ~mono_clock:(Eio.Stdenv.mono_clock env)
+                ~sw
+                (fun () ->
+                  Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                  let run ~system_prompt =
+                    match
+                      Keeper_turn_driver.run_named
+                        ~runtime_id:"antigravity.gemini"
+                        ~keeper_name:"antigravity-fixture"
+                        ~base_path
+                        ~goal:"Call masc_probe once"
+                        ~system_prompt
+                        ~tools:[ tool ]
+                        ~agent_core_tools:[ tool ]
+                        ~initial_messages:history
+                        ~context:(Agent_core.Context.create ())
+                        ~sw
+                        ~net:(Eio.Stdenv.net env)
+                        ()
+                    with
+                    | Ok _ -> ()
+                    | Error error -> fail (Agent_core.Error.to_string error)
+                  in
+                  run ~system_prompt:"keeper prompt before the edit";
+                  check (pair string int) "the first turn starts a conversation"
+                    ("conversation-antigravity-fixture:ordinal:1", 1)
+                    (settled_turn ());
+                  run ~system_prompt:"keeper prompt before the edit";
+                  check (pair string int) "an unchanged prompt resumes it"
+                    ("conversation-antigravity-fixture:ordinal:73", 73)
+                    (settled_turn ());
+                  run ~system_prompt:"keeper prompt after the edit";
+                  check (pair string int) "a changed prompt starts a fresh conversation"
+                    ("conversation-antigravity-fixture:ordinal:1", 1)
+                    (settled_turn ());
+                  let sent = In_channel.with_open_bin prompt_path In_channel.input_all in
+                  check bool "the fresh start sends the history again" true
+                    (String_util.contains_substring sent "history-00"))))))
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -1786,6 +1866,10 @@ let () =
             "projects MCP tool and settles"
             `Quick
             test_keeper_projects_mcp_tool_and_settles
+          ; test_case
+              "a changed system prompt starts a fresh conversation"
+              `Quick
+              test_changed_system_prompt_starts_a_fresh_conversation
           ; test_case
               "blank result starts fresh next turn"
               `Quick

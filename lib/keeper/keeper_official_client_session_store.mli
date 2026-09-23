@@ -170,6 +170,20 @@ type claim_plan =
   ; required_tool_surface_sha256 : string option
   }
 
+(** How a settled session's canonical snapshot compares with the one this
+    execution would send. [Context_fresh_plan]: the plan was already fresh, so
+    nothing was compared. [Context_unchanged]: the snapshot matches and the
+    session resumes. [Context_superseded]: the settled session named here
+    cannot show an unchanged snapshot, for [reason], and the plan became
+    fresh. *)
+type context_reconciliation =
+  | Context_fresh_plan
+  | Context_unchanged
+  | Context_superseded of
+      { settled : settlement
+      ; reason : context_admission_error
+      }
+
 type claim_error =
   | Invalid_runtime_id
   | Input_recovery_required of Keeper_internal_error.official_client_recovery
@@ -277,6 +291,29 @@ val validate_completed_continuation :
 val validate_unchanged_context : expected:t option -> snapshot_sha256:string ->
   (unit, context_admission_error) result
 val context_admission_error_to_string : context_admission_error -> string
+
+val context_admission_error_code : context_admission_error -> string
+(** Stable snake_case name of the reason, for log lines. *)
+
+val reconcile_canonical_context :
+  claim_plan -> expected:t option -> snapshot_sha256:string ->
+  claim_plan * context_reconciliation
+(** Fold a changed canonical snapshot into the plan, as
+    [reconcile_tool_surface] does for a moved tool surface. When the plan
+    resumes a settled session whose acknowledged snapshot differs from
+    [snapshot_sha256], or that has no acknowledged snapshot, the plan becomes
+    the fresh-session plan instead of a refusal. A refusal stranded the
+    session: [Settled] never becomes [Recovery_required], so the resolve
+    endpoint had nothing to act on (#38328). Only the
+    [Canonical_source_guard] delivery compares snapshots; [claim_with_context_frontier]
+    applies this again for that delivery. *)
+
+val admit_continuation_context :
+  continuation:Keeper_semantic_execution.official_client_checkpoint option ->
+  context_reconciliation ->
+  (unit, context_admission_error) result
+(** An unfinished Gate continuation must resume the session that opened the
+    Gate, so a superseded context stays a refusal while one is pending. *)
 
 val claim_with_context_frontier :
   context_frontier:context_frontier option ->

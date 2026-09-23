@@ -159,6 +159,14 @@ type claim_plan =
   ; required_tool_surface_sha256 : string option
   }
 
+type context_reconciliation =
+  | Context_fresh_plan
+  | Context_unchanged
+  | Context_superseded of
+      { settled : settlement
+      ; reason : context_admission_error
+      }
+
 type claim_error =
   | Invalid_runtime_id
   | Input_recovery_required of Keeper_internal_error.official_client_recovery
@@ -1073,6 +1081,45 @@ let validate_unchanged_context ~expected ~snapshot_sha256 =
     else Error Canonical_context_changed
   | Some _ | None -> Error Context_frontier_missing
 
+let context_admission_error_code = function
+  | Context_frontier_missing -> "context_frontier_missing"
+  | Canonical_context_changed -> "canonical_context_changed"
+
+(* The same trap [reconcile_tool_surface] closes, on the canonical snapshot.
+   A client with no replaceable configuration channel binds its settled
+   session to a hash of the system prompt and history it started with. A
+   keeper prompt edit moves that hash at the next restart, and a refusal here
+   never ends: [Settled] is a healthy phase, so nothing marks it
+   [Recovery_required], the resolve endpoint has no id to act on, and the
+   stored hash is never rewritten. Every cycle refused until an operator moved
+   the durable file aside (#38328).
+
+   What the prior session settled against no longer describes this
+   execution, so the plan becomes the fresh-session plan. A settled binding
+   with no acknowledged frontier cannot show that its history is unchanged,
+   and strands the same way, so it takes the same branch. The fresh start
+   drops only the turns the vendor conversation alone holds; MASC's
+   checkpoint, memory and recorded effects are not part of that session. *)
+let reconcile_canonical_context plan ~expected ~snapshot_sha256 =
+  match plan.previous_settlement with
+  | None -> plan, Context_fresh_plan
+  | Some settled ->
+    (match validate_unchanged_context ~expected ~snapshot_sha256 with
+     | Ok () -> plan, Context_unchanged
+     | Error reason ->
+       ( { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None }
+       , Context_superseded { settled; reason } ))
+
+(* An unfinished Gate continuation has to land in the session that opened the
+   Gate; [validate_continuation] already refuses any other session. A fresh
+   start would drop that session, so a changed context stays a refusal here. *)
+let admit_continuation_context ~continuation reconciliation =
+  match continuation, reconciliation with
+  | Some (_ : Keeper_semantic_execution.official_client_checkpoint),
+    Context_superseded { reason; _ } -> Error reason
+  | Some _, (Context_fresh_plan | Context_unchanged)
+  | None, (Context_fresh_plan | Context_unchanged | Context_superseded _) -> Ok ()
+
 let context_admission_error_to_string = function
   | Context_frontier_missing ->
     "context_frontier_missing: retained vendor conversation has no canonical context provenance; unchanged history cannot be verified"
@@ -1089,14 +1136,18 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
     |> Result.map_error claim_error_to_string
   in
   let plan = reconcile_tool_surface plan ~tool_surface_sha256 in
-  let* () = match context_frontier, plan.previous_settlement with
-    | Some {delivery=Canonical_source_guard; snapshot_sha256; _}, Some _ ->
-      validate_unchanged_context ~expected ~snapshot_sha256
-      |> Result.map_error context_admission_error_to_string
-    | Some {delivery=(Prepared_start_context | Replaced_configuration | Canonical_source_guard
-                     | Held_by_vendor_session); _}, None
-    | Some {delivery=(Prepared_start_context | Replaced_configuration | Held_by_vendor_session); _}, Some _
-    | None, _ -> Ok ()
+  (* Applied again here, as [reconcile_tool_surface] is, so the durable claim
+     and the adapter's conversation mode come from the same plan. A Gate
+     continuation is refused before this point by the adapter
+     ([admit_continuation_context]). *)
+  let plan = match context_frontier with
+    | Some {delivery=Canonical_source_guard; snapshot_sha256; _} ->
+      let plan, (_ : context_reconciliation) =
+        reconcile_canonical_context plan ~expected ~snapshot_sha256 in
+      plan
+    | Some {delivery=(Prepared_start_context | Replaced_configuration
+                     | Held_by_vendor_session); _}
+    | None -> plan
   in
   let last_recovery_resolution =
     Option.bind expected (fun binding -> binding.last_recovery_resolution)

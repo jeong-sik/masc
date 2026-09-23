@@ -341,11 +341,14 @@ val normalize_requeued_consumed :
 type judgment_delivery_outcome =
   | Delivered of candidate
   | Candidate_absent
-      (** The named candidate is not in the live ledger — a retire moves the
+      (** The named candidate is not in the live ledger and no row the
+          decoder refused names it or hides its name — a retire moves the
           whole store aside as one directory and never leaves a tombstone, so
-          this is indistinguishable from any other cause of absence and is
-          treated the same: the delivery cannot succeed on a retry of the
-          identical request, because there is no row left to update. *)
+          the delivery cannot succeed on a retry of the identical request,
+          because there is no row left to update. A refused row that names the
+          candidate, or whose [candidate_id] cannot be read, makes the result
+          an [Error] instead: the candidate may still hold an undelivered
+          judgment. *)
 
 val apply_judgment_and_deliver :
   base_path:string ->

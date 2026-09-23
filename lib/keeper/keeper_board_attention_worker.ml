@@ -711,14 +711,14 @@ let is_not_relevant_completion partition =
 ;;
 
 (* [Candidate_absent] means the candidate this partition's [Completed] item
-   names is not in the live ledger. A retire moves the whole candidate store
-   aside as one directory (scripts/check-runtime-deployment-preflight.sh); it
-   never leaves a tombstone the live ledger can read back, so this cannot
-   distinguish "retired" from any other cause a candidate is gone -- both
-   mean the same thing for this delivery: it cannot succeed on a retry of the
-   identical request, because the row it would update no longer exists.
-   Settling the partition here without one is the terminal outcome, not a
-   fallback (masc, board attention finalizer, 2026-08-16). *)
+   names is not in the live ledger and no unreadable row there names it or
+   hides its name. A retire moves the whole candidate store aside as one
+   directory (scripts/check-runtime-deployment-preflight.sh) and leaves no
+   tombstone, so the delivery cannot succeed on a retry of the identical
+   request: the row it would update no longer exists. Settling the partition
+   here without one is the terminal outcome, not a fallback. An unreadable
+   row for the candidate comes back as [Error], and the partition stays
+   [Completed] with its judgment. *)
 let deliver_and_settle_completed ~base_path ~keeper_name partition =
   match partition.Partition.state with
   | Partition.Completed { item; _ } ->

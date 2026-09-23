@@ -1452,23 +1452,49 @@ let candidate_of_json json =
   Ok candidate
 ;;
 
+type rejected_row_identity =
+  | Rejected_candidate_id of string
+    (** The row's [candidate_id] field decodes as a string: the refused row
+        belongs to that candidate. *)
+  | Rejected_unidentified
+    (** The row is not JSON, not an object, or its [candidate_id] does not
+        decode, so it could belong to any candidate. *)
+
+type rejected_row =
+  { rejected_line : int
+  ; rejected_detail : string
+  ; rejected_identity : rejected_row_identity
+  }
+
 (* One unreadable row used to fail the whole read, and the write path reads
    before it writes — so compaction could never run and the row stayed
    forever. Measured 2026-08-28: 17 of 575 rows carried a field a hard cut had
    removed, and those 17 stopped all 10 keeper ledgers, 402 WARN/day.
 
-   This ledger is a projection. [latest_candidates] keeps the newest row per
-   candidate_id and the board itself is the source, so a dropped row costs a
-   cached candidate, not durable truth. Reading the rest is worth more than
-   refusing everything.
-
-   Rejected rows are returned, never swallowed: the caller logs them, and the
-   next write rewrites the store from the rows that parsed (see
-   [needs_compaction]). *)
+   [latest_candidates] keeps the newest readable row per candidate_id, and the
+   other candidates stay usable. A refused row can still hold an undelivered
+   judgment, so it is returned with the [candidate_id] it carries: delivery
+   treats it as unproven absence, and a store holding one stays append-only
+   (see [needs_compaction]). *)
 type parse_report =
   { rows : candidate list
-  ; rejected : (int * string) list
+  ; rejected : rejected_row list
   }
+
+(* Reads only the [candidate_id] of a row the full decoder refused, through
+   the same [assoc]/[field]/[string_json] steps [candidate_of_json] uses. *)
+let rejected_row_identity json =
+  let context = "rejected board attention candidate" in
+  match assoc ~context json with
+  | Error _ -> Rejected_unidentified
+  | Ok fields ->
+    (match field ~context "candidate_id" fields with
+     | Error _ -> Rejected_unidentified
+     | Ok candidate_id_json ->
+       (match string_json ~context candidate_id_json with
+        | Ok candidate_id -> Rejected_candidate_id candidate_id
+        | Error _ -> Rejected_unidentified))
+;;
 
 let parse_rows content =
   let lines = String.split_on_char '\n' content in
@@ -1484,13 +1510,21 @@ let parse_rows content =
            (match candidate_of_json json with
             | Ok candidate -> loop (line_number + 1) (candidate :: rows) rejected rest
             | Error detail ->
-              loop (line_number + 1) rows ((line_number, detail) :: rejected) rest)
+              let row =
+                { rejected_line = line_number
+                ; rejected_detail = detail
+                ; rejected_identity = rejected_row_identity json
+                }
+              in
+              loop (line_number + 1) rows (row :: rejected) rest)
          | exception Yojson.Json_error detail ->
-           loop
-             (line_number + 1)
-             rows
-             ((line_number, "invalid JSON: " ^ detail) :: rejected)
-             rest)
+           let row =
+             { rejected_line = line_number
+             ; rejected_detail = "invalid JSON: " ^ detail
+             ; rejected_identity = Rejected_unidentified
+             }
+           in
+           loop (line_number + 1) rows (row :: rejected) rest)
   in
   loop 1 [] [] lines
 ;;
@@ -1527,7 +1561,8 @@ let latest_candidates rows =
 let report_rejected_rows ~context rejected =
   match rejected with
   | [] -> ()
-  | (line_number, detail) :: _ ->
+  | { rejected_line = line_number; rejected_detail = detail; rejected_identity = _ }
+    :: _ ->
     Log.Keeper.warn
       "candidate ledger %s: skipped %d unreadable row(s); first is line %d: %s"
       context
@@ -1681,7 +1716,12 @@ let load_candidates_with_rejections ~base_path ~keeper_name =
   in
   let { rows; rejected } = parse_rows snapshot.Fs_compat.bytes in
   report_rejected_rows ~context:path rejected;
-  Ok (latest_candidates rows, rejected)
+  Ok
+    ( latest_candidates rows
+    , List.map
+        (fun { rejected_line; rejected_detail; rejected_identity = _ } ->
+           rejected_line, rejected_detail)
+        rejected )
 ;;
 
 let load_candidates ~base_path ~keeper_name =
@@ -2300,20 +2340,66 @@ type judgment_delivery_outcome =
   | Delivered of candidate
   | Candidate_absent
       (** The candidate this partition's [Completed] item names is not in the
-          live ledger. A retire moves the whole candidate store aside as one
+          live ledger, and every row of that ledger decoded or names another
+          candidate. A retire moves the whole candidate store aside as one
           directory (scripts/check-runtime-deployment-preflight.sh); it never
-          leaves a tombstone the live ledger can read back, so this cannot
-          distinguish "retired" from any other cause a candidate is gone —
-          both mean the same thing for this delivery: it cannot succeed on a
-          retry of the identical request, because the row it would update no
-          longer exists. Every other failure below stays a typed [Error],
-          because those represent a live candidate in an unexpected state,
-          which is a bug this function must keep reporting loudly rather than
-          quietly resolve. *)
+          leaves a tombstone the live ledger can read back, so the delivery
+          cannot succeed on a retry of the identical request, because the row
+          it would update no longer exists. A row the decoder refused that
+          names this candidate, or whose candidate cannot be read, is not
+          absence: the candidate may still carry an undelivered judgment, so
+          that case is an [Error] and the partition stays. Every other failure
+          below stays a typed [Error], because those represent a live
+          candidate in an unexpected state, which is a bug this function must
+          keep reporting loudly rather than quietly resolve. *)
 
-let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
+(* [load_candidates] drops rows it cannot decode, so a miss there does not
+   prove the candidate is gone. The miss is confirmed on a whole-store read
+   that returns the refused rows with the [candidate_id] each one carries. *)
+let find_candidate_for_delivery ~base_path ~keeper_name ~candidate_id =
   let* candidates = load_candidates ~base_path ~keeper_name in
   match find_candidate candidates candidate_id with
+  | Some candidate -> Ok (Some candidate)
+  | None ->
+    let path = candidate_path ~base_path ~keeper_name in
+    let* snapshot =
+      Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+      |> snapshot_result ~path
+    in
+    let { rows; rejected } = parse_rows snapshot.Fs_compat.bytes in
+    (match find_candidate (latest_candidates rows) candidate_id with
+     | Some candidate -> Ok (Some candidate)
+     | None ->
+       let blocking =
+         List.find_opt
+           (fun { rejected_identity; rejected_line = _; rejected_detail = _ } ->
+              match rejected_identity with
+              | Rejected_candidate_id rejected_id -> String.equal rejected_id candidate_id
+              | Rejected_unidentified -> true)
+           rejected
+       in
+       (match blocking with
+        | None -> Ok None
+        | Some { rejected_line; rejected_detail; rejected_identity } ->
+          let owner =
+            match rejected_identity with
+            | Rejected_candidate_id _ -> "names this candidate"
+            | Rejected_unidentified -> "has no readable candidate_id"
+          in
+          Error
+            (Printf.sprintf
+               "Board attention candidate %s is not readable, so its absence is \
+                unproven: ledger %s line %d %s and was refused: %s"
+               candidate_id
+               path
+               rejected_line
+               owner
+               rejected_detail)))
+;;
+
+let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
+  let* found = find_candidate_for_delivery ~base_path ~keeper_name ~candidate_id in
+  match found with
   | None -> Ok Candidate_absent
   | Some candidate ->
     let* judged_candidate =

@@ -2761,6 +2761,97 @@ let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_
       "the terminalized partition was offered for settlement again (infinite retry)"
 ;;
 
+(* A ledger row the decoder refuses is dropped from [load_candidates], which
+   used to read as [Candidate_absent] and settle a Relevant judgment that was
+   never delivered. Here every row for the candidate carries an unsupported
+   schema_version: settlement must fail, keep the partition Completed with its
+   judgment, and deliver once the row is readable again. *)
+let test_settle_completed_snapshot_keeps_a_partition_whose_candidate_row_is_unreadable
+  ()
+  =
+  with_temp_base "board-attention-worker-candidate-unreadable" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  ignore
+    (ok
+       "create Ready root"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" [ persisted ])
+      : int);
+  let attempt = provenance "candidate-unreadable" in
+  let execute ~before_dispatch ~before_advance _prepared =
+    ok "bind" (before_dispatch attempt);
+    ignore before_advance;
+    Ok (judgment attempt J.Relevant)
+  in
+  (match
+     ok
+       "judge to Completed"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "fixture did not reach Completed");
+  let ledger_path =
+    Filename.concat
+      (Filename.concat
+         (Common.masc_dir_from_base_path ~base_path)
+         "board_attention_candidates")
+      "alpha.jsonl"
+  in
+  let replace_ledger bytes =
+    let staged = ledger_path ^ ".replace" in
+    Out_channel.with_open_bin staged (fun channel -> output_string channel bytes);
+    Sys.rename staged ledger_path
+  in
+  let original = In_channel.with_open_bin ledger_path In_channel.input_all in
+  let unsupported_schema line =
+    match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      Yojson.Safe.to_string
+        (`Assoc
+            (("schema_version", `Int (-1)) :: List.remove_assoc "schema_version" fields))
+    | _ -> Alcotest.fail "candidate ledger row is not an object"
+  in
+  let corrupted =
+    String.split_on_char '\n' original
+    |> List.filter (fun line -> not (String.equal (String.trim line) ""))
+    |> List.map (fun line -> unsupported_schema line ^ "\n")
+    |> String.concat ""
+  in
+  replace_ledger corrupted;
+  Alcotest.(check int)
+    "the corrupt row is not a readable candidate"
+    0
+    (ok "load corrupt ledger" (A.load_candidates ~base_path ~keeper_name:"alpha")
+     |> List.length);
+  (match W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" with
+   | Error (_ : string) -> ()
+   | Ok (W.Partition_settled _) ->
+     Alcotest.fail "an unreadable candidate row was settled as absent"
+   | Ok W.No_completed_partition ->
+     Alcotest.fail "the Completed partition disappeared before settlement");
+  (match (load_one_partition ~base_path).state with
+   | P.Completed { item = { judgment = kept; _ }; _ } ->
+     Alcotest.(check string) "the judgment stays on the partition" attempt.slot_id kept.slot_id
+   | _ -> Alcotest.fail "partition with an unreadable candidate left Completed");
+  Alcotest.(check string)
+    "the unreadable rows stay on disk"
+    corrupted
+    (In_channel.with_open_bin ledger_path In_channel.input_all);
+  replace_ledger original;
+  (match
+     ok
+       "settlement after the row is readable again"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha")
+   with
+   | W.Partition_settled { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
+   | W.No_completed_partition -> Alcotest.fail "the kept judgment was not settled");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
+  | _ -> Alcotest.fail "the kept judgment was not delivered after repair"
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_worker"
@@ -2926,6 +3017,10 @@ let () =
             "settle_completed_snapshot terminalizes a partition whose candidate was retired"
             `Quick
             test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired
+        ; Alcotest.test_case
+            "settle_completed_snapshot keeps a partition whose candidate row is unreadable"
+            `Quick
+            test_settle_completed_snapshot_keeps_a_partition_whose_candidate_row_is_unreadable
         ; Alcotest.test_case
             "reconcile_quarantines settles a blocked partition whose candidate was retired"
             `Quick

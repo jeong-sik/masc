@@ -1892,7 +1892,6 @@ type overview_snapshot = {
   ov_keeper_liveness: keeper_liveness_counts;
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
-  ov_top_attention: attention_item option;
   ov_generated_at: string;
 }
 

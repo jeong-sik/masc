@@ -46,7 +46,16 @@ val with_purge_then_catch_up
     example for unread atoms), a lane-level error, and a raise. The purge
     cancelled the catch-up that was running and discarded the wakes that
     arrived meanwhile; without this the backlog waits for the Keeper's next
-    turn, and a purge retry is refused again. *)
+    turn, and a purge retry is refused again.
+
+    On [Error Purge_already_in_progress] the submission is always discarded,
+    because the other purge still holds the exclusion; that purge submits
+    its own catch-up when it ends.
+
+    Call from the lane's owner domain ([Eio_context.run_on_owner_domain]),
+    as {!Keeper_memory_lane.with_librarian_purge} and
+    {!Keeper_memory_lane.submit} require. This function does not cross
+    domains itself. *)
 
 val unlaunched_keeper_names
   :  persisted:string list

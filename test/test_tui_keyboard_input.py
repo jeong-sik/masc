@@ -13543,8 +13543,9 @@ def fusion_live_reload_interaction(
 
 
 # The hook's per-call observation names the keeper turn (total_turns + 1)
-# the session-numbered call below belongs to; without it the row would say
-# "turn ?". The session ordinal (7) and the keeper turn (42) differ, so a
+# the session-numbered call below belongs to; without it the row would name
+# the turn with no number. The session ordinal (7) and the keeper turn (42)
+# differ, so a
 # needle can tell which of the two numbers a row drew.
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"

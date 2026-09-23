@@ -2748,6 +2748,18 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]
 ;;
 
+(* The Keeper GitHub tab draws what the config stores and what this host
+   resolves from it. The second row is there to show a difference, and on a
+   plain login there is none: the live roster drew "signed in as
+   pangyo-preachers · scopes: gist, read:org, repo, workflow" twice, once
+   under each label. The rows are compared now, so agreement is one row
+   carrying both labels and only a difference costs two. *)
+let test_the_github_identity_rows_are_compared_before_they_are_drawn () =
+  check int "the two readings are compared" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"github_identity_lines" ~callee:"String.equal")
+;;
+
 (* A failed turn used to be drawn twice: the server records it in the
    transcript, the pane records it in the session, and the filter that drops
    session rows the transcript holds could only see the role. Every error row
@@ -3107,6 +3119,10 @@ let () =
           "renderers sanitize untrusted terminal fields"
           `Quick
           test_renderers_sanitize_untrusted_terminal_fields;
+        test_case
+          "the GitHub identity rows are compared before they are drawn"
+          `Quick
+          test_the_github_identity_rows_are_compared_before_they_are_drawn;
         test_case
           "the session row filter reads the transcript"
           `Quick

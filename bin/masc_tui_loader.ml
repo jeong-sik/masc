@@ -1806,10 +1806,26 @@ let github_identity_lines (json : Yojson.Safe.t) : string list =
         | Some _ | None -> "  token env: (none)"
       in
       let line label = function Some status -> [ "  " ^ label ^ ": " ^ status ] | None -> [] in
+      (* The second reading is here to show a difference: what the keeper's
+         config stores, against what this host resolves from it. They agree
+         on every keeper whose login is plain, and then the two rows are the
+         same sentence twice -- on the live roster code-reviewer drew
+         "signed in as pangyo-preachers · scopes: gist, read:org, repo,
+         workflow" on both. Agreement is one row carrying both labels, so a
+         reader is never left wondering whether the effective side was read
+         at all; a difference is still two rows. *)
+      let stored = auth_status (List.assoc_opt "stored" fields) in
+      let effective = auth_status (List.assoc_opt "effective" fields) in
+      let identity_lines =
+        match stored, effective with
+        | Some stored_status, Some effective_status
+          when String.equal stored_status effective_status ->
+            line ("stored and " ^ effective_label) stored
+        | Some _, _ | None, _ -> line "stored" stored @ line effective_label effective
+      in
       let lines =
         [ Printf.sprintf "GitHub (%s)" hostname ]
-        @ line "stored" (auth_status (List.assoc_opt "stored" fields))
-        @ line effective_label (auth_status (List.assoc_opt "effective" fields))
+        @ identity_lines
         @ [ token_env_line ]
         @ (match string_field "config_dir" with Some dir -> [ "  config: " ^ dir ] | None -> [])
       in

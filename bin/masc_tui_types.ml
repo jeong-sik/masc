@@ -1978,6 +1978,47 @@ type overview_quota_reading =
   | Quota_read of Tui_decode.runtime_option list
   | Quota_failed of string
 
+(** One open pull request as [GET /api/v1/repositories/pulls] reports it
+    (RFC-0465). The check and review words are parsed at decode; a word this
+    build cannot name makes the row undecodable rather than a default. *)
+type pull_checks = Pull_checks_passing | Pull_checks_failing | Pull_checks_running | Pull_checks_none
+type pull_review = Pull_review_approved | Pull_review_changes_requested | Pull_review_waiting | Pull_review_none
+
+type open_pull = {
+  op_number: int;
+  op_title: string;
+  op_head_branch: string;
+  op_draft: bool;
+  op_checks: pull_checks;
+  op_review: pull_review;
+}
+
+type repository_pulls_reading =
+  | Repo_pulls_read of { pulls: open_pull list; undecodable: int }
+  | Repo_pulls_failed of string
+      (** The server's failure kind, with its detail when it carried one. *)
+  | Repo_pulls_not_read
+  | Repo_not_github
+
+type repository_pulls_row = { rp_repository: string; rp_state: repository_pulls_reading }
+
+type pulls_reader =
+  | Pulls_reader_ready of string
+  | Pulls_reader_not_ready of string
+      (** Why the server is not reading: not declared, the Keeper is missing,
+          or its token cannot be read. *)
+
+type overview_pulls_reading =
+  | Overview_pulls_unread
+  | Overview_pulls_read of {
+      reader: pulls_reader;
+      repositories_error: string option;
+          (** The server could not list the registered repositories; the rows
+              are the last list it could, so they may be out of date. *)
+      repositories: repository_pulls_row list;
+    }
+  | Overview_pulls_failed of string
+
 (** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
     briefing writes [null] for a Keeper with no registry entry (an offline
     Keeper that never booted this process), which is a different fact from a
@@ -2754,6 +2795,18 @@ type surface =
   | Tools
   | System_logs
 
+(** The Keeper roster or one Keeper's detail: where the selected Keeper is
+    the one on screen, so a key can be read as meaning that Keeper. Every
+    constructor is named so a new surface has to decide. *)
+let shows_selected_keeper = function
+  | Keepers (Keeper_list | Keeper_detail) -> true
+  | Keepers (Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)
+  | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
+  | Planning | Schedules | Verification | Harness | Fusion | Repositories
+  | Code | Changes | Connectors | Runtime | Config | Resources | Tools
+  | System_logs ->
+      false
+
 (** The Activity screen is two surfaces under one tab strip: the event
     feed and the system logs, reached from each other with 1 and 2. A
     rule about "the Activity screen" reads this rather than [Acting]
@@ -2820,6 +2873,7 @@ type surface_needs = {
   needs_operator_approvals : bool;
   needs_asks : bool;
   needs_runtime_quota : bool;
+  needs_repository_pulls : bool;
 }
 
 let nothing =
@@ -2833,6 +2887,7 @@ let nothing =
     needs_operator_approvals = false;
     needs_asks = false;
     needs_runtime_quota = false;
+    needs_repository_pulls = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -2857,7 +2912,11 @@ and surface_needs_of_surface : surface -> surface_needs = function
      43 KB and answers in under two milliseconds on the live runtime, and
      only this surface draws the windows beside the Keepers they stop. *)
   | Overview ->
-      { nothing with needs_transport = true; needs_runtime_quota = true }
+      { nothing with
+        needs_transport = true
+      ; needs_runtime_quota = true
+      ; needs_repository_pulls = true
+      }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
   | Acting -> nothing
@@ -2911,6 +2970,8 @@ let surface_needs_delta ~previous ~next =
   ; needs_asks = next.needs_asks && not previous.needs_asks
   ; needs_runtime_quota =
       next.needs_runtime_quota && not previous.needs_runtime_quota
+  ; needs_repository_pulls =
+      next.needs_repository_pulls && not previous.needs_repository_pulls
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -5536,6 +5597,7 @@ type state = {
      picker's [runtime_catalog] so a refresh behind the Overview never moves
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
+  mutable overview_pulls: overview_pulls_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
   mutable runtime_assignments: Tui_decode.runtime_assignment list;
   mutable runtime_catalog_error: string option;
@@ -5853,6 +5915,16 @@ type state = {
   mutable connector_unbind_all_armed:
     (string * Masc_tui_connector_unbind.target list) option;
   mutable connector_unbind_all_inflight: bool;
+  (* A Keeper the operator just paused or shut down, waiting for a fresh
+     connector read to learn whether it still holds bindings to offer to
+     remove. *)
+  mutable connector_unbind_offer_pending: string list;
+  (* The offer after a pause or shutdown, while it waits for its one key.
+     Separate from the unbind-all arm: that arm answers [U], and on the
+     Keeper list [U] is the runtime picker. *)
+  mutable connector_unbind_offer: Masc_tui_connector_unbind.offer option;
+  (* Frames the terminal accepted with changed output. *)
+  mutable frames_presented: int;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
@@ -7658,6 +7730,7 @@ let create_state
   runtime_pick_cursor = 0;
   runtime_catalog = [];
   overview_quota = Quota_unread;
+  overview_pulls = Overview_pulls_unread;
   runtime_lanes = [];
   runtime_assignments = [];
   runtime_catalog_error = None;
@@ -7837,6 +7910,9 @@ let create_state
   connector_unbind_armed = None;
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
+  connector_unbind_offer_pending = [];
+  connector_unbind_offer = None;
+  frames_presented = 0;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;
@@ -8850,7 +8926,10 @@ let selected_memory_keeper (state : state) =
   let rows = visible_memory_keepers state in
   List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
 
-let memory_overview_scrolled ?cursor (state : state) =
+(* [header_rows] is how many rows the fleet header above the sort row takes.
+   The renderer wraps it to the frame, so only it knows the number; it passes
+   the length of the rows it draws ([Masc_tui_render_memory.memory_overview_scrolled]). *)
+let memory_overview_scrolled ~header_rows ?cursor (state : state) =
   let keepers = visible_memory_keepers state in
   let count = List.length keepers in
   let cursor = Option.value cursor ~default:state.memory_health_cursor in
@@ -8882,8 +8961,8 @@ let memory_overview_scrolled ?cursor (state : state) =
   { sc_count = count
   ; sc_chrome =
       Masc_tui_frame.chrome_rows
-      (* Totals, Librarian, legend, sort, divider, headings, divider. *)
-      + 7 + context_rows
+      (* The fleet header, then legend, sort, divider, headings, divider. *)
+      + header_rows + 5 + context_rows
       + (if memory_overview_query state <> "" then 1 else 0)
       + (if Option.is_some state.memory_health_error then 2 else 0)
       + refused_rows
@@ -9813,7 +9892,10 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         listing ~error:state.memory_facts_error
           (List.length (memory_fact_rows state))
       else
-        Some (memory_overview_scrolled state)
+        (* The overview's header rows are wrapped to the terminal width, which
+           this module does not read. [Masc_tui.scrolled_surface] answers it
+           from the renderer, as it does for Tools. *)
+        None
   | Changes when Option.is_some (opened_file_change state) -> None
   | Changes ->
       Some

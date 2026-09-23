@@ -99,7 +99,7 @@ let inspect_keeper_toml_content ~(path : string) content
         { keeper_path = path
         ; failing_path = path
         ; kind = Invalid_name
-        ; detail = Printf.sprintf "invalid keeper name '%s'" name
+        ; detail = Keeper_config_text.invalid_name_error name
         }
     else
       let id = Ids.Keeper_id.generate ~name ~path in

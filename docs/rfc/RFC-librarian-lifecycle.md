@@ -248,7 +248,7 @@ claude_code·antigravity 턴 뒤의 회차는 메시지를 중앙값 1개 받았
 | Memory OS RFC §3 | "librarian 이 올바르게 동작하는 한 overflow 상황은 존재하지 않는다" | 그렇게 만드는 장치가 코드에 없다. 창을 고르는 파일(`keeper_carried_front`·`keeper_carried_range`·`keeper_model_input_ledger`·`keeper_turn_driver_try_provider`·`keeper_unified_turn`)에 Librarian 참조가 0건이다 |
 | Memory OS RFC §3.5 | 저널 줄에 `watermark` 를 남긴다 | 라이브 저널의 커밋 줄 키는 `change, dropped, outcome, recorded_at, revision, source` 뿐이다. 구현된 적이 없다 |
 | 창 RFC §13.6 | "고를 것이 없고 틀릴 수도 없다" | 위치가 안 읽은 구간을 넘어가면 틀린다. 읽은 데까지만 옮길 때 참이다(§4.5 I1) |
-| 창 RFC §13.6 | 도구 결과 마커는 "지금은 거절 경로의 `last_resort` 에서만 켜진다" | 끝난 턴의 도구 결과는 이미 조립 때 마커로 나간다(RFC-0363, 기본 켜짐). `last_resort` 가 바꾸는 것은 지금 턴의 결과다 |
+| 창 RFC §13.6 | 도구 결과 마커는 "지금은 거절 경로에서만 켜진다" | 끝난 턴의 도구 결과는 이미 조립 때 마커로 나간다(RFC-0363, 기본 켜짐). 크기 거절 뒤의 강등(`Current_turn_demoted`, 창 RFC §10.4)이 바꾸는 것은 지금 턴의 결과다 |
 
 Memory OS RFC 의 두 문장은 §8 의 문서 PR 에서 고친다. 창 RFC 의 세 문장은 아직 머지되지 않은 Draft #37008 의 것이라 그 소유자에게 요청한다.
 
@@ -484,7 +484,7 @@ flowchart TD
 | 도구 이름과 성패 | Keeper 메모리의 `tool_calls` | 그 범위 메시지의 ToolUse 이름과 ToolResult `is_error` |
 | 상대방 관측 | 턴 끝 시각 이전의 최근 72개 | 읽은 위치의 시각과 범위 끝의 시각 사이 |
 | facts, 받은 일, Keeper 역할 | 회차가 도는 순간의 값 | 같다 |
-| Goal 기준 | closure: 회차가 도는 순간의 task. durable: 없음(`No_task`) | durable 회차는 턴 끝 줄에 task 정체성이 없어 싣지 않는다(§8 "멈춘 Keeper 의 역할과 task"). closure 는 범위가 기록된 마지막 턴에서 끝나면 같다. 지금 task 를 지나간 턴의 것으로 추측하지 않는다 |
+| Goal 기준 | durable·continuity: 없음(`No_task`). queue: Keeper 의 지금 task(`Keeper_librarian_input_sources.goal_context_for_task`) | durable·continuity 회차는 턴 끝 줄에 task 정체성이 없어 싣지 않는다(§8 "멈춘 Keeper 의 역할과 task"). 지금 task 를 지나간 턴의 것으로 추측하지 않는다. queue 회차는 턴 범위 없이 밀린 입력과 이전 맥락 묶음을 정리하고, 회차가 도는 순간의 task 를 싣는다. 입력이 쌓인 뒤 task 가 바뀌었다면 바뀐 task 가 실리는 근사다 |
 
 - 지금 Keeper 메모리가 넘기는 도구 성패에는 `Unknown` 이 있다. 메시지에는 `is_error` 두 값뿐이다. 이 차이가 출력에 주는 영향은 하네스로 잰다.
 - checkpoint 를 디스크에서 읽는 비용은 하네스와 라이브에서 잰다. 크면 깨우는 신호에 메모리 속 메시지를 귀띔으로 같이 넘기되, 범위 양 끝 digest 가 맞을 때만 쓴다.
@@ -617,6 +617,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 ## 6. 이 RFC 가 닫지 않는 것
 
 - 도구 결과 본문. 회차는 지금처럼 읽지 않는다. 끝난 턴의 도구 결과는 blob 마커로 다시 열 수 있다(RFC-0363).
+- 끝나지 못한 턴. 끝 줄이 없어서 회차가 읽지 않는다(§1 의 3 은 끝난 턴만 말한다). 그 턴의 도구 결과가 창을 넘겨 거절됐다면, 다음 턴도 같은 atom 을 싣고 같은 거절을 받는다. 이 반복은 창 쪽이 닫는다. 크기 거절 뒤에 그 결과를 마커로 바꿔 같은 후보에 한 번 다시 보낸다(창 RFC §10.4 마지막 줄, §13.9). 받아들여지면 턴이 끝나 끝 줄이 생기고, 회차는 그 턴을 평소처럼 읽는다.
 - facts 와 고정 브리핑이 혼자 모델 한도를 넘는 경우(창 RFC §13.9). facts 블록의 크기는 코드가 숫자로 자르지 않는다. Librarian 의 `absorbs`·`dropped` 가 줄인다.
 - 슬롯 넘김(#36979)과 exact 레인 deadline 선언(#37004). 이 RFC 가 고치지는 않았고, 둘 다 2026-09-21 에 닫혔다(§4.10).
 - 재시작 줄을 하나도 못 쓴 채로 이력이 새로 시작한 경우. 줄 쓰기가 실패해도 턴과 비우기는 그대로 진행한다(§4.6). 빈 이력에서 시작한 턴이 시작할 때의 줄과 끝의 줄을 둘 다 못 쓰고(저장만 하고 죽은 턴은 끝의 줄이 원래 없다) 이력에 atom 을 남기면, 다음 턴은 `Continued_history` 라 그 trace 에는 재시작 줄이 끝내 없다. 재시작 줄의 append 도중에 서버가 죽은 Keeper 가 그렇다 — 다음 append 는 그 조각을 잘라내고 이어서 쓰지만(§4.6) 잘려 나간 재시작 줄은 돌아오지 않는다. 읽은 위치가 있던 Keeper 는 위치가 맞지 않아 서고(§4.4 의 5) 화면에 뜬다. 읽은 위치가 없던 Keeper 는 첫 구간이 기준점 앞에 놓여 읽히지 않는다(§4.4 의 3 ③). checkpoint 버전 교체로 시작한 턴은 저장 뒤에 줄을 쓰므로, 받아들여진 저장과 그 줄 사이에 프로세스가 죽어도 같은 일이 난다. 못 쓴 줄은 ERROR 로그와 `masc_keeper_turn_boundary_failures_total` 에 남는다.
@@ -672,7 +673,7 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 - **두 파일의 배포 preflight 등록.** 2026-09-21 확인: `bin/deployment_preflight_helper.ml` 의 `durable_stores` 에 두 파일이 없고, lint(`scripts/ci/check_exact_field_decoder_preflight.py`)는 `exact_field_names_result` 를 모른다(#37019). 읽는 쪽이 들어갔으므로 ①·②·③ 과 같은 스택의 작은 PR(④)로 등록한다.
 - **Keeper 를 지울 때의 순서.** `purge_keeper_artifacts` 는 `Keeper_memory_lane.with_librarian_purge` 안에서 실행 중 작업을 취소·대기하고, 이전 health 관측을 지운 뒤 파일을 삭제한다. 이 구간에 들어온 wake 는 기록하고 버리며, 동시 purge 는 명시적인 오류를 받는다. 삭제가 성공하거나 실패·취소되면 해당 purge 소유자만 제외 상태를 해제한다. 따라서 대기 중 늦게 온 wake 가 새 작업을 시작해 삭제된 파일을 다시 만들 수 없다. `request_cancel` 은 다른 domain 의 요청을 거절하므로 bracket 전체를 owner domain 에서 실행한다. Keeper 의 일반 시작·중지는 이 상태를 바꾸지 않는다.
 - **exact-output registry 가 공개되기 전.** 순서를 지키는 것은 `create_server_state` 의 프로그램 순서다 — `configure_exact_output_registry` 가 동기로 끝난 뒤에야 `start_keeper_loops` 가 불리고 그 안에서 `keeper_autoboot` 가 fork 된다. `Runtime_startup_state` 는 그 전에 이미 `Available` 일 수 있다(`note_runtime_loaded` 가 `Runtime.set_loaded` 에서 올린다). autoboot 의 `await_available` 이 실제로 막는 것은 setup-required 경로뿐이다. 그래서 ②는 autoboot 안에 두면 새 장치 없이 만족한다.
-- **멈춘 Keeper 의 역할과 task.** `consume_one` 은 `Keeper_meta_store` 로 디스크의 meta 를 읽고 `meta.instructions` 를 싣는다(#37208). 공식 클라이언트 closure 는 owner projection 을 보지만, 그 경로는 방금 턴을 돈 Keeper 에만 있으므로 멈춘 Keeper 에는 닿지 않는다. task 는 싣지 않는다: durable 회차의 `goal_context` 는 `No_task` 로 고정이다(`keeper_librarian_durable_consumer.ml`). 턴 끝 기록에 그 턴의 task 정체성이 없고, 지금 task 는 나중 턴의 것일 수 있어 지나간 턴의 것으로 추측하지 않는다. §4.7 의 Goal 기준 행은 closure 경로(`goal_context_for_task`)에만 참이다. durable 회차에 task 를 실으려면 턴 끝 줄에 task 정체성을 싣는 생산자 변경이 먼저다 — 열린 항목이다.
+- **멈춘 Keeper 의 역할과 task.** `consume_one` 은 `Keeper_meta_store` 로 디스크의 meta 를 읽고 `meta.instructions` 를 싣는다(#37208). task 는 싣지 않는다: durable 회차의 `goal_context` 는 `No_task` 로 고정이다(`keeper_librarian_durable_consumer.ml`). 턴 끝 기록에 그 턴의 task 정체성이 없고, 지금 task 는 나중 턴의 것일 수 있어 지나간 턴의 것으로 추측하지 않는다. Goal 기준은 queue 회차만 싣는다(§4.7). durable 회차에 task 를 실으려면 턴 끝 줄에 task 정체성을 싣는 생산자 변경이 먼저다 — 열린 항목이다.
 - **취소.** 위에 있던 "밖에서 부른다"는 낡은 문장이었다. `keeper_librarian_runtime.ml` 의 `Cancelled` 갈래는 이미 `Eio.Cancel.protect` 안에서 완료 표시와 실패 저널을 쓴다(2026-08-07 실측을 인용한 주석이 그 자리에 있다). Curator 와 같은 자리이고, 서버 종료 때 Keeper 수만큼 한꺼번에 취소돼도 같다. 고칠 것이 없다.
 
 **5단계의 hard cut(2026-09-22).** 저널의 실패 줄은 필드 이름이 정확히 일치해야 읽힌다(`keeper_memory_os_current.ml` `failed_entry_of_fields`). `cadence_deferred` 를 지웠으므로 그 필드가 있는 옛 실패 줄(2026-09-21 기준 전 기간 5,330개)은 새 코드가 읽지 못하고, 새 실패 줄은 롤백한 코드가 읽지 못한다. §5 가 스냅숏과 턴 기록에 대해 피한 그 일을 저널에서는 받아들였고, 저널 파일은 옮기지 않았다. 근거: reader 는 줄 단위 `result` 를 돌려주고(`read_journal_tail`), TUI 는 못 읽는 줄을 버리고 세며, dashboard 는 `undecodableLines` 로 세고, health 는 마지막 한 줄만 본다. 같은 상태의 줄이 이미 있었다 — 2026-07-31~08-06 에 `outcome` 없이 쓰인 2,770줄이 그렇게 세어지고 있었고 꼬리 창(기본 50, 최대 500줄)에서 밀려난 뒤였다. 저널은 관측용이다(스냅숏 커밋은 별도 파일). 배포 preflight 는 저널을 읽지 않으므로 바꾸지 않았다. 저장 스키마에서 wire 필드를 지우면 lint 의 `scripts/wire-field-removal-schema-gate.sh` 가 버전 bump·strip 스크립트·`schema-compat:` 줄 중 하나를 요구한다 — 이 hard cut 은 위 근거를 commit message 의 `schema-compat:` 줄로 적어 통과했다. RFC-0456 §5 는 저널 형식을 바꾸지 않는다고 적었으므로 이 RFC 가 그 부분을 대신한다.

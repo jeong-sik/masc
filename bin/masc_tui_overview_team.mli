@@ -23,11 +23,15 @@ type group =
           nothing asking for the operator. Drawn as one line of names. *)
 
 type detail =
-  | Blocker of { summary : string; held : int }
+  | Blocker of {
+      summary : string;
+      item : Masc_tui_types.attention_item;
+      held : int;
+    }
       (** The first attention item above info severity that names this
           Keeper -- its blocker
           sentence when the item carries one, else its summary, verbatim --
-          and how many open tasks it holds while stuck. *)
+          the item itself, and how many open tasks it holds while stuck. *)
   | Phase_word of { word : string; held : int }
       (** A stuck Keeper no attention item explains: its own phase word. *)
   | Working_on of { task : Tui_decode.task; more : int; awaiting : int }
@@ -66,6 +70,24 @@ val drawn_rows : t -> int
     any. The row budget asks for this many. *)
 
 val count : t -> group -> int
+
+val drawn_items : t -> rows:int -> Masc_tui_types.attention_item list
+(** The attention items the block's first [rows] rows draw. The block draws
+    its [Needs_you] rows first, and only a [Blocker] row draws an item --
+    one item, even when several name the Keeper. A working or idle row, the
+    parked line and the holders line draw none. *)
+
+val settle :
+  t ->
+  attention:Masc_tui_types.attention_item list ->
+  allocate:(Masc_tui_types.attention_item list -> 'budget) ->
+  team_rows:('budget -> int) ->
+  Masc_tui_types.attention_item list * 'budget
+(** The Attention panel's items beside this block and the budget they were
+    allocated with: [attention] without the instances the drawn Team rows
+    carry. Rows the budget cuts keep their items in the panel, and with no
+    Team row drawn every item stays there, so an item is never on neither.
+    [allocate] must not give fewer Team rows for fewer panel items. *)
 
 val phase_word : Masc_tui_types.overview_keeper -> string
 (** The phase as the row prints it: the lifecycle word, the unreadable wire

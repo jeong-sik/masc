@@ -96,7 +96,6 @@ let run
       ?(gate = fun () -> true)
       ?marks
       ?(last_request = fun () -> None)
-      ?(last_resort = fun ~retry:_ -> false)
       ~ledger_of
       outcomes
   =
@@ -116,7 +115,6 @@ let run
       ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
         trace.halvings <- (first_atom, retry) :: trace.halvings;
         true)
-      ~last_resort
       ~on_retry:(fun ~retry _ -> trace.retries <- retry)
       ~attempt:(fun () ->
         let index = min trace.attempts (List.length outcomes - 1) in
@@ -220,7 +218,6 @@ let test_without_a_ledger_the_range_halves_until_it_fits () =
         front := first_atom;
         trace.halvings <- (first_atom, retry) :: trace.halvings;
         true)
-      ~last_resort:(fun ~retry:_ -> false)
       ~on_retry:(fun ~retry _ -> trace.retries <- retry)
       ~attempt:(fun () ->
         let index = min trace.attempts (List.length outcomes - 1) in
@@ -247,7 +244,6 @@ let test_halving_ends_at_one_atom_when_every_request_is_refused () =
       ~halve:(fun ~first_atom ~atom_count:_ ~retry:_ ->
         front := first_atom;
         true)
-      ~last_resort:(fun ~retry:_ -> false)
       ~on_retry:(fun ~retry:_ _ -> ())
       ~attempt:(fun () -> incr attempts; Error overflow)
       ()
@@ -273,7 +269,6 @@ let test_a_halving_that_cannot_name_its_front_ends_the_sequence () =
       ~hold_front:(fun _ -> ())
       ~evict:(fun _ -> false)
       ~halve:(fun ~first_atom:_ ~atom_count:_ ~retry:_ -> false)
-      ~last_resort:(fun ~retry:_ -> false)
       ~on_retry:(fun ~retry:_ _ -> fail "no retry is recorded for a move that did not happen")
       ~attempt:(fun () -> incr attempts; Error overflow)
       ()
@@ -327,48 +322,6 @@ let test_a_refusal_that_survives_the_newest_block_is_returned () =
   check (list int) "one eviction" [ 10 ] trace.evictions
 ;;
 
-(* The newest atom alone was refused: the last resort arms one more request
-   and the sequence asks again. *)
-let test_a_refused_single_atom_arms_the_last_resort_once () =
-  let armed = ref 0 in
-  let outcome, trace =
-    run
-      ~ledger_of:(fun _ -> None)
-      ~last_request:(fun () -> Some (request ~first_atom:15 ~atom_count:16))
-      ~last_resort:(fun ~retry:_ -> incr armed; !armed = 1)
-      [ Error overflow; Ok "demoted and accepted" ]
-  in
-  check (result string reject) "the demoted request answered" (Ok "demoted and accepted") outcome;
-  check int "two attempts" 2 trace.attempts;
-  check int "armed once" 1 !armed
-;;
-
-let test_the_last_resort_is_used_once_then_the_refusal_stands () =
-  let asked = ref 0 in
-  let outcome, trace =
-    run
-      ~ledger_of:(fun _ -> None)
-      ~last_request:(fun () -> Some (request ~first_atom:15 ~atom_count:16))
-      ~last_resort:(fun ~retry:_ -> incr asked; !asked = 1)
-      [ Error overflow; Error overflow; Ok "never" ]
-  in
-  check bool "the refusal stands" true (Result.is_error outcome);
-  check int "two attempts" 2 trace.attempts;
-  check int "asked twice, armed once" 2 !asked
-;;
-
-let test_nothing_to_demote_ends_the_sequence () =
-  let outcome, trace =
-    run
-      ~ledger_of:(fun _ -> None)
-      ~last_request:(fun () -> Some (request ~first_atom:15 ~atom_count:16))
-      ~last_resort:(fun ~retry:_ -> false)
-      [ Error overflow; Ok "never" ]
-  in
-  check bool "the refusal stands" true (Result.is_error outcome);
-  check int "one attempt" 1 trace.attempts
-;;
-
 (* An eviction that reports no move leaves the front where the refused
    request had it; asking again would send that request again. *)
 let test_an_eviction_that_did_not_move_ends_the_sequence () =
@@ -382,7 +335,6 @@ let test_an_eviction_that_did_not_move_ends_the_sequence () =
       ~hold_front:(fun _ -> ())
       ~evict:(fun _ -> false)
       ~halve:(fun ~first_atom:_ ~atom_count:_ ~retry:_ -> fail "nothing halves after an eviction step")
-      ~last_resort:(fun ~retry:_ -> false)
       ~on_retry:(fun ~retry:_ _ -> fail "no retry follows a move that did not happen")
       ~attempt:(fun () ->
         incr attempts;
@@ -502,7 +454,6 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
           ~hold:(fun seed -> halved := Some seed)
           ~first_atom
           ~retry)
-      ~last_resort:(fun ~retry:_ -> false)
       ~on_retry:(fun ~retry:_ _ -> ())
       ~attempt:(fun () ->
         incr attempts;
@@ -522,7 +473,7 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
             ~measure_message_bytes:(fun _ -> 1)
             ~front
             ~history_digest_at:digest_at
-            ~last_resort:false
+            ~current_turn_results:Try_provider.Current_turn_verbatim
             ~base_path:""
             ~demote_before:0
             ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
@@ -600,8 +551,7 @@ let test_a_refused_front_survives_candidate_changes ?(fallback_atoms = 16) ~bloc
             ~move_ledger:(Try_provider.For_testing.move_ledger_front working)
             ~hold:(fun seed -> held := Some seed)
             ~first_atom ~retry)
-        ~last_resort:(fun ~retry:_ -> false)
-        ~on_retry:(fun ~retry:_ _ -> ())
+          ~on_retry:(fun ~retry:_ _ -> ())
         ~attempt:(fun () ->
           let front, _ =
             Try_provider.For_testing.carried_front
@@ -612,7 +562,7 @@ let test_a_refused_front_survives_candidate_changes ?(fallback_atoms = 16) ~bloc
           let composed =
             Try_provider.For_testing.compose_carried_model_input
               ~measure_message_bytes:(fun _ -> 1) ~front
-              ~history_digest_at:digest_at ~last_resort:false
+              ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim
               ~base_path:"" ~demote_before:0 ~turn_boundary:(Front.Turn_boundary { end_atom = 0 }) history
           in
           let first_atom = composed.Try_provider.projection.Window.dropped_atoms in
@@ -772,7 +722,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
           let composed =
             Try_provider.For_testing.compose_carried_model_input
               ?continuity ~measure_message_bytes:(fun _ -> 1) ~front
-              ~history_digest_at:digest_at ~last_resort:false ~base_path:""
+              ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim ~base_path:""
               ~demote_before:boundary
               ~turn_boundary:(Front.Turn_boundary { end_atom = boundary })
               history
@@ -889,10 +839,6 @@ let () =
         ; test_case "halving without a nameable front ends" `Quick
             test_a_halving_that_cannot_name_its_front_ends_the_sequence
         ; test_case "single atom ends" `Quick test_a_single_atom_ends_the_sequence_with_the_refusal
-        ; test_case "single atom arms the last resort" `Quick
-            test_a_refused_single_atom_arms_the_last_resort_once
-        ; test_case "last resort once" `Quick test_the_last_resort_is_used_once_then_the_refusal_stands
-        ; test_case "nothing to demote" `Quick test_nothing_to_demote_ends_the_sequence
         ; test_case "nothing to move ends" `Quick test_no_ledger_and_no_request_ends_the_sequence
         ; test_case "gate" `Quick test_the_gate_blocks_a_retry_after_a_durable_checkpoint
         ; test_case "refusal past the newest block" `Quick

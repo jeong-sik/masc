@@ -652,76 +652,38 @@ let to_json forecast =
     ]
 ;;
 
-type librarian_gap =
-  { gap_start_atom : int
-  ; gap_end_atom : int
-  }
-
-(* The Librarian positions this keeper's files state on its current trace:
-   the snapshot's cut and the read position. The driver's point, when it has
-   one, is one of them, so an accepted start at or before both can open past
-   neither, and the checkpoint is left unread. *)
-let librarian_positions ~config ~keeper_name ~trace_id =
-  let snapshot =
-    match Keeper_librarian_continuity.read ~config ~keeper_name with
-    | Ok (Some snapshot)
-      when String.equal snapshot.Librarian_continuity_snapshot.trace_id trace_id ->
-      [ snapshot.Librarian_continuity_snapshot.end_atom ]
-    | Ok (Some _) | Ok None | Error _ -> []
-  in
-  let progress =
-    match
-      Keeper_librarian_progress.read
-        ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
-    with
-    | Ok (Some { Keeper_librarian_progress.position = { trace_id = read_on; end_atom; _ }; _ })
-      when String.equal read_on trace_id -> [ end_atom ]
-    | Ok (Some _) | Ok None | Error _ -> []
-  in
-  snapshot @ progress
-;;
-
+(* RFC librarian-lifecycle §4.10, rule 3, from the keeper's small files: its
+   meta names the current trace, the snapshot and the progress file say what
+   the Librarian covers on it, and the newest response-observed turn record
+   says where the last accepted request started. The gap is a fact about
+   that accepted request, so the checkpoint is not read: whether the next
+   request starts there is the driver's question, not the alarm's. *)
 let librarian_gap ~config ~keeper_name =
   match Keeper_meta_store.read_meta config keeper_name with
   | Error message -> Error message
   | Ok None -> Ok None
   | Ok (Some meta) ->
     let trace_id = Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id in
-    let accepted = (Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id).seed in
-    let positions = librarian_positions ~config ~keeper_name ~trace_id in
-    (match accepted with
-     | Some (seed : Keeper_carried_front.seed)
-       when List.exists (fun position -> seed.first_atom > position) positions ->
-       let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
-       (match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id:trace_id with
-        | Error error -> Error (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
-        | Ok checkpoint ->
-          let history = checkpoint.Agent_core.Checkpoint.messages in
-          let continuity, (_ : Keeper_turn_driver_try_provider.continuity_note list) =
-            Keeper_turn_driver_try_provider.read_keeper_continuity
-              ~config ~keeper_name ~trace_id ~messages:history
-          in
-          let { Keeper_turn_driver_try_provider.start; outlived_seed = _ } =
-            Keeper_turn_driver_try_provider.choose_range_start
-              ~continuity:(Some continuity) ~front:None ~accepted
-              ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest history)
-              ~turn_boundary:
-                (Keeper_turn_driver_try_provider.turn_start
-                   ~config ~keeper_name ~trace_id ~messages:history)
-          in
-          Ok
-            (match start with
-             | Keeper_turn_driver_try_provider.Past_librarian_point { point; accepted } ->
-               let gap_start_atom =
-                 match point with
-                 | Keeper_turn_driver_try_provider.At_snapshot snapshot ->
-                   snapshot.Librarian_continuity_snapshot.end_atom
-                 | Keeper_turn_driver_try_provider.At_read_position { end_atom } -> end_atom
-               in
-               Some { gap_start_atom; gap_end_atom = accepted.Keeper_carried_front.first_atom }
-             | Keeper_turn_driver_try_provider.From_snapshot _
-             | Keeper_turn_driver_try_provider.From_read_position _
-             | Keeper_turn_driver_try_provider.From_seed _
-             | Keeper_turn_driver_try_provider.From_turn_boundary _ -> None))
-     | Some (_ : Keeper_carried_front.seed) | None -> Ok None)
+    (match (Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id).seed with
+     | None -> Ok None
+     | Some (accepted : Keeper_carried_front.seed) ->
+       let snapshot_cut =
+         match Keeper_librarian_continuity.read ~config ~keeper_name with
+         | Ok (Some snapshot)
+           when String.equal snapshot.Librarian_continuity_snapshot.trace_id trace_id ->
+           Some snapshot.Librarian_continuity_snapshot.end_atom
+         | Ok (Some _) | Ok None | Error _ -> None
+       in
+       let read_position =
+         match
+           Keeper_librarian_progress.read
+             ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+         with
+         | Ok (Some { Keeper_librarian_progress.position = { trace_id = read_on; end_atom; _ }; _ })
+           when String.equal read_on trace_id -> Some end_atom
+         | Ok (Some _) | Ok None | Error _ -> None
+       in
+       Ok
+         (Keeper_carried_front.librarian_gap
+            ~snapshot_cut ~read_position ~accepted_start:accepted.first_atom))
 ;;

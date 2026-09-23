@@ -273,18 +273,17 @@ let librarian_journal_outcome ~keepers_dir ~keeper_id =
   read ~window:1
 ;;
 
-(* The gap, from files alone, so a server that just started shows it before
-   any drain has run here: the turn driver's own choice of where the next
-   request starts ({!Keeper_next_request_forecast.librarian_gap}), which
-   checks the snapshot and the read position against the checkpoint as the
-   driver does. The accepted start is the newest response-observed turn
-   record, whichever lane recorded it: an official client's byte window cut
-   counts the same way. A size refusal records no accepted start, so a turn
-   that ended on one never raises this alarm. A keeper whose files cannot be
-   read shows no alarm and says why on its log. *)
+(* The gap, from small files alone, so a server that just started shows it
+   before any drain has run here ({!Keeper_next_request_forecast.librarian_gap},
+   the one rule {!Keeper_carried_front.librarian_gap}). The accepted start is
+   the newest response-observed turn record, whichever lane recorded it: an
+   official client's byte window cut counts the same way. A size refusal
+   records no accepted start, so a turn that ended on one never raises this
+   alarm. A keeper whose meta cannot be read shows no alarm and says why on
+   its log. *)
 let librarian_stalled ~config ~keeper_id =
   match Keeper_next_request_forecast.librarian_gap ~config ~keeper_name:keeper_id with
-  | Ok (Some { Keeper_next_request_forecast.gap_start_atom; gap_end_atom }) ->
+  | Ok (Some { Keeper_carried_front.gap_start_atom; gap_end_atom }) ->
     Some { gap_start_atom; gap_end_atom }
   | Ok None -> None
   | Error detail ->

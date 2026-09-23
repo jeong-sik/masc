@@ -1872,13 +1872,14 @@ status: reference
 
 **Librarian Stalled (Librarian 이 멈춰 건너뛴 구간)**
 : Librarian 지점이 provider 가 마지막으로 받아들인 시작점보다 뒤에 있어서, 다음 요청이
-  건너뛰는 atom 구간. 요청에도 기억에도 없다. 시작은 Librarian 지점(맞는 스냅숏 컷, 없으면
-  읽은 위치), 끝은 받아들여진 시작점 바로 앞이다. driver 의 `choose_range_start` 가 고르는
-  `Past_librarian_point` 를 파일만 읽어 다시 계산한다(`Keeper_next_request_forecast.librarian_gap`).
+  건너뛰는 atom 중 요청에도 기억에도 없는 구간. 시작은 스냅숏 컷과 durable 읽은 위치 중 늦은
+  쪽, 끝은 받아들여진 시작점 바로 앞이다. 비면 gap 이 없다. 규칙은 순수 함수
+  `Keeper_carried_front.librarian_gap` 하나이고, 경보는 Keeper 의 작은 파일(meta, 스냅숏,
+  진행 파일, 턴 기록)만 읽어 그 함수를 부른다(`Keeper_next_request_forecast.librarian_gap`).
   health JSON 의 `librarian.stalled`(`gap_start_atom`, `gap_end_atom` — 끝은 제외)이고, TUI 는
   `Librarian stalled · atoms <a>-<b>` 로 그린다. 경보이지 Gate 가 아니다. Librarian 이
   받아들여진 시작점에 닿으면 사라진다(RFC librarian-lifecycle §4.10).
-  → [keeper_next_request_forecast](../../lib/keeper/keeper_next_request_forecast.mli)
+  → [keeper_carried_front](../../lib/keeper/keeper_carried_front.mli) · [keeper_next_request_forecast](../../lib/keeper/keeper_next_request_forecast.mli)
 
 **Continuity Width (연속성 회차의 폭)**
 : 연속성 회차가 한 번에 읽을 수 있는 atom 수의 상한. 크기 때문에 거절당한 회차가 좁힌

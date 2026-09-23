@@ -102,46 +102,6 @@ let schedule_write_schema tool =
   | None -> Error (Schedule_schema_not_registered tool)
 ;;
 
-let schedule_stamp_operator_actor ~agent_name = function
-  | `Assoc fields ->
-    let operator_kind =
-      Schedule_domain.actor_kind_to_string Schedule_domain.Human_operator
-    in
-    let stamped =
-      [ "requested_by_id", `String agent_name
-      ; "requested_by_kind", `String operator_kind
-      ; "scheduled_by_id", `String agent_name
-      ; "scheduled_by_kind", `String operator_kind
-      ]
-    in
-    let stamped_names = List.map fst stamped in
-    `Assoc
-      (stamped
-       @ List.filter
-           (fun (name, _) -> not (List.mem name stamped_names))
-           fields)
-  | other -> other
-;;
-
-let schedule_stamp_cancel_operator_actor ~agent_name = function
-  | `Assoc fields ->
-    let operator_kind =
-      Schedule_domain.actor_kind_to_string Schedule_domain.Human_operator
-    in
-    let stamped =
-      [ "cancelled_by_id", `String agent_name
-      ; "cancelled_by_kind", `String operator_kind
-      ]
-    in
-    let stamped_names = List.map fst stamped in
-    `Assoc
-      (stamped
-       @ List.filter
-           (fun (name, _) -> not (List.mem name stamped_names))
-           fields)
-  | other -> other
-;;
-
 let handle_schedule_write_request
       ~update
       ~state
@@ -162,7 +122,6 @@ let handle_schedule_write_request
       try Ok (Yojson.Safe.from_string body_str) with
       | Yojson.Json_error message -> Error ("Invalid JSON: " ^ message)
     in
-    let args = schedule_stamp_operator_actor ~agent_name args in
     let schedule_tool = if update then Schedule_update else Schedule_create in
     let tool_name = schedule_write_tool_name schedule_tool in
     let* schema =
@@ -180,7 +139,7 @@ let handle_schedule_write_request
     let config = (Mcp_server.workspace_scope state).Mcp_server.config in
     let context : Tool_schedule.context =
       { config
-      ; caller = Tool_schedule.Named_caller agent_name
+      ; caller = Tool_schedule.Operator_caller agent_name
       ; stamp_keeper_wake_result_delivery =
           (fun ~payload ->
              Schedule_payload_projection.set_keeper_wake_result_delivery
@@ -1512,10 +1471,10 @@ let add_routes ~sw ~clock router =
                  ~request reqd))
          request reqd)
   (* Schedule cancel from the terminal (#29684). The workspace tool owns the
-     argument contract ([Tool_schedule.handle_cancel]: schedule_id,
-     cancelled_by_*, reason) and the store transition. The HTTP trust boundary
-     owns the canceller: client-supplied identity fields are replaced with the
-     actor resolved from the credential before entering the tool. *)
+     argument contract ([Tool_schedule.handle_cancel]: schedule_id, reason)
+     and the store transition. The HTTP trust boundary owns the canceller:
+     the actor resolved from the credential enters the tool as
+     [Operator_caller], which may cancel any schedule. *)
   |> Http.Router.post "/api/v1/tools/masc_schedule_cancel" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_schedule_cancel"
          (fun state agent_name _req reqd ->
@@ -1532,12 +1491,21 @@ let add_routes ~sw ~clock router =
                try Ok (Yojson.Safe.from_string body_str)
                with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
              in
-             let args = schedule_stamp_cancel_operator_actor ~agent_name args in
              let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+             let context : Tool_schedule.context =
+               { config
+               ; caller = Tool_schedule.Operator_caller agent_name
+               ; stamp_keeper_wake_result_delivery =
+                   (fun ~payload ->
+                      Schedule_payload_projection.set_keeper_wake_result_delivery
+                        ~payload ~channel:None)
+               ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
+               }
+             in
              let start_time = Unix.gettimeofday () in
              let result =
                Tool_schedule.handle_cancel
-                 ~tool_name:"masc_schedule_cancel" ~start_time config args
+                 ~tool_name:"masc_schedule_cancel" ~start_time context args
              in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in

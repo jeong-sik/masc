@@ -100,6 +100,9 @@ type refusal_kind =
       (** An integer argument outside its declared minimum and maximum. *)
   | Refusal_cursor_mismatch
       (** A cursor used with filters other than the listing that issued it. *)
+  | Refusal_not_schedule_owner
+      (** A named caller asked to update or cancel a schedule it did not
+          make and that does not wake it. *)
 
 val refusal_kind_to_string : refusal_kind -> string
 val refusal_kind_of_string : string -> (refusal_kind, decode_error) result

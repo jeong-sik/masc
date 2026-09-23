@@ -1,11 +1,20 @@
 (* Who is calling, as the dispatch boundary that built the context knows it.
-   Two schedule actions stand on it: [owner=self] lists the caller's rows, and
-   create, update and note_add record the caller as the actor when the call
-   names none. *)
+   Every schedule action that names an actor stands on it: [owner=self] lists
+   the caller's rows, create and update record the caller as both
+   [requested_by] and [scheduled_by], and cancel records the caller as the
+   canceller and decides which rows it may cancel. No call argument names
+   the actor: an argument is whatever the caller chose to write, and a Keeper
+   that could write [human_operator] there could pass itself off as the
+   operator. *)
 type caller =
+  | Operator_caller of string
+  (* The operator surface: an HTTP route behind [with_tool_actor_auth], where
+     the name is the actor the credential resolved to. It records
+     [Human_operator] and may cancel any schedule. *)
   | Named_caller of string
-  (* A Keeper turn's own name, the actor an HTTP credential resolved to, or
-     an MCP caller whose name the endpoint did not mint itself. *)
+  (* A Keeper turn's own name, or an MCP caller whose name the endpoint did
+     not mint itself. It records [Automated_actor] and may cancel only the
+     rows [owner=self] lists for it. *)
   | Unnamed_caller
   (* An MCP caller that gave no name and presented no credential naming one.
      The endpoint minted a placeholder for its session; the placeholder
@@ -114,7 +123,7 @@ let argument_out_of_range ~field ~minimum ~maximum ~given =
 
 let caller_name ctx ~instead =
   match ctx.caller with
-  | Named_caller name -> Ok name
+  | Operator_caller name | Named_caller name -> Ok name
   | Unnamed_caller ->
     Error
       (Typed_refusal
@@ -126,6 +135,16 @@ let caller_name ctx ~instead =
                instead
          ; facts = []
          })
+;;
+
+let caller_actor ctx ~instead =
+  let* id = caller_name ctx ~instead in
+  let kind =
+    match ctx.caller with
+    | Operator_caller _ -> Schedule_domain.Human_operator
+    | Named_caller _ | Unnamed_caller -> Schedule_domain.Automated_actor
+  in
+  Ok Schedule_domain.{ id; kind; display_name = None }
 ;;
 
 let parse_due_at_iso8601 value =
@@ -306,21 +325,6 @@ let recurrence_of_arg args =
     let* expression = required_string args "recurrence_cron" in
     let* timezone = required_string args "recurrence_timezone" in
     validate_recurrence_arg (Schedule_domain.Cron { expression; timezone })
-;;
-
-(* [default_id] is asked only when the call names no actor id, so a call that
-   names one never depends on who the endpoint thinks is calling. *)
-let actor_from_args args ~prefix ~default_id ~default_kind =
-  let* id =
-    match string_opt args (prefix ^ "_id") with
-    | Some id -> Ok id
-    | None -> default_id ()
-  in
-  let* kind = plain (actor_kind_of_arg args (prefix ^ "_kind") default_kind) in
-  let display_name = string_opt args (prefix ^ "_display_name") in
-  if String.equal (String.trim id) ""
-  then Error (Refusal (prefix ^ "_id must not be empty"))
-  else Ok Schedule_domain.{ id; kind; display_name }
 ;;
 
 (* The kind the runtime stamps on every schedule it creates. Written as a
@@ -588,6 +592,65 @@ let refusal_of_service_error (err : Schedule_service.service_error) =
   | Schedule_service.Creation_rejected _ -> Refusal message
 ;;
 
+(* The rows a named caller may change: the ones [owner=self] lists for it,
+   a row it scheduled or a row that wakes it. The operator may change any
+   row. *)
+let caller_holds_row ~name (request : Schedule_domain.schedule_request) =
+  String.equal request.scheduled_by.id name
+  || (match Schedule_payload_projection.wake_keeper_name request with
+      | Some keeper_name -> String.equal keeper_name name
+      | None -> false)
+;;
+
+(* Asked before update and cancel. A row this read does not find is left to
+   the store, which answers "not found" under its own lock. *)
+let authorize_row_change ctx ~schedule_id =
+  match ctx.caller with
+  | Operator_caller _ -> Ok ()
+  | Unnamed_caller ->
+    let* _name =
+      caller_name ctx ~instead:"only a named caller may change a schedule"
+    in
+    Ok ()
+  | Named_caller name ->
+    (match Schedule_store.read_state_result ctx.config with
+     | Error err ->
+       Error
+         (Refusal
+            ("schedule store read failed: " ^ Schedule_store.read_error_to_string err))
+     | Ok state ->
+       (match
+          List.find_opt
+            (fun (request : Schedule_domain.schedule_request) ->
+               String.equal request.schedule_id schedule_id)
+            state.schedules
+        with
+        | None -> Ok ()
+        | Some request when caller_holds_row ~name request -> Ok ()
+        | Some request ->
+          Error
+            (Typed_refusal
+               { kind = Schedule_contract_values.Refusal_not_schedule_owner
+               ; message =
+                   Printf.sprintf
+                     "schedule %s was scheduled by %s and does not wake %s; a \
+                      caller changes only the schedules it made or the ones \
+                      that wake it"
+                     schedule_id
+                     request.scheduled_by.id
+                     name
+               ; facts =
+                   [ "schedule_id", `String schedule_id
+                   ; "caller", `String name
+                   ; "scheduled_by_id", `String request.scheduled_by.id
+                   ; ( "wake_target"
+                     , match Schedule_payload_projection.wake_keeper_name request with
+                       | Some keeper_name -> `String keeper_name
+                       | None -> `Null )
+                   ]
+               }))
+;;
+
 (* TEL-OK: schedule tools return [Tool_result.t] through the shared
    [Tool_dispatch] paths; [Server_bootstrap_maintenance] installs the canonical
    dispatch observer that records tool telemetry and metrics once for keeper and
@@ -615,21 +678,21 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       | Some requested_at -> Ok requested_at
     in
     let* due_at = resolve_due_at ~dispatched_at:start_time recurrence args in
-    let* requested_by =
-      actor_from_args args ~prefix:"requested_by"
-        ~default_id:(fun () -> Ok "operator")
-        ~default_kind:Schedule_domain.Human_operator
-    in
     let* scheduled_by =
-      actor_from_args args ~prefix:"scheduled_by"
-        ~default_id:(fun () -> caller_name ctx ~instead:"pass scheduled_by_id")
-        ~default_kind:Schedule_domain.Automated_actor
+      caller_actor ctx
+        ~instead:"call with an agent name or a credential that names one"
     in
+    let requested_by = scheduled_by in
     let* schedule_id =
       match action, string_opt args "schedule_id" with
       | Create_schedule, schedule_id -> Ok schedule_id
       | Update_schedule, Some schedule_id -> Ok (Some schedule_id)
       | Update_schedule, None -> Error (Refusal "schedule_id is required")
+    in
+    let* () =
+      match action, schedule_id with
+      | Update_schedule, Some schedule_id -> authorize_row_change ctx ~schedule_id
+      | Update_schedule, None | Create_schedule, _ -> Ok ()
     in
     let* expires_at = strict_number args "expires_at_unix" in
     let write_request () =
@@ -797,7 +860,7 @@ let owner_filter_matches filter (request : Schedule_domain.schedule_request) =
   in
   let scheduled name = String.equal request.scheduled_by.id name in
   match filter with
-  | Either_side name -> scheduled name || wakes name
+  | Either_side name -> caller_holds_row ~name request
   | Wake_target name -> wakes name
   | Scheduled_by name -> scheduled name
   | All_rows -> true
@@ -1059,24 +1122,22 @@ let handle_get ~tool_name ~start_time ctx args =
        ok ~tool_name ~start_time (schedule_request_json ?last_wake request))
 ;;
 
-(* Takes the config alone, not the full [context]: cancel touches nothing but
-   the schedule store, so requiring the creation-path hooks (or an agent name
-   the arguments already carry) would be a dependency this action does not
-   have. *)
-let handle_cancel ~tool_name ~start_time (config : Workspace.config) args =
-  let parsed =
-    let* schedule_id = required_string args "schedule_id" in
-    let* cancelled_by_id = required_string args "cancelled_by_id" in
-    let* cancelled_by_kind =
-      actor_kind_of_arg args "cancelled_by_kind" Schedule_domain.Human_operator
+(* The canceller is the caller, never an argument: see [caller]. *)
+let handle_cancel ~tool_name ~start_time ctx args =
+  let result =
+    let* schedule_id = plain (required_string args "schedule_id") in
+    let* reason = plain (required_string args "reason") in
+    let* cancelled_by =
+      caller_actor ctx
+        ~instead:"call with an agent name or a credential that names one"
     in
-    let* reason = required_string args "reason" in
-    Ok (schedule_id, cancelled_by_id, cancelled_by_kind, reason)
+    let* () = authorize_row_change ctx ~schedule_id in
+    Ok (schedule_id, reason, cancelled_by)
   in
-  match parsed with
-  | Error msg -> workflow_error ~tool_name ~start_time msg
-  | Ok (schedule_id, cancelled_by_id, cancelled_by_kind, reason) ->
-    (match Schedule_service.cancel config ~schedule_id with
+  match result with
+  | Error refusal -> refusal_result ~tool_name ~start_time refusal
+  | Ok (schedule_id, reason, cancelled_by) ->
+    (match Schedule_service.cancel ctx.config ~schedule_id with
      | Error err ->
        refusal_result ~tool_name ~start_time (refusal_of_service_error err)
      | Ok request ->
@@ -1086,8 +1147,9 @@ let handle_cancel ~tool_name ~start_time (config : Workspace.config) args =
            ; "schedule", schedule_request_json request
            ; ( "cancelled_by"
              , `Assoc
-                 [ "id", `String cancelled_by_id
-                 ; "kind", `String (Schedule_domain.actor_kind_to_string cancelled_by_kind)
+                 [ "id", `String cancelled_by.Schedule_domain.id
+                 ; ( "kind"
+                   , `String (Schedule_domain.actor_kind_to_string cancelled_by.kind) )
                  ] )
            ; "reason", `String reason
            ]))
@@ -1179,9 +1241,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = Update_request; _ } -> handle handle_update
   | Some { action = List_requests; _ } -> handle handle_list
   | Some { action = Get_request; _ } -> handle handle_get
-  | Some { action = Cancel_request; _ } ->
-      handle (fun ~tool_name ~start_time ctx ->
-          handle_cancel ~tool_name ~start_time ctx.config)
+  | Some { action = Cancel_request; _ } -> handle handle_cancel
   | Some { action = Add_note; _ } -> handle handle_note_add
   | Some { action = List_notes; _ } -> handle handle_notes_list
   (* [None] is "not a schedule tool". Spelling it out rather than [_] keeps the

@@ -1944,9 +1944,8 @@ let post_schedule_update ~(host : string) ~(port : int) ~(body_json : string) =
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_update"
     ~body:body_json
 
-(** POST /api/v1/tools/masc_schedule_cancel. The authenticated HTTP boundary
-    supplies the canceller identity before the tool validates its argument
-    contract. The reason is a fixed audit phrase -- the arm display already
+(** POST /api/v1/tools/masc_schedule_cancel. The server records the
+    credential's actor as the canceller. The reason is a fixed audit phrase -- the arm display already
     named which schedule the second press cancels. *)
 let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
     : (Yojson.Safe.t, string) result =
@@ -1963,7 +1962,7 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
     argument contract; the kind-specific timing fields arrive already
     assembled by the caller (the form's typed spec builds them), and time
     syntax, cron text, and timezone spellings stay the tool's to validate.
-    The requester rides as this process, a human operator's terminal. *)
+    The server records the credential's actor as requester and scheduler. *)
 let post_schedule_create ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(message : string)
     ~(timing_fields : (string * Yojson.Safe.t) list) :
@@ -1972,10 +1971,6 @@ let post_schedule_create ~(host : string) ~(port : int)
     `Assoc
       ([ ("keeper_name", `String keeper_name)
        ; ("message", `String message)
-       ; ("requested_by_id", `String default_agent_name)
-       ; ("requested_by_kind", `String "human_operator")
-       ; ("scheduled_by_id", `String default_agent_name)
-       ; ("scheduled_by_kind", `String "human_operator")
        ; ("source", `String "operator_request")
        ]
       @ timing_fields)

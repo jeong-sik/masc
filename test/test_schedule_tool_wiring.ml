@@ -142,8 +142,6 @@ let create_args
     ([ "due_at_unix", `Float future_due_at
      ; "keeper_name", `String "schedule-keeper"
      ; "message", `String message
-     ; "requested_by_id", `String "operator"
-     ; "scheduled_by_id", `String "scheduler-agent"
      ]
      @ (if allow_unregistered_keeper
         then [ "allow_unregistered_keeper", `Bool true ]
@@ -318,7 +316,6 @@ let test_create_list_get_cancel () =
     dispatch_exn config Tool_schemas_schedule.Cancel_request
       (`Assoc
         [ "schedule_id", `String "sched-tools"
-        ; "cancelled_by_id", `String "operator"
         ; "reason", `String "superseded"
         ])
   in
@@ -390,7 +387,6 @@ let test_update_requires_id_and_active_row () =
     (dispatch_exn config Tool_schemas_schedule.Cancel_request
        (`Assoc
          [ "schedule_id", `String schedule_id
-         ; "cancelled_by_id", `String "operator"
          ; "reason", `String "done"
          ]));
   let refused =
@@ -449,7 +445,6 @@ let test_results_survive_the_checkpoint_encoder () =
     dispatch_exn config Tool_schemas_schedule.Cancel_request
       (`Assoc
         [ "schedule_id", `String "sched-canonical"
-        ; "cancelled_by_id", `String "operator"
         ; "reason", `String "superseded"
         ])
   in
@@ -635,8 +630,6 @@ let test_removed_convenience_input_does_not_synthesize_payload () =
         [ "schedule_id", `String "sched-removed-convenience"
         ; "due_at_unix", `Float future_due_at
         ; "board_content", `String "must not become a scheduled product effect"
-        ; "requested_by_id", `String "operator"
-        ; "scheduled_by_id", `String "scheduler-agent"
         ])
   in
   check bool "removed convenience input rejected" false (Tool_result.is_success result);
@@ -657,8 +650,6 @@ let test_unregistered_wake_target_rejected () =
        ; "due_at_unix", `Float future_due_at
        ; "keeper_name", `String "ghost-keeper"
        ; "message", `String "wake for a keeper that does not exist"
-       ; "requested_by_id", `String "operator"
-       ; "scheduled_by_id", `String "scheduler-agent"
        ]
        @ if allow then [ "allow_unregistered_keeper", `Bool true ] else [])
   in
@@ -770,8 +761,6 @@ let test_known_fields_still_create () =
         ; "message", `String "wake up"
         ; "title", `String "a title"
         ; "urgency", `String "normal"
-        ; "requested_by_id", `String "operator"
-        ; "scheduled_by_id", `String "scheduler-agent"
         ; "allow_unregistered_keeper", `Bool true
         ])
   in
@@ -1161,7 +1150,6 @@ let test_cancel_refusal_says_the_state_and_the_last_wake () =
     dispatch_exn config Tool_schemas_schedule.Cancel_request
       (`Assoc
         [ "schedule_id", `String schedule_id
-        ; "cancelled_by_id", `String "analyst"
         ; "reason", `String "no longer needed"
         ])
   in
@@ -1308,8 +1296,8 @@ let wake_args ?(extra = []) () =
 
 (* An MCP caller that gave no name has only a name the endpoint minted for
    its session, which nobody owns across sessions. Where the tool would stand
-   on the caller's name -- owner=self, the scheduler, a note's author -- such a
-   caller names the actor itself or is refused. *)
+   on the caller's name -- owner=self, the scheduler, the canceller, a note's
+   author -- such a caller is refused; only a note may name its author. *)
 let test_an_unnamed_caller_names_the_actor_itself () =
   with_config
   @@ fun config ->
@@ -1323,28 +1311,128 @@ let test_an_unnamed_caller_names_the_actor_itself () =
        (dispatch_exn ~caller config Tool_schemas_schedule.List_requests
           (`Assoc
             [ "owner", `String "scheduled_by"; "owner_name", `String "scheduler-agent" ])));
-  check_refusal "create without scheduled_by_id"
+  check_refusal "create"
     Schedule_contract_values.Refusal_caller_unidentified
     (dispatch_exn ~caller config Tool_schemas_schedule.Create_request
        (wake_args ~extra:[ "due_in_sec", `Int 60 ] ()));
+  check_refusal "create naming a scheduler in the arguments"
+    Schedule_contract_values.Refusal_caller_unidentified
+    (dispatch_exn ~caller config Tool_schemas_schedule.Create_request
+       (wake_args
+          ~extra:[ "due_in_sec", `Int 60; "scheduled_by_id", `String "named-scheduler" ]
+          ()));
   check int "nothing stored for the unnamed create" 0
     (List.length (Schedule_store.read_state config).schedules);
+  let schedule_id = "sched-unnamed-target" in
+  ignore
+    (create_service_exn config ~schedule_id ~due_at:future_due_at
+       ~payload:(keeper_wake_payload "wake") ()
+     : Schedule_domain.schedule_request);
+  check_refusal "cancel"
+    Schedule_contract_values.Refusal_caller_unidentified
+    (dispatch_exn ~caller config Tool_schemas_schedule.Cancel_request
+       (`Assoc [ "schedule_id", `String schedule_id; "reason", `String "why" ]));
+  check_refusal "note without author_id"
+    Schedule_contract_values.Refusal_caller_unidentified
+    (dispatch_exn ~caller config Tool_schemas_schedule.Add_note
+       (`Assoc [ "schedule_id", `String schedule_id; "body", `String "why" ]))
+;;
+
+let stored_schedule config schedule_id =
+  match
+    List.find_opt
+      (fun (request : Schedule_domain.schedule_request) ->
+         String.equal request.schedule_id schedule_id)
+      (Schedule_store.read_state config).schedules
+  with
+  | Some request -> request
+  | None -> failf "schedule %s is not stored" schedule_id
+;;
+
+(* A Keeper is recorded as itself, whatever actor its arguments name: a
+   Keeper that could write human_operator into requested_by_kind or
+   cancelled_by_kind could pass itself off as the operator. *)
+let test_the_recorded_actor_is_the_caller_not_an_argument () =
+  with_config
+  @@ fun config ->
+  let caller = Tool_schedule.Named_caller "keeper-a" in
+  let schedule_id = "sched-caller-actor" in
   let created =
     dispatch_exn ~caller config Tool_schemas_schedule.Create_request
       (wake_args
          ~extra:
            [ "due_in_sec", `Int 60
-           ; "schedule_id", `String "sched-named-scheduler"
-           ; "scheduled_by_id", `String "named-scheduler"
+           ; "schedule_id", `String schedule_id
+           ; "requested_by_id", `String "operator"
+           ; "requested_by_kind", `String "human_operator"
+           ; "scheduled_by_id", `String "someone-else"
            ]
          ())
   in
-  check bool "create with scheduled_by_id succeeds" true (Tool_result.is_success created);
-  check_refusal "note without author_id"
-    Schedule_contract_values.Refusal_caller_unidentified
-    (dispatch_exn ~caller config Tool_schemas_schedule.Add_note
+  check bool "create succeeds" true (Tool_result.is_success created);
+  let stored = stored_schedule config schedule_id in
+  check string "scheduler is the caller" "keeper-a" stored.Schedule_domain.scheduled_by.Schedule_domain.id;
+  check string "requester is the caller" "keeper-a" stored.Schedule_domain.requested_by.Schedule_domain.id;
+  check bool "requester is not recorded as the operator" true
+    (stored.Schedule_domain.requested_by.Schedule_domain.kind = Schedule_domain.Automated_actor);
+  let cancelled =
+    dispatch_exn ~caller config Tool_schemas_schedule.Cancel_request
+      (`Assoc
+        [ "schedule_id", `String schedule_id
+        ; "cancelled_by_id", `String "operator"
+        ; "cancelled_by_kind", `String "human_operator"
+        ; "reason", `String "superseded"
+        ])
+  in
+  check bool "the caller cancels its own schedule" true
+    (Tool_result.is_success cancelled);
+  let open Yojson.Safe.Util in
+  let canceller = Tool_result.data cancelled |> member "cancelled_by" in
+  check string "canceller is the caller" "keeper-a"
+    (canceller |> member "id" |> to_string);
+  check string "canceller kind is automated" "automated_actor"
+    (canceller |> member "kind" |> to_string)
+;;
+
+(* A Keeper changes the schedules it made and the ones that wake it -- the
+   rows owner=self lists for it -- and no others. *)
+let test_a_keeper_cannot_cancel_another_keepers_schedule () =
+  with_config
+  @@ fun config ->
+  let schedule_id = "sched-owned-by-a" in
+  let created =
+    dispatch_exn ~caller:(Tool_schedule.Named_caller "keeper-a") config
+      Tool_schemas_schedule.Create_request
+      (wake_args
+         ~extra:[ "due_in_sec", `Int 60; "schedule_id", `String schedule_id ]
+         ())
+  in
+  check bool "keeper-a creates" true (Tool_result.is_success created);
+  let other = Tool_schedule.Named_caller "keeper-b" in
+  check_refusal "keeper-b cancels keeper-a's schedule"
+    Schedule_contract_values.Refusal_not_schedule_owner
+    (dispatch_exn ~caller:other config Tool_schemas_schedule.Cancel_request
        (`Assoc
-         [ "schedule_id", `String "sched-named-scheduler"; "body", `String "why" ]))
+         [ "schedule_id", `String schedule_id
+         ; "cancelled_by_id", `String "keeper-a"
+         ; "reason", `String "mine now"
+         ]));
+  check_refusal "keeper-b updates keeper-a's schedule"
+    Schedule_contract_values.Refusal_not_schedule_owner
+    (dispatch_exn ~caller:other config Tool_schemas_schedule.Update_request
+       (wake_args
+          ~extra:[ "due_in_sec", `Int 120; "schedule_id", `String schedule_id ]
+          ()));
+  let stored = stored_schedule config schedule_id in
+  check bool "the schedule is still scheduled" true
+    (stored.Schedule_domain.status = Schedule_domain.Scheduled);
+  check string "the scheduler is unchanged" "keeper-a" stored.Schedule_domain.scheduled_by.Schedule_domain.id;
+  (* The wake target is the other side owner=self reads. *)
+  check bool "the woken keeper may cancel" true
+    (Tool_result.is_success
+       (dispatch_exn ~caller:(Tool_schedule.Named_caller "schedule-keeper") config
+          Tool_schemas_schedule.Cancel_request
+          (`Assoc [ "schedule_id", `String schedule_id; "reason", `String "not needed" ])))
 ;;
 
 (* A call gives one due input, or none when a calendar recurrence derives
@@ -1702,6 +1790,10 @@ let () =
             test_list_pages_by_schedule_id
         ; test_case "an unnamed caller names the actor itself" `Quick
             test_an_unnamed_caller_names_the_actor_itself
+        ; test_case "the recorded actor is the caller, not an argument" `Quick
+            test_the_recorded_actor_is_the_caller_not_an_argument
+        ; test_case "a keeper cannot cancel another keeper's schedule" `Quick
+            test_a_keeper_cannot_cancel_another_keepers_schedule
         ; test_case "a call gives exactly one due input" `Quick
             test_a_call_gives_exactly_one_due_input
         ; test_case "due_in_sec counts from the dispatch clock" `Quick

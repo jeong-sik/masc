@@ -161,29 +161,6 @@ let test_no_tools_route_drift () =
       expected
       registered)
 
-let test_schedule_write_actor_is_stamped_from_auth () =
-  let open Yojson.Safe.Util in
-  let stamped =
-    Server_routes_http_routes_activity.schedule_stamp_operator_actor
-      ~agent_name:"tui-operator"
-      (`Assoc
-        [ "scheduled_by_id", `String "spoofed"
-        ; "requested_by_kind", `String "system"
-        ; "message", `String "keep me"
-        ])
-  in
-  check string "scheduled actor" "tui-operator"
-    (stamped |> member "scheduled_by_id" |> to_string);
-  check string "requested actor" "tui-operator"
-    (stamped |> member "requested_by_id" |> to_string);
-  check string "scheduled kind" "human_operator"
-    (stamped |> member "scheduled_by_kind" |> to_string);
-  check string "requested kind" "human_operator"
-    (stamped |> member "requested_by_kind" |> to_string);
-  check string "form fields survive" "keep me"
-    (stamped |> member "message" |> to_string)
-;;
-
 let rec remove_tree path =
   match Unix.lstat path with
   | { Unix.st_kind = Unix.S_DIR; _ } ->
@@ -364,6 +341,50 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
        check string "terminal bridge uses typed human operator" "human_operator"
     (response |> member "data" |> member "cancelled_by" |> member "kind"
      |> to_string)
+;;
+
+(* The operator surface records the credential's actor as requester and
+   scheduler. The tool schema declares no actor field, so a body that names
+   one is refused before anything is written. *)
+let test_schedule_create_actor_comes_from_auth () =
+  with_authenticated_activity_router
+    ~prefix:"schedule-create-http-actor-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  let body extra =
+    `Assoc
+      ([ "schedule_id", `String "sched-http-create"
+       ; "keeper_name", `String "http-keeper"
+       ; "message", `String "wake"
+       ; "due_in_sec", `Int 3600
+       ; "allow_unregistered_keeper", `Bool true
+       ]
+       @ extra)
+    |> Yojson.Safe.to_string
+  in
+  let post body =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_schedule_create"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
+  in
+  let forged_status, _ =
+    post (body [ "scheduled_by_id", `String "forged-body-actor" ])
+  in
+  check int "a body naming an actor is refused" 400 forged_status;
+  check int "nothing stored for the forged body" 0
+    (List.length (Schedule_store.read_state config).schedules);
+  let status, _ = post (body []) in
+  check int "create accepted" 201 status;
+  match (Schedule_store.read_state config).schedules with
+  | [ stored ] ->
+    check string "scheduler is the credential owner" "credential-owner"
+      stored.Schedule_domain.scheduled_by.Schedule_domain.id;
+    check string "requester is the credential owner" "credential-owner"
+      stored.Schedule_domain.requested_by.Schedule_domain.id;
+    check bool "the operator surface records a human operator" true
+      (stored.Schedule_domain.requested_by.Schedule_domain.kind
+       = Schedule_domain.Human_operator)
+  | rows -> failf "expected one stored schedule, got %d" (List.length rows)
 ;;
 
 let test_goal_transition_uses_authenticated_actor () =
@@ -1022,8 +1043,8 @@ let () =
             "no /api/v1/tools/* route drift"
             `Quick
             test_no_tools_route_drift
-        ; test_case "schedule write actor comes from auth" `Quick
-            test_schedule_write_actor_is_stamped_from_auth
+        ; test_case "schedule create actor comes from auth" `Quick
+            test_schedule_create_actor_comes_from_auth
         ; test_case "schedule cancel actor comes from auth" `Quick
             test_schedule_cancel_actor_is_stamped_from_auth
         ; test_case "goal transition actor comes from auth" `Quick

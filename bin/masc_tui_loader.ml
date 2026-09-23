@@ -1187,7 +1187,12 @@ let overview_keeper_rows_of_briefs briefs =
             | `Int seconds -> Some (float_of_int seconds)
             | _ -> None
           in
-          Some { okp_name = name; okp_phase; okp_last_turn_ago_s }
+          let okp_paused =
+            match Yojson.Safe.Util.member "paused" brief with
+            | `Bool paused -> Some paused
+            | _ -> None
+          in
+          Some { okp_name = name; okp_phase; okp_last_turn_ago_s; okp_paused }
       | _ -> None)
     briefs
 

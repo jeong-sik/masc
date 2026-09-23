@@ -31,7 +31,7 @@ let write_file path text =
   Out_channel.with_open_bin path (fun oc -> output_string oc text)
 
 let ok_response body =
-  Ok { Pulls.status = 200; body; rate_limit_remaining = Some 4990; rate_limit_reset = None }
+  Ok { Pulls.status = 200; body; rate_limit_remaining = Some 4990; rate_limit_reset = None; retry_after_s = None }
 
 let pull_node ~number ~branch ~draft ~review ~rollup =
   Printf.sprintf
@@ -185,6 +185,7 @@ let test_rate_limit_carries_reset () =
       ; body = {|{"message":"API rate limit exceeded"}|}
       ; rate_limit_remaining = Some 0
       ; rate_limit_reset = Some 1_790_003_600.
+      ; retry_after_s = None
       }
   in
   let http_post, _ = recording_stub [ limited ] in
@@ -347,10 +348,66 @@ let test_a_raised_refresh_marks_the_rows_until_the_next_one_returns () =
   Alcotest.(check bool) "the next returned refresh clears the mark" true
     (Option.is_none next.repositories_error)
 
+(* A Remote_ssh Keeper's GitHub login lives on its endpoint. A hosts.yml in
+   this host's directory for that Keeper was not written by its login, so the
+   reader refuses it instead of sending it (RFC-0465 §4: no other credential). *)
+let remote_endpoint_name = "pr-reader-box"
+
+let test_remote_ssh_reader_is_refused () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = ready_base_path ~token:"gho_host_copy" in
+  write_file
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+    (Exec_ssh_endpoint.to_toml
+       Exec_ssh_endpoint.
+         { name = remote_endpoint_name
+         ; host = "fixture.invalid"
+         ; user = "masc"
+         ; port = default_port
+         ; identity_file = default_identity_file ~name:remote_endpoint_name
+         ; known_hosts_file = default_known_hosts_file ~name:remote_endpoint_name
+         ; remote_root = "/srv/masc/playground"
+         ; connect_timeout_sec = 1
+         ; max_concurrent_sessions = 2
+         ; env_allowlist = []
+         ; capabilities = []
+         ; private_home = false
+         }
+     ^ Printf.sprintf "\n[repositories]\npr_reader = %S\n" reader_keeper);
+  write_file
+    (Config_dir_resolver.keeper_toml_path_for_base_path ~base_path reader_keeper)
+    (Printf.sprintf
+       "[keeper]\nsandbox_profile = \"remote_ssh\"\nremote_endpoint = %S\n"
+       remote_endpoint_name);
+  let config = Masc.Workspace.default_config base_path in
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String reader_keeper ]) with
+    | Ok fixture ->
+      { fixture with
+        Masc.Keeper_meta_contract.sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh
+      }
+    | Error detail -> failf "meta fixture: %s" detail
+  in
+  (match Masc.Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> failf "keeper meta persistence failed: %s" detail);
+  let http_post, calls, _ =
+    counting_stub (ok_response (page ~has_next:false ~cursor:None []))
+  in
+  let snapshot = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  (match snapshot.reader with
+   | Pulls.Reader_token_unavailable { keeper; reason = _ } ->
+     Alcotest.(check string) "the refusal names the reader" reader_keeper keeper
+   | Pulls.Reader_ready _ -> failf "a Remote_ssh reader was answered from this host's hosts.yml"
+   | _ -> failf "a Remote_ssh reader must be refused as token unavailable");
+  Alcotest.(check int) "GitHub is not called" 0 !calls
+
 let test_rejected_token_is_not_sent_again () =
   let base_path = ready_base_path ~token:"gho_revoked" in
   let rejected =
-    Ok { Pulls.status = 401; body = "{}"; rate_limit_remaining = None; rate_limit_reset = None }
+    Ok { Pulls.status = 401; body = "{}"; rate_limit_remaining = None; rate_limit_reset = None; retry_after_s = None }
   in
   let http_post, calls, _ = counting_stub rejected in
   let first = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
@@ -369,6 +426,51 @@ let test_rejected_token_is_not_sent_again () =
   let _third = Pulls.refresh ~now:later ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:second in
   Alcotest.(check int) "a new token is asked about" 2 !calls
 
+(* GitHub's secondary rate limit: 403 with [retry-after] while the primary
+   quota still has requests left. Reading it as a plain 403 would ask again
+   every 60 s during the wait GitHub asked for. *)
+let test_secondary_limit_waits_for_retry_after () =
+  let base_path = ready_base_path ~token:"gho_reader" in
+  let retry_after_s = 120 in
+  let limited =
+    Ok
+      { Pulls.status = 403
+      ; body = {|{"message":"You have exceeded a secondary rate limit."}|}
+      ; rate_limit_remaining = Some 4000
+      ; rate_limit_reset = Some (now () +. 3000.)
+      ; retry_after_s = Some retry_after_s
+      }
+  in
+  let http_post, calls, _ = counting_stub limited in
+  let config = Masc.Workspace.default_config base_path in
+  let first = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  let wait_ends = now () +. Float.of_int retry_after_s in
+  (match masc_pulls first with
+   | Pulls.Pulls_failed { failure = Pulls.Rate_limited { reset_at = Some at }; _ } ->
+     Alcotest.(check (float 0.)) "retry-after is the wait, not the primary reset" wait_ends at
+   | _ -> failf "403 with retry-after must read as rate limited");
+  let during () = wait_ends -. 1. in
+  let second = Pulls.refresh ~now:during ~http_post ~config ~previous:first in
+  Alcotest.(check int) "no call during retry-after" 1 !calls;
+  let after () = wait_ends in
+  let _third = Pulls.refresh ~now:after ~http_post ~config ~previous:second in
+  Alcotest.(check int) "asked again when retry-after ends" 2 !calls
+
+let test_plain_403_is_forbidden () =
+  let forbidden =
+    Ok
+      { Pulls.status = 403
+      ; body = {|{"message":"Resource protected by organization SAML enforcement."}|}
+      ; rate_limit_remaining = Some 4000
+      ; rate_limit_reset = None
+      ; retry_after_s = None
+      }
+  in
+  let http_post, _ = recording_stub [ forbidden ] in
+  match Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> failure_or_fail with
+  | Pulls.Forbidden { status = 403 } -> ()
+  | _ -> failf "403 without an exhausted limit or retry-after is forbidden"
+
 let test_rate_limit_waits_for_reset () =
   let base_path = ready_base_path ~token:"gho_reader" in
   let reset_at = now () +. 600. in
@@ -378,6 +480,7 @@ let test_rate_limit_waits_for_reset () =
       ; body = {|{"message":"API rate limit exceeded"}|}
       ; rate_limit_remaining = Some 0
       ; rate_limit_reset = Some reset_at
+      ; retry_after_s = None
       }
   in
   let http_post, calls, _ = counting_stub limited in
@@ -664,6 +767,10 @@ let () =
             "a raised refresh marks the rows until the next one returns"
             `Quick
             test_a_raised_refresh_marks_the_rows_until_the_next_one_returns
+        ; Alcotest.test_case
+            "remote_ssh reader is refused"
+            `Quick
+            test_remote_ssh_reader_is_refused
         ] )
     ; ( "provider limits"
       , [ Alcotest.test_case
@@ -671,6 +778,11 @@ let () =
             `Quick
             test_rejected_token_is_not_sent_again
         ; Alcotest.test_case "rate limit waits for reset" `Quick test_rate_limit_waits_for_reset
+        ; Alcotest.test_case
+            "secondary limit waits for retry-after"
+            `Quick
+            test_secondary_limit_waits_for_retry_after
+        ; Alcotest.test_case "plain 403 is forbidden" `Quick test_plain_403_is_forbidden
         ] )
     ; ( "keepers on branch"
       , [ Alcotest.test_case

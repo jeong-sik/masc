@@ -122,6 +122,7 @@ type response =
   ; body : string
   ; rate_limit_remaining : int option
   ; rate_limit_reset : float option
+  ; retry_after_s : int option
   }
 
 type http_post =
@@ -143,7 +144,7 @@ let curl_meta_marker = "\n--MASC-GITHUB-META--\n"
    no such header" rather than as a wrong reset time. *)
 let curl_write_out =
   curl_meta_marker
-  ^ "%{http_code}\n%header{x-ratelimit-remaining}\n%header{x-ratelimit-reset}"
+  ^ "%{http_code}\n%header{x-ratelimit-remaining}\n%header{x-ratelimit-reset}\n%header{retry-after}"
 
 let curl_timeout_sec = 20
 
@@ -165,7 +166,7 @@ let response_of_curl_output output =
     let meta_start = idx + String.length curl_meta_marker in
     let meta = String.sub output meta_start (String.length output - meta_start) in
     (match String.split_on_char '\n' meta with
-     | status_raw :: remaining_raw :: reset_raw :: _ ->
+     | status_raw :: remaining_raw :: reset_raw :: retry_after_raw :: _ ->
        (match int_of_string_opt (String.trim status_raw) with
         | None | Some 0 -> Error "curl reported no HTTP status"
         | Some status ->
@@ -174,6 +175,13 @@ let response_of_curl_output output =
             ; body
             ; rate_limit_remaining = int_of_string_opt (String.trim remaining_raw)
             ; rate_limit_reset = Option.map Float.of_int (int_of_string_opt (String.trim reset_raw))
+            ; retry_after_s =
+                (* GitHub sends delay-seconds; an HTTP-date or a negative
+                   number is not a wait this reader can use, so it reads as
+                   no header. *)
+                (match int_of_string_opt (String.trim retry_after_raw) with
+                 | Some seconds when seconds >= 0 -> Some seconds
+                 | Some _ | None -> None)
             })
      | _ -> Error "curl status trailer is incomplete")
 
@@ -401,12 +409,24 @@ let decode_page ~repo_slug (response : response) =
               | _ -> Error (Response_unreadable "pageInfo has no usable next page cursor"))
            | _ -> Error (Response_unreadable "pullRequests has no nodes or pageInfo"))))
 
-let failure_of_status (response : response) =
+(* GitHub's secondary rate limit answers 403 or 429 with [retry-after] while
+   [x-ratelimit-remaining] is still above 0. Its wait is the one GitHub names
+   first; asking during it can get the integration blocked, and the token is
+   the reader Keeper's own account token. *)
+let rate_limited ~now_s (response : response) =
+  let reset_at =
+    match response.retry_after_s with
+    | Some seconds -> Some (now_s +. Float.of_int seconds)
+    | None -> response.rate_limit_reset
+  in
+  Rate_limited { reset_at }
+
+let failure_of_status ~now_s (response : response) =
   match response.status with
   | 401 -> Some Token_rejected
-  | 429 -> Some (Rate_limited { reset_at = response.rate_limit_reset })
-  | 403 when response.rate_limit_remaining = Some 0 ->
-    Some (Rate_limited { reset_at = response.rate_limit_reset })
+  | 429 -> Some (rate_limited ~now_s response)
+  | 403 when response.rate_limit_remaining = Some 0 || Option.is_some response.retry_after_s ->
+    Some (rate_limited ~now_s response)
   | 403 -> Some (Forbidden { status = 403 })
   | status when status >= 200 && status < 300 -> None
   | status -> Some (Http_status { status })
@@ -423,7 +443,7 @@ let read_repository ~now ~http_post ~token repo_slug =
     match http_post ~url:graphql_url ~token ~body:(request_body ~owner ~name ~after) with
     | Error message -> failed (Transport_failed message)
     | Ok response ->
-      (match failure_of_status response with
+      (match failure_of_status ~now_s:(now ()) response with
        | Some failure -> failed failure
        | None ->
          (match decode_page ~repo_slug response with
@@ -464,13 +484,19 @@ let reader_of_declaration ~(config : Workspace.config) keeper =
     match Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path keeper with
     | None -> Error (Reader_keeper_missing { keeper })
     | Some _ ->
+      (* The login lane, not the host directory: a Remote_ssh Keeper's login
+         lives on its endpoint, and this host reading its own directory for
+         that Keeper would answer with a token the Keeper never wrote. *)
       (match
-         Keeper_github_identity.stored_token
+         Keeper_github_login_lane.stored_token
            ~config
            ~keeper_name:keeper
            ~hostname:github_hostname
        with
-       | Error reason -> Error (Reader_token_unavailable { keeper; reason })
+       | Error refusal ->
+         Error
+           (Reader_token_unavailable
+              { keeper; reason = Keeper_github_login_lane.stored_token_error_to_string refusal })
        | Ok token -> Ok { keeper; token }))
 
 let declaration_invalid fmt = Printf.ksprintf (fun m -> Error (Reader_declaration_invalid m)) fmt

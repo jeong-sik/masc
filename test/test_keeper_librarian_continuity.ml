@@ -517,11 +517,15 @@ let narrowing_marks = [ 'a'; 'b'; 'c'; 'd'; 'e'; 'f'; 'g'; 'h' ]
 let narrowing_atom_count = List.length narrowing_marks
 
 (* The rendered prompt carries each atom once, as conversation_history, on top
-   of a template of about 17 kB, so a unit of n atoms sends roughly
-   n * narrowing_atom_chars + 17 kB. With 16,000 characters an atom and the
-   ceiling below at 65,000, four atoms (64 kB + template) land over the
-   ceiling and two (32 kB + template) under it for any template between 1 kB
-   and 33 kB, so the template size cannot decide either comparison. Eight
+   of a fixed part T (template plus output schema), so a unit of n atoms sends
+   roughly n * narrowing_atom_chars + T. With 16,000 characters an atom and the
+   ceiling below at 65,000, four atoms (64 kB + T) land over the ceiling and
+   two (32 kB + T) under it for any T between 1 kB and 33 kB. The Memory pass
+   renders librarian.md, whose body alone is about 21.7 kB, so the output
+   schema and the request envelope share the remaining 11 kB or so before two
+   atoms stop fitting. That margin is narrower than it looks; the context-only
+   pass
+   renders librarian.continuity.md, about 2.7 kB. Eight
    atoms rather than four so that six remain after the first committed unit:
    a pass that released the width on a commit would offer those six and be
    refused, which four atoms could not have shown. *)
@@ -670,17 +674,23 @@ let tool_result_marker = "fixture-tool-result-body"
 let tool_name = "read_file"
 let tool_atom_indices = [ 1; 2; 3 ]
 let tool_atom_opening index = Printf.sprintf "tool-atom-%d-opening" index
+let tool_call_id index = Printf.sprintf "call-%d" index
+(* One call fails, so the folded result lines must carry both outcomes. *)
+let tool_call_fails index = index = 2
 let tool_atoms =
   let open Agent_core.Types in
   List.concat_map (fun index ->
-    let call_id = Printf.sprintf "call-%d" index in
+    let call_id = tool_call_id index in
     [ message (tool_atom_opening index)
     ; make_message ~role:Assistant
         [ ToolUse { id = call_id; name = tool_name
                   ; input = `Assoc [ "path", `String tool_argument_marker ] } ]
     ; { (make_message ~role:Tool
            [ ToolResult { tool_use_id = call_id; content = tool_result_marker
-                        ; outcome = Tool_succeeded; json = None; content_blocks = None } ])
+                        ; outcome = (if tool_call_fails index
+                            then Tool_failed { failure_kind = Reported_tool_error; error_class = None }
+                            else Tool_succeeded)
+                        ; json = None; content_blocks = None } ])
         with tool_call_id = Some call_id } ])
     tool_atom_indices
 
@@ -693,9 +703,18 @@ let check_folded_tool_request body =
     check int (Printf.sprintf "user message %d travels once" index) 1
       (occurrences ~sub:(tool_atom_opening index) body))
     tool_atom_indices;
-  check int "each call's tool name survives in its folded line"
-    (List.length tool_atom_indices)
-    (occurrences ~sub:("name=" ^ tool_name) body)
+  (* The folded lines are the host's own markers (Keeper_librarian
+     text_of_content): the call line names the tool, and the result line with
+     the same id states the outcome. *)
+  List.iter (fun index ->
+    let id = tool_call_id index in
+    check int (Printf.sprintf "call %s keeps its tool name" id) 1
+      (occurrences ~sub:(Printf.sprintf "[tool use omitted: id=%s name=%s]" id tool_name) body);
+    check int (Printf.sprintf "result %s keeps its outcome" id) 1
+      (occurrences
+         ~sub:(Printf.sprintf "[tool result omitted: id=%s is_error=%b]" id (tool_call_fails index))
+         body))
+    tool_atom_indices
 
 let test_a_continuity_pass_carries_tool_turns_folded_once () =
   let run ~memory_committed ~answer =

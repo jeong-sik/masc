@@ -95,6 +95,12 @@ let with_keeper_slot ~sem ~name f =
 
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
 
+(* What one Keeper name became in [keepers_json]. *)
+type keeper_row_outcome =
+  | Keeper_row of Yojson.Safe.t
+  | Keeper_gone (** metadata absent: removed after the name was listed *)
+  | Keeper_unread of Keeper_snapshot_unread.t
+
 let keepers_json
       ?keeper_names
       ?(include_recent_activity = false)
@@ -118,7 +124,7 @@ let keepers_json
      Without this cap, 9+ keepers doing concurrent file I/O + JSON
      construction can cause memory spikes during dashboard refresh. *)
   let n = List.length names in
-  let results = Array.make n None in
+  let results = Array.make n Keeper_gone in
   Eio.Fiber.all
     (List.mapi
        (fun idx name () ->
@@ -170,7 +176,12 @@ let keepers_json
           <- (try
                 let t0 = Time_compat.now () in
                 match Keeper_meta_store.read_meta config name with
-                | Error _ | Ok None -> None
+                | Error detail ->
+                  Keeper_unread
+                    { Keeper_snapshot_unread.name
+                    ; reason = Keeper_snapshot_unread.Meta_read_failed detail
+                    }
+                | Ok None -> Keeper_gone
                 | Ok (Some meta) ->
                   dt_meta := Time_compat.now () -. t0;
                   if lightweight && meta.paused
@@ -213,7 +224,7 @@ let keepers_json
                       result
                     in
                     emit_timing_log (Time_compat.now () -. t_work_start);
-                    Some
+                    Keeper_row
                       (`Assoc
                           ([ "runtime_class", `String "keeper"
                            ; "pipeline_stage", `String "paused"
@@ -467,17 +478,37 @@ let keepers_json
                          @ [ "runtime_trust", runtime_trust ])
                     in
                     emit_timing_log (Time_compat.now () -. t_work_start);
-                    Some row)
+                    Keeper_row row)
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->
-                Log.Dashboard.error
-                  "keepers_json fiber error (%s): %s"
-                  name
-                  (Printexc.to_string exn);
-                None)))
+                let detail = Printexc.to_string exn in
+                Log.Dashboard.error "keepers_json fiber error (%s): %s" name detail;
+                Keeper_unread
+                  { Keeper_snapshot_unread.name
+                  ; reason = Keeper_snapshot_unread.Row_raised detail
+                  })))
        names);
-  let rows = Array.to_list results |> List.filter_map Fun.id in
+  let outcomes = Array.to_list results in
+  let rows =
+    List.filter_map
+      (function
+        | Keeper_row row -> Some row
+        | Keeper_gone | Keeper_unread _ -> None)
+      outcomes
+  in
+  (* A Keeper whose row could not be built is still a Keeper: its name was
+     listed. Leaving it out of [items] alone made it vanish from the briefing
+     and the TUI with nothing saying so (#38090), so it is reported beside the
+     rows. A name whose metadata is gone ([Keeper_gone]) was removed, not
+     unread. *)
+  let unread =
+    List.filter_map
+      (function
+        | Keeper_unread unread -> Some unread
+        | Keeper_row _ | Keeper_gone -> None)
+      outcomes
+  in
   let declarations =
     match Keeper_meta_store.persisted_keeper_names_result config with
     | Error _ -> [] (* A failed read cannot establish that a Keeper never started. *)
@@ -490,7 +521,12 @@ let keepers_json
       |> List.map Keeper_declared_roster.to_json
   in
   let rows = rows @ declarations in
-  `Assoc [ "count", `Int (List.length rows); "items", `List rows ]
+  `Assoc
+    [ "count", `Int (List.length rows)
+    ; "items", `List rows
+    ; ( Keeper_snapshot_unread.section_field
+      , `List (List.map Keeper_snapshot_unread.to_json unread) )
+    ]
 ;;
 
 let persistent_agents_json = Operator_control_snapshot_persistent_agents.persistent_agents_json
@@ -642,7 +678,13 @@ let snapshot_json
                     ~lightweight:lightweight_summary
                     ~include_recent_activity:(not lightweight_summary)
                     config
-                else empty_section)
+                else
+                  (* No Keeper name was read, so none went unread. *)
+                  `Assoc
+                    [ "count", `Int 0
+                    ; "items", `List []
+                    ; Keeper_snapshot_unread.section_field, `List []
+                    ])
             in
             let persistent_agents_json_value =
               timed "persistent_agents_json" (fun () ->

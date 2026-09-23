@@ -101,6 +101,11 @@ let remember_input_capacity ~config ~keeper_name capacity =
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace input_capacities key capacity)
 ;;
 
+let forget_input_capacity ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove input_capacities key)
+;;
+
 let publish_measurement ~config ~keeper_name ~last_pass ~unread =
   let key = measurement_key ~config ~keeper_name in
   let measurement = { measured_at = Time_compat.now (); last_pass; unread } in
@@ -310,7 +315,21 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
           remember_input_capacity ~config ~keeper_name observed;
           capacity := Some observed)
         ~on_not_committed:(fun outcome -> cause := Some (merge_not_committed !cause outcome))
-        ~on_continuity_committed:(fun _ -> saved := true; observe O.Committed)
+        ~on_continuity_committed:(fun ~served_by _ ->
+          (* A CLI's reported limit is a fact about the CLI transport. The
+             walk sends one prompt to every slot, so the range is fitted to
+             it before dispatch whenever a CLI slot may be reached. An API
+             slot that committed took the range without that limit, so the
+             next attempt goes out whole again; if the walk reaches a CLI
+             again, that CLI measures anew. A CLI slot that committed, the
+             one that measured or another, answered inside the limit, so
+             the limit stands (#37625). *)
+          (match served_by with
+           | Runtime.Api_slot _ ->
+             forget_input_capacity ~config ~keeper_name;
+             capacity := None
+           | Runtime.Cli_slot _ -> ());
+          saved := true; observe O.Committed)
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
         input;
@@ -491,6 +510,7 @@ let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
 
 module For_testing = struct
   let limited_width = limited_width
+  let last_input_capacity = last_input_capacity
   let merge_not_committed = merge_not_committed
   let run_continuity = run_continuity
   let run_durable_with_commit = run_durable_with_commit

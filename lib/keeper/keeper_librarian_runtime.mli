@@ -90,7 +90,8 @@ val run_best_effort
        (** The character limit a CLI slot reported while refusing, for
            {!fit_continuity}. An API slot's refusal reports none. *)
   -> ?on_not_committed:(not_committed -> unit)
-  -> ?on_continuity_committed:(Librarian_continuity_snapshot.t -> unit)
+  -> ?on_continuity_committed:(served_by:string -> Librarian_continuity_snapshot.t -> unit)
+       (** [served_by] is the runtime id of the slot whose answer committed. *)
   -> ?durable_range_id:Keeper_memory_os_current.durable_range_id
   -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner

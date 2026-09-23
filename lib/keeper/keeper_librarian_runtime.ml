@@ -992,7 +992,7 @@ let run_best_effort
       ?(on_memory_committed = fun () -> ())
       ?(on_cli_input_limit = fun _ -> ())
       ?(on_not_committed = fun _ -> ())
-      ?(on_continuity_committed = fun _ -> ())
+      ?(on_continuity_committed = fun ~served_by:_ _ -> ())
       ?durable_range_id
       ?official_range_id
       ?cli_runner
@@ -1167,7 +1167,7 @@ let run_best_effort
                    continuity_write := `Assoc
                      ["status", `String "committed"; "end_atom", `Int snapshot.end_atom;
                       "prefix_sha256", `String snapshot.prefix_sha256];
-                   on_continuity_committed snapshot
+                   on_continuity_committed ~served_by:selected_slot snapshot
                  | Error detail ->
                    continuity_write := `Assoc ["status", `String "failed"; "detail", `String detail];
                    (* A snapshot that did not commit -- a CAS the history moved

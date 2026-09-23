@@ -271,15 +271,20 @@ let test_prefit_real_continuity ~base_path () =
         "new_claims", `List []; "dropped", `List []; "working_contexts", `List [];
         "working_state", `String state]))) in
     let committed = ref false and memory_committed = ref false in
+    let served_by = ref None in
     let current = Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> get in
     Runtime.run_best_effort ~continuity:prepared
       ~durable_range_id:(P.memory_range_id ~config ~keeper_name:keeper_id prepared |> get)
-      ~cli_runner:runner ~on_continuity_committed:(fun _ -> committed:=true)
+      ~cli_runner:runner
+      ~on_continuity_committed:(fun ~served_by:runtime_id _ ->
+        served_by := Some runtime_id; committed:=true)
       ~on_memory_committed:(fun () -> memory_committed:=true)
       ~base_path ~keepers_dir ~keeper_id
       ~expected_revision:(Option.map (fun (s : Current.t) -> s.revision) current) input;
     Alcotest.(check bool) "actual Memory publication completed" true !memory_committed;
     Alcotest.(check bool) "actual continuity publication completed" true !committed;
+    Alcotest.(check (option string)) "the commit names the runtime that answered"
+      (Some Fixture.cli_secondary_runtime) !served_by;
     let saved = P.read ~config ~keeper_name:keeper_id |> get |> some in
     Alcotest.(check int) "stored frontier advances to the selected atom group"
       (P.end_atom prepared) saved.end_atom;

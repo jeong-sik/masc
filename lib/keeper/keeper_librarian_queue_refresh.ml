@@ -101,6 +101,11 @@ let remember_input_capacity ~config ~keeper_name capacity =
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace input_capacities key capacity)
 ;;
 
+let forget_input_capacity ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove input_capacities key)
+;;
+
 let publish_measurement ~config ~keeper_name ~last_pass ~unread =
   let key = measurement_key ~config ~keeper_name in
   let measurement = { measured_at = Time_compat.now (); last_pass; unread } in
@@ -310,7 +315,19 @@ let run_continuity ?cli_runner ~base_path ~keeper_name () =
           remember_input_capacity ~config ~keeper_name observed;
           capacity := Some observed)
         ~on_not_committed:(fun outcome -> cause := Some (merge_not_committed !cause outcome))
-        ~on_continuity_committed:(fun _ -> saved := true; observe O.Committed)
+        ~on_continuity_committed:(fun ~served_by _ ->
+          (* A CLI's measured limit binds that CLI only. The range is fitted
+             to it before dispatch because the walk sends one prompt to every
+             slot, so once another runtime has committed, the next pass goes
+             out whole again and that CLI measures anew only if the walk
+             reaches it. *)
+          (match !capacity with
+           | Some observed
+             when not (String.equal observed.Keeper_lane_cli_oneshot.runtime_id served_by) ->
+             forget_input_capacity ~config ~keeper_name;
+             capacity := None
+           | Some _ | None -> ());
+          saved := true; observe O.Committed)
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
         input;

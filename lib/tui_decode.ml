@@ -2236,6 +2236,17 @@ type effective_skill_profile = {
   esp_flow : skill_flow option;
 }
 
+(* A Skill name the Keeper profile selected that the turn's catalog does not
+   hold. It is not a read failure -- the document may not exist at all -- so it
+   is a different fact from [ets_skills_left_out] and the producer sends it as
+   its own list. [csn_reason] is the producer's word for why
+   (`not_in_turn_skill_catalog`), kept optional because a reader that invents
+   one would be speaking for a producer that said nothing. *)
+type configured_skill_name_unavailable = {
+  csn_name : string;
+  csn_reason : string option;
+}
+
 type effective_tool_surface =
   | Effective_surface_available of {
       ets_keeper_name : string;
@@ -2251,6 +2262,10 @@ type effective_tool_surface =
          can call, and absence with no reason reads as a skill nobody
          wrote. *)
       ets_skills_left_out : string list;
+      (* Names the profile selected and the turn catalog does not carry. The
+         dashboard draws these under "Unavailable Skills"; this reader exists
+         so the other renderer of the same surface says it too. *)
+      ets_unavailable_skill_names : configured_skill_name_unavailable list;
       ets_composition_skills : Skill_reference.t list;
       ets_skill_profiles : effective_skill_profile list;
       ets_tool_surface_bytes : int;
@@ -3080,6 +3095,17 @@ let decode_effective_tool_surface json =
       let* ets_skills_left_out =
         decode_string_name_list json "skills_left_out"
       in
+      let* unavailable_skill_names_json =
+        optional_list_field json "unavailable_skill_names"
+      in
+      let* ets_unavailable_skill_names =
+        decode_list "effective_keeper_surface.unavailable_skill_names"
+          (fun entry ->
+            let* csn_name = required_string_field entry "name" in
+            let* csn_reason = optional_string_field entry "reason" in
+            Ok { csn_name; csn_reason })
+          unavailable_skill_names_json
+      in
       let* ets_instruction_skills =
         decode_skill_reference_list json "instruction_skills"
       in
@@ -3128,6 +3154,7 @@ let decode_effective_tool_surface json =
              ets_skill_resource_read_max_bytes;
              ets_instruction_skills;
              ets_skills_left_out;
+             ets_unavailable_skill_names;
              ets_composition_skills;
              ets_skill_profiles;
              ets_tool_surface_bytes;

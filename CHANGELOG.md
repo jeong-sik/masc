@@ -8,14 +8,6 @@
 
 ### Changed
 
-- The TUI reads a connector's `gateway_state` and `poll_state` as closed
-  variants instead of strings. A connector row the TUI cannot read, such as
-  one carrying a state the server's state machines never produce, is refused
-  on its own and drawn as one line naming the connector and the reason; the
-  other rows still load. The TUI decides whether the Channels pane's Runtime
-  state row repeats the connection badge by matching constructors rather than comparing
-  lowercased words. The runtime picker's kind badge width is measured from
-  the badge strings instead of being written as 7 in three places (#38050).
 - The Librarian reads a new claim that repeats a current memory word for word
   as that memory instead of refusing the whole pass as
   `duplicate_selected_memory_id`: the stored fact keeps its first sighting and

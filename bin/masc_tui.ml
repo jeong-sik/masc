@@ -61,10 +61,15 @@ module Terminal_restore = Masc_tui_terminal_restore
 
 (* Tools rows are the exact projection the renderer draws, so their scroll
    bound belongs to that projection rather than a second reconstruction in
-   the state module. Every other counted surface remains state-owned. *)
+   the state module. The Memory overview's header is wrapped to the terminal
+   width, so its chrome is the renderer's too. Every other counted surface
+   remains state-owned. *)
 let scrolled_surface state surface =
   match surface with
   | Tools -> Some (Masc_tui_render.tools_scrolled state)
+  | Memory when Option.is_none state.memory_facts_keeper ->
+      let _, cols = get_terminal_size () in
+      Some (Masc_tui_render_memory.memory_overview_scrolled ~cols state)
   | _ -> Masc_tui_types.scrolled_surface state surface
 ;;
 
@@ -354,7 +359,9 @@ let surface_body_height_at (state : state) ~cursor scrolled =
       ~cursor state
   else
     let scrolled =
-      if state.view = Memory then memory_overview_scrolled ~cursor state
+      if state.view = Memory then
+        let _, cols = get_terminal_size () in
+        Masc_tui_render_memory.memory_overview_scrolled ~cols ~cursor state
       else scrolled
     in
     surface_body_height ~rows:(surface_rows state) scrolled
@@ -1827,6 +1834,9 @@ type http_scoped_surface_results = {
     (Keeper_control.roster, Keeper_control.roster_failure) result option;
   (* [None] off the Overview, the one surface that draws the quota windows. *)
   http_runtime_quota: (Tui_decode.runtime_option list, string) result option;
+  http_repository_pulls:
+    (overview_pulls_reading, string) result
+    option;
 }
 
 type http_surface_results = {
@@ -10470,6 +10480,10 @@ let apply_runtime_quota_load state = function
   | Ok options -> state.overview_quota <- Quota_read options
   | Error err -> state.overview_quota <- Quota_failed err
 
+let apply_repository_pulls_load state = function
+  | Ok reading -> state.overview_pulls <- reading
+  | Error err -> state.overview_pulls <- Overview_pulls_failed err
+
 let apply_keeper_roster_load state = function
   | Ok roster ->
       state.keeper_roster <- roster;
@@ -10708,6 +10722,13 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  let http_repository_pulls =
+    when_needed needs.needs_repository_pulls (fun () ->
+        match Masc_tui_loader.load_repository_pulls ~host ~port with
+        | result -> result
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> Error (Printexc.to_string exn))
+  in
   { http_transport
   ; http_approvals
   ; http_asks
@@ -10718,6 +10739,7 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   ; http_fleet_safety
   ; http_keeper_roster
   ; http_runtime_quota
+  ; http_repository_pulls
   }
 
 let load_http_surfaces ~host ~port ~approval_ticket ~board_sort
@@ -10762,7 +10784,8 @@ let apply_http_scoped_surfaces state results =
   Option.iter (apply_system_logs_load state) results.http_system_logs;
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
-  Option.iter (apply_runtime_quota_load state) results.http_runtime_quota
+  Option.iter (apply_runtime_quota_load state) results.http_runtime_quota;
+  Option.iter (apply_repository_pulls_load state) results.http_repository_pulls
 
 (* This is a current reading, not a last-known cache. A failed probe makes
    the projection unread; every following refresh asks again, so a same-port
@@ -13517,6 +13540,28 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             | Some i -> i | None -> 0))
   | Keeper_action_done (keeper_name, action, result) ->
       apply_keeper_action_result state ~base_path keeper_name action result;
+      (* A paused or shut-down Keeper still routes its channels to itself, and
+         answers on them the moment it runs again. Read the bindings fresh
+         and, if it holds any, offer to remove them; doing nothing is the
+         default. *)
+      (match action, result with
+       | (Keeper_control.Pause | Keeper_control.Shutdown),
+         Ok (Keeper_control.Accepted _) ->
+           if not (List.mem keeper_name state.connector_unbind_offer_pending)
+           then
+             state.connector_unbind_offer_pending <-
+               keeper_name :: state.connector_unbind_offer_pending;
+           launch_connectors_load state ~mailbox
+       | (Keeper_control.Pause | Keeper_control.Shutdown),
+         (Ok
+            ( Keeper_control.Purge_accepted _
+            | Keeper_control.Paused_owner_conflict _
+            | Keeper_control.Rejected _ )
+         | Error _)
+       | ( ( Keeper_control.Resume | Keeper_control.Boot
+           | Keeper_control.Wakeup | Keeper_control.Delete ),
+           _ ) ->
+           ());
       (* The roster is the half of the row this refresh cannot read from disk,
          and it is what decides which action the row offers next. Asking for it
          now means the row stops offering the action that just ran without
@@ -15298,8 +15343,73 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  in
                  find 0 snapshot.cs_connectors);
           state.connectors_binding_cursor <- 0;
-          state.connector_unbind_armed <- None
-      | Error detail -> state.connectors_error <- Some detail)
+          state.connector_unbind_armed <- None;
+          (* Every Keeper paused or shut down since the last read gets its
+             answer from this one. The answering load may have started
+             before the pause landed; a pause does not change bindings, so
+             what it read is still what the Keeper holds. *)
+          let pending = List.rev state.connector_unbind_offer_pending in
+          state.connector_unbind_offer_pending <- [];
+          let unreadable =
+            Masc_tui_connector_unbind.unreadable_transports
+              snapshot.cs_connectors
+          in
+          List.iter
+            (fun keeper_name ->
+               match
+                 Masc_tui_connector_unbind.targets ~keeper_name
+                   snapshot.cs_connectors
+               with
+               | [] -> (
+                   (* No readable binding. An unreadable transport may still
+                      hold some, and saying nothing would read as none. *)
+                   match unreadable with
+                   | [] -> ()
+                   | _ :: _ ->
+                       report_action state "system"
+                         (Masc_tui_connector_unbind.nothing_to_unbind
+                            ~keeper_name ~unreadable))
+               | targets ->
+                   (* The offer takes the next key only where that key would
+                      mean this Keeper: its row or its detail is the one
+                      selected, and nothing else is armed. Anywhere else a
+                      [U] means something else, so the line only informs. *)
+                   let offer_here =
+                     Masc_tui_types.shows_selected_keeper state.view
+                     && (match selected_keeper state with
+                         | Some keeper -> String.equal keeper.k_name keeper_name
+                         | None -> false)
+                     && Option.is_none state.connector_unbind_all_armed
+                     && not state.composer_focused
+                   in
+                   if offer_here then begin
+                     (* The frame count keeps a key typed before this line
+                        was drawn from answering it. *)
+                     state.connector_unbind_offer <-
+                       Some
+                         { Masc_tui_connector_unbind.offer_keeper = keeper_name
+                         ; offer_targets = targets
+                         ; offered_at = state.frames_presented
+                         };
+                     report_action state "system"
+                       (Masc_tui_connector_unbind.offer_prompt ~keeper_name
+                          ~unreadable targets)
+                   end
+                   else
+                     report_action state "system"
+                       (Masc_tui_connector_unbind.still_bound ~keeper_name
+                          targets))
+            pending
+      | Error detail ->
+          state.connectors_error <- Some detail;
+          let pending = List.rev state.connector_unbind_offer_pending in
+          state.connector_unbind_offer_pending <- [];
+          List.iter
+            (fun keeper_name ->
+               report_action state "error"
+                 (Masc_tui_connector_unbind.offer_read_failed ~keeper_name
+                    ~detail))
+            pending)
   | Runtime_surface_loaded (generation, result) ->
       let is_current = generation = state.runtime_surface_generation in
       (match state.runtime_surface_inflight with
@@ -16421,7 +16531,9 @@ let main
         ~write:(output_string stdout)
         ~flush:(fun () -> flush stdout) frame
     with
-    | Frame_presenter.Presented -> commit_presented_approval approval
+    | Frame_presenter.Presented ->
+        state.frames_presented <- state.frames_presented + 1;
+        commit_presented_approval approval
     | Frame_presenter.Unchanged -> ()
   in
   (* Bind the bearer to the workspace actually opened, before any request is
@@ -16691,7 +16803,12 @@ let main
      never read. *)
   let handle_connector_unbind_all () =
     state.connector_unbind_armed <- None;
-    match selected_keeper state, state.connectors with
+    (* The selected Keeper decides, and a second press confirms only an arm
+       for that same Keeper. *)
+    let keeper_name =
+      Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+    in
+    match keeper_name, state.connectors with
     | None, _ ->
         state.connector_unbind_all_armed <- None;
         report_action state "error" "unbind all: select a Keeper first"
@@ -16699,8 +16816,7 @@ let main
         state.connector_unbind_all_armed <- None;
         report_action state "error"
           "unbind all: channel transports have not been read yet"
-    | Some keeper, Some snapshot -> (
-        let keeper_name = keeper.k_name in
+    | Some keeper_name, Some snapshot -> (
         let targets =
           Masc_tui_connector_unbind.targets ~keeper_name snapshot.cs_connectors
         in
@@ -16723,7 +16839,55 @@ let main
             state.connector_unbind_all_armed <- Some (keeper_name, targets);
             report_action state "system"
               (Masc_tui_connector_unbind.arm_prompt ~keeper_name
-                 ~confirm_key:"U" ~unreadable targets))
+                 ~confirm_key:Masc_tui_connector_unbind.unbind_all_key
+                 ~unreadable targets))
+  in
+  (* The pause offer's one key. It sends only what the offer named, for the
+     Keeper it named: a roster refresh can move the selection, and a
+     snapshot read since can hold other bindings. A changed list is offered
+     again rather than sent unread. *)
+  let handle_connector_unbind_offer_accept
+      (offer : Masc_tui_connector_unbind.offer) =
+    state.connector_unbind_offer <- None;
+    state.connector_unbind_armed <- None;
+    state.connector_unbind_all_armed <- None;
+    let keeper_name = offer.offer_keeper in
+    let still_selected =
+      match selected_keeper state with
+      | Some (keeper : keeper) -> String.equal keeper.k_name keeper_name
+      | None -> false
+    in
+    match still_selected, state.connectors with
+    | false, (Some _ | None) ->
+        report_action state "error"
+          (Printf.sprintf
+             "unbind all: %s is no longer the selected Keeper; nothing removed"
+             (Terminal_text.single_line keeper_name))
+    | true, None ->
+        report_action state "error"
+          "unbind all: channel transports have not been read yet"
+    | true, Some snapshot -> (
+        let targets =
+          Masc_tui_connector_unbind.targets ~keeper_name snapshot.cs_connectors
+        in
+        let unreadable =
+          Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
+        in
+        match targets with
+        | [] ->
+            report_action state "system"
+              (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
+                 ~unreadable)
+        | _ :: _ when targets = offer.offer_targets ->
+            launch_connector_unbind_all state ~mailbox:async_messages
+              ~keeper_name targets
+        | _ :: _ ->
+            state.connector_unbind_offer <-
+              Some { offer with offer_targets = targets
+                              ; offered_at = state.frames_presented };
+            report_action state "system"
+              (Masc_tui_connector_unbind.offer_prompt ~keeper_name ~unreadable
+                 targets))
   in
   let handle_connector_edit () =
     state.connector_unbind_armed <- None;
@@ -18341,6 +18505,24 @@ and is loaded on demand through keeper_skill.
          another surface is exactly the stale confirmation this cancels. *)
       if cancelled [ "u" ] then state.connector_unbind_armed <- None;
       if cancelled [ "U" ] then state.connector_unbind_all_armed <- None;
+      (* The pause offer takes one key. Anything else -- or any key read
+         before the offer reached the screen, typed for something else --
+         drops it, and that key keeps its own meaning. *)
+      let accepted_unbind_offer =
+        match state.connector_unbind_offer with
+        | None -> None
+        | Some offer -> (
+            match
+              Masc_tui_connector_unbind.read_offer_input offer
+                ~frames_presented:state.frames_presented
+                ~input_seen:(Option.is_some input) ~key
+            with
+            | Masc_tui_connector_unbind.Offer_waits -> None
+            | Masc_tui_connector_unbind.Offer_accepted -> Some offer
+            | Masc_tui_connector_unbind.Offer_dropped ->
+                state.connector_unbind_offer <- None;
+                None)
+      in
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
          send. Everything it does not claim reaches the surface with its
@@ -18380,6 +18562,8 @@ and is loaded on demand through keeper_skill.
        | None, _ | Some _, None -> ());
       (match key with
        | Some _ when composer_claimed -> ()
+       | Some _ when Option.is_some accepted_unbind_offer ->
+           Option.iter handle_connector_unbind_offer_accept accepted_unbind_offer
        (* The keeper-voice screen owns every key while it is open: it is drawn
           instead of the pane, so a key that fell through would act on a
           surface nobody is looking at. *)

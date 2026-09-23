@@ -77,6 +77,14 @@ status: reference
   담당자(MCP client 등)가 잡은 Task 는 "held outside the fleet" 한 줄로 센다.
   → [Masc_tui_overview_team](../../bin/masc_tui_overview_team.mli), RFC-0464
 
+**Attention (Overview Attention 패널)**
+: briefing 의 `incidents` 와 `attention_queue` 를 합친 목록. 운영자가 봐야 할 조건 하나가
+  한 줄이다. 화면에 그려진 Team 줄이 문장으로 싣는 항목(막힌 Keeper 줄 하나에 항목 하나)은
+  Team 줄에만 두고, 나머지는 모두 Attention 패널에 남긴다. 살아 있는 Keeper 에 관한 항목,
+  같은 Keeper 의 둘째 항목, 화면이 짧아 잘린 Team 줄의 항목, parked 줄의 Keeper 항목이
+  여기에 든다. 패널 제목은 Team 줄로 옮긴 수를 `+N on Team` 으로 적는다. Task 소유권
+  문제만 모은 Operator Attention 과는 다른 목록이다.
+
 **닫힌 quota 창 (Shut Quota Window)**
 : provider 계정이나 자격 증명 하나가 사용 한도에 걸려 요청을 받지 않는 상태. 런타임
   카탈로그(`/api/v1/runtime/resolved`)는 런타임마다 `quota_exhausted`·`quota_resets_at`·
@@ -178,7 +186,8 @@ status: reference
   Claude Code 레인은 이어 붙이기(resume) 때 세션을 처음 열 때 기록한 system prompt를
   대화를 압축할 때까지 그대로 다시 보낸다. 그래서 턴마다 바뀌는 내용(턴 컨텍스트와
   Librarian Working State)은 resume 사용자 프롬프트 앞에 붙여 보내고, 대화 기록은
-  보내지 않는다. 세션 기록의 `context_frontier.delivery`는 `held_by_vendor_session`이다.
+  보내지 않는다. 그래서 resume 턴의 세션 기록 `context_frontier.delivery`는
+  `held_by_vendor_session`이고, 세션을 처음 여는 턴은 `prepared_start_context`다.
   → [Keeper_official_client_host.resume_prompt](../../lib/keeper/keeper_official_client_host.mli)
   경계: 여기의 "role"은 Message의 role(`System`·`User`·`Assistant`·`Tool`)도, Board
   Interest 판정의 `keeper_role {name, board_interests}`도, Fusion 심판의 `judge_role`
@@ -353,7 +362,7 @@ status: reference
   `route_class_label`(retry/rotate/terminal class)이다. 영수증·blocker에는
   `exhausted_visible_alive:deterministic_request`처럼 kind와 class를 붙여 적고, metric은
   `route`·`class` 라벨로 나눠 적는다. 이 route는 관측이지 스케줄링 권위가 아니다 — Keeper를
-  멈추거나 기상 시각을 지어내지 못한다. 같은 실패를 두 곳이 다르게 읽어서는 안 된다:
+  멈추거나 다시 깨울 시각을 정하지 않는다. 같은 실패를 두 곳이 다르게 읽어서는 안 된다:
   route(영수증에 적히는 답)와 walk(`Runtime_attempt_fsm.should_try_next`가 실제로 다음
   후보로 넘어가는지)가 같은 답을 해야 한다(#38045). `retry_after` 힌트도 한 규칙으로 읽는다 —
   `usable_retry_after`가 없거나 0·음수·무한·NaN인 힌트는 "대기 시간을 말하지 않음"으로 답하고,
@@ -379,8 +388,8 @@ status: reference
 : 공식 클라이언트 세션에 기록된 `Input_rejected` 때문에 같은 runtime의 새 실행
   요청을 거절하는 상태. `bootstrap_floor_exceeded`는 줄일 수 있는 이력을 제거한
   입력도 용량을 넘은 경우이고, `effect_fenced`는 앞선 응답이나 도구 실행이 관측되어
-  입력을 줄여 재실행할 수 없는 경우다. 현재 거절은 provider 호출 전에 일어나며 앞선
-  provider attempt의 효과 자체와 구분한다. 상태 표시는 원인·runtime ID·recovery ID를
+  입력을 줄여 재실행할 수 없는 경우다. 현재 거절은 provider 호출 전에 일어나며, 앞선
+  시도가 남긴 효과와는 별개다. 상태 표시는 원인·runtime ID·recovery ID를
   기존 session에서 전달하며, 복구 승인이나 fence 해제를 수행하지 않는다.
   Fleet는 일시정지되지 않은 `Failing` Keeper의 이 원인을 `recovering`과 구분해
   `official_client_recovery_required_keeper_count/names`로 표시한다. 이는 운영자
@@ -497,9 +506,10 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. `Exact_lane_run_registry.lane`
-  의 생성자 넷(`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`)이
-  `all_lanes`로 열거된다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
+: 모델이 도는 Keeper의 exact-output 작업을 위한 고정 실행 경로. `Runtime.exact_lane`의
+  다섯(`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`)이
+  `all_exact_lanes`로 열거된다. 실행 기록(`Exact_lane_run_registry.lane`)은 이 중
+  `Verifier`를 뺀 넷을 센다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
   Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
   경계: 같은 단어를 두 곳이 더 쓴다. `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는
   **Runtime Candidate Order**이고, 공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
@@ -643,7 +653,7 @@ status: reference
 : 상세를 가진 판의 바인딩이 어느 상태에서 응답하는지의 닫힌 세 값
   (`Masc_tui_keys.detail_state`). `Either`(두 상태 모두 — 기본)·`List_only`(상세가 닫혀
   있을 때만)·`Detail_only`(상세가 열려 있을 때만). 상세를 가진 판은 한 푸터로 두 상태를
-  그리므로, 이 축이 없으면 화면에서 안 먹는 키를 정확히 하나 광고한다 — 상세가 열린 뒤의
+  그리므로, 이 축이 없으면 동작하지 않는 키를 푸터에 하나 보여준다 — 상세가 열린 뒤의
   `Right / Enter`, 닫힌 동안의 `[ / ]`. 푸터는 `~detail_open`으로 자기 상태를 말하고,
   그 인자가 없으면 모든 바인딩을 광고한다. `has_detail_scoped_keys`가 그런 판을 잡는다.
   → [masc_tui_keys.mli](../../bin/masc_tui_keys.mli)
@@ -844,8 +854,8 @@ status: reference
   [Fusion_sink.delivery_failure_code](../../lib/fusion/fusion_sink.mli)
 
 **Gate**
-: 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
-  경계. pending 판정은 다른 작업을 막지 않는다.
+: 외부 효과를 설정된 방식(`Keeper_gate_mode.t`: `Always_allow`·`Auto_judge`·`Manual`,
+  `Manual`은 사람이 판정)으로 판정하는 경계. pending 판정은 다른 작업을 막지 않는다.
 
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
@@ -870,10 +880,9 @@ status: reference
   지금 일을 맡은 쪽이고, `AwaitingVerification` 에서는 제출한 쪽이다.
 
 **Producer**
-: 판정 쪽 코드가 제출한 에이전트를 부르는 이름. 이 RFC의 1단계가
-  `AwaitingVerification.assignee`도 `producer`로 바꾼다. 이후 새 Task 생애주기
-  코드는 제출자를 `producer`로만 부른다. verification 레코드의 외부 스키마 키
-  `worker`는 남지만 Task 소유권이나 관계를 찾는 키로 사용하지 않는다.
+: 판정 쪽 코드가 제출한 에이전트를 부르는 이름. Task 레코드에서는
+  `AwaitingVerification.assignee`에 적힌다(→ Assignee). verification 레코드의 외부
+  스키마 키 `worker`는 Task 소유권이나 관계를 찾는 데 쓰지 않는다.
 
 **Claim**
 : `Todo` 인 Task 를 맡는 전이. 한 에이전트는 `Claimed` 와 `InProgress` 를 합쳐 하나만
@@ -1167,7 +1176,8 @@ status: reference
   위치는 원장의 것이고(`Ledger`), 없으면 — 부팅 뒤 첫 turn이거나 이 runtime의
   첫 turn이면 — 가장 새 turn 기록이 실제 provider 응답과 이어진 범위가 위치가
   된다(`Turn_record`). 거절이 앞을 옮긴 뒤에는 그 이동을 이름으로 남긴다
-  (`Halved_after_refusal`·`Evicted_after_refusal`).
+  (`Halved_after_refusal`·`Evicted_after_refusal`). 씨앗으로 보낸 범위가 거절돼 이번
+  턴의 시작부터 다시 보낼 때도 이름을 남긴다(`Turn_start_after_seed_refusal`).
   위치는 번호와 digest의 쌍이라, 손에 든 History가 같은 번호를 같은 Message로
   열 때만 쓴다(`for_history`). History의 Atom 개수는 비교하지 않는다.
   RFC 코퍼스는 이 자리를 **씨앗**이라 부른다.
@@ -1539,8 +1549,7 @@ status: reference
   매 회차 설정을 확인하므로 꺼진 동안에는 다음 범위를 읽지 않는다.
   이 이름은 프롬프트 category `librarian`(`config/prompts/librarian.md`,
   `workspace_memory_curator.md`)과 CLI `masc-librarian-replay`·`masc-librarian-continuity`가
-  공유한다. 셋은 서로 다른 것이고, 어느 것도 Skill이 아니다. `Tool Librarian`의
-  현재 지위는 [Skills](../SKILLS.md) 도입부가 정한다.
+  공유한다. 셋은 서로 다른 것이고, 어느 것도 Skill이 아니다.
 
 **Librarian Replay**
 : `masc-librarian-replay` CLI. 라이브 워크스페이스의 turn-boundary 로그와 checkpoint에

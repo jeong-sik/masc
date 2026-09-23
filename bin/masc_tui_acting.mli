@@ -200,8 +200,16 @@ val projection_chunks : chunk_projection -> chunk list
 val chunk_tools : chunk -> chunk_tool list
 (** The calls a chunk names: the ledger's when it reported, else the wire's. *)
 
-val turn_text : int option -> string
-(** [turn 41], or [turn ?] when the event carried none. *)
+val turn_number_text : int -> string
+(** [turn 41]. *)
+
+val turn_label : int option -> string
+(** The event column's name for a turn: [turn 41], or [turn] when no settle
+    in the held window numbered it. *)
+
+val turn_detail : int option -> string
+(** The same turn beside the figures: [turn 41], or nothing when no settle in
+    the held window numbered it. *)
 
 val chunk_rows : traces:(string * string) list -> entry list -> row list
 (** The [Turns] projection: entries (newest first) folded into one row per

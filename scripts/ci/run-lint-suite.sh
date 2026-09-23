@@ -136,7 +136,7 @@ blocking_lints() {
 
   # A test/*.ml no stanza names is silently skipped by dune: the file stays in
   # the tree, CI stays green, and the suite never runs. The reverse -- a stanza
-  # whose %{dep:*.py|*.sh} script was deleted -- fails only root @runtest,
+  # naming a .py/.sh/.cjs/.mjs script that was deleted -- fails only root @runtest,
   # which no PR check runs. The baseline is 0 of either, so this is strict
   # rather than a ratchet.
   run_self_test_when_changed "Test modules are wired self-test" \

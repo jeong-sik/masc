@@ -2,8 +2,11 @@
 """Test wiring agrees with the files in both directions.
 
 A test/*.ml must be named by a dune stanza, or dune silently skips it; and a
-script a stanza runs through `%{dep:<name>.py|.sh}` must exist, or root
-`dune build @runtest` fails with "No rule found".
+script a stanza names must exist, or root `dune build @runtest` fails with
+"No rule found". A script is any atom ending in .py, .sh, .cjs or .mjs --
+whether it sits in `%{dep:...}`, a `(deps ...)` field or a bare `(run ...)`
+argument -- read after `;` comments are removed. No rule in the test tree
+produces a file with those extensions, so every such atom names a source file.
 
 `test/dune` has no top-level `(modules)` field, so a `test/*.ml` that no stanza
 names is not an error: dune leaves it out of the build, CI stays green, and that
@@ -32,6 +35,7 @@ one does not.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import sys
@@ -42,7 +46,10 @@ MIN_MODULES = 1000
 
 MODULE_TOKEN = re.compile(r"[A-Za-z0-9_]+")
 INCLUDE = re.compile(r"\(include\s+([^)\s]+)\)")
-SCRIPT_DEP = re.compile(r"%\{dep:([^}\s]+\.(?:py|sh))\}")
+SCRIPT_ATOM = re.compile(
+    r"(?<![\w./-])(%\{workspace_root\}/)?((?:\.\.?/)?[\w./-]*\w\.(?:py|sh|cjs|mjs))(?![\w.])"
+)
+LINE_COMMENT = re.compile(r";.*$", re.MULTILINE)
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -79,24 +86,35 @@ def orphans(directory: pathlib.Path, dune: pathlib.Path) -> list[str]:
     return [name for name in modules_in(directory) if name not in wired]
 
 
-def missing_scripts(directory: pathlib.Path, dune: pathlib.Path, label: str) -> list[str]:
+def missing_scripts(
+    repo_root: pathlib.Path, directory: pathlib.Path, dune: pathlib.Path, label: str
+) -> list[str]:
+    """Script atoms that resolve to no file. Stanzas pulled in by (include)
+    behave as if written in [dune], so they resolve against its directory;
+    a %{workspace_root}/ prefix resolves against the repository root."""
     if not dune.is_file():
         return []
-    named = sorted(set(SCRIPT_DEP.findall(wiring_text(dune))))
-    return [f"{label}/{name}" for name in named if not (directory / name).is_file()]
+    text = LINE_COMMENT.sub("", wiring_text(dune))
+    missing = set()
+    for root_prefix, name in SCRIPT_ATOM.findall(text):
+        base, shown = (repo_root, name) if root_prefix else (directory, f"{label}/{name}")
+        shown = os.path.normpath(shown)
+        if not (base / name).is_file():
+            missing.add(shown)
+    return sorted(missing)
 
 
 def scan(repo_root: pathlib.Path) -> tuple[int, list[str], list[str]]:
     test_dir = repo_root / "test"
     checked = len(modules_in(test_dir))
     found = [f"test/{name}.ml" for name in orphans(test_dir, test_dir / "dune")]
-    missing = missing_scripts(test_dir, test_dir / "dune", "test")
+    missing = missing_scripts(repo_root, test_dir, test_dir / "dune", "test")
 
     for dune in sorted(test_dir.glob("*/dune")):
         sub = dune.parent
         checked += len(modules_in(sub))
         found += [f"test/{sub.name}/{name}.ml" for name in orphans(sub, dune)]
-        missing += missing_scripts(sub, dune, f"test/{sub.name}")
+        missing += missing_scripts(repo_root, sub, dune, f"test/{sub.name}")
 
     return checked, found, missing
 
@@ -115,8 +133,14 @@ def self_test() -> int:
             "(rule\n (alias runtest-present)\n"
             " (action (run python3 %{dep:present.py} %{dep:../bin/x.exe})))\n"
             "(rule\n (alias runtest-gone)\n (action (run python3 %{dep:gone.py})))\n"
+            "(rule\n (alias runtest-deps-only)\n (deps ../scripts/gone-tool.sh)\n"
+            " (action (run node gone.cjs)))\n"
+            "(rule\n (alias runtest-rooted)\n (deps %{workspace_root}/scripts/rooted.sh))\n"
+            "; a comment naming %{dep:only-in-comment.py} is not wiring\n"
         )
         (test / "present.py").write_text("")
+        (root / "scripts").mkdir()
+        (root / "scripts" / "rooted.sh").write_text("")
         (test / "test_alpha.ml").write_text("")
         (test / "test_orphan.ml").write_text("")
         (test / "sub" / "dune").write_text("(test\n (name test_sub)\n (modules test_sub))\n")
@@ -124,9 +148,10 @@ def self_test() -> int:
         (test / "sub" / "test_sub_orphan.ml").write_text("")
 
         checked, found, missing = scan(root)
-        if missing == ["test/gone.py"]:
-            print("[PASS] fire: a script a stanza depends on but the tree lacks is reported;"
-                  " an included stanza resolves against test/, and a build product is not a script")
+        if missing == ["scripts/gone-tool.sh", "test/gone.cjs", "test/gone.py"]:
+            print("[PASS] fire: a missing script is reported from %{dep:}, a (deps) field and a"
+                  " bare run argument; an included stanza resolves against test/,"
+                  " %{workspace_root}/ against the root, and comments and build products are skipped")
         else:
             print(f"[FAIL] wrong missing scripts: {missing}", file=sys.stderr)
             rc = 1
@@ -146,6 +171,8 @@ def self_test() -> int:
         (test / "test_orphan.ml").unlink()
         (test / "sub" / "test_sub_orphan.ml").unlink()
         (test / "gone.py").write_text("")
+        (test / "gone.cjs").write_text("")
+        (root / "scripts" / "gone-tool.sh").write_text("")
         _, found, missing = scan(root)
         if found == [] and missing == []:
             print("[PASS] pass: a fully wired tree reports nothing")

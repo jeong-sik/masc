@@ -955,8 +955,9 @@ type sent_request =
   ; digest_at : int -> string option
   ; origin : Keeper_carried_front.origin
         (* Where the range the request carried started: a refusal of a
-           range a seed opened ahead of the turn boundary is answered from
-           that boundary ([seed_refusal_sequence]). *)
+           range a seed or a Librarian point opened ahead of the turn
+           boundary is answered from that boundary
+           ([turn_boundary_resend_sequence]). *)
   }
 
 (* What one candidate carries between its requests and the retry policy
@@ -1025,16 +1026,27 @@ let demotion_plan ?(demote_from = 0) ~measure_message_bytes ~base_path ~demote_b
 ;;
 
 (* Where a request's carried range opens (RFC keeper-context-window-in-tokens
-   §13.4, §13.6), from values the caller read: a snapshot that fits this
-   history, else the Librarian's read position in it, else a seed this
-   history still opens with the same message, else where the last completed
-   turn on this history ended. Nothing else chooses the start: the turn's
-   composition and the next-request forecast both ask here, so the forecast
-   shows the start the request will have. A seed this history does not hold
-   is dropped and returned with the reason. *)
+   §13.4, §13.6; RFC librarian-lifecycle §4.10), from values the caller read:
+   a snapshot that fits this history, else the Librarian's read position in
+   it, else a seed this history still opens with the same message, else where
+   the last completed turn on this history ended. A Librarian point yields to
+   a later start the provider accepted on this history: the newest
+   response-observed turn record, or the turn boundary a size refusal moved
+   this turn to. That start never passes this turn's boundary. Nothing else
+   chooses the start: the turn's composition and the next-request forecast
+   both ask here, so the forecast shows the start the request will have. A
+   seed this history does not hold is dropped and returned with the reason. *)
+type librarian_point =
+  | At_snapshot of Librarian_continuity_snapshot.t
+  | At_read_position of { end_atom : int }
+
 type range_start =
   | From_snapshot of Librarian_continuity_snapshot.t
   | From_read_position of { end_atom : int }
+  | Past_librarian_point of
+      { point : librarian_point
+      ; accepted : Keeper_carried_front.seed
+      }
   | From_seed of Keeper_carried_front.seed
   | From_turn_boundary of Keeper_carried_front.turn_start
 
@@ -1043,7 +1055,46 @@ type start_choice =
   ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
   }
 
-let choose_range_start ~continuity ~front ~history_digest_at ~turn_boundary =
+let librarian_point_end_atom = function
+  | At_snapshot snapshot -> snapshot.Librarian_continuity_snapshot.end_atom
+  | At_read_position { end_atom } -> end_atom
+;;
+
+(* Rule 7 of RFC librarian-lifecycle §4.10: an accepted start is at most
+   this turn's boundary, so this turn's input always rides. A start past it
+   is moved back to it, named by the message that opens the boundary atom;
+   a boundary this history does not name keeps no accepted start. An unknown
+   boundary bounds nothing, and the projection still carries the newest
+   atom ({!Keeper_carried_front.clamp}). *)
+let within_turn_boundary ~history_digest_at ~turn_boundary (seed : Keeper_carried_front.seed) =
+  match turn_boundary with
+  | Keeper_carried_front.Turn_boundary { end_atom } when seed.first_atom > end_atom ->
+    Option.map
+      (fun front_digest -> { seed with first_atom = end_atom; front_digest })
+      (history_digest_at end_atom)
+  | Keeper_carried_front.Turn_boundary _ | Keeper_carried_front.Turn_boundary_unknown _ ->
+    Some seed
+;;
+
+let from_librarian_point ~accepted ~history_digest_at ~turn_boundary point =
+  let at_point =
+    match point with
+    | At_snapshot snapshot -> From_snapshot snapshot
+    | At_read_position { end_atom } -> From_read_position { end_atom }
+  in
+  let past_point =
+    Option.bind accepted (fun seed ->
+      match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
+      | Error (_ : Keeper_carried_front.dropped_front) -> None
+      | Ok seed -> within_turn_boundary ~history_digest_at ~turn_boundary seed)
+  in
+  match past_point with
+  | Some seed when seed.Keeper_carried_front.first_atom > librarian_point_end_atom point ->
+    Past_librarian_point { point; accepted = seed }
+  | Some (_ : Keeper_carried_front.seed) | None -> at_point
+;;
+
+let choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary =
   let without_point () =
     match front with
     | None -> { start = From_turn_boundary turn_boundary; outlived_seed = None }
@@ -1053,10 +1104,14 @@ let choose_range_start ~continuity ~front ~history_digest_at ~turn_boundary =
        | Error dropped ->
          { start = From_turn_boundary turn_boundary; outlived_seed = Some (seed, dropped) })
   in
+  let at_point point =
+    { start = from_librarian_point ~accepted ~history_digest_at ~turn_boundary point
+    ; outlived_seed = None
+    }
+  in
   match continuity with
-  | Some (Summarized { snapshot; _ }) -> { start = From_snapshot snapshot; outlived_seed = None }
-  | Some (Absorbed { end_atom; _ }) ->
-    { start = From_read_position { end_atom }; outlived_seed = None }
+  | Some (Summarized { snapshot; _ }) -> at_point (At_snapshot snapshot)
+  | Some (Absorbed { end_atom; _ }) -> at_point (At_read_position { end_atom })
   | Some Without_snapshot | None -> without_point ()
 ;;
 
@@ -1067,6 +1122,11 @@ let range_start_origin = function
       ; boundary_line = snapshot.Librarian_continuity_snapshot.end_boundary_line
       }
   | From_read_position { end_atom } -> Keeper_carried_front.Librarian_progress { end_atom }
+  | Past_librarian_point { point; accepted } ->
+    Keeper_carried_front.Past_librarian_point
+      { librarian_end_atom = librarian_point_end_atom point
+      ; source = accepted.Keeper_carried_front.source
+      }
   | From_seed seed -> Keeper_carried_front.Carried seed.Keeper_carried_front.source
   | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
     Keeper_carried_front.Turn_start { end_atom }
@@ -1080,26 +1140,39 @@ let range_start_origin = function
    read everything, which is the only state a purge leaves it in. A seed or
    a turn boundary always carries the newest atom ({!Keeper_carried_front.clamp});
    an unknown boundary carries that atom alone. *)
+let working_state_message snapshot : Agent_core.Types.message =
+  { role = Agent_core.Types.User
+  ; content = [ Agent_core.Types.Text (working_state_text snapshot) ]
+  ; name = None; tool_call_id = None
+  ; metadata = Runtime_model_input_tail_window.working_state_metadata
+  }
+;;
+
 let project_range_start ~measure_message_bytes ~atom_count start messages =
   match start with
   | From_snapshot snapshot ->
-    let working : Agent_core.Types.message =
-      { role = Agent_core.Types.User
-      ; content = [ Agent_core.Types.Text (working_state_text snapshot) ]
-      ; name = None; tool_call_id = None
-      ; metadata = Runtime_model_input_tail_window.working_state_metadata
-      }
-    in
     Runtime_model_input_tail_window.project_from_atom
       ~allow_empty_history:true
       ~history_already_announced:true ~measure_message_bytes
       ~first_atom:snapshot.Librarian_continuity_snapshot.end_atom
-      (working :: messages)
+      (working_state_message snapshot :: messages)
   | From_read_position { end_atom } ->
     (* No summary stands in for the absorbed atoms; the omission preamble
        says older turns are left out. *)
     Runtime_model_input_tail_window.project_from_atom
       ~allow_empty_history:true ~measure_message_bytes ~first_atom:end_atom messages
+  | Past_librarian_point { point = At_snapshot snapshot; accepted } ->
+    (* The working state still rides: it summarizes the atoms before the
+       point, and the range opens at the accepted start after it. *)
+    Runtime_model_input_tail_window.project_from_atom
+      ~history_already_announced:true ~measure_message_bytes
+      ~first_atom:(Keeper_carried_front.clamp ~atom_count accepted.first_atom)
+      (working_state_message snapshot :: messages)
+  | Past_librarian_point { point = At_read_position _; accepted } ->
+    Runtime_model_input_tail_window.project_from_atom
+      ~measure_message_bytes
+      ~first_atom:(Keeper_carried_front.clamp ~atom_count accepted.first_atom)
+      messages
   | From_seed (seed : Keeper_carried_front.seed) ->
     Runtime_model_input_tail_window.project_from_atom
       ~measure_message_bytes
@@ -1122,6 +1195,7 @@ let compose_carried_model_input
       ?continuity
       ~measure_message_bytes
       ~(front : Keeper_carried_front.seed option)
+      ~(accepted : Keeper_carried_front.seed option)
       ~(history_digest_at : int -> string option)
       ~current_turn_results
       ~base_path
@@ -1137,7 +1211,7 @@ let compose_carried_model_input
      never widen again. A history that only lost an unsaved attempt's tail
      keeps the position. *)
   let { start; outlived_seed } =
-    choose_range_start ~continuity ~front ~history_digest_at ~turn_boundary
+    choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
   in
   (* A range that opens on a seed reaches behind this turn, so its aged tool
      results are demoted at the turn boundary on either path that carries
@@ -1150,7 +1224,8 @@ let compose_carried_model_input
     | Wide, Some Without_snapshot ->
       (match start with
        | From_seed _ -> demote_before
-       | From_snapshot _ | From_read_position _ | From_turn_boundary _ -> 0)
+       | From_snapshot _ | From_read_position _ | Past_librarian_point _
+       | From_turn_boundary _ -> 0)
     | Wide, None -> demote_before
   in
   (* After a size refusal this turn's own atoms join the demotion, whatever
@@ -1182,8 +1257,8 @@ let compose_carried_model_input
      Composition consumes that evidence; it does not reinterpret the prior
      outcome as a size refusal. A size refusal of this range is answered
      after the attempt: with no continuity by the in-turn ladder, which owns
-     any further move toward the newest atom; with no Librarian point by one
-     resend from the turn boundary ([seed_refusal_sequence]). *)
+     any further move toward the newest atom; otherwise by one resend from
+     the turn boundary ([turn_boundary_resend_sequence]). *)
   let projection, transmitted_bytes =
     project_range_start
       ~measure_message_bytes
@@ -1242,6 +1317,7 @@ let request_view
       ~provider_config
       ~measure_message_bytes
       ~front
+      ~accepted
       ~history_digest_at
       ~current_turn_results
       ~base_path
@@ -1256,6 +1332,7 @@ let request_view
         ~input_policy ?continuity
         ~measure_message_bytes
         ~front
+        ~accepted
         ~history_digest_at
         ~current_turn_results
         ~base_path
@@ -1443,7 +1520,7 @@ let bounded_model_input_projection
        front, or the range the newest turn record joined to a response
        (RFC keeper-context-window-in-tokens §13.4). Only an absorbed point
        replaces it. A refusal of the range a seed opened holds the turn
-       boundary as the turn's front ([seed_refusal_sequence]), which
+       boundary as the turn's front ([turn_boundary_resend_sequence]), which
        [carried_front] reads here as it reads any front a refusal moved. *)
     let front, dropped_ledger =
       match ctx.continuity with
@@ -1478,6 +1555,20 @@ let bounded_model_input_projection
              ctx.runtime_id
              (Yojson.Safe.to_string (Keeper_model_input_ledger.to_json stale)))
       dropped_ledger;
+    (* A turn with a Librarian point starts past it only where the provider
+       accepted a later start on this history (RFC librarian-lifecycle
+       §4.10, rules 1 and 2): the turn boundary a size refusal moved this
+       turn to, else the newest response-observed turn record. Both are read
+       from the turn and from the file, never from the process's ledger, so
+       a restart and a lane's next candidate choose the same start. *)
+    let accepted =
+      match ctx.continuity with
+      | Some (Summarized _ | Absorbed _) ->
+        (match ctx.carried_front_after_refusal () with
+         | Some _ as held -> held
+         | None -> (Lazy.force cold_seed).Keeper_carried_front.seed)
+      | None | Some Without_snapshot -> None
+    in
     let current_turn_results = !(state.current_turn_results) in
     let base_path =
       match current_turn_results with
@@ -1502,6 +1593,7 @@ let bounded_model_input_projection
         ~provider_config
         ~measure_message_bytes
         ~front
+        ~accepted
         ~history_digest_at
         ~current_turn_results
         ~base_path
@@ -1546,6 +1638,7 @@ let bounded_model_input_projection
                  ~input_policy:ctx.input_policy ?continuity:ctx.continuity
                  ~measure_message_bytes
                  ~front
+                 ~accepted
                  ~history_digest_at
                  ~current_turn_results:
                    (Current_turn_demoted { refused_atom_count = history_atom_count })
@@ -2438,19 +2531,68 @@ let eviction_retry_to_json = function
    rotating candidates: a retry here is a same-run retry too, so it must not
    fire once AGENT_CORE has mutated agent state at a durable checkpoint
    stage. *)
-(* The one answer a turn with no Librarian point has to a size refusal
-   (RFC keeper-context-window-in-tokens §13.4). When the provider refuses a
-   range that a seed opened, with a refusal the no-continuity ladder moves
-   the front for ([refusal_evicts]), and the turn boundary lies after that
-   range's first atom, the boundary is held as the turn's front and the same
+(* The refusals the turn boundary resend answers (RFC librarian-lifecycle
+   §4.10, rule 1). A typed size refusal, and also a refusal whose reason
+   agent core does not model: every live size refusal measured so far
+   arrives that way -- a 400 whose only size signal is its sentence, with
+   no typed code (RFC librarian-lifecycle §4.10 lists the measured wires) --
+   and reading the sentence
+   would be a string classifier. Today this is the same set as
+   [refusal_evicts]. It is kept separate so that this check keeps all three
+   when [refusal_evicts] narrows to the two typed size refusals (#38286).
+   - A refusal that was not about size draws the same refusal from the
+     boundary. No accepted start is recorded, and the turn ends on it.
+   - A refusal that was about size leaves a gap the Librarian still reads.
+     Once it reaches the accepted start the request starts at its point
+     again (rule 5), so no context is lost for good.
+   - The cost: one more request for each 400 whose reason is unknown.
+   Enumerated so a new variant forces a decision here. *)
+let boundary_resend_on = function
+  | Agent_core.Error.Api (ContextOverflow _)
+  | Agent_core.Error.Api
+      (InvalidRequest
+         { reason = (Request_body_refused_by_provider _ | Unknown_invalid_request); _ }) ->
+    true
+  | Agent_core.Error.Api
+      ( InvalidRequest
+          { reason = (Json_parse_error | Attempt_rejected | Refusal_body_not_received); _ }
+      | InputCapacity _
+      | RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | AuthorizationError _
+      | PaymentRequired _
+      | NotFound _
+      | NetworkError _
+      | Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+;;
+
+(* The lane's answer to a size refusal of a range that opened before this
+   turn's boundary (RFC keeper-context-window-in-tokens §13.4; RFC
+   librarian-lifecycle §4.10, rule 1). When the provider refuses such a range
+   -- one a seed opened, or one opened at a Librarian point or at the accepted
+   start past it -- with a refusal [boundary_resend_on] names, and the turn
+   boundary lies after that range's
+   first atom, the boundary is held as the turn's front and the same
    candidate is asked once more. The front belongs to the turn (§10.4): a
    later candidate or lane opens there instead of on the refused range. An
-   accepted request is what the ledger and the turn record keep, so the next
-   turn's seed is that boundary; the range grows back only through
-   responses. A refused boundary request, a refusal of a range that opened
-   at or after the boundary, and every other error end the sequence with
-   the error in hand. The range is never halved on this path. *)
-let seed_refusal_sequence
+   accepted request is what the turn record keeps, so the next turn starts
+   from that boundary until the range grows back through responses or, with
+   a Librarian point, the Librarian reads past it. A refused boundary
+   request, a refusal of a range that opened at or after the boundary, and
+   every other error end the sequence with the error in hand. The range is
+   never halved on this path. *)
+let turn_boundary_resend_sequence
       ~same_run_retry_authorized
       ~(refused_range : unit -> (Keeper_carried_front.origin * int) option)
       ~(turn_start_front : unit -> Keeper_carried_front.seed option)
@@ -2464,8 +2606,13 @@ let seed_refusal_sequence
   | Ok _ as ok -> ok
   | Error error as failed ->
     (match refused_range () with
-     | Some (Keeper_carried_front.Carried _, refused_first_atom)
-       when refusal_evicts error && same_run_retry_authorized () ->
+     | Some
+         ( ( Keeper_carried_front.Carried _
+           | Keeper_carried_front.Librarian_snapshot _
+           | Keeper_carried_front.Librarian_progress _
+           | Keeper_carried_front.Past_librarian_point _ )
+         , refused_first_atom )
+       when boundary_resend_on error && same_run_retry_authorized () ->
        (match turn_start_front () with
         | Some (front : Keeper_carried_front.seed)
           when front.first_atom > refused_first_atom ->
@@ -2477,6 +2624,7 @@ let seed_refusal_sequence
          ( ( Keeper_carried_front.Carried _
            | Keeper_carried_front.Librarian_snapshot _
            | Keeper_carried_front.Librarian_progress _
+           | Keeper_carried_front.Past_librarian_point _
            | Keeper_carried_front.Turn_start _
            | Keeper_carried_front.Turn_start_unknown _ )
          , _ )
@@ -2663,45 +2811,46 @@ let run_try_provider_with_carried_range_eviction
   let same_run_retry_authorized () = same_run_retry_allowed ctx.checkpoint_progress in
   (* The lane's own answer to a size refusal, which depends on where the
      range started; what is left after it is the current turn's demotion. *)
+  let boundary_resend ~source =
+    turn_boundary_resend_sequence
+      ~same_run_retry_authorized
+      ~refused_range:(fun () ->
+        Option.map
+          (fun (sent : sent_request) ->
+             sent.origin, sent.request.Keeper_model_input_ledger.first_atom)
+          !(state.last_request))
+      ~turn_start_front:(fun () ->
+        Option.bind !(state.last_request) (fun (sent : sent_request) ->
+          let atom_count = sent.request.Keeper_model_input_ledger.atom_count in
+          let first_atom =
+            match ctx.turn_boundary with
+            | Keeper_carried_front.Turn_boundary { end_atom } ->
+              Keeper_carried_front.clamp ~atom_count end_atom
+            | Keeper_carried_front.Turn_boundary_unknown _ ->
+              Keeper_carried_front.newest_atom ~atom_count
+          in
+          Option.map
+            (fun front_digest ->
+               { Keeper_carried_front.first_atom; front_digest; source })
+            (sent.digest_at first_atom)))
+      ~hold_front:ctx.hold_carried_front
+      ~on_turn_start:(fun error front ->
+        Log.Keeper.info
+          ~keeper_name:ctx.keeper_name
+          "model input carried range refused runtime=%s: the turn's front moves to \
+           the turn boundary and the same candidate is asked again front=%s error=%s"
+          ctx.runtime_id
+          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json front))
+          (Agent_core.Error.to_string error))
+      ~attempt
+      ()
+  in
   let range_answer () =
     match ctx.continuity with
-    | Some (Summarized _ | Absorbed _) -> attempt ()
+    | Some (Summarized _ | Absorbed _) ->
+      boundary_resend ~source:Keeper_carried_front.Turn_start_after_librarian_refusal
     | Some Without_snapshot ->
-      seed_refusal_sequence
-        ~same_run_retry_authorized
-        ~refused_range:(fun () ->
-          Option.map
-            (fun (sent : sent_request) ->
-               sent.origin, sent.request.Keeper_model_input_ledger.first_atom)
-            !(state.last_request))
-        ~turn_start_front:(fun () ->
-          Option.bind !(state.last_request) (fun (sent : sent_request) ->
-            let atom_count = sent.request.Keeper_model_input_ledger.atom_count in
-            let first_atom =
-              match ctx.turn_boundary with
-              | Keeper_carried_front.Turn_boundary { end_atom } ->
-                Keeper_carried_front.clamp ~atom_count end_atom
-              | Keeper_carried_front.Turn_boundary_unknown _ ->
-                Keeper_carried_front.newest_atom ~atom_count
-            in
-            Option.map
-              (fun front_digest ->
-                 { Keeper_carried_front.first_atom
-                 ; front_digest
-                 ; source = Keeper_carried_front.Turn_start_after_seed_refusal
-                 })
-              (sent.digest_at first_atom)))
-        ~hold_front:ctx.hold_carried_front
-        ~on_turn_start:(fun error front ->
-          Log.Keeper.info
-            ~keeper_name:ctx.keeper_name
-            "model input carried seed refused runtime=%s: the turn's front moves to \
-             the turn boundary and the same candidate is asked again front=%s error=%s"
-            ctx.runtime_id
-            (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json front))
-            (Agent_core.Error.to_string error))
-        ~attempt
-        ()
+      boundary_resend ~source:Keeper_carried_front.Turn_start_after_seed_refusal
     | None ->
       (* An uncapped runtime retries like any other. #36817 kept such a
          runtime out of the token halving because that walk invented a seed

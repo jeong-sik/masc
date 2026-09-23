@@ -1622,8 +1622,9 @@ let run_named
 	     takes ([continuity] above): one choice per turn for every lane, so a
 	     fitting working state, else the Librarian's read position, is the same
 	     absorbed point on both. What each lane weighs it against differs: the
-	     Agent Core branch composes from the absorbed point whenever there is
-	     one ([compose_carried_model_input]), while these lanes cut their start
+	     Agent Core branch composes from the absorbed point, or from a later
+	     start the provider accepted past it ([choose_range_start]), while
+	     these lanes cut their start
 	     seed themselves and keep a seed or a lane cut that sits past it
 	     ([Keeper_official_client_host.carried_start_range]). The choice is
 	     handed over as a position in the exact list each composition cuts,
@@ -2595,13 +2596,16 @@ let run_named
             ; input_policy
             ; turn_boundary = Eio.Lazy.force turn_boundary
             ; continuity
-            ; (* Read only when the process holds no ledger for this pair:
-                 the range the newest completed Agent Core turn record on
-                 this history measured, whichever runtime ran it, so a
-                 restart or a lane's next candidate resumes the range the
-                 last turn carried rather than this turn's own boundary. A
-                 caller that reads no records leaves the first request to
-                 that boundary. *)
+            ; (* The range the newest response-observed turn record on this
+                 history measured, whichever runtime ran it. Without a
+                 Librarian point it is read only when the process holds no
+                 ledger for this pair, so a restart or a lane's next
+                 candidate resumes the range the last turn carried rather
+                 than this turn's own boundary. With one it is the accepted
+                 start the point yields to when it lies past the point (RFC
+                 librarian-lifecycle §4.10). A caller that reads no records
+                 leaves the first request to that boundary, or to the
+                 point. *)
               carried_front_seed =
                 (fun () ->
                    match carried_front_seed with

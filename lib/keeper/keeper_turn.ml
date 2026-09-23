@@ -698,7 +698,7 @@ let run_keeper_invocation_turn_admitted_inner
              | Workspace_memory_publication.Unavailable detail ->
                Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
              | Missing | Available _ -> ());
-            let build_turn_prompt ~base_system_prompt ~messages:_
+            let build_turn_prompt ~base_system_prompt:_ ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
               (* Durable memory arrives from Memory OS facts recall
@@ -766,14 +766,10 @@ let run_keeper_invocation_turn_admitted_inner
                   ~telemetry_feedback_text
                   ~turn_instructions_text
               in
-              (* === HARD CONSTRAINTS (stay in system_prompt) === *)
-              (* The model-facing stable contract is shared with autonomous
-                 turns. [base_system_prompt] is the checkpoint bootstrap
-                 prompt assembled by [Keeper_run_context]; using it here was
-                 the last production split between direct and autonomous
-                 Keeper behavior. Channel-specific input remains below in
-                 [dynamic_context] and the persisted user message. *)
-              { system_prompt = base_system_prompt; dynamic_context; dynamic_context_for_tools = None }
+              (* The system prompt is the base prompt [Keeper_run_context]
+                 built, shared with autonomous turns. Channel-specific input
+                 stays in [dynamic_context] and the persisted user message. *)
+              { dynamic_context; dynamic_context_for_tools = None }
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();

@@ -18,7 +18,6 @@
     @since Unified Keeper Loop *)
 
 type turn_prompt_parts = {
-  system_prompt : string;
   world_state : string;
   user_message : string;
 }
@@ -1351,43 +1350,22 @@ let goal_store_unavailable_fragment_vars
   ]
 ;;
 
-let constitution_unreadable_reported : (string, unit) Hashtbl.t =
-  Hashtbl.create 1
-
-let constitution_unreadable_mutex = Stdlib.Mutex.create ()
-
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ()
   =
   let instructions = effective_instructions ~meta ?profile_defaults () in
-  (* The world's own articles (RFC-0442). An unreadable ledger is reported and
-     the turn proceeds without the block: a world that cannot read its norms
-     still has work to do, and a keeper blocked on its own constitution would
-     be a worse failure than one that does not see it. *)
-  let constitution =
-    match World_constitution_store.load ~base_path:config.Workspace.base_path with
-    | Ok ledger -> World_constitution_render.articles ledger.articles
-    | Error error ->
-      (* build_system_prompt runs on every turn of every keeper, and an
-         unreadable ledger does not heal itself, so an unguarded line here is
-         one error per keeper per cycle forever. The condition is worth saying
-         once; repeating it buries everything else. *)
-      let detail = World_constitution_store.read_error_to_string error in
-      let fresh =
-        Stdlib.Mutex.protect constitution_unreadable_mutex (fun () ->
-          if Hashtbl.mem constitution_unreadable_reported detail then false
-          else (
-            Hashtbl.add constitution_unreadable_reported detail ();
-            true))
-      in
-      if fresh then
-        Log.Misc.error
-          "world constitution ledger unreadable, rendering no articles: %s"
-          detail;
-      ""
-  in
+  (* The world's own articles (RFC-0442). A missing ledger is a world that has
+     written no norms yet, and [load] answers it as an empty ledger. A ledger
+     that exists but cannot be read is not that world: rendering it as no
+     articles ran the turn without its norms and changed the prompt the
+     vendor session was settled against (#38354). The read error goes back
+     to the caller, which refuses the turn before dispatch. *)
+  match World_constitution_store.load ~base_path:config.Workspace.base_path with
+  | Error error -> Error error
+  | Ok ledger ->
+  let constitution = World_constitution_render.articles ledger.articles in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~instructions
@@ -1403,7 +1381,7 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
      itself had dropped — so a keeper was told its checkpoint survives across
      cycles only when prompt config was degraded. The permanent content now
      lives in [keeper]; nothing in it varied per turn. *)
-  base_system_prompt
+  Ok base_system_prompt
 ;;
 
 (* The backlog read produces three distinct facts, and the Namespace State
@@ -1485,9 +1463,7 @@ let format_workspace_memory_observation = function
       [ "proposal_id", descriptor.proposal_id;
         "context_sha256", descriptor.context_sha256 ] ^ "\n\n")
 
-let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
-    ~(config : Workspace.config)
-    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+let build_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
@@ -1501,13 +1477,9 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
   =
-  let system_prompt =
-    (* No goal list here: #32665 took the summaries out of the system prompt
-       so a Keeper's stable contract stops restating a store the turn already
-       carries. The value stays in scope because this function still renders
-       it into the turn's own context below -- that is the half #32665 kept. *)
-    build_system_prompt ~meta ~config ?profile_defaults ()
-  in
+  (* No system prompt here. The turn sends the one
+     [Keeper_run_context.prepare_run_context] built, so a second read of the
+     constitution ledger cannot disagree with the first (#38354). *)
   (* User message: structured world observation — reactive triggers + resource state only.
      Runtime telemetry remains on decision_audit and independent observation paths.
 
@@ -2159,12 +2131,13 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     String.concat "\n\n"
       (Env_config_keeper.KeeperAutonomous.wake_prompt () :: answered_asks)
   in
-  { system_prompt; world_state; user_message }
+  { world_state; user_message }
 ;;
 
 let emit_prompt_metrics
       ~(meta : Keeper_meta_contract.keeper_meta)
-      { system_prompt; world_state; user_message }
+      ~(system_prompt : string)
+      { world_state; user_message }
   =
   (* Tool names and availability come exclusively from the typed schemas sent
      with this turn. Prompt markdown describes behaviour rather than attempting
@@ -2206,9 +2179,6 @@ let emit_prompt_metrics
 ;;
 
 let build_prompt
-      ~meta
-      ~config
-      ?profile_defaults
       ~turn_decision
       ?previous_turn_stop
       ~current_task
@@ -2221,31 +2191,21 @@ let build_prompt
       ~observation
       ()
   =
-  let prompt =
-    build_prompt_internal
-      ~meta
-      ~config
-      ?profile_defaults
-      ~turn_decision:(Some turn_decision)
-      ?previous_turn_stop
-      ~current_task
-      ?task_skill_surfaces
-      ?active_goal_summaries
-      ?workspace_memory
-      ?lane_updates
-      ?repository_freshness
-      ?context_budget_bytes
-      ~observation
-      ()
-  in
-  emit_prompt_metrics ~meta prompt;
-  prompt
+  build_prompt_internal
+    ~turn_decision:(Some turn_decision)
+    ?previous_turn_stop
+    ~current_task
+    ?task_skill_surfaces
+    ?active_goal_summaries
+    ?workspace_memory
+    ?lane_updates
+    ?repository_freshness
+    ?context_budget_bytes
+    ~observation
+    ()
 ;;
 
 let build_prompt_preview
-      ~meta
-      ~config
-      ?profile_defaults
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
@@ -2256,9 +2216,6 @@ let build_prompt_preview
       ()
   =
   build_prompt_internal
-    ~meta
-    ~config
-    ?profile_defaults
     ~turn_decision:None
     ~current_task
     ?task_skill_surfaces

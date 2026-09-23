@@ -13,7 +13,8 @@
 type remote_origin =
   | Origin_url of string
   | Origin_not_configured
-      (** [git config --get remote.origin.url] exited 1: no origin is set. *)
+      (** [git remote get-url origin] exited 2: the repository has no
+          [origin] remote. *)
   | Origin_unread
       (** The lookup timed out, git was missing, or it failed otherwise. *)
 

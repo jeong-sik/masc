@@ -55,18 +55,20 @@ def inspect_git(path):
             # field is unavailable, the rest of the row still reports.
             return None
 
-    # git config --get exits 1 when the key is not set: an origin that is
-    # not configured, which is an answer. Any other outcome is a read that
-    # did not happen.
+    # git remote get-url exits 2 only for "no such remote", and it needs a
+    # repository, so an unusable one (dubious ownership, a broken .git) dies
+    # with 128 instead. The host lane reads the same command the same way
+    # (Repo_git.get_origin_url). Any outcome but 0 or 2 is a read that did
+    # not happen.
     origin = None
     origin_state = 'unavailable'
     try:
-        r = subprocess.run(['git', '-C', path, 'config', '--get', 'remote.origin.url'],
+        r = subprocess.run(['git', '-C', path, 'remote', 'get-url', 'origin'],
                            capture_output=True, text=True, timeout=5)
         if r.returncode == 0 and r.stdout.strip():
             origin = r.stdout.strip()
             origin_state = 'present'
-        elif r.returncode == 1:
+        elif r.returncode == 2:
             origin_state = 'missing'
     except (subprocess.TimeoutExpired, OSError):
         pass

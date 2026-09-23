@@ -211,58 +211,72 @@ let test_origin_state_is_decoded_or_refused () =
    | Ok (_, [ { origin = R.Origin_not_configured; _ } ]) -> ()
    | Ok _ -> fail "missing must decode as Origin_not_configured"
    | Error detail -> failf "missing: %s" detail);
+  (match R.parse_probe_json ~root:"/root" (origin_row ~state:"unavailable" ~origin:"null") with
+   | Ok (_, [ { origin = R.Origin_unread; _ } ]) -> ()
+   | Ok _ -> fail "unavailable must decode as Origin_unread"
+   | Error detail -> failf "unavailable: %s" detail);
   expect_error
     "unknown state"
     {|checkouts[0]: origin_state: unknown value "gone"|}
     (origin_row ~state:"gone" ~origin:"null");
-  expect_error
-    "present without a url"
-    {|checkouts[0]: origin_state "present" disagrees with origin|}
-    (origin_row ~state:"present" ~origin:"null")
+  List.iter
+    (fun (state, origin) ->
+      expect_error
+        (state ^ " disagreeing with origin")
+        (Printf.sprintf {|checkouts[0]: origin_state %S disagrees with origin|} state)
+        (origin_row ~state ~origin))
+    [ "present", "null"; "missing", {|"https://x/y.git"|}; "unavailable", {|"https://x/y.git"|} ]
 ;;
 
 (* The probe itself, on a real tree: a checkout without an origin remote says
-   so instead of reading as an origin that could not be looked up. *)
+   so instead of reading as an origin that could not be looked up. Git runs
+   without the host's global and system config, so a user's own settings
+   cannot add a remote. *)
 let test_probe_tells_a_missing_origin_from_a_configured_one () =
-  let root = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf "masc-probe-%d" (Unix.getpid ())) in
-  let run cmd =
-    if Sys.command cmd <> 0 then failf "command failed: %s" cmd
-  in
-  let init name =
-    let dir = Filename.concat root name in
-    run (Printf.sprintf "mkdir -p %s && git -C %s init -q" (Filename.quote dir) (Filename.quote dir));
-    dir
-  in
-  let with_origin = init "with-origin" in
-  ignore (init "no-origin");
-  run
-    (Printf.sprintf
-       "git -C %s remote add origin https://github.com/jeong-sik/masc.git"
-       (Filename.quote with_origin));
-  let out = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf "masc-probe-%d.json" (Unix.getpid ())) in
-  run
-    (Printf.sprintf
-       "cd %s && python3 -c %s '[]' 32 8192 > %s"
-       (Filename.quote root)
-       (Filename.quote R.For_testing.probe_script)
-       (Filename.quote out));
-  let raw = In_channel.with_open_bin out In_channel.input_all in
-  ignore (Sys.command (Printf.sprintf "rm -rf %s %s" (Filename.quote root) (Filename.quote out)));
-  match R.parse_probe_json ~root raw with
-  | Error detail -> failf "probe output did not decode: %s" detail
-  | Ok (_, inspections) ->
-    let origin_of (ic : R.inspected_checkout) =
-      ( ic.checkout.relative_path
-      , match ic.origin with
-        | R.Origin_url url -> "url " ^ url
-        | R.Origin_not_configured -> "not configured"
-        | R.Origin_unread -> "unread" )
-    in
-    check
-      (list (pair string string))
-      "origins"
-      [ "no-origin", "not configured"; "with-origin", "url https://github.com/jeong-sik/masc.git" ]
-      (List.sort compare (List.map origin_of inspections))
+  let isolated = "env -u GIT_DIR -u GIT_WORK_TREE GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 " in
+  let root = Filename.temp_dir "masc-probe-" "" in
+  let out = Filename.concat root "probe.json" in
+  let tree = Filename.concat root "tree" in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
+    (fun () ->
+      let run cmd = if Sys.command (isolated ^ cmd) <> 0 then failf "command failed: %s" cmd in
+      let init name =
+        let dir = Filename.concat tree name in
+        run (Printf.sprintf "sh -c %s" (Filename.quote ("mkdir -p " ^ Filename.quote dir ^ " && git -C " ^ Filename.quote dir ^ " init -q")));
+        dir
+      in
+      let with_origin = init "with-origin" in
+      ignore (init "no-origin");
+      run
+        (Printf.sprintf
+           "git -C %s remote add origin https://github.com/jeong-sik/masc.git"
+           (Filename.quote with_origin));
+      run
+        (Printf.sprintf
+           "sh -c %s"
+           (Filename.quote
+              (Printf.sprintf
+                 "cd %s && python3 -c %s '[]' 32 8192 > %s"
+                 (Filename.quote tree)
+                 (Filename.quote R.For_testing.probe_script)
+                 (Filename.quote out))));
+      let raw = In_channel.with_open_bin out In_channel.input_all in
+      match R.parse_probe_json ~root:tree raw with
+      | Error detail -> failf "probe output did not decode: %s" detail
+      | Ok (_, inspections) ->
+        let origin_of (ic : R.inspected_checkout) =
+          ( ic.checkout.relative_path
+          , match ic.origin with
+            | R.Origin_url url -> "url " ^ url
+            | R.Origin_not_configured -> "not configured"
+            | R.Origin_unread -> "unread" )
+        in
+        check
+          (list (pair string string))
+          "origins"
+          [ "no-origin", "not configured"; "with-origin", "url https://github.com/jeong-sik/masc.git" ]
+          (List.sort compare (List.map origin_of inspections)))
 ;;
 
 let test_the_wrong_top_level_shapes_are_errors () =

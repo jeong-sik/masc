@@ -130,6 +130,9 @@ type memory_write_error_kind =
   | Supersedes_not_authored
       (** The [supersedes] fact is current but was not written by this
           keeper through [keeper_memory_write]. *)
+  | Supersedes_premise_of_successor
+      (** The new claim is derived and one of its missing premises is the
+          fact [supersedes] removes. *)
   | Persistence_failed of fact_store
       (** The store did not answer; which store decides what a repeat write
           does. *)

@@ -42,6 +42,7 @@ type supersede_error =
   | Supersede_self
   | Supersede_target_not_current of string
   | Supersede_target_not_authored of string
+  | Supersede_successor_rests_on_target of support_invalidation
   | Supersede_unsupported_derivation of support_invalidation
   | Supersede_persistence_failed of string
 
@@ -2562,6 +2563,11 @@ let supersede_fact
              String.equal (memory_id invalidation.fact) incoming_identity)
           invalidated
       with
+      | Some invalidation
+        when List.exists
+               (String.equal superseded_memory_id)
+               invalidation.missing_premise_ids ->
+        Error (Supersede_successor_rests_on_target invalidation)
       | Some invalidation -> Error (Supersede_unsupported_derivation invalidation)
       | None ->
         make_snapshot_from_maintained

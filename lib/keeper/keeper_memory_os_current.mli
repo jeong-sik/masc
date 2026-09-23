@@ -58,6 +58,10 @@ type supersede_error =
       (** The target is current but was not written by this keeper through
           [keeper_memory_write]; a Librarian copy is the Librarian's to
           revise. *)
+  | Supersede_successor_rests_on_target of support_invalidation
+      (** The successor is derived and, once the target is gone, has no
+          complete support path left; the target is among its missing
+          premises. A claim cannot rest on the fact it replaces. *)
   | Supersede_unsupported_derivation of support_invalidation
   | Supersede_persistence_failed of string
 

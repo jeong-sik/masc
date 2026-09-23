@@ -871,6 +871,7 @@ type memory_write_error_kind =
   | Supersedes_self
   | Supersedes_not_current
   | Supersedes_not_authored
+  | Supersedes_premise_of_successor
   | Persistence_failed of fact_store
   | Commit_receipt_inconsistent
   | No_memory_write_error
@@ -892,6 +893,7 @@ let memory_write_error_kind_to_string = function
   | Supersedes_self -> "supersedes_self"
   | Supersedes_not_current -> "supersedes_not_current"
   | Supersedes_not_authored -> "supersedes_not_authored"
+  | Supersedes_premise_of_successor -> "supersedes_premise_of_successor"
   | Persistence_failed (Ordinary_current | Source_bound_current) -> "persistence_failed"
   | Commit_receipt_inconsistent -> "commit_receipt_inconsistent"
   | No_memory_write_error -> ""
@@ -917,6 +919,7 @@ let class_of_memory_write_error_kind = function
   | Supersedes_with_source_path_unsupported
   | Supersedes_self
   | Supersedes_not_authored
+  | Supersedes_premise_of_successor
   | Source_read_failed
       ( Keeper_memory_source_current.Source_path_rejected _
       | Keeper_memory_source_current.Source_missing
@@ -964,7 +967,7 @@ let memory_write_failure_effect = function
   | Supersedes_with_source_path_unsupported
   | Supersedes_self ->
     Tool_result.Proven_pre_effect, "The claim was not committed."
-  | Supersedes_not_current | Supersedes_not_authored ->
+  | Supersedes_not_current | Supersedes_not_authored | Supersedes_premise_of_successor ->
     ( Tool_result.Proven_pre_effect
     , "The claim was not committed and no fact was removed." )
   | Commit_receipt_inconsistent ->
@@ -1090,6 +1093,12 @@ let memory_write_rejection_fields error_kind =
       "supersedes"
       "No current fact of yours has this memory_id. Search memory for the fact \
        you mean to replace and pass the memory_id it returns."
+  | Supersedes_premise_of_successor ->
+    at
+      "premise_ids"
+      "A premise under missing_premise_ids is the fact supersedes removes, and a \
+       claim cannot rest on the fact it replaces. Drop that premise, or drop \
+       supersedes to keep both facts."
   | Supersedes_not_authored ->
     at
       "supersedes"
@@ -1279,6 +1288,7 @@ let memory_write_basis_receipt = function
    authored fact. *)
 type explicit_write_error =
   | Write_unsupported_derivation of Keeper_memory_os_current.support_invalidation
+  | Write_successor_rests_on_target of Keeper_memory_os_current.support_invalidation
   | Write_persistence_failed of string
   | Write_supersede_refused of memory_write_error_kind
 
@@ -1331,6 +1341,8 @@ let upsert_explicit_fact
           Write_supersede_refused Supersedes_not_current
         | Keeper_memory_os_current.Supersede_target_not_authored _ ->
           Write_supersede_refused Supersedes_not_authored
+        | Keeper_memory_os_current.Supersede_successor_rests_on_target invalidation ->
+          Write_successor_rests_on_target invalidation
         | Keeper_memory_os_current.Supersede_unsupported_derivation invalidation ->
           Write_unsupported_derivation invalidation
         | Keeper_memory_os_current.Supersede_persistence_failed detail ->
@@ -1344,6 +1356,34 @@ let upsert_explicit_fact
        ()
    | Error _ -> ());
   result
+;;
+
+let support_invalidation_receipt
+      (invalidation : Keeper_memory_os_current.support_invalidation)
+  =
+  `Assoc
+    [ ( "memory_id"
+      , `String (Keeper_memory_os_types.memory_id invalidation.fact) )
+    ; ( "missing_premise_ids"
+      , `List
+          (List.map
+             (fun premise_id -> `String premise_id)
+             invalidation.missing_premise_ids) )
+    ]
+;;
+
+(* What a removal took with it: the facts that left the snapshot, and the
+   derived facts among them that lost their last complete support path. A
+   retraction and a supersession report it in the same two fields. *)
+let removal_receipt (snapshot : Keeper_memory_os_current.t) =
+  [ ( "removed_memory_ids"
+    , `List
+        (List.map
+           (fun fact -> `String (Keeper_memory_os_types.memory_id fact))
+           snapshot.change.removed) )
+  ; ( "support_invalidations"
+    , `List (List.map support_invalidation_receipt snapshot.change.invalidated) )
+  ]
 ;;
 
 type memory_write_identity_disposition = Inserted | Reobserved
@@ -1532,7 +1572,8 @@ let keeper_memory_write_with_outcome
              @ Option.fold
                  ~none:[]
                  ~some:(fun superseded_memory_id ->
-                   [ "superseded_memory_id", `String superseded_memory_id ])
+                   ("superseded_memory_id", `String superseded_memory_id)
+                   :: removal_receipt snapshot)
                  supersedes)
         | None ->
           let detail = "committed current Memory snapshot omitted the written fact" in
@@ -1564,6 +1605,20 @@ let keeper_memory_write_with_outcome
                   (fun premise_id -> `String premise_id)
                   invalidation.missing_premise_ids) )
          ]
+     | Error (Write_successor_rests_on_target invalidation) ->
+       respond
+         ~ok:false
+         ~error_kind:Supersedes_premise_of_successor
+         (( "missing_premise_ids"
+          , `List
+              (List.map
+                 (fun premise_id -> `String premise_id)
+                 invalidation.missing_premise_ids) )
+          :: Option.fold
+               ~none:[]
+               ~some:(fun superseded_memory_id ->
+                 [ "supersedes", `String superseded_memory_id ])
+               supersedes)
      | Error (Write_persistence_failed detail) ->
        Log.Keeper.warn
          "explicit current Memory write failed keeper=%s: %s"
@@ -1650,20 +1705,6 @@ let validate_memory_retract_args (args : Yojson.Safe.t) =
   else Memory_retract_ok { memory_id; reason }
 ;;
 
-let support_invalidation_receipt
-      (invalidation : Keeper_memory_os_current.support_invalidation)
-  =
-  `Assoc
-    [ ( "memory_id"
-      , `String (Keeper_memory_os_types.memory_id invalidation.fact) )
-    ; ( "missing_premise_ids"
-      , `List
-          (List.map
-             (fun premise_id -> `String premise_id)
-             invalidation.missing_premise_ids) )
-    ]
-;;
-
 let keeper_memory_retract_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -1734,25 +1775,15 @@ let keeper_memory_retract_with_outcome
        respond
          ~ok:true
          ~error_kind:No_memory_retract_error
-         [ "revision", `Int snapshot.revision
-         ; ( "recorded_at"
-           , `String (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
-         ; "outcome", `String "retracted_current_fact"
-         ; "store", `String "current_memory_snapshot"
-         ; "memory_id", `String memory_id
-         ; "reason", `String reason
-         ; ( "removed_memory_ids"
-           , `List
-               (List.map
-                  (fun fact ->
-                     `String (Keeper_memory_os_types.memory_id fact))
-                  snapshot.change.removed) )
-         ; ( "support_invalidations"
-           , `List
-               (List.map
-                  support_invalidation_receipt
-                  snapshot.change.invalidated) )
-         ]
+         ([ "revision", `Int snapshot.revision
+          ; ( "recorded_at"
+            , `String (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
+          ; "outcome", `String "retracted_current_fact"
+          ; "store", `String "current_memory_snapshot"
+          ; "memory_id", `String memory_id
+          ; "reason", `String reason
+          ]
+          @ removal_receipt snapshot)
      | Error Keeper_memory_os_current.Retract_memory_id_invalid ->
        respond
          ~ok:false

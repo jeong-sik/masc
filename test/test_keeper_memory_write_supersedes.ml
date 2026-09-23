@@ -90,11 +90,18 @@ let with_env f =
   f { config; keepers_dir }
 ;;
 
-let write env meta ?supersedes content =
+let write env meta ?supersedes ?derivation content =
   let args =
     `Assoc
       ([ "content", `String content ]
-       @ Option.fold ~none:[] ~some:(fun id -> [ "supersedes", `String id ]) supersedes)
+       @ Option.fold ~none:[] ~some:(fun id -> [ "supersedes", `String id ]) supersedes
+       @ Option.fold
+           ~none:[]
+           ~some:(fun (rule_id, premise_ids) ->
+             [ "rule_id", `String rule_id
+             ; "premise_ids", `List (List.map (fun id -> `String id) premise_ids)
+             ])
+           derivation)
   in
   (Runtime.keeper_memory_write_with_outcome ~config:env.config ~meta ~args)
     .Masc.Keeper_tool_execution.raw_output
@@ -187,6 +194,94 @@ let test_supersede_replaces_the_earlier_claim () =
 (* Bytes already current under another identity are a re-observation of that
    fact, exactly as a plain write of them would be: its first_seen and origin
    stay, only last_seen moves. *)
+let string_list_field key json =
+  match json_field key json with
+  | `List values ->
+    List.map
+      (function
+        | `String value -> value
+        | _ -> Alcotest.failf "expected strings in %s" key)
+      values
+  | _ -> Alcotest.failf "expected list field: %s" key
+;;
+
+(* A derived fact resting only on the superseded fact loses its support in
+   the same commit, and the receipt names it the way a retraction does. *)
+let test_supersede_reports_the_derived_facts_it_invalidates () =
+  with_env
+  @@ fun env ->
+  let meta = make_meta "supersede-cascade" in
+  let keeper_id = meta.name in
+  let premise_id = string_field "memory_id" (write env meta "the build is green") in
+  let derived = write env meta ~derivation:("green_means_ready", [ premise_id ]) "ready to release" in
+  check_ok "derived write" derived;
+  let derived_id = string_field "memory_id" derived in
+  let response = write env meta ~supersedes:premise_id "the build is red" in
+  check_ok "superseding the premise" response;
+  let successor_id = string_field "memory_id" response in
+  Alcotest.(check (list string))
+    "the derived fact left with its premise"
+    [ successor_id ]
+    (current_ids ~keepers_dir:env.keepers_dir ~keeper_id);
+  Alcotest.(check (list string))
+    "removed_memory_ids names the superseded and the derived fact"
+    (List.sort compare [ premise_id; derived_id ])
+    (List.sort compare (string_list_field "removed_memory_ids" response));
+  match json_field "support_invalidations" response with
+  | `List [ invalidation ] ->
+    Alcotest.(check string) "the invalidated fact" derived_id (string_field "memory_id" invalidation);
+    Alcotest.(check (list string))
+      "its missing premise"
+      [ premise_id ]
+      (string_list_field "missing_premise_ids" invalidation)
+  | _ -> Alcotest.fail "expected exactly one support invalidation"
+;;
+
+(* A successor derived from the fact it replaces would lose its own support
+   in the commit that writes it. That is told apart from a premise the store
+   never had. *)
+let test_successor_cannot_rest_on_the_fact_it_replaces () =
+  with_env
+  @@ fun env ->
+  let meta = make_meta "supersede-own-premise" in
+  let keeper_id = meta.name in
+  let premise_id = string_field "memory_id" (write env meta "stage 1 cleared") in
+  let before_ids = current_ids ~keepers_dir:env.keepers_dir ~keeper_id in
+  let before_revision = revision ~keepers_dir:env.keepers_dir ~keeper_id in
+  let label = "successor rests on the target" in
+  let response =
+    write
+      env
+      meta
+      ~supersedes:premise_id
+      ~derivation:("next_stage", [ premise_id ])
+      "stage 2 is open"
+  in
+  check_refused ~error_kind:"supersedes_premise_of_successor" label response;
+  Alcotest.(check string) "rejected field" "premise_ids" (string_field "rejected_field" response);
+  Alcotest.(check (list string))
+    "missing premise is the superseded fact"
+    [ premise_id ]
+    (string_list_field "missing_premise_ids" response);
+  check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events:0 label;
+  let absent = "sha256:" ^ String.make 64 'c' in
+  let label = "successor rests on an absent fact" in
+  let response =
+    write
+      env
+      meta
+      ~supersedes:premise_id
+      ~derivation:("next_stage", [ absent ])
+      "stage 2 is open"
+  in
+  check_refused ~error_kind:"unsupported_derivation" label response;
+  Alcotest.(check (list string))
+    "missing premise is the absent fact"
+    [ absent ]
+    (string_list_field "missing_premise_ids" response);
+  check_nothing_written env ~keeper_id ~before_ids ~before_revision ~before_events:0 label
+;;
+
 let test_supersede_into_an_existing_claim_reobserves_it () =
   with_env
   @@ fun env ->
@@ -341,6 +436,14 @@ let () =
             "into an existing claim re-observes it"
             `Quick
             test_supersede_into_an_existing_claim_reobserves_it
+        ; Alcotest.test_case
+            "reports the derived facts it invalidates"
+            `Quick
+            test_supersede_reports_the_derived_facts_it_invalidates
+        ; Alcotest.test_case
+            "a successor cannot rest on the fact it replaces"
+            `Quick
+            test_successor_cannot_rest_on_the_fact_it_replaces
         ; Alcotest.test_case "refusals write nothing" `Quick test_refusals_write_nothing
         ; Alcotest.test_case
             "a librarian copy is not supersedable"

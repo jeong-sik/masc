@@ -304,12 +304,96 @@ let test_two_names_that_differ_only_in_case_are_refused () =
     let result =
       Dos_lane.load
         ~ledger_dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
+        ~saves_dir:(Filename.concat base_path "saves")
         ~program_name:"game.com" ~program_bytes:hello_com
         ~files:[ ("GAME.COM", hello_com); ("DATA.DAT", "upper"); ("data.dat", "lower") ]
         ~announce:(fun () -> incr announced)
     in
     check bool "the load is refused" true (Result.is_error result);
     check int "and nothing was announced" 0 !announced)
+;;
+
+(* A game in miniature: if SAVE.DAT opens it prints it, otherwise it writes
+   "NEW$" there -- create, write, close -- and waits for a key either way.
+
+   100 mov ax,3D00h / mov dx,fname / int 21h / jc create
+   10A mov bx,ax / mov ah,3Fh / mov cx,16 / mov dx,buf / int 21h
+   116 mov ah,3Eh / int 21h / mov ah,9 / mov dx,buf / int 21h / jmp wait
+   123 create: mov ah,3Ch / xor cx,cx / mov dx,fname / int 21h / mov bx,ax
+       mov ah,40h / mov cx,4 / mov dx,msg / int 21h / mov ah,3Eh / int 21h
+   13C wait: mov ah,0 / int 16h / or ax,ax / jz wait / int 20h
+   146 fname "SAVE.DAT",0   14F msg "NEW$"   153 buf 16 x "$" *)
+let saver_com =
+  "\xb8\x00\x3d\xba\x46\x01\xcd\x21\x72\x19"
+  ^ "\x89\xc3\xb4\x3f\xb9\x10\x00\xba\x53\x01\xcd\x21"
+  ^ "\xb4\x3e\xcd\x21\xb4\x09\xba\x53\x01\xcd\x21\xeb\x19"
+  ^ "\xb4\x3c\x31\xc9\xba\x46\x01\xcd\x21\x89\xc3"
+  ^ "\xb4\x40\xb9\x04\x00\xba\x4f\x01\xcd\x21\xb4\x3e\xcd\x21"
+  ^ "\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20"
+  ^ "SAVE.DAT\000" ^ "NEW$" ^ String.make 16 '$'
+;;
+
+let saves_of ~base_path name =
+  Filename.concat
+    (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "saves")
+    name
+;;
+
+let install_game ~base_path name files =
+  let dir = Filename.concat (programs_dir ~base_path) name in
+  mkdir_p dir;
+  List.iter (fun (f, contents) -> write_file (Filename.concat dir f) contents) files
+;;
+
+let eject () = ignore (Dos_lane.eject ~announce:ignore () : (unit, Dos_lane.error) result)
+
+(* A game saves by writing a file, and the machine kept what the guest wrote
+   only in memory: an eject or a server restart took the campaign with it,
+   as the MSX 삼국지2 lane's Keepers found. What the program wrote is now on
+   disk after the call that wrote it, and the next load mounts it. *)
+let test_a_save_outlives_its_machine () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
+    let first = load ~base_path "quest" in
+    check bool "the first run boots" true (is_completed first);
+    let kept = Filename.concat (saves_of ~base_path "quest") "SAVE.DAT" in
+    check bool "the save is on disk after the call that wrote it" true (Sys.file_exists kept);
+    check string "with what the program wrote" "NEW$"
+      (In_channel.with_open_bin kept In_channel.input_all);
+    eject ();
+    let second = load ~base_path "quest" in
+    check bool "the next machine finds the save and prints it" true
+      (contains "NEW" (string_field "screen_text" second)))
+;;
+
+(* A save made earlier stands in for the inventory's copy of the same file,
+   matched the way DOS matches names. *)
+let test_a_save_is_mounted_over_the_inventory_copy () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com); ("SAVE.DAT", "OLD$") ];
+    let saves = saves_of ~base_path "quest" in
+    mkdir_p saves;
+    write_file (Filename.concat saves "save.dat") "MINE$";
+    let loaded = load ~base_path "quest" in
+    let text = string_field "screen_text" loaded in
+    check bool "the save wins" true (contains "MINE" text);
+    check bool "the inventory copy is not what the guest opened" false (contains "OLD" text))
+;;
+
+(* When the save cannot be written the call says so; the machine still moved
+   and stays loaded, and nothing pretends the save exists. *)
+let test_a_save_that_cannot_be_written_is_reported () =
+  with_workspace (fun base_path ->
+    install_game ~base_path "quest" [ ("QUEST.COM", saver_com) ];
+    let saves = saves_of ~base_path "quest" in
+    mkdir_p (Filename.dirname saves);
+    write_file saves "a file where the save directory would be";
+    let loaded = load ~base_path "quest" in
+    check bool "the call reports the lost save" false (is_completed loaded);
+    check bool "and names why" true
+      (contains "did not reach disk" (Tool_result.message loaded));
+    check bool "the machine is still there" true
+      (is_completed (dispatch ~base_path "masc_dos_screen" [])))
 ;;
 
 let test_unknown_key_is_refused () =
@@ -402,6 +486,10 @@ let () =
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key
         ; test_case "sequence length" `Quick test_a_sequence_has_a_length
         ; test_case "case collision" `Quick test_two_names_that_differ_only_in_case_are_refused
+        ; test_case "save outlives machine" `Quick test_a_save_outlives_its_machine
+        ; test_case "save over inventory" `Quick
+            test_a_save_is_mounted_over_the_inventory_copy
+        ; test_case "save not written" `Quick test_a_save_that_cannot_be_written_is_reported
         ; test_case "unknown key" `Quick test_unknown_key_is_refused
         ; test_case "step cap" `Quick test_step_cap
         ; test_case "peek" `Quick test_peek_reads_the_text_page

@@ -26,11 +26,14 @@ type error =
   | No_machine
   | Invalid_request of string
   | Unreadable of string
+  | Not_kept of string
 
 let error_to_string = function
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
   | Invalid_request message -> message
   | Unreadable message -> message
+  | Not_kept message ->
+    "the machine moved, but a file the program wrote did not reach disk: " ^ message
 ;;
 
 (* The core runs about 24 million instructions a second on this hardware
@@ -70,6 +73,11 @@ type machine = {
   program : string;
   ledger_path : string;
   mutable entries : entry list;  (* newest first *)
+  saves_dir : string;
+  kept : (string, string) Hashtbl.t;
+      (* DOS name -> the contents last known to be on disk, either in the
+         inventory or in [saves_dir]. A file whose mounted contents differ
+         from this is one the program wrote since. *)
 }
 
 let state : machine option ref = ref None
@@ -168,13 +176,6 @@ let append_entry st e =
   st.entries <- e :: st.entries
 ;;
 
-let rec mkdir_p dir =
-  if not (Sys.file_exists dir) then begin
-    mkdir_p (Filename.dirname dir);
-    Sys.mkdir dir 0o755
-  end
-;;
-
 (* ---------- time ---------- *)
 
 let clamp_steps steps =
@@ -239,6 +240,82 @@ let advance st ~budget ~until_ready =
   if until_ready then advance_until_ready st ~budget else advance_blind st ~budget
 ;;
 
+(* ---------- the program's own saves ---------- *)
+
+(* A DOS game saves by writing a file, and Dos_machine keeps what the guest
+   wrote only in its mount table. Without this a server restart, an eject or
+   the next load took every campaign with it: the MSX 삼국지2 lane lost its
+   Keepers' games that way. After every call that ran the guest, a file whose
+   mounted contents differ from what is on disk is written to [saves_dir],
+   and the next load of the same program mounts it over the inventory copy.
+
+   A file the program deletes is not carried: the inventory copy comes back
+   at the next load. None of the games this lane runs delete their saves. *)
+
+let write_atomically ~dir name contents =
+  let path = Filename.concat dir name in
+  let tmp = Filename.concat dir ("." ^ name ^ ".tmp") in
+  Out_channel.with_open_bin tmp (fun oc -> output_string oc contents);
+  Sys.rename tmp path
+;;
+
+let rec mkdir_p dir =
+  if not (Sys.file_exists dir) then begin
+    mkdir_p (Filename.dirname dir);
+    Sys.mkdir dir 0o755
+  end
+;;
+
+(* Writes every changed file, and records a file as kept only once it is on
+   disk, so a failed write is tried again after the next call. *)
+let keep_writes st =
+  let failures =
+    List.filter_map
+      (fun name ->
+        match Dos_machine.read_mounted st.m name with
+        | None -> None
+        | Some now ->
+          (match Hashtbl.find_opt st.kept name with
+           | Some before when String.equal before now -> None
+           | _ ->
+             (match
+                mkdir_p st.saves_dir;
+                write_atomically ~dir:st.saves_dir name now
+              with
+              | () ->
+                Hashtbl.replace st.kept name now;
+                None
+              | exception Sys_error message -> Some (name ^ ": " ^ message))))
+      (Dos_machine.mounted_names st.m)
+  in
+  match failures with
+  | [] -> Ok ()
+  | _ -> Error (Not_kept (String.concat "; " failures))
+;;
+
+(* Every call that ran the guest ends here: the observation, once what the
+   guest wrote is on disk. *)
+let ran_then_kept st ran = Result.map (fun () -> (observe st, ran)) (keep_writes st)
+
+(* The saves over the inventory, matched the way DOS matches names. *)
+let with_saves ~saves_dir files =
+  let saved =
+    if Sys.file_exists saves_dir && Sys.is_directory saves_dir then
+      Sys.readdir saves_dir
+      |> Array.to_list
+      |> List.filter (fun f -> not (String.starts_with ~prefix:"." f))
+      |> List.filter (fun f -> not (Sys.is_directory (Filename.concat saves_dir f)))
+      |> List.map (fun f ->
+        (f, In_channel.with_open_bin (Filename.concat saves_dir f) In_channel.input_all))
+    else []
+  in
+  let folded (name, _) = String.uppercase_ascii name in
+  let inventory_only =
+    List.filter (fun f -> not (List.exists (fun s -> folded s = folded f) saved)) files
+  in
+  inventory_only @ saved
+;;
+
 (* ---------- lifecycle ---------- *)
 
 (* DOS folds filenames to upper case, so DATA.DAT and data.dat are one name to
@@ -262,7 +339,8 @@ let is_mz image =
   String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
 ;;
 
-let load ~ledger_dir ~program_name ~program_bytes ~files ~announce =
+let load ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announce =
+  let files = with_saves ~saves_dir files in
   locked (fun () ->
     if String.length program_bytes = 0 then
       Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
@@ -285,13 +363,17 @@ let load ~ledger_dir ~program_name ~program_bytes ~files ~announce =
         let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
         (* A new machine starts a new ledger. *)
         Out_channel.with_open_bin ledger_path (fun _ -> ());
+        let kept = Hashtbl.create (List.length files) in
+        List.iter
+          (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents)
+          files;
         let st =
-          { m; steps = 0; program = program_name; ledger_path; entries = [] }
+          { m; steps = 0; program = program_name; ledger_path; entries = []; saves_dir; kept }
         in
         state := Some st;
         announce ();
         let ran = advance st ~budget:boot_steps ~until_ready:true in
-        Ok (observe st, ran)
+        ran_then_kept st ran
       end)
 ;;
 
@@ -313,7 +395,7 @@ let step ~steps ~until_ready =
     | Error e -> Error e
     | Ok budget ->
       let ran = advance st ~budget ~until_ready in
-      Ok (observe st, ran))
+      ran_then_kept st ran)
 ;;
 
 (* ---------- input ---------- *)
@@ -382,7 +464,7 @@ let press ~who ~keys ~steps =
          | Error e -> Error e
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
-           Ok (observe st, ran)))
+           ran_then_kept st ran))
 ;;
 
 (* The mouse is state, not a queue. A key enters the ring and is gone; the
@@ -413,20 +495,19 @@ let click ~who ~x ~y ~buttons ~steps =
         Dos_machine.set_mouse st.m ~x ~y ~buttons;
         if buttons = 0 then begin
           let ran = advance st ~budget ~until_ready:true in
-          Ok (observe st, ran)
+          ran_then_kept st ran
         end
         else begin
           let half = max 1 (budget / 2) in
           let down = advance st ~budget:half ~until_ready:true in
           Dos_machine.set_mouse st.m ~x ~y ~buttons:0;
           let up = advance st ~budget:(budget - down.steps_run) ~until_ready:true in
-          Ok
-            ( observe st
-            , { steps_run = down.steps_run + up.steps_run
+          ran_then_kept st
+            { steps_run = down.steps_run + up.steps_run
               ; settled = down.settled && up.settled
               ; input_requests = down.input_requests + up.input_requests
               ; keys_pressed = 0
-              } )
+              }
         end)
 ;;
 
@@ -447,7 +528,7 @@ let type_text ~who ~text ~steps =
          | Error e -> Error e
          | Ok resolved ->
            let ran = press_resolved st ~who ~keys:resolved ~budget in
-           Ok (observe st, ran)))
+           ran_then_kept st ran))
 ;;
 
 (* ---------- introspection ---------- *)

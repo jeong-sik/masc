@@ -56,7 +56,7 @@ let of_lane ?(extra = []) ~tool_name ~start_time
       ()
   | Error ((Dos_lane.No_machine | Dos_lane.Invalid_request _) as e) ->
     reject ~tool_name ~start_time (Dos_lane.error_to_string e)
-  | Error (Dos_lane.Unreadable _ as e) ->
+  | Error ((Dos_lane.Unreadable _ | Dos_lane.Not_kept _) as e) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
       (Dos_lane.error_to_string e)
 ;;
@@ -75,6 +75,11 @@ let of_lane_run ~tool_name ~start_time
    host path. *)
 let dos_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos"
 let programs_dir ~base_path = Filename.concat (dos_dir ~base_path) "programs"
+
+(* What a program wrote on earlier machines, one directory per inventory
+   name. Keyed by the inventory name, not the executable: two games may both
+   boot a MAIN.EXE. *)
+let saves_dir ~base_path name = Filename.concat (Filename.concat (dos_dir ~base_path) "saves") name
 
 let entries_of dir =
   if Sys.file_exists dir && Sys.is_directory dir then
@@ -256,7 +261,8 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
      | Error message -> reject ~tool_name ~start_time message
      | Ok (program_name, program_bytes, files) ->
        let loaded =
-         Dos_lane.load ~ledger_dir:(dos_dir ~base_path) ~program_name ~program_bytes
+         Dos_lane.load ~ledger_dir:(dos_dir ~base_path)
+           ~saves_dir:(saves_dir ~base_path (String.trim name)) ~program_name ~program_bytes
            ~files
            ~announce:(fun () ->
              relay_to_board ~author:agent_name

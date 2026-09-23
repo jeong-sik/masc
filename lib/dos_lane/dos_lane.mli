@@ -74,6 +74,10 @@ type error =
   | Unreadable of string
       (** a file that is there and will not read. A path that does not exist
           is [Invalid_request] — the caller named it. *)
+  | Not_kept of string
+      (** the call ran the guest, but a file the program wrote did not reach
+          [saves_dir]. The machine moved; the write is tried again after the
+          next call. *)
 
 val error_to_string : error -> string
 
@@ -109,6 +113,7 @@ val settle_chunk : int
 
 val load :
   ledger_dir:string ->
+  saves_dir:string ->
   program_name:string ->
   program_bytes:string ->
   files:(string * string) list ->
@@ -126,6 +131,12 @@ val load :
 
     Two names that differ only in case are refused: DOS folds filenames, so
     the guest would see one of them and the observation would list both.
+
+    [saves_dir] holds what this program wrote on earlier machines. Its files
+    are mounted over [files] of the same DOS name, and every call that runs
+    the guest writes a file whose contents changed back to it, so a game's
+    own save survives an eject and a server restart. A file the program
+    deletes is not carried: the next load mounts the inventory copy again.
 
     [announce] runs while the machine's lock is still held, right after this
     machine becomes the workspace's. Announcements therefore reach whoever

@@ -157,7 +157,7 @@ let cleanup_result cleanup outcome =
       | Ok () -> None
       | Error detail -> Some detail
     with
-    | exn -> Some (Printexc.to_string exn))
+    | exn -> Some (Printexc.to_string exn)) (* cancel-guard-ok: the body is Eio.Cancel.protect *)
 ;;
 
 let rec claim_finalization t =

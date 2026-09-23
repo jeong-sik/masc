@@ -617,7 +617,7 @@ let terminate_spawned_process ~clock proc stdin_w =
          Eio.Process.await proc |> ignore
        with
        | _ -> ()) (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
-    | _ -> ())
+    | _ -> ()) (* cancel-guard-ok: the body is Eio.Cancel.protect *)
 ;;
 
 type protocol_state =

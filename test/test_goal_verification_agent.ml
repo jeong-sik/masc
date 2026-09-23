@@ -72,10 +72,15 @@ let ensure_producer_playground (config : Workspace.config) producer =
   path
 ;;
 
+(* The clock of the running [with_workspace], for a test that must fail
+   rather than hang when an awaited event never arrives. *)
+let workspace_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
   Masc_test_deps.init_eio_clock env;
+  workspace_clock := Some (Eio.Stdenv.clock env);
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect
@@ -1125,6 +1130,10 @@ let test_wake_after_deferred_persist_survives_active_scan () =
    claim once the operator takes the Goal out of verifying. The first review
    hangs; Reopen cancels it and frees the claim, and the next request is
    reviewed and committed without any other wake. *)
+(* Upper bound on the wait for the next review to commit. Every step is local
+   and stubbed, so reaching it means the cancel never happened. *)
+let hung_review_wait_s = 30.0
+
 let test_reopen_from_verifying_cancels_a_hung_review () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
@@ -1168,7 +1177,16 @@ let test_reopen_from_verifying_cancels_a_hung_review () =
             let reopened = must_succeed "reopen from verifying" (transition ctx goal_id "reopen") in
             check string "reopen leaves verifying" "executing" (json_state reopened [ "goal"; "phase" ]);
             ignore (must_succeed "new request" (transition ctx goal_id "request_complete"));
-            Eio.Promise.await finished)));
+            let clock = match !workspace_clock with
+              | Some clock -> clock
+              | None -> fail "test setup: with_workspace did not record its clock" in
+            match Eio.Time.with_timeout clock hung_review_wait_s (fun () ->
+                Eio.Promise.await finished; Ok ()) with
+            | Ok () -> ()
+            | Error `Timeout ->
+              fail (Printf.sprintf
+                "no committed review %.0fs after reopen: the hung review was not \
+                 cancelled or its claim was not released" hung_review_wait_s))));
   let runs = reviews_of_goal registry goal_id in
   check bool "the hung review was cancelled" true
     (List.exists (fun (run : Goal_verification_run_registry.run) ->

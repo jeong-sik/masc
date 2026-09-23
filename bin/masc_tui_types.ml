@@ -1986,8 +1986,6 @@ type pull_mergeable = Pull_mergeable | Pull_conflicting | Pull_mergeable_unknown
 
 type open_pull = {
   op_number: int;
-  op_title: string;
-  op_head_branch: string;
   op_draft: bool;
   op_checks: pull_checks;
   op_review: pull_review;

@@ -5521,6 +5521,7 @@
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_rows.inc)
+(include stanzas/test_tui_decoded_field_census.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_title_counts.inc)
 (include stanzas/test_tui_data_unreliable_row.inc)

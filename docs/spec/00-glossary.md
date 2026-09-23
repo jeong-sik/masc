@@ -1401,8 +1401,9 @@ status: reference
   → [Librarian_continuity_snapshot](../../lib/librarian_continuity_snapshot.mli)
 
 **Working State (대화 작업 상태)**
-: Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항
-  (`Keeper_librarian.selection.working_state`). Continuity Snapshot이 담는
+: Librarian이 완료된 대화와 이전 상태에서 정리한 작업·제약·결정·미해결 사항.
+  연속성 회차의 답에만 있고, `Keeper_librarian.continuity_working_state_of_json_result`가
+  비지 않은 글인지 보고 읽는다. 연속성이 없는 기억 회차는 이 칸을 읽지 않는다. Continuity Snapshot이 담는
   "이어서 할 일의 설명" 절반이며, 같은 파일에 저장된 정확한 대화 범위와 한 쌍이다.
   큐 원본을 정리한 Working Context(`working_contexts`)나 장기 Memory facts와 다르다.
   모델의 출력만으로 범위가 소비된 것은 아니며, pair 저장과 소비 시 이력 검증이

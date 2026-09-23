@@ -161,7 +161,9 @@ and invalid schema values reject the answer (`Keeper_librarian`).
 `working_contexts` is judged apart from these: when it is missing or fails the
 pending-input check, the answer's Memory changes still commit, that pass
 organizes nothing, and the run records `answer_missing` or `answer_refused`
-as its `context_write`.
+as its `context_write`. `working_state` is read only when the pass carries a
+continuity range, which requires nonblank text; a Memory pass without one
+never reads it.
 
 `Keeper_memory_os_current.apply_disposition` applies the changes to the current
 snapshot under its write lock. A fact the Keeper wrote while the model was

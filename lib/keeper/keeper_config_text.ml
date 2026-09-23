@@ -40,7 +40,7 @@ let bool_of_env_opt name =
 (* A keeper's directory is [keepers/<name>], beside the stores kept directly
    under [keepers/]; a keeper named like one of them would share its
    directory. [Keeper_id.Keeper_name.of_string] refuses the same names. *)
-let is_keepers_root_store_name name = List.mem name Common.keepers_root_store_dirnames
+let is_keepers_root_store_name = Common.is_keepers_root_store_dirname
 
 let validate_name name =
   Safe_identifier.is_portable_name name && not (is_keepers_root_store_name name)

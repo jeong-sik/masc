@@ -417,6 +417,10 @@ let retained_keeper_names_read_only_result config =
          match Keeper_runtime_root_entry.metadata_keeper_name entry with
          | Some name when validate_name name -> Ok (name :: names)
          | Some _ -> Ok names
+         (* A store kept beside the keepers ([keepers/tool_usage]) is not a
+            keeper directory; an unknown directory with an invalid name still
+            fails the listing. *)
+         | None when Common.is_keepers_root_store_dirname entry -> Ok names
          | None ->
            let path = Filename.concat dir entry in
            (match Unix.lstat path with

@@ -117,6 +117,11 @@ val keepers_root_store_dirnames : string list
     beside the keeper directories under [keepers/], so no keeper may take one
     of these names. *)
 
+val is_keepers_root_store_dirname : string -> bool
+(** Whether [name] is one of {!keepers_root_store_dirnames}, ignoring ASCII
+    case: on a case-insensitive filesystem (macOS APFS by default)
+    [keepers/Tool_Usage] is the same directory as [keepers/tool_usage]. *)
+
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and
     {!Keeper_identity} can both compute it without depending on each

@@ -36,6 +36,47 @@ let test_typed_name_agrees () =
   check bool "ordinary typed name" true
     (Result.is_ok (Keeper_id.Keeper_name.of_string "masc-pro-builder"))
 
+let test_case_is_ignored () =
+  List.iter
+    (fun dirname ->
+       check bool (dirname ^ " is lowercase") true
+         (String.equal dirname (String.lowercase_ascii dirname));
+       let upper = String.uppercase_ascii dirname in
+       check bool (upper ^ " refused: same directory on a case-insensitive disk") false
+         (Keeper_config.validate_name upper))
+    Common.keepers_root_store_dirnames
+
+let rec remove_tree path =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+    Unix.rmdir path
+  | { Unix.st_kind = (Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
+    Sys.remove path
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+
+let rec mkdir_p path =
+  if not (Sys.file_exists path) then (mkdir_p (Filename.dirname path); Unix.mkdir path 0o755)
+
+(* Any workspace where a keeper flushed tool usage has keepers/tool_usage/;
+   the retained keeper listing must pass over it, yet still refuse an unknown
+   directory whose name is not a keeper name. *)
+let test_retained_listing_passes_over_store_directories () =
+  let base_path = Filename.temp_dir "keeper-name-reserves" "" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+    let config = Workspace.default_config base_path in
+    let keepers_dir = Workspace.keepers_runtime_dir config in
+    mkdir_p (Filename.concat keepers_dir "alpha");
+    List.iter (fun dirname -> mkdir_p (Filename.concat keepers_dir dirname))
+      Common.keepers_root_store_dirnames;
+    (match Keeper_meta_store.retained_keeper_names_read_only_result config with
+     | Ok names -> check (list string) "only the keeper is listed" [ "alpha" ] names
+     | Error detail -> fail detail);
+    mkdir_p (Filename.concat keepers_dir "not a keeper!");
+    match Keeper_meta_store.retained_keeper_names_read_only_result config with
+    | Error _ -> ()
+    | Ok names -> fail ("unknown invalid directory was accepted: " ^ String.concat "," names))
+
 let test_ordinary_names_still_pass () =
   List.iter
     (fun name -> check bool name true (Keeper_config.validate_name name))
@@ -52,6 +93,9 @@ let () =
       , [ test_case "store directory names are not keeper names" `Quick
             test_store_directory_names_are_not_keeper_names
         ; test_case "the typed name agrees" `Quick test_typed_name_agrees
+        ; test_case "case is ignored" `Quick test_case_is_ignored
+        ; test_case "retained listing passes over store directories" `Quick
+            test_retained_listing_passes_over_store_directories
         ; test_case "ordinary names still pass" `Quick test_ordinary_names_still_pass
         ; test_case "non-portable names keep their message" `Quick
             test_non_portable_names_keep_their_message

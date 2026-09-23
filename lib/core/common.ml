@@ -160,6 +160,9 @@ let keepers_root_store_dirnames =
        | Keeper_scoped_rotated
        | Workspace_scoped -> None)
     keeper_runtime_stores
+
+let is_keepers_root_store_dirname name =
+  List.mem (String.lowercase_ascii name) keepers_root_store_dirnames
 let auth_dir_from_base_path ~base_path =
   Filename.concat (masc_dir_from_base_path ~base_path) "auth"
 

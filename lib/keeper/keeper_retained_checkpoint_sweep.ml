@@ -74,7 +74,7 @@ let live_references ~runtime_root =
            is_directory ~follow:true (Filename.concat keepers_dir keeper_name)
            |> Result.map_error unreadable
          in
-         let root_store = List.mem keeper_name Common.keepers_root_store_dirnames in
+         let root_store = Common.is_keepers_root_store_dirname keeper_name in
          let has_metadata () =
            Sys.file_exists
              (Filename.concat keepers_dir

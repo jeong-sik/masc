@@ -775,9 +775,13 @@ let consume_one_with_extent
       next
       outcome
   in
+  (* The two positions are independent (RFC §4.10). An official stop holds
+     the official lines only: no later line lifts it, so letting it hold the
+     atoms too would stand every round of the keeper at a line the atom path
+     has already settled (masc#37061). The stop is this pass's answer once the
+     atom part has nothing to do, so a drain that reads atoms ends on it. *)
   match selection, official with
   | R.Stop stop, _ -> Error (Range_stopped stop)
-  | _, R.Official_stop { line; error } -> Error (Official_range_stopped { line; error })
   | R.Position_in_other_trace position, _ -> Error (Position_in_other_trace position)
   | R.Baseline _, _ ->
     (* The atom position is set first; the official lines wait for the next
@@ -785,8 +789,11 @@ let consume_one_with_extent
     (match R.progress_after ~trace_id selection with
      | None -> Ok Nothing_to_read
      | Some next -> write_atom next (fun progress -> Baseline_advanced progress))
+  | R.Nothing_to_read, R.Official_stop { line; error } ->
+    Error (Official_range_stopped { line; error })
   | R.Nothing_to_read, R.Nothing_official -> Ok Nothing_to_read
-  | (R.Nothing_to_read | R.Read _), (R.Nothing_official | R.Official_read _) ->
+  | R.Read _, (R.Nothing_official | R.Official_read _ | R.Official_stop _)
+  | R.Nothing_to_read, R.Official_read _ ->
     (* The atom part, when there is one: its range, the line that ends it,
        and the receipt identity the Memory commit records. *)
     let* atom =

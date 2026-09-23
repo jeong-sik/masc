@@ -48,7 +48,7 @@ def test_aggregate_rows(tmp_path, monkeypatch, capsys):
     row1 = lines[1].split(",")
     assert row1[:5] == ["arm-b-20260910-1200", "fix-git", "fix-git__Abc123", "1", "1234"]
     assert row1[5:9] == ["100", "50", "10", "0.01"]
-    assert row1[9:] == ["17", "2", "Succeeded", "", "", ""]
+    assert row1[9:] == ["17", "2", "Succeeded", "", "", "", "", "", "", ""]
     row2 = lines[2].split(",")
     assert row2[2] == "fix-git__Def456" and row2[3] == "0"
 
@@ -103,7 +103,7 @@ def test_a_missing_measurement_stays_blank(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
     aggregate.main()
     row = capsys.readouterr().out.strip().splitlines()[1].split(",")
-    assert row[4:] == ["", "", "", "", "", "", "", "", "", "", ""]
+    assert row[4:] == [""] * 15
 
 
 def test_unpriced_keeper_rows_reach_the_table(tmp_path, monkeypatch, capsys):
@@ -185,3 +185,36 @@ def test_the_interruption_and_keeper_stop_columns_come_from_metadata(
     assert rows[0]["masc_state"] == "Running"
     assert rows[0]["interrupted"] == "True"
     assert rows[0]["keepers_stopped"] == "False"
+
+
+def test_a_row_names_its_candidate_order_and_who_answered(tmp_path, monkeypatch, capsys):
+    # #37952: arm l walks a candidate order. A row that does not say which
+    # candidates were declared and which answered cannot tell a failover
+    # trial from a single-model one.
+    import csv
+    jobs = tmp_path / "jobs"
+    make_trial(jobs, "arm-l/fix-git__Abc123", agent_result={"metadata": {
+        "arm": "l",
+        "candidates": ["kimi_coding.kimi-for-coding", "kimi_coding.k3"],
+        "answered_by": {"kimi_coding.k3": 2, "kimi_coding.kimi-for-coding": 1},
+        "turns_unanswered": 1}})
+    make_trial(jobs, "arm-e/fix-git__Def456", trial_name="fix-git__Def456",
+               agent_result={"metadata": {
+                   "arm": "e", "candidates": ["claude.claude-fable-5-1"],
+                   "answered_by": {}, "turns_unanswered": 0}})
+
+    monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
+    aggregate.main()
+
+    rows = {row["trial"]: row for row in csv.DictReader(
+        capsys.readouterr().out.splitlines())}
+    walked = rows["fix-git__Abc123"]
+    assert walked["arm"] == "l"
+    # Order is the lane's meaning, so the cell keeps it.
+    assert walked["candidates"] == "kimi_coding.kimi-for-coding > kimi_coding.k3"
+    assert walked["answered_by"] == "kimi_coding.k3=2;kimi_coding.kimi-for-coding=1"
+    assert walked["turns_unanswered"] == "1"
+    single = rows["fix-git__Def456"]
+    assert single["candidates"] == "claude.claude-fable-5-1"
+    # Measured and nothing answered: the count says so, the blank does not.
+    assert single["answered_by"] == "" and single["turns_unanswered"] == "0"

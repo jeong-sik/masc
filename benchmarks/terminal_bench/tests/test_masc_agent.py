@@ -509,6 +509,51 @@ def test_the_image_variables_the_keepers_lacked_reach_harbor_metadata(tmp_path):
     assert context.metadata["endpoint_env_left_out"] == left_out
 
 
+def test_a_failover_trial_reports_its_candidate_order_and_who_answered(tmp_path):
+    # #37952: a result has to say which candidates the trial declared and which
+    # of them answered, or a failover run cannot be told from a single-model one.
+    write_result(tmp_path, answered_by={"kimi_coding.k3": 2}, turns_unanswered=1)
+    agent = MascAgent(logs_dir=tmp_path, model_name="kimi_coding/kimi-for-coding",
+                      arm="l", fallback_models="kimi_coding/k3")
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    assert context.metadata["arm"] == "l"
+    assert context.metadata["candidates"] == [
+        "kimi_coding.kimi-for-coding", "kimi_coding.k3"]
+    assert context.metadata["route"] == "bench"
+    assert context.metadata["answered_by"] == {"kimi_coding.k3": 2}
+    assert context.metadata["turns_unanswered"] == 1
+
+
+def test_a_single_model_trial_reports_one_candidate_routed_by_itself(tmp_path):
+    write_result(tmp_path)
+    context = SimpleNamespace(metadata=None)
+    make_agent(tmp_path, arm="e").populate_context_post_run(context)
+    assert context.metadata["candidates"] == ["claude.claude-fable-5"]
+    assert context.metadata["route"] == "claude.claude-fable-5"
+    # collect_result.sh wrote no answer counts: unmeasured, not zero turns.
+    assert context.metadata["answered_by"] is None
+    assert context.metadata["turns_unanswered"] is None
+
+
+@pytest.mark.parametrize("result_text", [None, "{truncated"])
+def test_the_candidate_order_is_reported_without_a_readable_result(tmp_path, result_text):
+    if result_text is not None:
+        (Path(tmp_path) / "result.json").write_text(result_text)
+    agent = MascAgent(logs_dir=tmp_path, model_name="kimi_coding/kimi-for-coding",
+                      arm="l", fallback_models="kimi_coding/k3")
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    assert context.metadata["candidates"] == [
+        "kimi_coding.kimi-for-coding", "kimi_coding.k3"]
+    assert context.metadata["route"] == "bench"
+
+
+def test_an_unknown_provider_is_refused_at_construction(tmp_path):
+    with pytest.raises(ValueError, match="unknown provider"):
+        MascAgent(logs_dir=tmp_path, model_name="nowhere/some-model", arm="b")
+
+
 def test_validated_dist_identity_reaches_harbor_metadata(tmp_path, monkeypatch):
     import agents.masc_agent as m
 

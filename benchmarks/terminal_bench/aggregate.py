@@ -33,7 +33,16 @@ COLUMNS = [
     # 멈췄는지. masc_state 만으로는 "시간 초과로 끊긴 Running" 과 다른 이유의
     # Running 이 구분되지 않는다.
     "interrupted", "keepers_stopped",
+    # 어느 arm 이었고 어떤 후보 순서를 선언했는지, 그중 누가 실제로 답했는지.
+    # arm l 만 후보가 둘 이상이다. answered_by 는 "runtime=turn 수" 를 ; 로
+    # 잇고, turns_unanswered 는 어느 후보도 답하기 전에 끝난 turn 수다.
+    # 둘 다 빈 칸이면 측정되지 않은 것이다(0 이 아니다).
+    "arm", "candidates", "answered_by", "turns_unanswered",
 ]
+
+# 후보 순서를 한 칸에 적을 때의 구분자. 순서가 곧 의미라 정렬하지 않는다.
+CANDIDATE_SEPARATOR = " > "
+ANSWER_SEPARATOR = ";"
 
 
 def iter_trials(jobs: Path):
@@ -59,6 +68,19 @@ def cell(value) -> str:
     return "" if value is None else str(value)
 
 
+def candidates_cell(candidates) -> str:
+    return "" if candidates is None else CANDIDATE_SEPARATOR.join(candidates)
+
+
+def answered_by_cell(answered_by) -> str:
+    """답한 turn 이 없을 때({})와 미측정(None)은 둘 다 빈 칸이다. 둘은
+    turns_unanswered 칸으로 가른다: 측정했으면 숫자, 안 했으면 빈 칸이다."""
+    if answered_by is None:
+        return ""
+    return ANSWER_SEPARATOR.join(
+        f"{runtime}={turns}" for runtime, turns in sorted(answered_by.items()))
+
+
 def main() -> None:
     jobs = Path(sys.argv[1])
     # csv.writer 로 쓴다. task_name 이나 masc_state 에 쉼표가 들어가면 수동
@@ -74,6 +96,7 @@ def main() -> None:
                 trial_dir.parent.name, trial_dir.name.split("__")[0],
                 trial_dir.name, "", "", "", "", "", "", "", "",
                 read_error or "unreadable", "", "", "",
+                "", "", "", "",
             ])
             continue
         verifier = data.get("verifier_result") or {}
@@ -95,6 +118,10 @@ def main() -> None:
             cell((meta.get("keeper_usage") or {}).get("cost_rows_unreported")),
             cell(meta.get("interrupted")),
             cell(meta.get("keepers_stopped")),
+            cell(meta.get("arm")),
+            candidates_cell(meta.get("candidates")),
+            answered_by_cell(meta.get("answered_by")),
+            cell(meta.get("turns_unanswered")),
         ])
 
 

@@ -138,8 +138,15 @@ Anthropic 요청에서는 `tool_choice.disable_parallel_tool_use`, OpenAI 요청
 - 후보는 같은 provider 의 서로 다른 모델이어야 한다. 컨테이너에 넘기는 키가 하나이고,
   같은 모델을 두 번 넣으면 이 거절을 못 넘긴다. official client(`claude_code`)는 받지 않는다.
 - 다른 arm 에 fallback 을 주면 렌더 단계에서 거절한다. arm 하나는 처치 하나로 남긴다.
-- 지금 `aggregate.py` 는 어느 후보가 답했는지 따로 세지 않는다. 넘어갔는지는 trial 의
-  keeper trace 에서 본다.
+- 후보 순서를 따라 넘어가는 arm 은 L 하나다. 나머지 arm(b–h, k)은 모델 하나만 재므로
+  리더보드 비교에는 그쪽을 쓴다.
+- trial 결과에 후보가 남는다. harbor metadata 의 `candidates` 는 선언한 후보 순서(masc 가
+  해소하는 id), `route` 는 keeper 가 배정받은 값(lane `bench` 또는 runtime 하나)이다.
+  `answered_by` 는 실제로 답한 runtime 별 turn 수이고, `turns_unanswered` 는 어느 후보도
+  답하기 전에 끝난 turn 수다. 둘은 keeper 의 decision log(`provider_context.executed_runtime_id`)
+  에서 센다(`driver/answered_by.sh`). 측정하지 못했으면 둘 다 `null` 이다.
+- `aggregate.py` CSV 끝에 `arm`, `candidates`(`a > b` 처럼 순서대로), `answered_by`
+  (`runtime=turn 수` 를 `;` 로), `turns_unanswered` 칸이 붙는다.
 
 렌더만 확인할 때(모델 호출 없음, OpenRouter endpoint 목록은 읽는다):
 

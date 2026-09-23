@@ -26,6 +26,7 @@ from render_configs import (  # noqa: E402
     ARMS,
     PROVIDERS,
     candidate_runtime_ids,
+    effective_runtime_id,
     keeper_route,
     render_arm,
 )
@@ -78,7 +79,17 @@ class MascAgent(BaseInstalledAgent):
         # here so a bad list fails at agent construction, not after install.
         self.fallback_runtime_ids = tuple(
             _runtime_id_of_model(m) for m in fallback_models.split(",") if m.strip())
-        candidate_runtime_ids(self.arm, self.runtime_id, self.fallback_runtime_ids)
+        provider = self.runtime_id.split(".", 1)[0]
+        if provider not in PROVIDERS:
+            raise ValueError(
+                f"unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
+        # Computed here so a candidate order that cannot be named fails at
+        # construction, and so every result path reports the same order.
+        self._candidates = tuple(
+            effective_runtime_id(c) for c in candidate_runtime_ids(
+                self.arm, self.runtime_id, self.fallback_runtime_ids))
+        self._route = keeper_route(
+            self.arm, self.runtime_id, self.fallback_runtime_ids)
         self._dist_identity: DistIdentity | None = None
 
     @staticmethod
@@ -93,9 +104,6 @@ class MascAgent(BaseInstalledAgent):
 
     def _container_env(self) -> dict[str, str]:
         provider = self.runtime_id.split(".", 1)[0]
-        if provider not in PROVIDERS:
-            raise ValueError(
-                f"unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
         key_env = PROVIDERS[provider]["api_key_env"]
         key = self._get_env(key_env)
         if not key:
@@ -107,8 +115,7 @@ class MascAgent(BaseInstalledAgent):
             # takes the wire form; keeper_up takes this one.
             # On a failover arm this is the lane (keeper_route): keeper_up
             # writes it as the keeper's assignment.
-            "BENCH_RUNTIME_ID": keeper_route(
-                self.arm, self.runtime_id, self.fallback_runtime_ids),
+            "BENCH_RUNTIME_ID": self._route,
             "KEEPER_COUNT": str(ARMS[self.arm]["keepers"]),
         }
         # Optional. A keeper gets a GitHub login only when this is set:
@@ -254,11 +261,29 @@ class MascAgent(BaseInstalledAgent):
             total += tokens * rate
         return total if counted else None
 
+    def _arm_metadata(self) -> dict:
+        """What the trial was configured to run, known whether or not it ran.
+
+        `candidates` is the rendered candidate order in the ids masc resolves:
+        one entry on a single-model arm, the [runtime.lanes.bench] lane on a
+        failover arm. `route` is what the keeper was assigned: the lane, or
+        the one runtime. A result can then say which candidates it declared
+        without reading the rendered config back.
+        """
+        return {
+            "arm": self.arm,
+            "runtime_id": self.runtime_id,
+            "fallback_runtime_ids": list(self.fallback_runtime_ids),
+            "candidates": list(self._candidates),
+            "route": self._route,
+        }
+
     def populate_context_post_run(self, context: AgentContext) -> None:
         result_path = Path(self.logs_dir) / "result.json"
         if not result_path.exists():
             context.metadata = {
-                **(context.metadata or {}), **identity_metadata(self._dist_identity)}
+                **(context.metadata or {}), **self._arm_metadata(),
+                **identity_metadata(self._dist_identity)}
             return
         try:
             data = json.loads(result_path.read_text())
@@ -267,7 +292,7 @@ class MascAgent(BaseInstalledAgent):
             # lose it.
             context.metadata = {**(context.metadata or {}),
                                 "masc_state": f"result_unreadable: {exc}",
-                                "arm": self.arm, "runtime_id": self.runtime_id,
+                                **self._arm_metadata(),
                                 **identity_metadata(self._dist_identity)}
             return
         final = data.get("final") or {}
@@ -296,8 +321,10 @@ class MascAgent(BaseInstalledAgent):
             "duplicate_tool_calls": data.get("duplicate_tool_calls"),
             # The image variables its keepers ran without (driver/endpoint_env.sh).
             "endpoint_env_left_out": data.get("endpoint_env_left_out"),
-            "arm": self.arm,
-            "runtime_id": self.runtime_id,
-            "fallback_runtime_ids": list(self.fallback_runtime_ids),
+            # Which of the candidates answered, turn by turn (driver/
+            # answered_by.sh). null means unmeasured, not "no turns".
+            "answered_by": data.get("answered_by"),
+            "turns_unanswered": data.get("turns_unanswered"),
+            **self._arm_metadata(),
             **identity_metadata(self._dist_identity),
         }

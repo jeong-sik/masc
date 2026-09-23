@@ -73,8 +73,8 @@ let seconds_text seconds = string_of_int seconds ^ "s"
 
 (* What the renderer draws, without its colours: a task row is its age and
    id, every other line its summary text. *)
-let drawn ~height ~cursor =
-  Tasks.lines ~height ~cursor tasks backlog
+let drawn ~height ~selected =
+  Tasks.lines ~height ~selected tasks backlog
   |> List.map (fun line ->
          match line with
          | Tasks.Task_row { task; _ } ->
@@ -96,25 +96,25 @@ let test_held_work_first () =
     ; "60s task-1730"
     ; "3 todo · oldest " ^ oldest_todo_seconds
     ]
-    (drawn ~height:10 ~cursor:0)
+    (drawn ~height:10 ~selected:(Some 0))
 
 let test_cut_says_how_many_are_left () =
   check (list string) "one held row, the count left out, the backlog line"
     [ "7200s task-1720"; "+3 more active"; "3 todo · oldest " ^ oldest_todo_seconds ]
-    (drawn ~height:3 ~cursor:0);
-  check (list string) "the window follows the cursor to the last held row"
+    (drawn ~height:3 ~selected:None);
+  check (list string) "the window follows the selection to the last held row"
     [ "60s task-1730"; "+3 more active"; "3 todo · oldest " ^ oldest_todo_seconds ]
-    (drawn ~height:3 ~cursor:3);
+    (drawn ~height:3 ~selected:(Some 3));
   check (list string) "two rows give up the backlog line before the count"
     [ "7200s task-1720"; "+3 more active" ]
-    (drawn ~height:2 ~cursor:0)
+    (drawn ~height:2 ~selected:(Some 0))
 
-let test_rows_are_the_cursor_order () =
-  check (list string) "the cursor indexes the drawn order"
+let test_rows_are_the_drawn_order () =
+  check (list string) "rows are the drawn order"
     [ "task-1720"; "task-1710"; "task-1700"; "task-1730" ]
     (List.map (fun (task : Tui_decode.task) -> task.id) (Tasks.rows tasks));
   let indexes =
-    Tasks.lines ~height:10 ~cursor:0 tasks backlog
+    Tasks.lines ~height:10 ~selected:None tasks backlog
     |> List.filter_map (function
          | Tasks.Task_row { index; _ } -> Some index
          | Tasks.More_active _ | Tasks.Nothing_active | Tasks.Todo_backlog _ ->
@@ -135,7 +135,7 @@ let test_nothing_held_is_said () =
       tasks
   in
   let text ~height =
-    Tasks.lines ~height ~cursor:0 todo_only backlog
+    Tasks.lines ~height ~selected:None todo_only backlog
     |> List.filter_map (Tasks.summary_text ~age_text:seconds_text ~now)
   in
   check (list string) "said, then the backlog line"
@@ -147,21 +147,57 @@ let test_nothing_held_is_said () =
   check int "the layout asks for both lines" 2
     (Tasks.line_count todo_only backlog)
 
-(* The palette, a followed link, the agenda and the change view all land
-   through [cursor_after_open], and the detail's sidebar highlights
-   [row_of] the open task. *)
+(* The selection is an id. The palette, a followed link, the agenda and
+   the change view all set it to the opened task's id; the renderer, Enter
+   and Ctrl-] look its row up in the rows of that moment. *)
+let selected_id tasks ~selected =
+  Option.map
+    (fun (task : Tui_decode.task) -> task.id)
+    (Tasks.selected_task tasks ~selected)
+
 let test_open_todo_highlights_nothing () =
+  let selected = Some "task-1501" in
   check (option int) "a todo task opened from the palette has no row" None
-    (Tasks.row_of tasks ~task_id:"task-1501");
-  check int "the cursor goes back to the first row" 0
-    (Tasks.cursor_after_open tasks ~task_id:"task-1501")
+    (Tasks.selected_index tasks ~selected);
+  check (option string) "Enter and Ctrl-] name nothing" None
+    (selected_id tasks ~selected);
+  check (option string) "j from there goes to the first row"
+    (Some "task-1720")
+    (Tasks.step tasks ~selected Tasks.Next)
 
 let test_open_held_task_highlights_its_row () =
+  let selected = Some "task-1710" in
   check (option int) "an in-progress task opened from a link is its row"
     (Some 1)
-    (Tasks.row_of tasks ~task_id:"task-1710");
-  check int "the cursor lands on that row" 1
-    (Tasks.cursor_after_open tasks ~task_id:"task-1710")
+    (Tasks.selected_index tasks ~selected);
+  check (option string) "j moves to its neighbour" (Some "task-1700")
+    (Tasks.step tasks ~selected Tasks.Next);
+  check (option string) "k moves to the row above" (Some "task-1720")
+    (Tasks.step tasks ~selected Tasks.Previous)
+
+(* One poll: task-1720, above the selected row, finishes and leaves the
+   list. Every row below it moves up one. *)
+let after_poll_without id =
+  List.filter (fun (task : Tui_decode.task) -> not (String.equal task.id id)) tasks
+
+let test_a_poll_does_not_move_the_selection () =
+  let selected = Some "task-1700" in
+  check (option int) "before the poll" (Some 2)
+    (Tasks.selected_index tasks ~selected);
+  let polled = after_poll_without "task-1720" in
+  check (option int) "its row moved up" (Some 1)
+    (Tasks.selected_index polled ~selected);
+  check (option string) "Enter and Ctrl-] still name the same task"
+    (Some "task-1700")
+    (selected_id polled ~selected)
+
+let test_a_finished_selection_selects_nothing () =
+  let selected = Some "task-1700" in
+  let polled = after_poll_without "task-1700" in
+  check (option int) "no row is highlighted" None
+    (Tasks.selected_index polled ~selected);
+  check (option string) "Enter and Ctrl-] name nothing" None
+    (selected_id polled ~selected)
 
 let () =
   run "tui_overview_tasks"
@@ -169,12 +205,16 @@ let () =
         [ test_case "held work first" `Quick test_held_work_first
         ; test_case "a cut says how many are left" `Quick
             test_cut_says_how_many_are_left
-        ; test_case "rows are the cursor order" `Quick
-            test_rows_are_the_cursor_order
+        ; test_case "rows are the drawn order" `Quick
+            test_rows_are_the_drawn_order
         ; test_case "nothing held is said" `Quick test_nothing_held_is_said
         ; test_case "an open todo task highlights no row" `Quick
             test_open_todo_highlights_nothing
         ; test_case "an open held task highlights its row" `Quick
             test_open_held_task_highlights_its_row
+        ; test_case "a poll does not move the selection" `Quick
+            test_a_poll_does_not_move_the_selection
+        ; test_case "a finished selection selects nothing" `Quick
+            test_a_finished_selection_selects_nothing
         ] )
     ]

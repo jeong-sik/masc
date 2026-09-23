@@ -10,7 +10,8 @@ val rows : Masc.Tui_decode.task list -> Masc.Tui_decode.task list
 (** The tasks that get a row, in drawing order. Within one status the task
     held longest comes first; a task whose timestamp does not parse comes
     after the ones that do. [Todo], [Done] and [Cancelled] never appear.
-    The Overview task cursor is an index into this list. *)
+    The Overview selection is a task id, looked up in this list at every
+    use: a poll that drops a finished task shifts every index below it. *)
 
 val held_since : Masc.Tui_decode.task -> float option
 (** When the row's current hold began: [started_at] for [InProgress],
@@ -30,8 +31,7 @@ val backlog : Masc_domain.task list -> backlog
 
 type line =
   | Task_row of { index : int; task : Masc.Tui_decode.task }
-      (** [index] is the row's position in {!rows}, the value the cursor
-          holds when this row is selected. *)
+      (** [index] is the row's position in {!rows}. *)
   | More_active of int  (** Rows of {!rows} the height left out. *)
   | Nothing_active  (** No task is held. Said rather than left blank. *)
   | Todo_backlog of backlog
@@ -42,12 +42,17 @@ val line_count : Masc.Tui_decode.task list -> backlog -> int
     whether an empty or unread note gets one. *)
 
 val lines :
-  height:int -> cursor:int -> Masc.Tui_decode.task list -> backlog -> line list
+  height:int ->
+  selected:int option ->
+  Masc.Tui_decode.task list ->
+  backlog ->
+  line list
 (** At most [height] lines. With nothing held, [Nothing_active] and the
     backlog line, [Nothing_active] given up first. When every row fits, all
     of {!rows} and then the backlog line; when the rows fit but the backlog
     line does not, the backlog line is given up. When the rows do not fit, a
-    window of them that keeps [cursor] on screen, then [More_active] with the
+    window of them that keeps the [selected] row on screen (the top rows
+    when nothing is selected), then [More_active] with the
     count left out, then the backlog line -- each of the two only while a
     task row is still drawn beside it. *)
 
@@ -56,10 +61,28 @@ val row_of : Masc.Tui_decode.task list -> task_id:string -> int option
     -- a [Todo], [Done] or [Cancelled] one opened from the palette, a link or
     the agenda -- and then no row is highlighted beside its detail. *)
 
-val cursor_after_open : Masc.Tui_decode.task list -> task_id:string -> int
-(** Where the Overview task cursor goes when a task's detail opens: its row,
-    or the first row when it has none, so j/k after the detail closes start
-    from the top of the list rather than from a row nobody chose. *)
+val selected_index :
+  Masc.Tui_decode.task list -> selected:string option -> int option
+(** The selected task's current row. [None] when nothing is selected or the
+    selected task has left {!rows}: a finished task selects nothing rather
+    than the row that moved into its place. *)
+
+val selected_task :
+  Masc.Tui_decode.task list ->
+  selected:string option ->
+  Masc.Tui_decode.task option
+(** The task behind {!selected_index}; what Enter opens and Ctrl-] names. *)
+
+val id_at : Masc.Tui_decode.task list -> int -> string option
+(** The id on a row of {!rows}, for keys that name a row by position. *)
+
+type step = Next | Previous
+
+val step :
+  Masc.Tui_decode.task list -> selected:string option -> step -> string option
+(** j/k. From no selection (or one that left the rows), the first row; from
+    a selected row, its neighbour, stopping at either end. [None] only when
+    there are no rows. *)
 
 val age_text : age_text:(int -> string) -> now:float -> float option -> string
 (** [age_text] applied to the seconds from the given instant to [now]; ["?"]

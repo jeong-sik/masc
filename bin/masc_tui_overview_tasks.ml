@@ -79,7 +79,7 @@ let line_count tasks backlog =
 
 let take count items = List.filteri (fun index _ -> index < count) items
 
-let lines ~height ~cursor tasks backlog =
+let lines ~height ~selected tasks backlog =
   let height = max 0 height in
   let held = rows tasks in
   let held_count = List.length held in
@@ -109,7 +109,10 @@ let lines ~height ~cursor tasks backlog =
     let count_lines = if height - count_line >= 1 then count_line else 0 in
     let visible = height - List.length trailer - count_lines in
     let first =
-      min (max 0 (cursor - visible + 1)) (max 0 (held_count - visible))
+      match selected with
+      | None -> 0
+      | Some index ->
+          min (max 0 (index - visible + 1)) (max 0 (held_count - visible))
     in
     let window = row_lines ~first ~count:visible in
     if count_lines = 0 then window
@@ -124,10 +127,31 @@ let row_of tasks ~task_id =
   in
   find 0 (rows tasks)
 
-let first_row = 0
+let selected_index tasks ~selected =
+  Option.bind selected (fun task_id -> row_of tasks ~task_id)
 
-let cursor_after_open tasks ~task_id =
-  Option.value (row_of tasks ~task_id) ~default:first_row
+let id_at tasks index =
+  Option.map
+    (fun (task : Tui_decode.task) -> task.id)
+    (List.nth_opt (rows tasks) index)
+
+let selected_task tasks ~selected =
+  Option.bind (selected_index tasks ~selected) (fun index ->
+      List.nth_opt (rows tasks) index)
+
+type step = Next | Previous
+
+let step tasks ~selected direction =
+  let last = List.length (rows tasks) - 1 in
+  match selected_index tasks ~selected with
+  | None -> id_at tasks 0
+  | Some index ->
+      let target =
+        match direction with
+        | Next -> min (index + 1) last
+        | Previous -> max (index - 1) 0
+      in
+      id_at tasks target
 
 let age_text ~age_text ~now since =
   match since with

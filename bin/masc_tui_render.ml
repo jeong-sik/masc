@@ -940,15 +940,21 @@ let render_overview (state : state) =
      box_line buf cols (Ansi.dim ^ note ^ Ansi.reset)
    | Some _ | None -> begin
     (* Held work first, one row each, then the todo backlog as one line.
-       The cursor indexes [Overview_tasks.rows], the order drawn here. *)
+       The selection is a task id; its row is looked up in this frame's
+       [Overview_tasks.rows], so a poll that drops a task above it cannot
+       move the highlight onto another task. *)
     let now = Unix.gettimeofday () in
+    let selected =
+      Overview_tasks.selected_index state.tasks
+        ~selected:state.task_selected_id
+    in
     (* An unread or failed backlog has said so above; "no task in progress"
        would be a reading it never made. *)
     let lines =
       if List.is_empty state.tasks then []
       else
         Overview_tasks.lines ~height:row_budget.task_rows
-          ~cursor:state.task_cursor state.tasks
+          ~selected state.tasks
           (Overview_tasks.backlog state.tasks_domain)
     in
     let ages =
@@ -980,7 +986,10 @@ let render_overview (state : state) =
               Printf.sprintf "%s%*s%s %s" Ansi.dim age_cells age Ansi.reset
                 (task_line task)
             in
-            if state.task_focus = Right_pane && index = state.task_cursor then
+            if
+              state.task_focus = Right_pane
+              && Option.equal Int.equal selected (Some index)
+            then
               box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ row))
             else box_line buf cols ("  " ^ row)
         | Overview_tasks.More_active _ | Overview_tasks.Nothing_active

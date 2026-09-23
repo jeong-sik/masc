@@ -17524,12 +17524,18 @@ and is loaded on demand through keeper_skill.
   let handle_schedule_modify () =
     match selected_schedule_row state with
     | None -> report_action state "error" "modify: no schedule under the cursor"
+    (* The refusal was always real; it just arrived after the operator had
+       edited fifteen fields and saved. The status is on the screen before the
+       key is pressed, so the answer is available here. *)
     | Some row ->
-      handle_schedule_form ~action:"modify"
-        ~stem:(Masc_tui_types.schedule_update_form_json row)
-        ~post:(fun body_json ->
-          Masc_tui_http.post_schedule_update ~host:server_peer_host
-            ~port:state.port ~body_json)
+      (match Masc_tui_types.schedule_modify_refusal row with
+       | Some reason -> report_action state "error" ("modify: " ^ reason)
+       | None ->
+         handle_schedule_form ~action:"modify"
+           ~stem:(Masc_tui_types.schedule_update_form_json row)
+           ~post:(fun body_json ->
+             Masc_tui_http.post_schedule_update ~host:server_peer_host
+               ~port:state.port ~body_json))
   in
   let consume_resize_request () =
     if Atomic.exchange resize_requested false then

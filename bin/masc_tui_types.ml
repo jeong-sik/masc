@@ -1404,6 +1404,35 @@ let schedule_payload_body = function
        | Some _ | None -> `Assoc [])
   | _ -> `Assoc []
 
+(** Why the store would refuse a modify, read before the editor opens.
+
+    [Schedule_store.Transition_refused] names its own boundary: "the request
+    is [Running] or terminal", terminal being [Schedule_domain.is_terminal].
+    That sentence is the whole rule, so it is asked here rather than restated
+    as a word list -- a status the store adds later lands on the right side
+    of it without this file changing.
+
+    [None] is the answer for a word this build does not name. It is the same
+    promise [sch_status] makes by staying a string: an unrecognised status
+    renders as itself, and it is the server's call, not ours, whether it can
+    be modified. Refusing on a word we cannot read would turn forward
+    compatibility into a locked row. *)
+let schedule_modify_refusal (row : schedule_row) : string option =
+  match Schedule_domain.schedule_status_of_string row.sch_status with
+  | Error _ -> None
+  | Ok status ->
+      let refused =
+        match status with
+        | Schedule_domain.Running -> true
+        | other -> Schedule_domain.is_terminal other
+      in
+      if refused then
+        Some
+          (Printf.sprintf
+             "the store refuses a %s schedule; only scheduled and due rows change"
+             row.sch_status)
+      else None
+
 let schedule_update_form_json (row : schedule_row) =
   let body = schedule_payload_body row.sch_payload in
   let recurrence_kind = schedule_json_string "kind" row.sch_recurrence in

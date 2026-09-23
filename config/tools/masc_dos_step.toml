@@ -13,10 +13,10 @@ defer_loading = true
 [[params]]
 name = "steps"
 type = "integer"
-description = "Instruction budget. Default 1000000, about 40 ms."
+description = "Instruction budget. Default 4000000, about 170 ms."
 minimum = 1
 maximum = 4000000
-default = 1000000
+default = 4000000
 
 [[params]]
 name = "until_ready"

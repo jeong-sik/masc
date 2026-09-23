@@ -79,6 +79,9 @@ type error =
           is [Invalid_request] — the caller named it. *)
   | Held_by of string
       (** another caller holds the controller; nothing was done. *)
+  | Guest_fault of string
+      (** the program ran an instruction the emulator does not implement.
+          The machine stays loaded, stopped at that instruction. *)
 
 val error_to_string : error -> string
 
@@ -104,9 +107,9 @@ type ran = {
   keys_pressed : int;
       (** keys this call delivered. {!step} and {!load} press nothing, so it
           is zero there. Below the number {!press} or {!type_text} was given,
-          it means the call reached its step ceiling: the rest were not
-          recorded and never reached the ring, so the caller sends them
-          again. *)
+          a key left the program busy (not settled) or the call reached its
+          step ceiling: the rest were not recorded and never reached the
+          ring. Wait for [settled] with {!step}, then send them again. *)
   unsaved : string list;
       (** files the program wrote during this call that did not reach the
           saves directory, one line each with the reason. Empty when every
@@ -153,8 +156,8 @@ val load :
     carried: the next load mounts the inventory copy again. A save directory
     that will not read is [Unreadable].
 
-    [announce] runs while the machine's lock is still held, right after this
-    machine becomes the workspace's. Announcements therefore reach whoever
+    [announce] runs while the machine's lock is still held, once this machine
+    is the workspace's and has booted. Announcements therefore reach whoever
     reads them in the order the machines actually changed. It must not call
     back into this module — the lock is not reentrant. *)
 
@@ -219,7 +222,9 @@ val step :
 val press :
   who:string -> keys:string list -> steps:int -> (observation * ran, error) result
 (** Puts each key in the BIOS ring in turn and runs until the machine is
-    ready again, or [steps] runs out for that key. Key names
+    ready again, or [steps] runs out for that key. A key that leaves the
+    machine busy ends the sequence: the next key goes in only once the
+    program is waiting for it. Key names
     are {!Dos_machine.key_of_string}'s: the arrows, home and page keys,
     insert, delete, enter, esc, space, tab, backspace, F1-F10, or one
     character. A name the machine has no key for is refused before anything

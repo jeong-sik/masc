@@ -3,7 +3,8 @@ description = """
 Press keys on the shared DOS machine.
 
 Each key enters the BIOS ring (no hold time) and the machine runs until it is \
-ready again, so ["down", "down", "return"] walks a menu in one call. Names: \
+ready again, so ["down", "down", "return"] walks a menu in one call; a key \
+that leaves the program busy ends the sequence there. Names: \
 up down left right home end pgup pgdn insert delete enter return esc space \
 tab backtab backspace f1-f10, or one character; an unknown name is refused \
 before anything is pressed. Recorded in the ledger. A call stops at 4000000 \
@@ -24,7 +25,7 @@ description = "Keys in order, e.g. [\"down\", \"return\"] or [\"y\"]."
 [[params]]
 name = "steps"
 type = "integer"
-description = "Instruction budget per key. Default 1000000."
+description = "Instruction budget per key. Default 4000000."
 minimum = 1
 maximum = 4000000
-default = 1000000
+default = 4000000

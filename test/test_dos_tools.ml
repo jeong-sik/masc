@@ -334,7 +334,10 @@ let test_a_sequence_spends_one_ceiling_not_one_per_key () =
     check bool "the press is accepted" true (is_completed result);
     check bool "the call stops at one budget, not two" true
       (int_field "steps_run" result <= 4_000_000);
-    check int "and says how many keys landed" 1 (int_field "keys_pressed" result))
+    check int "and says how many keys landed" 1 (int_field "keys_pressed" result);
+    (* The first key left the program busy, so the second was never put in
+       the ring: a key typed into a running loop is eaten by it. *)
+    check int "the unsent key is not in the ledger" 1 (List.length (Dos_lane.ledger ())))
 ;;
 
 (* The ceiling bounds the machine's time, not the call's work: a program that
@@ -559,6 +562,38 @@ let test_a_free_controller_goes_to_the_next_successful_mover () =
       (controller moved))
 ;;
 
+(* A pass to a name no caller can ever have -- "@liu-bei", "liu bei" --
+   would leave the machine held by nobody who can move or eject it again. It
+   is refused, and the controller stays where it was. *)
+let test_a_pass_to_an_impossible_name_is_refused () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    List.iter
+      (fun bad ->
+        let refused =
+          dispatch ~base_path ~agent:"dos-test" "masc_dos_pass" [ ("to", `String bad) ]
+        in
+        check bool (bad ^ " is refused") false (is_completed refused))
+      [ "@liu-bei"; "liu bei"; "\xec\x9c\xa0\xeb\xb9\x84" ];
+    check (option string) "the holder still holds it" (Some "dos-test")
+      (controller (dispatch ~base_path "masc_dos_screen" [])))
+;;
+
+(* lea ax, ax: an instruction the emulator does not implement. The core
+   raises instead of misbehaving; the lane turns that into an error the
+   caller can read, and keeps the stopped machine loaded. *)
+let test_an_unimplemented_instruction_is_an_error () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "fault.com" "\x8d\xc0";
+    let loaded = load ~base_path "fault.com" in
+    check bool "the load reports the fault" false (is_completed loaded);
+    check bool "and says what happened" true
+      (contains "does not implement" (Tool_result.message loaded));
+    check bool "the stopped machine stays loaded" true
+      (is_completed (dispatch ~base_path "masc_dos_screen" [])))
+;;
+
 let test_unknown_key_is_refused () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
@@ -661,6 +696,10 @@ let () =
         ; test_case "pass" `Quick test_pass_hands_the_machine_on
         ; test_case "free controller" `Quick
             test_a_free_controller_goes_to_the_next_successful_mover
+        ; test_case "pass to an impossible name" `Quick
+            test_a_pass_to_an_impossible_name_is_refused
+        ; test_case "unimplemented instruction" `Quick
+            test_an_unimplemented_instruction_is_an_error
         ; test_case "unknown key" `Quick test_unknown_key_is_refused
         ; test_case "step cap" `Quick test_step_cap
         ; test_case "peek" `Quick test_peek_reads_the_text_page

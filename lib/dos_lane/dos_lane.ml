@@ -28,6 +28,7 @@ type error =
   | Invalid_request of string
   | Unreadable of string
   | Held_by of string
+  | Guest_fault of string
 
 let error_to_string = function
   | No_machine -> "no DOS machine is loaded: call masc_dos_load first"
@@ -38,6 +39,9 @@ let error_to_string = function
       "%s holds the controller, so nothing was done: wait until they pass it with \
        masc_dos_pass. masc_dos_screen needs no controller"
       holder
+  | Guest_fault message ->
+    "the program ran something this machine does not implement, and stopped there: "
+    ^ message
 ;;
 
 (* The core runs about 24 million instructions a second on this hardware
@@ -111,6 +115,17 @@ let with_machine f =
    Whoever moves the machine first holds it; everyone else is refused before
    anything happens and can still watch. The holder hands it on with [pass].
    A refused call takes nothing. *)
+(* A call that runs the guest can fail two ways that are not the caller's
+   arguments: the core meets an instruction it does not implement (ocaml-dos
+   raises rather than misbehave quietly), or the ledger file will not take a
+   line. Both come back as errors, not exceptions out of the tool. *)
+let running f =
+  match f () with
+  | result -> result
+  | exception Cpu86.Unsupported message -> Error (Guest_fault message)
+  | exception Sys_error message -> Error (Unreadable message)
+;;
+
 let refuse_other st ~who =
   match st.controller with
   | Some holder when not (String.equal holder who) -> Error (Held_by holder)
@@ -126,11 +141,11 @@ let with_control ~who f =
          holder, and given back if the call is refused. *)
       let before = st.controller in
       st.controller <- Some who;
-      let result = f st in
+      let result = running (fun () -> f st) in
       (match result with
-       | Ok _ -> ()
-       | Error (No_machine | Invalid_request _ | Unreadable _ | Held_by _) ->
-         st.controller <- before);
+       | Ok _ | Error (Unreadable _ | Guest_fault _) -> ()
+         (* the call ran: the machine may have moved *)
+       | Error (No_machine | Invalid_request _ | Held_by _) -> st.controller <- before);
       result)
 ;;
 
@@ -420,7 +435,15 @@ let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announ
           (Invalid_request
              (Printf.sprintf "%s and %s are one name to DOS; the guest can only see one"
                 earlier later))
-      | None -> begin
+      | None ->
+        (* A new machine starts a new ledger. *)
+        let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+        match
+          mkdir_p ledger_dir;
+          Out_channel.with_open_bin ledger_path (fun _ -> ())
+        with
+        | exception Sys_error message -> Error (Unreadable message)
+        | () -> begin
         let m = Dos_machine.create () in
         List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
         (* The image's own bytes choose the loader, not its name: an MZ header is
@@ -428,10 +451,6 @@ let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announ
            file still boots the way DOS would boot it. *)
         if is_mz program_bytes then Dos_machine.load_exe m program_bytes
         else Dos_machine.load_com m program_bytes;
-        mkdir_p ledger_dir;
-        let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
-        (* A new machine starts a new ledger. *)
-        Out_channel.with_open_bin ledger_path (fun _ -> ());
         let kept = Hashtbl.create (List.length files) in
         List.iter
           (fun (name, contents) -> Hashtbl.replace kept (String.uppercase_ascii name) contents)
@@ -441,9 +460,16 @@ let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announ
           ; controller = Some who; incarnation = Random_id.uuid_v7 () }
         in
         state := Some st;
+        let booted =
+          running (fun () ->
+            let ran = advance st ~budget:boot_steps ~until_ready:true in
+            ran_then_kept st ran)
+        in
+        (* Announced once the machine is the workspace's and has booted as far
+           as it will, still under the lock so announcements keep machine
+           order. *)
         announce ();
-        let ran = advance st ~budget:boot_steps ~until_ready:true in
-        ran_then_kept st ran
+        booted
       end)
 ;;
 
@@ -540,7 +566,15 @@ let press_resolved st ~who ~keys ~budget =
   List.iter
     (fun (name, word) ->
       let left = max_steps_per_call - !total in
-      if left > 0 then begin
+      (* A key goes in only when the machine is ready for it. If the previous
+         key left the program busy -- a fade, a load, an AI turn -- the next
+         one would land in whatever loop is running, and a "press any key"
+         wait or a skip check eats it. On 삼국지3 that turned a copy-protection
+         code typed during the fade into a wrong code, and the game exited.
+         The rest of the sequence is not sent; keys_pressed says where it
+         stopped. *)
+      let ready = !pressed = 0 || !last_settled in
+      if left > 0 && ready then begin
         append_entry st { at_step = st.steps; who; key_name = name };
         Dos_machine.push_key st.m word;
         let ran = advance_until_ready st ~budget:(min budget left) in

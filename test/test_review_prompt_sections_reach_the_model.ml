@@ -269,6 +269,7 @@ let test_the_producer_tree_slot_teaches_the_checkout_prefix () =
 (* The producer-tree slot asks a completion for the snapshot and for an
    execution receipt behind a build claim. *)
 let test_the_completion_lookup_asks_for_evidence () =
+  init ();
   let text =
     match render_task_prompt (AR.Producer_tree [ marker "root_layout" ]) request with
     | Ok text -> text

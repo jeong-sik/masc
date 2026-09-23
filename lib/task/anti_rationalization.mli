@@ -33,6 +33,9 @@ type review_request =
     containment primitives, not inside the review protocol. Every advertised
     filesystem tool is bound to the one producer named by the review
     request. *)
+(** [dispatch] receives every tool name the reviewer calls except the
+    verdict tool, so it must answer a name outside [schemas] with a typed
+    [Tool_result] error rather than raise. *)
 type lookup_surface =
   { schemas : Types_core.tool_schema list
   ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result

@@ -106,7 +106,7 @@ streaming = false
   let response_observed_model_inputs = ref [] in
   let attempt_errors = ref [] in
   let run ?(runtime_id = "fixture.sample") goal =
-    Keeper_turn_driver.run_named
+    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
       ~system_prompt:"No body gate fixture."
       ~runtime_id ~keeper_name:"no-body-gate-proof" ~base_path
       ~agent_core_tools:[] ~goal ~sw ~net:env#net
@@ -314,7 +314,7 @@ streaming = false
   in
   let expect_demoted = completed && reader_available in
   let result =
-    Keeper_turn_driver.run_named
+    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
       ~input_policy:Keeper_input_policy.Small
       ~session_id:trace_id
       ~system_prompt:"Demotion fixture."

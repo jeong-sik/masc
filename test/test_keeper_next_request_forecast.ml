@@ -285,6 +285,121 @@ max-concurrent = 1
              Keeper_carried_front.Carried (Keeper_carried_front.Turn_record { turn = 1 })))
      | _ -> Alcotest.fail "one configured runtime must produce one forecast candidate")
 
+(* RFC-0458 §3.4 rule 5: the forecast shows the order this Keeper's next turn
+   takes. A head that failed in this Keeper's own walk is walked first again;
+   the same mark recorded by another Keeper sends it behind. *)
+let test_the_recorders_forecast_walks_its_marked_head_first () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.on_release sw (fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    match previous_fs with
+    | Some fs -> Fs_compat.set_fs fs
+    | None -> Fs_compat.clear_fs ());
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace base_path);
+  let config = Workspace.default_config base_path in
+  let config_path = Filename.concat base_path "runtime.toml" in
+  Out_channel.with_open_bin config_path (fun output ->
+    output_string output
+      {|[runtime]
+default = "forecast_lane"
+[runtime.lanes.forecast_lane]
+candidates = [ "forecast.head", "forecast.fallback" ]
+[providers.forecast]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.head]
+api-name = "forecast-head-model"
+max-context = 8192
+tools-support = true
+streaming = false
+[models.fallback]
+api-name = "forecast-fallback-model"
+max-context = 8192
+tools-support = true
+streaming = false
+[forecast.head]
+max-concurrent = 1
+[forecast.fallback]
+max-concurrent = 1
+|});
+  (match Runtime.init_default ~config_path with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String "forecast-recorder" ])
+    with
+    | Ok meta -> meta
+    | Error detail -> Alcotest.fail detail
+  in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let checkpoint : Agent_core.Checkpoint.t =
+    { version = Agent_core.Checkpoint.checkpoint_version
+    ; session_id = trace_id
+    ; agent_name = meta.name
+    ; model = "forecast-head-model"
+    ; system_prompt = None
+    ; messages = history ~exchanges:1 ~text_bytes:10
+    ; usage = Agent_core.Types.empty_usage
+    ; turn_count = 1
+    ; created_at = 0.
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = None
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; reasoning_effort = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_core.Types.Off
+    ; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0
+       checkpoint
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let store = Keeper_types_support.keeper_turn_record_store config meta.name in
+  Eio.Switch.on_release sw (fun () -> Dated_jsonl.prepare_for_directory_removal store);
+  let mark_head ~keeper_name =
+    let head = Option.get (Runtime.get_runtime_by_id "forecast.head") in
+    Runtime_candidate_backpressure.note_failed_attempt
+      ~candidate:head.Runtime.candidate_backpressure
+      ~failure:Runtime_candidate_backpressure.Provider_timeout
+      ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name)
+  in
+  let forecast_order () =
+    match Keeper_next_request_forecast.forecast ~config ~keeper_name:meta.name with
+    | Error detail -> Alcotest.fail detail
+    | Ok forecast ->
+      List.map
+        (fun (candidate : Keeper_next_request_forecast.candidate) -> candidate.runtime_id)
+        forecast.candidates
+  in
+  mark_head ~keeper_name:meta.name;
+  Alcotest.(check (list string)) "the recorder's forecast walks its marked head first"
+    [ "forecast.head"; "forecast.fallback" ] (forecast_order ());
+  mark_head ~keeper_name:"another-keeper";
+  Alcotest.(check (list string)) "another Keeper's mark sends the head behind"
+    [ "forecast.fallback"; "forecast.head" ] (forecast_order ())
+
 let component component bytes : Turn_record.input_component = { component; bytes }
 
 (* lane-smith turn 3646 on 2026-09-16: memory recall and dynamic context
@@ -866,5 +981,7 @@ let () =
     ; ( "store"
       , [ Alcotest.test_case "forecast finds a response beyond unobserved rows" `Quick
             test_forecast_reads_an_observed_front_beyond_unobserved_rows
+        ; Alcotest.test_case "the recorder's forecast walks its marked head first" `Quick
+            test_the_recorders_forecast_walks_its_marked_head_first
         ] )
     ]

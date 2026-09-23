@@ -21,6 +21,7 @@ include Keeper_turn_driver
 let run_named_with_masc_tools
     ~runtime_id
     ?(keeper_name = "")
+    ~walk_owner
     ~goal
     ?goal_blocks
     ~base_path
@@ -62,6 +63,7 @@ let run_named_with_masc_tools
     Keeper_turn_driver.run_named
       ~runtime_id
         ~keeper_name
+      ~walk_owner
       ~goal
       ?goal_blocks
       ~base_path

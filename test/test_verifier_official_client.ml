@@ -133,7 +133,7 @@ candidates = ["forbidden.verifier", "official.verifier"]
   if mode = "valid" then (
     let tool = Agent_core.Tool.create ~name:"report_review_verdict" ~description:"Required verifier callback"
       ~parameters:[] (fun _ -> fail "an arbitrary transform must be refused before tool dispatch") in
-    let refused = Keeper_turn_driver.run_named ~runtime_id:"official.verifier"
+    let refused = Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~runtime_id:"official.verifier"
       ~keeper_name:"arbitrary-transform-probe" ~base_path:root
       ~goal:"Reject the unsupported transform." ~system_prompt:"Explicit verifier contract."
       ~tools:[tool] ~agent_core_tools:[tool] ~output_contract:Keeper_turn_driver.Tool_verdict

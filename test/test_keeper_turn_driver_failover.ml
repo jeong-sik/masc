@@ -810,7 +810,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
     let agent_ref = ref None in
     let current_goal = "current goal" in
     (match
-       Driver.run_named
+       Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
          ~system_prompt:"You are the runtime failover test Keeper."
          ~runtime_id:"primary.test_model"
          ~keeper_name:"prior-checkpoint-current-goal"
@@ -949,7 +949,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
         ()
     in
     ignore
-      (Driver.run_named
+      (Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
          ~system_prompt:"You are the runtime failover test Keeper."
          ~runtime_id:"resilient"
          ~keeper_name:"media-degrade-keeper"
@@ -1423,7 +1423,7 @@ let run_deferred_lane_with_image ~next_runtime_id ~later_runtime_ids =
         ~failure:(retryable_network_error "previous cycle failed")
     in
     let result =
-      Driver.run_named
+      Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"resilient"
         ~keeper_name:"deferred-per-candidate"
@@ -1555,7 +1555,7 @@ let run_checkpoint_lane_turn ~history_messages ~on_manifests =
       }
     in
     match
-      Driver.run_named
+      Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
         ~system_prompt:"You are the runtime failover test Keeper."
         ~runtime_id:"checkpoint_lane"
         ~keeper_name:"checkpoint-runtime-compat-keeper"
@@ -1948,7 +1948,7 @@ let test_attempt_loop_moves_past_payment_required () =
   let attempts = ref [] in
   let events = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -2008,7 +2008,7 @@ let test_attempt_loop_stops_on_nonretryable_failure () =
   let attempts = ref [] in
   let events = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -2059,7 +2059,7 @@ let test_attempt_loop_stops_on_nonretryable_failure () =
 let test_failed_lane_receipt_counts_missing_tail () =
   let last_attempt_index = ref 0 in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -2099,7 +2099,7 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
   let events = ref [] in
   let checkpoint_progress = Atomic.make Try_provider.No_checkpoint_stage in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -2159,7 +2159,7 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
     let primary = runtime "codex.codex" in
     let fallback = runtime "primary.test_model" in
     let result =
-      Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+      Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~runtime_id:"checkpoint_lane"
         ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -2215,7 +2215,7 @@ let test_first_candidate_success_keeps_lane_attempt_index_zero () =
       | None -> Alcotest.fail "missing runtime codex.codex"
     in
     let result =
-      Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+      Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~runtime_id:"checkpoint_lane"
         ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -2256,7 +2256,7 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
          })
   in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -2298,7 +2298,7 @@ let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
   let attempts = ref [] in
   let deferred = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> true)
       ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"primary.test_model"
@@ -2365,7 +2365,7 @@ let test_attempt_loop_fails_closed_without_effect_observation () =
 
 let test_effect_fence_outranks_an_earlier_overflow () =
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -2411,7 +2411,7 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
   let checkpoint_after_primary = checkpoint_with_session_id "after-primary" in
   let primary_error = accept_empty_no_progress_error "primary.test_model" in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -2517,7 +2517,7 @@ let test_attempt_loop_moves_past_no_progress_by_default () =
        let attempts = ref [] in
        let events = ref [] in
        let result =
-         Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+         Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
            ~runtime_id:"resilient"
            ~runtime_id_of:(fun runtime_id -> runtime_id)
            ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -2552,7 +2552,7 @@ let test_attempt_loop_does_not_gate_network_retry () =
   let gate_called = ref false in
   let events = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -2625,7 +2625,7 @@ let test_http_429_preserves_unknown_scope_and_fallback () =
     Runtime_quota_window.reset_for_testing ();
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       let attempts = ref [] in
-      let result = Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+      let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~runtime_id:"quota_lane" ~runtime_id_of:Fun.id
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
@@ -2672,7 +2672,7 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
     Alcotest.(check (list string)) "all observed candidates remain in declared order"
       ids (backpressure_order ids);
     let attempts = ref [] in
-    let result = Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"quota_lane" ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
@@ -2757,7 +2757,7 @@ let attempt_failure : Runtime_candidate_backpressure.attempt_failure option Alco
 ;;
 
 let walk_once ?provider_answered outcomes ids =
-  Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+  Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
     ?provider_answered
     ~runtime_id:"quota_lane" ~runtime_id_of:Fun.id
     ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -3236,7 +3236,7 @@ let test_rate_limit_candidate_survives_unchanged_reload_only () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     let old = Option.get (Runtime.get_runtime_by_id "shared_a.test_model") in
     let attempt runtime reload =
-      let result = Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+      let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
         ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
         ~candidate_backpressure_of:(fun (rt : Runtime.t) -> Some rt.candidate_backpressure)
@@ -3306,7 +3306,7 @@ let test_rate_limit_credential_rotation_under_same_reference () =
       let toml = runtime_toml_quota_lane_with_shared_credential key in
       with_runtime_config toml (fun () ->
         let old = Option.get (Runtime.get_runtime_by_id "shared_a.test_model") in
-        let result = Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+        let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
           ~runtime_id:"quota_lane" ~runtime_id_of:(fun (rt : Runtime.t) -> rt.id)
           ~quota_scope_of:(fun rt -> Some (Runtime.quota_scope_of_runtime rt))
           ~candidate_backpressure_of:(fun (rt : Runtime.t) -> Some rt.candidate_backpressure)
@@ -3335,7 +3335,7 @@ let test_attempt_loop_reorders_shared_quota_sibling_same_turn () =
       (fun () ->
          let attempts = ref [] in
          let result =
-           Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+           Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
              ~runtime_id:"quota_lane"
              ~runtime_id_of:Fun.id
              ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -3385,7 +3385,7 @@ let test_attempt_quota_scope_survives_runtime_reload () =
          in
          let attempted_scope = Runtime.quota_scope_of_runtime attempted_runtime in
          let result =
-           Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+           Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
              ~runtime_id:"quota_lane"
              ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
              ~quota_scope_of:(fun runtime ->
@@ -3492,7 +3492,7 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
          Masc_test_deps.init_eio_clock ~sw env;
          let transformed_urls = ref [] in
          let result =
-           Driver.run_named
+           Driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
              ~system_prompt:"You are the runtime failover test Keeper."
              ~runtime_id:"quota_lane"
              ~keeper_name:"deferred-frozen-quota-order"
@@ -3554,7 +3554,7 @@ let test_a_success_leaves_the_next_walk_declared () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     let events = ref [] in
     let result =
-      Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+      Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~runtime_id:"resilient"
         ~runtime_id_of:(fun runtime_id -> runtime_id)
         ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -3604,7 +3604,7 @@ let head_timeout () =
 let walk_resilient ~recorder ~head_answers order =
   let attempts = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn recorder)
       ~runtime_id:"resilient" ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
@@ -3699,6 +3699,108 @@ let test_the_recorders_retry_renews_then_clears_the_mark () =
       [ lane_head; lane_fallback ] (fresh_order_for keeper_b))
 ;;
 
+(* The same rule through [run_named]: the fresh lane order and the image
+   reroute set are both built for the turn's owner. [provider_config_transform]
+   stops the turn at its first dispatch, which is what these tests read. *)
+let first_dispatch ~walk_owner ?goal_blocks runtime_id =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let attempts = ref [] in
+  let (_ : (Driver.named_run_result, Agent_core.Error.t) result) =
+    Driver.run_named ~walk_owner
+      ~system_prompt:"You are the runtime failover test Keeper."
+      ~runtime_id
+      ~keeper_name:"keeper-a"
+      ~base_path:(Filename.get_temp_dir_name ())
+      ~agent_core_tools:[]
+      ~goal:"walk the lane"
+      ?goal_blocks
+      ~on_runtime_attempt:(fun attempt ->
+        attempts := !attempts @ [ attempt.Driver.runtime_id ])
+      ~provider_config_transform:(fun _ ->
+        Error
+          (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig
+                { field = "provider-config-transform"
+                ; detail = "stop after observing the first dispatch"
+                })))
+      ~sw
+      ~net:env#net
+      ()
+  in
+  match !attempts with
+  | first :: _ -> first
+  | [] -> Alcotest.fail "the turn dispatched nothing"
+;;
+
+let test_run_named_dispatches_the_recorders_marked_head_first () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let head = Option.get (Runtime.get_runtime_by_id lane_head) in
+    Runtime_candidate_backpressure.note_failed_attempt
+      ~candidate:head.Runtime.candidate_backpressure
+      ~failure:Runtime_candidate_backpressure.Provider_timeout
+      ~recorded_by:keeper_a;
+    Alcotest.(check string) "keeper-a's turn dispatches the head it saw fail"
+      lane_head
+      (first_dispatch ~walk_owner:(Driver.Fleet_keeper_turn keeper_a) "resilient");
+    Alcotest.(check string) "keeper-b's turn dispatches the fallback"
+      lane_fallback
+      (first_dispatch ~walk_owner:(Driver.Fleet_keeper_turn keeper_b) "resilient");
+    Alcotest.(check string) "a one-shot walk dispatches the fallback"
+      lane_fallback
+      (first_dispatch ~walk_owner:Driver.One_shot_walk "resilient"))
+;;
+
+let test_run_named_reroutes_an_image_to_the_recorders_marked_candidate () =
+  with_runtime_config runtime_toml_media_lane_with_two_vision_candidates (fun () ->
+    let marked = Option.get (Runtime.get_runtime_by_id "lanevision.vision_model") in
+    Runtime_candidate_backpressure.note_failed_attempt
+      ~candidate:marked.Runtime.candidate_backpressure
+      ~failure:Runtime_candidate_backpressure.Provider_timeout
+      ~recorded_by:keeper_a;
+    let goal_blocks =
+      [ Agent_core.Types.Text "describe the image"
+      ; Agent_core.Types.Image
+          { media_type = "image/png"
+          ; data = Base64.encode_string "image"
+          ; source_type = Agent_core.Types.Base64
+          }
+      ]
+    in
+    Alcotest.(check string) "keeper-a's image turn starts on the vision candidate it saw fail"
+      "lanevision.vision_model"
+      (first_dispatch ~walk_owner:(Driver.Fleet_keeper_turn keeper_a) ~goal_blocks "resilient");
+    Alcotest.(check string) "keeper-b's image turn starts on the other vision candidate"
+      "backupvision.vision_model"
+      (first_dispatch ~walk_owner:(Driver.Fleet_keeper_turn keeper_b) ~goal_blocks "resilient"))
+;;
+
+(* A completion review runs once under a disposable name. A failure it saw
+   must not become a mark only that name could retry: it leaves the head's
+   evidence as it was. *)
+let test_a_one_shot_walk_records_no_failure () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let one_shot_walk ids =
+      Driver.For_testing.attempt_runtime_candidates ~walk_owner:Driver.One_shot_walk
+        ~runtime_id:"resilient" ~runtime_id_of:Fun.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+          attempt_without_effect
+            (if String.equal runtime_id lane_head then head_timeout () else Ok runtime_id)
+            None)
+        ids
+    in
+    let (_ : (string, Agent_core.Error.t) result) = one_shot_walk [ lane_head; lane_fallback ] in
+    Alcotest.(check bool) "the head holds no mark" true (Option.is_none (head_recorder ()));
+    let (_ : string list) =
+      walk_resilient ~recorder:keeper_a ~head_answers:false [ lane_head; lane_fallback ]
+    in
+    let (_ : (string, Agent_core.Error.t) result) = one_shot_walk [ lane_head; lane_fallback ] in
+    Alcotest.(check bool) "keeper-a's mark keeps keeper-a as its recorder" true
+      (head_recorded_by keeper_a))
+;;
+
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_core.Agent.After_assistant_collected
@@ -3715,7 +3817,7 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
        Driver.For_testing.observe_checkpoint_stage checkpoint_progress stage;
        let primary_error = retryable_network_error "response-stage failure" in
        let result =
-         Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+         Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
            ~runtime_id:"resilient"
            ~runtime_id_of:(fun runtime_id -> runtime_id)
            ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -3753,7 +3855,7 @@ let test_attempt_loop_preserves_last_core_error () =
   let events = ref [] in
   let observed_errors = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -3826,7 +3928,7 @@ let input_capacity_error reason =
 let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
   let attempts = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -3865,7 +3967,7 @@ let test_attempt_loop_overflow_tries_next_candidate () =
   let attempts = ref [] in
   let events = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -3903,7 +4005,7 @@ let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
   let attempts = ref [] in
   let events = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
@@ -3936,7 +4038,7 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
   let attempt_errors = ref [] in
   let lane_terminal = ref None in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -4003,7 +4105,7 @@ let test_attempt_loop_midwalk_terminal_outranks_observed_overflow () =
   let attempts = ref [] in
   let lane_terminal = ref None in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -4053,7 +4155,7 @@ let test_attempt_loop_reports_pre_dispatch_refusal_disposition () =
   let attempt_errors = ref [] in
   let lane_terminal = ref None in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -4115,7 +4217,7 @@ let test_repeating_generation_leaves_the_model_not_only_the_provider () =
   let attempt_errors = ref [] in
   let refusal = ref None in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"lane.glm"
       ~runtime_id_of:Fun.id
       ~model_of:flash_or_plus
@@ -4160,7 +4262,7 @@ let test_repeating_generation_leaves_the_model_not_only_the_provider () =
 let test_repeat_on_the_only_model_reports_the_repeat () =
   let lane_terminal = ref None in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"lane.flash-only"
       ~runtime_id_of:Fun.id
       ~model_of:flash_or_plus
@@ -4244,7 +4346,7 @@ let test_registry_identity_is_the_served_name_not_the_model_id () =
   with_runtime_config runtime_toml_same_model_twice (fun () ->
     let dispatched = ref [] in
     let result =
-      Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+      Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~runtime_id:"glm"
         ~runtime_id_of:Fun.id
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -4273,7 +4375,7 @@ let test_registry_identity_is_the_served_name_not_the_model_id () =
 let test_overflow_seen_before_a_repeat_outranks_the_refused_tail () =
   let lane_terminal = ref None in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"lane.overflow-then-repeat"
       ~runtime_id_of:Fun.id
       ~model_of:(function
@@ -4318,7 +4420,7 @@ let test_deferred_hint_after_a_repeat_names_a_different_model () =
   let walk candidates =
     let deferred = ref [] in
     let result =
-      Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+      Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
         ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
         ~runtime_id:"lane.glm"
@@ -4361,7 +4463,7 @@ let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
          { status = 500; message = "checkpoint-observed failure" })
   in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
       ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"lane.frozen"
@@ -4395,7 +4497,7 @@ let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
 let test_deferred_cycle_starts_at_supplied_successor_and_keeps_tail () =
   let attempts = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"runtime.b"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
@@ -4423,7 +4525,7 @@ let test_deferred_cycle_starts_at_supplied_successor_and_keeps_tail () =
 let test_deferred_cycle_post_checkpoint_replaces_hint_with_tail () =
   let deferred = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
       ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"runtime.b"
@@ -4449,7 +4551,7 @@ let test_deferred_cycle_post_checkpoint_replaces_hint_with_tail () =
 let test_single_candidate_checkpoint_failure_has_no_hint () =
   let deferred = ref [] in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
       ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"runtime.only"
@@ -4606,7 +4708,7 @@ let same_path_walk ~continuation candidates attempt =
     | Wrote_nothing | Write_failed -> ()
   in
   let result =
-    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ ->
         Driver.For_testing.same_run_retry_allowed progress)
       ~retry_deferral:(collecting_deferral continuation deferred)
@@ -4991,7 +5093,7 @@ let candidate_access_errors =
 let test_candidate_access_denial_reaches_the_next_declared_runtime () =
   List.iter (fun (label, denied) ->
     let attempts = ref [] in
-    let result = Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
@@ -5010,7 +5112,7 @@ let test_access_failover_preserves_effect_and_caller_authority () =
   List.iter (fun (_label, denied) ->
     List.iter (fun disposition ->
       let attempts = ref 0 in
-      let result = Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+      let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
         ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
         ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
@@ -5034,7 +5136,7 @@ let test_access_failover_preserves_effect_and_caller_authority () =
        Masc.Keeper_provider_attempt_effect.Observation_unavailable];
     let attempts = ref 0 in
     let deferred = ref [] in
-    let result = Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
       ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
@@ -5071,7 +5173,7 @@ let test_exhausted_access_errors_rotate_and_deterministic_requests_remain_termin
   in
   List.iter (fun (denied, expected) ->
     let attempts = ref [] in
-    let result = Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
+    let result = Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
       ~runtime_id:"access-lane" ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
@@ -5333,6 +5435,18 @@ let () =
             "the recorder's retry renews then clears the mark"
             `Quick
             test_the_recorders_retry_renews_then_clears_the_mark;
+          Alcotest.test_case
+            "run_named dispatches the recorder's marked head first"
+            `Quick
+            test_run_named_dispatches_the_recorders_marked_head_first;
+          Alcotest.test_case
+            "run_named reroutes an image to the recorder's marked candidate"
+            `Quick
+            test_run_named_reroutes_an_image_to_the_recorders_marked_candidate;
+          Alcotest.test_case
+            "a one-shot walk records no failure"
+            `Quick
+            test_a_one_shot_walk_records_no_failure;
           Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick

@@ -86,7 +86,7 @@ let record_completed_turn ~config =
    returns the attempt errors the lane reported, newest first. *)
 let dispatch ~sw ~net ~base_path =
   let errors = ref [] in
-  (match Keeper_turn_driver.run_named ~system_prompt:"Continuity dispatch fixture."
+  (match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~system_prompt:"Continuity dispatch fixture."
       ~runtime_id:"continuity" ~keeper_name ~base_path ~session_id:trace_id
       ~initial_messages:(covered @ [msg T.User pending]) ~agent_core_tools:[]
       ~goal:"Report progress."

@@ -63,7 +63,7 @@ max-context = 200000
    | Error detail -> fail detail);
   let attempt_errors = ref [] in
   let result =
-    Keeper_turn_driver.run_named
+    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
       ~system_prompt:"Attempt without a clock."
       ~runtime_id:"listener.sample"
       ~keeper_name:"attempt-without-clock"

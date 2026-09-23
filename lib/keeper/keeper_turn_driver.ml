@@ -160,17 +160,29 @@ type lane_terminal_error =
    non-rotating error before resolvable alternatives are tried. Order is
    therefore resolvable-active, then resolvable-exhausted, then unresolvable —
    declared relative order preserved within each class (PR #28219 review). *)
+(* Who a walk runs for. A fleet Keeper's turn comes back every cycle, so the
+   failures it sees name it as their recorder. A one-shot walk (a completion
+   review) never walks again: a mark naming it would have no one to retry it,
+   so it records no failure evidence at all (RFC-0458 §3.4 rule 5). *)
+type walk_owner =
+  | Fleet_keeper_turn of Runtime_candidate_backpressure.recorder
+  | One_shot_walk
+
 (* Whose walk is ordering the lane. A failed attempt holds until its candidate
    answers, and while a sibling answers the candidate is never dispatched to
-   answer; the lane stayed on its fallback until restart (#38174). So the
-   Keeper that recorded the failure walks the declared order on its next fresh
-   walk: its next cycle tries the head once more, which renews or clears the
-   mark. Every other walk -- another Keeper's, the retry of the failed turn, a
-   rotation inside a walk -- still sends the candidate back (RFC-0458 §3.4,
-   2026-09-23). *)
+   answer; the lane stayed on its fallback until restart (#38174). So in the
+   fresh walk of the Keeper that recorded a failure, its own marks keep their
+   declared place: its next cycle dispatches the first of them again (normally
+   the head), which renews or clears the mark. In every other walk -- another
+   Keeper's, a one-shot walk, the retry of the failed turn, a rotation inside
+   a walk -- every mark sends its candidate back (RFC-0458 §3.4, 2026-09-23). *)
 type walk_start =
   | Fresh_walk_by of Runtime_candidate_backpressure.recorder
-  | Continuing_walk
+  | Every_mark_demotes
+
+let fresh_walk_of = function
+  | Fleet_keeper_turn recorder -> Fresh_walk_by recorder
+  | One_shot_walk -> Every_mark_demotes
 
 type demotion =
   | Not_demoted
@@ -209,7 +221,7 @@ let demote_unavailable_candidates ~now ~walk ~quota_scope_of ~candidate_backpres
        | Fresh_walk_by walker
          when Runtime_candidate_backpressure.same_recorder walker recorded_by ->
          Not_demoted
-       | Fresh_walk_by _ | Continuing_walk -> Failed_without_rest)
+       | Fresh_walk_by _ | Every_mark_demotes -> Failed_without_rest)
     | false, Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = None }
     | false, None ->
       Not_demoted
@@ -243,7 +255,7 @@ let quota_ordered_runtime_ids ~now ~walk runtime_ids =
 ;;
 
 let quota_ordered_deferred_runtime_lane ~now hint =
-  match quota_ordered_runtime_ids ~now ~walk:Continuing_walk (deferred_runtime_ids hint) with
+  match quota_ordered_runtime_ids ~now ~walk:Every_mark_demotes (deferred_runtime_ids hint) with
   | next_runtime_id :: later_runtime_ids ->
     { hint with next_runtime_id; later_runtime_ids }
   | [] -> hint
@@ -404,7 +416,7 @@ let assignment_walk_order ~now ~walk assignment_id =
 let assignment_walk_rest ~now assignment_id =
   (* Whose walk it is only moves a failed attempt, and a failed attempt never
      rests (RFC-0458 §3.4), so every walker reaches the same rest. *)
-  match assignment_walk_order ~now ~walk:Continuing_walk assignment_id with
+  match assignment_walk_order ~now ~walk:Every_mark_demotes assignment_id with
   | Ok { order = head :: later; _ } -> walk_rest ~now ~head ~later
   | Ok { order = []; _ } | Error (Assignment_missing | Catalog_unavailable _) ->
     Walk_head_serving { runtime_id = assignment_id }
@@ -592,7 +604,7 @@ let attempt_runtime_candidates
     ?model_of
     ?candidate_backpressure_of
     ?candidate_dispatchable
-    ~recorder
+    ~walk_owner
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
        ?status:string ->
@@ -692,7 +704,7 @@ let attempt_runtime_candidates
     in
     demote_unavailable_candidates
       ~now:(Unix.gettimeofday ())
-      ~walk:Continuing_walk
+      ~walk:Every_mark_demotes
       ~quota_scope_of ~candidate_backpressure_of
       dispatchable
     @ undispatchable
@@ -868,11 +880,14 @@ let attempt_runtime_candidates
          | Agent_core.Error.Internal_carried _ -> false
        in
        let note_failed_attempt failure =
-         Option.iter
-           (fun candidate ->
-              Runtime_candidate_backpressure.note_failed_attempt
-                ~candidate ~failure ~recorded_by:recorder)
-           attempt_candidate_backpressure
+         match walk_owner with
+         | Fleet_keeper_turn recorder ->
+           Option.iter
+             (fun candidate ->
+                Runtime_candidate_backpressure.note_failed_attempt
+                  ~candidate ~failure ~recorded_by:recorder)
+             attempt_candidate_backpressure
+         | One_shot_walk -> ()
        in
        (* The evidence follows the failure route, the one classification of
           this error that the keeper's failure handling reads, rather than a
@@ -1487,6 +1502,7 @@ let run_named
     ?(input_policy = Keeper_input_policy.default)
     ~runtime_id
     ?(keeper_name = "")
+    ~walk_owner
     ?pre_tool_rejects
     ~base_path
     ~goal
@@ -1763,13 +1779,13 @@ let run_named
     | Some rejects -> rejects
     | None -> ref []
   in
-  let recorder = Runtime_candidate_backpressure.keeper_recorder ~keeper_name in
+  let fresh_walk = fresh_walk_of walk_owner in
   let demote_quota_exhausted candidates =
     quota_ordered_runtime_ids
       (* NDT-OK: scheduling intentionally compares the stored expiry with
          wall clock; the ordering read receives one explicit [now]. *)
       ~now:(Unix.gettimeofday ())
-      ~walk:(Fresh_walk_by recorder)
+      ~walk:fresh_walk
       candidates
   in
   let* lane_candidate_ids =
@@ -1840,7 +1856,7 @@ let run_named
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
          ordering read receives one explicit [now], as the lane's does above. *)
       ~now:(Unix.gettimeofday ())
-      ~walk:(Fresh_walk_by recorder)
+      ~walk:fresh_walk
       ~deferred_runtime_lane
       ~first_candidate
       ~remaining_runtimes
@@ -1924,7 +1940,7 @@ let run_named
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
     ~pre_tool_rejects
-    ~recorder
+    ~walk_owner
     ?retry_deferral:runtime_retry_deferral
     ~tool_results_saved:(fun () ->
       Keeper_turn_driver_try_provider.tool_results_saved checkpoint_progress)

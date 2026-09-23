@@ -1608,6 +1608,10 @@ let run_turn
                       ~runtime_id:runtime_id_string
                       ~base_path:config.base_path
                       ~keeper_name:meta.name
+                      ~walk_owner:
+                        (Keeper_turn_driver.Fleet_keeper_turn
+                           (Runtime_candidate_backpressure.keeper_recorder
+                              ~keeper_name:meta.name))
                       ~pre_tool_rejects
                       ~continue_from_checkpoint
                       ~goal:user_message

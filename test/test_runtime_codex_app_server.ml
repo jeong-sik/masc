@@ -2892,7 +2892,7 @@ let run_keeper_turn ?(tools = []) ?hooks ?context_injector ?model_input_projecti
                       | [] -> None
                       | _ :: _ -> Some (Agent_core.Context.create ())
                     in
-                    Keeper_turn_driver.run_named
+                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"codex.codex"
                       ~keeper_name
                       ~base_path

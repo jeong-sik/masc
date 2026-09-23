@@ -377,7 +377,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                   |> Result.map_error (fun error -> fail error)
                   |> Result.get_ok;
                   match
-                    Keeper_turn_driver.run_named
+                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path
@@ -506,7 +506,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                            (Filename.concat base_path "antigravity-prompt.txt")
                            In_channel.input_all);
                     match
-                      Keeper_turn_driver.run_named
+                      Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                         ~runtime_id:"antigravity.gemini"
                         ~keeper_name:"antigravity-fixture"
                         ~base_path
@@ -546,7 +546,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       let preserved_prompt = In_channel.with_open_bin
                         (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
                       List.iter (fun (system_prompt, initial_messages) ->
-                        match Keeper_turn_driver.run_named
+                        match Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~goal:"New goal must not run with stale context"
                           ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
@@ -747,7 +747,7 @@ let test_blank_success_requires_fresh_conversation () =
                 (fun () ->
                   Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
                   let run () =
-                    Keeper_turn_driver.run_named
+                    Keeper_turn_driver.run_named ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-fixture"
                       ~base_path

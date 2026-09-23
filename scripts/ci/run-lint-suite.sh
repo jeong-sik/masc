@@ -73,6 +73,12 @@ blocking_lints() {
   run_lint "CHANGELOG has one section for this version" \
     python3 scripts/ci/changelog-section.py \
     "$(sed -n 's/^(version \([0-9.]*\))$/\1/p' dune-project)" CHANGELOG.md /dev/null
+  # Entries arrive as changelog.d/<PR>.md so parallel pull requests do not
+  # all insert at the same line of CHANGELOG.md.
+  run_lint "Changelog fragments well-formed" \
+    python3 scripts/changelog-fragments.py check
+  run_lint "Changelog fragments self-test" \
+    python3 test/test_changelog_fragments.py
   run_lint "Logging consistency" bash scripts/ci/check-logging-consistency.sh
   run_lint "Issue taxonomy parser and reconciliation" node scripts/test-issue-taxonomy-core.cjs
   run_self_test_when_changed "OCaml test suite reporter self-test" \
@@ -354,6 +360,10 @@ blocking_pr_lints() {
     bash scripts/check-release-train-guard.sh --base "${base}" --head HEAD
   run_lint "PR hygiene" \
     bash scripts/check-pr-hygiene.sh --base "${base}" --head "${head}"
+  # A pull request writes changelog.d/<PR>.md; only a release pull request
+  # (version bump or fragment assembly) adds bullets under [Unreleased].
+  run_lint "Changelog entries arrive as fragments" \
+    python3 scripts/changelog-fragments.py pr-guard --base "${base}" --head "${head}"
   # The companion to the boundary guard wired above: a new .mli whose paired
   # .ml is already in that guard's allow-list has to be added alongside it,
   # or every later PR fails on docstrings this one exposed. That is PR #11248

@@ -1325,7 +1325,7 @@ let test_a_long_keeper_widens_its_column () =
 let test_short_rows_leave_the_columns_where_they_were () =
   let columns =
     Acting.columns ~inner_width:160
-      [ table_row ~keeper:"rondo" ~label:"turn" () ]
+      [ table_row ~keeper:"short" ~label:"turn" () ]
   in
   check int "the keeper column is what it drew before" 16
     columns.Acting.keeper_cells;

@@ -4,6 +4,14 @@
 
 ### Changed
 
+- The Librarian reads a new claim that repeats a kept current memory word for
+  word as that memory unchanged instead of refusing the whole pass as
+  `duplicate_selected_memory_id`: the stored fact keeps its first sighting, its
+  `absorbs` go into the existing id, a self-absorb does nothing, and two claims
+  with the same text merge. Dropping and restating a memory in one answer is
+  refused as `dropped_memory_id_recreated`, and restating a memory another claim
+  absorbs as `absorbed_memory_id_restated`. The absorb gate judges an
+  absorption into a restated memory against its current text (#38048).
 - The runtime failover concept is now named the **Runtime Candidate Order** in
   the TUI: the lane key help and status strings say "candidate order" where
   they said "failover" — the `e` key help and its label on the lane sheet

@@ -256,6 +256,11 @@ let transition_task_outcome_r
                  (Masc_domain.Task_error.InvalidState
                     "a cancellation verdict requires an operator's signature \
                      (RFC-0417 §4.4)"))
+          | Error (Workspace_task_lifecycle.Verdict_cancellation_reason_unavailable detail) ->
+            Error
+              (Masc_domain.Task
+                 (Masc_domain.Task_error.InvalidState
+                    ("an approved stop needs the producer's stated reason: " ^ detail)))
           | Error
               (Workspace_task_lifecycle.Verification_id_mismatch
                  { expected; actual }) ->
@@ -858,6 +863,9 @@ let commit_verdict_r
                  ~task_status:task.task_status
                  ~now
                  ~notes
+                 ~read_cancellation_reason:
+                   (Workspace_verification_store.read_cancellation_reason
+                      ~base_path:config.Workspace_utils_backend_setup.base_path)
              with
              | Ok decided -> Ok decided
              | Error Workspace_task_lifecycle.Verdict_rejection_reason_required ->
@@ -878,6 +886,13 @@ let commit_verdict_r
                     (Masc_domain.Task_error.InvalidState
                         "a cancellation verdict requires an operator's signature \
                         (RFC-0417 §4.4)"))
+             | Error
+                 (Workspace_task_lifecycle.Verdict_cancellation_reason_unavailable
+                    detail) ->
+               Error
+                 (Masc_domain.Task
+                    (Masc_domain.Task_error.InvalidState
+                       ("an approved stop needs the producer's stated reason: " ^ detail)))
              | Error
                  (Workspace_task_lifecycle.Verification_id_mismatch
                     { expected; actual }) ->
@@ -908,9 +923,13 @@ let commit_verdict_r
            in
            let producer = decided.Workspace_task_lifecycle.producer in
            let verification_id = decided.Workspace_task_lifecycle.verification_id in
-           let rejection_handoff =
+           (* An approval leaves the producer's handoff where it is: it is the
+              producer's account of the work or of the stop, and the verdict
+              has its own record. A rejection replaces it with what must be
+              fixed, because that is what the producer resumes from. *)
+           let handoff_context =
              match verdict with
-             | Masc_domain.Verdict_approved -> None
+             | Masc_domain.Verdict_approved -> task.handoff_context
              | Masc_domain.Verdict_rejected { reason } ->
                Some
                  { Masc_domain.summary = reason
@@ -947,7 +966,7 @@ let commit_verdict_r
                       then
                         { t with
                           task_status = new_status
-                        ; handoff_context = rejection_handoff
+                        ; handoff_context
                         }
                       else t)
                    backlog.tasks
@@ -1106,7 +1125,10 @@ let commit_verdict_r
            let verdict_fields =
              match verdict with
              | Masc_domain.Verdict_approved ->
-               [ "verdict", `String "approved" ]
+               ("verdict", `String "approved")
+               :: (match String.trim notes with
+                   | "" -> []
+                   | stated -> [ "notes", `String stated ])
              | Masc_domain.Verdict_rejected { reason } ->
                [ "verdict", `String "rejected"; "reason", `String reason ]
            in

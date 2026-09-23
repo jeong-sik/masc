@@ -4,6 +4,7 @@ type invalid =
   | Verdict_authority_identity_required
   | Verdict_rejection_reason_required
   | Verdict_cancel_requires_operator
+  | Verdict_cancellation_reason_unavailable of string
   | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 
@@ -238,6 +239,7 @@ let decide_verdict
       ~(task_status : Masc_domain.task_status)
       ~now
       ~notes
+      ~read_cancellation_reason
   =
   let provenance ~producer ~verification_id decision =
     if not (Masc_domain.completion_authority_has_identity authority)
@@ -279,13 +281,29 @@ let decide_verdict
           | Masc_domain.Cancel_task ->
             (match authority with
              | Masc_domain.Human_operator _ ->
-               provenance
-                 ~producer:assignee
-                 ~verification_id:actual_verification_id
-                 { new_status =
-                     cancelled_status ~agent_name:assignee ~now ~reason:notes
-                 ; set_current = None
-                 }
+               (* The stop is the producer's claim, so its terminal record
+                  carries the producer's sentence under the producer's name.
+                  The operator's signature and notes are the verdict's, and
+                  the verdict record keeps them. *)
+               (match
+                  read_cancellation_reason ~verification_id:actual_verification_id
+                with
+                | Workspace_verification_store.Cancellation_reason_stated reason ->
+                  provenance
+                    ~producer:assignee
+                    ~verification_id:actual_verification_id
+                    { new_status =
+                        cancelled_status ~agent_name:assignee ~now ~reason
+                    ; set_current = None
+                    }
+                | Workspace_verification_store.Cancellation_reason_absent ->
+                  Error
+                    (Verdict_cancellation_reason_unavailable
+                       (Printf.sprintf
+                          "verification record %s states no cancellation reason"
+                          actual_verification_id))
+                | Workspace_verification_store.Cancellation_reason_unreadable detail ->
+                  Error (Verdict_cancellation_reason_unavailable detail))
              | Masc_domain.System_llm_agent _ ->
                Error Verdict_cancel_requires_operator))
        | Masc_domain.Verdict_rejected { reason } ->

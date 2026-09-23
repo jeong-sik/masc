@@ -15,6 +15,11 @@ type invalid =
           carry only an operator's signature. A system-lane approval of a
           cancel claim is refused at the commit funnel, where every verdict
           caller converges. *)
+  | Verdict_cancellation_reason_unavailable of string
+      (** An approved stop ends with the producer's stated reason, read from
+          the verification record being approved. A record that cannot be
+          read, or that states no reason, refuses the approval rather than
+          ending the Task with no reason or with someone else's. *)
   | Verification_id_mismatch of { expected : string; actual : string }
   | Invalid_transition
 
@@ -69,7 +74,11 @@ type verdict_decision =
 
     [authority] carries provenance from a caller that authenticated an operator
     or accepted a typed system-LLM judge result. The type separates verdicts
-    from Keeper actions; it does not perform authentication itself. *)
+    from Keeper actions; it does not perform authentication itself.
+
+    An approved stop ends as [Cancelled] under the producer's name with the
+    reason [read_cancellation_reason] returns for the verification being
+    approved; [notes] belong to the verdict and never become that reason. *)
 val decide_verdict
   :  authority:Masc_domain.completion_authority
   -> verdict:Masc_domain.completion_verdict
@@ -78,6 +87,8 @@ val decide_verdict
   -> task_status:Masc_domain.task_status
   -> now:string
   -> notes:string
+  -> read_cancellation_reason:
+       (verification_id:string -> Workspace_verification_store.cancellation_reason_read)
   -> (verdict_decision, invalid) result
 
 val valid_next_actions

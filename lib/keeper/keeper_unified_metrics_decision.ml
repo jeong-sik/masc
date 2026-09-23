@@ -257,9 +257,6 @@ let append_decision_record
               let runtime_fields =
                 match r.runtime_observation with
                 | Some co ->
-                    let runtime_id =
-                      co.runtime_id
-                    in
                     let streaming_fields =
                       [
                         ("streaming_ttfrc_ms", Json_util.float_opt_to_json co.streaming_ttfrc_ms);
@@ -267,8 +264,15 @@ let append_decision_record
                         ("streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json co.streaming_inter_chunk_avg_ms);
                       ]
                     in
+                    (* Same split as [provider_context]: the lane, then the
+                       candidate that answered on it. The answerer is named
+                       here too because model-inference attribution reads
+                       this object before [provider_context] and falls back
+                       to [runtime_id] only when [executed_runtime_id] is
+                       absent; without it the lane would get the credit. *)
                     [
-                      ("runtime_id", `String runtime_id);
+                      ("runtime_id", `String (runtime_id_of_meta meta));
+                      ("executed_runtime_id", `String co.runtime_id);
                       ("selected_model", `Null);
                     ] @ streaming_fields
                 | None -> []

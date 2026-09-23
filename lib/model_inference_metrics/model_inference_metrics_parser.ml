@@ -30,9 +30,8 @@ let provider_opt_of_fields ~(model : string) (fields : (string * Yojson.Safe.t) 
 (* [executed_runtime_id] is the candidate that answered; [runtime_id] is the
    lane it answered on. In-turn failover can make those different
    runtimes, and this function's callers ask the first question, so prefer
-   the answerer wherever the producer recorded one. Records written before
-   masc#35043, and turns that failed before any candidate reported in, carry
-   the lane alone. *)
+   the answerer wherever the producer recorded one. A turn with no
+   candidate report carries the lane alone. *)
 let runtime_model_attribution_of_fields (fields : (string * Yojson.Safe.t) list) =
   let named key = json_string_field_opt key fields in
   match named "executed_runtime_id" with

@@ -2551,6 +2551,169 @@ let () =
      = "Rate limited: slow down")
 ;;
 
+(* masc#38417: on every decision row [runtime_id] is the keeper's lane and
+   [executed_runtime_id] the candidate that answered, in [provider_context]
+   and in [telemetry] alike. The keeper is assigned [lane]; its successful
+   turn is answered by the lane's second candidate. *)
+let () =
+  with_temp_dir "keeper-decision-row-lane" @@ fun workspace_dir ->
+  let keeper_name = "decision-row-lane" in
+  let lane = "decision-lane" in
+  let head_runtime = "primary.test_model" in
+  let answering_runtime = "fallback.test_model" in
+  let config = Masc.Workspace.default_config workspace_dir in
+  let meta : KMC.keeper_meta =
+    meta_fixture_exn
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "trace_id", `String "trace-decision-row-lane"
+        ])
+  in
+  let meta =
+    { meta with runtime =
+        { meta.runtime with usage =
+            { meta.runtime.usage with total_turns = 1 } } }
+  in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  ignore (Masc.Workspace.init config ~agent_name:(Some "test"));
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot) @@ fun () ->
+  let runtime_path = Filename.concat workspace_dir "runtime.toml" in
+  Fs_compat.save_file runtime_path
+    (Printf.sprintf {|
+[runtime]
+default = "%s"
+[runtime.lanes.%s]
+candidates = ["%s", "%s"]
+[runtime.assignments]
+%s = "%s"
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[primary.test_model]
+is-default = true
+max-concurrent = 1
+[fallback.test_model]
+max-concurrent = 1
+|}
+       head_runtime lane head_runtime answering_runtime keeper_name lane);
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> () | Error detail -> failwith detail);
+  let observation =
+    let capture, _metrics = Runtime_observation.runtime_metrics_for_candidates () in
+    Runtime_observation.runtime_observation_with_metrics
+      ~runtime_id:answering_runtime ~selected_model_raw:None ~capture ()
+  in
+  let prompt_metrics =
+    Masc.Keeper_agent_prompt_metrics.build_prompt_metrics
+      ~system_prompt:"" ~dynamic_context:"" ~user_message:""
+  in
+  let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
+    { actual_input_tokens = None
+    ; attribution =
+        Masc.Keeper_agent_prompt_metrics.Not_measured
+          Masc.Keeper_agent_prompt_metrics.Dispatch_not_reached
+    }
+  in
+  let tool_surface : Masc.Keeper_agent_tool_surface.tool_surface_metrics =
+    { turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_optional
+    ; config_root = ""
+    ; runtime_config_path = None
+    }
+  in
+  let answered_result : Masc.Keeper_agent_run.run_result =
+    { response_text = "answered on the lane's second candidate"
+    ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+    ; terminal_effect_receipt = None
+    ; model_used = "test-model"
+    ; runtime_id = answering_runtime
+    ; max_context = 1000
+    ; prompt_metrics
+    ; ctx_composition
+    ; runtime_observation = Some observation
+    ; cooperative_boundary = None
+    ; turn_count = 1
+    ; final_agent_core_turn_ordinal = 0
+    ; usage = Masc.Inference_utils.zero_usage
+    ; usage_reported = true
+    ; usage_scope = Runtime_usage_scope.Per_request
+    ; usage_basis = Masc.Keeper_usage_resolution.Per_request
+    ; tool_calls = []
+    ; completion_contract_result = R.Completion_tool_execution_observed
+    ; operator_disposition = None
+    ; official_client_settlement = None
+    ; checkpoint = None
+    ; trace_ref = None
+    ; run_validation = None
+    ; stop_reason = Runtime_agent.Completed
+    ; inference_telemetry = None
+    ; tool_surface
+    }
+  in
+  let world =
+    Masc.Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  let log_path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
+  let append_and_read ~outcome ~result ?executed_runtime_id () =
+    Masc.Keeper_unified_metrics_decision.append_decision_record
+      ~config ~meta ~observation:world ~latency_ms:3 ~outcome
+      ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
+      ~degraded_retry_applied:None ~degraded_retry_deferred:None
+      ~result ?executed_runtime_id ();
+    Fs_compat.load_file log_path |> String.split_on_char '\n'
+    |> List.filter (fun row -> row <> "") |> List.rev |> List.hd
+    |> Yojson.Safe.from_string
+  in
+  let member_at row outer inner =
+    Yojson.Safe.Util.(row |> member outer |> member inner)
+  in
+  let answered =
+    append_and_read ~outcome:"success" ~result:(Some answered_result) ()
+  in
+  check "an observed success row keeps the lane in provider_context.runtime_id"
+    (member_at answered "provider_context" "runtime_id" = `String lane);
+  check "an observed success row names the answerer in provider_context.executed_runtime_id"
+    (member_at answered "provider_context" "executed_runtime_id"
+     = `String answering_runtime);
+  check "an observed success row keeps the lane in telemetry.runtime_id"
+    (member_at answered "telemetry" "runtime_id" = `String lane);
+  check "an observed success row names the answerer in telemetry.executed_runtime_id"
+    (member_at answered "telemetry" "executed_runtime_id" = `String answering_runtime);
+  let aggregate =
+    Model_inference_metrics.compute ~base_path:workspace_dir ~window_minutes:60
+  in
+  check "model metrics credit the observed success to the answerer, not the lane"
+    (List.map
+       (fun (stats : Model_inference_metrics.model_stats) -> stats.model_id)
+       aggregate.models
+     = [ answering_runtime ^ " (runtime)" ]);
+  (* No run result: the turn failed and only the runtime walk's own report
+     names who was dispatched. *)
+  let failed =
+    append_and_read ~outcome:"error" ~result:None ~executed_runtime_id:head_runtime ()
+  in
+  check "a failed row without a run result keeps the lane in provider_context.runtime_id"
+    (member_at failed "provider_context" "runtime_id" = `String lane);
+  check "a failed row names the dispatched candidate in provider_context.executed_runtime_id"
+    (member_at failed "provider_context" "executed_runtime_id" = `String head_runtime);
+  check "a failed row without a run result keeps the lane in telemetry.runtime_id"
+    (member_at failed "telemetry" "runtime_id" = `String lane);
+  check "a failed row names the dispatched candidate in telemetry.executed_runtime_id"
+    (member_at failed "telemetry" "executed_runtime_id" = `String head_runtime)
+;;
+
 let () =
   match !failures with
   | [] -> print_endline "test_keeper_terminal_reason_typed: OK"

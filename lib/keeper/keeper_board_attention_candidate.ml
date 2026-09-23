@@ -153,13 +153,12 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-(* v8 is a hard cut: pending rows retain no Board thread snapshots,
-   [keeper_context] contains only lane identity and normalized interests,
-   comment identity is the producer-supplied comment id, and a requeued
-   quarantine names the principal that requested it. The deployment
-   preflight rejects a ledger that holds any non-v8 row, so older rows are
-   never decoded as v8. *)
-let schema_version = 8
+(* v7 is a hard cut: pending rows no longer retain Board thread snapshots,
+   [keeper_context] contains only lane identity and normalized interests, and
+   comment identity is the producer-supplied comment id. The deployment
+   preflight rejects a ledger that holds any non-v7 row, so older rows are
+   never decoded as v7. *)
+let schema_version = 7
 
 let quarantine_failure_category_to_string = function
   | Candidate_membership_conflict -> "candidate_membership_conflict"

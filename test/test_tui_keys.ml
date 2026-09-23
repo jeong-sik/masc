@@ -359,7 +359,7 @@ let test_schedule_create_form_names_the_canonical_required_fields () =
 
 (* The modify key's help says "running/finished rows refuse". These pin that
    the refusal now happens at the keypress, and that the set it refuses is the
-   store's own: [Transition_refused] is Running or [is_terminal].
+   store's own: both ask [Schedule_domain.modify_allowed].
 
    The vocabulary is checked against
    [Schedule_contract_values.schedule_status_strings] rather than trusted as a
@@ -401,8 +401,23 @@ let test_modify_names_the_status_it_refuses () =
     (* The operator is told which word on the screen closed the door, not
        just that it is closed. *)
     check str "the reason quotes the status the screen showed"
-      "the store refuses a running schedule; only scheduled and due rows change"
+      "the store refuses to modify a running schedule (status as last read; \
+       refresh if it has changed)"
       reason
+
+(* The TUI and [Schedule_store.update_request] both ask
+   [Schedule_domain.modify_allowed]; the store side is pinned in
+   test_schedule_store. This pins the TUI side for every contract status. *)
+let test_modify_refusal_is_the_shared_predicate () =
+  List.iter
+    (fun word ->
+      match Schedule_domain.schedule_status_of_string word with
+      | Error msg -> Alcotest.fail msg
+      | Ok status ->
+        check Alcotest.bool (word ^ " refuses iff modify_allowed is false")
+          (not (Schedule_domain.modify_allowed status))
+          (refusal_for word <> None))
+    Schedule_contract_values.schedule_status_strings
 
 let test_modify_leaves_an_unnamed_status_to_the_server () =
   (* [sch_status] stays a string so a status this build does not name renders
@@ -2826,6 +2841,8 @@ let () =
         ; Alcotest.test_case
             "modify refuses exactly the statuses the store refuses" `Quick
             test_modify_refuses_exactly_the_statuses_the_store_refuses
+        ; Alcotest.test_case "modify refusal is the shared predicate" `Quick
+            test_modify_refusal_is_the_shared_predicate
         ; Alcotest.test_case "modify names the status it refuses" `Quick
             test_modify_names_the_status_it_refuses
         ; Alcotest.test_case

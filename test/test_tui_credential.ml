@@ -199,8 +199,9 @@ let test_a_mismatched_stored_token_is_replaced () =
    expired or mismatched file is replaced; a bearer from the environment is
    never this client's to replace. *)
 let test_refresh_after_a_refusal () =
-  let refresh ?(source = Credential.From_workspace) stored =
-    Credential.refresh_plan ~source ~sent:"old" ~stored
+  let refresh ?(source = Credential.From_workspace) ?(credential_record = true)
+      stored =
+    Credential.refresh_plan ~source ~sent:"old" ~stored ~credential_record
       ~workspace_requires_token:true ~workspace_initialized:true
   in
   check bool "a different bearer in the workspace is adopted" true
@@ -217,9 +218,20 @@ let test_refresh_after_a_refusal () =
      = Credential.Keep_held);
   check bool "an open workspace mints nothing" true
     (Credential.refresh_plan ~source:Credential.From_workspace ~sent:"old"
-       ~stored:Credential.Stored_expired ~workspace_requires_token:false
-       ~workspace_initialized:true
-     = Credential.Keep_held)
+       ~stored:Credential.Stored_expired ~credential_record:true
+       ~workspace_requires_token:false ~workspace_initialized:true
+     = Credential.Keep_held);
+  (* An operator who deleted this client's credential while it ran is not
+     overruled by the next refusal. *)
+  check bool "a mismatched file with no record left is not minted over" true
+    (refresh ~credential_record:false Credential.Stored_mismatched
+     = Credential.Keep_held);
+  check bool "no file and no record is not minted either" true
+    (refresh ~credential_record:false Credential.Not_stored
+     = Credential.Keep_held);
+  check bool "a bearer written since is still adopted without a record" true
+    (refresh ~credential_record:false (Credential.Stored "new")
+     = Credential.Adopt "new")
 
 (* The self-mint window is this client's own policy, not the workspace's. The
    workspace default is a day, meant for an operator sitting in front of a

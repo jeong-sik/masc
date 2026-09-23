@@ -112,13 +112,16 @@ val refresh_plan :
   source:token_source ->
   sent:string ->
   stored:stored_token ->
+  credential_record:bool ->
   workspace_requires_token:bool ->
   workspace_initialized:bool ->
   refresh
 (** What to do after the server refused the bearer [sent]. A different bearer
     in the workspace was minted by another masc-tui and is adopted rather than
     minted over, so two clients converge on one bearer instead of refusing
-    each other's. *)
+    each other's. Without a [credential_record] for this client nothing is
+    minted: a record gone while the TUI runs was removed by an operator, and
+    the refusal that follows names [masc login] instead of re-creating it. *)
 
 type outcome =
   | Held

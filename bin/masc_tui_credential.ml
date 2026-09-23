@@ -180,14 +180,17 @@ type refresh =
   | Remint of mint_reason
   | Keep_held
 
-let refresh_plan ~source ~sent ~stored ~workspace_requires_token
-    ~workspace_initialized =
+let refresh_plan ~source ~sent ~stored ~credential_record
+    ~workspace_requires_token ~workspace_initialized =
   match source with
   | From_environment -> Keep_held
   | From_workspace -> (
       match stored with
       | Stored token when not (String.equal token sent) -> Adopt token
       | Stored _ -> Keep_held
+      | Stored_expired | Stored_mismatched | Not_stored
+        when not credential_record ->
+          Keep_held
       | (Stored_expired | Stored_mismatched | Not_stored) as stored -> (
           match
             plan ~env_token:None ~workspace_token:stored

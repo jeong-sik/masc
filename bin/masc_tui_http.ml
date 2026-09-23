@@ -170,9 +170,16 @@ let mint_operator_token ~base_path ~host ~port =
    rest of its run. The decision that ends in a mint is taken again under this
    lock, so the second process finds the first one's bearer and adopts it. *)
 let with_mint_lock ~base_path f =
-  File_lock_eio.with_durable_lock
-    ~lock_path:(Filename.concat (Auth.auth_dir base_path) "masc-tui.token.lock")
-    f
+  (* A lock that fails to release after the body ran does not undo what the
+     body did: the bearer is minted, on disk and held. Only a lock never taken
+     means nothing happened. *)
+  match
+    File_lock_eio.with_durable_lock_observed
+      ~lock_path:(Filename.concat (Auth.auth_dir base_path) "masc-tui.token.lock")
+      f
+  with
+  | File_lock_eio.Body_completed { value; release_error = _ } -> Ok value
+  | File_lock_eio.Lock_not_acquired error -> Error error
 
 let workspace_facts ~base_path =
   let cfg = Auth.load_auth_config base_path in
@@ -240,18 +247,33 @@ let install_operator_token ~base_path ~host ~port =
    [sent], which is the one case where sending the request again can answer
    differently -- including when another request of this run refreshed it
    first. *)
+(* The bearer whose replacement failed during this run, and why. A mint that
+   failed once for a bearer fails the same way on the next refusal of it --
+   the directory is still unwritable -- and each attempt rewrites the
+   credential record first, so the refusal of that bearer is not answered with
+   another mint. Adopting a bearer [masc login] wrote since is still open. The
+   reason reaches the operator through [refusal]. *)
+let failed_refresh : (string * string) option ref = ref None
+
+let refresh_failure () = Option.map snd !failed_refresh
+
 let refresh_operator_token ~sent =
   match !credential_workspace with
   | None -> false
   | Some _ when not (Option.equal String.equal !operator_token_cell (Some sent)) ->
       true
   | Some (base_path, host, port) -> (
-      let workspace_requires_token, workspace_initialized =
-        workspace_facts ~base_path
-      in
+      (* A config.json edited into something unreadable mid-run is the
+         server's to refuse; this answer stays a status, not an exception out
+         of a request. *)
+      match workspace_facts ~base_path with
+      | exception Auth.Auth_config_error _ -> false
+      | workspace_requires_token, workspace_initialized -> (
       let decide () =
         Masc_tui_credential.refresh_plan ~source:!operator_token_source ~sent
           ~stored:(stored_operator_token ~base_path)
+          ~credential_record:
+            (Option.is_some (Auth.load_credential base_path default_agent_name))
           ~workspace_requires_token ~workspace_initialized
       in
       let act = function
@@ -259,12 +281,19 @@ let refresh_operator_token ~sent =
             operator_token_cell := Some token;
             true
         | Masc_tui_credential.Keep_held -> false
+        | Masc_tui_credential.Remint _
+          when Option.equal String.equal (Option.map fst !failed_refresh)
+                 (Some sent) ->
+            false
         | Masc_tui_credential.Remint _ -> (
             match mint_operator_token ~base_path ~host ~port with
             | Ok report ->
                 operator_token_cell := Some report.bearer_token;
                 true
-            | Error _ -> false)
+            | Error err ->
+                failed_refresh :=
+                  Some (sent, Masc_domain.masc_error_to_string err);
+                false)
       in
       match decide () with
       | Masc_tui_credential.Keep_held -> false
@@ -279,7 +308,13 @@ let refresh_operator_token ~sent =
                 else act (decide ()))
           with
           | Ok changed -> changed
-          | Error _ -> false))
+          | Error lock_error ->
+              failed_refresh :=
+                Some
+                  ( sent,
+                    "the credential lock could not be taken: "
+                    ^ File_lock_eio.durable_lock_error_to_string lock_error );
+              false)))
 
 let operator_token () = !operator_token_cell
 let operator_token_present () = Option.is_some (operator_token ())
@@ -318,14 +353,27 @@ let request_clock () = Eio_context.get_clock_opt ()
    masc-tui minted over it. [send] is called again with whatever is held after
    the refresh; nothing else about the request changes, and a second 401 is
    returned as it came. *)
-let with_credential_refresh send =
+let with_credential_refresh_on ~refused send =
   let sent = operator_token () in
-  match send () with
-  | Ok (401, _) as refused -> (
-      match sent with
-      | Some sent when refresh_operator_token ~sent -> send ()
-      | Some _ | None -> refused)
-  | result -> result
+  let first = send () in
+  if not (refused first) then first
+  else
+    match sent with
+    | Some sent when refresh_operator_token ~sent -> send ()
+    | Some _ | None -> first
+
+let with_credential_refresh send =
+  with_credential_refresh_on
+    ~refused:(function Ok (401, _) -> true | Ok _ | Error _ -> false)
+    send
+
+(* A stream refused at the door comes back buffered, before any chunk was
+   delivered, so opening it again repeats nothing the caller saw. *)
+let stream_refused = function
+  | Ok (Masc_http_client.Pool.Buffered { status = 401; _ }) -> true
+  | Ok (Masc_http_client.Pool.Buffered _ | Masc_http_client.Pool.Streamed _)
+  | Error _ ->
+      false
 
 (* A caller that built its own header list carries the bearer it read then;
    a retry swaps in the one held now and keeps every other header. *)
@@ -400,9 +448,14 @@ let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
    show them. *)
 let refusal ~status_code ~body =
   match status_code with
-  | 401 | 403 ->
-      Masc_tui_credential.refusal ~credential_sent:(operator_token_present ())
-        (Masc_tui_credential.server_reason_of_body body)
+  | 401 | 403 -> (
+      let said =
+        Masc_tui_credential.refusal ~credential_sent:(operator_token_present ())
+          (Masc_tui_credential.server_reason_of_body body)
+      in
+      match refresh_failure () with
+      | None -> said
+      | Some why -> said ^ " (this client could not replace it: " ^ why ^ ")")
   | _ -> Masc.Tui_decode.http_status_error ~status_code ~body
 
 let decode_json ~allow_empty ~status_code ~body =
@@ -572,18 +625,17 @@ let post_keeper_chat ?(admission_intent = Masc_tui_keeper_chat_projection.Queue_
     , Masc_tui_keeper_chat_projection.error )
     result =
   let url = url_of ~host ~port ~path:keeper_chat_stream_path in
-  let headers =
-    json_headers
-      (("Accept", "text/event-stream") :: auth_headers ())
-  in
   (* Whole body, no live view, nothing held to resume after. *)
   let body =
     Masc_tui_keeper_chat_projection.request_body ~admission_intent
       ~since_seq:Masc.Keeper_chat_event_log.Whole_turn request
   in
   match
+    with_credential_refresh @@ fun () ->
     Masc_http_client.post_sync ?clock:(request_clock ())
-      ~timeout_sec:keeper_chat_timeout_sec ~url ~headers ~body ()
+      ~timeout_sec:keeper_chat_timeout_sec ~url
+      ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
+      ~body ()
   with
   | Error detail ->
       Error (Masc_tui_keeper_chat_projection.Transport_error detail)
@@ -621,15 +673,15 @@ let post_keeper_chat_streaming ?(admission_intent = Masc_tui_keeper_chat_project
     , Masc_tui_keeper_chat_projection.error )
     result =
   let url = url_of ~host ~port ~path:keeper_chat_stream_path in
-  let headers =
-    json_headers (("Accept", "text/event-stream") :: auth_headers ())
-  in
   let body =
     Masc_tui_keeper_chat_projection.request_body ~admission_intent ~since_seq request
   in
   match
+    with_credential_refresh_on ~refused:stream_refused @@ fun () ->
     Masc_http_client.post_stream ~clock
-      ~idle_timeout_sec:keeper_chat_timeout_sec ~url ~headers ~body ~on_chunk ()
+      ~idle_timeout_sec:keeper_chat_timeout_sec ~url
+      ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
+      ~body ~on_chunk ()
   with
   | Error detail ->
       Error (Masc_tui_keeper_chat_projection.Transport_error detail)
@@ -952,14 +1004,19 @@ let fetch_keeper_file_changes ~(host : string) ~(port : int)
 let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
     : (string, string) result =
   let url = url_of ~host ~port ~path:mcp_path in
-  let headers =
-    json_headers
-      (("Accept", "application/json, text/event-stream") :: auth_headers ())
-  in
   let body = Masc_tui_observer.initialize_request_body ~client_version in
   match
+    with_credential_refresh_on
+      ~refused:(function
+        | Ok { Masc_http_client.status = 401; _ } -> true
+        | Ok _ | Error _ -> false)
+    @@ fun () ->
     Masc_http_client.post_response_sync ?clock:(request_clock ())
-      ~timeout_sec:(request_timeout_sec ()) ~url ~headers ~body ()
+      ~timeout_sec:(request_timeout_sec ()) ~url
+      ~headers:
+        (json_headers
+           (("Accept", "application/json, text/event-stream") :: auth_headers ()))
+      ~body ()
   with
   | Error detail -> Error (report_err "MCP initialize failed" detail)
   | Ok { Masc_http_client.status; body; _ }
@@ -2924,11 +2981,10 @@ let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
            (percent_encode_path_segment keeper_name)
            query)
   in
-  let headers =
-    json_headers (("Accept", "text/event-stream") :: auth_headers ())
-  in
   match
-    Masc_http_client.post_stream ~clock ~idle_timeout_sec:900.0 ~url ~headers
+    with_credential_refresh_on ~refused:stream_refused @@ fun () ->
+    Masc_http_client.post_stream ~clock ~idle_timeout_sec:900.0 ~url
+      ~headers:(json_headers (("Accept", "text/event-stream") :: auth_headers ()))
       ~body:"{}" ~on_chunk ()
   with
   | Error detail -> Error detail

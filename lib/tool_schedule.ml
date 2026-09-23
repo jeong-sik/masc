@@ -148,6 +148,40 @@ let caller_actor ctx ~instead =
   Ok Schedule_domain.{ id; kind; display_name = None }
 ;;
 
+(* The actor fields are not in the tool schemas, but a call that skips schema
+   validation can still send them. A field that names an actor other than the
+   caller is refused rather than ignored, so the caller learns the record is
+   not what it asked for; a field that names the caller changes nothing. *)
+let refuse_other_actor ~(actor : Schedule_domain.actor) ~prefix args =
+  let mismatch field given described =
+    Error
+      (Typed_refusal
+         { kind = Schedule_contract_values.Refusal_actor_mismatch
+         ; message =
+             Printf.sprintf
+               "%s names %s but the caller is %s; the actor is the caller, so \
+                omit the field"
+               field given described
+         ; facts =
+             [ "field", `String field
+             ; "caller", `String actor.id
+             ; "caller_kind", `String (Schedule_domain.actor_kind_to_string actor.kind)
+             ; "given", `String given
+             ]
+         })
+  in
+  let id_field = prefix ^ "_id" in
+  let kind_field = prefix ^ "_kind" in
+  let kind = Schedule_domain.actor_kind_to_string actor.kind in
+  match string_opt args id_field with
+  | Some given when not (String.equal given actor.id) ->
+    mismatch id_field given actor.id
+  | Some _ | None ->
+    (match string_opt args kind_field with
+     | Some given when not (String.equal given kind) -> mismatch kind_field given kind
+     | Some _ | None -> Ok ())
+;;
+
 let parse_due_at_iso8601 value =
   match Time_codec.parse_rfc3339_whole_seconds value with
   | Error Time_codec.Invalid_rfc3339 -> None
@@ -706,13 +740,13 @@ let handle_write ~action ~tool_name ~start_time ctx args =
       | Update_schedule, Some schedule_id -> Ok (Some schedule_id)
       | Update_schedule, None -> Error (Refusal "schedule_id is required")
     in
-    let caller_as_both () =
-      let* actor =
-        caller_actor ctx
-          ~instead:"call with an agent name or a credential that names one"
-      in
-      Ok (actor, actor)
+    let* caller =
+      caller_actor ctx
+        ~instead:"call with an agent name or a credential that names one"
     in
+    let* () = refuse_other_actor ~actor:caller ~prefix:"requested_by" args in
+    let* () = refuse_other_actor ~actor:caller ~prefix:"scheduled_by" args in
+    let caller_as_both () = Ok (caller, caller) in
     let* requested_by, scheduled_by =
       match action, schedule_id with
       | Update_schedule, Some schedule_id ->
@@ -1163,6 +1197,7 @@ let handle_cancel ~tool_name ~start_time ctx args =
       caller_actor ctx
         ~instead:"call with an agent name or a credential that names one"
     in
+    let* () = refuse_other_actor ~actor:cancelled_by ~prefix:"cancelled_by" args in
     let* _stored = authorize_row_change ctx ~schedule_id in
     Ok (schedule_id, reason, cancelled_by)
   in
@@ -1198,6 +1233,7 @@ let handle_note_add ~tool_name ~start_time ctx args =
       caller_actor ctx
         ~instead:"call with an agent name or a credential that names one"
     in
+    let* () = refuse_other_actor ~actor:author ~prefix:"author" args in
     let author_id = author.Schedule_domain.id in
     let author_kind = author.kind in
     let now = Time_compat.now () in

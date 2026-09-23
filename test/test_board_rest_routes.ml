@@ -293,7 +293,7 @@ let with_authenticated_activity_router ~prefix ~agent_name f =
        f ~base_path ~config ~state ~sw ~clock ~router ~token)
 ;;
 
-let test_schedule_cancel_actor_is_stamped_from_auth () =
+let test_schedule_cancel_actor_is_the_authenticated_caller () =
   with_authenticated_activity_router
     ~prefix:"schedule-cancel-http-actor-"
     ~agent_name:"credential-owner"
@@ -319,11 +319,26 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
     | Ok schedule -> schedule
     | Error error -> fail (Schedule_service.service_error_to_string error)
   in
-  let body =
+  let forged =
     `Assoc
       [ "schedule_id", `String schedule.schedule_id
       ; "cancelled_by_id", `String "forged-body-actor"
-      ; "cancelled_by_kind", `String "system"
+      ; "reason", `String "duplicate"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let status, response =
+    dispatch_json ~router ~token
+      ~path:"/api/v1/tools/masc_schedule_cancel"
+      ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body:forged ()
+  in
+  let open Yojson.Safe.Util in
+  check int "a body naming another actor is refused" 400 status;
+  check string "the refusal is typed" "actor_mismatch"
+    (response |> member "data" |> member "error_kind" |> to_string);
+  let body =
+    `Assoc
+      [ "schedule_id", `String schedule.schedule_id
       ; "reason", `String "duplicate"
       ]
     |> Yojson.Safe.to_string
@@ -333,12 +348,11 @@ let test_schedule_cancel_actor_is_stamped_from_auth () =
       ~path:"/api/v1/tools/masc_schedule_cancel"
       ~extra_headers:[ "X-Masc-Agent", "forged-header-actor" ] ~body ()
   in
-       let open Yojson.Safe.Util in
-       check int "cancel accepted" 200 status;
-       check string "credential owner is the canceller" "credential-owner"
-         (response |> member "data" |> member "cancelled_by" |> member "id"
-          |> to_string);
-       check string "terminal bridge uses typed human operator" "human_operator"
+  check int "cancel accepted" 200 status;
+  check string "credential owner is the canceller" "credential-owner"
+    (response |> member "data" |> member "cancelled_by" |> member "id"
+     |> to_string);
+  check string "the kind is the action's default" "human_operator"
     (response |> member "data" |> member "cancelled_by" |> member "kind"
      |> to_string)
 ;;
@@ -1201,7 +1215,7 @@ let () =
         ; test_case "a worker credential cancelling is not the operator" `Quick
             test_schedule_cancel_with_a_worker_credential_is_not_the_operator
         ; test_case "schedule cancel actor comes from auth" `Quick
-            test_schedule_cancel_actor_is_stamped_from_auth
+            test_schedule_cancel_actor_is_the_authenticated_caller
         ; test_case "goal transition actor comes from auth" `Quick
             test_goal_transition_uses_authenticated_actor
         ; test_case "board write actors come from auth" `Quick

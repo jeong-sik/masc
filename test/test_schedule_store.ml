@@ -1377,6 +1377,7 @@ let test_contract_vocabularies_own_strings_and_errors () =
        ; "due_inputs_conflict"
        ; "due_input_missing"
        ; "caller_unidentified"
+       ; "actor_mismatch"
        ; "argument_out_of_range"
        ; "cursor_mismatch"
        ; "not_schedule_owner"

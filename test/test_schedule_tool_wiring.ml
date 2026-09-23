@@ -1350,41 +1350,43 @@ let stored_schedule config schedule_id =
   | None -> failf "schedule %s is not stored" schedule_id
 ;;
 
-(* A Keeper is recorded as itself, whatever actor its arguments name: a
-   Keeper that could write human_operator into requested_by_kind or
-   cancelled_by_kind could pass itself off as the operator. *)
+(* A Keeper is recorded as itself, kind included. An argument naming the
+   operator kind is refused: a Keeper that could write human_operator into
+   requested_by_kind or cancelled_by_kind could pass itself off as the
+   operator. *)
 let test_the_recorded_actor_is_the_caller_not_an_argument () =
   with_config
   @@ fun config ->
   let caller = Tool_schedule.Named_caller "keeper-a" in
   let schedule_id = "sched-caller-actor" in
-  let created =
+  let create extra =
     dispatch_exn ~caller config Tool_schemas_schedule.Create_request
       (wake_args
-         ~extra:
-           [ "due_in_sec", `Int 60
-           ; "schedule_id", `String schedule_id
-           ; "requested_by_id", `String "operator"
-           ; "requested_by_kind", `String "human_operator"
-           ; "scheduled_by_id", `String "someone-else"
-           ]
+         ~extra:([ "due_in_sec", `Int 60; "schedule_id", `String schedule_id ] @ extra)
          ())
   in
-  check bool "create succeeds" true (Tool_result.is_success created);
+  check_refusal "a keeper claiming the operator kind"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (create [ "requested_by_kind", `String "human_operator" ]);
+  check bool "create succeeds" true (Tool_result.is_success (create []));
   let stored = stored_schedule config schedule_id in
-  check string "scheduler is the caller" "keeper-a" stored.Schedule_domain.scheduled_by.Schedule_domain.id;
-  check string "requester is the caller" "keeper-a" stored.Schedule_domain.requested_by.Schedule_domain.id;
+  check string "scheduler is the caller" "keeper-a"
+    stored.Schedule_domain.scheduled_by.Schedule_domain.id;
+  check string "requester is the caller" "keeper-a"
+    stored.Schedule_domain.requested_by.Schedule_domain.id;
   check bool "requester is not recorded as the operator" true
-    (stored.Schedule_domain.requested_by.Schedule_domain.kind = Schedule_domain.Automated_actor);
-  let cancelled =
+    (stored.Schedule_domain.requested_by.Schedule_domain.kind
+     = Schedule_domain.Automated_actor);
+  let cancel extra =
     dispatch_exn ~caller config Tool_schemas_schedule.Cancel_request
       (`Assoc
-        [ "schedule_id", `String schedule_id
-        ; "cancelled_by_id", `String "operator"
-        ; "cancelled_by_kind", `String "human_operator"
-        ; "reason", `String "superseded"
-        ])
+        ([ "schedule_id", `String schedule_id; "reason", `String "superseded" ]
+         @ extra))
   in
+  check_refusal "a keeper cancelling as the operator"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (cancel [ "cancelled_by_kind", `String "human_operator" ]);
+  let cancelled = cancel [] in
   check bool "the caller cancels its own schedule" true
     (Tool_result.is_success cancelled);
   let open Yojson.Safe.Util in
@@ -1415,7 +1417,6 @@ let test_a_keeper_cannot_cancel_another_keepers_schedule () =
     (dispatch_exn ~caller:other config Tool_schemas_schedule.Cancel_request
        (`Assoc
          [ "schedule_id", `String schedule_id
-         ; "cancelled_by_id", `String "keeper-a"
          ; "reason", `String "mine now"
          ]));
   check_refusal "keeper-b updates keeper-a's schedule"
@@ -1475,52 +1476,63 @@ let test_an_update_keeps_the_rows_actors_and_its_target_rule () =
     stored.Schedule_domain.scheduled_by.Schedule_domain.id
 ;;
 
-(* The actor a schedule records is the caller the boundary resolved, not a
-   client-supplied id. The HTTP boundary already replaces the id before the
-   tool sees it (#37149); the MCP path does not stamp, so the tool itself must
-   not trust the argument -- otherwise an MCP caller names any actor it likes
-   on create, cancel and note_add. *)
+(* The actor a schedule records is the caller the boundary resolved. A
+   client-supplied id that names someone else is refused rather than silently
+   ignored: the HTTP boundary already replaced it (#37149), and the MCP path
+   does not stamp, so the tool itself must refuse -- otherwise an MCP caller
+   names any actor it likes on create, cancel and note_add. *)
 let test_a_named_caller_is_the_actor_not_the_argument () =
   with_config
   @@ fun config ->
   let caller = Tool_schedule.Named_caller "real-caller" in
-  let created =
+  let create extra =
     dispatch_exn ~caller config Tool_schemas_schedule.Create_request
       (`Assoc
-        [ "schedule_id", `String "sched-actor-binding"
-        ; "due_at_unix", `Float future_due_at
-        ; "keeper_name", `String "schedule-keeper"
-        ; "message", `String "spoofed actors"
-        ; "requested_by_id", `String "spoofed-requester"
-        ; "scheduled_by_id", `String "spoofed-scheduler"
-        ])
+        ([ "schedule_id", `String "sched-actor-binding"
+         ; "due_at_unix", `Float future_due_at
+         ; "keeper_name", `String "schedule-keeper"
+         ; "message", `String "actor binding"
+         ]
+         @ extra))
   in
-  check bool "create succeeds" true (Tool_result.is_success created);
+  check_refusal "requested_by_id naming another actor"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (create [ "requested_by_id", `String "spoofed-requester" ]);
+  check_refusal "scheduled_by_id naming another actor"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (create [ "scheduled_by_id", `String "spoofed-scheduler" ]);
+  let created = create [ "requested_by_id", `String "real-caller" ] in
+  check bool "an id that names the caller is accepted" true
+    (Tool_result.is_success created);
   let open Yojson.Safe.Util in
   check string "requested_by is the caller" "real-caller"
     (Tool_result.data created |> member "requested_by" |> member "id" |> to_string);
   check string "scheduled_by is the caller" "real-caller"
     (Tool_result.data created |> member "scheduled_by" |> member "id" |> to_string);
-  let noted =
-    dispatch_exn ~caller config Tool_schemas_schedule.Add_note
-      (`Assoc
-        [ "schedule_id", `String "sched-actor-binding"
-        ; "body", `String "spoofed author"
-        ; "author_id", `String "spoofed-author"
-        ])
-  in
-  check bool "note succeeds" true (Tool_result.is_success noted);
-  check string "note author is the caller" "real-caller"
-    (Tool_result.data noted |> member "note" |> member "author_id" |> to_string);
+  check_refusal "cancelled_by_id naming another actor"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (dispatch_exn ~caller config Tool_schemas_schedule.Cancel_request
+       (`Assoc
+         [ "schedule_id", `String "sched-actor-binding"
+         ; "cancelled_by_id", `String "spoofed-canceller"
+         ; "reason", `String "spoofed"
+         ]));
+  check_refusal "author_id naming another actor"
+    Schedule_contract_values.Refusal_actor_mismatch
+    (dispatch_exn ~caller config Tool_schemas_schedule.Add_note
+       (`Assoc
+         [ "schedule_id", `String "sched-actor-binding"
+         ; "body", `String "spoofed author"
+         ; "author_id", `String "spoofed-author"
+         ]));
   let cancelled =
     dispatch_exn ~caller config Tool_schemas_schedule.Cancel_request
       (`Assoc
         [ "schedule_id", `String "sched-actor-binding"
-        ; "cancelled_by_id", `String "spoofed-canceller"
-        ; "reason", `String "spoofed"
+        ; "reason", `String "done"
         ])
   in
-  check bool "cancel succeeds" true (Tool_result.is_success cancelled);
+  check bool "cancel without an id succeeds" true (Tool_result.is_success cancelled);
   check string "cancelled_by is the caller" "real-caller"
     (Tool_result.data cancelled |> member "cancelled_by" |> member "id" |> to_string)
 ;;

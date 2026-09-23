@@ -96,6 +96,8 @@ type refusal_kind =
       (** No due input, and the recurrence cannot derive one. *)
   | Refusal_caller_unidentified
       (** The call needs the caller's name and the endpoint does not know it. *)
+  | Refusal_actor_mismatch
+      (** An actor id argument names someone other than the caller. *)
   | Refusal_argument_out_of_range
       (** An integer argument outside its declared minimum and maximum. *)
   | Refusal_cursor_mismatch

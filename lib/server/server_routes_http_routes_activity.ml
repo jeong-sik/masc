@@ -1471,7 +1471,8 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   (* Schedule create/modify from the terminal. Their schemas share the same
      editable definition; update additionally requires the stable id. Actor
-     auth supplies the scheduler identity instead of trusting a form field. *)
+     auth resolves the caller; the tool records that caller as the actor and
+     refuses a form field that names someone else. *)
   |> Http.Router.post "/api/v1/tools/masc_schedule_create" (fun request reqd ->
        with_tool_actor_auth ~tool_name:"masc_schedule_create"
          (fun state agent_name _request reqd ->

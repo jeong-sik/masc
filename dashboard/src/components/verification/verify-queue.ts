@@ -67,6 +67,11 @@ interface VqGateRow {
 
 interface VqQueueItem {
   task: Task
+  // The submission this card draws (its request_id). A verdict names it so
+  // the server refuses one that lands after the producer resubmitted. Null
+  // while the task's request row is not loaded: nothing on the card came
+  // from a submission, so there is nothing to judge yet.
+  verificationId: string | null
   isCancel: boolean
   goalId: string | null
   goalTitle: string | null
@@ -110,6 +115,7 @@ function buildQueueItem(
   const submitActor = request?.submitted_by?.trim() || task.assignee || null
   return {
     task,
+    verificationId: request?.request_id ?? null,
     isCancel: task.verification_intent === 'cancel',
     goalId: task.goal_id ?? null,
     goalTitle,
@@ -608,12 +614,17 @@ export function VerifyQueue() {
   const onResolve = (item: VqQueueItem, decision: VerificationVerdictDecision, reason: string | null) => {
     const taskId = item.task.id
     if (pending[taskId]) return
+    const verificationId = item.verificationId
+    if (verificationId === null) {
+      setErrors(prev => ({ ...prev, [taskId]: '검증 요청을 아직 불러오지 못해서 판정을 보낼 수 없어요' }))
+      return
+    }
     setPending(prev => ({ ...prev, [taskId]: true }))
     setErrors(prev => ({ ...prev, [taskId]: null }))
     void submitVerificationVerdict(
       decision === 'reject'
-        ? { taskId, decision, reason: reason ?? '' }
-        : { taskId, decision },
+        ? { taskId, verificationId, decision, reason: reason ?? '' }
+        : { taskId, verificationId, decision },
     )
       .then(() => {
         setVerdicts(prev => [...prev, { item, decision, reason }])

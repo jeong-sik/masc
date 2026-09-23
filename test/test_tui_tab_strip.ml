@@ -137,6 +137,44 @@ let test_the_runtime_header_draws_through_the_strip () =
        ~binding_name:"render_runtime" ~callee:"tab_strip"
      >= 1)
 
+(* A tab's count is a convenience -- the tab is a place to go, and the screen
+   it opens draws its own rows. So a tab whose source this screen has not read
+   carries its name alone, because a zero from an unread snapshot is not a
+   reading.
+
+   Both strips did it the other way. The Runtime strip counted standalone
+   lanes off [state.standalone_lanes], which only the Lanes screen loads, and
+   drew "Standalone (0)" beside a Lanes screen listing five. The Lanes strip
+   counted runtimes and lanes off [state.runtime_surface], which only the
+   Runtime screen loads, and drew "All runtimes (0)" over a server holding
+   125. *)
+let test_an_unread_tab_carries_its_name_alone () =
+  Alcotest.(check string) "unread" "Standalone"
+    (Masc_tui_ansi.tab_entry_label "Standalone" None);
+  Alcotest.(check string) "read" "Standalone (5 lanes)"
+    (Masc_tui_ansi.tab_entry_label "Standalone" (Some "5 lanes"));
+  (* Zero is a reading too, where something measured it. *)
+  Alcotest.(check string) "measured zero" "All runtimes (0)"
+    (Masc_tui_ansi.tab_entry_label "All runtimes" (Some "0"))
+
+let test_both_strips_ask_the_same_helper () =
+  let render = "bin/masc_tui_render.ml" in
+  let calls binding =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:binding ~callee:"tab_entry_label"
+  in
+  Alcotest.(check bool) "the Lanes strip asks it" true
+    (calls "render_lanes_overview" > 0);
+  Alcotest.(check bool) "so does the Runtime strip" true
+    (calls "render_runtime" > 0);
+  List.iter
+    (fun needle ->
+      Alcotest.(check int)
+        (Printf.sprintf "no strip spells %S itself" needle)
+        0
+        (Ast_grep.count_exact_string_literals ~module_path:render ~needle))
+    [ "All runtimes (%d)"; "Standalone (%d)"; "Lanes (%d)" ]
+
 let () =
   Alcotest.run "tui_tab_strip"
     [ ( "tab strip"
@@ -161,5 +199,9 @@ let () =
             test_the_current_entry_is_always_on_the_row
         ; Alcotest.test_case "a strip that fits is unchanged" `Quick
             test_a_strip_that_fits_is_unchanged
+        ; Alcotest.test_case "an unread tab carries its name alone" `Quick
+            test_an_unread_tab_carries_its_name_alone
+        ; Alcotest.test_case "both strips ask the same helper" `Quick
+            test_both_strips_ask_the_same_helper
         ] )
     ]

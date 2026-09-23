@@ -306,28 +306,16 @@ let install () =
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
-    let lookup_schemas, lookup_dispatch =
-      match (lookup : Task.Anti_rationalization.lookup_surface) with
-      | No_lookup_surface -> [], None
-      | Lookup_tools { schemas; dispatch; _ } -> schemas, Some dispatch
+    let { Task.Anti_rationalization.schemas = lookup_schemas
+        ; dispatch = dispatch_lookup
+        }
+      =
+      lookup
     in
     (* The verdict tool and the lookup tools share one dispatch entry point, so
-       the name decides which surface answers. A name belonging to neither is an
-       error the evaluator can read and correct, not a silently dropped call. *)
-    let dispatch_lookup ~name ~args =
-      let start_time = Time_compat.now () in
-      match lookup_dispatch with
-      | None ->
-        Tool_result.error
-          ~failure_class:Tool_result.Workflow_rejection
-          ~tool_name:name
-          ~start_time
-          (Printf.sprintf
-             "unknown tool %s; this review offers only %s"
-             name
-             report_tool_schema.Masc_domain.name)
-      | Some dispatch -> dispatch ~name ~args
-    in
+       the name decides which surface answers. A name belonging to neither
+       reaches the lookup dispatch, which returns an error the evaluator can
+       read and correct, not a silently dropped call. *)
     let dispatch_verdict ~name ~args =
       let start_time = Time_compat.now () in
       let result = match !verdict_ref with

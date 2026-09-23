@@ -90,7 +90,7 @@ let test_an_answer_after_the_timeout_is_remembered () =
       check remember_outcome
         "the late answer descends from an ask that really timed out here"
         (Late.Remembered { tool_name = "Edit" })
-        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:(Some "mode-operator")
+        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ()))
 
 let test_an_answer_that_names_no_ask_is_dropped () =
@@ -99,7 +99,7 @@ let test_an_answer_that_names_no_ask_is_dropped () =
         "an answer that cannot be attributed to an ask is not kept"
         Late.No_matching_ask
         (Late.remember_late late ~keeper_name:keeper
-           ~tool_call_id:"call-never-held" ~actor:(Some "mode-operator")
+           ~tool_call_id:"call-never-held" ~actor:"mode-operator"
            Registry.Approve ()))
 
 let test_an_ask_that_timed_out_long_ago_cannot_be_answered () =
@@ -111,7 +111,7 @@ let test_an_ask_that_timed_out_long_ago_cannot_be_answered () =
          answered"
         Late.No_matching_ask
         (Late.remember_late late ~now:(1000.0 +. Late.ttl_sec +. 1.0)
-           ~keeper_name:keeper ~tool_call_id:"call-old" ~actor:(Some "mode-operator")
+           ~keeper_name:keeper ~tool_call_id:"call-old" ~actor:"mode-operator"
            Registry.Approve ()))
 
 (* ── settling the retried call ────────────────────────────────────── *)
@@ -121,7 +121,7 @@ let test_the_identical_retried_call_is_settled_once () =
       time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~input:(edit_input "lib/a.ml");
       ignore
-        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:(Some "mode-operator")
+        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       ignore (drain events []);
       (* The retry carries a fresh call id; identity is the call itself. *)
@@ -150,7 +150,7 @@ let test_a_remembered_denial_refuses_the_identical_retry () =
       time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~input:(edit_input "lib/a.ml");
       ignore
-        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:(Some "mode-operator")
+        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Deny ());
       ignore (drain events []);
       let retry =
@@ -170,7 +170,7 @@ let test_a_call_with_different_arguments_is_asked_about () =
       time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~input:(edit_input "lib/a.ml");
       ignore
-        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:(Some "mode-operator")
+        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       let other =
         gate.Gate.tool_approval
@@ -190,7 +190,7 @@ let test_the_same_arguments_in_another_order_are_the_same_call () =
           (`Assoc
              [ "file_path", `String "lib/a.ml"; "old_string", `String "x" ]);
       ignore
-        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:(Some "mode-operator")
+        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       let retry =
         gate.Gate.tool_approval
@@ -207,7 +207,7 @@ let test_a_remembered_answer_does_not_cross_keepers () =
       time_out gate ~tool_call_id:"call-1" ~tool_name:"Edit"
         ~input:(edit_input "lib/a.ml");
       ignore
-        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:(Some "mode-operator")
+        (Late.remember_late late ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       (* Same store, another keeper's gate: the identity carries the keeper
          name, so the identical call from somebody else is asked about. *)
@@ -242,7 +242,7 @@ let test_a_fresh_remembered_answer_applies () =
       ignore
         (Late.remember_late late
            ~now:(Eio.Time.now clock -. 1.0)
-           ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:(Some "mode-operator")
+           ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       let retry =
         gate.Gate.tool_approval
@@ -262,7 +262,7 @@ let test_a_remembered_answer_past_its_moment_is_asked_about_again () =
       ignore
         (Late.remember_late late
            ~now:(Eio.Time.now clock -. Late.ttl_sec -. 1.0)
-           ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:(Some "mode-operator")
+           ~keeper_name:keeper ~tool_call_id:"call-1" ~actor:"mode-operator"
            Registry.Approve ());
       ignore (drain events []);
       let retry =

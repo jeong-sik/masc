@@ -1,22 +1,19 @@
 (** Keeper_next_request_forecast — what the next Agent Core request would
     carry, computed from the same values a turn uses, without a turn.
 
-    RFC keeper-context-window-in-tokens §10.4, run forward: the carried
-    range from the pair's front over the durable checkpoint with the
-    autonomous wake line appended as the newest atom. A valid pair ledger
-    is projected through the same high/low-water decision the driver applies
-    at the next turn boundary; this calculation leaves the observed ledger
-    unchanged. [counted_tokens] remains its last measured total, not the
-    projected total after eviction. Nothing here
-    dispatches, advances a cursor, consumes a note, or writes a front.
+    RFC keeper-context-window-in-tokens §13.4 and §13.6, run forward: the
+    range starts where {!Keeper_turn_driver_try_provider.choose_range_start}
+    says, over the durable checkpoint with the autonomous wake line appended
+    as the newest atom. The Librarian point is the one the turn driver
+    chooses ({!Keeper_turn_driver_try_provider.read_keeper_continuity}); the
+    front beside it is the pair's ledger while the history holds it
+    (process-local, absent after a restart until the first response
+    observation), else the range the newest response-observed turn record on
+    the trace measured, whichever runtime ran it. [counted_tokens] is the
+    ledger's last measured total. Nothing here dispatches, advances a cursor,
+    consumes a note, writes a front, or writes the turn's log lines.
 
-    Live at the time of the call: the pair's ledger (process-local, absent
-    after a restart until the first response observation), the binding's marks, and
-    the checkpoint. Without a ledger the front is the range the newest
-    completed Agent Core turn record on the trace measured, whichever
-    runtime ran it, exactly as the turn driver seeds it; without that the
-    request is the whole
-    history and the provider judges it. As last measured, from turn
+    As last measured, from turn
     records: [R] (tool schemas + keeper instructions) from the newest
     composition of a completed turn on the same runtime, because the tool
     surface is the lane's and an errored turn's record names the requested
@@ -132,8 +129,9 @@ type candidate =
   { runtime_id : string
   ; lane : (unit, lane_refusal) result
   ; marks : Runtime_schema.context_marks option
-        (** As the binding declares them; [None] leaves eviction to a
-            refusal. *)
+        (** As the binding declares them. They do not move this forecast's
+            range: the driver judges them only on a request with no
+            continuity choice, and a Keeper turn on a trace always has one. *)
   ; parts : (measured_parts, parts_refusal) result
   ; history_atoms : int  (** Atoms in the checkpoint plus the wake line. *)
   ; carried : carried option  (** [None] when [lane] is refused. *)
@@ -168,17 +166,16 @@ val declared_at : declared:string list -> string -> int option
 
 val carry
   :  measure:(Agent_core.Types.message -> int)
+  -> continuity:Keeper_turn_driver_try_provider.continuity option
   -> front:Keeper_carried_front.seed option
   -> turn_start:Keeper_carried_front.turn_start
   -> counted_tokens:int option
   -> Agent_core.Types.message list
   -> carried
-(** The pure arithmetic, for tests: {!Runtime_model_input_tail_window.project_from_atom}
-    from the seeded front, once {!Keeper_carried_front.for_history} admits it
-    against this history (the index opens with the seed's message); without
-    one, or with one it drops, from [turn_start]: the end of the last
-    completed turn on this history (RFC keeper-context-window-in-tokens
-    §13.4), or the newest atom alone when that boundary is unknown. *)
+(** The pure arithmetic: {!Keeper_turn_driver_try_provider.choose_range_start}
+    over these values, projected by
+    {!Keeper_turn_driver_try_provider.project_range_start}. [counted_tokens]
+    rides along only when the range opens on [front]. *)
 
 
 type composition =

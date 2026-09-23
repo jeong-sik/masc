@@ -383,6 +383,68 @@ let test_an_empty_memory_page_uses_the_shared_notes () =
   check bool "the body leaves the fleet key to the footer" false
     (contains "Fleet Memory Search" (lines unread))
 ;;
+let make_fleet_health keeper : Decode.memory_health_snapshot =
+  { mhs_generated_at = 1000.0
+  ; mhs_keepers = [ keeper ]
+  ; mhs_refused_keepers = []
+  ; mhs_total_facts = 10
+  ; mhs_total_observed_facts = 10
+  ; mhs_total_derived_facts = 0
+  ; mhs_total_support_invalidations = 0
+  ; mhs_total_snapshot_bytes = 1024
+  ; mhs_total_source_facts = 0
+  ; mhs_total_source_invalidations = 0
+  ; mhs_total_source_snapshot_bytes = 0
+  ; mhs_total_librarian_failures = 0
+  ; mhs_total_librarian_unread_turns = Some 0
+  ; mhs_total_librarian_continuity_unread_atoms = 0
+  ; mhs_total_librarian_continuity_unmeasured = 0
+  ; mhs_total_vision_ingest_errors = 0
+  ; mhs_total_read_errors = 0
+  ; mhs_total_source_read_errors = 0
+  ; mhs_warn_alerts = 0
+  ; mhs_error_alerts = 0
+  ; mhs_starving_keepers = 0
+  }
+
+let rows_drawn ~cols ~budget state =
+  let count = ref 0 in
+  Render_memory.render_memory_body ~cols ~budget state
+    ~push:(fun _ -> incr count)
+    ~push_styled:(fun ~style:_ _ -> incr count)
+    ~push_selected:(fun _ -> incr count)
+    ~push_divider:(fun () -> incr count)
+    ~push_empty:(fun () -> incr count);
+  !count
+
+(* The fleet readings wrap, so the header takes more rows at a narrow width
+   than a fixed count could assume; the scroll bound now receives the real
+   length ([~header_rows]) instead of a guess, and the body has to draw inside
+   the budget that pays for them. A header that grows without the bound
+   following draws the list past the rows it was handed, and the keypress
+   bound then names rows the frame never drew -- the failure this file caught
+   when the wrapping landed without the counting (#36497). *)
+let test_memory_header_rows_come_out_of_the_budget () =
+  let state = make_state () in
+  let keeper =
+    make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024
+  in
+  state.memory_health <- Some (make_fleet_health keeper);
+  state.memory_health_cursor <- 0;
+  (* Without this the budget assertions below are vacuous: a header that never
+     wrapped would satisfy them while proving nothing. *)
+  check bool "the header takes more rows at 80 columns than at 140" true
+    (List.length (Render_memory.memory_fleet_header_rows ~cols:80 state)
+     > List.length (Render_memory.memory_fleet_header_rows ~cols:140 state));
+  List.iter
+    (fun cols ->
+      check bool
+        (Printf.sprintf "%d columns draws inside its budget" cols)
+        true
+        (rows_drawn ~cols ~budget:20 state <= 20))
+    [ 80; 100; 140 ]
+;;
+
 
 (* The filter bar names the filter its number is over.
 
@@ -532,10 +594,10 @@ let test_render_memory_body_with_keepers () =
   check bool "rows rendered" true (!count > 0 && !count <= 20)
 ;;
 
-(* RFC librarian-lifecycle §4.9: a continuity lag the server could not take
-   prints as "?", since zero is what a caught-up keeper shows, and the fleet
-   header carries the measured sum beside how many keepers it left out. *)
-let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
+(* A populated fleet: one keeper whose continuity lag the server could not
+   take, one that is three atoms behind. Every count in it is a single digit,
+   which is what makes the header's width the header's own doing. *)
+let fleet_health : Decode.memory_health_snapshot =
   let with_lag (keeper : Decode.memory_keeper_health) lag =
     { keeper with
       mkh_librarian = { keeper.mkh_librarian with Decode.mlh_continuity_unread_atoms = lag } }
@@ -566,21 +628,28 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
     ; mhs_starving_keepers = 0
     }
   in
-  (* The Librarian line is drawn for the selected keeper only, so each keeper
-     is read at its own cursor. *)
-  let render cursor =
-    let state = make_state () in
-    state.memory_health <- Some health;
-    state.memory_health_cursor <- cursor;
-    let lines = ref [] in
-    Render_memory.render_memory_body ~cols:100 ~budget:20 state
-      ~push:(fun line -> lines := line :: !lines)
-      ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
-      ~push_selected:(fun line -> lines := line :: !lines)
-      ~push_divider:(fun () -> ())
-      ~push_empty:(fun () -> ());
-    String.concat "\n" !lines
-  in
+  health
+
+(* The Librarian line is drawn for the selected keeper only, so each keeper
+   is read at its own cursor. *)
+let fleet_rows ~cols ~cursor =
+  let state = make_state () in
+  state.memory_health <- Some fleet_health;
+  state.memory_health_cursor <- cursor;
+  let lines = ref [] in
+  Render_memory.render_memory_body ~cols ~budget:20 state
+    ~push:(fun line -> lines := line :: !lines)
+    ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
+    ~push_selected:(fun line -> lines := line :: !lines)
+    ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  List.rev !lines
+
+(* RFC librarian-lifecycle §4.9: a continuity lag the server could not take
+   prints as "?", since zero is what a caught-up keeper shows, and the fleet
+   header carries the measured sum beside how many keepers it left out. *)
+let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
+  let render cursor = String.concat "\n" (fleet_rows ~cols:100 ~cursor) in
   let both = render 0 ^ "\n" ^ render 1 in
   check bool "an unmeasured lag prints as a question, not as zero" true
     (contains "continuity behind ?" both);
@@ -593,6 +662,65 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
     (contains "1 keeper not measured" both);
   check bool "and a count that is not one keeps the plural" true
     (contains "3 atoms behind" both)
+;;
+
+(* #36497. The fleet header is the block above the sort row, and it used to be
+   one line carrying both subjects: 176 cells with every count a single digit,
+   against the 96 the frame gives at the 100 columns the PTY harness opens. It
+   did not fit at 140 either. The frame cut it mid-word, and what it cut away
+   was "since server start" -- the phrase that says the failure count restarts
+   with the server -- so "0 failures" read as a running total.
+
+   Scoped to the header rows on purpose: the rows below are the grid's, and a
+   width check that swept the whole surface would fail for someone else's
+   reasons. *)
+let fleet_header_rows ~cols =
+  let rows = fleet_rows ~cols ~cursor:0 |> List.map Masc_tui_theme.strip_sgr in
+  let rec above = function
+    | [] -> []
+    | row :: _ when contains "Sort [s]:" row -> []
+    | row :: rest -> row :: above rest
+  in
+  above rows
+
+let test_the_fleet_header_fits_the_frame_it_is_drawn_in () =
+  List.iter
+    (fun cols ->
+      let inner = Masc_tui_frame.inner_width ~cols in
+      List.iter
+        (fun row ->
+          let width = Layout.display_width row in
+          if width > inner then
+            failf "at %d columns a header row of %d cells does not fit %d: %s"
+              cols width inner row)
+        (fleet_header_rows ~cols))
+    [ 80; 100; 110; 120; 140 ]
+;;
+
+let test_the_header_keeps_each_count_with_the_phrase_that_dates_it () =
+  List.iter
+    (fun cols ->
+      let rows = fleet_header_rows ~cols in
+      List.iter
+        (fun clause ->
+          check bool
+            (Printf.sprintf "%d columns keeps %S whole on one row" cols clause)
+            true
+            (List.exists (fun row -> contains clause row) rows))
+        [ "0 failures since server start"
+        ; "3 atoms behind in continuity (1 keeper not measured)"
+        ; "0 support invalidations"
+        ])
+    [ 80; 100; 110; 120; 140 ]
+;;
+
+(* The row count is the price this pays, and it is worth pinning: a wider
+   frame spends fewer rows on the header, and the harness default spends one
+   more than a wide terminal does. *)
+let test_a_wider_frame_spends_fewer_rows_on_the_header () =
+  let rows cols = List.length (fleet_header_rows ~cols) in
+  check bool "140 columns is not worse than 100" true (rows 140 <= rows 100);
+  check bool "100 columns is not worse than 80" true (rows 100 <= rows 80)
 ;;
 
 (* How the last pass ended and what the journal last failed with are drawn
@@ -837,6 +965,88 @@ let test_the_row_badge_says_what_the_store_says () =
   (* A word wider than the cell keeps the cell's width and says it was cut. *)
   check bool "a long one is cut with its mark" true
     (contains "[VALIDATED\xe2\x80\xa6]" (line (fact_row Cat.Validated_approach)))
+;;
+
+(* Every badge this cell can draw has to be told apart from every other one.
+
+   The cell is ten cells wide and cuts what runs past it, which was the right
+   shape while the category was a wire string nobody could enumerate. It is a
+   closed set of eight now, plus the pane's own two words, and two of the ten
+   are longer than the cell: [CODE_CHANGE] draws as "CODE_CHAN..." and
+   [VALIDATED_APPROACH] as "VALIDATED...". Nothing collides today, and this
+   is what says so -- a category added later whose first nine characters
+   repeat another's would draw the same cell for two different things, which
+   is the whole job of the column.
+
+   Walked from [all_categories], so a ninth is measured without this file
+   changing. *)
+let test_every_badge_this_cell_draws_is_its_own () =
+  let fact_row (category : Cat.category) : Types.memory_fact_row =
+    Types.Memory_row_fact
+      { Decode.mf_claim = "a claim of a fixed length"
+      ; mf_category = category
+      ; mf_origin = "authored"
+      ; mf_first_seen = 100.0
+      ; mf_last_seen = 200.0
+      ; mf_memory_id = "mem-1"
+      ; mf_events = Decode.no_memory_fact_events
+      }
+  in
+  let source_row : Types.memory_fact_row =
+    Types.Memory_row_source_fact
+      { Decode.msf_claim = "a claim of a fixed length"
+      ; msf_first_seen = 100.0
+      ; msf_path = "docs/x.md"
+      ; msf_sha256 = "abc"
+      }
+  in
+  let dropped_row : Types.memory_fact_row =
+    Types.Memory_row_invalidation
+      { Decode.mi_source_path = "docs/x.md"
+      ; mi_invalidated_at = 100.0
+      ; mi_reason = "gone"
+      }
+  in
+  (* The badge is the bracketed head of the row, which every row draws before
+     anything that varies between them. *)
+  let badge row =
+    let line =
+      Masc_tui_theme.strip_sgr
+        (Render_memory.memory_fact_row_line ~cols:120 row)
+    in
+    match String.index_opt line '[' with
+    | None -> Alcotest.failf "a memory row drew no badge: %S" line
+    | Some open_at -> (
+        match String.index_from_opt line open_at ']' with
+        | None -> Alcotest.failf "a memory row's badge never closed: %S" line
+        | Some close_at ->
+            String.sub line open_at (close_at - open_at + 1))
+  in
+  let named =
+    List.map (fun category ->
+        (Cat.category_to_string category, badge (fact_row category)))
+      Cat.all_categories
+    @ [ ("source", badge source_row); ("dropped", badge dropped_row) ]
+  in
+  List.iter
+    (fun (name, drawn) ->
+      List.iter
+        (fun (other_name, other_drawn) ->
+          if name <> other_name && String.equal drawn other_drawn then
+            Alcotest.failf "%s and %s draw the same badge %S" name other_name
+              drawn)
+        named)
+    named;
+  (* And the cell keeps its width whatever it holds, or the columns beside it
+     would move from row to row. *)
+  List.iter
+    (fun (name, drawn) ->
+      (* Cells, not bytes: the cut labels end in an ellipsis that spends one
+         cell and three bytes. *)
+      check int
+        (Printf.sprintf "%s takes the cell's width" name)
+        12 (Layout.display_width drawn))
+    named
 ;;
 
 (* Only [Blocker] is dressed. It is the one category whose name is an alarm,
@@ -1382,7 +1592,12 @@ let test_render_memory_overflow_selection () =
     ; mhs_error_alerts = 0
     ; mhs_starving_keepers = 0
     };
-  let rows = 24 in
+  (* The fleet header is as many rows as the frame wraps it to, and the list
+     gets what is left; pin the rows the header takes at 100 columns so the
+     list heights below stay the case this test is about. *)
+  let rows =
+    22 + List.length (Render_memory.memory_fleet_header_rows ~cols:100 state)
+  in
   let budget = rows - Masc_tui_frame.chrome_rows in
   let height layout =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.Types.sc_chrome
@@ -1390,7 +1605,7 @@ let test_render_memory_overflow_selection () =
       ~overflow_takes_row:layout.sc_overflow_takes_row
   in
   check int "five keepers fit two list rows beside their context" 2
-    (height (Types.memory_overview_scrolled state));
+    (height (Render_memory.memory_overview_scrolled ~cols:100 state));
   let assert_selected_visible () =
     let used = ref 0 and selected = ref None in
     let push _ = incr used in
@@ -1407,7 +1622,7 @@ let test_render_memory_overflow_selection () =
   (* Move through an overflowing list using the same target-row layout as
      keyboard input, including the context of the newly selected keeper. *)
   for cursor = 0 to 4 do
-    let layout = Types.memory_overview_scrolled ~cursor state in
+    let layout = Render_memory.memory_overview_scrolled ~cols:100 ~cursor state in
     state.memory_health_cursor <- cursor;
     state.memory_health_scroll <-
       Masc_tui_scroll.ensure_visible ~cursor ~height:(height layout)
@@ -1415,11 +1630,11 @@ let test_render_memory_overflow_selection () =
     assert_selected_visible ()
   done;
   check int "the final row's error and alert leave one list row" 1
-    (height (Types.memory_overview_scrolled state));
+    (height (Render_memory.memory_overview_scrolled ~cols:100 state));
   check int "the final row requires scrolling" 4 state.memory_health_scroll;
   state.search_last <- "keeper-4";
   state.memory_health_error <- Some "refresh failed";
-  let layout = Option.get (Types.scrolled_surface state Types.Memory) in
+  let layout = Render_memory.memory_overview_scrolled ~cols:100 state in
   check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
   check (option (list string)) "search names the same filtered row"
     (Some ["keeper-4 read-error"]) (Types.surface_row_texts state Types.Memory);
@@ -1535,6 +1750,8 @@ let () =
         ] )
     ; ( "render_body"
       , [ test_case "memory_body_budget" `Quick test_render_memory_body
+        ; test_case "header rows come out of the budget" `Quick
+            test_memory_header_rows_come_out_of_the_budget
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
         ; test_case "the filter bar names the query it counted" `Quick
             test_the_memory_filter_bar_names_the_query_it_counted
@@ -1542,6 +1759,12 @@ let () =
             test_the_fact_filter_bar_names_the_query_it_counted
         ; test_case "the librarian line says when the continuity lag is unknown" `Quick
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
+        ; test_case "the fleet header fits the frame it is drawn in" `Quick
+            test_the_fleet_header_fits_the_frame_it_is_drawn_in
+        ; test_case "the header keeps each count with the phrase that dates it"
+            `Quick test_the_header_keeps_each_count_with_the_phrase_that_dates_it
+        ; test_case "a wider frame spends fewer rows on the header" `Quick
+            test_a_wider_frame_spends_fewer_rows_on_the_header
         ; test_case "the librarian line speaks the pass ending and its cause" `Quick
             test_the_librarian_line_speaks_the_pass_ending_and_its_cause
         ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting
@@ -1572,6 +1795,8 @@ let () =
             test_the_category_row_is_the_shared_strip
         ; test_case "the narrowest body spends its row on the sort" `Quick
             test_the_narrowest_body_spends_its_row_on_the_sort
+        ; test_case "every badge this cell draws is its own" `Quick
+            test_every_badge_this_cell_draws_is_its_own
         ; test_case "the row badge says what the store says" `Quick
             test_the_row_badge_says_what_the_store_says
         ; test_case "only the alarm category is dressed" `Quick

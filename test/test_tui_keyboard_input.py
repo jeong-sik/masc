@@ -10515,6 +10515,7 @@ def standalone_lane_fixture(
         "last_outcome": "succeeded",
         "p50_elapsed_s": 8.0,
         "selected_slots": [{"slot_id": "glm-coding.glm-5-turbo", "count": 12}],
+        "runs_without_slot": {"vendor_system_one": 0, "server_restarted": 0, "no_slot": 0},
     }
     if lane_id == "board_attention_exact":
         row["jev"] = {"state": "off"}
@@ -11450,6 +11451,209 @@ def keeper_gate_mode_footer_interaction(
         os.write(master_fd, b"q")
 
     return interact
+
+CONNECTORS_PATH = "/api/v1/gate/connectors"
+CONNECTOR_NAMES_PATH = "/api/v1/gate/connector/names"
+CONNECTOR_UNBIND_PATH = "/api/v1/gate/connector/unbind"
+
+
+def connector_unbind_all_fixtures(
+    requests: HttpRequests | None = None,
+) -> HttpFixtures:
+    """alpha holds two Discord channels, beta one; one of alpha's is rebound.
+
+    The name directory knows 111 only, so the other channel has to say its
+    name is unknown. The unbind answers 409 for 333 -- the server's reply when
+    the channel now names another Keeper -- so the result has a skip in it.
+    """
+    fixtures = keeper_runtime_http_fixtures()
+
+    def connectors() -> HttpResponse:
+        # With [requests], a removed binding leaves the list once its unbind
+        # was answered 200 -- the reading the post-unbind reload must show.
+        removed = {
+            json.loads(body)["channel_id"]
+            for path, body in (requests or [])
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        } - {"333"}
+        bindings = [
+            {"channel_id": channel, "keeper_name": keeper}
+            for channel, keeper in (("111", "alpha"), ("444", "beta"), ("333", "alpha"))
+            if channel not in removed
+        ]
+        return (
+            200,
+            {
+                "connectors": [
+                    {
+                        "connector_id": "discord",
+                        "display_name": "Discord",
+                        "status": "connected",
+                        "available": True,
+                        "connected": True,
+                        "configured_bindings": bindings,
+                    }
+                ],
+                "total": 1,
+                "active_count": 1,
+            },
+        )
+
+    fixtures[CONNECTORS_PATH] = connectors
+    fixtures[CONNECTOR_NAMES_PATH] = (
+        200,
+        {
+            "connector_id": "discord",
+            "kind": "channel",
+            "mapping_scope": "workspace",
+            "path": "connector_names/discord/channel",
+            "total": 1,
+            "has_more": False,
+            "mappings": [{"id": "111", "name": "general"}],
+        },
+    )
+
+    def unbind(body: bytes) -> HttpResponse:
+        channel = json.loads(body).get("channel_id")
+        if channel == "333":
+            return (409, {"error": "binding changed"})
+        return (200, {"ok": True})
+
+    fixtures[CONNECTOR_UNBIND_PATH] = RequestHttpResponse(unbind)
+    return fixtures
+
+
+def run_keeper_unbind_all_channels_regression(executable: str) -> None:
+    """U twice on the Channels tab removes every binding of that Keeper.
+
+    #38167: the tab removed one binding per two presses, so five channels
+    took ten presses and five selections. The first U names what it will
+    remove; the second sends one conditional unbind per binding and reports
+    each answer. beta's binding is not sent at all.
+    """
+    requests: HttpRequests = []
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
+        # [ from Info wraps to Runs; Channels is two further back.
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Runs")
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Automation")
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Channels")
+        wait_for_output(process, master_fd, output, b"333 (name unknown)",
+                        start=0, timeout=5.0)
+        drain_until_quiet(process, master_fd, output)
+        listed = screen_text(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        if b"general (111)" not in listed:
+            raise AssertionError(
+                f"the binding list did not name channel 111: {listed!r}"
+            )
+        send_and_wait(process, master_fd, output, b"U",
+                      b"unbind all armed: press U again")
+        if any(path.startswith(CONNECTOR_UNBIND_PATH) for path, _ in requests):
+            raise AssertionError(f"the first U sent an unbind: {requests!r}")
+        send_and_wait(process, master_fd, output, b"U",
+                      b"unbind all of alpha: 1 removed, 1 kept, 0 not found, 0 failed")
+        sent = sorted(
+            (json.loads(body)["channel_id"], json.loads(body)["keeper_name"])
+            for path, body in requests
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        )
+        if sent != [("111", "alpha"), ("333", "alpha")]:
+            raise AssertionError(
+                f"unbind all did not send exactly alpha's two bindings: {sent!r}"
+            )
+        # The pane reads the bindings again after the write: 111 is gone and
+        # 333, kept by the 409, is still alpha's.
+        wait_for_output(process, master_fd, output, b"1 here / 2 total",
+                        start=0, timeout=5.0)
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="U U on the Channels tab unbinds every binding of the Keeper",
+        interact=interact,
+        http_fixtures=connector_unbind_all_fixtures(requests),
+        http_requests=requests,
+    )
+
+
+def run_pause_offers_channel_unbind_regression(executable: str) -> None:
+    """Pausing a Keeper that holds bindings offers to remove them, once.
+
+    #38167: a paused Keeper still routes its Discord channels to itself and
+    answers on them as soon as it runs again. After the pause is accepted the
+    footer names the channels and the one key that removes them. y takes the
+    offer; any other key leaves the bindings. U is not that key: on the list
+    it opens the runtime picker, and "pause, then pick another runtime" must
+    not remove the Keeper's channels.
+    """
+
+    def pause_alpha(process: subprocess.Popen[bytes], master_fd: int,
+                    output: bytearray) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        # Pause is not a two-press action; one p sends it.
+        send_and_wait(process, master_fd, output, b"p",
+                      b"y: also unbind alpha's 2 channels")
+
+    def unbinds(requests: HttpRequests) -> list[tuple[str, str]]:
+        return sorted(
+            (json.loads(body)["channel_id"], json.loads(body)["keeper_name"])
+            for path, body in requests
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        )
+
+    def fixtures() -> HttpFixtures:
+        served = connector_unbind_all_fixtures()
+        served["/api/v1/keepers/alpha/directive"] = (200, {"ok": True})
+        return served
+
+    taken: HttpRequests = []
+
+    def take_offer(process: subprocess.Popen[bytes], master_fd: int,
+                   _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        pause_alpha(process, master_fd, output)
+        send_and_wait(process, master_fd, output, b"y",
+                      b"unbind all of alpha: 1 removed, 1 kept, 0 not found, 0 failed")
+        if unbinds(taken) != [("111", "alpha"), ("333", "alpha")]:
+            raise AssertionError(
+                f"the offer did not send exactly alpha's two bindings: {unbinds(taken)!r}"
+            )
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="y after a pause removes the paused Keeper's channel bindings",
+        interact=take_offer,
+        http_fixtures=fixtures(),
+        http_requests=taken,
+    )
+
+    declined: HttpRequests = []
+
+    def decline_offer(process: subprocess.Popen[bytes], master_fd: int,
+                      _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        pause_alpha(process, master_fd, output)
+        # U straight after the offer is the runtime picker, not a yes.
+        send_and_wait(process, master_fd, output, b"U", b"\xe2\x96\xb8 runtime")
+        if unbinds(declined):
+            raise AssertionError(
+                f"a declined offer still sent unbinds: {unbinds(declined)!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="U after a pause opens the runtime picker and keeps the bindings",
+        interact=decline_offer,
+        http_fixtures=fixtures(),
+        http_requests=declined,
+    )
+
 
 def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
     """Beside the acting pane the row is 92 cells; a strip wider than that
@@ -13543,8 +13747,9 @@ def fusion_live_reload_interaction(
 
 
 # The hook's per-call observation names the keeper turn (total_turns + 1)
-# the session-numbered call below belongs to; without it the row would say
-# "turn ?". The session ordinal (7) and the keeper turn (42) differ, so a
+# the session-numbered call below belongs to; without it the row would name
+# the turn with no number. The session ordinal (7) and the keeper turn (42)
+# differ, so a
 # needle can tell which of the two numbers a row drew.
 OBSERVER_TOOL_CALLED_FRAME = (
     b"id: 1\n"
@@ -14045,6 +14250,86 @@ def unread_keeper_briefing() -> HttpResponse:
     )
 
 
+def pull_requests_briefing() -> HttpResponse:
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-23T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [
+                {"name": "k-author", "phase": "running", "last_turn_ago_s": 30}
+            ],
+            "keepers_unread": [],
+        },
+    )
+
+
+def pull_request_row(number: int, keeper: str | None, mergeable: str) -> dict[str, object]:
+    return {
+        "repo_slug": "jeong-sik/masc",
+        "number": number,
+        "title": f"pull {number}",
+        "head_branch": f"fix/{number}",
+        "draft": False,
+        "checks": "passing",
+        "review": "waiting",
+        "mergeable": mergeable,
+        "author": keeper if keeper is not None else "someone-else",
+        "keeper": keeper,
+        "updated_at": "2026-09-23T00:00:00Z",
+    }
+
+
+def repository_pulls_fixture() -> HttpResponse:
+    # RFC-0465 §2.1: #11 is the Keeper's by last commit author; #12 is by
+    # nobody the Keeper list names and cannot merge.
+    return (
+        200,
+        {
+            "reader": {"state": "ready", "keeper": "pr-updater"},
+            "repositories_error": None,
+            "keepers": {"state": "listed"},
+            "repositories": [
+                {
+                    "repository_id": "masc",
+                    "pulls": {
+                        "state": "read",
+                        "undecodable": 0,
+                        "pulls": [
+                            pull_request_row(11, "k-author", "mergeable"),
+                            pull_request_row(12, None, "conflicting"),
+                        ],
+                    },
+                }
+            ],
+        },
+    )
+
+
+def pull_requests_on_overview_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        for needle in (b"1 conflicting", b"1 not by a Keeper", b"#11"):
+            wait_for_output(process, master_fd, output, needle, start=0, timeout=10.0)
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def unread_keeper_counted_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -14510,6 +14795,8 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures=enter_split_fixtures,
     )
     run_tab_strip_keeps_current_entry_regression(executable)
+    run_keeper_unbind_all_channels_regression(executable)
+    run_pause_offers_channel_unbind_regression(executable)
     run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
@@ -14650,6 +14937,15 @@ def run_keyboard_regression(executable: str) -> None:
         interact=attention_drawn_once_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Pull requests on Overview",
+        interact=pull_requests_on_overview_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": pull_requests_briefing(),
+            "/api/v1/repositories/pulls": repository_pulls_fixture(),
         },
     )
     run_terminal_scenario(
@@ -16553,10 +16849,14 @@ def run_schedule_source_status_regression(executable: str) -> None:
                     "pty": base64.b64encode(zlib.compress(captured[start:end])).decode(),
                 }), flush=True)
 
+            # Wait on "HTTP 503", the error the Schedules pane draws, not a bare
+            # "503": the palette footer prints the fixture server's random port,
+            # and RC run 35815189729 drew "Port: 35039", so the bare needle matched
+            # the palette frame before Schedules ever rendered.
             palette_go(process, master_fd, output, b"go schedules",
-                       b"503" if initial_error else b"status:running")
+                       b"HTTP 503" if initial_error else b"status:running")
             if initial_error:
-                screen = require("data unreliable:", "schedule load failed:", "503")
+                screen = require("data unreliable:", "schedule load failed:", "HTTP 503")
                 for absent in (b"Requests: 0", b"no scheduled automation", b"schedule-proof-701"):
                     if absent in screen:
                         raise AssertionError(f"Failed initial source invented data: {screen!r}")
@@ -16573,23 +16873,23 @@ def run_schedule_source_status_regression(executable: str) -> None:
                         f"the schedule count and its next wake split rows: {summary_row!r}"
                     )
                 fail_reads.set()
-                send_and_wait(process, master_fd, output, b"r", b"503")
-                require("이전 조회 유지 ·", "503", "schedule-proof-701",
+                send_and_wait(process, master_fd, output, b"r", b"HTTP 503")
+                require("이전 조회 유지 ·", "HTTP 503", "schedule-proof-701",
                         "status:running", "Requests: 1")
                 evidence("retained-list-refresh-failed")
                 send_and_wait(process, master_fd, output, b"\x1b[C", b"instance-proof-701")
-                require("이전 조회 유지 ·", "503", "instance-proof-701")
+                require("이전 조회 유지 ·", "HTTP 503", "instance-proof-701")
                 # The warning belongs to the source, so it remains visible
                 # while the retained detail body is scrolled.
                 send_and_wait(process, master_fd, output, b"\x1b[6~", b"DELIVERY EVIDENCE")
-                require("이전 조회 유지 ·", "503")
+                require("이전 조회 유지 ·", "HTTP 503")
                 send_and_wait(process, master_fd, output, b"\x1b[D", b"status:running")
 
             recovered_reads.set()
             fail_reads.clear()
             send_and_wait(process, master_fd, output, b"r", b"recovered-keeper")
             screen = require("status:scheduled", "Requests: 1", "schedule-proof-701")
-            for absent in ("조회 실패:", "갱신 실패:", "503", "status:running"):
+            for absent in ("조회 실패:", "갱신 실패:", "HTTP 503", "status:running"):
                 if absent.encode() in screen:
                     raise AssertionError(f"Recovered source retained old status: {screen!r}")
             evidence("source-recovered")

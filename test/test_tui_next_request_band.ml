@@ -271,7 +271,13 @@ let test_the_turn_start_and_refusal_fronts_say_why () =
        (with_origin (Inspector.Carried_evicted_after_refusal { retry = 3 })));
   Alcotest.(check bool) "a refused seed range" true
     (says "the seed range was refused: front moved to where this turn began"
-       (with_origin Inspector.Carried_turn_start_after_seed_refusal))
+       (with_origin Inspector.Carried_turn_start_after_seed_refusal));
+  Alcotest.(check bool) "a fitting snapshot" true
+    (says "the Librarian's working state stands in for the atoms before 3100 (boundary line 42)"
+       (with_origin (Inspector.Carried_librarian_snapshot { end_atom = 3100; boundary_line = 42 })));
+  Alcotest.(check bool) "the Librarian's read position" true
+    (says "the Librarian has read up to atom 3100; nothing is sent in place of those atoms"
+       (with_origin (Inspector.Carried_librarian_progress { end_atom = 3100 })))
 
 let test_a_refused_seed_origin_decodes () =
   let json =
@@ -360,6 +366,50 @@ let test_a_turn_start_origin_decodes () =
      when String.equal reason "boundary read failed: fixture" -> ()
    | Ok _ -> Alcotest.fail "the unknown turn start origin lost its reason"
    | Error detail -> Alcotest.fail ("the unknown turn start origin decodes: " ^ detail));
+  let with_origin origin =
+    Yojson.Safe.from_string
+      (Printf.sprintf
+         {|{"schema":"masc.keeper.next-request-forecast.v5","checkpoint_messages":1,"wake_line_bytes":1,
+            "walk":{"lane_id":"r","declared":["r"]},
+            "candidates":[{"runtime_id":"r","lane":{"agent_core":true},"marks":null,
+              "parts":{"error":"not measured"},"history_atoms":4,
+              "carried":{"first_atom":2,"kept_atoms":2,"transmitted_bytes":300,"preamble_bytes":null,
+                         "origin":%s,"counted_tokens":null},
+              "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
+         origin)
+  in
+  (match
+     Inspector.decode_forecast
+       (with_origin {|{"kind":"librarian_snapshot","end_atom":2,"boundary_line":7}|})
+   with
+   | Ok
+       { candidates =
+           [ { carried =
+                 Some
+                   { origin =
+                       Inspector.Carried_librarian_snapshot { end_atom = 2; boundary_line = 7 }
+                   ; _
+                   }
+             ; _
+             }
+           ]
+       ; _
+       } -> ()
+   | Ok _ -> Alcotest.fail "the snapshot origin lost its position"
+   | Error detail -> Alcotest.fail ("the snapshot origin decodes: " ^ detail));
+  (match
+     Inspector.decode_forecast (with_origin {|{"kind":"librarian_progress","end_atom":2}|})
+   with
+   | Ok
+       { candidates =
+           [ { carried = Some { origin = Inspector.Carried_librarian_progress { end_atom = 2 }; _ }
+             ; _
+             }
+           ]
+       ; _
+       } -> ()
+   | Ok _ -> Alcotest.fail "the read-position origin lost its atom"
+   | Error detail -> Alcotest.fail ("the read-position origin decodes: " ^ detail));
   let without_atom =
     Yojson.Safe.from_string
       {|{"schema":"masc.keeper.next-request-forecast.v5","checkpoint_messages":1,"wake_line_bytes":1,

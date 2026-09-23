@@ -271,8 +271,6 @@ type keeper_call = {
           Never [Recorded_malformed]: the decoder refuses that row. *)
   kc_duration_ms : float option;
   kc_turn : int option;
-  kc_task_id : string option;
-  kc_model : string option;
   kc_execution_id : string option;
       (** Canonical physical execution identity. Chat tool activity joins to
           this field only; timestamps, names, and list positions never join. *)
@@ -290,7 +288,6 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;  (** in the server's order, newest last *)
-  kcs_count : int;
   kcs_health : string;  (** the server's own freshness verdict, verbatim *)
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
@@ -487,6 +484,16 @@ type effective_skill_profile = {
   esp_flow : skill_flow option;
 }
 
+type configured_skill_name_unavailable = {
+  csn_name : string;
+  csn_reason : string option;
+}
+(** A Skill name the Keeper profile selected that the turn's catalog does not
+    hold. Not a read failure, so it is a different fact from
+    [ets_skills_left_out]. [csn_reason] is the producer's word for why, and it
+    is [None] when the producer sent none rather than a word this reader made
+    up. *)
+
 type effective_tool_surface =
   | Effective_surface_available of {
       ets_keeper_name : string;
@@ -502,6 +509,10 @@ type effective_tool_surface =
          can call, and absence with no reason reads as a skill nobody
          wrote. *)
       ets_skills_left_out : string list;
+      (* Names the profile selected and the turn catalog does not carry. The
+         dashboard draws these under "Unavailable Skills"; the TUI reads the
+         same list so both renderers of this surface say it. *)
+      ets_unavailable_skill_names : configured_skill_name_unavailable list;
       ets_composition_skills : Skill_reference.t list;
       ets_skill_profiles : effective_skill_profile list;
       ets_tool_surface_bytes : int;
@@ -1196,7 +1207,6 @@ type harness_calibration = {
 
 type harness_overview = {
   hov_evaluator_status : string;
-  hov_last_signal_at : float option;
 }
 
 type harness_snapshot = {
@@ -1262,7 +1272,10 @@ type verification_snapshot = {
   vs_truncated : bool;  (** A further page exists. *)
   vs_awaiting_unresolved : string list;
       (** Request ids the backlog waits on that name no record. A task holding
-          one of these is waiting on something that is not there. *)
+          one of these is waiting on something that is not there. One page of
+          them: the server cuts the list at the request's limit. *)
+  vs_awaiting_unresolved_total : int;
+      (** How many such ids there are in all, which the page may not hold. *)
   vs_backlog_error : string option;
       (** Why the queue could not be resolved. An empty list carrying this is
           not an empty queue. *)
@@ -1448,6 +1461,16 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_runs_without_slot = {
+  slws_vendor_system_one : int;
+  slws_server_restarted : int;
+  slws_no_slot : int;
+}
+(** The lane's finished runs that name no slot, by why: Vendor System One
+    answered a Board Attention run before any slot was bound, a restart
+    closed the run on replay, or it finished before a slot was bound. With
+    the slot counts they add up to the finished runs. *)
+
 type standalone_lane_jev_destination = {
   sljd_destination_uri : string;
   sljd_model : string;
@@ -1493,6 +1516,7 @@ type standalone_lane = {
   sl_last_outcome : string option;
   sl_p50_elapsed_s : float option;
   sl_selected_slots : standalone_lane_slot_count list;
+  sl_runs_without_slot : standalone_lane_runs_without_slot;
 }
 
 type standalone_lanes_snapshot = {
@@ -1505,7 +1529,9 @@ type standalone_lanes_snapshot = {
 
 val standalone_lane_status_to_string : standalone_lane_status -> string
 
-val standalone_lane_configuration_to_string :
+(** The configuration clause of the lane detail line, subject included where
+    the state needs one. The caller writes no noun of its own. *)
+val standalone_lane_configuration_phrase :
   standalone_lane_configuration -> string
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
@@ -2012,7 +2038,6 @@ type gate_rule = {
   gr_tool : string;
   gr_fingerprint : string;
   gr_created_at : float;
-  gr_created_by : string option;
   gr_expires_at : float option;
 }
 
@@ -2177,7 +2202,6 @@ type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
   sgc_minor_heap_size : int;
-  sgc_space_overhead : int;
   sgc_minor_collections : int;
   sgc_major_collections : int;
   sgc_compactions : int;
@@ -3292,3 +3316,18 @@ val sgr_left_release : string -> char -> (int * int) option
 (** Plain SGR left release position for screenshot click/drag gestures. *)
 
 val keeper_of_declaration : Keeper_declared_roster.t -> keeper
+
+type schedule_runner_hold =
+  { srh_occurrence_id : string
+      (** The occurrence the schedule runner held back on its newest tick. *)
+  ; srh_due_at_iso : string
+      (** When that occurrence came due. *)
+  }
+(** A schedule the runner is holding because its target Keeper has not yet
+    taken the previous occurrence. The server reads it from the same runner
+    status [/health] reports as [schedule_runner.held]. *)
+
+val decode_schedule_runner_hold :
+  Yojson.Safe.t -> (schedule_runner_hold option, string) result
+(** Reads a schedule row's [runner_hold]. [null] or an absent field is a
+    schedule the runner is not holding; an object must carry both fields. *)

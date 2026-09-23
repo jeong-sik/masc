@@ -967,6 +967,12 @@
  (libraries masc))
 
 (library
+ (name masc_tui_connector_unbind)
+ (wrapped false)
+ (modules masc_tui_connector_unbind)
+ (libraries masc masc_tui_ansi))
+
+(library
  (name masc_tui_keeper_mark)
  (wrapped false)
  (modules masc_tui_keeper_mark)
@@ -1092,6 +1098,14 @@
  (wrapped false)
  (modules masc_tui_fetched))
 
+;; A Keeper's Board-attention quarantine rows on its Info tab. Own library so
+;; the lines and the requeue target have a test that does not draw a screen.
+(library
+ (name masc_tui_board_quarantine)
+ (wrapped false)
+ (modules masc_tui_board_quarantine)
+ (libraries masc masc_tui_ansi masc_tui_fetched yojson))
+
 (library
  (name masc_tui_fork_guard)
  (wrapped false)
@@ -1210,6 +1224,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries digestif mtime.clock.os masc_tui_esc_interrupt masc_tui_planning_detail
+  masc_tui_connector_unbind
   ;; [sch_last_wake_status] is the schedule contract's wake_status.
   masc.masc_schedule
   masc_tui_answering
@@ -1241,6 +1256,7 @@
   masc_tui_ask_layout
   masc_tui_ask_projection
   masc_tui_board_detail
+  masc_tui_board_quarantine
   masc_tui_fetched
   masc_tui_attachment
   masc_tui_code_lexer
@@ -1521,6 +1537,14 @@
  (modules masc_tui_overview_team)
  (libraries masc masc_types masc_tui_types))
 
+;; RFC-0465: the Overview's pull request reading, decoder and lines. A
+;; library so a test can decode the server's own encoder output.
+(library
+ (name masc_tui_repository_pulls)
+ (wrapped false)
+ (modules masc_tui_repository_pulls)
+ (libraries unix masc masc_tui_types masc_tui_ansi yojson))
+
 (executable
  (name masc_tui)
  (modules
@@ -1531,6 +1555,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_repository_pulls
   digestif
   masc.string_util
   masc.keeper_runtime
@@ -1548,6 +1573,7 @@
   masc_tui_lane_declaration
   masc_tui_lane_table
   masc_tui_connector_state
+  masc_tui_connector_unbind
   masc_tui_fleet_line
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.
@@ -1644,6 +1670,7 @@
   masc_tui_command
   masc_tui_gate_text
   masc_tui_wire_age
+  masc_tui_board_quarantine
   masc_tui_text_block
   masc_tui_preset_text
   masc_tui_mcp

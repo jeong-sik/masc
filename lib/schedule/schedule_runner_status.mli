@@ -74,6 +74,16 @@ val record_tick_crash :
 
 val snapshot : unit -> snapshot
 
+val held_occurrence :
+  snapshot ->
+  schedule_instance_id:string ->
+  schedule_id:string ->
+  Schedule_runner.wake_signal option
+(** The occurrence of this schedule instance that the newest successful tick
+    held back, if it held one. The same [held] list [/health] reports, looked
+    up for one schedule row so a reader of the schedule list does not rebuild
+    the hold from the keeper queue. *)
+
 val snapshot_to_yojson :
   ?now:float -> ?stale_after_sec:float -> snapshot -> Yojson.Safe.t
 (** Render a stable JSON status. [stale_after_sec] is supplied by the caller

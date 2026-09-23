@@ -1438,6 +1438,12 @@ let fetch_operator_snapshot ~(host : string) ~(port : int) :
     ~path:"/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 
 (** GET /api/v1/runtime/resolved — runtimes and keeper assignments. *)
+(** GET /api/v1/repositories/pulls -- open pull requests of the registered
+    GitHub repositories (RFC-0465). *)
+let fetch_repository_pulls ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/repositories/pulls"
+
 let fetch_runtime_resolved ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/runtime/resolved"
@@ -2368,6 +2374,33 @@ let fetch_keeper_github_identity ~(host : string) ~(port : int)
       (Printf.sprintf "/api/v1/keepers/%s/github-identity"
          (percent_encode_path_segment keeper_name))
 
+let board_quarantines_path keeper_name =
+  Printf.sprintf "/api/v1/keepers/%s/board-attention/quarantines"
+    (percent_encode_path_segment keeper_name)
+
+(** GET /api/v1/keepers/:name/board-attention/quarantines — the Keeper's rows
+    of the Board-attention quarantine inventory. *)
+let fetch_keeper_board_quarantines ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:(board_quarantines_path keeper_name)
+
+(** POST /api/v1/keepers/:name/board-attention/quarantines/:partition/recovery
+    — the operator's requeue of one quarantined partition. The server takes
+    the actor from the credential; the body names only which quarantine
+    generation this press was made against. A 5xx here can mean the requeue
+    committed and its wake did not, so it is kept apart from a refusal. *)
+let post_board_quarantine_requeue ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(partition_id : string)
+    ~(request : Masc.Keeper_board_attention_quarantine_command.request) :
+    post_outcome =
+  post_json_outcome ~host ~port
+    ~path:
+      (board_quarantines_path keeper_name
+       ^ "/" ^ percent_encode_path_segment partition_id ^ "/recovery")
+    ~body:
+      (Yojson.Safe.to_string
+         (Masc.Keeper_board_attention_quarantine_command.request_to_json request))
+
 (** GET /api/v1/keepers/oauth/attached-tools — every declared service and
     what it currently offers this Keeper. *)
 let fetch_attached_tools ~(host : string) ~(port : int) ~(keeper_name : string) :
@@ -2700,6 +2733,32 @@ let post_connector_unbind ~(host : string) ~(port : int) ~(connector : string)
       (Printf.sprintf "/api/v1/gate/connector/unbind?name=%s"
          (percent_encode_path_segment connector))
     ~body:body_json
+
+(** The same route, conditional on the owner: the server removes the binding
+    only while it still names [target.keeper_name]. The reply is read by its
+    status, since 409 (rebound) and 404 (already gone) are answers the caller
+    reports differently from a failure. *)
+let post_connector_unbind_owned ~(host : string) ~(port : int)
+    (target : Masc_tui_connector_unbind.target) :
+    Masc_tui_connector_unbind.outcome =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "channel_id", `String target.channel_id
+        ; "keeper_name", `String target.keeper_name
+        ])
+  in
+  match
+    http_post ~headers:(auth_headers ()) ~host ~port
+      ~path:
+        (Printf.sprintf "/api/v1/gate/connector/unbind?name=%s"
+           (percent_encode_path_segment target.connector_id))
+      ~body
+  with
+  | Error detail -> Masc_tui_connector_unbind.Failed detail
+  | Ok (status_code, response) ->
+      Masc_tui_connector_unbind.outcome_of_status ~status:status_code
+        ~refusal:(refusal ~status_code ~body:response)
 
 (** One [resources/list] over the MCP endpoint, on an open session. *)
 let call_mcp_resources_list ~(host : string) ~(port : int)

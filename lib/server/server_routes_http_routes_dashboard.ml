@@ -561,11 +561,30 @@ type runtime_route_lane =
           ...). The "exact/" prefix keeps the name space disjoint from
           conversation-lane names. *)
 
+let exact_route_prefix = "exact/"
+
 let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
   | Runtime_media_failover -> "media_failover"
   | Runtime_named_lane lane_id -> lane_id
-  | Runtime_exact_lane lane -> "exact/" ^ Runtime.exact_lane_id lane
+  | Runtime_exact_lane lane -> exact_route_prefix ^ Runtime.exact_lane_id lane
+
+(* Which name space a route string belongs to, before anything is resolved.
+   Creating or renaming a lane asks only this: the name must land in the
+   conversation-lane space, whether or not a lane of that name exists yet. *)
+type route_name_space =
+  | Default_route
+  | Media_failover_route
+  | Exact_route of string
+  | Lane_route
+
+let route_name_space = function
+  | "default" -> Default_route
+  | "media_failover" -> Media_failover_route
+  | lane when String.starts_with ~prefix:exact_route_prefix lane ->
+    let prefix_length = String.length exact_route_prefix in
+    Exact_route (String.sub lane prefix_length (String.length lane - prefix_length))
+  | _ -> Lane_route
 
 (* A name is admitted when the runtime resolver knows it: a declared lane,
    whatever its name, or a configured runtime id. [resolve_assignment] answers
@@ -574,11 +593,11 @@ let runtime_route_lane_to_string = function
    names which name space the rest of the string belongs to, and the name must
    be one of the exact lanes the server runs ({!Runtime.exact_lane_of_id}), so
    a typo is refused here instead of becoming a table nothing reads. *)
-let parse_runtime_route_lane = function
-  | "default" -> Ok Runtime_default
-  | "media_failover" -> Ok Runtime_media_failover
-  | lane when String.length lane > 6 && String.equal (String.sub lane 0 6) "exact/" ->
-    let name = String.sub lane 6 (String.length lane - 6) in
+let parse_runtime_route_lane lane =
+  match route_name_space lane with
+  | Default_route -> Ok Runtime_default
+  | Media_failover_route -> Ok Runtime_media_failover
+  | Exact_route name ->
     (match Runtime.exact_lane_of_id name with
      | Some exact -> Ok (Runtime_exact_lane exact)
      | None ->
@@ -587,7 +606,7 @@ let parse_runtime_route_lane = function
             "unknown exact-output lane: %s (expected one of %s)"
             name
             (String.concat ", " (List.map Runtime.exact_lane_id Runtime.all_exact_lanes))))
-  | lane ->
+  | Lane_route ->
     (match Runtime.resolve_assignment lane with
      | `Lane _ -> Ok (Runtime_named_lane lane)
      | `Unavailable missing ->
@@ -693,14 +712,19 @@ let parse_set_route_body json lane =
         | Ok runtime_id -> Ok (Runtime_route_runtime_id (parsed_lane, runtime_id))))
 
 (* A new lane's name must not read as one of the other routes this endpoint
-   edits. A name the resolver does not know is what a create expects, so the
-   resolver's refusal is not an error here; whether the file already declares
-   the lane is decided under the write lock ({!Runtime.create_runtime_lane}). *)
+   edits, an exact/ name included: a lane created under it could never be
+   addressed again. Whether the file already declares the lane is decided
+   under the write lock ({!Runtime.create_runtime_lane}). *)
+let lane_name_of_new_name name =
+  match route_name_space name with
+  | Lane_route -> Ok name
+  | Default_route | Media_failover_route | Exact_route _ ->
+    Error (Printf.sprintf "%S names another route, not a lane" name)
+
 let parse_create_route_body json lane =
-  match parse_runtime_route_lane lane with
-  | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
-    Error (Printf.sprintf "%S names another route, not a lane" lane)
-  | Ok (Runtime_named_lane _) | Error _ ->
+  match lane_name_of_new_name lane with
+  | Error _ as err -> err
+  | Ok lane ->
     (match required_string_array_field json "runtime_ids" with
      | Error _ as err -> err
      | Ok runtime_ids -> Ok (Runtime_route_lane_created (lane, runtime_ids)))
@@ -714,11 +738,9 @@ let parse_rename_route_body json lane =
     (match required_string_field json "to" with
      | Error _ as err -> err
      | Ok new_lane_id ->
-       (match parse_runtime_route_lane new_lane_id with
-        | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
-          Error (Printf.sprintf "%S names another route, not a lane" new_lane_id)
-        | Ok (Runtime_named_lane _) | Error _ ->
-          Ok (Runtime_route_lane_renamed (lane_id, new_lane_id))))
+       (match lane_name_of_new_name new_lane_id with
+        | Error _ as err -> err
+        | Ok new_lane_id -> Ok (Runtime_route_lane_renamed (lane_id, new_lane_id))))
   | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
     Error (Printf.sprintf "%S names another route, not a lane" lane)
   | Error _ as err -> err
@@ -1314,7 +1336,7 @@ module For_testing = struct
   let lane_string = function
     | Runtime_default -> "default"
     | Runtime_media_failover -> "media_failover"
-    | Runtime_exact_lane exact -> "exact/" ^ Runtime.exact_lane_id exact
+    | Runtime_exact_lane exact -> exact_route_prefix ^ Runtime.exact_lane_id exact
     | Runtime_named_lane id -> id
 
   let parse_runtime_route_body body =
@@ -1333,12 +1355,12 @@ module For_testing = struct
     | Ok (Runtime_route_lane_renamed (lane_id, new_lane_id)) ->
         Ok (lane_id, "rename", [ new_lane_id ])
     | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->
-        Ok ("exact/" ^ Runtime.exact_lane_id exact, "append", [ runtime_id ])
+        Ok (exact_route_prefix ^ Runtime.exact_lane_id exact, "append", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_dropped (exact, runtime_id)) ->
-        Ok ("exact/" ^ Runtime.exact_lane_id exact, "drop", [ runtime_id ])
+        Ok (exact_route_prefix ^ Runtime.exact_lane_id exact, "drop", [ runtime_id ])
     | Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move)) ->
         Ok
-          ( "exact/" ^ Runtime.exact_lane_id exact
+          ( exact_route_prefix ^ Runtime.exact_lane_id exact
           , "move"
           , [ runtime_id
             ; (match move with
@@ -1690,11 +1712,16 @@ let handle_gate_retry_body state operator_name request reqd body_str =
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
 ;;
 
-let handle_gate_rule_delete_body state request reqd body_str =
+let handle_gate_rule_delete_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
     let base_path = (Mcp_server.workspace_config state).base_path in
-    match dashboard_gate_rule_delete_http_json ~base_path ~args with
+    match
+      dashboard_gate_rule_delete_http_json
+        ~base_path
+        ~deleted_by:operator_name
+        ~args
+    with
     | Ok json -> respond_json_value_with_cors request reqd json
     | Error message ->
       respond_json_value_with_cors
@@ -3073,9 +3100,9 @@ let add_routes ~sw ~clock router =
          request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/rules/delete" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _operator_name _req reqd ->
+         (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
-             (handle_gate_rule_delete_body state request reqd))
+             (handle_gate_rule_delete_body state operator_name request reqd))
          request reqd)
 
   |> Http.Router.get "/api/v1/operator" (fun request reqd ->

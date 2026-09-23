@@ -77,6 +77,12 @@ val overview_team_chrome_rows : int
 (** The Team block's title row and the divider under it, drawn only when
     [team_rows] is positive. *)
 
+val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allocation
+(** Adds up to [extra] Team rows out of [filler_rows] only: rows nothing else
+    on the Overview wanted. A Team block not yet drawn also pays its
+    {!overview_team_chrome_rows} from the filler, and gets nothing unless at
+    least one row is left after them. Every other count is unchanged. *)
+
 val allocate_overview :
   terminal_rows:int ->
   has_cluster:bool ->
@@ -103,7 +109,8 @@ type keeper_columns = {
 }
 (** Plain-text cell budgets for one roster row, in cells. *)
 
-val allocate_keeper_columns : inner_width:int -> keeper_columns
+val allocate_keeper_columns :
+  inner_width:int -> widest_runtime:int -> keeper_columns
 (** Divide the box's inner width across the roster columns. Columns drop from
     the right as the terminal narrows; the keeper's name and its status never
     drop. Above the minimum, slack goes to name and runtime before task. *)
@@ -593,3 +600,15 @@ val classify_wake_reading :
     (retained count, per-schedule ceiling) once the exact lookup answers.
     [Wake_last_only] is the row's single newest attempt while the list is in
     flight; it is not an empty history, and neither is a failed load. *)
+
+(** {1 Schedule hold reading} *)
+
+val schedule_hold_tag : due:string -> string
+(** The short form, for a line that also names the schedule and its status:
+    only since when the held occurrence has been due. It leads
+    {!schedule_hold_reading}, so the two cannot say different things. *)
+
+val schedule_hold_reading : due:string -> string
+(** What the Schedules screen says about a schedule the runner is holding:
+    since when its held occurrence has been due, and that it waits for the
+    target Keeper to take the previous wake. [due] is already formatted. *)

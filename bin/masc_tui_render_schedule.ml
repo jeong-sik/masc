@@ -262,6 +262,21 @@ let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
   in
   { attention_rows; team_rows; task_error_rows; task_rows; filler_rows }
 
+(* Detail lines under the Team block (a repository's pull requests) are worth
+   drawing but not worth a backlog row: they take only rows that would
+   otherwise be blank. *)
+let spend_spare_rows_on_team (allocation : overview_allocation) ~extra =
+  let chrome =
+    if allocation.team_rows > 0 then 0 else overview_team_chrome_rows
+  in
+  let rows = min (max 0 extra) (max 0 (allocation.filler_rows - chrome)) in
+  if rows = 0 then allocation
+  else
+    { allocation with
+      team_rows = allocation.team_rows + rows
+    ; filler_rows = allocation.filler_rows - rows - chrome
+    }
+
 (* Keeper roster columns.
 
    Cell widths, not text. Every width here is a plain-text budget the renderer
@@ -288,7 +303,6 @@ let keeper_last_turn_width = 6
 let keeper_minimum_name_width = 16
 let keeper_maximum_name_width = 32
 let keeper_minimum_runtime_width = 20
-let keeper_maximum_runtime_width = 34
 let keeper_minimum_task_width = 10
 let keeper_flags_minimum_inner_width = 98
 let keeper_runtime_minimum_inner_width = 118
@@ -308,7 +322,13 @@ let keeper_columns_used_width columns =
   + (if columns.kcol_show_runtime then 1 + columns.kcol_runtime else 0)
   + 1 + columns.kcol_task
 
-let allocate_keeper_columns ~inner_width =
+(* [widest_runtime] is the widest runtime cell the rows will draw, measured
+   from those rows. A constant stood here before, and at 34 it was below what
+   the cell holds: runtime ids reach 49 cells on the live catalogue
+   ([antigravity_subscription.claude-opus-4-6-thinking]), so every long id was
+   elided while the slack the row had left went on to the task column -- 49
+   cells of it, for an id this file's own note calls short by construction. *)
+let allocate_keeper_columns ~inner_width ~widest_runtime =
   let inner_width = max 0 inner_width in
   let show_flags = inner_width >= keeper_flags_minimum_inner_width in
   let show_runtime = inner_width >= keeper_runtime_minimum_inner_width in
@@ -329,11 +349,11 @@ let allocate_keeper_columns ~inner_width =
         (min (keeper_maximum_name_width - keeper_minimum_name_width) slack)
         slack
     in
+    let runtime_ceiling = max keeper_minimum_runtime_width widest_runtime in
     let runtime_growth, slack =
       if show_runtime then
         take
-          (min (keeper_maximum_runtime_width - keeper_minimum_runtime_width)
-             slack)
+          (min (runtime_ceiling - keeper_minimum_runtime_width) slack)
           slack
       else (0, slack)
     in
@@ -1425,3 +1445,11 @@ let classify_wake_reading ~history_error ~history =
   | None, None -> Wake_last_only
   | None, Some (0, _) -> Wake_never
   | None, Some (count, retention) -> Wake_history { count; retention }
+
+(* A schedule the runner holds back (#38205). Its status stays [due] and its
+   last wake is still the previous occurrence's, so without this reading a
+   held heartbeat looks like a late one. *)
+let schedule_hold_tag ~due = "held since " ^ due
+
+let schedule_hold_reading ~due =
+  schedule_hold_tag ~due ^ ": the keeper has not taken the previous wake yet"

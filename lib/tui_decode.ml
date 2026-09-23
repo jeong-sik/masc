@@ -169,6 +169,12 @@ type standalone_lane_slot_count = {
   slsc_count : int;
 }
 
+type standalone_lane_runs_without_slot = {
+  slws_vendor_system_one : int;
+  slws_server_restarted : int;
+  slws_no_slot : int;
+}
+
 type standalone_lane_jev_destination = {
   sljd_destination_uri : string;
   sljd_model : string;
@@ -203,6 +209,7 @@ type standalone_lane = {
   sl_last_outcome : string option;
   sl_p50_elapsed_s : float option;
   sl_selected_slots : standalone_lane_slot_count list;
+  sl_runs_without_slot : standalone_lane_runs_without_slot;
 }
 
 type standalone_lanes_snapshot = {
@@ -2014,8 +2021,6 @@ type keeper_call = {
   kc_outcome : Tool_result.recorded_call_outcome;
   kc_duration_ms : float option;
   kc_turn : int option;
-  kc_task_id : string option;
-  kc_model : string option;
   kc_execution_id : string option;
   kc_tool_use_id : string option;
   kc_schedule : keeper_call_schedule option;
@@ -2027,7 +2032,6 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;
-  kcs_count : int;
   kcs_health : string;
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
@@ -2229,6 +2233,17 @@ type effective_skill_profile = {
   esp_flow : skill_flow option;
 }
 
+(* A Skill name the Keeper profile selected that the turn's catalog does not
+   hold. It is not a read failure -- the document may not exist at all -- so it
+   is a different fact from [ets_skills_left_out] and the producer sends it as
+   its own list. [csn_reason] is the producer's word for why
+   (`not_in_turn_skill_catalog`), kept optional because a reader that invents
+   one would be speaking for a producer that said nothing. *)
+type configured_skill_name_unavailable = {
+  csn_name : string;
+  csn_reason : string option;
+}
+
 type effective_tool_surface =
   | Effective_surface_available of {
       ets_keeper_name : string;
@@ -2244,6 +2259,10 @@ type effective_tool_surface =
          can call, and absence with no reason reads as a skill nobody
          wrote. *)
       ets_skills_left_out : string list;
+      (* Names the profile selected and the turn catalog does not carry. The
+         dashboard draws these under "Unavailable Skills"; this reader exists
+         so the other renderer of the same surface says it too. *)
+      ets_unavailable_skill_names : configured_skill_name_unavailable list;
       ets_composition_skills : Skill_reference.t list;
       ets_skill_profiles : effective_skill_profile list;
       ets_tool_surface_bytes : int;
@@ -2806,7 +2825,6 @@ type harness_calibration = {
 
 type harness_overview = {
   hov_evaluator_status : string;
-  hov_last_signal_at : float option;
 }
 
 type harness_snapshot = {
@@ -2863,6 +2881,7 @@ type verification_snapshot = {
   vs_awaiting_unresolved : string list;
       (** Request ids the backlog waits on that name no record. A task holding
           one of these is waiting on something that is not there. *)
+  vs_awaiting_unresolved_total : int;  (** all such ids; the list is one page *)
   vs_backlog_error : string option;
       (** Why the queue could not be resolved. An empty list carrying this is
           not an empty queue. *)
@@ -3072,6 +3091,17 @@ let decode_effective_tool_surface json =
       let* ets_skills_left_out =
         decode_string_name_list json "skills_left_out"
       in
+      let* unavailable_skill_names_json =
+        optional_list_field json "unavailable_skill_names"
+      in
+      let* ets_unavailable_skill_names =
+        decode_list "effective_keeper_surface.unavailable_skill_names"
+          (fun entry ->
+            let* csn_name = required_string_field entry "name" in
+            let* csn_reason = optional_string_field entry "reason" in
+            Ok { csn_name; csn_reason })
+          unavailable_skill_names_json
+      in
       let* ets_instruction_skills =
         decode_skill_reference_list json "instruction_skills"
       in
@@ -3120,6 +3150,7 @@ let decode_effective_tool_surface json =
              ets_skill_resource_read_max_bytes;
              ets_instruction_skills;
              ets_skills_left_out;
+             ets_unavailable_skill_names;
              ets_composition_skills;
              ets_skill_profiles;
              ets_tool_surface_bytes;
@@ -5804,13 +5835,7 @@ let decode_harness_overview json =
         | `String value -> value
         | _ -> "unknown"
       in
-      let last_signal_at =
-        match member "last_signal_at" overview with
-        | `Float value -> Some value
-        | `Int value -> Some (Float.of_int value)
-        | _ -> None
-      in
-      Some { hov_evaluator_status = status; hov_last_signal_at = last_signal_at }
+      Some { hov_evaluator_status = status }
   | _ -> None
 
 let decode_harness_snapshot json =
@@ -5895,6 +5920,14 @@ let decode_verification_snapshot json =
   let* vs_awaiting_unresolved =
     decode_string_name_list json "awaiting_unresolved"
   in
+  let* vs_awaiting_unresolved_total =
+    match vs_view with
+    | Awaiting_queue -> required_int_field json "awaiting_unresolved_total"
+    | Full_history ->
+      (* The history view does not join the backlog, so it sends neither the
+         unresolved list nor its count; there is nothing it failed to find. *)
+      Ok 0
+  in
   let* vs_backlog_error = optional_string_field json "backlog_error" in
   let* vs_backlog_recovery = optional_string_field json "backlog_recovery" in
   Ok
@@ -5904,6 +5937,7 @@ let decode_verification_snapshot json =
     ; vs_offset
     ; vs_truncated
     ; vs_awaiting_unresolved
+    ; vs_awaiting_unresolved_total
     ; vs_backlog_error
     ; vs_backlog_recovery
     }
@@ -5962,11 +5996,6 @@ let decode_keeper_call json =
     | _ -> None
   in
   let kc_turn = match member "turn" json with `Int value -> Some value | _ -> None in
-  let string_opt key =
-    match member key json with
-    | `String value when String.trim value <> "" -> Some value
-    | _ -> None
-  in
   let optional_nonnegative_int key =
     match member key json with
     | `Null -> Ok None
@@ -6019,8 +6048,6 @@ let decode_keeper_call json =
       ; kc_outcome
       ; kc_duration_ms
       ; kc_turn
-      ; kc_task_id = string_opt "task_id"
-      ; kc_model = string_opt "model"
       ; kc_execution_id = nonblank kc_execution_id
       ; kc_tool_use_id = nonblank kc_tool_use_id
       ; kc_schedule
@@ -6031,7 +6058,6 @@ let decode_keeper_call json =
 
 let decode_keeper_calls_snapshot ~requested_keeper json =
   let* kcs_keeper = required_string_field json "keeper" in
-  let* kcs_count = required_int_field json "count" in
   let* kcs_health = required_string_field json "health" in
   let* entries_json = required_list_field json "entries" in
   let* rows =
@@ -6062,7 +6088,6 @@ let decode_keeper_calls_snapshot ~requested_keeper json =
   Ok
     { kcs_keeper
     ; kcs_entries = List.rev kcs_entries
-    ; kcs_count
     ; kcs_health
     ; kcs_latest_age_s
     ; kcs_stale_reason
@@ -6430,9 +6455,15 @@ let standalone_lane_configuration_of_string = function
   | "unavailable" -> Ok Lane_registry_unavailable
   | other -> Error ("standalone lane configuration: unknown value " ^ other)
 
-let standalone_lane_configuration_to_string = function
-  | Lane_ready -> "ready"
-  | Lane_slotless -> "no slot admitted"
+(* A clause, not a word. The lane detail line writes [obligation ^ " lane"],
+   then this, then the last run, and it used to write the noun itself:
+   "configuration " ^ the word here. Three of the four words already carry
+   their own subject, so the live screen read "configuration not configured",
+   and the other two read "configuration no slot admitted" and "configuration
+   registry unreadable". The sentence is written in one place now, here. *)
+let standalone_lane_configuration_phrase = function
+  | Lane_ready -> "configuration ready"
+  | Lane_slotless -> "configured, but no slot admitted"
   | Lane_unconfigured -> "not configured"
   | Lane_registry_unavailable -> "registry unreadable"
 
@@ -6566,6 +6597,10 @@ let decode_standalone_lane json =
   let* sl_selected_slots =
     decode_list "selected_slots" decode_standalone_lane_slot_count selected_slots
   in
+  let* runs_without_slot = required_member json "runs_without_slot" in
+  let* slws_vendor_system_one = required_int_field runs_without_slot "vendor_system_one" in
+  let* slws_server_restarted = required_int_field runs_without_slot "server_restarted" in
+  let* slws_no_slot = required_int_field runs_without_slot "no_slot" in
   Ok
     { sl_lane_id
     ; sl_label
@@ -6589,6 +6624,8 @@ let decode_standalone_lane json =
     ; sl_last_outcome
     ; sl_p50_elapsed_s
     ; sl_selected_slots
+    ; sl_runs_without_slot =
+        { slws_vendor_system_one; slws_server_restarted; slws_no_slot }
     }
 
 let decode_standalone_lanes_snapshot json =
@@ -7473,7 +7510,6 @@ type gate_rule = {
   gr_tool : string;
   gr_fingerprint : string;
   gr_created_at : float;
-  gr_created_by : string option;
   gr_expires_at : float option;
 }
 
@@ -7734,11 +7770,6 @@ let decode_gate_rule json =
     | `Int value -> Ok (float_of_int value)
     | _ -> Error "approval rule created_at must be a number"
   in
-  let optional_string field =
-    match member field json with
-    | `String value -> Some value
-    | _ -> None
-  in
   let gr_expires_at =
     match member "expires_at" json with
     | `Float value -> Some value
@@ -7751,7 +7782,6 @@ let decode_gate_rule json =
     ; gr_tool
     ; gr_fingerprint
     ; gr_created_at
-    ; gr_created_by = optional_string "created_by"
     ; gr_expires_at
     }
 
@@ -8203,7 +8233,6 @@ type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
   sgc_minor_heap_size : int;
-  sgc_space_overhead : int;
   sgc_minor_collections : int;
   sgc_major_collections : int;
   sgc_compactions : int;
@@ -8314,7 +8343,6 @@ let decode_server_identity json =
           { sgc_heap_words = int_in gc_obj "heap_words" 0
           ; sgc_live_words = int_in gc_obj "live_words" 0
           ; sgc_minor_heap_size = int_in gc_obj "minor_heap_size" 0
-          ; sgc_space_overhead = int_in gc_obj "space_overhead" 0
           ; sgc_minor_collections = int_in gc_obj "minor_collections" 0
           ; sgc_major_collections = int_in gc_obj "major_collections" 0
           ; sgc_compactions = int_in gc_obj "compactions" 0
@@ -11156,4 +11184,19 @@ let decode_async_request_observation json =
     in
     Ok (Async_ready { summary; requests; recovery })
   | _ -> Error (Printf.sprintf "unknown async inventory status %S" status)
+;;
+
+type schedule_runner_hold =
+  { srh_occurrence_id : string
+  ; srh_due_at_iso : string
+  }
+
+let decode_schedule_runner_hold row =
+  match member "runner_hold" row with
+  | `Null -> Ok None
+  | `Assoc _ as hold ->
+    let* srh_occurrence_id = required_string_field hold "occurrence_id" in
+    let* srh_due_at_iso = required_string_field hold "due_at_iso" in
+    Ok (Some { srh_occurrence_id; srh_due_at_iso })
+  | bad -> field_type_error "runner_hold" "an object or null" bad
 ;;

@@ -689,8 +689,7 @@ val temperature_of_runtime_id : string -> float option
     for the model bound to runtime [id], or [None] when the id is not configured
     or the model leaves it unset.  Consumed by
     {!Runtime_inference.resolve_temperature}: a keeper turn uses this value when
-    set and its caller fallback ([MASC_KEEPER_UNIFIED_TEMP]) otherwise.  Required
-    for models that reject the default temperature (Kimi K2.7 accepts only 1.0). *)
+    set and its caller fallback ([MASC_KEEPER_UNIFIED_TEMP]) otherwise. *)
 
 val reasoning_effort_of_runtime_id : string -> Llm_provider.Reasoning_effort.t option
 (** Per-model [reasoning-effort] from runtime.toml, or [None] when unset or

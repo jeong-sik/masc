@@ -20,6 +20,10 @@ type t =
   { keeper_name : string
   ; partition_id : string
   ; request : request
+  ; requested_by : string
+    (** The authenticated principal issuing the command. It is written onto
+        the candidate's [Requeue_requested] and [Requeued] phases and is the
+        actor of the command's audit row. *)
   }
 
 type input_error =
@@ -31,6 +35,7 @@ type input_error =
   | Unsupported_schema of string
   | Unsupported_decision of string
   | Invalid_keeper_name of string
+  | Invalid_requester
 
 type execution_error =
   | Candidate_state_conflict of string
@@ -53,11 +58,13 @@ val input_error_to_string : input_error -> string
 val input_error_to_json : input_error -> Yojson.Safe.t
 val execution_error_label : execution_error -> string
 val parse_request : Yojson.Safe.t -> (request, input_error) result
-val parse_tool_command : Yojson.Safe.t -> (t, input_error) result
+val parse_tool_command :
+  requested_by:string -> Yojson.Safe.t -> (t, input_error) result
 
 val make :
   keeper_name:string ->
   raw_partition_id:string ->
+  requested_by:string ->
   request ->
   (t, input_error) result
 
@@ -78,7 +85,6 @@ end
 
 val audit :
   Workspace.config ->
-  actor:string ->
   t ->
   outcome:Audit_log.outcome ->
   (unit, string) result
@@ -104,6 +110,7 @@ type inventory_item =
   ; quarantined_at : float
   ; requested_at : float option
   ; requeued_at : float option
+  ; requested_by : string option
   }
 
 type inventory_error_kind =
@@ -130,3 +137,13 @@ val inventory_json :
   base_path:string ->
   keeper_names:string list ->
   Yojson.Safe.t
+
+val request_to_json : request -> Yojson.Safe.t
+(** The request body {!parse_request} accepts, schema included. *)
+
+val inventory_item_of_json : Yojson.Safe.t -> (inventory_item, string) result
+(** Inverse of the item rows {!inventory_to_json} writes. An unknown [phase]
+    or [failure_category] spelling is an [Error], never a default. *)
+
+val inventory_error_of_json : Yojson.Safe.t -> (inventory_error, string) result
+(** Inverse of the [errors] rows {!inventory_to_json} writes. *)

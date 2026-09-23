@@ -17,6 +17,7 @@ type t =
   { keeper_name : string
   ; partition_id : string
   ; request : request
+  ; requested_by : string
   }
 
 type input_error =
@@ -28,6 +29,7 @@ type input_error =
   | Unsupported_schema of string
   | Unsupported_decision of string
   | Invalid_keeper_name of string
+  | Invalid_requester
 
 type execution_error =
   | Candidate_state_conflict of string
@@ -120,15 +122,17 @@ let parse_request json =
   request_of_fields fields
 ;;
 
-let make ~keeper_name ~raw_partition_id request =
+let make ~keeper_name ~raw_partition_id ~requested_by request =
   if not (Keeper_config.validate_name keeper_name)
   then Error (Invalid_keeper_name keeper_name)
   else if String.equal (String.trim raw_partition_id) ""
   then Error (Invalid_field "partition_id")
-  else Ok { keeper_name; partition_id = raw_partition_id; request }
+  else if String.equal (String.trim requested_by) ""
+  then Error Invalid_requester
+  else Ok { keeper_name; partition_id = raw_partition_id; request; requested_by }
 ;;
 
-let parse_tool_command json =
+let parse_tool_command ~requested_by json =
   let* fields =
     validate_exact_object
       ~expected:
@@ -143,7 +147,7 @@ let parse_tool_command json =
   let* keeper_name = nonblank "keeper_name" (List.assoc "keeper_name" fields) in
   let* partition_id = nonblank "partition_id" (List.assoc "partition_id" fields) in
   let* request = request_of_fields fields in
-  make ~keeper_name ~raw_partition_id:partition_id request
+  make ~keeper_name ~raw_partition_id:partition_id ~requested_by request
 ;;
 
 let input_error_to_string = function
@@ -158,6 +162,7 @@ let input_error_to_string = function
   | Unsupported_schema schema -> "unsupported schema: " ^ schema
   | Unsupported_decision decision -> "unsupported decision: " ^ decision
   | Invalid_keeper_name name -> "invalid keeper name: " ^ name
+  | Invalid_requester -> "the authenticated requester is empty"
 ;;
 
 let input_error_to_json error =
@@ -447,6 +452,7 @@ let execute_with_before_partition_commit
           ~partition_id:command.partition_id
           ~expected_quarantine_id:command.request.expected_quarantine_id
           ~requested_at:now
+          ~requested_by:command.requested_by
       with
       | Ok candidate -> Ok candidate
       | Error detail -> Error (Candidate_state_conflict detail)
@@ -495,11 +501,11 @@ module For_testing = struct
   ;;
 end
 
-let audit config ~actor command ~outcome =
+let audit config command ~outcome =
   try
     Audit_log.log_action
       config
-      ~agent_id:actor
+      ~agent_id:command.requested_by
       ~action:(Audit_log.Custom "keeper_board_attention_quarantine_requeue")
       ~details:
         (`Assoc
@@ -571,6 +577,7 @@ type inventory_item =
   ; quarantined_at : float
   ; requested_at : float option
   ; requeued_at : float option
+  ; requested_by : string option
   }
 
 type inventory_error_kind =
@@ -587,18 +594,20 @@ type inventory =
   }
 
 let inventory_phase_projection = function
-  | Candidate.Quarantined -> Inventory_quarantined, None, None
-  | Candidate.Requeue_requested { requested_at } ->
-    Inventory_requeue_requested, Some requested_at, None
-  | Candidate.Requeued { requeued_at } ->
-    Inventory_requeued, None, Some requeued_at
+  | Candidate.Quarantined -> Inventory_quarantined, None, None, None
+  | Candidate.Requeue_requested { requested_at; requested_by } ->
+    Inventory_requeue_requested, Some requested_at, None, Some requested_by
+  | Candidate.Requeued { requeued_at; requested_by } ->
+    Inventory_requeued, None, Some requeued_at, Some requested_by
 ;;
 
 let inventory_item_of_candidate ~keeper_name (candidate : Candidate.candidate) =
   match candidate.status with
   | Candidate.Pending _ | Candidate.Judged _ | Candidate.Consumed _ -> None
   | Candidate.Quarantine { quarantine; phase } ->
-    let phase, requested_at, requeued_at = inventory_phase_projection phase in
+    let phase, requested_at, requeued_at, requested_by =
+      inventory_phase_projection phase
+    in
     Some
       { keeper_name
       ; partition_id = quarantine.partition_id
@@ -610,6 +619,7 @@ let inventory_item_of_candidate ~keeper_name (candidate : Candidate.candidate) =
       ; quarantined_at = quarantine.quarantined_at
       ; requested_at
       ; requeued_at
+      ; requested_by
       }
 ;;
 
@@ -679,6 +689,7 @@ let inventory_item_to_json (item : inventory_item) =
     ; "quarantined_at", `Float item.quarantined_at
     ; "requested_at", Json_util.float_opt_to_json item.requested_at
     ; "requeued_at", Json_util.float_opt_to_json item.requeued_at
+    ; "requested_by", Json_util.string_opt_to_json item.requested_by
     ]
 ;;
 
@@ -700,4 +711,142 @@ let inventory_to_json inventory =
 
 let inventory_json ~base_path ~keeper_names =
   inventory ~base_path ~keeper_names |> inventory_to_json
+;;
+
+(* The body [parse_request] accepts, built from the same fields. A client that
+   spelled the schema and the decision itself would be a second copy of them. *)
+let request_to_json (request : request) =
+  `Assoc
+    [ "schema", `String request_schema
+    ; "candidate_id", `String request.candidate_id
+    ; "expected_quarantine_id", `String request.expected_quarantine_id
+    ; ( "decision"
+      , `String
+          (match request.decision with
+           | Acknowledge_and_requeue -> "acknowledge_and_requeue") )
+    ]
+;;
+
+(* Readers of [inventory_item_to_json] and the error rows beside it. They sit
+   next to the writers so the two cannot drift: a field renamed on one side is
+   a failing round trip in this module's own suite. *)
+let inventory_phase_of_string = function
+  | "quarantined" -> Some Inventory_quarantined
+  | "requeue_requested" -> Some Inventory_requeue_requested
+  | "requeued" -> Some Inventory_requeued
+  | _ -> None
+;;
+
+let inventory_error_kind_of_string = function
+  | "candidate_ledger_unavailable" -> Some Inventory_candidate_ledger_unavailable
+  | _ -> None
+;;
+
+let json_field fields name =
+  match List.assoc_opt name fields with
+  | Some value -> Ok value
+  | None -> Error ("missing field " ^ name)
+;;
+
+let json_string fields name =
+  let* value = json_field fields name in
+  match value with
+  | `String text -> Ok text
+  | _ -> Error (name ^ " must be a string")
+;;
+
+let json_number = function
+  | `Float value -> Some value
+  | `Int value -> Some (Float.of_int value)
+  | _ -> None
+;;
+
+let json_float fields name =
+  let* value = json_field fields name in
+  match json_number value with
+  | Some number -> Ok number
+  | None -> Error (name ^ " must be a number")
+;;
+
+let json_float_opt fields name =
+  let* value = json_field fields name in
+  match value with
+  | `Null -> Ok None
+  | other ->
+    (match json_number other with
+     | Some number -> Ok (Some number)
+     | None -> Error (name ^ " must be a number or null"))
+;;
+
+let json_string_opt fields name =
+  let* value = json_field fields name in
+  match value with
+  | `Null -> Ok None
+  | `String text -> Ok (Some text)
+  | _ -> Error (name ^ " must be a string or null")
+;;
+
+let attempt_provenance_of_json = function
+  | `Null -> Ok None
+  | `Assoc fields ->
+    let* slot_id = json_string fields "slot_id" in
+    let* call_id = json_string fields "call_id" in
+    let* plan_fingerprint = json_string fields "plan_fingerprint" in
+    let* request_body_sha256 = json_string fields "request_body_sha256" in
+    Ok
+      (Some
+         ({ slot_id; call_id; plan_fingerprint; request_body_sha256 }
+          : Candidate.attempt_provenance))
+  | _ -> Error "attempt_provenance must be an object or null"
+;;
+
+let inventory_item_of_json = function
+  | `Assoc fields ->
+    let* keeper_name = json_string fields "keeper_name" in
+    let* partition_id = json_string fields "partition_id" in
+    let* candidate_id = json_string fields "candidate_id" in
+    let* quarantine_id = json_string fields "quarantine_id" in
+    let* phase_raw = json_string fields "phase" in
+    let* phase =
+      match inventory_phase_of_string phase_raw with
+      | Some phase -> Ok phase
+      | None -> Error ("unknown phase " ^ phase_raw)
+    in
+    let* category_raw = json_string fields "failure_category" in
+    let* failure_category =
+      match Candidate.quarantine_failure_category_of_string category_raw with
+      | Some category -> Ok category
+      | None -> Error ("unknown failure_category " ^ category_raw)
+    in
+    let* provenance_json = json_field fields "attempt_provenance" in
+    let* attempt_provenance = attempt_provenance_of_json provenance_json in
+    let* quarantined_at = json_float fields "quarantined_at" in
+    let* requested_at = json_float_opt fields "requested_at" in
+    let* requested_by = json_string_opt fields "requested_by" in
+    let* requeued_at = json_float_opt fields "requeued_at" in
+    Ok
+      ({ keeper_name
+       ; partition_id
+       ; candidate_id
+       ; quarantine_id
+       ; phase
+       ; failure_category
+       ; attempt_provenance
+       ; quarantined_at
+       ; requested_at
+       ; requested_by
+       ; requeued_at
+       }
+       : inventory_item)
+  | _ -> Error "inventory item must be an object"
+;;
+
+let inventory_error_of_json = function
+  | `Assoc fields ->
+    let* keeper_name = json_string fields "keeper_name" in
+    let* kind_raw = json_string fields "kind" in
+    (match inventory_error_kind_of_string kind_raw with
+     | Some kind -> Ok ({ keeper_name; kind } : inventory_error)
+     | None -> Error ("unknown inventory error kind " ^ kind_raw))
+  | _ -> Error "inventory error must be an object"
 ;;

@@ -46,7 +46,9 @@ val float_of_env_default : string -> default:float -> min_v:float -> max_v:float
 
 (** {1 Name Validation} *)
 
-(** Validate a keeper name with the shared portable-name grammar. *)
+(** Validate a keeper name: the shared portable-name grammar, and not the
+    directory name of a runtime store kept directly under [keepers/]
+    ([Common.Keepers_root_scoped]). *)
 val validate_name : string -> bool
 
 val invalid_name_error : string -> string

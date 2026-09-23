@@ -8,6 +8,7 @@ module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
 module Keeper_selection = Masc_tui_keeper_selection
+module Repository_pulls = Masc_tui_repository_pulls
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
 module Render_schedule = Masc_tui_render_schedule
@@ -833,6 +834,7 @@ let decode_schedule_row json =
     optional_nested_int_field json "keeper_reaction_evidence"
       "quarantined_record_count"
   in
+  let* sch_runner_hold = Tui_decode.decode_schedule_runner_hold json in
   Ok
     { sch_schedule_instance_id
     ; sch_schedule_id
@@ -876,6 +878,7 @@ let decode_schedule_row json =
     ; sch_wake_cancelled_recorded_at_iso
     ; sch_reaction_quarantined
     ; sch_reaction_latest_at_iso
+    ; sch_runner_hold
     }
 
 let decode_schedule_rows json_list =
@@ -922,6 +925,35 @@ let decode_schedule_snapshot json =
           (Printf.sprintf "schedules fsm must be an object: %s"
              (Yojson.Safe.to_string other))
   in
+  (* Walked from [Schedule_domain.all_schedule_statuses], the same list the
+     server builds this object from, so a status added to the shared contract
+     is asked for here without a second spelling of the vocabulary. The server
+     sends [null] exactly when the store read failed, which is the reading
+     [request_count] already carries. *)
+  let* scs_counts =
+    match Yojson.Safe.Util.member "counts" json with
+    | `Null -> Ok None
+    | `Assoc fields ->
+        let rec read acc = function
+          | [] -> Ok (Some (List.rev acc))
+          | status :: rest -> (
+              let name = Schedule_domain.schedule_status_to_string status in
+              match List.assoc_opt name fields with
+              | Some (`Int count) -> read ((status, count) :: acc) rest
+              | Some other ->
+                  Error
+                    (Printf.sprintf "schedules counts %s must be an integer: %s"
+                       name
+                       (Yojson.Safe.to_string other))
+              | None ->
+                  Error (Printf.sprintf "schedules counts is missing %s" name))
+        in
+        read [] Schedule_domain.all_schedule_statuses
+    | other ->
+        Error
+          (Printf.sprintf "schedules counts must be an object or null: %s"
+             (Yojson.Safe.to_string other))
+  in
   let* rows = required_list_field json "requests" in
   let* scs_rows = decode_schedule_rows rows in
   Ok
@@ -930,6 +962,7 @@ let decode_schedule_snapshot json =
     ; scs_request_count
     ; scs_truncated
     ; scs_next_due_iso
+    ; scs_counts
     ; scs_rows
     }
 
@@ -1197,6 +1230,15 @@ let overview_keeper_rows_of_briefs briefs =
           Some { okp_name = name; okp_phase; okp_last_turn_ago_s; okp_paused }
       | _ -> None)
     briefs
+
+(* RFC-0465 pull request snapshot. A row whose check or review word, number,
+   title, branch or draft flag cannot be read is counted with the server's
+   own undecodable rows instead of being drawn with a guessed state. *)
+let load_repository_pulls ~(host : string) ~(port : int) :
+    (overview_pulls_reading, string) result =
+  match Masc_tui_http.fetch_repository_pulls ~host ~port with
+  | Error err -> Error ("pull requests load failed: " ^ err)
+  | Ok json -> Repository_pulls.decode_reading json
 
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
@@ -1781,6 +1823,13 @@ let load_keeper_github_identity_view ~(host : string) ~(port : int)
   with
   | Error err -> Error ("github identity load failed: " ^ err)
   | Ok json -> Ok (github_identity_lines json)
+
+let load_keeper_board_quarantines ~(host : string) ~(port : int)
+    ~(keeper_name : string) :
+    (Masc_tui_board_quarantine.t, string) result =
+  match Masc_tui_http.fetch_keeper_board_quarantines ~host ~port ~keeper_name with
+  | Error err -> Error ("board quarantines: " ^ err)
+  | Ok json -> Masc_tui_board_quarantine.decode json
 
 (* What a Keeper can be attached to, and what each of those currently offers
    it. One fetch rather than two: a list of providers and a list of

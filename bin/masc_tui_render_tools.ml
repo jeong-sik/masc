@@ -380,6 +380,7 @@ let tools_display_lines (state : state) =
                    ets_skill_resource_read_max_bytes;
                    ets_instruction_skills;
                    ets_skills_left_out;
+                   ets_unavailable_skill_names;
                    ets_composition_skills;
                    ets_skill_profiles;
                    ets_tool_surface_bytes;
@@ -791,6 +792,28 @@ let tools_display_lines (state : state) =
                     (Theme.warn ()),
                     "     " ^ Terminal_text.single_line entry)
                   left_out)
+        (* A configured name the turn catalog does not hold is a different
+           fact from a document that failed to read: the operator selected a
+           Skill that is not there. The dashboard says it under "Unavailable
+           Skills"; without these rows this screen answered "what can this
+           Keeper call" while staying silent about a selection that did
+           nothing. Drawn only when there is one. *)
+        @ (match ets_unavailable_skill_names with
+           | [] -> []
+           | unavailable ->
+             ( (Theme.warn ()),
+               Printf.sprintf "   %d configured skill name(s) not in the turn catalog"
+                 (List.length unavailable) )
+             :: List.map
+                  (fun { Masc.Tui_decode.csn_name; csn_reason } ->
+                    (Theme.warn ()),
+                    "     "
+                    ^ Terminal_text.single_line csn_name
+                    ^ (match csn_reason with
+                       | None -> ""
+                       | Some reason ->
+                         " \xc2\xb7 " ^ Terminal_text.single_line reason))
+                  unavailable)
         @ [ Ansi.bold, Tool_table.effective_tool_header ]
         @ tool_lines
     end

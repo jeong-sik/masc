@@ -264,6 +264,24 @@ let test_the_overview_load_stops_reading_a_field_no_screen_draws () =
    nearest state. *)
 let loader = "bin/masc_tui_loader.ml"
 
+(* The schedule store's dispositions are named once, by the shared contract
+   the server builds this object from. The decoder walks that list instead of
+   spelling the seven words again, so a status the contract gains is asked for
+   here without this file changing -- and cannot be quietly dropped from the
+   Automation tab's count line. *)
+let test_the_schedule_counts_are_read_from_the_shared_status_list () =
+  Alcotest.(check bool) "the decoder walks the contract's own list" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:loader
+       ~binding_name:"decode_schedule_snapshot"
+       ~callee:"Schedule_domain.schedule_status_to_string"
+     > 0);
+  Alcotest.(check int) "and spells no disposition of its own" 0
+    (Ast_grep.count_string_literals_in_value_binding ~module_path:loader
+       ~binding_name:"decode_schedule_snapshot"
+       ~literals:
+         [ "scheduled"; "due"; "running"; "succeeded"; "failed"; "cancelled"
+         ; "expired" ])
+
 let test_the_fleet_row_reads_the_control_planes_own_word () =
   Alcotest.(check int) "the liveness word is parsed, not matched as text" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:loader
@@ -339,6 +357,32 @@ let test_the_schedule_detail_says_what_became_of_the_wake () =
     (Ast_grep.count_calls_in_value_binding ~module_path:render
        ~binding_name:"schedule_detail_lines" ~callee:"schedule_turn_rows"
      > 0)
+
+(* #38205: [/health] reported which occurrence the schedule runner held back
+   and no screen read it. The schedule row carries the hold now; this pins
+   that the loader decodes it and that both the list's summary line and the
+   detail pane draw it through the one reading. *)
+let test_the_schedules_screen_draws_the_runner_hold () =
+  Alcotest.(check bool) "the loader decodes the row's hold" true
+    (Ast_grep.count_calls_in_value_binding ~module_path:loader
+       ~binding_name:"decode_schedule_row"
+       ~callee:"Tui_decode.decode_schedule_runner_hold"
+     > 0);
+  List.iter
+    (fun (binding_name, callee) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s reads the hold" binding_name)
+        true
+        (reads ~binding_name ~fields:[ "sch_runner_hold" ] > 0);
+      Alcotest.(check bool)
+        (Printf.sprintf "%s words it through %s" binding_name callee)
+        true
+        (Ast_grep.count_calls_in_value_binding ~module_path:render ~binding_name
+           ~callee
+         > 0))
+    [ "schedule_delivery_summary", "Render_schedule.schedule_hold_tag"
+    ; "schedule_detail_lines", "Render_schedule.schedule_hold_reading"
+    ]
 
 let test_the_schedule_subject_is_measured_not_given_the_line () =
   (* Twice: once to measure the column, once to fill the cell. One call would
@@ -460,6 +504,21 @@ let test_the_two_p50s_on_the_lanes_screen_agree () =
        ~binding_name:"standalone_lane_detail_lines"
        ~needle:" \xc2\xb7 p50 latency %.2fs")
 
+(* The configuration clause is written once, in [Tui_decode]. This line used
+   to introduce it with a noun of its own -- "configuration " ^ a word that
+   three of the four states already give a subject -- so an unconfigured lane
+   read "configuration not configured". The caller draws the clause as it
+   comes. *)
+let test_the_lane_line_writes_no_noun_of_its_own () =
+  Alcotest.(check int) "the line takes the clause whole" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:"%s lane \xc2\xb7 %s \xc2\xb7 %s");
+  Alcotest.(check int) "and no longer names the subject itself" 0
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~needle:"%s lane \xc2\xb7 configuration %s \xc2\xb7 %s")
+
 let test_board_lane_detail_draws_typed_jev_readiness () =
   Alcotest.(check int) "the detail reads the decoded JEV field" 1
     (reads ~binding_name:"standalone_lane_detail_lines" ~fields:[ "sl_jev" ]);
@@ -557,11 +616,11 @@ let test_memory_surface_keeps_the_starvation_axes () =
   Alcotest.(check bool) "the title names the starving count" true
     (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0);
   Alcotest.(check bool) "the title keeps source facts separate" true
-    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body" ~fields:[ "mhs_total_source_facts" ] > 0);
+    (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows" ~fields:[ "mhs_total_source_facts" ] > 0);
   Alcotest.(check bool) "the title keeps derived facts separate" true
-    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body" ~fields:[ "mhs_total_derived_facts" ] > 0);
+    (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows" ~fields:[ "mhs_total_derived_facts" ] > 0);
   Alcotest.(check bool) "the title exposes support retractions" true
-    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body"
+    (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows"
        ~fields:[ "mhs_total_support_invalidations" ]
      > 0);
   (* The source snapshot has four numbers and the row has one cell for them,
@@ -774,7 +833,7 @@ let test_the_window_is_measured_where_the_cursor_lands () =
     "the cursor-dependent layout is read in one place" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
        ~binding_name:"surface_body_height_at"
-       ~callee:"memory_overview_scrolled")
+       ~callee:"Masc_tui_render_memory.memory_overview_scrolled")
 
 (* A lookup in the body of a drawing loop is paid once per visible row. The
    count is over the whole renderer rather than one binding, because the
@@ -866,6 +925,17 @@ let test_the_board_title_counts_through_the_helper_that_knows_the_board () =
   Alcotest.(check int) "the title asks what the board holds" 1
     (asks "board_list_count_text")
 
+(* The slot history and the run total sit one line apart in the lane detail,
+   and the slots cover only the runs that named one -- on the live Board
+   Attention lane, 357 of 489, most of the rest Vendor System One answers.
+   The runs without a slot are drawn by the one function that reads the
+   server's reasons, rather than spelled again beside the line. *)
+let test_the_lane_slot_history_says_what_it_does_not_cover () =
+  Alcotest.(check int) "the detail asks for the runs that named no slot" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"standalone_lane_detail_lines"
+       ~callee:"standalone_lane_runs_without_slot_parts")
+
 (* A stamp that can be older than today is drawn as a span, not as a clock.
 
    Both of these sit beside the screen's own clock and used to draw the hour
@@ -927,6 +997,62 @@ let test_the_board_age_column_reads_the_sort_once () =
   Alcotest.(check int) "and names that time over the column once" 1
     (asks ~callee:"board_age_header")
 
+
+(* Six values the loader read and no screen drew.
+
+   [count] was the one that cost something: the tool-call snapshot required
+   it, so a server that stopped sending it failed the whole decode and blanked
+   the pane over a number nothing reads -- the same shape as the overview
+   field #38224 took out, and the rows carry their own length anyway. The
+   other five were free to decode and just as unread: a call's [model] is the
+   redaction label "runtime" by boundary design and never a model name, a
+   call's [task_id] comes through null, the harness evaluator's
+   [last_signal_at] is already folded into the status word the server sends
+   (it answers "stale" past its own threshold), a gate rule's [created_by]
+   sits beside a row that draws the keeper and the tool, and [space_overhead]
+   is a GC setting rather than a reading.
+
+   Each binding is checked twice: the key it no longer opens, and a key it
+   still does, so a renamed binding cannot make this pass by matching
+   nothing. *)
+let test_the_loader_stops_opening_keys_no_screen_draws () =
+  let decode = "lib/tui_decode.ml" in
+  let dropped =
+    [ ("decode_keeper_call", "task_id")
+    ; ("decode_keeper_call", "model")
+    ; ("decode_keeper_calls_snapshot", "count")
+    ; ("decode_harness_overview", "last_signal_at")
+    ; ("decode_gate_rule", "created_by")
+    ; ("decode_server_identity", "space_overhead")
+    ]
+  in
+  let still_read =
+    [ ("decode_keeper_call", "turn")
+    ; ("decode_keeper_calls_snapshot", "health")
+    ; ("decode_harness_overview", "evaluator_status")
+    ; ("decode_gate_rule", "expires_at")
+    ; ("decode_server_identity", "minor_heap_size")
+    ]
+  in
+  List.iter
+    (fun (binding, key) ->
+      Alcotest.(check int)
+        (Printf.sprintf "%s no longer opens %S" binding key)
+        0
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:decode ~binding_name:binding ~needle:key))
+    dropped;
+  List.iter
+    (fun (binding, key) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s still opens %S" binding key)
+        true
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:decode ~binding_name:binding ~needle:key
+        > 0))
+    still_read
+;;
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -944,6 +1070,10 @@ let () =
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the load stops reading a field no screen draws"
             `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
+        ; Alcotest.test_case "the loader stops opening keys no screen draws"
+            `Quick test_the_loader_stops_opening_keys_no_screen_draws
+        ; Alcotest.test_case "the schedule counts read the shared status list"
+            `Quick test_the_schedule_counts_are_read_from_the_shared_status_list
         ; Alcotest.test_case "the fleet row reads the control plane's word"
             `Quick test_the_fleet_row_reads_the_control_planes_own_word
         ; Alcotest.test_case "the operation is compared before repeating"
@@ -959,6 +1089,8 @@ let () =
             test_a_detail_heading_is_spelled_the_way_a_heading_is
         ; Alcotest.test_case "the two p50s on the Lanes screen agree" `Quick
             test_the_two_p50s_on_the_lanes_screen_agree
+        ; Alcotest.test_case "the lane line writes no noun of its own" `Quick
+            test_the_lane_line_writes_no_noun_of_its_own
         ; Alcotest.test_case "Board lane detail draws typed JEV readiness" `Quick
             test_board_lane_detail_draws_typed_jev_readiness
         ; Alcotest.test_case "the Code tree draws one folder arrow" `Quick
@@ -973,6 +1105,8 @@ let () =
             test_the_roster_title_says_whether_the_reading_is_live
         ; Alcotest.test_case "the schedule detail says what became of the wake"
             `Quick test_the_schedule_detail_says_what_became_of_the_wake
+        ; Alcotest.test_case "the Schedules screen draws the runner hold"
+            `Quick test_the_schedules_screen_draws_the_runner_hold
         ; Alcotest.test_case "Repositories show the server-resolved path"
             `Quick test_repositories_show_the_server_resolved_checkout_path
         ; Alcotest.test_case "Repository changes keep the Git axes" `Quick
@@ -1003,6 +1137,9 @@ let () =
             test_the_board_title_counts_through_the_helper_that_knows_the_board
         ; Alcotest.test_case "a stamp that can outlive today is a span" `Quick
             test_a_stamp_that_can_outlive_today_is_drawn_as_a_span
+        ; Alcotest.test_case
+            "the lane slot history says what it does not cover" `Quick
+            test_the_lane_slot_history_says_what_it_does_not_cover
         ; Alcotest.test_case
             "both doors into the runtime detail ask the same lane list" `Quick
             test_both_doors_into_the_runtime_detail_ask_the_same_lane_list

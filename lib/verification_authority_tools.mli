@@ -31,15 +31,15 @@ val create_goal_proof : config:Workspace.config ->
     for every Goal. [tool_search_files] is absent — its containment runs
     through a Keeper's sandbox meta, which this surface has none of. *)
 
-val root_layout : t -> (string list, string) result
+val root_layout : t -> (Task.Anti_rationalization.lookup_root, string) result
 (** The paths the lookup tools resolve against, listed from disk at review
     time and relative to the ownership root: bounded immediate entries plus
     every checkout returned by the shared checkout-discovery authority.
     Unavailable or partial discovery is [Error], so a caller must defer the
     review instead of turning an incomplete list into absence evidence. A
-    workspace producer whose root does not exist gets one line stating that
-    absence: nothing creates that directory for such a producer, so the fact
-    is complete and the review proceeds on the submitted evidence. *)
+    workspace producer whose root does not exist is [Producer_root_absent]:
+    nothing creates that directory for such a producer, so the fact is
+    complete and the review proceeds on the submitted evidence. *)
 
 val goal_proof_root_layout : t -> (string list, string) result
 (** {!root_layout} for a {!create_goal_proof} surface: the producer entries

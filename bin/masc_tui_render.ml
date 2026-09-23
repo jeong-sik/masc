@@ -2032,6 +2032,11 @@ let render_board_list (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let count = List.length state.board_posts in
+  (* Read once for the whole list: the header word and every row's number name
+     the same time, and they would drift the moment two readings of the sort
+     disagreed. *)
+  let age_time = board_sort_time state.board_sort in
+  let age_header = board_age_header age_time in
   (* Which sub-board is being read. Said only when the list is narrowed: "all
      hearths" is what a reader assumes, and 24 of them share this board with
      1550 of 2171 posts in one, so a narrowed list that did not say so would
@@ -2118,7 +2123,8 @@ let render_board_list (state : state) =
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
               (String.make board_table_lead ' '
-               ^ Render_schedule.board_header_row ~title_width:title_w))
+               ^ Render_schedule.board_header_row ~age_header
+                   ~title_width:title_w))
         ; c.push_divider
         ]
       in
@@ -2182,7 +2188,15 @@ let render_board_list (state : state) =
               ; brow_author = Terminal_text.single_line p.bp_author
               ; brow_title = Terminal_text.single_line p.bp_title
               ; brow_age =
-                  Render_schedule.board_age_text ~now:now_unix p.bp_updated_at
+                  (* The time the sort ordered by, not always the last move:
+                     four of the five orders rank or break ties on the moment
+                     the post appeared, and under those a column of last-move
+                     spans did not climb with the rows. A post replied to a
+                     minute ago sat sixth under "newest post first" reading
+                     "25s". *)
+                  Render_schedule.board_age_text ~now:now_unix
+                    (board_age_source ~time:age_time
+                       ~posted:p.bp_created_at_unix ~changed:p.bp_updated_at)
               ; brow_score = score_text
               ; brow_replies = replies_text
               }
@@ -2201,7 +2215,8 @@ let render_board_list (state : state) =
             in
             let content =
               String.make board_table_lead ' '
-              ^ Render_schedule.board_row ~styles ~title_width:title_w values
+              ^ Render_schedule.board_row ~styles ~age_header
+                  ~title_width:title_w values
             in
             if is_selected then
               c.push_selected (Masc_tui_theme.strip_sgr content)

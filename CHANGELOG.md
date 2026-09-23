@@ -4,6 +4,7 @@
 
 ### Changed
 
+- The Board list's age column holds the time the sort ordered by, and its header names that time: `AGE` under the four orders that rank or break ties on when the post appeared (`hot`, `trending`, `recent`, `discussed`), `MOVED` under `updated`, which ranks on the last change. The column drew the last change under every sort, so under `recent` -- "newest post first" -- a post made 24 minutes ago with a reply 24 seconds ago sat sixth reading `25s`, a smaller number than the five rows above it, and the order looked broken. The sort is read once per draw, so the header word and every row's number name the same time (#38121).
 - The runtime startup degradation record no longer carries fields that were always empty. It is built only when no default, media-failover or lane reference names a missing runtime, so `dropped_routes`, `dropped_media_failover`, `dropped_lane_candidates` and `dropped_lanes` were always `[]` and `effective_default_runtime_id` always equaled `configured_default_runtime_id`. They leave the record, its JSON and the dashboard decoder; the log line names the default once instead of `configured default "x" -> effective default "x"`, and the dashboard alert reads `default:` (#38074).
 - The runtime failover concept is now named the **Runtime Candidate Order** in
   the TUI: the lane key help and status strings say "candidate order" where

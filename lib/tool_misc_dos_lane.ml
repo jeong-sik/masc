@@ -44,6 +44,7 @@ let ran_fields (r : Dos_lane.ran) =
   ; ("settled", `Bool r.Dos_lane.settled)
   ; ("input_requests", `Int r.Dos_lane.input_requests)
   ; ("keys_pressed", `Int r.Dos_lane.keys_pressed)
+  ; ("unsaved", `List (List.map (fun u -> `String u) r.Dos_lane.unsaved))
   ]
 ;;
 
@@ -75,6 +76,11 @@ let of_lane_run ~tool_name ~start_time
    host path. *)
 let dos_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos"
 let programs_dir ~base_path = Filename.concat (dos_dir ~base_path) "programs"
+
+(* What a program wrote on earlier machines, one directory per inventory
+   name. Keyed by the inventory name, not the executable: two games may both
+   boot a MAIN.EXE. *)
+let saves_dir ~base_path name = Filename.concat (Filename.concat (dos_dir ~base_path) "saves") name
 
 let entries_of dir =
   if Sys.file_exists dir && Sys.is_directory dir then
@@ -142,12 +148,7 @@ let executable_in ?boot dir =
    The name may be a file (boots alone) or a directory (boots with its data
    files mounted). It cannot climb out: a separator or a dot segment is
    refused before it reaches the filesystem. *)
-let escapes name =
-  String.contains name '/'
-  || String.contains name '\\'
-  || String.equal name ".."
-  || String.starts_with ~prefix:"." name
-;;
+let escapes = Dos_lane.escapes
 
 (* Spelling the name safely is not the whole boundary. Sys.file_exists and
    open both follow symbolic links, so an entry linked at a file outside
@@ -286,7 +287,8 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
      | Error message -> reject ~tool_name ~start_time message
      | Ok (program_name, program_bytes, files) ->
        let loaded =
-         Dos_lane.load ~ledger_dir:(dos_dir ~base_path) ~program_name ~program_bytes
+         Dos_lane.load ~ledger_dir:(dos_dir ~base_path)
+           ~saves_dir:(saves_dir ~base_path (String.trim name)) ~program_name ~program_bytes
            ~files
            ~announce:(fun () ->
              relay_to_board ~author:agent_name

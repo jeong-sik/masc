@@ -6072,7 +6072,12 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries alcotest masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+ ; The pick dispatch lives in the executable, which no test can link, so the
+ ; one assertion about it is read through Ast_grep. The source is a dep:
+ ; without it the test reads a cached verdict and stays green while the
+ ; wiring it asserts is gone.
+ (deps %{workspace_root}/bin/masc_tui.ml)
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 
 (rule

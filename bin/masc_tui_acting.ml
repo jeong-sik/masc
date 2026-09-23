@@ -1179,3 +1179,41 @@ let evidence_fields (entry : entry) =
       ; some "Detail" row.detail
       ; some "Call evidence" "this event is not an exact tool invocation"
       ]
+
+(* ── The Activity table's two measured columns ─────────────────────────── *)
+
+(* What every row spends before the columns below: the two leading cells, the
+   clock, the glyph, and the gap that brings each of the four fields. *)
+let table_fixed_cells = 15
+
+(* What the two columns drew before they were measured. Neither goes under it,
+   so a narrow frame draws the table it drew yesterday. *)
+let keeper_minimum_cells = 16
+let label_minimum_cells = 16
+
+type columns = { keeper_cells : int; label_cells : int }
+
+let columns ~inner_width rows =
+  let widest pick =
+    List.fold_left
+      (fun widest row ->
+        max widest (Masc_tui_message_layout.display_width (pick row)))
+      0 rows
+  in
+  let keeper_needed = max keeper_minimum_cells (widest (fun row -> row.keeper)) in
+  let label_needed = max label_minimum_cells (widest (fun row -> row.label)) in
+  (* Detail is the column that carries sentences -- a tool name, a turn, a
+     cost -- so the two named ones together take at most half of what the
+     frame leaves. *)
+  let share =
+    max
+      (keeper_minimum_cells + label_minimum_cells)
+      (max 0 (inner_width - table_fixed_cells) / 2)
+  in
+  let keeper_cells =
+    max keeper_minimum_cells (min keeper_needed (share - label_minimum_cells))
+  in
+  let label_cells =
+    max label_minimum_cells (min label_needed (share - keeper_cells))
+  in
+  { keeper_cells; label_cells }

@@ -5277,14 +5277,20 @@ let decode_memory_health_snapshot json =
          | Ok keeper -> Ok keeper
          | Error reason ->
            Error
-             { mkr_keeper_id = Result.to_option (required_string_field row "keeper_id")
+             { mkr_keeper_id =
+                 (* The row is already refused with [reason]; an unreadable
+                    [keeper_id] only means the refusal cannot name its keeper. *)
+                 (match required_string_field row "keeper_id" with
+                  | Ok keeper_id -> Some keeper_id
+                  | Error _ -> None)
              ; mkr_reason = Printf.sprintf "keepers[%d]: %s" index reason
              })
       keepers_json
   in
-  let mhs_keepers = List.filter_map Result.to_option rows in
-  let mhs_refused_keepers =
-    List.filter_map (function Ok _ -> None | Error refusal -> Some refusal) rows
+  let mhs_keepers, mhs_refused_keepers =
+    List.partition_map
+      (function Ok keeper -> Either.Left keeper | Error refusal -> Either.Right refusal)
+      rows
   in
   let* () =
     let keeper_ids =

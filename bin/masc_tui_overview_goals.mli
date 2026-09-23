@@ -32,10 +32,11 @@ val progress :
 val wanted_rows : Masc_tui_types.overview_goals_reading -> int
 (** Rows the section asks the Overview budget for, headline included. A
     reading not made yet or failed wants its one explaining line; a reading
-    with no drawn goal wants the headline and a line saying so. *)
+    with no drawn goal wants only the headline, which says so. *)
 
 val lines :
   now:float ->
+  localtime:(float -> Unix.tm) ->
   inner_width:int ->
   rows:int ->
   tasks:(Tui_decode.task list, string) result ->
@@ -43,7 +44,8 @@ val lines :
   string list
 (** At most [rows] lines, headline first. Goals past the budget are cut from
     the bottom and the headline says how many are drawn. [now] is the Unix
-    time the due-date countdown counts from, in UTC days. [tasks] is the
+    time the due-date countdown counts from; [localtime] puts it on the
+    operator's calendar, since a due date carries no zone. [tasks] is the
     backlog the headline counts; its read error replaces the count. *)
 
 val draw :
@@ -51,6 +53,7 @@ val draw :
   cols:int ->
   rows:int ->
   now:float ->
+  localtime:(float -> Unix.tm) ->
   tasks:(Tui_decode.task list, string) result ->
   Masc_tui_types.overview_goals_reading ->
   unit

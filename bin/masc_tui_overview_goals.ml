@@ -64,7 +64,7 @@ let progress ~goals ~tasks =
 let wanted_rows (reading : Types.overview_goals_reading) =
   match reading with
   | Types.Goals_unread | Types.Goals_failed _ -> 1
-  | Types.Goals_read goals -> 1 + max 1 (List.length (drawn_goals goals))
+  | Types.Goals_read goals -> 1 + List.length (drawn_goals goals)
 
 (* Cells of the task bar. A width, not a threshold: nothing is decided by it. *)
 let bar_cells = 16
@@ -98,9 +98,11 @@ let idle_text (goal : Tui_decode.overview_goal) =
   | Some seconds -> "idle " ^ Masc_tui_render_prim.keeper_lane_idle_text seconds
   | None -> "idle \xe2\x80\x94"
 
-let utc_today ~now =
-  Option.bind (Ptime.of_float_s now) (fun instant ->
-      Ptime.of_date (Ptime.to_date instant))
+(* [due_date] is a calendar date with no zone, so it is compared with the
+   operator's own calendar date: the day [localtime] puts [now] on. *)
+let local_today ~now ~localtime =
+  let tm : Unix.tm = localtime now in
+  Ptime.of_date (tm.Unix.tm_year + 1900, tm.Unix.tm_mon + 1, tm.Unix.tm_mday)
 
 let due_text ~today (goal : Tui_decode.overview_goal) =
   match goal.og_due_date with
@@ -127,8 +129,8 @@ let widest texts =
   List.fold_left (fun acc text -> max acc (Masc_tui_message_layout.display_width text)) 0
     texts
 
-let goal_rows ~now ~inner_width goals =
-  let today = utc_today ~now in
+let goal_rows ~now ~localtime ~inner_width goals =
+  let today = local_today ~now ~localtime in
   let counts = List.map task_count_text goals in
   let idles = List.map idle_text goals in
   let dues = List.map (due_text ~today) goals in
@@ -169,7 +171,7 @@ let title = Ansi.bold ^ "GOALS" ^ Ansi.reset
 
 let take rows items = List.filteri (fun index _ -> index < rows) items
 
-let lines ~now ~inner_width ~rows ~tasks (reading : Types.overview_goals_reading)
+let lines ~now ~localtime ~inner_width ~rows ~tasks (reading : Types.overview_goals_reading)
     =
   let rows = max 0 rows in
   let all =
@@ -184,7 +186,11 @@ let lines ~now ~inner_width ~rows ~tasks (reading : Types.overview_goals_reading
         let goal_count = List.length drawn in
         let shown = min goal_count (max 0 (rows - 1)) in
         let cut =
-          if shown < goal_count then
+          if goal_count = 0 then
+            Printf.sprintf "  %s\xc2\xb7 no goal is executing, verifying or \
+                            awaiting confirmation%s"
+              Ansi.dim Ansi.reset
+          else if shown < goal_count then
             Printf.sprintf "  %s\xc2\xb7 %d of %d goals shown%s" Ansi.dim shown
               goal_count Ansi.reset
           else ""
@@ -201,22 +207,14 @@ let lines ~now ~inner_width ~rows ~tasks (reading : Types.overview_goals_reading
               Printf.sprintf "%s   %sactive work unread: %s%s%s" title
                 (Theme.warn ()) (Terminal_text.single_line reason) Ansi.reset cut
         in
-        let body =
-          match drawn with
-          | [] ->
-              [ Printf.sprintf "  %sno goal is executing, verifying or awaiting \
-                                confirmation%s"
-                  Ansi.dim Ansi.reset ]
-          | _ :: _ -> goal_rows ~now ~inner_width drawn
-        in
-        headline :: body
+        headline :: goal_rows ~now ~localtime ~inner_width drawn
   in
   take rows all
 
-let draw buf ~cols ~rows ~now ~tasks reading =
+let draw buf ~cols ~rows ~now ~localtime ~tasks reading =
   if rows > 0 then begin
     let inner_width = framed_inner_width cols in
-    let drawn = lines ~now ~inner_width ~rows ~tasks reading in
+    let drawn = lines ~now ~localtime ~inner_width ~rows ~tasks reading in
     List.iter (box_line buf cols) drawn;
     (* [rows] is what the budget spent; a short list still fills it so the
        frame below starts where the budget says. *)

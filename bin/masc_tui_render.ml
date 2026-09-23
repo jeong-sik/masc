@@ -733,7 +733,7 @@ let render_overview (state : state) =
     overview_layout state ~terminal_rows:rows
   in
   Overview_goals.draw buf ~cols ~rows:row_budget.goal_rows
-    ~now:(Unix.gettimeofday ())
+    ~now:(Unix.gettimeofday ()) ~localtime:Unix.localtime
     ~tasks:(Option.fold ~none:(Ok state.tasks) ~some:Result.error tasks_error)
     state.overview_goals;
   (* The panel spans the band the rest of the screen's rows cover: one cell of

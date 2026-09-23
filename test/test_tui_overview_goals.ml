@@ -258,7 +258,8 @@ let contains ~sub text =
   at 0
 
 let draw ?(rows = 10) ?(tasks = live_tasks) reading =
-  Goals.lines ~now:captured_at ~inner_width:120 ~rows ~tasks:(Ok tasks) reading
+  Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows
+    ~tasks:(Ok tasks) reading
   |> List.map strip_ansi
 
 let find_row ~sub rows =
@@ -320,13 +321,27 @@ let test_a_failed_read_is_one_explicit_line () =
 let test_an_unread_backlog_is_not_a_zero () =
   let goals = decode_fixture () in
   let rows =
-    Goals.lines ~now:captured_at ~inner_width:120 ~rows:10
+    Goals.lines ~now:captured_at ~localtime:Unix.gmtime ~inner_width:120 ~rows:10
       ~tasks:(Error "backlog.json unreadable") (Types.Goals_read goals)
     |> List.map strip_ansi
   in
   check bool "the headline names the unread backlog" true
     (contains ~sub:"active work unread: backlog.json unreadable" (List.hd rows));
   check bool "and counts nothing" false (contains ~sub:"of 13" (List.hd rows))
+
+(* 2026-09-23T15:30:00Z is already 00:30 on the 24th in KST. The operator's
+   calendar says the release is 13 days away; UTC days would say 14. *)
+let test_the_countdown_uses_the_operator_calendar () =
+  let goals = decode_fixture () in
+  let just_after_kst_midnight = 1790177400.0 in
+  let kst now = Unix.gmtime (now +. (9. *. 3600.)) in
+  let rows =
+    Goals.lines ~now:just_after_kst_midnight ~localtime:kst ~inner_width:120
+      ~rows:10 ~tasks:(Ok live_tasks) (Types.Goals_read goals)
+    |> List.map strip_ansi
+  in
+  check bool "the countdown is from the local date" true
+    (contains ~sub:"due 10-07 (D-13)" (find_row ~sub:"v0.37.0" rows))
 
 let test_an_unknown_phase_is_refused () =
   let json =
@@ -357,6 +372,8 @@ let () =
             test_a_failed_read_is_one_explicit_line
         ; test_case "an unread backlog is not a zero" `Quick
             test_an_unread_backlog_is_not_a_zero
+        ; test_case "the countdown uses the operator calendar" `Quick
+            test_the_countdown_uses_the_operator_calendar
         ; test_case "an unknown phase is refused" `Quick
             test_an_unknown_phase_is_refused
         ] )

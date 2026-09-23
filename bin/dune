@@ -1552,7 +1552,8 @@
   masc_tui_ansi
   masc_tui_message_layout
   masc_tui_render_prim
-  ptime))
+  ptime
+  unix))
 
 ;; RFC-0465: the Overview's pull request reading, decoder and lines. A
 ;; library so a test can decode the server's own encoder output.

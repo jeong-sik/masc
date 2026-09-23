@@ -118,31 +118,6 @@ function parseRepositoryCheckout(r: unknown): RepositoryCheckout | null {
   }
 }
 
-interface PlaygroundPR {
-  pr_url: string
-  branch: string
-  title: string
-  draft: boolean
-}
-
-function isPlaygroundPR(r: unknown): r is PlaygroundPR {
-  if (!isRecord(r)) return false
-  return typeof r.pr_url === 'string'
-    && typeof r.branch === 'string'
-    && typeof r.title === 'string'
-    && typeof r.draft === 'boolean'
-}
-
-interface PlaygroundWorktree {
-  name: string
-  path: string
-}
-
-function isPlaygroundWorktree(r: unknown): r is PlaygroundWorktree {
-  if (!isRecord(r)) return false
-  return typeof r.name === 'string' && typeof r.path === 'string'
-}
-
 export function RepositoryCheckoutsPanel({ keeperName }: { keeperName: string }) {
   const detail = keeperStatusDetails.value[keeperName]
   if (!detail?.rawStatus) return null
@@ -157,10 +132,7 @@ export function RepositoryCheckoutsPanel({ keeperName }: { keeperName: string })
       .map(parseRepositoryCheckout)
       .filter((checkout): checkout is RepositoryCheckout => checkout !== null)
     : []
-  const prs = (Array.isArray(execCtx.pr_history) ? execCtx.pr_history : []).filter(isPlaygroundPR)
-  const worktrees = (Array.isArray(execCtx.active_worktrees) ? execCtx.active_worktrees : []).filter(isPlaygroundWorktree)
-
-  if (checkouts.length === 0 && prs.length === 0 && worktrees.length === 0) return null
+  if (checkouts.length === 0) return null
 
   return html`
     <${PanelCard} title="저장소 작업">
@@ -195,33 +167,6 @@ export function RepositoryCheckoutsPanel({ keeperName }: { keeperName: string })
                   <span class="text-3xs text-[var(--color-fg-disabled)] flex-shrink-0">${behind === null || ahead === null ? checkout.inspection_state : `behind ${behind} · ahead ${ahead}`}</span>
                 </div>
               `})}
-            </div>
-          </div>
-        ` : null}
-
-        ${prs.length > 0 ? html`
-          <div>
-            <${SectionHeader} size="xs" class="mb-1.5">PRs (${prs.length})</${SectionHeader}>
-            <div class="flex flex-col gap-1.5">
-              ${prs.map(pr => html`
-                <div class="flex items-center gap-2 px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-row">
-                  <span class="text-xs text-[var(--color-fg-secondary)] truncate flex-1">${pr.title}</span>
-                  <${MonoBadge}>${pr.branch}</${MonoBadge}>
-                  ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">draft</span>` : null}
-                  <a href=${pr.pr_url} target="_blank" rel="noopener" class="v2-mobile-operator-target inline-flex items-center text-3xs text-[var(--color-accent-fg)] hover:underline flex-shrink-0">PR</a>
-                </div>
-              `)}
-            </div>
-          </div>
-        ` : null}
-
-        ${worktrees.length > 0 ? html`
-          <div>
-            <${SectionHeader} size="xs" class="mb-1.5">워크트리 (${worktrees.length})</${SectionHeader}>
-            <div class="flex flex-wrap gap-1.5">
-              ${worktrees.map(w => html`
-                <span class="text-3xs font-mono px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]" title=${w.path}>${w.name}</span>
-              `)}
             </div>
           </div>
         ` : null}

@@ -1,25 +1,20 @@
 (** Tests for #27320 — context-overflow feedback shrink on the
     official-client lanes.
 
-    Two units are covered directly:
+    {!Keeper_turn_driver_try_provider.context_overflow_shrink_sequence} is
+    the pure same-runtime retry policy. The suite injects a fake [attempt]
+    callback so the halving sequence, the walk to the floor, the
+    same-run-retry-authority gate, and the "only a typed overflow retries"
+    rule are verified without an Eio-backed provider.
 
-    - {!Keeper_turn_driver_try_provider.context_overflow_shrink_sequence}:
-      the pure same-runtime retry policy. Injects a fake [attempt] callback
-      so the halving sequence, the walk to the floor, the same-run-retry-authority
-      gate, and the "only a typed overflow retries" rule are verified
-      without an Eio-backed provider.
-    - {!Keeper_context_overflow_shrink_state}: the process-local (keeper,
-      runtime) memory of the last capacity that succeeded.
-
-    [Keeper_claude_code_runtime] and [Keeper_codex_runtime] wire these two
-    together with their real provider call, which has no unit-level fixture
+    [Keeper_claude_code_runtime] and [Keeper_codex_runtime] wire it to their
+    real provider call, which has no unit-level fixture
     in this suite — see [test_keeper_turn_driver_failover.ml] for the
     candidate-rotation layer's equivalent boundary. The Agent Core lane's
     retry is [carried_range_eviction_sequence], covered in
     [test_keeper_carried_range_eviction.ml]. *)
 
 module Try_provider = Masc.Keeper_turn_driver_try_provider
-module Shrink_state = Masc.Keeper_context_overflow_shrink_state
 
 open Alcotest
 
@@ -51,14 +46,12 @@ let test_halves_capacity_on_repeated_overflow_until_success () =
     attempted_capacities := capacity :: !attempted_capacities;
     if capacity <= 128 then Ok "done" else Error (context_overflow ())
   in
-  let recorded_success = ref None in
   let shrink_events = ref [] in
   let result =
     Try_provider.context_overflow_shrink_sequence
       ~starting_capacity:1024
       ~same_run_retry_authorized:always_authorized
       ~shrink_admits_history:always_admits_history
-      ~record_success:(fun ~capacity -> recorded_success := Some capacity)
       ~on_shrink_retry:(fun ~shrink_attempt ~previous_capacity ~capacity ->
         shrink_events :=
           (shrink_attempt, previous_capacity, capacity) :: !shrink_events)
@@ -69,7 +62,6 @@ let test_halves_capacity_on_repeated_overflow_until_success () =
   check (list int) "capacity halves each retry: 1024, 512, 256, 128"
     [ 1024; 512; 256; 128 ]
     (List.rev !attempted_capacities);
-  check (option int) "records the capacity that succeeded" (Some 128) !recorded_success;
   check
     (list (triple int int int))
     "shrink events carry (attempt, previous, next) in order"
@@ -96,7 +88,6 @@ let test_walks_until_no_smaller_view_is_named () =
            it names the rejected view itself, which is no smaller view. *)
         if capacity <= smallest_view then capacity else default_capacity)
       ~shrink_admits_history:always_admits_history
-      ~record_success:(fun ~capacity:_ -> fail "overflow never succeeds here")
       ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity:_ ->
         incr shrink_count)
       ~attempt
@@ -123,7 +114,6 @@ let test_non_overflow_error_never_shrinks () =
       ~starting_capacity:1024
       ~same_run_retry_authorized:always_authorized
       ~shrink_admits_history:always_admits_history
-      ~record_success:(fun ~capacity:_ -> fail "network error never succeeds")
       ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity ->
         no_shrink_expected ~capacity)
       ~attempt
@@ -152,7 +142,6 @@ let test_checkpoint_boundary_blocks_shrink_even_on_overflow () =
       ~starting_capacity:1024
       ~same_run_retry_authorized:(fun () -> false)
       ~shrink_admits_history:always_admits_history
-      ~record_success:(fun ~capacity:_ -> fail "no success expected")
       ~on_shrink_retry:(fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity ->
         no_shrink_expected ~capacity)
       ~attempt
@@ -179,7 +168,6 @@ let test_custom_shrink_replaces_only_the_exceptional_start () =
       ~shrink_capacity:(fun ~capacity ~default_capacity ->
         if capacity = sentinel then 400 else default_capacity)
       ~shrink_admits_history:always_admits_history
-      ~record_success:(fun ~capacity:_ -> ())
       ~on_shrink_retry:
         (fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity:_ -> ())
       ~attempt
@@ -203,7 +191,6 @@ let test_non_decreasing_custom_shrink_does_not_repeat_provider_attempt () =
       ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
         capacity)
       ~shrink_admits_history:always_admits_history
-      ~record_success:(fun ~capacity:_ -> fail "overflow never succeeds here")
       ~on_shrink_retry:
         (fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity:_ ->
           incr shrink_events)
@@ -232,7 +219,6 @@ let test_the_floor_is_the_last_view () =
       ~same_run_retry_authorized:always_authorized
       ~final_shrink_capacity:(fun ~capacity:_ -> Some 17)
       ~shrink_admits_history:always_admits_history
-      ~record_success:(fun ~capacity:_ -> fail "overflow never succeeds here")
       ~on_shrink_retry:
         (fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity:_ -> ())
       ~attempt:(fun ~capacity ->
@@ -267,7 +253,6 @@ let test_a_reserve_larger_than_the_next_capacity_stops_the_shrink () =
       ~starting_capacity:524_288
       ~same_run_retry_authorized:always_authorized
       ~shrink_admits_history:(fun ~capacity -> reserve_bytes < capacity)
-      ~record_success:(fun ~capacity:_ -> fail "overflow never succeeds here")
       ~on_shrink_retry:
         (fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity:_ ->
           incr shrink_count)
@@ -294,7 +279,6 @@ let test_the_shrink_stops_at_the_first_inadmissible_step () =
       ~starting_capacity:1024
       ~same_run_retry_authorized:always_authorized
       ~shrink_admits_history:(fun ~capacity -> capacity >= 512)
-      ~record_success:(fun ~capacity:_ -> fail "overflow never succeeds here")
       ~on_shrink_retry:
         (fun ~shrink_attempt:_ ~previous_capacity:_ ~capacity:_ -> ())
       ~attempt:(fun ~capacity ->
@@ -310,81 +294,6 @@ let test_the_shrink_stops_at_the_first_inadmissible_step () =
     (List.rev !attempted_capacities)
 ;;
 
-(* {1 Keeper_context_overflow_shrink_state} *)
-
-let test_state_defaults_to_max_capacity_when_unseen () =
-  Eio_main.run
-  @@ fun _env ->
-  Shrink_state.For_testing.reset ();
-  check int "no memory yet: falls back to the declared cap" 1_048_576
-    (Shrink_state.starting_capacity
-       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity:1_048_576)
-;;
-
-let test_state_remembers_last_success () =
-  Eio_main.run
-  @@ fun _env ->
-  Shrink_state.For_testing.reset ();
-  Shrink_state.record_success
-    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity:131_072;
-  check int "next turn starts from the remembered capacity" 131_072
-    (Shrink_state.starting_capacity
-       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity:1_048_576)
-;;
-
-let test_state_clamps_a_remembered_value_above_the_current_cap () =
-  Eio_main.run
-  @@ fun _env ->
-  Shrink_state.For_testing.reset ();
-  Shrink_state.record_success
-    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity:2_097_152;
-  check int "a stale remembered value never exceeds the current declared cap"
-    1_048_576
-    (Shrink_state.starting_capacity
-       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity:1_048_576)
-;;
-
-(* The seed is the runtime's declared ceiling, and a caller that passes
-   [max_int] instead opts out of every clamp above: a remembered value can
-   never be stale, and the first attempt carries the whole history. The
-   claude_code lane did exactly that until 2026-08-24, so a model declaring
-   max-prompt-bytes=524288 learned its own ceiling from the provider's
-   rejection, one full turn at a time. This pins what [max_capacity]
-   means so the next lane that wires it reads the contract here. *)
-let test_max_int_capacity_disables_the_clamp () =
-  Eio_main.run
-  @@ fun _env ->
-  Shrink_state.For_testing.reset ();
-  Shrink_state.record_success
-    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity:8_388_608;
-  check int "an unbounded cap keeps a value a declared cap would have clamped"
-    8_388_608
-    (Shrink_state.starting_capacity
-       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity:max_int);
-  check int "the same memory against a declared cap is clamped to it" 524_288
-    (Shrink_state.starting_capacity
-       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity:524_288)
-;;
-
-let test_state_is_keyed_per_keeper_and_runtime () =
-  Eio_main.run
-  @@ fun _env ->
-  Shrink_state.For_testing.reset ();
-  Shrink_state.record_success
-    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity:131_072;
-  check int "a different runtime on the same keeper is unaffected" 1_048_576
-    (Shrink_state.starting_capacity
-       ~keeper_name:"alpha" ~runtime_id:"agent_core-fallback" ~max_capacity:1_048_576);
-  check int "the same runtime id on a different keeper is unaffected" 1_048_576
-    (Shrink_state.starting_capacity
-       ~keeper_name:"beta" ~runtime_id:"agent_core-primary" ~max_capacity:1_048_576)
-;;
-
-
-(* The memory is a claim that a turn completed at that size. An overflow at
-   that size disproves it, and #31684 showed what keeping it costs: the pair
-   re-entered at the disproved capacity every turn for the life of the
-   process. *)
 let () =
   run
     "keeper_context_overflow_shrink"
@@ -425,28 +334,6 @@ let () =
             "the shrink stops at the first inadmissible step"
             `Quick
             test_the_shrink_stops_at_the_first_inadmissible_step
-        ] )
-    ; ( "shrink_state"
-      , [ test_case
-            "defaults to max capacity when unseen"
-            `Quick
-            test_state_defaults_to_max_capacity_when_unseen
-        ; test_case
-            "remembers last success"
-            `Quick
-            test_state_remembers_last_success
-        ; test_case
-            "clamps a remembered value above the current cap"
-            `Quick
-            test_state_clamps_a_remembered_value_above_the_current_cap
-        ; test_case
-            "max_int capacity disables the clamp"
-            `Quick
-            test_max_int_capacity_disables_the_clamp
-        ; test_case
-            "is keyed per (keeper, runtime)"
-            `Quick
-            test_state_is_keyed_per_keeper_and_runtime
         ] )
     ]
 ;;

@@ -895,8 +895,16 @@ let test_prompt_contains_exact_current_selection () =
     |> Yojson.Safe.Util.to_list |> List.hd |> Yojson.Safe.Util.member "fact"
   in
   let fields = Yojson.Safe.Util.to_assoc first_fact in
-  check bool "timing metadata fields are omitted" false
-    (List.mem_assoc "first_seen" fields || List.mem_assoc "last_seen" fields)
+  check (option string) "the write time reaches the prompt"
+    (Some (Masc_domain.iso8601_of_unix_seconds current_a.first_seen))
+    (match List.assoc_opt "first_seen" fields with
+     | Some (`String at) -> Some at
+     | Some _ | None -> None);
+  check (option string) "the re-observation time reaches the prompt"
+    (Some (Masc_domain.iso8601_of_unix_seconds current_a.last_seen))
+    (match List.assoc_opt "last_seen" fields with
+     | Some (`String at) -> Some at
+     | Some _ | None -> None)
 ;;
 
 let test_prompt_carries_keeper_instructions () =
@@ -1558,8 +1566,8 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
       check bool "origin kind reaches prompt without the opaque trace id" true
         (Yojson.Safe.Util.member "origin" details = `Assoc ["kind", `String "authored"]);
       let fields = Yojson.Safe.Util.to_assoc details in
-      check bool "timing metadata fields are omitted" false
-        (List.mem_assoc "first_seen" fields || List.mem_assoc "last_seen" fields);
+      check bool "both write times reach the prompt" true
+        (List.mem_assoc "first_seen" fields && List.mem_assoc "last_seen" fields);
       check bool "Board source ids remain available for new claim provenance" true
         (Yojson.Safe.Util.member "basis" details = Memory.basis_to_json emergency.basis);
       let source = Yojson.Safe.Util.(details |> member "basis" |> member "board") in
@@ -1651,8 +1659,8 @@ let test_input_metadata_is_not_accepted_as_claim_output () =
     | Error error -> fail (Librarian.parse_error_to_string error)
     | Ok _ -> failf "input-only metadata %s was accepted as output" field)
     [ "origin", `Assoc ["kind", `String "authored"; "trace_id", `String "forged"]
-    ; "first_seen", `Float 1.
-    ; "last_seen", `Float 2.
+    ; "first_seen", `String "1970-01-01T00:00:01Z"
+    ; "last_seen", `String "1970-01-01T00:00:02Z"
     ; "basis", `Assoc ["kind", `String "observed"] ]
 ;;
 

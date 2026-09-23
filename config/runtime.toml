@@ -106,17 +106,26 @@ media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
 # skill_applicability = false  # current request + authorized Skill body advice
 # excluded_keepers = []
 
+# max_output_tokens is the output budget a lane's requests send as max_tokens.
+# It is optional: a lane without it sends no max_tokens of its own and the
+# provider's default applies. The model's catalog max_output_tokens is what
+# the model can emit, not a request budget, and is never sent in its place.
+# 8192 tokens bounds a large structured judgment.
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+max_output_tokens = 8192
 
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+max_output_tokens = 8192
 
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.deepseek-v4-flash"]
+max_output_tokens = 8192
 
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["glm-coding.glm-5-3", "ollama_cloud.ollama-cloud-deepseek-v4-flash"]
+max_output_tokens = 8192
 
 # SSH remote execution endpoint registry (Phase 1 SSH lane, spec §4.2 in
 # docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md).
@@ -2077,6 +2086,15 @@ candidates = [
 [runtime.assignments]
 # example: pin a test keeper to an explicit runtime
 # canary = "deepseek.deepseek-v4-pro"
+
+# ═══ Repositories ═══════════════════════════════════════════════════
+# 서버가 등록된 GitHub 저장소의 열린 PR 을 60초마다 읽을 때 쓸 토큰의 주인
+# Keeper 다(RFC-0465). 그 Keeper 의 github-cli/hosts.yml 토큰을 읽을 때마다 새로
+# 읽는다. 적지 않으면 PR 을 읽지 않고, /api/v1/repositories/pulls 가 그 이유를
+# 말한다. 이 표에는 pr_reader 말고 다른 키를 쓸 수 없다.
+#
+# [repositories]
+# pr_reader = "<keeper>"
 
 # ═══ Connectors ══════════════════════════════════════════════════════
 # 어떤 인바운드 메시지가 턴을 시작하는지를 커넥터별로 정한다. 운영자가 적어두는

@@ -189,6 +189,13 @@ let basis_for_prompt ~by_identity = function
       ]
 ;;
 
+(* When the fact was written ([first_seen]) and last written again with the
+   same bytes ([last_seen]). Without them a keeper's snapshots of one moving
+   state -- a game position rewritten every step -- read as equals, and none
+   can be told apart as the stale one (#37079). Both are needed: a state that
+   returns to an earlier value keeps its old [first_seen] and only moves
+   [last_seen]. They are write times, not the times the states held, and not
+   a strength signal (RFC-0418); the prompt says so. *)
 let current_fact_json ~by_identity index fact =
   `Assoc
     [ wire_field_memory_id, `String (surrogate_id_of_index index)
@@ -199,6 +206,10 @@ let current_fact_json ~by_identity index fact =
           ; wire_field_origin,
             `Assoc [ wire_field_kind, `String (origin_kind_to_string fact.origin.kind) ]
           ; wire_field_basis, basis_for_prompt ~by_identity fact.basis
+          ; ( wire_field_first_seen
+            , `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen) )
+          ; ( wire_field_last_seen
+            , `String (Masc_domain.iso8601_of_unix_seconds fact.last_seen) )
           ] )
     ]
 ;;

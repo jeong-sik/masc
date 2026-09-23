@@ -9,6 +9,12 @@ val messages_for_librarian
   :  Keeper_librarian.input
   -> (Agent_core.Types.message list, string) result
 
+(** Every variable the [librarian] template is rendered with: the input's own
+    variables and the shared [working_contexts_rule] fragment. *)
+val librarian_prompt_variables
+  :  Keeper_librarian.input
+  -> ((string * string) list, string) result
+
 type extraction_error
 
 val extraction_error_to_string : extraction_error -> string

@@ -190,10 +190,12 @@ let with_working_contexts_rule variables =
     (render_prompt Prompt_names.librarian_working_contexts_rule [])
 ;;
 
+let librarian_prompt_variables input =
+  with_working_contexts_rule (Keeper_librarian.prompt_variables input)
+;;
+
 let render_librarian_prompt input =
-  Result.bind
-    (with_working_contexts_rule (Keeper_librarian.prompt_variables input))
-    (render_prompt Prompt_names.librarian)
+  Result.bind (librarian_prompt_variables input) (render_prompt Prompt_names.librarian)
 ;;
 
 type librarian_prompt_material =

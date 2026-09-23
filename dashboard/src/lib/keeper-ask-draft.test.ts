@@ -222,15 +222,15 @@ describe('answerRequestBody', () => {
     })
   })
 
-  it('leaves out a blank identity instead of sending an empty string', () => {
-    const body = answerRequestBody(row(), [], { actorId: '   ', sessionId: null })
+  it('leaves out identity fields: the server records the authenticated caller (task-1662)', () => {
+    const body = answerRequestBody(row(), [], { sessionId: null })
     expect('actor_id' in body).toBe(false)
     expect('session_id' in body).toBe(false)
   })
 
-  it('carries the identity when there is one', () => {
-    const body = answerRequestBody(row(), [], { actorId: 'vincent', sessionId: 's1' })
-    expect(body.actor_id).toBe('vincent')
+  it('never sends a self-reported actor_id even when a session is present', () => {
+    const body = answerRequestBody(row(), [], { sessionId: 's1' })
+    expect('actor_id' in body).toBe(false)
     expect(body.session_id).toBe('s1')
   })
 })

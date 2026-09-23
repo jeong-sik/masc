@@ -3,6 +3,7 @@
 module Keeper_declared_roster = Masc.Keeper_declared_roster
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_status_runtime = Masc.Keeper_status_runtime
+module Keeper_snapshot_unread = Masc.Keeper_snapshot_unread
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
@@ -1160,6 +1161,13 @@ let load_overview ~(host : string) ~(port : int) :
       in
       let* agent_briefs = optional_list_field json "agent_briefs" in
       let* keeper_briefs = optional_list_field json "keeper_briefs" in
+      (* Keepers the server listed but could not build a row for. They are
+         not in [keeper_briefs]; before #38090 they were in neither, and the
+         Overview counted a fleet that had lost a Keeper as a smaller one. *)
+      let* keepers_unread =
+        let* items = required_list_field json "keepers_unread" in
+        Keeper_snapshot_unread.list_of_json (`List items)
+      in
       let* top_attention =
         let fallback =
           match incidents with
@@ -1184,8 +1192,16 @@ let load_overview ~(host : string) ~(port : int) :
          holds workspace_health, cluster, and project and nothing else --
          [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
          a count read from there was a default dressed as a reading. *)
-      let ov_keepers = List.length keeper_briefs in
-      let ov_keeper_liveness = keeper_liveness_of_briefs keeper_briefs in
+      (* An unread Keeper is still a Keeper -- the server listed its name --
+         so it is in the count and among the unreadable, the same as a brief
+         whose liveness word this build cannot name. The count stays exact:
+         what is missing is the Keeper's state, not the Keeper. *)
+      let n_unread = List.length keepers_unread in
+      let ov_keepers = List.length keeper_briefs + n_unread in
+      let ov_keeper_liveness =
+        let counts = keeper_liveness_of_briefs keeper_briefs in
+        { counts with klc_unreadable = counts.klc_unreadable + n_unread }
+      in
       let ov_mcp_agents = List.length agent_briefs in
       let* ov_generated_at = required_string_field json "generated_at" in
       Ok
@@ -1610,7 +1626,7 @@ let load_keeper_config_editor ~(host : string) ~(port : int)
 (* The github-identity payload is the fixed record built by
    Keeper_github_identity.observation_to_yojson: hostname, config_dir,
    projected_token_env_names, stored + effective (each
-   authenticated/login/error), effective_probe_scope. Read those fields into a
+   authenticated/login/scopes/error), effective_probe_scope. Read those fields into a
    short human view rather than pretty-printing the raw JSON. Any shape surprise
    (hostname absent, an error envelope, a field of the wrong type) falls back to
    the raw block, so the tab never shows less than the payload carried. *)
@@ -1640,10 +1656,30 @@ let github_identity_lines (json : Yojson.Safe.t) : string list =
           | Some (`String value) -> Some value
           | Some _ | None -> None
         in
+        (* What the token may do, as GitHub listed it. A token GitHub lists
+           no scopes for (a fine-grained PAT, an App token) says so rather
+           than showing an empty list, which would read as "none". *)
+        let scopes =
+          match List.assoc_opt "scopes" af with
+          | Some (`List items) ->
+            " \xc2\xb7 scopes: "
+            ^ (match
+                 List.filter_map
+                   (function `String scope -> Some scope | _ -> None)
+                   items
+               with
+               | [] -> "(none)"
+               | scopes -> String.concat ", " scopes)
+          | Some `Null -> " \xc2\xb7 scopes: not listed by GitHub"
+          (* No key at all is a server that does not report scopes, not a
+             token GitHub lists none for; say nothing rather than the wrong
+             one of the two. *)
+          | Some _ | None -> ""
+        in
         Some
           (match authenticated, login, error with
-           | true, Some who, _ -> "signed in as " ^ who
-           | true, None, _ -> "signed in"
+           | true, Some who, _ -> "signed in as " ^ who ^ scopes
+           | true, None, _ -> "signed in" ^ scopes
            | false, _, Some message -> "not signed in (" ^ message ^ ")"
            | false, _, None -> "not signed in")
       | Some _ | None -> None

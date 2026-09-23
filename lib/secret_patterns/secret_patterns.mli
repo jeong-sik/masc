@@ -17,6 +17,7 @@ val is_sensitive_key : string -> bool
     (token, api_key, password, ...). *)
 
 val redact_json_strings : Yojson.Safe.t -> Yojson.Safe.t
-(** Recursively apply {!redact_text} to string leaves and replace
-    sensitive-key fields with [\[REDACTED\]], preserving structure and
-    without truncation. *)
+(** Recursively apply {!redact_text} to string leaves and to object keys,
+    and replace the value of a sensitive key (judged on the key as it came)
+    with [\[REDACTED\]], preserving structure and without truncation. Two
+    keys that redact to the same text are both kept, in order. *)

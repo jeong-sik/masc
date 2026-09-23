@@ -114,9 +114,13 @@ val sync
     manifest is then rewritten from the current set ([managed_by],
     [schema], sorted [paths], and [sha256] mapping each path to the digest
     of the bytes this pass left there) as the record of what this binary
-    owns there. Without a manifest, or with one under a schema no domain
-    writes, a pass deletes nothing, overwrites every differing file, and
-    writes one. A manifest that does not read, or that another domain
+    owns there. A manifest without [sha256] still says what to retire but
+    records no digest, so every differing file is treated as stale: that is
+    the manifest a binary that records no digests leaves after its pass, for
+    example after a rollback, and the copies it wrote are distribution
+    copies, not operator edits. Without a manifest, or with one under a
+    schema no domain writes, a pass deletes nothing, overwrites every
+    differing file, and writes one. A manifest that does not read, or that another domain
     wrote, is reported in
     [failed] and left as it is: the pass deletes nothing and writes no
     manifest, so the same report returns every boot until the operator

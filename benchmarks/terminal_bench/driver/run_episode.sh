@@ -19,7 +19,7 @@ source "$BENCH/driver/endpoint_account.sh"
 INSTRUCTION_FILE="$1"
 RESULT_JSON="$2"
 KEEPER_COUNT="${KEEPER_COUNT:-1}"
-RUNTIME_ID="${BENCH_RUNTIME_ID:?BENCH_RUNTIME_ID required (e.g. anthropic.claude-fable-5)}"
+RUNTIME_ID="${BENCH_RUNTIME_ID:?BENCH_RUNTIME_ID required (e.g. anthropic.claude-fable-5-1)}"
 POLL_INTERVAL_SEC=10
 # The episode has no deadline of its own. Harbor's agent timeout (28800s on
 # every Terminal-Bench 4.0 task) is the only bound: when it fires, harbor

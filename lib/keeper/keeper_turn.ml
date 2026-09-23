@@ -853,6 +853,35 @@ let run_keeper_invocation_turn_admitted_inner
                   | Some admission ->
                     Keeper_direct_gate_continuation.finish_run ~config:ctx.config
                       ~keeper_name:meta.name ~operation_id admission run_result in
+                (* A Gate whose original session is full cannot continue
+                   anywhere: suspending it again would resume into the same
+                   refusal. The operation fails with that typed cause, and the
+                   session record lets the next ordinary turn start fresh. *)
+                let gate_session_full = match gate_resume, run_result with
+                  | Some admission, Error _ ->
+                    Keeper_direct_gate_continuation.session_full ~config:ctx.config
+                      ~keeper_name:meta.name admission
+                  | Some _, Ok _ | None, (Ok _ | Error _) -> Ok None in
+                match gate_session_full with
+                | Error detail ->
+                  Progress.stop_tracking turn_task_id;
+                  dispatch_failed
+                    ~class_:Tool_result.Runtime_failure
+                    (Keeper_request_failure.Turn_continuation_unpersisted
+                       { stage = Keeper_request_failure.Gate_suspend; detail })
+                | Ok (Some cause) ->
+                  let summary = Keeper_request_failure.summary { Keeper_request_failure.cause } in
+                  Log.Keeper.warn "direct Gate continuation ended: %s" summary;
+                  (try
+                     let _ = Trajectory.finalize trajectory_acc
+                       (Trajectory.Failed summary) in
+                     ()
+                   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
+                     ~label:"trajectory finalize (gate session full)" exn);
+                  restart_keepalive_after_message_turn ctx meta;
+                  Progress.stop_tracking turn_task_id;
+                  dispatch_failed ~class_:Tool_result.Runtime_failure cause
+                | Ok None ->
                 let source = match run_result with
                   | Ok {Keeper_agent_run.checkpoint=Some checkpoint; _} ->
                     Ok (Keeper_direct_gate_continuation.Returned_agent_core checkpoint)

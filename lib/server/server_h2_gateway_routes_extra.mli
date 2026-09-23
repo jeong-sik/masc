@@ -16,7 +16,7 @@ val dispatch :
   [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
   | `CONNECT | `TRACE | `Other of string ] ->
   bool
-(** [dispatch ~h2_reqd ~httpun_request ~cors ~path ~config method_]
+(** [dispatch ~h2_reqd ~httpun_request ~cors ~path ~config ~with_public_read method_]
     handles the following routes:
 
     {2 Voice config}
@@ -37,13 +37,22 @@ val dispatch :
     - [GET /api/v1/board/flairs] — available flair list.
     - [GET /api/v1/board/curation] — latest AI curation snapshot
       ([{snapshot: null}] when no snapshot has been submitted yet).
+    - [GET /api/v1/board/sub-boards] — sub-board list.
+    - [GET /api/v1/board/sub-boards/<id_or_slug>] — single sub-board via
+      {!Server_routes_http_runtime.board_sub_board_detail_json}, the same
+      handler HTTP/1 serves.
     - [GET /api/v1/board/<post_id>] — single post with
       configurable [format] query param (defaults to [nested]); unsupported
-      values return [400 Bad Request].
-    - [GET /api/v1/board/sub-boards] — sub-board list.
-    - [POST /api/v1/board/sub-boards] — create sub-board (auth required).
-      Body: [{ slug, name, description, access? }].
-    - [GET /api/v1/board/sub-boards/<id_or_slug>] — single sub-board.
+      values return [400 Bad Request].  Matched after every fixed
+      [/api/v1/board/...] path above, so it never answers those paths.
+
+    {2 Read gate}
+
+    Every GET route above except [/api/v1/board/flairs] and the static
+    assets runs inside [with_public_read], the parent gateway's
+    counterpart of {!Server_auth.with_public_read}.  Under
+    [MASC_HTTP_AUTH_STRICT=1] a token-less request to any of them is
+    refused with [401], as on HTTP/1.
 
     {2 Karma}
     - [GET /api/v1/karma] — full karma table sorted descending by

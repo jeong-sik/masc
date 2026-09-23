@@ -18,6 +18,10 @@ type input_rejection_reason = Keeper_internal_error.official_client_input_reject
   | Bootstrap_floor_exceeded
   | Effect_fenced
 
+type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
+  | No_activity_observed
+  | Activity_observed
+
 type recovery_failure =
   | Transient_spawn_failed
   | Owner_stopped_turn
@@ -28,6 +32,7 @@ type recovery_failure =
   | Host_hook_failed
   | State_persistence_failed
   | Process_restarted
+  | Vendor_session_full of vendor_session_activity
 
 type failure_disposition =
   | Transient
@@ -50,6 +55,7 @@ let failure_disposition = function
     Ambiguous
   | Provider_rejected -> Fatal
   | Input_rejected _ -> Fatal
+  | Vendor_session_full _ -> Fatal
 ;;
 
 type recovery_required =
@@ -418,6 +424,8 @@ let recovery_failure_to_string = function
   | Host_hook_failed -> "host_hook_failed"
   | State_persistence_failed -> "state_persistence_failed"
   | Process_restarted -> "process_restarted"
+  | Vendor_session_full No_activity_observed -> "vendor_session_full_no_activity"
+  | Vendor_session_full Activity_observed -> "vendor_session_full_after_activity"
 ;;
 
 let recovery_failure_of_string = function
@@ -432,6 +440,8 @@ let recovery_failure_of_string = function
   | "host_hook_failed" -> Ok Host_hook_failed
   | "state_persistence_failed" -> Ok State_persistence_failed
   | "process_restarted" -> Ok Process_restarted
+  | "vendor_session_full_no_activity" -> Ok (Vendor_session_full No_activity_observed)
+  | "vendor_session_full_after_activity" -> Ok (Vendor_session_full Activity_observed)
   | _ -> Error "unknown official-client recovery failure"
 ;;
 
@@ -1259,6 +1269,36 @@ let require_recovery ~base_path ~keeper_name ~expected ~failure ~detail
     { expected with phase = Recovery_required recovery; updated_at = required_at }
 ;;
 
+let conclude_resume_session_full ~base_path ~keeper_name ~expected ~recovery_id
+    ~updated_at =
+  let* () =
+    if Float.is_finite updated_at
+    then Ok ()
+    else Error "official-client session-full updated_at must be finite"
+  in
+  match expected.phase with
+  | Recovery_required
+      ({ failure = Input_rejected Bootstrap_floor_exceeded
+       ; previous_settlement = Some _
+       ; _
+       } as recovery)
+    when String.equal recovery.recovery_id recovery_id ->
+    transition
+      ~base_path
+      ~keeper_name
+      ~expected:(Some expected)
+      { expected with
+        phase =
+          Recovery_required
+            { recovery with failure = Vendor_session_full No_activity_observed }
+      ; updated_at
+      }
+  | Recovery_required _ | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+    Error
+      "only a resumed session's own floor rejection can be concluded as a full \
+       session"
+;;
+
 let incomplete_claim = function
   | Start { owner_epoch; previous_settlement } ->
     Some (owner_epoch, previous_settlement)
@@ -1357,9 +1397,18 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
       | Retry_previous ->
         (* The conversation is kept, so only the turn that failed is dropped and
            the next claim re-attempts the same ordinal against it. *)
-        (match recovery.previous_settlement with
-         | None -> Error Retry_previous_unavailable
-         | Some settlement -> Ok (Settled settlement, current.turn_count - 1))
+        (* A full vendor session refuses the same resume again, so there is
+           no previous settlement worth returning to. *)
+        (match recovery.failure, recovery.previous_settlement with
+         | Vendor_session_full _, (Some _ | None) -> Error Retry_previous_unavailable
+         | ( ( Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
+             | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
+             | State_persistence_failed | Process_restarted )
+           , None ) -> Error Retry_previous_unavailable
+         | ( ( Transient_spawn_failed | Owner_stopped_turn | Transport_interrupted
+             | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
+             | State_persistence_failed | Process_restarted )
+           , Some settlement ) -> Ok (Settled settlement, current.turn_count - 1))
       | Restart_fresh ->
         (* Restart abandons the conversation, so the ordinal restarts with it and
            the next claim asks for ordinal 1 -- what a fresh provider conversation

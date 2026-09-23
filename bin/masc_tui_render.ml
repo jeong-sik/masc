@@ -874,8 +874,10 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
      lines keep the text column, so long handoff summaries stay readable. *)
   let labeled_lines label text =
     let width = max 10 (cols - 16) in
-    Message_layout.wrap_words ~max_cells:width
-      (Terminal_text.single_line text)
+    (* The block has rows, so a line break in the text takes one instead of
+       being spelled into the sentence. Of the 718 tasks on this workspace
+       406 are written with line breaks. *)
+    Masc_tui_text_block.rows ~max_cells:width text
     |> List.mapi
          (fun index line ->
             if index = 0 then Printf.sprintf "  %-8s %s" label line
@@ -6203,9 +6205,17 @@ let render_clients (state : state) =
       16 clients
     |> min 24
   in
+  (* The column carries a reading only where a client is bound to a Keeper
+     under a name of its own. Where no row has one, its cells and header are
+     seventeen blank columns, and the clock at the end of the row is what
+     loses them: "last seen 01:4…" is not a time. *)
+  let acting_for_drawn = Masc_tui_types.clients_act_for_others clients in
+  let acting_for_header =
+    if acting_for_drawn then Printf.sprintf "%-16s " "ACTING FOR" else ""
+  in
   let col_hdr =
-    Printf.sprintf "  %-9s %-*s %-10s %-16s %-9s %s" "STATUS" name_width
-      "NAME" "TYPE" "KEEPER" "TASK" "LAST SEEN"
+    Printf.sprintf "  %-9s %-*s %-10s %s%-9s %s" "STATUS" name_width "NAME"
+      "TYPE" acting_for_header "TASK" "LAST SEEN"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -6240,10 +6250,17 @@ let render_clients (state : state) =
           let open Masc.Tui_decode in
           let status = client_status_to_string row.cr_status in
           let name = Terminal_text.single_line row.cr_name in
+          (* Both sides sanitized before they are compared: the cell is
+             drawn from this reading, and a name that differs only in the
+             bytes [Terminal_text] strips is the same name on screen. *)
           let keeper =
-            match row.cr_keeper_name with
-            | Some keeper -> Terminal_text.single_line keeper
-            | None -> "-"
+            match
+              Masc_tui_types.client_acting_for ~name
+                ~keeper_name:
+                  (Option.map Terminal_text.single_line row.cr_keeper_name)
+            with
+            | Some keeper -> keeper
+            | None -> ""
           in
           let task =
             match row.cr_current_task with
@@ -6251,10 +6268,10 @@ let render_clients (state : state) =
             | None -> "-"
           in
           let line =
-            Printf.sprintf "  %-9s %s %-10s %-16s %-9s %s" status
+            Printf.sprintf "  %-9s %s %-10s %s%-9s %s" status
               (fit_width name name_width)
               (fit_width (Terminal_text.single_line row.cr_agent_type) 10)
-              (fit_width keeper 16)
+              (if acting_for_drawn then fit_width keeper 16 ^ " " else "")
               (fit_width task 9)
               (* The clock alone, which the header's own clock gives a
                  distance to -- so in the header's zone. The clock was cut

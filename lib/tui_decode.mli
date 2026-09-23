@@ -271,8 +271,6 @@ type keeper_call = {
           Never [Recorded_malformed]: the decoder refuses that row. *)
   kc_duration_ms : float option;
   kc_turn : int option;
-  kc_task_id : string option;
-  kc_model : string option;
   kc_execution_id : string option;
       (** Canonical physical execution identity. Chat tool activity joins to
           this field only; timestamps, names, and list positions never join. *)
@@ -290,7 +288,6 @@ type keeper_call = {
 type keeper_calls_snapshot = {
   kcs_keeper : string;
   kcs_entries : keeper_call list;  (** in the server's order, newest last *)
-  kcs_count : int;
   kcs_health : string;  (** the server's own freshness verdict, verbatim *)
   kcs_latest_age_s : float option;
   kcs_stale_reason : string option;
@@ -1196,7 +1193,6 @@ type harness_calibration = {
 
 type harness_overview = {
   hov_evaluator_status : string;
-  hov_last_signal_at : float option;
 }
 
 type harness_snapshot = {
@@ -2028,7 +2024,6 @@ type gate_rule = {
   gr_tool : string;
   gr_fingerprint : string;
   gr_created_at : float;
-  gr_created_by : string option;
   gr_expires_at : float option;
 }
 
@@ -2193,7 +2188,6 @@ type server_gc_health = {
   sgc_heap_words : int;
   sgc_live_words : int;
   sgc_minor_heap_size : int;
-  sgc_space_overhead : int;
   sgc_minor_collections : int;
   sgc_major_collections : int;
   sgc_compactions : int;

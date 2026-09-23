@@ -971,6 +971,62 @@ let test_the_board_age_column_reads_the_sort_once () =
   Alcotest.(check int) "and names that time over the column once" 1
     (asks ~callee:"board_age_header")
 
+
+(* Six values the loader read and no screen drew.
+
+   [count] was the one that cost something: the tool-call snapshot required
+   it, so a server that stopped sending it failed the whole decode and blanked
+   the pane over a number nothing reads -- the same shape as the overview
+   field #38224 took out, and the rows carry their own length anyway. The
+   other five were free to decode and just as unread: a call's [model] is the
+   redaction label "runtime" by boundary design and never a model name, a
+   call's [task_id] comes through null, the harness evaluator's
+   [last_signal_at] is already folded into the status word the server sends
+   (it answers "stale" past its own threshold), a gate rule's [created_by]
+   sits beside a row that draws the keeper and the tool, and [space_overhead]
+   is a GC setting rather than a reading.
+
+   Each binding is checked twice: the key it no longer opens, and a key it
+   still does, so a renamed binding cannot make this pass by matching
+   nothing. *)
+let test_the_loader_stops_opening_keys_no_screen_draws () =
+  let decode = "lib/tui_decode.ml" in
+  let dropped =
+    [ ("decode_keeper_call", "task_id")
+    ; ("decode_keeper_call", "model")
+    ; ("decode_keeper_calls_snapshot", "count")
+    ; ("decode_harness_overview", "last_signal_at")
+    ; ("decode_gate_rule", "created_by")
+    ; ("decode_server_identity", "space_overhead")
+    ]
+  in
+  let still_read =
+    [ ("decode_keeper_call", "turn")
+    ; ("decode_keeper_calls_snapshot", "health")
+    ; ("decode_harness_overview", "evaluator_status")
+    ; ("decode_gate_rule", "expires_at")
+    ; ("decode_server_identity", "minor_heap_size")
+    ]
+  in
+  List.iter
+    (fun (binding, key) ->
+      Alcotest.(check int)
+        (Printf.sprintf "%s no longer opens %S" binding key)
+        0
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:decode ~binding_name:binding ~needle:key))
+    dropped;
+  List.iter
+    (fun (binding, key) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s still opens %S" binding key)
+        true
+        (Ast_grep.count_exact_string_literals_in_value_binding
+           ~module_path:decode ~binding_name:binding ~needle:key
+        > 0))
+    still_read
+;;
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -988,6 +1044,8 @@ let () =
             `Quick test_the_summary_row_does_not_count_the_panel_below_it
         ; Alcotest.test_case "the load stops reading a field no screen draws"
             `Quick test_the_overview_load_stops_reading_a_field_no_screen_draws
+        ; Alcotest.test_case "the loader stops opening keys no screen draws"
+            `Quick test_the_loader_stops_opening_keys_no_screen_draws
         ; Alcotest.test_case "the schedule counts read the shared status list"
             `Quick test_the_schedule_counts_are_read_from_the_shared_status_list
         ; Alcotest.test_case "the fleet row reads the control plane's word"

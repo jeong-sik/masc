@@ -59,8 +59,8 @@ status: reference
   붙어 그쪽 도구를 가져온다.
 
 **HITL**
-: Human-in-the-Loop의 약어. Gate의 외부 효과를 사람이 판정하는 비차단 권한 경로다.
-  대기 중인 HITL 판정은 다른 Keeper의 턴이나 서로 독립인 작업을 멈추지 않는다.
+: Human-in-the-Loop의 약어. Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는
+  경로다. 사람의 답을 기다리는 동안에도 다른 Keeper의 턴이나 상관없는 작업은 계속 돈다.
 
 **Surface**
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
@@ -461,8 +461,12 @@ status: reference
   의 생성자 넷(`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`)이
   `all_lanes`로 열거된다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
   Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
-  경계: 같은 단어를 두 곳이 더 쓴다. `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는
-  **Runtime Candidate Order**이고, 공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
+  경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
+  `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는 **Runtime Candidate Order**다.
+  공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
+  `Keeper_memory_lane`은 Keeper 하나의 Librarian 작업을 줄 세우는 **Memory queue**다.
+  `Keeper_lane.t`는 Keeper 하나가 쥔 fiber 실행 칸이다. 셋 다 이 항목의 Lane과
+  관계가 없다.
   → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**
@@ -628,7 +632,8 @@ status: reference
 ## Collaboration State
 
 **Board**
-: 공유 발견, 질문, 답변, 의견과 결정을 게시하는 durable 협업 표면.
+: 에이전트와 사람이 발견·질문·답변·의견·결정을 올리는 공개 게시판. 올린 글은
+  재시작해도 남는다.
   글의 `content_updated_at`은 생성 또는 제목·본문·작성자가 실제로 바뀐 시각이다.
   댓글·투표·고정 등 일반 활동이 갱신하는 `updated_at`과 구분한다.
   같은 내용으로 다시 저장하면 `content_updated_at`은 유지한다.
@@ -684,15 +689,10 @@ status: reference
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
   Activity도 커밋된 상태를 표시한다. 맡은 Task의 취소 요청은 검증 제출이고,
   `Todo`는 직접 취소할 수 있다. 실제 `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
-  판정자의 이름은 authority이고, 판정 payload의 `producer`가 작업 관계와 실행
-  구간의 소유자다. `AwaitingVerification`은 `Held_pending_verdict`로 claim에
-  응답하므로 Keeper가 다시 맡을 수 없다. 완료·취소 verdict는 Keeper action이
-  아니라 system LLM 또는 인증된 운영자의 authority 경계에서만 적용된다.
-
-**Evidence**
-: 관찰·검증·전환을 근거에 연결하는 분류된 reference. `evidence_refs` 같은 필드로 전달한다.
-  `note:<text>`는 허용된 서술형 근거이며, Task handoff summary와 completion notes도 이
-  형식으로 정규화된다. Note evidence는 artifact나 collaboration source의 증명은 아니다.
+  판정하는 쪽은 authority로, 일을 낸 쪽은 판정 payload의 `producer`로 적는다.
+  `AwaitingVerification`인 Task에 claim하면 `Held_pending_verdict`로 거절되므로
+  판정 전에는 Keeper가 다시 맡을 수 없다. 완료·취소 판정은 Keeper가 내리지 못하고,
+  서버 안의 판정 에이전트나 인증된 운영자만 내린다(**Completion Authority**).
 
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
@@ -706,8 +706,9 @@ status: reference
   `admits_self_directed_progress`가 이 경계를 정의한다.
 
 **Schedule**
-: 미래 시점에 Keeper를 깨우는 durable 요청. 만들기, 조회, 수정, 취소와
-  기록 추가·조회 도구가 있다. Schedule은 이후 외부 효과를 자동 승인하지 않는다.
+: 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기,
+  조회, 수정, 취소와 기록 추가·조회 도구가 있다. Keeper를 깨울 뿐이고, 깨어난 Keeper가
+  하려는 바깥 작업을 대신 허락하지 않는다.
 
 **Fusion**
 : 여러 독립 판단을 비동기로 수집하고 하나의 결론으로 합성하는 실행. 패널 구성원
@@ -785,8 +786,9 @@ status: reference
   [Fusion_sink.delivery_failure_code](../../lib/fusion/fusion_sink.mli)
 
 **Gate**
-: 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
-  경계. pending 판정은 다른 작업을 막지 않는다.
+: 바깥에 흔적을 남기는 작업을 실행하기 전에 멈춰 세우는 검문소. 설정에 따라 늘 허락
+  (Always Allowed), 자동 판정(Auto Judge), 사람 판정(HITL) 중 하나로 정한다. 판정을
+  기다리는 작업이 있어도 다른 작업은 막히지 않는다.
 
 **HITL Delivery Occasion (HITL 전달 계기)**
 : 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
@@ -811,10 +813,11 @@ status: reference
   지금 일을 맡은 쪽이고, `AwaitingVerification` 에서는 제출한 쪽이다.
 
 **Producer**
-: 판정 쪽 코드가 제출한 에이전트를 부르는 이름. 이 RFC의 1단계가
-  `AwaitingVerification.assignee`도 `producer`로 바꾼다. 이후 새 Task 생애주기
-  코드는 제출자를 `producer`로만 부른다. verification 레코드의 외부 스키마 키
-  `worker`는 남지만 Task 소유권이나 관계를 찾는 키로 사용하지 않는다.
+: 판정 쪽 코드가 일을 제출한 에이전트를 부르는 이름. 같은 사람이 상태 안에서는
+  `AwaitingVerification.assignee`로 적히고, 반려 기록(`pending_completion_rejection`)에는
+  `producer`로 적힌다. verification 레코드의 바깥 키 `worker`도 같은 사람을 적지만,
+  Task를 누가 맡았는지 찾는 키로 쓰지 않는다.
+  → [Types_core](../../lib/types/types_core.mli)
 
 **Claim**
 : `Todo` 인 Task 를 맡는 전이. 한 에이전트는 `Claimed` 와 `InProgress` 를 합쳐 하나만
@@ -856,12 +859,24 @@ status: reference
   를 담는다. Release, Submission, cancel 이 쓰고 Claim 과 Start 는 지우지 않는다. 반려
   판정은 이 메모를 판정 사유로 덮어쓴다.
 
-**Evidence Reference**
-: 제출에 다는 증거 참조. `artifact:`, `note:`, `board:`, `fusion:` 네 형식만 열린다.
+**Evidence Reference (증거 참조)**
+: 제출이나 상태 전환에 다는 근거. `evidence_refs` 같은 필드로 나른다. 형식은
+  `artifact:`, `note:`, `board:`, `fusion:` 넷뿐이다. `note:<글>`은 글로 적은 근거다.
+  Task 인계 요약과 완료 메모도 이 형식으로 바뀌어 붙는다. `note:` 근거는 파일이나
+  Board 글, Fusion 실행이 실제로 있다는 증명이 아니다.
+  → [Workspace_verification_store](../../lib/workspace/workspace_verification_store.ml),
+  [Workspace_task_verification](../../lib/workspace/workspace_task_verification.ml)
 
 **Operator Attention**
 : 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는 `Cancel_claim`,
   `Held_without_actor`, `Producer_record_unreadable` 이다.
+  **다른 뜻**: attention이라는 말은 세 곳이 더 쓴다. **Board Attention Candidate**는
+  Keeper가 반응할지 판정할 게시물이다. Dashboard 브리핑의 attention 항목
+  (`Dashboard_attention.attention_item`)과 TUI 개요 화면의 attention 항목
+  (`attention_item`)은 운영자가 먼저 봐야 할 사고·경고 줄이다. 이 목록은 그 줄의
+  재료 중 하나일 뿐이다.
+  → [Operator_task_attention](../../lib/operator_task_attention.mli),
+  [Dashboard_attention](../../lib/dashboard/dashboard_attention.mli)
 
 **Current Task**
 : 에이전트 기록의 `current_task`, Keeper meta 의 `current_task_id`, planning 의 current
@@ -1030,10 +1045,15 @@ status: reference
   실패로 세지 않는다(정당한 거절). `failed`는 metadata·load·commit 실패만 센다.
   → [Keeper_transcript_tail_recovery](../../lib/keeper/keeper_transcript_tail_recovery.mli)
 
-**받은 일 정리**
-: 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
-  checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다. 정리 하나가
-  pocket이고, 저장된 현재 pocket 묶음은 Working Context다.
+**Working Context (받은 일 정리)**
+: Librarian이 Keeper가 아직 처리하지 않은 event·chat 요청을 묶어, 원본 요청에 맥락과
+  다음 행동 제안을 붙여 둔 것. 실행 권한도 checkpoint 이력도 아니다. 정리 하나가
+  pocket(`Keeper_librarian_context.pocket`)이고, 지금 저장된 pocket 묶음이
+  `Keeper_librarian.selection.working_contexts`다. Memory OS와 같이 Keeper 이름에
+  묶이므로 cluster가 달라도 공유한다(**Cluster** 항목). cluster별 Read Position과는
+  따로 움직인다.
+  **다른 뜻**: 코드의 `Keeper_types.working_context`는 이 묶음이 아니라 실행 중인
+  Keeper가 쥔 Checkpoint 하나를 감싼 값이다(**Checkpoint** 항목). 이름만 같다.
   `[typesafeai] context_review = true`이면 새 정리 전체의 의미 보존을 JEV Choice로
   평가한다. 원본의 요청·제약·약속과 다음 행동 제안을 함께 보며, 합치는 이전 정리의
   참조 원문도 포함한다. `needs_revision`이면 새 정리의 게시만 보류한다. 미평가·실패·
@@ -1238,10 +1258,10 @@ status: reference
   `Turn_ref`의 trace id가 이 값이다.
 
 **Memory OS**
-: Keeper의 durable personal facts와 recall을 소유하는 typed memory store.
-  현재 Memory OS와 working context는 operator config의 Keeper 이름에 귀속되어,
-  같은 base path에서 같은 이름을 쓰는 Keeper는 cluster가 달라도 공유한다.
-  Turn Boundary와 Read Position만 cluster runtime 좌표로 분리된다.
+: Keeper 하나가 오래 들고 가는 기억(Fact)을 저장하고 다시 꺼내 주는 곳.
+  Keeper 이름에 묶이므로, 같은 base path에서 이름이 같은 Keeper는 cluster가 달라도
+  같은 Memory OS와 Working Context를 쓴다. cluster마다 따로인 것은 Turn Boundary와
+  Read Position뿐이다(**Cluster** 항목).
 
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
@@ -1361,13 +1381,6 @@ status: reference
   원본 checkpoint나 Memory의 처리 위치를 바꾸지 않는다. 기본은 `small`이다.
   `max_context_override`는 별도의 토큰 상한이며, 이 설정이나 채워야 할 목표가 아니다.
   공식 클라이언트는 자체 문맥 처리를 사용하므로 선택값과 실제 적용 여부를 구분한다.
-
-**Working Context**
-: Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. 각 항목은 받은 일
-  정리가 낸 pocket(`Keeper_librarian_context.pocket`)이고, 현재 묶음은
-  `Keeper_librarian.selection.working_contexts`다. Memory OS와 같은
-  operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.
-  cluster별 Librarian Read Position과는 별개의 상태다.
 
 **Fact**
 : Memory OS의 기억 하나. 문장(`claim`), `category`, 처음·마지막으로 본 시각,

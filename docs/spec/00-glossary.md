@@ -191,20 +191,18 @@ status: reference
   (`Keeper_board_attention_partition`). 아직 할당되지 않은 비종단 Candidate마다 하나의
   singleton 루트를 받는다. MASC가 Candidate 소유권과 이 상태 머신을 통제하고,
   AGENT_CORE는 승인·디스패치·전진을 맡는다. 런타임 전이는 cursor-fenced 행을 추가하며
-  법적 상태 전이마다 `generation`이 정확히 한 번 증가한다.
+  허용된 전이마다 `generation`이 정확히 한 번 증가한다.
   - 상태는 `Ready`·`Running`·`Completed`·`Settled`·`Abandoned`·`Blocked`다.
-  - `Completed`: 판정 결과(`item : completed_item`)를 확보한 완료 상태.
-  - `Settled`: **판정이 원장에 기록된 완전 종단**. 어떤 법적 전이도 `Settled`를 떠날 수
-    없다. 판정 기록 없이 이 상태에 도달할 수 없다.
-  - `Abandoned`: **판정 목적의 종단(포기)**. `settle`로 도달하지 않으며, 원장에서 영구 결손된
-    후보를 가진 `Blocked` 루트를 `reconcile_quarantines`가 포기할 때처럼 판정을 영구히
-    남기지 못한 상태다. 단, 일치하는 후보가 여전히 `Resumable_pending`인 경우
-    `ensure_roots`가 동일한 결정론적 식별자의 다음 `generation`에서 `Abandoned → Ready`로
-    재개방할 수 있다.
-  - 경계: 과거에는 결손 루트를 `Settled`로 처리하고 `Settled → Ready` 재개방을 허용하여
-    원장과 뷰의 desync가 발생했으나, 판정 기록이 있는 종단(`Settled`)과 판정 없이 포기된
-    종단(`Abandoned`)을 분리했다(#37976). 또한 이 상태 머신은 Candidate의
-    생애주기(`Pending → Judged → Consumed`, `Quarantined`)와 다른 층위다.
+  - `Completed`: 판정 결과(`item : completed_item`)를 확보한 상태.
+  - `Settled`: **판정이 원장에 기록된 끝 상태**. `Settled`를 떠나는 전이는 없다.
+    판정 기록 없이는 이 상태에 올 수 없다.
+  - `Abandoned`: **판정 없이 끝난 상태**. `settle`로는 오지 않는다. 원장에서 사라진
+    후보를 가진 `Blocked` 루트를 `reconcile_quarantines`가 포기할 때 이 상태가 된다.
+    일치하는 후보가 아직 `Resumable_pending`이면 `ensure_roots`가 같은 결정론적 식별자의
+    다음 `generation`으로 `Ready`를 다시 연다. 후보가 `Resumable_judged`나
+    `Requeued_resumable`이면 `ensure_roots`는 이 루트를 건드리지 않는다.
+  - 경계: 이 상태 머신은 Candidate 생애주기(`Pending → Judged → Consumed`,
+    `Quarantined`)와 다른 층위다.
   → [Keeper_board_attention_partition](../../lib/keeper/keeper_board_attention_partition.mli)
 
 **Keeper Cycle**

@@ -5837,6 +5837,7 @@
 (include stanzas/test_tui_ask_projection.inc)
 
 (include stanzas/test_tui_tasks_title_fits_the_frame.inc)
+(include stanzas/test_tui_board_hearth_census_width.inc)
 
 (include stanzas/test_tui_ask_context_block.inc)
 

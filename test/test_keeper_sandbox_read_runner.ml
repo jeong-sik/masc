@@ -39,6 +39,7 @@ module Mock_backend = struct
 
   let read_file
       ?turn_sandbox_factory:_
+      ?start_line:_
       ~config:_
       ~meta:_
       ~host_path

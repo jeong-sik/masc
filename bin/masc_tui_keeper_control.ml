@@ -74,14 +74,22 @@ let roster_failure_message ~credential_sent = function
   | Roster_malformed detail -> "live keeper status unreadable: " ^ detail
 
 let roster_failure_of_status ~status ~body =
+  let unreachable () =
+    Roster_unreachable
+      (match response_detail ~status body with
+       | "" -> Printf.sprintf "HTTP %d" status
+       | detail -> detail)
+  in
   match status with
-  | 401 | 403 ->
-      Roster_unauthorized (Masc_tui_credential.server_reason_of_body body)
-  | _ ->
-      Roster_unreachable
-        (match response_detail ~status body with
-         | "" -> Printf.sprintf "HTTP %d" status
-         | detail -> detail)
+  | 401 | 403 -> (
+      match Masc_tui_credential.server_reason_of_body body with
+      | Some reason -> Roster_unauthorized reason
+      | None ->
+          (* The server answered and refused; the status says so where the
+             server's sentence alone would read like a lost connection. *)
+          Roster_unreachable
+            (Printf.sprintf "HTTP %d: %s" status (response_detail ~status body)))
+  | _ -> unreachable ()
 
 let find_row rows name =
   List.find_opt

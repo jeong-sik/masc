@@ -400,12 +400,12 @@ let test_decode_events_error_by_code () =
   check events_error "an object with no error code is undecodable"
     (Log.Events_undecodable "500 {\"oops\":true}")
     (decode ~status:500 "{\"oops\":true}");
-  (* A 401/403 is about the credential, whatever the body says. *)
+  (* A 401/403 that names an auth code is about the credential. *)
   check events_error "401 is a refusal"
     (Log.Events_refused
        (Masc_tui_credential.refusal ~credential_sent:true
           Masc_tui_credential.Rejected))
-    (decode ~status:401 (envelope "unauthorized" "bad token"));
+    (decode ~status:401 {|{"error":"[AuthError] Invalid token","auth_error_code":"invalid_token"}|});
   check events_error "401 with an expired code says so"
     (Log.Events_refused
        (Masc_tui_credential.refusal ~credential_sent:true
@@ -415,7 +415,13 @@ let test_decode_events_error_by_code () =
     (Log.Events_refused
        (Masc_tui_credential.refusal ~credential_sent:false
           Masc_tui_credential.Rejected))
-    (Log.decode_events_error ~status:403 ~credential_sent:false "forbidden")
+    (Log.decode_events_error ~status:403 ~credential_sent:false
+       {|{"error":"[AuthError] Unauthorized","auth_error_code":"missing_token"}|});
+  (* One without a code is the handler's own answer and is read like any
+     other refusal, not sent to masc login. *)
+  check events_error "403 without an auth code keeps the server's words"
+    (Log.Events_denied "403 not yours")
+    (decode ~status:403 (envelope "not_owner" "not yours"))
 ;;
 
 (* The request the pager sends: both cursors in their request spelling, each

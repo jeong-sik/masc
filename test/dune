@@ -3344,6 +3344,8 @@
 
 (include stanzas/test_keeper_meta_invalid_recovery.inc)
 
+(include stanzas/test_keeper_name_reserves_store_dirs.inc)
+
 (include stanzas/test_store_unreadable.inc)
 
 

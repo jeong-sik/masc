@@ -419,6 +419,7 @@ let test_the_memory_filter_bar_names_the_query_it_counted () =
          ; mhs_warn_alerts = 0
          ; mhs_error_alerts = 0
          ; mhs_starving_keepers = 0
+         ; mhs_refused_keepers = []
          ; mhs_total_vision_ingest_errors = 0
          });
     state.Types.search <- (if typing then Some query else None);

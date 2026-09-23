@@ -243,6 +243,20 @@ let test_gate_label_absent_from_page_is_error () =
   check bool "gate label with no rows anywhere is refused" true
     (member "error" json <> `Null)
 
+(* The page is the newest window. A gate lane whose rows are all older reads
+   as an empty page with the cursor the caller pages back with. *)
+let test_gate_label_behind_the_page_reads_with_a_cursor () =
+  let json =
+    parse
+      (SR.respond ~bindings ~surface:"calendar" ~limit:10 ~has_more:true
+         ~notes:[] discord_fixture)
+  in
+  check bool "not refused while older rows remain" true (member "error" json = `Null);
+  check int "no rows of it on this page" 0 (to_int (member "lane_row_count" json));
+  check bool "the cursor to page back is there" true
+    (Yojson.Safe.Util.to_bool (member "has_more" json)
+     && member "oldest_ts" json <> `Null)
+
 let test_known_lanes_still_read_with_bindings () =
   let json =
     parse
@@ -297,6 +311,8 @@ let () =
             test_unknown_label_is_error_with_page_labels;
           test_case "gate label present on the page reads" `Quick
             test_gate_label_present_on_page_reads;
+          test_case "gate label behind the page reads with a cursor" `Quick
+            test_gate_label_behind_the_page_reads_with_a_cursor;
           test_case "gate label absent from the page is refused" `Quick
             test_gate_label_absent_from_page_is_error;
           test_case "known lanes still read with bindings" `Quick

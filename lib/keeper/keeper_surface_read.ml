@@ -223,8 +223,11 @@ let unknown_label_hint = function
    slack/discord are unbound only when the runtime's binding lists say
    so. Any other label is a gate channel label, and without a registry
    the page itself is the only evidence: present -> a legitimate lane,
-   absent -> unknown. Same trimmed-exact comparison as the filter. *)
-let classify_surface ~bindings ~(page_labels : string list) surface =
+   absent -> unknown. The page is the newest window, so an absence proves
+   nothing while older rows remain ([has_more]): a gate lane that went quiet
+   behind the window reads as an empty page whose cursor pages back to it.
+   Same trimmed-exact comparison as the filter. *)
+let classify_surface ~bindings ~has_more ~(page_labels : string list) surface =
   let surface = String.trim surface in
   match surface with
   | "dashboard" | "agent" | "broadcast" | "webhook" -> None
@@ -233,7 +236,7 @@ let classify_surface ~bindings ~(page_labels : string list) surface =
   | "discord" ->
       if bindings.discord = [] then Some Unbound_connector else None
   | _ ->
-      if List.mem surface page_labels then None
+      if List.mem surface page_labels || has_more then None
       else Some (Unknown_label page_labels)
 
 let respond_unverified ~surface ~limit ~has_more ~notes
@@ -291,7 +294,7 @@ let respond ?bindings ~surface ~limit ~has_more ~notes
     | None -> respond_unverified ~surface ~limit ~has_more ~notes messages
     | Some bindings ->
         (match
-           classify_surface ~bindings ~page_labels:(page_labels messages)
+           classify_surface ~bindings ~has_more ~page_labels:(page_labels messages)
              surface
          with
          | None ->

@@ -1305,6 +1305,65 @@ let test_call_key_prefers_the_provider_id () =
         (equal (Acting.call_key call) (Acting.Call_by_id "wire-1"))
   | calls -> failf "one call expected, %d folded" (List.length calls)
 
+(* The Activity table's two named columns were literals of 16 cells. The
+   agent_core family names its runtime lane as the agent, so those rows drew
+   [agent_core-olla...] at every width -- including the ones where the detail
+   column beside them was empty. *)
+let table_row ?(keeper = "keeper") ?(label = "turn") ?(detail = "") () =
+  { Acting.at = 100.; keeper; glyph = Acting.Turn_boundary; label; detail }
+
+let test_a_long_keeper_widens_its_column () =
+  let name = "agent_core-glm-coding.glm-5-turbo" in
+  let columns =
+    Acting.columns ~inner_width:160 [ table_row ~keeper:name () ]
+  in
+  check int "the column holds the name whole" (String.length name)
+    columns.Acting.keeper_cells
+
+(* A roster of short names has no use for a wider column: those cells belong
+   to the detail beside them. *)
+let test_short_rows_leave_the_columns_where_they_were () =
+  let columns =
+    Acting.columns ~inner_width:160
+      [ table_row ~keeper:"rondo" ~label:"turn" () ]
+  in
+  check int "the keeper column is what it drew before" 16
+    columns.Acting.keeper_cells;
+  check int "and so is the event column" 16 columns.Acting.label_cells
+
+(* Neither column goes under what it drew before, whatever the frame is, so a
+   narrow terminal draws the table it drew yesterday. *)
+let test_no_column_goes_under_what_it_drew_before () =
+  for inner_width = 0 to 200 do
+    let columns =
+      Acting.columns ~inner_width [ table_row ~keeper:"a-very-long-agent-name-indeed" () ]
+    in
+    check bool
+      (Printf.sprintf "inner %d keeps the keeper column" inner_width)
+      true
+      (columns.Acting.keeper_cells >= 16);
+    check bool
+      (Printf.sprintf "inner %d keeps the event column" inner_width)
+      true
+      (columns.Acting.label_cells >= 16)
+  done
+
+(* And the detail column keeps half the row: it is the one that carries
+   sentences. *)
+let test_the_named_columns_leave_detail_its_half () =
+  let long = String.make 80 'x' in
+  for inner_width = 80 to 200 do
+    let columns =
+      Acting.columns ~inner_width [ table_row ~keeper:long ~label:long () ]
+    in
+    let taken = columns.Acting.keeper_cells + columns.Acting.label_cells in
+    let half = max 32 ((inner_width - 15) / 2) in
+    check bool
+      (Printf.sprintf "inner %d leaves detail its half (took %d)" inner_width
+         taken)
+      true (taken <= half)
+  done
+
 let () =
   run "tui acting"
     [ ( "rows"
@@ -1401,5 +1460,13 @@ let () =
             test_a_folded_ledger_call_keeps_the_rows_facts
         ; test_case "a call key prefers the provider's id" `Quick
             test_call_key_prefers_the_provider_id
+        ; test_case "a long keeper widens its column" `Quick
+            test_a_long_keeper_widens_its_column
+        ; test_case "short rows leave the columns where they were" `Quick
+            test_short_rows_leave_the_columns_where_they_were
+        ; test_case "no column goes under what it drew before" `Quick
+            test_no_column_goes_under_what_it_drew_before
+        ; test_case "the named columns leave detail its half" `Quick
+            test_the_named_columns_leave_detail_its_half
         ] )
     ]

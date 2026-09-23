@@ -779,6 +779,20 @@ let render_overview (state : state) =
      where it says something the rows cannot: that some did not fit. The
      Events panel beside it states its window the same way. *)
   let attention_count = List.length attention_items in
+  (* The age cell answers "why is this still here", and a producer that puts
+     no time on its evidence leaves it an em dash. Live, that is every item:
+     of the nine the briefing queued, eight carry no timestamp at all and the
+     ninth writes one under a name this surface does not read, so the column
+     drew nine dashes and spent four cells of a panel that shares its row with
+     the events beside it. It is drawn when some item has an age; summaries
+     still start on one edge, because the column is there or not there for the
+     whole panel. *)
+  let attention_shows_age =
+    List.exists
+      (fun (item : attention_item) ->
+        Option.is_some item.ai_evidence_ts)
+      attention_items
+  in
   (* Items a drawn Team row carries are drawn there, not here
      ([overview_layout]). The panel says how many went there, so its count
      and the briefing's total do not disagree without a reason on screen,
@@ -874,12 +888,17 @@ let render_overview (state : state) =
            no time on it -- it stands until its condition clears. A fixed
            three-cell column, like the severity label, so summaries start on
            one edge. *)
-        let age_label =
-          match a.ai_evidence_ts with
-          | Some ts ->
-              keeper_lane_idle_text
-                (int_of_float (Unix.gettimeofday () -. ts))
-          | None -> "\xe2\x80\x94"
+        let age_cell =
+          if not attention_shows_age then ""
+          else
+            let age_label =
+              match a.ai_evidence_ts with
+              | Some ts ->
+                  keeper_lane_idle_text
+                    (int_of_float (Unix.gettimeofday () -. ts))
+              | None -> "\xe2\x80\x94"
+            in
+            Printf.sprintf "%s%s%s " Ansi.dim (fit_width age_label 3) Ansi.reset
         in
           (* Fitted once, by the fit that draws the row. Fitting the summary
              here as well meant guessing how many cells the label ahead of it
@@ -889,8 +908,7 @@ let render_overview (state : state) =
              badge pads itself to its own column, which is measured from the
              level names rather than guessed at -- so it is the one part of
              the row that is finished before it gets here. *)
-          Printf.sprintf "%s %s%s%s %s" severity_badge
-            Ansi.dim (fit_width age_label 3) Ansi.reset
+          Printf.sprintf "%s %s%s" severity_badge age_cell
             (Terminal_text.single_line a.ai_summary)
     in
     let event_str =
@@ -12805,9 +12823,32 @@ let render_acting (state : state) =
   box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ Acting.filter_explanation state.acting_filter);
   box_divider buf cols;
+  (* Measured over every row the filter keeps, not the page on screen, so the
+     columns do not move while a reader scrolls. This walks the list once and
+     builds a row per entry; what the note above avoids for the page is the
+     pairing, which is quadratic, and measuring needs neither the pairing nor
+     the duration it finds -- those reach the detail column, and the two
+     columns measured here are the keeper and the label. *)
+  let table_columns =
+    let measured =
+      match chunked with
+      | Some rows -> rows
+      | None ->
+          List.map
+            (fun (entry, _older) ->
+              let row = Acting.row_of_entry ~duration_ms:None entry in
+              { row with
+                Acting.keeper =
+                  Acting.keeper_of_event ~traces entry.Acting.ae_event
+              })
+            visible
+    in
+    Acting.columns ~inner_width:(framed_inner_width cols) measured
+  in
   let col_hdr =
-    Printf.sprintf "  %-8s %-16s %s %-16s %s" "TIME" "KEEPER" " " "EVENT"
-      "DETAIL"
+    Printf.sprintf "  %-8s %-*s %s %-*s %s" "TIME"
+      table_columns.Acting.keeper_cells "KEEPER" " "
+      table_columns.Acting.label_cells "EVENT" "DETAIL"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -12872,16 +12913,20 @@ let render_acting (state : state) =
           let detail = Terminal_text.single_line row.Acting.detail in
           let label = Terminal_text.single_line row.Acting.label in
           let line =
+            let keeper_cell =
+              fit_width
+                (Terminal_text.single_line row.Acting.keeper)
+                table_columns.Acting.keeper_cells
+            in
             if detail = "" then
-              Printf.sprintf "  %-8s %-16s %s %s" clock
-                (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
+              Printf.sprintf "  %-8s %s %s %s" clock keeper_cell
                 (Acting.glyph_text row.Acting.glyph)
                 label
             else
-              Printf.sprintf "  %-8s %-16s %s %-16s %s" clock
-                (fit_width (Terminal_text.single_line row.Acting.keeper) 16)
+              Printf.sprintf "  %-8s %s %s %s %s" clock keeper_cell
                 (Acting.glyph_text row.Acting.glyph)
-                (fit_width label 16) detail
+                (fit_width label table_columns.Acting.label_cells)
+                detail
           in
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
           let line = if selected then "> " ^ String.sub line 2 (String.length line - 2) else line in

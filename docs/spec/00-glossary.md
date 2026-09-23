@@ -66,7 +66,7 @@ status: reference
   한 줄이다. Overview 는 이 중 Team 블록이 이미 그리는 Keeper 에 관한 항목(막힌 Keeper 의
   원인, paused Keeper)을 Team 줄에만 두고, Attention 패널에는 나머지(다른 대상, briefing 이
   나열하지 않은 Keeper)만 둔다. 화면이 짧아 Team 블록이 그려지지 않으면 패널이 전부를
-  그린다. Task 소유권 문제만 모은 [Operator Attention](#) 과는 다른 목록이다.
+  그린다. Task 소유권 문제만 모은 Operator Attention 과는 다른 목록이다.
 
 **닫힌 quota 창 (Shut Quota Window)**
 : provider 계정이나 자격 증명 하나가 사용 한도에 걸려 요청을 받지 않는 상태. 런타임

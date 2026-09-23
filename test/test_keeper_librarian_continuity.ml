@@ -524,14 +524,14 @@ let narrowing_atom_count = List.length narrowing_marks
    roughly n * narrowing_atom_chars + T. With 16,000 characters an atom and the
    ceiling below at 65,000, four atoms (64 kB + T) land over the ceiling and
    two (32 kB + T) under it for any T between 1 kB and 33 kB. The Memory pass
-   renders librarian.md, whose body alone is about 21.7 kB, so the output
-   schema and the request envelope share the remaining 11 kB or so before two
-   atoms stop fitting. That margin is narrower than it looks; the context-only
-   pass
-   renders librarian.continuity.md, about 2.7 kB. Eight
-   atoms rather than four so that six remain after the first committed unit:
-   a pass that released the width on a commit would offer those six and be
-   refused, which four atoms could not have shown. *)
+   renders librarian.md, about 21.7 kB with its working_contexts rule spliced
+   in and before the schema, so the output schema and the request envelope
+   share the remaining 11 kB or so before two atoms stop fitting. That margin
+   is narrower than it looks. The context-only pass renders
+   librarian.continuity.md, about 2.7 kB. Eight atoms rather than four so that
+   six remain after the first committed unit: a pass that released the width
+   on a commit would offer those six and be refused, which four atoms could
+   not have shown. *)
 let narrowing_atom_chars = 16_000
 let narrowing_atom_text mark = String.make narrowing_atom_chars mark
 

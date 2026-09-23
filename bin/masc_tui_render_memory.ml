@@ -590,6 +590,93 @@ let memory_fact_detail_lines ~cols (row : memory_fact_row) =
           (memory_fact_age_label row.mi_invalidated_at ^ " ago")
       ]
 
+(* The fleet header above the sort row: the Total, Ordinary and Librarian
+   readings, each wrapped to the frame. Its row count depends on the width, so
+   the list's height is worked out from these same rows ([memory_overview_scrolled])
+   rather than from a fixed count of header lines. *)
+let memory_fleet_header_rows ~cols (state : state) : string list =
+  (* What to say where the numbers would go. They are missing for two reasons
+     and the line has to name the one that holds: nothing has arrived yet, or
+     the load failed. The table below already draws the server's own reason in
+     red, so a header that says "waiting" after a failure puts two answers to
+     the same question on one screen -- and this one is on top, so it is the
+     one that gets read. *)
+  let missing_reading waiting =
+    if Option.is_some state.memory_health_error then field_failed else waiting
+  in
+  (* Every reading in this header is a labelled row that asks the frame for its
+     width. The row that carried the Ordinary and Librarian readings together
+     needed 176 cells with every count a single digit, while the frame gives 96
+     at the 100 columns the PTY harness opens and 136 at 140 -- so it was cut
+     mid-word at every width a terminal is likely to have, and the tail it lost
+     was the one saying the failure count restarts with the server. A cut count
+     reads as a running total. A count is not a thing to spell halfway.
+
+     The shape is the one this file already uses for the History field: wrap at
+     the width the label leaves, continuation rows hanging under the label so a
+     row starting with a number still has its subject above it. The break is a
+     clause mark rather than any space, because "0 failures since server start"
+     and "0 failures" are different claims (#36497). *)
+  let labelled label clauses =
+    let prefix = "  " ^ label ^ " " in
+    let prefix_cells = Message_layout.display_width prefix in
+    let room = max 1 (framed_inner_width cols - prefix_cells) in
+    Message_layout.pack_clauses ~max_cells:room clauses
+    |> List.mapi (fun index line ->
+           (if index = 0 then prefix else String.make prefix_cells ' ') ^ line)
+  in
+  let total =
+    match state.memory_health with
+    | None -> [ "  Total: " ^ missing_reading "waiting for memory snapshots" ]
+    | Some snapshot ->
+       labelled "Total"
+         [ Masc_tui_message_layout.count_noun
+             (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact"
+         ; Printf.sprintf "%d ordinary + %d source"
+             snapshot.mhs_total_facts snapshot.mhs_total_source_facts
+         ; Printf.sprintf "recall %s tok"
+             (recall_tokens
+                (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
+         ; Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper"
+         ]
+  in
+  let readings =
+    match state.memory_health with
+    | None -> [ "  Librarian: " ^ missing_reading "waiting for health data" ]
+    | Some snapshot ->
+       (* Every count spells its own noun: each of these reads 1 on an
+          ordinary day, and the line said "1 keepers", "1 atoms",
+          "1 failures". The unread turns keep "?" when nothing measured
+          them, which is not a count and cannot take a noun from one. *)
+       labelled "Ordinary:"
+         [ Printf.sprintf "%d observed / %d derived"
+             snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
+         ; Masc_tui_message_layout.count_noun
+             snapshot.mhs_total_support_invalidations "support invalidation"
+         ]
+       @ labelled "Librarian:"
+         [ (match snapshot.mhs_total_librarian_unread_turns with
+            | None -> "? turns"
+            | Some turns -> Masc_tui_message_layout.count_noun turns "turn")
+           ^ " unread"
+         ; Printf.sprintf "%s behind in continuity (%s not measured)"
+             (Masc_tui_message_layout.count_noun
+                snapshot.mhs_total_librarian_continuity_unread_atoms "atom")
+             (Masc_tui_message_layout.count_noun
+                snapshot.mhs_total_librarian_continuity_unmeasured "keeper")
+         ; Masc_tui_message_layout.count_noun
+             snapshot.mhs_total_librarian_failures "failure"
+           ^ " since server start"
+         ]
+  in
+  total @ readings
+
+
+let memory_overview_scrolled ~cols ?cursor (state : state) =
+  memory_overview_scrolled
+    ~header_rows:(List.length (memory_fleet_header_rows ~cols state))
+    ?cursor state
+
 let render_memory_body ~cols ~budget (state : state)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
@@ -613,44 +700,7 @@ let render_memory_body ~cols ~budget (state : state)
       (Theme.recede ()) Ansi.reset
       (Theme.recede ()) Ansi.reset
   in
-  (* What to say where the numbers would go. They are missing for two reasons
-     and the line has to name the one that holds: nothing has arrived yet, or
-     the load failed. The table below already draws the server's own reason in
-     red, so a header that says "waiting" after a failure puts two answers to
-     the same question on one screen -- and this one is on top, so it is the
-     one that gets read. *)
-  let missing_reading waiting =
-    if Option.is_some state.memory_health_error then field_failed else waiting
-  in
-  (match state.memory_health with
-   | None -> push ("  Total: " ^ missing_reading "waiting for memory snapshots")
-   | Some snapshot ->
-       push (Printf.sprintf "  Total %s · %d ordinary + %d source · recall %s tok · %s"
-         (Masc_tui_message_layout.count_noun (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
-         snapshot.mhs_total_facts snapshot.mhs_total_source_facts
-         (recall_tokens
-            (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
-         (Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper")));
-  (match state.memory_health with
-   | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
-   | Some snapshot ->
-       (* Every count spells its own noun: each of these reads 1 on an
-          ordinary day, and the line said "1 keepers", "1 atoms",
-          "1 failures". The unread turns keep "?" when nothing measured
-          them, which is not a count and cannot take a noun from one. *)
-       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %s · Librarian: %s unread · %s behind in continuity (%s not measured) · %s since server start"
-         snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
-         (Masc_tui_message_layout.count_noun
-            snapshot.mhs_total_support_invalidations "support invalidation")
-         (match snapshot.mhs_total_librarian_unread_turns with
-          | None -> "? turns"
-          | Some turns -> Masc_tui_message_layout.count_noun turns "turn")
-         (Masc_tui_message_layout.count_noun
-            snapshot.mhs_total_librarian_continuity_unread_atoms "atom")
-         (Masc_tui_message_layout.count_noun
-            snapshot.mhs_total_librarian_continuity_unmeasured "keeper")
-         (Masc_tui_message_layout.count_noun
-            snapshot.mhs_total_librarian_failures "failure")));
+  List.iter push (memory_fleet_header_rows ~cols state);
   push info_bar;
   let search_bar =
     (* The one value the list was filtered by. [visible_memory_keepers] narrows
@@ -704,7 +754,7 @@ let render_memory_body ~cols ~budget (state : state)
     | None -> []
     | Some k -> memory_context_lines k
   in
-  let layout = memory_overview_scrolled ~cursor state in
+  let layout = memory_overview_scrolled ~cols ~cursor state in
   let rows = budget + Masc_tui_frame.chrome_rows in
   let available = max 1 (rows - layout.sc_chrome) in
   let overflowing = shown > available in

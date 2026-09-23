@@ -1002,6 +1002,24 @@ let test_a_memory_whose_only_successor_is_not_stored_stays_current () =
   check (list string) "A has no successor" [] (successors_of current_a_id events)
 ;;
 
+(* The answer restates A word for word and says it supersedes B, and the
+   keeper retracts A during the pass. A is not brought back, so B has no
+   successor in the next snapshot and stays current with no Revised event. *)
+let test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current () =
+  let selection, disposition, events, _ =
+    librarian_round ~name:"restated-successor-retracted"
+      ~answer:(selection_json ~new_claims:[ superseding_claim ~claim:"keep A" (`String "m2") () ] ())
+      ~keeper_facts:[ current_b ]
+      ()
+  in
+  check (list string) "the answer did supersede B with A"
+    [ current_b_id ^ "->" ^ current_a_id ] (revision_pairs selection.revisions);
+  check (list string) "B stays current and A stays retracted"
+    [ current_b_id ] (ids disposition.snapshot.facts);
+  check (list string) "no revision carried out" [] (revision_pairs disposition.revisions_applied);
+  check (list string) "B has no successor" [] (successors_of current_b_id events)
+;;
+
 (* The two arrays stay required even when both are empty: an answer missing a
    field is a malformed answer, not a decision to change nothing. *)
 let test_a_selection_without_the_dropped_field_rejects () =
@@ -1932,6 +1950,8 @@ let () =
             test_a_claim_absorbing_a_memory_the_keeper_retracted_during_the_pass_is_not_stored
         ; test_case "a memory whose only successor is not stored stays current" `Quick
             test_a_memory_whose_only_successor_is_not_stored_stays_current
+        ; test_case "a memory superseded by a restatement the keeper retracted stays current" `Quick
+            test_a_memory_superseded_by_a_restatement_the_keeper_retracted_stays_current
         ; test_case "selection without dropped field rejects" `Quick
             test_a_selection_without_the_dropped_field_rejects
         ; test_case "dropped statements validate" `Quick

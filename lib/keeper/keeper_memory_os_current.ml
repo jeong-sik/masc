@@ -2245,9 +2245,10 @@ let apply_disposition
 
      A new claim that supersedes such a memory, or absorbs one, is not stored:
      it would carry on content the keeper already removed or replaced, and the
-     old id would get a second successor. A memory a refused claim supersedes
-     stays current unless another stored claim continues it, since its only
-     reason to leave was that claim.
+     old id would get a second successor. A memory the answer supersedes
+     leaves only when one of its successors is in the next snapshot: a stored
+     new claim, or a restated memory the locked snapshot still holds. Its only
+     reason to leave was that successor.
 
      An absorption goes into a memory the answer names: a stored new claim, or
      a current memory it wrote again verbatim. An absorption whose target is
@@ -2277,7 +2278,6 @@ let apply_disposition
     let claims_refused, claims_accepted =
       List.partition continues_a_removed_memory new_claims
     in
-    let refused_ids = ids_of claims_refused in
     let accepted_ids = ids_of claims_accepted in
     let plan_retired =
       Set_util.StringSet.filter
@@ -2293,7 +2293,8 @@ let apply_disposition
            | _ :: _ ->
              List.exists
                (fun (revision : Keeper_memory_os_types.revision) ->
-                  not (Set_util.StringSet.mem revision.superseded_by refused_ids))
+                  held revision.superseded_by
+                  || Set_util.StringSet.mem revision.superseded_by accepted_ids)
                successors)
         retired
     in

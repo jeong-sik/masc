@@ -365,8 +365,12 @@ val apply_disposition
     a memory the locked snapshot does not hold is not stored and is returned
     in [claims_not_applied]: it would carry on content the keeper already
     removed or replaced, and give the old id a second successor. A memory
-    whose every successor in [revisions] was not stored stays current even if
-    [dropped_statements] retires it. [revisions] is required for the same
+    [revisions] supersedes stays current, even if [dropped_statements] retires
+    it, unless one of its successors is a stored new claim or a memory the
+    locked snapshot holds. Only the absorptions passed in [absorbed] are
+    checked: when a caller leaves an absorption out (the absorb gate declined
+    it), the claim is stored even if the memory that absorption named is
+    gone. [revisions] is required for the same
     reason [absorbed] is: a caller that leaves it out would store a successor
     of a memory the keeper already replaced.
 

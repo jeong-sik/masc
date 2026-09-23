@@ -2168,8 +2168,7 @@ type inventory_freshness =
 type effective_tool = {
   et_name : string;
   et_origin : string;
-  et_group : string option;
-  et_skill_source : string option;
+  et_skill_source_id : string option;
 }
 
 type effective_tool_delivery =
@@ -2838,9 +2837,28 @@ let decode_effective_tool json =
   let* et_name = required_string_field json "name" in
   let* origin = required_object_field json "origin" in
   let* et_origin = required_string_field origin "kind" in
-  let* et_group = optional_string_field origin "group" in
-  let* et_skill_source = optional_string_field origin "skill_source" in
-  Ok { et_name; et_origin; et_group; et_skill_source }
+  (* Which configured skill source supplied this tool.
+     Keeper_effective_tool_surface.origin_to_yojson carries it as
+     origin.skill_provenance.identity.source_id, and only for composition
+     skills: for every other origin the key is absent, and for a composition
+     skill whose provenance is unknown it is null. Both mean "no source to
+     name", not a malformed payload, so each step is optional.
+
+     This used to read origin.group and origin.skill_source. No producer has
+     emitted either since the surface moved to skill_provenance, so the
+     Tools screen printed a bare "composition_skill" for every skill tool
+     and never said which skill it came from. *)
+  let* provenance = optional_object_field origin "skill_provenance" in
+  let* et_skill_source_id =
+    match provenance with
+    | None -> Ok None
+    | Some provenance ->
+      let* identity = optional_object_field provenance "identity" in
+      (match identity with
+       | None -> Ok None
+       | Some identity -> optional_string_field identity "source_id")
+  in
+  Ok { et_name; et_origin; et_skill_source_id }
 
 let decode_skill_reference_list json field =
   let* values = required_list_field json field in

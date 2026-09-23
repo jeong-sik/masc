@@ -597,10 +597,9 @@ let run_keeper_invocation_turn_admitted_inner
          the same (trace_id, total_turns + 1) snapshot the Turn_record writer
          stamps (keeper_agent_run.ml:250-251 receives this very meta via the
          run_turn call below). Threaded into reply_json; never re-derived at
-         the reply seam from updated_meta, whose trace_id is post-lifecycle and
-         is rotated on handoff turns (keeper_rollover) — re-derivation would
-         yield a different join key than the Turn_record for the same turn
-         (RFC §7.2 mint-once, thread down). *)
+         the reply seam from updated_meta, whose total_turns already counts
+         this turn — re-derivation would yield a different join key than the
+         Turn_record for the same turn (RFC §7.2 mint-once, thread down). *)
       let turn_ref =
         Ids.Turn_ref.make
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

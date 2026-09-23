@@ -77,11 +77,6 @@ type meta_command =
       ; updated_at : string
       }
   | Update_profile of profile_update
-  | Repair_trace_identity of
-      { trace_id : Keeper_id.Trace_id.t
-      ; trace_history : string list
-      ; updated_at : string
-      }
   | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
   | Turn_started_projection of { updated_at : string }
   | Turn_succeeded of
@@ -461,14 +456,6 @@ let apply_existing (state : state) meta command =
          ; agent_core_env = update.agent_core_env
          ; updated_at = update.updated_at
          })
-  | Repair_trace_identity repair ->
-    let runtime =
-      { meta.runtime with
-        trace_id = repair.trace_id
-      ; trace_history = repair.trace_history
-      }
-    in
-    Ok (with_meta state { meta with runtime; updated_at = repair.updated_at })
   | Turn_started_projection { updated_at } ->
     Ok (with_meta state { meta with updated_at })
   | Turn_succeeded { usage; updated_at } ->

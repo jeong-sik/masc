@@ -386,9 +386,8 @@ let backend_name_of_storage = function
 (* #10919: per-call Backend init was producing 1745 inits / 2 days
    (~83 inits per server lifetime against an expected 1) plus 3490
    INFO log lines.  Hot callers — [Workspace.default_config] from every
-   MCP tool dispatch and [keeper_rollover] per rollover
-   [keeper_rollover] per rollover — were paying both filesystem
-   resolution and a fresh Backend handshake per invocation.
+   MCP tool dispatch — were paying both filesystem resolution and a fresh
+   Backend handshake per invocation.
 
    The returned [config] is an immutable record and the underlying
    storage is already deduplicated upstream:
@@ -424,10 +423,10 @@ let build_default_config base_path =
   let resolved_path = runtime_base_path (Ambient base_path) in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
-  (* #10919: this factory is invoked per-tool-dispatch (8 call sites:
-     mcp_server_eio_call_tool, mcp_tool_runtime_workspace,
-     keeper_rollover, ...) — 1745 inits / 2 days = 3490 INFO events
-     for what is conceptually a static config.  Demote the success
+  (* #10919: this factory is invoked per tool dispatch (callers include
+     mcp_server_eio_call_tool and mcp_tool_runtime_workspace) — 1745 inits /
+     2 days = 3490 INFO events for what is conceptually a static config.
+     Demote the success
      path to DEBUG; the failure / fallback paths below stay at
      WARN so operators still see degraded backend selection.  A
      per-base_path memoization patch (root fix for the per-call

@@ -85,7 +85,6 @@ type t =
   | ExecutionReceiptFailures
   | SessionCleanupFailures
   | ToolExecuteFailures
-  | RolloverFailures
   | LifecycleDispatchRejections
   | LifecycleTransactions
   | RecordingErrorDedup
@@ -291,7 +290,6 @@ let to_string = function
   | ExecutionReceiptFailures -> "masc_keeper_execution_receipt_failures_total"
   | SessionCleanupFailures -> "masc_keeper_session_cleanup_failures_total"
   | ToolExecuteFailures -> "masc_keeper_tool_execute_runtime_failures_total"
-  | RolloverFailures -> "masc_keeper_rollover_failures_total"
   | LifecycleDispatchRejections -> "masc_keeper_lifecycle_dispatch_rejections_total"
   | LifecycleTransactions -> "masc_keeper_lifecycle_transactions_total"
   | RecordingErrorDedup -> "masc_keeper_recording_error_dedup_total"

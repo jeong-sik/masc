@@ -1654,7 +1654,11 @@ let github_identity_lines (json : Yojson.Safe.t) : string list =
                with
                | [] -> "(none)"
                | scopes -> String.concat ", " scopes)
-          | Some _ | None -> " \xc2\xb7 scopes: not listed by GitHub"
+          | Some `Null -> " \xc2\xb7 scopes: not listed by GitHub"
+          (* No key at all is a server that does not report scopes, not a
+             token GitHub lists none for; say nothing rather than the wrong
+             one of the two. *)
+          | Some _ | None -> ""
         in
         Some
           (match authenticated, login, error with

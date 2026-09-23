@@ -757,6 +757,35 @@ let test_login_scopes_of_query () =
        go 0)
 ;;
 
+(* The probe's stdout read on its own, over the shapes gh can hand back. Only
+   the login and the scopes header leave the parser, and header text never
+   becomes a login. *)
+let test_probe_output_shapes () =
+  let dir = Filename.temp_dir "masc-gh-probe-" "" in
+  let read stdout =
+    Github.auth_result_of_probe ~base_path:dir ~keeper_name:"probe"
+      (Unix.WEXITED 0, stdout, "")
+  in
+  let scopes = Alcotest.(option (list string)) in
+  let crlf = read "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo, workflow\r\n\r\noctocat\n" in
+  Alcotest.(check (option string)) "CRLF login" (Some "octocat") crlf.login;
+  Alcotest.check scopes "CRLF scopes" (Some [ "repo"; "workflow" ]) crlf.scopes;
+  let lf = read "HTTP/2.0 200 OK\nx-oauth-scopes: gist\n\noctocat\n" in
+  Alcotest.(check (option string)) "LF login" (Some "octocat") lf.login;
+  Alcotest.check scopes "header name in any case" (Some [ "gist" ]) lf.scopes;
+  let empty = read "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: \r\n\r\noctocat\n" in
+  Alcotest.check scopes "an empty header is an empty list, not an absent one" (Some []) empty.scopes;
+  let accepted =
+    read "HTTP/2.0 200 OK\r\nX-Accepted-Oauth-Scopes: admin:org\r\n\r\noctocat\n"
+  in
+  Alcotest.check scopes "the accepted-scopes header is not the token's" None accepted.scopes;
+  let headers_only = read "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo\r\n" in
+  Alcotest.(check bool) "headers with no body are not a login" false headers_only.authenticated;
+  let plain = read "octocat\n" in
+  Alcotest.(check (option string)) "output without headers is the login" (Some "octocat") plain.login;
+  Alcotest.check scopes "and names no scopes" None plain.scopes
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
@@ -767,6 +796,7 @@ let () =
             `Quick
             test_login_argv_carries_only_chosen_scopes
         ; Alcotest.test_case "login scopes from the query" `Quick test_login_scopes_of_query
+        ; Alcotest.test_case "probe output shapes" `Quick test_probe_output_shapes
         ; Alcotest.test_case
             "fake gh login and effective identity"
             `Quick

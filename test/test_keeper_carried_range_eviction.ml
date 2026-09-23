@@ -917,11 +917,12 @@ let test_a_librarian_behind_turn_resends_from_the_boundary () =
     (opened_past_the_point second_last)
 ;;
 
-(* Live size refusals arrive as [Unknown_invalid_request]: ollama_cloud's
-   "The prompt is too long" with a null code, glm's "Prompt exceeds max
-   length". The boundary resend answers them with its own set
-   ([boundary_resend_on]), not with [refusal_evicts], so the resend still
-   runs once the cutting ladders answer only a typed size refusal (#38286). *)
+(* Live size refusals arrive as [Unknown_invalid_request]: a 400 whose
+   only size signal is its sentence, with no typed code (RFC
+   librarian-lifecycle §4.10 lists the measured wires). The boundary resend
+   answers them with its own set ([boundary_resend_on]), not with
+   [refusal_evicts], so the resend still runs once the cutting ladders
+   answer only a typed size refusal (#38286). *)
 let test_an_unattributed_size_refusal_resends_from_the_boundary () =
   let outcome, sent, recorded, _ =
     librarian_turn ~refusal:unattributed_refusal ~point:2 ~accepted:None ~limit:8 ~boundary:8

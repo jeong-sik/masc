@@ -2532,8 +2532,9 @@ let eviction_retry_to_json = function
 (* The refusals the turn boundary resend answers (RFC librarian-lifecycle
    §4.10, rule 1). A typed size refusal, and also a refusal whose reason
    agent core does not model: every live size refusal measured so far
-   arrives that way -- ollama_cloud's "The prompt is too long" with a null
-   code, glm's "Prompt exceeds max length" -- and reading the sentence
+   arrives that way -- a 400 whose only size signal is its sentence, with
+   no typed code (RFC librarian-lifecycle §4.10 lists the measured wires) --
+   and reading the sentence
    would be a string classifier. Today this is the same set as
    [refusal_evicts]. It is kept separate so that this check keeps all three
    when [refusal_evicts] narrows to the two typed size refusals (#38286).

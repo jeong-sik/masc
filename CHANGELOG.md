@@ -61,7 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- A `turn_failures` blocker now says what failed. Its summary read `Keeper turn failed N consecutive cycle(s); inspect the last runtime error before retry.` and named no error, and after a restart there was none to name: the registry rebuilds the blocker from the durable streak, which stores only the count. That is the window from boot until the next successful turn resets the streak. The summary now reads the Keeper's newest execution receipt and, when that receipt is a failed or cancelled turn (a provider wall-clock timeout ends the turn cancelled and still advances the streak), names when it ended, its `terminal_reason_code` and its `error.message` — `last failed turn ended 2026-09-23T00:38:12Z with api_error_rate_limited: Rate limited: …`. With no receipt, a newest receipt that is not a failure, or a receipt store that cannot be read, it says that instead of a cause. The status tool, operator digest, dashboard briefing attention queue and keeper list all carry the new sentence (#38064).
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result

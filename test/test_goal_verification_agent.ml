@@ -332,47 +332,42 @@ let test_goal_proof_reads_the_workspace_playground () =
   let reviewer =
     fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-      match lookup with
-      | AR.No_lookup_surface ->
-        fail "the Goal proof judge was handed no lookup surface"
-      | AR.Lookup_tools { schemas; dispatch; root_layout } ->
-        check bool "the read tool is advertised" true
-          (List.exists
-             (fun (schema : Masc_domain.tool_schema) ->
-                String.equal schema.name "tool_read_file")
-             schemas);
-        check bool "the web tool is advertised" true
-          (List.exists
-             (fun (schema : Masc_domain.tool_schema) ->
-                String.equal schema.name "masc_web_fetch")
-             schemas);
-        check bool "the prompt names the tools the judge holds" true
-          (String_util.contains_substring prompt "tool_read_file");
-        check bool "the prompt lists the root the tools resolve against" true
-          (List.exists
-             (fun entry -> String_util.contains_substring prompt entry)
-             root_layout);
-        let path = Filename.concat "some-keeper" "measurement.txt" in
-        let read =
-          dispatch
-            ~name:"tool_read_file"
-            ~args:(`Assoc [ "file_path", `String path ])
-          |> lookup_text
-        in
-        (match read with
-         | Error detail -> fail ("the judge could not read the measurement: " ^ detail)
-         | Ok output ->
-           reads := !reads + 1;
-           check bool "the judge read the measurement itself" true
-             (String_util.contains_substring output "pass rate: 100%"));
-        let input =
-          `Assoc [ "verdict", `String "APPROVE"; "reason", `String stated_reason ]
-        in
-        on_tool_result
-          ~input
-          (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
-             "recorded");
-        Ok {AR.selected_runtime_id="verifier-a";verdict=Some (AR.Approve stated_reason)}
+      let { AR.schemas; dispatch } = lookup in
+      check bool "the read tool is advertised" true
+        (List.exists
+           (fun (schema : Masc_domain.tool_schema) ->
+              String.equal schema.name "tool_read_file")
+           schemas);
+      check bool "the web tool is advertised" true
+        (List.exists
+           (fun (schema : Masc_domain.tool_schema) ->
+              String.equal schema.name "masc_web_fetch")
+           schemas);
+      check bool "the prompt names the tools the judge holds" true
+        (String_util.contains_substring prompt "tool_read_file");
+      check bool "the prompt lists the root the tools resolve against" true
+        (String_util.contains_substring prompt "some-keeper");
+      let path = Filename.concat "some-keeper" "measurement.txt" in
+      let read =
+        dispatch
+          ~name:"tool_read_file"
+          ~args:(`Assoc [ "file_path", `String path ])
+        |> lookup_text
+      in
+      (match read with
+       | Error detail -> fail ("the judge could not read the measurement: " ^ detail)
+       | Ok output ->
+         reads := !reads + 1;
+         check bool "the judge read the measurement itself" true
+           (String_util.contains_substring output "pass rate: 100%"));
+      let input =
+        `Assoc [ "verdict", `String "APPROVE"; "reason", `String stated_reason ]
+      in
+      on_tool_result
+        ~input
+        (Tool_result.ok ~tool_name:"report_review_verdict" ~start_time:0.0
+           "recorded");
+      Ok {AR.selected_runtime_id="verifier-a";verdict=Some (AR.Approve stated_reason)}
   in
   with_lane_and_reviewer
     ~slots:(fun () -> Ok [ "verifier-a" ])
@@ -402,11 +397,7 @@ let test_refuted_goal_can_request_proof_again_and_pass () =
   let reviewer =
     fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
         ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-      let dispatch =
-        match lookup with
-        | AR.Lookup_tools { dispatch; _ } -> dispatch
-        | AR.No_lookup_surface -> fail "the judge was handed no lookup surface"
-      in
+      let { AR.dispatch; _ } = lookup in
       let read =
         dispatch
           ~name:"tool_read_file"
@@ -502,13 +493,11 @@ let test_goal_proof_surface_survives_a_crowded_playground () =
   ignore
     (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   let reached = ref false in
-  let layout_seen = ref [] in
+  let prompt_seen = ref "" in
   let reviewer =
-    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_
-        ~lookup ~on_tool_result ~on_runtime_attempt_error:_ () ->
-      (match lookup with
-       | AR.No_lookup_surface -> fail "the crowded root produced no lookup surface"
-       | AR.Lookup_tools { root_layout; _ } -> layout_seen := root_layout);
+    fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_
+        ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
+      prompt_seen := prompt;
       reached := true;
       on_tool_result
         ~input:
@@ -525,7 +514,12 @@ let test_goal_proof_surface_survives_a_crowded_playground () =
     (fun () -> drain config);
   check bool "the evaluator was reached rather than deferred" true !reached;
   check bool "every producer is listed, none dropped by a cap" true
-    (List.length !layout_seen >= checkouts);
+    (List.for_all
+       (fun index ->
+          String_util.contains_substring
+            !prompt_seen
+            (Printf.sprintf "producer-%02d" index))
+       (List.init checkouts Fun.id));
   check string "the review produced a verdict" "executing"
     (stored_phase config goal_id)
 ;;
@@ -582,7 +576,7 @@ let test_lane_unavailable_keeps_the_pending_row () =
     (fun () ->
        let work =
          match Agent.collect_pending config with
-         | Ok work -> work
+         | Ok { Agent.collected; _ } -> collected
          | Error failure -> fail (Agent.scan_failure_to_string failure)
        in
        let outcomes = List.map (Agent.process_pending_work config) work in
@@ -827,8 +821,6 @@ let test_skipped_scan_records_one_row_and_one_warn_per_cycle () =
       check string "the scan names the refused member" "criterion_revision" field;
       check string "the scan names the repair" "criterion_revision" repair
     | Error (Agent.Scan_skipped _) -> fail "the reason is not the refused schema member"
-    | Error (Agent.Ledger_reconcile_failed _) ->
-      fail "an unreadable store was reported as a ledger reconcile failure"
     | Ok () -> fail "rows without criterion_revision drained as a healthy store"
   in
   cycle ();
@@ -874,8 +866,6 @@ let test_scan_preserves_source_failure () =
   (match Agent.collect_pending config with
    | Error (Agent.Scan_skipped unavailable) ->
      check string "scan names the file it could not read" path unavailable.Goal_store.file
-   | Error (Agent.Ledger_reconcile_failed _) ->
-     fail "an unreadable store was reported as a ledger reconcile failure"
    | Ok _ -> fail "unavailable source was reported as a successful scan");
   check string "scan does not repair primary" "unreadable primary"
     (Fs_compat.load_file path);
@@ -894,7 +884,7 @@ let test_committed_proven_proof_reconciles_without_review () =
   in
   let work =
     match Agent.collect_pending config with
-    | Ok work -> work
+    | Ok { Agent.collected; _ } -> collected
     | Error failure -> fail (Agent.scan_failure_to_string failure)
   in
   check bool "reconciliation does not call the model again" false
@@ -1009,7 +999,7 @@ let test_committed_refuted_proof_reconciles_without_rearm () =
   in
   let work =
     match Agent.collect_pending config with
-    | Ok work -> work
+    | Ok { Agent.collected; _ } -> collected
     | Error failure -> fail (Agent.scan_failure_to_string failure)
   in
   check bool "refutation is not overwritten by a re-armed request" false
@@ -1021,6 +1011,63 @@ let test_committed_refuted_proof_reconciles_without_rearm () =
     check string "the exact refutation run survives" "goal-run-before-crash"
       verdict.Goal_verification.verification_run_id
   | _ -> fail "reconciliation overwrote the refuted ledger state"
+;;
+
+(* One Verifying goal whose ledger cannot be re-armed must not stop the
+   scan. The bad goal holds a human-confirmed proof for its current
+   criterion while its phase is still Verifying: reconciliation finds no
+   committed proof to replay, and re-arming refuses because the criterion is
+   already proven. The other goal, an ordinary pending request, is still
+   collected and still drained. *)
+let test_one_unreconcilable_goal_does_not_stop_the_scan () =
+  with_workspace
+  @@ fun config ->
+  let bad_goal_id =
+    set_up_committed_proof_crash
+      config
+      ~outcome:Goal_verification.Proven
+      ~evidence:"proven before the phase write"
+  in
+  let proven =
+    match (ledger_record config bad_goal_id).completion with
+    | Goal_verification.Proof_proven verdict -> verdict
+    | _ -> fail "test setup: the bad goal needs a proven ledger row"
+  in
+  (match
+     Goal_verification.record_human_confirmation
+       config
+       ~goal_id:bad_goal_id
+       proven
+       ~operator_id:"operator"
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  let ctx = workspace_ctx config in
+  let good_goal_id = create_goal ctx "Goal beside an unreconcilable ledger" in
+  ignore
+    (must_succeed "request_complete" (transition ctx good_goal_id "request_complete"));
+  (match Agent.collect_pending config with
+   | Ok { Agent.collected; unreconciled } ->
+     check bool "the healthy goal is still collected" true
+       (has_completion_work good_goal_id collected);
+     check bool "the unreconcilable goal is not collected" false
+       (has_completion_work bad_goal_id collected);
+     check (list string) "the scan names the one goal it could not reconcile"
+       [ bad_goal_id ]
+       (List.map (fun (failure : Agent.reconcile_failure) -> failure.failed_goal_id)
+          unreconciled)
+   | Error failure -> fail (Agent.scan_failure_to_string failure));
+  with_lane_and_reviewer
+    ~slots:(fun () -> Ok [ "verifier-a" ])
+    ~reviewer:
+      (recording_reviewer (ref []) [ "verifier-a", Stub_approve "healthy goal verified" ])
+    (fun () -> drain config);
+  check string "the healthy goal is drained past the bad one" "awaiting_confirmation"
+    (stored_phase config good_goal_id);
+  check string "the bad goal stays verifying" "verifying" (stored_phase config bad_goal_id);
+  match (ledger_record config bad_goal_id).completion with
+  | Goal_verification.Human_confirmed _ -> ()
+  | _ -> fail "the scan rewrote the unreconcilable goal's ledger row"
 ;;
 
 let test_superseded_review_keeps_the_evaluated_original_criterion () =
@@ -1415,6 +1462,10 @@ let () =
             "committed refuted proof reconciles without re-arm"
             `Quick
             test_committed_refuted_proof_reconciles_without_rearm
+        ; test_case
+            "one unreconcilable goal does not stop the scan"
+            `Quick
+            test_one_unreconcilable_goal_does_not_stop_the_scan
         ; test_case "verifying goal with a missing request is rearmed and drained"
             `Quick
             test_verifying_goal_with_a_missing_request_is_rearmed_and_drained

@@ -246,25 +246,11 @@ let root_kind root =
     Error (Printf.sprintf "%s: %s" operation (Unix.error_message code))
 ;;
 
-let absent_root_layout root =
-  match
-    Prompt_registry.render_prompt_template
-      Prompt_names.verification_lookup_root_layout_absent
-      [ "root", root ]
-  with
-  | Ok text -> Ok [ String.trim text ]
-  | Error detail ->
-    Error
-      (Printf.sprintf
-         "prompt %s: %s"
-         Prompt_names.verification_lookup_root_layout_absent
-         detail)
-;;
-
 (* Nothing creates a workspace producer's playground: no boot, no sandbox.
    So its absence is a fact about the producer, not an unavailable surface,
-   and the judge receives it as the layout and rules on the evidence that is
-   there (the snapshot's notes, URLs, and typed unreadable artifacts).
+   and the judge is told so in its own lookup section and rules on the
+   evidence that is there (the snapshot's typed items, submitted Board and
+   Fusion sources, and URLs it opens).
    Treating it as unavailable deferred the review on every sweep and left
    every Task submitted over MCP in AwaitingVerification with nobody told:
    nine Tasks, 131 identical warning lines on 2026-09-11. A Keeper's root is
@@ -274,13 +260,13 @@ let root_layout t =
   let open Result.Syntax in
   match t.producer_scope, root_kind t.ownership_root with
   | Workspace_producer, Ok Fs_compat.Exact_missing ->
-    absent_root_layout t.ownership_root
+    Ok (Task.Anti_rationalization.Producer_root_absent { root = t.ownership_root })
   | ( Workspace_producer
     , (Ok (Fs_compat.Exact_unknown | Fs_compat.Exact_kind _) | Error _) )
   | Keeper_producer _, _ ->
     let* entry_lines = entry_lines_of t.ownership_root ~cap:root_entry_cap in
     let* checkout_lines = checkout_lines t.ownership_root in
-    Ok (entry_lines @ checkout_lines)
+    Ok (Task.Anti_rationalization.Producer_tree (entry_lines @ checkout_lines))
 ;;
 
 (* The Goal proof root holds every producer, so the checkout scan that maps one

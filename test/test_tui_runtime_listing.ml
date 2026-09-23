@@ -477,6 +477,8 @@ let standalone_lane ~lane_id ~declared ~admitted : Masc.Tui_decode.standalone_la
   ; sl_last_outcome = None
   ; sl_p50_elapsed_s = None
   ; sl_selected_slots = []
+  ; sl_runs_without_slot =
+      { Tui_decode.slws_vendor_system_one = 0; slws_server_restarted = 0; slws_no_slot = 0 }
   }
 
 let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
@@ -625,6 +627,74 @@ let media_failover_state ?(cursor = 0) ?(declared = [ "a"; "b" ]) ?(admitted = [
   state.slot_editor <- Some { se_target = Media_failover_slots; se_cursor = cursor };
   state
 
+(* The route editor sends the order it read, in full, and it reads that order
+   off the same list the candidate guard watches. After a failed read-back
+   that order is evidence of the state before the last write, so sending it
+   restores whatever that write removed.
+
+   The conversation-lane editor has refused this since the guard was written.
+   The route editor did not: its plan asked only whether a write was in
+   flight, and the pick list put [Pick_media_failover] on the unguarded side
+   of a match whose comment said only the conversation-lane arm sends the
+   order in full. *)
+let test_the_route_editor_will_not_write_from_a_stale_list () =
+  let stale state =
+    state.runtime_surface_generation <- 1;
+    state.runtime_lane_write <- Lane_write_posting;
+    settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
+    runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
+      (Error "HTTP 503: down")
+  in
+  let refusal =
+    "refuse: the lane list may be stale; reload it before changing candidates"
+  in
+  let state = media_failover_state () in
+  stale state;
+  Alcotest.(check string) "a move is refused" refusal
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  Alcotest.(check string) "so is a drop" refusal
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  Alcotest.(check string) "and the stale line says why" stale_after_503
+    (stale_text state);
+  (* An exact lane names the one slot it changes and the writer reads the
+     declared order under its lock, so a stale reading here cannot undo
+     anything and the edit still lands. *)
+  let exact = slot_editor_state () in
+  stale exact;
+  Alcotest.(check string) "an exact lane's drop is untouched"
+    "librarian_exact drop a, cursor stays"
+    (slot_plan_text (plan_slot_edit exact Drop_slot))
+
+(* The pick dispatch lives in the executable, so this is read off its source.
+   It used to decide the same question with a list of constructors written
+   into the match, and that list left [Pick_media_failover] on the unguarded
+   side. *)
+let test_the_pick_dispatch_asks_the_same_question () =
+  Alcotest.(check int) "the dispatch asks which writes send the whole order" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"launch_runtime_lane_pick"
+       ~callee:"Masc_tui_types.runtime_lane_pick_sends_whole_order")
+
+(* Which writes a stale list can undo is one question, asked of the value
+   rather than of a list of constructors written at each dispatch. Both
+   vocabularies answer it exhaustively, so a pick or a slot target added later
+   has to choose a side instead of inheriting the unguarded one. *)
+let test_the_writes_a_stale_list_can_undo_are_named_once () =
+  let pick name expected value =
+    Alcotest.(check bool) name expected
+      (runtime_lane_pick_sends_whole_order value)
+  in
+  pick "a conversation lane sends its whole order" true
+    (Pick_conversation_lane "coding");
+  pick "so does the media failover route" true Pick_media_failover;
+  pick "an exact lane appends one slot" false (Pick_exact_lane "verifier_exact");
+  pick "a new lane sends only the pick" false (Pick_new_lane "fresh");
+  pick "the default is one entry, replaced" false Pick_route_default;
+  Alcotest.(check bool) "the route editor sends its whole order" true
+    (slot_editor_target_sends_whole_order Media_failover_slots);
+  Alcotest.(check bool) "the exact-lane editor names one slot" false
+    (slot_editor_target_sends_whole_order (Exact_lane_slots "verifier_exact"))
+
 let test_the_route_editor_writes_the_whole_order () =
   let state = media_failover_state () in
   Alcotest.(check (list string)) "the route's entries, in call order"
@@ -708,5 +778,11 @@ let () = Alcotest.run "runtime list geometry"
         test_the_picker_offers_only_declared_lanes;
       Alcotest.test_case "the route editor writes the whole order" `Quick
         test_the_route_editor_writes_the_whole_order;
+      Alcotest.test_case "the route editor will not write from a stale list"
+        `Quick test_the_route_editor_will_not_write_from_a_stale_list;
+      Alcotest.test_case "the writes a stale list can undo are named once"
+        `Quick test_the_writes_a_stale_list_can_undo_are_named_once;
+      Alcotest.test_case "the pick dispatch asks the same question" `Quick
+        test_the_pick_dispatch_asks_the_same_question;
       Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
         test_the_route_editor_keeps_an_unresolved_entry_in_place]]

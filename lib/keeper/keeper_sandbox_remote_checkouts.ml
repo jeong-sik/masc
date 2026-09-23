@@ -1,8 +1,13 @@
 open Keeper_meta_contract
 
+type remote_origin =
+  | Origin_url of string
+  | Origin_not_configured
+  | Origin_unread
+
 type inspected_checkout =
   { checkout : Keeper_playground_checkouts.checkout
-  ; origin_url : string option
+  ; origin : remote_origin
   ; branch : (string, string) result
   ; head : (string, string) result
   ; dirty : (bool * int, string) result
@@ -50,7 +55,23 @@ def inspect_git(path):
             # field is unavailable, the rest of the row still reports.
             return None
 
-    origin = git('config', '--get', 'remote.origin.url')
+    # git remote get-url exits 2 only for "no such remote", and it needs a
+    # repository, so an unusable one (dubious ownership, a broken .git) dies
+    # with 128 instead. The host lane reads the same command the same way
+    # (Repo_git.get_origin_url). Any outcome but 0 or 2 is a read that did
+    # not happen.
+    origin = None
+    origin_state = 'unavailable'
+    try:
+        r = subprocess.run(['git', '-C', path, 'remote', 'get-url', 'origin'],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip():
+            origin = r.stdout.strip()
+            origin_state = 'present'
+        elif r.returncode == 2:
+            origin_state = 'missing'
+    except (subprocess.TimeoutExpired, OSError):
+        pass
     branch = git('symbolic-ref', '--short', '-q', 'HEAD') or git('rev-parse', '--abbrev-ref', 'HEAD')
     head = git('rev-parse', 'HEAD')
     status = git('--no-optional-locks', 'status', '--porcelain=v1', '--untracked-files=normal')
@@ -84,6 +105,7 @@ def inspect_git(path):
 
     return {
         'origin': origin,
+        'origin_state': origin_state,
         'branch': branch,
         'head': head,
         'dirty': dirty,
@@ -243,7 +265,17 @@ let parse_checkout ~root json =
   let checkout : Keeper_playground_checkouts.checkout =
     { relative_path; absolute_path; name; git_link }
   in
-  let* origin_url = optional_string_field "origin" fields in
+  let* origin =
+    let* state = string_field "origin_state" fields in
+    let* url = optional_string_field "origin" fields in
+    match state, url with
+    | "present", Some url -> Ok (Origin_url url)
+    | "missing", None -> Ok Origin_not_configured
+    | "unavailable", None -> Ok Origin_unread
+    | ("present" | "missing" | "unavailable"), _ ->
+      Error (Printf.sprintf "origin_state %S disagrees with origin" state)
+    | other, _ -> Error (Printf.sprintf "origin_state: unknown value %S" other)
+  in
   let* branch =
     let* branch = optional_string_field "branch" fields in
     Ok (Option.to_result ~none:"branch unavailable" branch)
@@ -268,7 +300,7 @@ let parse_checkout ~root json =
   let* behind = optional_int_field "behind" fields in
   Ok
     { checkout
-    ; origin_url
+    ; origin
     ; branch
     ; head
     ; dirty
@@ -329,6 +361,10 @@ let catalog_to_json_arg catalog =
       repos
   in
   Yojson.Safe.to_string (`List json_repos)
+
+module For_testing = struct
+  let probe_script = probe_script
+end
 
 let discover_and_inspect
     ~timeout_sec

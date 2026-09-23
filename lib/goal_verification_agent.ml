@@ -59,42 +59,62 @@ let group_pending_by_goal work =
    review or reconciliation. Recovery re-arms only still-Verifying Goals; an
    ordinary criterion edit must not become an implicit completion request. *)
 
-(* Why a scan produced no work. The two arms have different consequences:
-   a store this build cannot read is recorded as a durable row and one WARN
-   line (RFC-0444 §2.3 row 7), a ledger the scan could read but not
-   reconcile for one goal is an ERROR naming that goal. *)
-type scan_failure =
-  | Scan_skipped of Goal_store.unavailable
-  | Ledger_reconcile_failed of
-      { goal_id : string
-      ; detail : string
-      }
+(* Why a scan produced no work: a store this build cannot read. It is
+   recorded as a durable row and one WARN line (RFC-0444 §2.3 row 7). *)
+type scan_failure = Scan_skipped of Goal_store.unavailable
 
 let scan_failure_to_string = function
   | Scan_skipped unavailable -> Goal_store.unavailable_to_string unavailable
-  | Ledger_reconcile_failed { goal_id; detail } ->
-    Printf.sprintf "goal_id=%s: %s" goal_id detail
 ;;
 
-let collect_pending config : (pending_work list, scan_failure) result =
+(* One Verifying goal whose ledger the scan could read but not reconcile or
+   re-arm. The scan skips that goal and keeps collecting the others; the
+   caller logs each one at ERROR, and its pending row stays durable. *)
+type reconcile_failure =
+  { failed_goal_id : string
+  ; failure : string
+  }
+
+type scan =
+  { collected : pending_work list
+  ; unreconciled : reconcile_failure list
+  }
+
+let collect_pending config : (scan, scan_failure) result =
   match Goal_store.list_goals_result config ~phase:Goal_phase.Verifying () with
   | Error unavailable -> Error (Scan_skipped unavailable)
   | Ok goals ->
-  let failed goal_id detail = Error (Ledger_reconcile_failed { goal_id; detail }) in
-  let rec collect acc = function
-    | [] -> Ok (List.rev acc)
-    | (goal : Goal_store.goal) :: rest ->
-      (match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
-       | Error detail -> failed goal.id detail
-       | Ok (Workspace_goals.Reconciled _ | Workspace_goals.Reconciliation_not_needed _) ->
-         collect acc rest
-       | Ok Workspace_goals.No_committed_proof ->
-         (match Workspace_goals.recover_current_proof config ~goal_id:goal.id with
-          | Error detail -> failed goal.id detail
-          | Ok true -> collect ({ goal_id = goal.id } :: acc) rest
-          | Ok false -> collect acc rest))
-  in
-  collect [] goals
+    let collect_goal (goal : Goal_store.goal) =
+      match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
+      | Error failure -> Error failure
+      | Ok (Workspace_goals.Reconciled _ | Workspace_goals.Reconciliation_not_needed _) ->
+        Ok None
+      | Ok Workspace_goals.No_committed_proof ->
+        Workspace_goals.recover_current_proof config ~goal_id:goal.id
+        |> Result.map (fun rearmed -> if rearmed then Some { goal_id = goal.id } else None)
+    in
+    let collected, unreconciled =
+      List.fold_left
+        (fun (collected, unreconciled) (goal : Goal_store.goal) ->
+           match collect_goal goal with
+           | Ok None -> collected, unreconciled
+           | Ok (Some work) -> work :: collected, unreconciled
+           | Error failure ->
+             collected, { failed_goal_id = goal.id; failure } :: unreconciled)
+        ([], [])
+        goals
+    in
+    Ok { collected = List.rev collected; unreconciled = List.rev unreconciled }
+;;
+
+let log_unreconciled failures =
+  List.iter
+    (fun { failed_goal_id; failure } ->
+       Log.Misc.error
+         "goal verifier ledger reconcile failed goal_id=%s; its pending row stays undrained: %s"
+         failed_goal_id
+         failure)
+    failures
 ;;
 
 (* RFC-0444 §2.3 row 7 and criterion 3: one WARN line per skipped scan, and
@@ -127,47 +147,56 @@ let skip_scan (unavailable : Goal_store.unavailable) =
 (* The judge is told what it holds. A surface it is never described cannot be
    used: an evaluator that held read tools and was told nothing about them
    spent the whole review guessing paths (masc#29250). *)
-let render_lookup_section (lookup : Task.Anti_rationalization.lookup_surface) =
-  match lookup with
-  | Task.Anti_rationalization.No_lookup_surface ->
-    Ok
-      "You hold no tool that opens anything. Nothing here can measure the \
-       declared metric, so the only verdict this review can reach honestly is \
-       a refusal that says so."
-  | Task.Anti_rationalization.Lookup_tools { schemas; dispatch = _; root_layout } ->
-    let tool_names =
-      schemas
-      |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-      |> String.concat ", "
-    in
-    (* The empty-root sentence is the same prose the task verifier renders;
-       both lanes share the one slot in verification.md. *)
-    let root_layout_lines =
-      match root_layout with
-      | [] ->
-        Result.map
-          (fun text -> "  " ^ String.trim text)
-          (Prompt_registry.render_prompt_template
-             Prompt_names.verification_lookup_root_layout_empty
-             [])
-      | entries ->
-        Ok (entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n")
-    in
-    (match root_layout_lines with
-     | Error _ as error -> error
-     | Ok root_layout_lines ->
-       Prompt_registry.render_prompt_template
-         Prompt_names.goal_verification_lookup
-         [ "lookup_tools", tool_names; "lookup_root_layout", root_layout_lines ])
+let render_lookup_section
+      ~(lookup : Task.Anti_rationalization.lookup_surface)
+      ~root_layout
+      ~submitted_evidence
+  =
+  let tool_names =
+    lookup.Task.Anti_rationalization.schemas
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+    |> String.concat ", "
+  in
+  (* The empty-root sentence is the same prose the task verifier renders;
+     both lanes share the one slot in verification.md. *)
+  let root_layout_lines =
+    match root_layout with
+    | [] ->
+      Result.map
+        (fun text -> "  " ^ String.trim text)
+        (Prompt_registry.render_prompt_template
+           Prompt_names.verification_lookup_root_layout_empty
+           [])
+    | entries ->
+      Ok (entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n")
+  in
+  (* The submitted identities are data. What the judge does with them is
+     said in the [lookup] slot of goal_verification.md. *)
+  let submitted_sources =
+    Yojson.Safe.to_string
+      (`List
+          (List.map
+             Workspace_verification_store.submitted_evidence_item_metadata_to_yojson
+             submitted_evidence))
+  in
+  match root_layout_lines with
+  | Error _ as error -> error
+  | Ok root_layout_lines ->
+    Prompt_registry.render_prompt_template
+      Prompt_names.goal_verification_lookup
+      [ "lookup_tools", tool_names
+      ; "lookup_root_layout", root_layout_lines
+      ; "submitted_sources", submitted_sources
+      ]
 ;;
 
-let render_proof_prompt ~lookup (goal : Goal_store.goal) =
+let render_proof_prompt ~lookup ~root_layout ~submitted_evidence (goal : Goal_store.goal) =
   let open Result.Syntax in
   let declared = function
     | Some value when String.trim value <> "" -> value
     | Some _ | None -> "(not declared)"
   in
-  let* lookup_section = render_lookup_section lookup in
+  let* lookup_section = render_lookup_section ~lookup ~root_layout ~submitted_evidence in
   Prompt_registry.render_prompt_template
     Prompt_names.goal_verification_proof
     [ "goal_title", goal.Goal_store.title
@@ -186,14 +215,11 @@ let goal_proof_lookup config ~submitted_evidence =
   let open Result.Syntax in
   let* tools = Verification_authority_tools.create_goal_proof ~config ~submitted_evidence in
   let* root_layout = Verification_authority_tools.goal_proof_root_layout tools in
-  let root_layout = root_layout @ ["Submitted source identities (read exact bodies with the Board/Fusion tools): " ^
-    Yojson.Safe.to_string (`List (List.map Workspace_verification_store.submitted_evidence_item_metadata_to_yojson submitted_evidence))] in
   Ok
-    (Task.Anti_rationalization.Lookup_tools
-       { schemas = Verification_authority_tools.schemas tools
-       ; dispatch = Verification_authority_tools.dispatch tools
-       ; root_layout
-       })
+    ( { Task.Anti_rationalization.schemas = Verification_authority_tools.schemas tools
+      ; dispatch = Verification_authority_tools.dispatch tools
+      }
+    , root_layout )
 ;;
 
 (* {1 Verdict commit}
@@ -270,7 +296,7 @@ let process_pending_work_inner
           defer
             ~goal_id:work.goal_id
             ~reason:("goal proof lookup surface unavailable: " ^ detail)
-        | Ok lookup ->
+        | Ok (lookup, root_layout) ->
        let on_tool_result ~input result = observe_tool ~input result in
        let result =
          Task.Anti_rationalization.run
@@ -286,7 +312,8 @@ let process_pending_work_inner
                "[goal-proof-review] goal_id=%s %s"
                work.goal_id
                message)
-           ~render_prompt:(fun () -> render_proof_prompt ~lookup goal)
+           ~render_prompt:(fun () ->
+             render_proof_prompt ~lookup ~root_layout ~submitted_evidence goal)
            ~lookup
            ~on_tool_result
            ()
@@ -456,15 +483,15 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
   | Error (Scan_skipped unavailable) as error ->
     skip_scan unavailable;
     error
-  | Error (Ledger_reconcile_failed _) as error -> error
-  | Ok work ->
+  | Ok { collected; unreconciled } ->
+    log_unreconciled unreconciled;
     List.iter
       (fun item ->
          (* RFC-0387: per-row outcomes are logged at the point of decision
             (commit/defer); the synchronous drain discards them. *)
          (* fire-and-forget: per-row results are durable in the ledger. *)
          ignore (process_pending_work ~sw config item))
-      work;
+      collected;
     Ok ()
 ;;
 
@@ -619,12 +646,8 @@ let take_items limit items =
 let process_pending (runtime : runtime) =
   match collect_pending runtime.config with
   | Error (Scan_skipped unavailable) -> skip_scan unavailable
-  | Error (Ledger_reconcile_failed { goal_id; detail }) ->
-    Log.Misc.error
-      "goal verifier ledger reconcile failed goal_id=%s; pending rows remain undrained: %s"
-      goal_id
-      detail
-  | Ok work ->
+  | Ok { collected = work; unreconciled } ->
+    log_unreconciled unreconciled;
     let active = Atomic.get runtime.in_flight in
     let available = max 0 (max_concurrent_reviews - List.length active) in
     let eligible =
@@ -753,12 +776,17 @@ module For_testing = struct
     | Superseded
     | Deferred of string
 
-  type nonrec scan_failure = scan_failure =
-    | Scan_skipped of Goal_store.unavailable
-    | Ledger_reconcile_failed of
-        { goal_id : string
-        ; detail : string
-        }
+  type nonrec scan_failure = scan_failure = Scan_skipped of Goal_store.unavailable
+
+  type nonrec reconcile_failure = reconcile_failure =
+    { failed_goal_id : string
+    ; failure : string
+    }
+
+  type nonrec scan = scan =
+    { collected : pending_work list
+    ; unreconciled : reconcile_failure list
+    }
 
   let scan_failure_to_string = scan_failure_to_string
 end

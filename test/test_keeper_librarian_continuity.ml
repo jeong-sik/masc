@@ -350,15 +350,16 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
     String.make 1000 'c'; String.make 6000 'd'] in
   save source; boundary ~fresh:true 1 source;
   let current = Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1000.
-    ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[] () |> get in
+    ~source:{kind=Current.Librarian;trace_id} ~absorbed:[] ~new_claims:[] () |> get
+    |> fun (d : Current.disposition) -> d.snapshot in
   let half = prepare config |> some |> P.narrow |> some in
   let input : K.input =
     {turn_ref=P.turn_ref half; goal_context=K.No_task; keeper_instructions=instructions;
      current=Some {K.facts=current.facts};
      working_context=Masc.Keeper_librarian_context.empty;
      messages=P.messages half; tool_observations=[];counterpart_observations=[]} in
-  let variables = ("continuity", Yojson.Safe.to_string (P.prompt_json half)) ::
-    List.remove_assoc "continuity" (K.prompt_variables input) in
+  let variables =
+    Masc.Keeper_librarian_runtime.librarian_prompt_variables ~continuity:half input |> get in
   let _, prompt = Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian variables |> get in
   let requirement = Agent_core.Exact_output.make_output_requirement
@@ -390,6 +391,9 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
   check int "actual queue publishes every source atom" 4 saved.end_atom;
   check int "known final-slot bound prevents repeated oversized probes" 1 !oversized;
   check int "one refusal and two fitted chunks reach final slot" 3 !final_calls;
+  check bool "commits by the other CLI slot keep the learned limit" true
+    (Option.is_some
+       (Masc.Keeper_librarian_queue_refresh.For_testing.last_input_capacity ~config ~keeper_name));
   check bool "no-fit source still reaches recovered alternative" true
     (match !alternative_bytes with Some size -> size > max_chars | None -> false);
   let module O = Masc.Keeper_continuity_observation in
@@ -515,10 +519,16 @@ let narrowing_atom_count = List.length narrowing_marks
    refused pass carries to the next one and which refusals must not move it at
    all (#37793: one live Keeper walked 12756 -> 6378 -> 3189 ninety-six times
    in a day and committed nothing, because every pass started over). *)
-let narrowing_fixture ~slot_count ~answer f =
+let narrowing_fixture ?(cli_slot_ids = []) ?cli_runner ~slot_count ~answer f =
   let open Masc in
   let module F = Exact_output_fixture in
   let module Current = Masc.Keeper_memory_os_current in
+  let with_cli_runtimes body =
+    match cli_slot_ids with
+    | [] -> body ()
+    | _ :: _ -> F.with_official_client_runtimes body
+  in
+  with_cli_runtimes @@ fun () ->
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true")
   @@ fun () ->
   with_source @@ fun env config save _append boundary ->
@@ -549,7 +559,7 @@ let narrowing_fixture ~slot_count ~answer f =
        bodies := !bodies @ [String.length body];
        answer index body)) in
   let slot_ids = List.init slot_count (fun index -> Printf.sprintf "narrowing-slot-%d" index) in
-  ignore (F.publish_registry ~lane_id:"librarian_exact" ~slot_ids
+  ignore (F.publish_registry ~cli_slot_ids ~lane_id:"librarian_exact" ~slot_ids
     (F.resolver_snapshot ~source:"narrowing-fixture"
        (List.map (fun id -> { F.id; base_url = server.F.base_url }) slot_ids)));
   (* The rendered prompt carries the same atoms twice -- once as
@@ -570,7 +580,8 @@ let narrowing_fixture ~slot_count ~answer f =
   (* No forget_measurement between passes: that is what a server restart does,
      and the width these cases are about lives in the same memory. *)
   let pass () =
-    Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity ~base_path ~keeper_name () in
+    Masc.Keeper_librarian_queue_refresh.For_testing.run_continuity ?cli_runner ~base_path
+      ~keeper_name () in
   let coverage () = Option.map (fun (s : S.t) -> s.end_atom) (P.read ~config ~keeper_name |> get) in
   (* Take the checkpoint away for one pass. prepare then answers with no
      source without the backlog having been read, which is the outcome the
@@ -591,6 +602,46 @@ let accepted_answer =
     (Yojson.Safe.from_string
        {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|})
 let refused kind = Printf.sprintf {|{"error":{"message":"fixture %s","type":"%s"}}|} kind kind
+
+let contains ~sub text =
+  let n = String.length sub and m = String.length text in
+  let rec at i = i + n <= m && (String.sub text i n = sub || at (i + 1)) in
+  at 0
+
+(* A continuity range whose Memory the durable pass already committed is a
+   Context-only pass (#38184). It asks for the working state alone: the
+   request names no Memory output field, the conversation travels once inside
+   the continuity block instead of also as conversation_history, and an answer
+   of the working state alone commits the range without touching Memory. *)
+let test_a_committed_range_asks_for_the_working_state_alone () =
+  let requests = ref [] in
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index body ->
+      requests := !requests @ [ body ];
+      ( `OK
+      , Exact_output_fixture.openai_response
+          (`Assoc [ "working_state", `String "Continue from the eighth atom." ]) ))
+  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path in
+  let memory_revision () =
+    Masc.Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
+    |> get
+    |> Option.map (fun (s : Masc.Keeper_memory_os_current.t) -> s.revision) in
+  record_memory config;
+  let before = memory_revision () in
+  pass ();
+  check int "one request" 1 (List.length !requests);
+  let body = List.hd !requests in
+  check bool "the request names no Memory output field" false
+    (contains ~sub:Masc.Keeper_librarian.wire_field_new_claims body);
+  (* Each atom is 8000 characters. Sent twice, as the Memory pass sends them,
+     the atoms alone reach twice their total. *)
+  check bool "the conversation is sent once" true
+    (String.length body < 2 * narrowing_atom_count * 8_000);
+  check (option int) "the working state alone commits the whole range"
+    (Some narrowing_atom_count) (coverage ());
+  check (option int) "Memory stays as the durable pass committed it" before (memory_revision ())
 
 let test_refused_width_carries_to_the_next_pass () =
   narrowing_fixture ~slot_count:1
@@ -756,6 +807,58 @@ let walk_of_two ~first ~second =
   check (option int) "and nothing is committed" None (coverage ())
 
 let quota () = `Too_many_requests, refused "rate_limit_error"
+
+(* A CLI's reported limit is a fact about the CLI transport. Once an API slot
+   commits a range, the limit no longer fits the passes that follow: the next
+   request carries every unread atom, the way it did before any CLI refused.
+   Before this, one CLI refusal cut every later pass to CLI size for the life
+   of the process, even while the API slot took whole ranges. *)
+let test_an_api_commit_releases_the_cli_limit () =
+  let module F = Exact_output_fixture in
+  let module Codex = Runtime_codex_app_server in
+  let api_up = ref false and cli_calls = ref 0 in
+  let cli_runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+    incr cli_calls;
+    match !cli_calls with
+    | 1 ->
+      (* The whole backlog is too large for the CLI; a third of its size
+         holds one or two atoms, so the rest of the backlog after one fitted
+         unit is more than one fitted unit again. *)
+      let actual_chars = Codex.prompt_char_count prompt |> get in
+      Error (Masc.Fusion_official_client.Codex_failure (Codex.Rpc_error
+        {method_="turn/start";code=Some (-32602);message="fixture capacity";
+         data=Some (`Assoc ["input_error_code", `String "input_too_large";
+           "actual_chars", `Int actual_chars; "max_chars", `Int (actual_chars / 3)])}))
+    | 2 ->
+      Ok {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"s"}|}
+    | _ ->
+      Error (Masc.Fusion_official_client.Setup_failure (Provider_error "fixture unavailable"))
+  in
+  narrowing_fixture ~cli_slot_ids:[ F.cli_primary_runtime ] ~cli_runner ~slot_count:1
+    ~answer:(fun _index _body -> if !api_up then `OK, accepted_answer else quota ())
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  let capacity () =
+    Masc.Keeper_librarian_queue_refresh.For_testing.last_input_capacity ~config ~keeper_name in
+  pass ();
+  let cli_end = match coverage () with
+    | Some end_atom -> end_atom
+    | None -> fail "the fitted CLI answer committed nothing" in
+  check bool "the CLI committed a fitted part of the backlog" true
+    (cli_end > 0 && cli_end < narrowing_atom_count);
+  check bool "a CLI commit keeps the limit it answered inside" true
+    (Option.is_some (capacity ()));
+  let before_api = List.length !bodies in
+  api_up := true;
+  pass ();
+  check (option int) "the API slot reads the rest of the backlog"
+    (Some narrowing_atom_count) (coverage ());
+  check bool "an API commit forgets the CLI limit" true (Option.is_none (capacity ()));
+  let api_requests = List.filteri (fun index _ -> index >= before_api) !bodies in
+  (* Still fitted to the CLI limit, the rest would take more than one request
+     after the first. *)
+  check int "the kept limit fits the first request, and one more reads the rest" 2
+    (List.length api_requests);
+  check int "the CLI is not asked again" 3 !cli_calls
 let no_state () = `OK, answer_without_state
 
 let test_a_refused_answer_then_a_quota_reads_less () =
@@ -786,6 +889,9 @@ let () = run "production continuity pair"
     test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
     test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
     test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;
+    test_case "a committed range asks for the working state alone" `Quick
+      test_a_committed_range_asks_for_the_working_state_alone;
+    test_case "an API commit releases the CLI limit" `Quick test_an_api_commit_releases_the_cli_limit;
     test_case "a refusal that is not about size keeps the width" `Quick test_a_refusal_that_is_not_about_size_keeps_the_width;
     test_case "a size refusal anywhere in the walk narrows" `Quick test_a_size_refusal_anywhere_in_the_walk_narrows;
     test_case "an unreadable source keeps the width" `Quick test_an_unreadable_source_keeps_the_width;

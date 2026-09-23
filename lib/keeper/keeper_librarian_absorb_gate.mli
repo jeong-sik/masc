@@ -5,7 +5,8 @@
     judgment model (TypeSafe Jev) is asked, per statement, whether the claim
     conveys it. A memory with a statement the claim does not convey is taken
     out of the answer's [absorbed] list and stays current; the new claim is
-    still applied. The rest are absorbed as the answer said.
+    still applied. A memory whose every statement is conveyed is absorbed as
+    the answer said; only such a verdict authorizes removing a memory.
 
     The gate only ever narrows [absorbed]. When the gate is declared off, or
     the Keeper is excluded, the answer is applied as it came. When the gate is
@@ -13,8 +14,16 @@
     armed -- nothing is absorbed and every source stays current. When an
     enabled judgment fails, only completed positive verdicts authorize
     absorption; unconfirmed sources stay current. New claims are still
-    applied in every case, so neither misconfiguration nor judgment failure
-    stops the Memory cycle. *)
+    applied, so neither misconfiguration nor judgment failure stops the
+    Memory cycle.
+
+    One exception to "new claims are applied" (RFC-0463 section 2.8): a new
+    claim that named memories in [absorbs] and had none of them absorbed is
+    asked the reverse question -- do the memories it named, which stay
+    current, convey each of its statements? When every statement is
+    conveyed the claim is a copy of what stays and is not applied. When a
+    statement is not conveyed, or the question cannot be answered, the claim
+    is applied as before. *)
 
 (** {1 Statements} *)
 
@@ -55,7 +64,7 @@ type judged =
   ; conveyed : source_verdict list  (** memories absorbed: every statement conveyed *)
   ; unjudged : Keeper_memory_os_types.absorbed_statement list
         (** absorptions the gate could not judge because the answer names a
-            claim or a memory the pass did not carry; applied as they came *)
+            claim or a memory the pass did not carry; the memory stays current *)
   ; unjudgeable : Keeper_memory_os_types.absorbed_statement list
         (** absorptions the gate could not judge because the claim, or a
             statement of the memory, does not fit a request
@@ -125,12 +134,69 @@ val judge
     answer restated is judged against that memory's text. One request per absorbing claim, chunked by
     {!questions_per_request}. *)
 
+(** {1 The reverse question} *)
+
+type copy_not_judged =
+  | Gate_judgment_failed
+      (** the forward judgment failed, so the judge was not asked again *)
+  | Continues_a_dropped_memory
+      (** the claim is what a [supersedes] continues: leaving it out would
+          drop the memory it revises with nothing in its place *)
+  | No_source_fits_the_state
+      (** every memory it named is over {!state_bytes_limit} on its own *)
+  | Statement_too_large
+      (** a statement not conveyed so far never fit a request beside a state *)
+  | No_statement  (** the claim cuts into no statement, so nothing was asked *)
+  | Request_failed of string
+
+type copy_verdict =
+  | Copy of { statements : string list }
+      (** every statement conveyed by the memories it named: not applied *)
+  | Carries_new_statement of
+      { statements : int
+      ; not_conveyed : int
+      }  (** applied *)
+  | Not_judged of copy_not_judged  (** applied, as before the question existed *)
+
+type copy_check =
+  { claim_id : string
+  ; sources : string list  (** the memories the claim named, all still current *)
+  ; verdict : copy_verdict
+  ; requests : int
+  }
+
+val judge_copies
+  :  evaluate:evaluate
+  -> facts:Keeper_memory_os_types.fact list
+  -> new_claims:Keeper_memory_os_types.fact list
+  -> superseding:string list
+  -> absorbed:Keeper_memory_os_types.absorbed_statement list
+  -> applied:Keeper_memory_os_types.absorbed_statement list
+  -> copy_check list
+(** The claims of [new_claims] that name memories in [absorbed] (the
+    answer's absorptions) and have none in [applied] (what the gate let
+    through), each asked the reverse question: the claim is cut by
+    {!statements}; the memories it named are joined, in the answer's order,
+    into states of at most {!state_bytes_limit} bytes (a memory over it alone
+    is left out); each state is asked about the statements no earlier state
+    conveyed, in requests of at most {!questions_per_request} questions. The
+    question names the memories, not a claim, as what is under review. A
+    statement is conveyed only above {!conveyed_boundary}: a tie, which
+    absorbs a source in the forward question, would here drop the claim, so
+    it counts as not conveyed. A claim whose id is in [superseding] is not
+    asked. *)
+
 (** {1 Entry point} *)
 
 type skip_reason = No_absorptions | Unavailable of Typesafeai_config.unavailable_reason
 
+type direction =
+  | Forward  (** the gate's question: does the claim convey a source's statement *)
+  | Reverse  (** the reverse question: do the sources convey a claim's statement *)
+
 type evaluation =
-  { destinations : Typesafeai_client.destination_id list
+  { direction : direction
+  ; destinations : Typesafeai_client.destination_id list
   ; state : Yojson.Safe.t
   ; questions : (string * Typesafeai_types.question) list
   ; result : (Typesafeai_client.evaluated, Typesafeai_client.failure) result
@@ -146,7 +212,9 @@ type run_result =
       }
   | Evaluated of
       { outcome : outcome
-      ; evaluations : evaluation list
+      ; copy_checks : copy_check list
+          (** the reverse question for the claims that absorbed nothing *)
+      ; evaluations : evaluation list  (** forward requests, then reverse ones *)
       }
 
 type observation =
@@ -159,6 +227,13 @@ type observation =
 val observation_to_yojson : observation -> Yojson.Safe.t
 
 val absorbed_of_run : run_result -> Keeper_memory_os_types.absorbed_statement list
+
+val without_copies
+  :  run_result
+  -> Keeper_memory_os_types.fact list
+  -> Keeper_memory_os_types.fact list
+(** The claims to apply without the ones the run judged copies (the
+    [Copy] verdicts of its [copy_checks]); a skipped run judged none. *)
 val run_result_to_yojson : run_result -> Yojson.Safe.t
 (** Observed gate outcome and the actual evaluation responses, for the
     Librarian run's existing output payload. Valid Noul values are preserved
@@ -180,6 +255,7 @@ val run
   -> keeper_id:string
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
+  -> superseding:string list
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> unit
   -> run_result

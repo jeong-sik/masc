@@ -19,6 +19,13 @@ type plan = {
   questions_shown : int;
   questions_hidden : int;
   context_shown : bool;
+  context_notice : bool;
+      (** The reason was dropped and one line saying so fits. The line spends
+          a row like the hidden-question count does, so the plan decides it
+          here rather than the renderer drawing it past the budget: with the
+          questions filling the room exactly, a notice drawn outside the plan
+          pushed the bottom of the block off, and the bottom is where the
+          folded asks and their own count line are. *)
   summaries_shown : int;
       (** Folded asks that get a line. The rest are counted in
           [summaries_hidden]. *)
@@ -85,16 +92,24 @@ let plan ~budget ~spent ~question_heights ~question_cursor ~context_height
   let questions_hidden = total_questions - questions_shown in
   (* The reason goes in only when it does not cost a question its place. It
      explains the ask; the questions are the ask. *)
+  let hidden_line = if questions_hidden > 0 then 1 else 0 in
   let context_shown =
+    context_height > 0 && used + hidden_line + context_height <= expand_available
+  in
+  (* Saying the reason was dropped costs a row of its own. When not even that
+     row is left the block says nothing, as it did before: keeping to the
+     budget matters more than the notice. *)
+  let context_notice =
     context_height > 0
-    && used + (if questions_hidden > 0 then 1 else 0) + context_height
-       <= expand_available
+    && (not context_shown)
+    && used + hidden_line + 1 <= expand_available
   in
   {
     question_start;
     questions_shown;
     questions_hidden;
     context_shown;
+    context_notice;
     summaries_shown = others_shown;
     summaries_hidden = others_hidden;
   }

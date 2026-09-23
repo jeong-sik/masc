@@ -920,9 +920,9 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
       | _ -> Alcotest.fail "Unbound Running did not return Ready");
      (match second.state with
       | P.Blocked
-          { reason = P.Exact_execution_quarantined (P.Bound durable); _ } ->
-        Alcotest.(check bool) "Bound proof retained in quarantine" true (durable = bound_proof)
-      | _ -> Alcotest.fail "Bound Running was not quarantined");
+          { reason = P.Exact_execution_interrupted (P.Bound durable); _ } ->
+        Alcotest.(check bool) "Bound proof retained in recovery block" true (durable = bound_proof)
+      | _ -> Alcotest.fail "Bound Running was not blocked requeueably");
      let settled_blocked =
        ok "settle terminal Blocked" (P.settle ~now:21.0 ~base_path ~partition:second)
      in
@@ -949,8 +949,17 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
 let test_provider_neutral_blocked_reason_codec () =
   let reasons : (string * P.blocked_reason) list =
     [ "setup", P.Exact_setup_unavailable "lane admission unavailable"
-    ; "replay", P.Exact_flow_replayed
-    ; "terminal", P.Exact_execution_terminal
+    ; "replay", P.Exact_flow_replayed None
+    ; "replay-bound", P.Exact_flow_replayed (Some (P.Bound (provenance ())))
+    ; ( "lane-exhausted"
+      , P.Exact_lane_exhausted
+          { detail = "payment refused"; progress = Some (P.Bound (provenance ())) } )
+    ; ( "bookkeeping"
+      , P.Exact_flow_bookkeeping_failed
+          { detail = "receipt not durable"; progress = None } )
+    ; ( "completion"
+      , P.Exact_completion_failed
+          { detail = "completion write failed"; progress = Some (P.Bound (provenance ())) } )
     ; ( "domain"
       , P.Domain_output_invalid
           { detail = "judgment schema rejected"; progress = None } )
@@ -959,7 +968,9 @@ let test_provider_neutral_blocked_reason_codec () =
           { detail = "opaque identity mismatch"
           ; progress = Some (P.Bound (provenance ()))
           } )
-    ; "worker", P.Unexpected_worker_failure "worker terminated unexpectedly"
+    ; ( "worker"
+      , P.Unexpected_worker_failure
+          { detail = "worker terminated unexpectedly"; progress = None } )
     ]
   in
   List.iteri

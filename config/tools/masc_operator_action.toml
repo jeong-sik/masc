@@ -9,10 +9,6 @@ broadcast, pause a namespace, inject work, or message a keeper through \
 the remote operator surface."""
 
 [[params]]
-name = "actor"
-type = "string"
-
-[[params]]
 name = "action_type"
 type = "string"
 required = true

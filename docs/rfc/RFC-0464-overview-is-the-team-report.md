@@ -49,11 +49,14 @@ Attention / TUI Session Events 띠와 Tasks 사이에 전체 폭 Team 섹션을 
   ○ parked: lane-smith, rondo, rust-hwp-guy, sangsu
 ```
 
-- **무리(닫힌 합타입)**: `Needs_you`(Failing·Crashed, 또는 paused 가 아닌데 phase 가 없는 offline)
-  → `Working`(Running 이고 맡은 열린 Task 가 있음) → `Idle`(그 밖의 살아 있는 phase)
-  → `Parked`(Paused·Stopped·Offline). 같은 무리 안은 이름순이다. 점수나 가중치로 정렬하지 않는다.
-- **막힌 행의 설명**: Attention 항목 중 `target_type = keeper` 이고 `target_id` 가 그 Keeper 인
-  첫 항목의 summary 다. 없으면 phase 단어만 쓴다. TUI 가 원인을 추측하거나 문장을 해석하지 않는다.
+- **무리(닫힌 합타입)**: `Needs_you`(Failing·Crashed, 또는 paused 가 아니고 phase 가 없는데
+  info 가 아닌 Attention 항목이 가리키는 Keeper) → `Working`(살아 있는 phase 이고 맡은 열린
+  Task 가 있음) → `Idle`(그 밖의 살아 있는 phase) → `Parked`(brief 의 `paused` 가 true,
+  또는 Paused·Stopped·Offline, 또는 phase 가 없고 가리키는 항목도 없음). paused Keeper 는
+  autoboot 에서 빠지므로 서버를 다시 띄운 뒤에는 phase 가 null 이다. 그래서 phase 가 아니라
+  `paused` 로 판정한다. 같은 무리 안은 이름순이다. 점수나 가중치로 정렬하지 않는다.
+- **막힌 행의 설명**: Attention 항목 중 `target_type = keeper` 이고 `target_id` 가 그 Keeper 이며
+  severity 가 info 가 아닌 첫 항목의 summary 다. 없으면 phase 단어만 쓴다. TUI 가 원인을 추측하거나 문장을 해석하지 않는다.
 - **일하는 행의 설명**: 그 Keeper 가 assignee 인 Claimed/InProgress Task 중 목록 순서상 첫 Task.
   더 있으면 `+N`, 검증 대기 Task 는 `N awaiting` 으로 붙인다.
 - **Parked**: 한 줄에 이름만 모은다. 운영자가 멈춘 Keeper 는 매 턴 읽을 필요가 없다.
@@ -70,7 +73,7 @@ Overview 의 Task 커서·상세 흐름을 옮기는 건 이 RFC 범위 밖이�
 | 1 | Tasks 머리줄의 늘 0 인 `done` 을 24시간 완료 수(`task_flow.recent.completed`)로 바꾼다 | render.ml |
 | 2 | briefing `keeper_briefs` 를 행으로 디코드하고 Team 섹션을 그린다 | types/loader/schedule/새 모듈 |
 | 3 | 14일 완료 막대(`task_flow.daily`)를 Team 제목 줄 오른쪽에 싣는다 | 새 모듈 |
-| 4 | 런타임 quota 소진·재개 시각과 Keeper 24시간 비용 (`/runtime/resolved`, `/dashboard/keeper-costs`) | http/loader/새 모듈 |
+| 4 | 닫힌 quota 창과 재개 시각을 Team 첫 줄에 (`/runtime/resolved`). 비용은 뺀다 — keeper-costs 가 모르는 비용을 0 으로 합친다(#38083) | types/masc_tui/render |
 | 5 | 보류 (2026-09-23 운영자): 섹션 켜기·끄기는 새 Overview 를 실제로 써 본 뒤 정한다 | — |
 | 6 | GitHub PR 동기화 — 서버에 PR 목록 수집기가 없다. 별도 RFC 로 설계한다 | — |
 

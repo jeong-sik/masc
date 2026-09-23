@@ -1642,6 +1642,12 @@ let test_running_guest_is_a_remote_endpoint () =
       (List.assoc_opt "MASC_CONFIG_DIR" injected);
     Alcotest.(check bool) "the lane's own env still leads" true
       (List.mem_assoc "GH_CONFIG_DIR" injected);
+    Alcotest.(check (option string)) "commits carry the keeper as author"
+      (Some "lane-smith")
+      (List.assoc_opt "GIT_AUTHOR_NAME" injected);
+    Alcotest.(check (option string)) "commits carry the keeper as committer"
+      (Some "lane-smith")
+      (List.assoc_opt "GIT_COMMITTER_NAME" injected);
     (match Masc.Keeper_sandbox_remote.transport endpoint with
      | Masc.Keeper_sandbox_remote.Container_exec
          (guest : Masc.Keeper_sandbox_remote.container_exec) ->

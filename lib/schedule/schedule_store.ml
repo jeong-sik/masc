@@ -798,16 +798,15 @@ let update_request config ~now (request : Schedule_domain.schedule_request) =
     match find_schedule state request.schedule_id with
     | None -> Error Schedule_not_found
     | Some current ->
-      (match current.status with
-       | Scheduled | Due ->
-         let* () = validate_initial_request request in
-         let* () = changed_due_not_past ~now ~current request in
-         let schedules = replace_schedule state.schedules request in
-         let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
-         let* () = write_state config next_state in
-         Ok request
-       | Running | Succeeded | Failed | Cancelled | Expired ->
-         Error (transition_refused state current ~attempted:Modify_schedule)))
+      if Schedule_domain.modify_allowed current.status
+      then (
+        let* () = validate_initial_request request in
+        let* () = changed_due_not_past ~now ~current request in
+        let schedules = replace_schedule state.schedules request in
+        let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
+        let* () = write_state config next_state in
+        Ok request)
+      else Error (transition_refused state current ~attempted:Modify_schedule))
 ;;
 
 let cancel_request config ~schedule_id =

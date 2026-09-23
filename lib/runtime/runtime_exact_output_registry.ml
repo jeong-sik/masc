@@ -16,6 +16,10 @@ type admitted_lane =
        whether an id resolves to a live official-client runtime is an
        execution-time question the lane runner answers with a typed error,
        and the projection shows the declaration either way. *)
+  ; max_output_tokens : int option
+    (* The lane's declared output budget, carried verbatim. [None] means the
+       declaration named none, and the lane's requests carry no [max_tokens]
+       of their own. *)
   }
 
 type rejected_slot =
@@ -202,7 +206,11 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
           (position + 1)
           (String_set.add lane.id seen)
           admitted_by_id
-          ({ id = lane.id; slots; cli_slots = lane.cli_slot_ids }
+          ({ id = lane.id
+           ; slots
+           ; cli_slots = lane.cli_slot_ids
+           ; max_output_tokens = lane.max_output_tokens
+           }
            :: admitted_lanes)
           (List.rev_append lane_rejected_slots rejected_slots)
           rest
@@ -457,21 +465,27 @@ let resolve_lane registry ~lane_id =
   with
   | None -> Error (Exact_lane_unconfigured { lane_id })
   | Some lane ->
-    let selected_slots =
-      List.map
-        (fun (slot : admitted_slot) ->
-           ({ slot_id = slot.slot_id
-            ; admitted_target = slot.admitted_target
-            }
-             : selected_slot))
-        lane.slots
-    in
     (* A lane is empty only when it has NOTHING to run: cli fallbacks keep a
        lane alive even when every catalog slot was dropped (and a cli-only
        judge lane is a supported shape — RFC cli-runtimes-as-lane-slots). *)
-    if selected_slots = [] && lane.cli_slots = []
+    if lane.slots = [] && lane.cli_slots = []
     then Error (No_admitted_lane_slots { lane_id })
-    else Ok { selected_slots; cli_slots = lane.cli_slots }
+    else
+      let selected_slots =
+        List.map
+          (fun (slot : admitted_slot) ->
+             let admitted_target =
+               match lane.max_output_tokens with
+               | Some max_tokens ->
+                 Exact_output.admitted_target_with_max_tokens
+                   slot.admitted_target
+                   max_tokens
+               | None -> slot.admitted_target
+             in
+             ({ slot_id = slot.slot_id; admitted_target } : selected_slot))
+          lane.slots
+      in
+      Ok { selected_slots; cli_slots = lane.cli_slots }
 ;;
 
 let publication_error_to_string = function

@@ -53,10 +53,12 @@ let runtime_toml effort = Printf.sprintf {|[runtime]
 default = "openrouter.probe"
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["openrouter.probe"]
+max_output_tokens = 4096
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["openrouter.probe"]
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["openrouter.probe"]
+max_output_tokens = 4096
 [providers.openrouter]
 protocol = "openai-compatible-http"
 endpoint = "https://openrouter.ai/api/v1"
@@ -68,6 +70,7 @@ key = "OPENROUTER_API_KEY"
 api-name = "z-ai/glm-5.3-flash"
 tools-support = true
 thinking-support = true
+max-output-tokens = 384000
 reasoning-effort = %S
 [openrouter.probe]
 |} effort
@@ -90,7 +93,7 @@ let with_runtime f =
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     Fs_compat.remove_tree root) @@ fun () ->
   Llm_provider.Model_catalog.clear_global ();
-  let load effort =
+  let load ?(lane_id = "librarian_exact") effort =
     let path = Filename.concat root "runtime.toml" in
     Fs_compat.save_file path (runtime_toml effort);
     Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
@@ -103,9 +106,9 @@ let with_runtime f =
      | _ -> fail "expected the API runtime");
     Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root ();
     let registry = Registry.current () |> require_ok "published registry" in
-    match Registry.resolve_lane registry ~lane_id:"librarian_exact" with
+    match Registry.resolve_lane registry ~lane_id with
     | Ok { selected_slots = [ slot ]; _ } -> slot.admitted_target
-    | _ -> fail "expected one admitted Librarian slot" in
+    | _ -> failf "expected one admitted %s slot" lane_id in
   f load
 
 let ready target =
@@ -158,9 +161,16 @@ let test_explicit_effort_reaches_serialized_request () =
         ~io:{ getenv = (fun _ -> Ok (Some "synthetic-no-network")) }
         ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
       |> require_ok "wire resolver snapshot" in
-    let selected = Resolver.admit_target_ref snapshot target.target_ref
-      |> require_ok "wire admitted target" |> Resolver.resolve_target
-      |> require_ok "wire selected target" in
+    let selected =
+      Resolver.admit_target_ref snapshot target.target_ref
+      |> require_ok "wire admitted target"
+      (* The runtime bootstrap runs this target through a lane that declares
+         [max_output_tokens = 4096]; the wire plan must carry the same budget
+         or the frozen bytes differ for a reason the test is not about. *)
+      |> fun admitted -> Resolver.admitted_target_with_max_tokens admitted 4096
+      |> Resolver.resolve_target
+      |> require_ok "wire selected target"
+    in
     let requirement = Ready.make_output_requirement
         ~schema:(`Assoc [ "type", `String "object" ])
         ~minimum_guarantee:Ready.Json_syntax in
@@ -181,6 +191,33 @@ let test_explicit_effort_reaches_serialized_request () =
       Yojson.Safe.Util.(body |> member "reasoning_effort" |> to_string))
     [ Llm_provider.Reasoning_effort.Low; Llm_provider.Reasoning_effort.High ]
 
+let serialized_body target =
+  let projected = EO.projection_target target in
+  let preflight =
+    Plan.preflight
+      ~config:projected.config
+      ~messages
+      ~body_timeout_s:projected.body_timeout_s
+      ~anthropic_thinking_control:projected.anthropic_thinking_control
+    |> require_ok "preflight"
+  in
+  let plan = Plan.finalize_unmeasured preflight |> require_ok "finalize" in
+  Yojson.Safe.from_string (Plan.request_body plan)
+
+(* The catalog ceiling is 384000. The Librarian lane declares 4096 and its
+   request carries that; the HITL lane declares nothing and its request
+   carries no max_tokens, so the provider's default applies. The ceiling is
+   what the model can emit and is never the request budget. *)
+let test_declared_lane_budget_reaches_serialized_request () =
+  with_runtime @@ fun load ->
+  check int "the declared lane budget is the request max_tokens" 4096
+    Yojson.Safe.Util.(serialized_body (load "low") |> member "max_tokens" |> to_int);
+  check bool "a lane with no budget sends no max_tokens" true
+    (Yojson.Safe.Util.(
+       serialized_body (load ~lane_id:"hitl_auto_judge" "low") |> member "max_tokens")
+     = `Null)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -194,4 +231,6 @@ let () =
         test_case "effort changes frozen identity and preserves captured target" `Quick
           test_effort_changes_frozen_exact_identity;
         test_case "low and high survive the actual request serializer" `Quick
-          test_explicit_effort_reaches_serialized_request ] ]
+          test_explicit_effort_reaches_serialized_request;
+        test_case "the declared lane budget is the serialized max_tokens" `Quick
+          test_declared_lane_budget_reaches_serialized_request ] ]

@@ -32,6 +32,89 @@ let lane_by_id json lane_id =
       (lane |> Yojson.Safe.Util.member "lane_id" |> Yojson.Safe.Util.to_string))
 ;;
 
+(* A finished run that names no slot is not one kind of run. On Board
+   Attention a success without a slot is Vendor System One's answer, which
+   runs before any slot is bound; a run closed on replay after a restart
+   never learned its slot; anything else finished before one was bound. The
+   lane says which, and with the slot counts they add up to every finished
+   run. *)
+let test_runs_without_a_slot_are_split_by_why () =
+  let completed ~run_id ~lane ~outcome ~selected_slot =
+    exact_run ~run_id ~lane ~started_at:50.
+      ~status:(Exact.Completed { outcome; elapsed_s = 1.; output = `Null; selected_slot })
+  in
+  let restarted = Exact.Failed { code = Exact.server_restarted_code; detail = "orphan" } in
+  let provider = Exact.Failed { code = "provider"; detail = "offline" } in
+  let exact_runs =
+    [ completed ~run_id:"board-slot" ~lane:Exact.Board_attention
+        ~outcome:Exact.Succeeded ~selected_slot:(Some "board-primary")
+    ; completed ~run_id:"board-jev-1" ~lane:Exact.Board_attention
+        ~outcome:Exact.Succeeded ~selected_slot:None
+    ; completed ~run_id:"board-jev-2" ~lane:Exact.Board_attention
+        ~outcome:Exact.Succeeded ~selected_slot:None
+    ; completed ~run_id:"board-restart" ~lane:Exact.Board_attention
+        ~outcome:restarted ~selected_slot:None
+    ; completed ~run_id:"board-failed" ~lane:Exact.Board_attention
+        ~outcome:provider ~selected_slot:None
+    ; completed ~run_id:"board-cancelled" ~lane:Exact.Board_attention
+        ~outcome:Exact.Cancelled ~selected_slot:None
+    ; exact_run ~run_id:"board-persistence" ~lane:Exact.Board_attention ~started_at:40.
+        ~status:
+          (Exact.Completion_persistence_failed
+             { intended_outcome = Exact.Succeeded
+             ; elapsed_s = 1.
+             ; output = `Null
+             ; selected_slot = None
+             ; failure = { detail = "disk"; state = Exact.Not_persisted }
+             })
+    ; exact_run ~run_id:"board-running" ~lane:Exact.Board_attention ~started_at:60.
+        ~status:Exact.Running
+    ; completed ~run_id:"librarian-no-slot" ~lane:Exact.Librarian
+        ~outcome:Exact.Succeeded ~selected_slot:None
+    ]
+  in
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane:(fun lane_id ->
+        Projection.Configured
+          { admitted_slots = [ lane_id ^ "-primary" ]
+          ; cli_slots = []
+          ; dropped_slots = []
+          ; declared_slots = [ lane_id ^ "-primary" ]
+          ; admission_error = None
+          })
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:(List.length exact_runs)
+      ~exact_runs
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  let int_at lane path =
+    List.fold_left (fun json key -> Yojson.Safe.Util.member key json) lane path
+    |> Yojson.Safe.Util.to_int
+  in
+  let board = lane_by_id json "board_attention_exact" in
+  let without key = int_at board [ "runs_without_slot"; key ] in
+  check int "Vendor System One answered the slotless successes, recorded or not" 3
+    (without "vendor_system_one");
+  check int "a restart orphan is its own count" 1 (without "server_restarted");
+  check int "a failure and a cancellation before any slot" 2 (without "no_slot");
+  let named =
+    board |> Yojson.Safe.Util.member "selected_slots" |> Yojson.Safe.Util.to_list
+    |> List.fold_left (fun sum slot -> sum + int_at slot [ "count" ]) 0
+  in
+  check int "slots and the three counts add up to every finished run"
+    (int_at board [ "succeeded_count" ] + int_at board [ "failed_count" ]
+     + int_at board [ "cancelled_count" ])
+    (named + without "vendor_system_one" + without "server_restarted" + without "no_slot");
+  let librarian = lane_by_id json "librarian_exact" in
+  check int "a slotless success outside Board Attention is not Vendor System One" 0
+    (int_at librarian [ "runs_without_slot"; "vendor_system_one" ]);
+  check int "it is counted as naming no slot" 1
+    (int_at librarian [ "runs_without_slot"; "no_slot" ])
+;;
+
 let test_snapshot_names_every_lane_and_keeps_observed_truth () =
   let exact_runs =
     [ exact_run
@@ -883,6 +966,10 @@ let () =
             "all lanes and observation states"
             `Quick
             test_snapshot_names_every_lane_and_keeps_observed_truth
+        ; test_case
+            "runs without a slot are split by why"
+            `Quick
+            test_runs_without_a_slot_are_split_by_why
         ; test_case
             "latest terminal is ordered by completion time"
             `Quick

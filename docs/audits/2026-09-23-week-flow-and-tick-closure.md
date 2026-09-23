@@ -186,6 +186,34 @@ Glossary(`docs/spec/00-glossary.md`)·constitution·코드를 같이 읽었다. 
 | Goal verifier 자리 수명이 phase 와 따로 논다 | 떠난 verifier 가 자리를 쥔다 | 예 | #38047: phase 를 떠나는 전이에서 자리를 푼다 |
 | "Continuity" 가 붙은 항목 셋 | Snapshot·Synthesis Observation·Measurement(#37911 뒤) | 이름만 겹친다 | 없음. 각 항목이 서로를 가리키면 충분하다 |
 
+## 4. 오후 점검 (13:00 KST 이후)
+
+오전 표에서 "열림" 이나 "확신 낮음" 으로 남긴 칸을 코드와 라이브 로그로 다시 봤다.
+
+| 칸 | 결과 | 근거 | 처리 |
+|---|---|---|---|
+| 공식 클라이언트 줄인 용량 | 열림이 맞다. 성공한 크기만 기억하고 더 큰 크기는 다시 시도하지 않아서 재시작 전까지 내려가기만 한다 | `keeper_context_overflow_shrink_state.ml`. 09-19~22 shrink 1,272건은 첫 시도가 거의 다 무제한이었다(재시작이 기억을 지움). 남아 있던 기억은 더 낮게만 갔다(code-reviewer 2,555 KB) | #38188: 기억을 지우고 턴마다 선언 한도에서 시작 |
+| 반 접기·밀어내기·마지막 수단 | 마지막 수단만 죽은 코드다. 반 접기와 밀어내기는 verifier(세션 id 없음, Small 정책)가 쓴다 | `keeper_turn_driver.ml:1581`, `workspace_metric_hooks.ml:403` | #38109 가 같은 자리를 바꾸는 중이라 그 뒤에 지운다 |
+| 연속성 사다리 | 대부분 문제 아님. 턴 하나가 거절될 때만 atom 절반으로 들어가고(RFC §4.11 4 가 허용), 폭보다 작은 턴은 통째로 읽는다. 폭보다 큰 턴을 두 번에 나눠 읽는 비용만 남는다 | `keeper_librarian_queue_refresh.ml:240-262` | 없음 |
+| 다음 요청 예측 | 조립 순서는 맞다. 범위 고르기를 따로 복사해서 Librarian 연속성을 보지 않는다 | `keeper_next_request_forecast.ml:143-190` 대 `try_provider.ml:986-1110` | #38190 (이슈) |
+| lane-smith Librarian | 09-22 05:32Z purge(#37751 이전)가 atom 번호를 바꿔서, 저장된 위치를 증명하는 턴 경계가 없다. 매 회차 같은 오류로 멈추고 공식 클라이언트 줄까지 막혔다. 14 Keeper 중 이 하나뿐이다 | `keeper_librarian_durable_consumer.ml:867-879` | 드라이런(정상 Keeper 넷으로 대조 확인) 뒤 운영자 승인을 받아 `librarian-progress.json` 만 옮겨 두었다. 04:00:56Z 회차가 공식 클라이언트 줄을 310 → 322 까지 읽고 커밋했다(revision 6736, +3 −1). 코드는 바꾸지 않는다 |
+
+### Memory 수명
+
+| 단계 | 결과 |
+|---|---|
+| 생산 | Librarian 과 Keeper 직접 쓰기. 닫힘 |
+| 소거 | 네 길(Librarian drop·supersede·absorb, Keeper retract, 관리 endpoint, 파생 사실 연쇄). 일정이나 규칙으로 지우는 길은 없다. 틀린 사실은 LLM 이나 Keeper 가 골라야만 빠진다 |
+| 합성 | absorb 가 N 개를 하나로 바꾸고 판정 모델이 같은 뜻인지 본다. 중복 판정은 정확한 바이트뿐이다 |
+| 강화 | 없다(RFC-0418 의 결정). 라이브 1,701 개 중 `last_seen > first_seen` 은 0 개다 |
+| 크기 | 상한이 없고, 현재 사실 전부가 매 턴 고정 블록으로 들어간다. rondo 223 개 168,601 B, masc-pro-builder 167 개 160,301 B, pr-updater 152 개 146,466 B. RFC-keeper-context-window-in-tokens §13.9 "고정 부분이 혼자 한도를 넘는 경우" 의 실측이다 |
+
+### TUI wiring (09-16 이후 바뀐 wire 필드)
+
+- 검증 대기열 `(+N)` 이 페이지 길이로 세어져 모자랐다. #38201.
+- Schedule runner `held` 목록을 읽는 곳이 없다. #38205 (이슈).
+- 그 밖에 Task·Goal·Keeper·Librarian/Memory health·HITL·Schedule·Lane·Skills·Connector 의 새 키는 양쪽이 맞았다.
+
 ## 근거
 
 - Evidence: `git log origin/main`(`61992074eb`, 2026-09-23 10:35 KST fetch), `gh api repos/jeong-sik/masc/issues/<n>` 17건,

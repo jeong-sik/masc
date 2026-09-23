@@ -1110,6 +1110,53 @@ let wrap_words ~max_cells text =
   in
   loop [] (String.split_on_char ' ' text)
 
+let clause_separator = " \xc2\xb7 "
+
+(* A header row of this shape is a list of clauses joined by [clause_separator],
+   and a clause is the unit that means something: "0 failures since server
+   start" says the count restarts with the server, and the same row ending at
+   "0 failures" says a running total. So a row ends where a clause ends. Only a
+   clause that cannot fit a row on its own falls back to {!wrap_words}, because
+   at that point every break is inside a clause and a space is the least bad
+   one. Nothing is dropped and nothing is cut: the caller draws the rows it is
+   given. The caller hands over the clauses themselves rather than the joined
+   row: a clause whose own text holds the separator stays one clause. *)
+let pack_clauses ~max_cells (clauses : string list) =
+  let room = max 1 max_cells in
+  let rows = ref [] in
+  let current = ref "" in
+  let emit () =
+    if !current <> "" then begin
+      rows := !current :: !rows;
+      current := ""
+    end
+  in
+  List.iter
+    (fun clause ->
+      if display_width clause <= room then
+        if !current = "" then current := clause
+        else
+          let candidate = !current ^ clause_separator ^ clause in
+          if display_width candidate <= room then current := candidate
+          else begin
+            emit ();
+            current := clause
+          end
+      else begin
+        emit ();
+        let rec keep_last = function
+          | [] -> ()
+          | [ last ] -> current := last
+          | row :: rest ->
+              rows := row :: !rows;
+              keep_last rest
+        in
+        keep_last (wrap_words ~max_cells:room clause)
+      end)
+    clauses;
+  emit ();
+  match List.rev !rows with [] -> [ "" ] | rows -> rows
+
 type journal_piece =
   | Journal_piece_sign of journal_sign
   | Journal_piece_category of journal_tone

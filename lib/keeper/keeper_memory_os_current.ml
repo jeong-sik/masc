@@ -2193,6 +2193,12 @@ let make_snapshot
    A fact the librarian retires is retired even if the keeper re-observed it
    during the pass: the judgment was about the claim, and a re-observation does
    not answer it. The keeper can state it again on its next turn. *)
+type disposition =
+  { snapshot : t
+  ; absorbed_applied : Keeper_memory_os_types.absorbed_statement list
+  ; absorbed_not_applied : Keeper_memory_os_types.absorbed_statement list
+  }
+
 let apply_disposition
       ?on_committed
       ?clock
@@ -2214,12 +2220,47 @@ let apply_disposition
       Set_util.StringSet.empty
       (Option.value dropped_statements ~default:[])
   in
-  let absorbed_into =
+  (* An absorption goes into a memory the answer names: a new claim, or a
+     current memory it wrote again verbatim. The librarian read the snapshot
+     before its provider turn, so a memory it restated may be gone by the time
+     the lock is taken (a keeper retraction or supersede during the pass). An
+     absorption whose target is neither held by the locked snapshot nor added
+     by this answer is not applied: its source stays current, the removed
+     memory is not brought back, and no absorbed row points into an id no
+     snapshot has (#38186). The store decides this itself; no caller input
+     is needed. *)
+  let new_claim_ids =
+    List.fold_left
+      (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
+      Set_util.StringSet.empty
+      new_claims
+  in
+  let absorbed_into (previous : t option) =
+    let current_ids =
+      match previous with
+      | None -> Set_util.StringSet.empty
+      | Some snapshot ->
+        List.fold_left
+          (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
+          Set_util.StringSet.empty
+          snapshot.facts
+    in
     List.fold_left
       (fun into_of (statement : Keeper_memory_os_types.absorbed_statement) ->
-         Set_util.StringMap.add statement.absorbed statement.into into_of)
+         if Set_util.StringSet.mem statement.into current_ids
+            || Set_util.StringSet.mem statement.into new_claim_ids
+         then Set_util.StringMap.add statement.absorbed statement.into into_of
+         else into_of)
       Set_util.StringMap.empty
       absorbed
+  in
+  (* An absorption is applied when its row is written: its source left the
+     snapshot into its target. Set by the one [before_replace] under the lock,
+     which runs on every commit; read only after the commit succeeded. *)
+  let partitioned = ref ([], absorbed) in
+  let disposition_of snapshot =
+    let absorbed_applied, absorbed_not_applied = !partitioned in
+    { snapshot; absorbed_applied; absorbed_not_applied }
   in
   (* RFC-0456 §4.2: an absorbed fact leaves the snapshot only with its row kept.
      The rows are the absorbed facts the locked snapshot held and the next one
@@ -2227,6 +2268,7 @@ let apply_disposition
      they are written just before the replace; a failed write fails this
      commit. *)
   let write_absorbed_rows ~(previous : t option) ~(next : t) =
+    let absorbed_into = absorbed_into previous in
     let next_ids =
       List.fold_left
         (fun ids fact -> Set_util.StringSet.add (memory_id fact) ids)
@@ -2251,11 +2293,22 @@ let apply_disposition
          | None -> []
          | Some snapshot -> snapshot.facts)
     in
+    partitioned
+    := List.partition
+         (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
+            List.exists
+              (fun (row : Keeper_memory_absorbed.record) ->
+                 String.equal row.memory_id statement.absorbed
+                 && String.equal row.into statement.into)
+              rows)
+         absorbed;
     Keeper_memory_absorbed.append_all ~keepers_dir ~keeper_id rows
     |> Result.map_error Keeper_memory_absorbed.append_error_to_string
   in
   update_locked
-    ?on_committed
+    ?on_committed:
+      (Option.map (fun on_committed snapshot -> on_committed (disposition_of snapshot))
+         on_committed)
     ?clock
     ?dropped_statements
     ?durable_range_id
@@ -2270,6 +2323,7 @@ let apply_disposition
          | None -> []
          | Some snapshot -> snapshot.facts
        in
+       let absorbed_into = absorbed_into previous in
        let kept =
          List.filter
            (fun fact ->
@@ -2298,6 +2352,7 @@ let apply_disposition
            new_claims
        in
        make_snapshot ~previous ~now ~source ~facts:(kept @ List.rev added) ())
+  |> Result.map disposition_of
 ;;
 
 let replace

@@ -99,8 +99,11 @@ let wire_field_supersedes = Keeper_memory_os_types.wire_field_supersedes
 let wire_field_absorbs = Keeper_memory_os_types.wire_field_absorbs
 let wire_claim_fields = Keeper_memory_os_types.wire_librarian_claim_fields
 let wire_dropped_fields = Keeper_memory_os_types.wire_librarian_dropped_fields
+let wire_field_working_state = "working_state"
+let wire_field_working_contexts = "working_contexts"
 let wire_current_fields =
-  [ wire_field_new_claims; wire_field_dropped; "working_contexts"; "working_state" ]
+  [ wire_field_new_claims; wire_field_dropped; wire_field_working_contexts
+  ; wire_field_working_state ]
 
 let trim_nonempty s =
   let s = String.trim s in
@@ -189,6 +192,13 @@ let basis_for_prompt ~by_identity = function
       ]
 ;;
 
+(* When the fact was written ([first_seen]) and last written again with the
+   same bytes ([last_seen]). Without them a keeper's snapshots of one moving
+   state -- a game position rewritten every step -- read as equals, and none
+   can be told apart as the stale one (#37079). Both are needed: a state that
+   returns to an earlier value keeps its old [first_seen] and only moves
+   [last_seen]. They are write times, not the times the states held, and not
+   a strength signal (RFC-0418); the prompt says so. *)
 let current_fact_json ~by_identity index fact =
   `Assoc
     [ wire_field_memory_id, `String (surrogate_id_of_index index)
@@ -199,6 +209,10 @@ let current_fact_json ~by_identity index fact =
           ; wire_field_origin,
             `Assoc [ wire_field_kind, `String (origin_kind_to_string fact.origin.kind) ]
           ; wire_field_basis, basis_for_prompt ~by_identity fact.basis
+          ; ( wire_field_first_seen
+            , `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen) )
+          ; ( wire_field_last_seen
+            , `String (Masc_domain.iso8601_of_unix_seconds fact.last_seen) )
           ] )
     ]
 ;;
@@ -276,6 +290,24 @@ let prompt_variables (inp : input) : (string * string) list =
   ; ( "counterpart_observations"
     , Keeper_counterpart_observation.render_for_prompt
         inp.counterpart_observations )
+  ]
+;;
+
+let continuity_prompt_variables (inp : input) ~continuity =
+  [ ( "keeper_instructions"
+    , format_keeper_instructions_for_prompt inp.keeper_instructions )
+  ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
+  ; "current_memory", format_current_selection_for_prompt inp.current
+  ; "continuity", Yojson.Safe.to_string continuity
+  ]
+;;
+
+let working_context_prompt_variables (inp : input) =
+  [ ( "keeper_instructions"
+    , format_keeper_instructions_for_prompt inp.keeper_instructions )
+  ; "goal_context", Yojson.Safe.to_string (goal_context_to_json inp.goal_context)
+  ; "current_memory", format_current_selection_for_prompt inp.current
+  ; "working_context", Yojson.Safe.to_string (Keeper_librarian_context.prompt_json inp.working_context)
   ]
 ;;
 
@@ -758,22 +790,38 @@ let materialize_facts ~current_facts ~new_claims ~dropped ~absorbed =
   }
 ;;
 
-(* What the store is asked to add: the new claims, and each restated memory
-   that some applied absorption goes into. The store skips an identity it
-   still holds, so a restated memory is added again only when the keeper took
-   it away during the pass; without it the absorbed memories would leave and
-   their rows would point into an id no snapshot has. A restatement nothing
-   goes into stays a restatement: the keeper's retraction stands. *)
-let claims_to_apply (selection : selection) ~(absorbed : Keeper_memory_os_types.absorbed_statement list) =
-  let intos =
-    List.fold_left
-      (fun ids (statement : Keeper_memory_os_types.absorbed_statement) ->
-         String_set.add statement.into ids)
-      String_set.empty
-      absorbed
-  in
-  selection.new_claims
-  @ List.filter (fun fact -> String_set.mem (memory_id fact) intos) selection.restated
+let working_contexts_of_json (inp : input) json =
+  Keeper_librarian_context.select inp.working_context json
+  |> Result.map_error (fun detail -> Working_context_invalid detail)
+;;
+
+(* A context-only answer is one field. The object check is the same one the
+   Memory answer passes, with the allowed set narrowed to that field. *)
+let single_field_of_json_result ~field json =
+  match json with
+  | `Assoc fields ->
+    (match first_object_field_error ~allowed:[ field ] fields with
+     | Some (Unexpected_object_field name) -> Error (Unexpected_field name)
+     | Some (Duplicate_object_field name) -> Error (Duplicate_field name)
+     | None ->
+       (match List.assoc_opt field fields with
+        | None -> Error Missing_required_fields
+        | Some value -> Ok value))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error Top_level_not_object
+;;
+
+let working_state_of_json_result json =
+  Result.bind (single_field_of_json_result ~field:wire_field_working_state json)
+    (function
+      | `String text when String.trim text <> "" -> Ok text
+      | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null ->
+        Error (Working_state_invalid "working_state must be nonblank text"))
+;;
+
+let working_contexts_of_json_result (inp : input) json =
+  Result.bind (single_field_of_json_result ~field:wire_field_working_contexts json)
+    (working_contexts_of_json inp)
 ;;
 
 let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
@@ -793,15 +841,14 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
      | Some (Duplicate_object_field field) -> Error (Duplicate_field field)
      | None ->
        let open Result.Syntax in
-       let* working_state = match List.assoc_opt "working_state" fields with
+       let* working_state = match List.assoc_opt wire_field_working_state fields with
          | None | Some `Null -> Ok None
          | Some (`String text) when String.trim text <> "" -> Ok (Some text)
          | Some _ -> Error (Working_state_invalid "working_state must be nonblank text or null") in
        let* working_contexts =
-         match List.assoc_opt "working_contexts" fields with
+         match List.assoc_opt wire_field_working_contexts fields with
          | None -> Error Missing_required_fields
-         | Some json -> Keeper_librarian_context.select inp.working_context json
-             |> Result.map_error (fun detail -> Working_context_invalid detail)
+         | Some json -> working_contexts_of_json inp json
        in
        (match
           List.assoc_opt wire_field_new_claims fields

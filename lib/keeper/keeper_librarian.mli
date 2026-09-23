@@ -125,6 +125,8 @@ val wire_field_memory_id : string
 val wire_field_reason : string
 val wire_field_supersedes : string
 val wire_field_absorbs : string
+val wire_field_working_state : string
+val wire_field_working_contexts : string
 val wire_current_fields : string list
 val wire_claim_fields : string list
 val wire_dropped_fields : string list
@@ -132,6 +134,18 @@ val wire_dropped_fields : string list
 val goal_context_to_json : goal_context -> Yojson.Safe.t
 
 val prompt_variables : input -> (string * string) list
+
+(** Variables of the continuity pass over a range whose Memory is already
+    committed. The conversation arrives once, inside [continuity]; the
+    current memory is reference material, not a subject of judgment. *)
+val continuity_prompt_variables
+  :  input
+  -> continuity:Yojson.Safe.t
+  -> (string * string) list
+
+(** Variables of the pending-input organization pass: the working context
+    and the material that reads it, with no conversation to judge. *)
+val working_context_prompt_variables : input -> (string * string) list
 
 type parse_error =
   | Top_level_not_object
@@ -164,19 +178,20 @@ type parse_error =
 
 val parse_error_to_string : parse_error -> string
 
-(** The facts to hand {!Keeper_memory_os_current.apply_disposition} as
-    [new_claims]: [selection.new_claims], and each [selection.restated] memory
-    that an applied absorption in [absorbed] goes into. The store skips an id
-    it still holds, so such a memory comes back only if the keeper retracted it
-    during the pass, and the absorbed memories never point into an id no
-    snapshot has. A restatement nothing goes into is not re-added. *)
-val claims_to_apply
-  :  selection
-  -> absorbed:Keeper_memory_os_types.absorbed_statement list
-  -> Keeper_memory_os_types.fact list
-
 val selection_of_json_result
   :  ?now:float
   -> input
   -> Yojson.Safe.t
   -> (selection, parse_error) result
+
+(** The continuity-only answer: an object with exactly a nonblank
+    [working_state]. Any other field, a Memory field included, is refused. *)
+val working_state_of_json_result : Yojson.Safe.t -> (string, parse_error) result
+
+(** The pending-input organization answer: an object with exactly
+    [working_contexts], checked against [input.working_context]. Any other
+    field, a Memory field included, is refused. *)
+val working_contexts_of_json_result
+  :  input
+  -> Yojson.Safe.t
+  -> (Keeper_librarian_context.pocket list, parse_error) result

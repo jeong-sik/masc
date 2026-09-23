@@ -3344,6 +3344,8 @@
 
 (include stanzas/test_keeper_meta_invalid_recovery.inc)
 
+(include stanzas/test_keeper_name_reserves_store_dirs.inc)
+
 (include stanzas/test_store_unreadable.inc)
 
 
@@ -3480,6 +3482,25 @@
 (test
  (name test_tui_connection_status)
  (modules test_tui_connection_status)
+ (libraries alcotest masc masc_tui_types))
+
+; Anchored here rather than at the head of the file. That alone is not enough
+; to keep two pull requests apart -- this stanza and the one below it both
+; chose the same anchor and collided on the merge -- so a suite added later
+; picks a stanza no open branch is already sitting under.
+; [masc.masc_schedule] is here for [Schedule_domain], whose status list and
+; terminal rule the line under test walks rather than restating.
+(test
+ (name test_tui_schedule_counts_line)
+ (modules test_tui_schedule_counts_line)
+ (libraries alcotest masc.masc_schedule masc_tui_types))
+
+; Its own anchor, under the other suite that links only the state vocabulary
+; and the wire types, so two pull requests adding a suite do not both land on
+; the head of this file.
+(test
+ (name test_tui_lane_slot_reach)
+ (modules test_tui_lane_slot_reach)
  (libraries alcotest masc masc_tui_types))
 
 ; Its own anchor, under the other suite that links only the state vocabulary,
@@ -4165,6 +4186,23 @@
  (name test_tui_chart)
  (modules test_tui_chart)
  (libraries alcotest masc_tui_chart masc_tui_message_layout masc_tui_theme))
+
+; RFC-0464: the Overview Team block's projection.
+; RFC-0465: the TUI pull request decoder against the server's own encoder.
+(test
+ (name test_tui_repository_pulls)
+ (modules test_tui_repository_pulls)
+ (libraries alcotest masc.server masc_tui_types masc_tui_repository_pulls))
+
+(test
+ (name test_tui_overview_team)
+ (modules test_tui_overview_team)
+ (libraries
+  alcotest
+  masc
+  masc_types
+  masc_tui_types
+  masc_tui_overview_team))
 
 (test
  (name test_tui_render_metrics)
@@ -5315,6 +5353,11 @@
   (source_tree ../bin)))
 
 (test
+ (name test_tui_connector_unbind)
+ (modules test_tui_connector_unbind)
+ (libraries alcotest masc masc_tui_connector_unbind))
+
+(test
  (name test_tui_fleet_line)
  (modules test_tui_fleet_line)
  (libraries alcotest masc masc_tui_fleet_line))
@@ -5328,6 +5371,16 @@
  (name test_tui_table)
  (modules test_tui_table)
  (libraries alcotest masc_tui_message_layout masc_tui_table))
+
+(test
+ (name test_tui_wire_age)
+ (modules test_tui_wire_age)
+ (libraries alcotest masc_tui_wire_age))
+
+(test
+ (name test_tui_board_quarantine)
+ (modules test_tui_board_quarantine)
+ (libraries alcotest masc yojson masc_tui_fetched masc_tui_board_quarantine))
 
 (test
  (name test_tui_text_block)
@@ -5760,6 +5813,10 @@
 (include stanzas/test_keeper_ask_answer_wake.inc)
 
 (include stanzas/test_server_keeper_oauth_client.inc)
+
+; RFC-0465: open pull requests of registered GitHub repositories.
+(include stanzas/test_server_repository_pulls.inc)
+
 (include stanzas/test_keeper_identity_declarations.inc)
 (include stanzas/test_keeper_oauth_identity.inc)
 
@@ -5778,6 +5835,8 @@
 (include stanzas/test_tui_ask_layout.inc)
 
 (include stanzas/test_tui_ask_projection.inc)
+
+(include stanzas/test_tui_ask_context_block.inc)
 
 (include stanzas/test_tui_memory_back.inc)
 
@@ -5963,7 +6022,7 @@
 (test
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
- (libraries alcotest masc yojson))
+ (libraries alcotest masc unix yojson))
 
 (test
  (name test_tui_image_mosaic)
@@ -6039,7 +6098,12 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries alcotest masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
+ ; The pick dispatch lives in the executable, which no test can link, so the
+ ; one assertion about it is read through Ast_grep. The source is a dep:
+ ; without it the test reads a cached verdict and stays green while the
+ ; wiring it asserts is gone.
+ (deps %{workspace_root}/bin/masc_tui.ml)
+ (libraries alcotest ast_grep masc masc.agent_core.llm_provider masc_tui_frame masc_tui_message_layout masc_tui_types))
 
 
 (rule

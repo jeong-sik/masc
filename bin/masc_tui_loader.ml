@@ -8,6 +8,7 @@ module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
 module Keeper_selection = Masc_tui_keeper_selection
+module Repository_pulls = Masc_tui_repository_pulls
 module Context_state = Masc_tui_context_state
 module Metrics_tail = Masc_tui_metrics_tail
 module Render_schedule = Masc_tui_render_schedule
@@ -471,8 +472,17 @@ let decode_attention_item json =
   let* raw_severity = required_string_field json "severity" in
   let* ai_severity = decode_attention_severity raw_severity in
   let* ai_summary = required_string_field json "summary" in
-  let* ai_target_type = required_string_field json "target_type" in
-  let* ai_target_id = optional_string_field json "target_id" in
+  let* target_type = required_string_field json "target_type" in
+  let* target_id = optional_string_field json "target_id" in
+  (* The producers write ["keeper"] with the Keeper's name as the id
+     (lib/dashboard/dashboard_execution.ml, the keeper status bridge). A
+     keeper item without a name names nobody to join on, so it stays with the
+     other targets. *)
+  let ai_target =
+    match (target_type, target_id) with
+    | "keeper", Some name -> Attention_keeper name
+    | _, _ -> Attention_other { target_type; target_id }
+  in
   (* Evidence is free-shaped on the wire (each producer writes its own
      object); the one thing this surface reads out of it is the tool-host
      failure timestamp. An absent or non-object evidence, or one without a
@@ -483,6 +493,19 @@ let decode_attention_item json =
     | `Assoc _ as nested -> optional_string_field nested "log_ts"
     | _ -> Ok None
   in
+  (* The keeper status bridge puts the blocker's own sentence under
+     [evidence.runtime_blocker]; the summary repeats it inside the Keeper
+     name and class word, which on a narrow row pushes the cause off the
+     end. Absent on every other producer's evidence. *)
+  let* ai_blocker_summary =
+    match Yojson.Safe.Util.member "evidence" json with
+    | `Assoc _ as evidence -> (
+        match Yojson.Safe.Util.member "runtime_blocker" evidence with
+        | `Assoc _ as blocker ->
+            optional_string_field blocker "runtime_blocker_summary"
+        | _ -> Ok None)
+    | _ -> Ok None
+  in
   let ai_evidence_ts =
     Option.bind evidence_log_ts Masc_domain.parse_iso8601_opt
   in
@@ -490,8 +513,8 @@ let decode_attention_item json =
     { ai_kind
     ; ai_severity
     ; ai_summary
-    ; ai_target_type
-    ; ai_target_id
+    ; ai_target
+    ; ai_blocker_summary
     ; ai_evidence_ts
     }
 
@@ -900,6 +923,35 @@ let decode_schedule_snapshot json =
           (Printf.sprintf "schedules fsm must be an object: %s"
              (Yojson.Safe.to_string other))
   in
+  (* Walked from [Schedule_domain.all_schedule_statuses], the same list the
+     server builds this object from, so a status added to the shared contract
+     is asked for here without a second spelling of the vocabulary. The server
+     sends [null] exactly when the store read failed, which is the reading
+     [request_count] already carries. *)
+  let* scs_counts =
+    match Yojson.Safe.Util.member "counts" json with
+    | `Null -> Ok None
+    | `Assoc fields ->
+        let rec read acc = function
+          | [] -> Ok (Some (List.rev acc))
+          | status :: rest -> (
+              let name = Schedule_domain.schedule_status_to_string status in
+              match List.assoc_opt name fields with
+              | Some (`Int count) -> read ((status, count) :: acc) rest
+              | Some other ->
+                  Error
+                    (Printf.sprintf "schedules counts %s must be an integer: %s"
+                       name
+                       (Yojson.Safe.to_string other))
+              | None ->
+                  Error (Printf.sprintf "schedules counts is missing %s" name))
+        in
+        read [] Schedule_domain.all_schedule_statuses
+    | other ->
+        Error
+          (Printf.sprintf "schedules counts must be an object or null: %s"
+             (Yojson.Safe.to_string other))
+  in
   let* rows = required_list_field json "requests" in
   let* scs_rows = decode_schedule_rows rows in
   Ok
@@ -908,6 +960,7 @@ let decode_schedule_snapshot json =
     ; scs_request_count
     ; scs_truncated
     ; scs_next_due_iso
+    ; scs_counts
     ; scs_rows
     }
 
@@ -1143,6 +1196,48 @@ let keeper_liveness_of_briefs briefs =
       | _ -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
     empty briefs
 
+(* One Team row per brief. A row with no name is not a Keeper anyone can act
+   on and is left out; the liveness counts above still count it. A phase or a
+   turn age this build cannot read stays visible as such on its own row
+   rather than failing the whole snapshot for one Keeper. *)
+let overview_keeper_rows_of_briefs briefs =
+  List.filter_map
+    (fun brief ->
+      match Yojson.Safe.Util.member "name" brief with
+      | `String name when String.trim name <> "" ->
+          let okp_phase =
+            match Yojson.Safe.Util.member "phase" brief with
+            | `Null -> Keeper_phase_absent
+            | `String word -> (
+                match Tui_decode.keeper_phase_of_string word with
+                | Some phase -> Keeper_phase phase
+                | None -> Keeper_phase_unreadable word)
+            | other -> Keeper_phase_unreadable (Yojson.Safe.to_string other)
+          in
+          let okp_last_turn_ago_s =
+            match Yojson.Safe.Util.member "last_turn_ago_s" brief with
+            | `Float seconds -> Some seconds
+            | `Int seconds -> Some (float_of_int seconds)
+            | _ -> None
+          in
+          let okp_paused =
+            match Yojson.Safe.Util.member "paused" brief with
+            | `Bool paused -> Some paused
+            | _ -> None
+          in
+          Some { okp_name = name; okp_phase; okp_last_turn_ago_s; okp_paused }
+      | _ -> None)
+    briefs
+
+(* RFC-0465 pull request snapshot. A row whose check or review word, number,
+   title, branch or draft flag cannot be read is counted with the server's
+   own undecodable rows instead of being drawn with a guessed state. *)
+let load_repository_pulls ~(host : string) ~(port : int) :
+    (overview_pulls_reading, string) result =
+  match Masc_tui_http.fetch_repository_pulls ~host ~port with
+  | Error err -> Error ("pull requests load failed: " ^ err)
+  | Ok json -> Repository_pulls.decode_reading json
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =
@@ -1150,7 +1245,6 @@ let load_overview ~(host : string) ~(port : int) :
   | Error err -> Error ("overview load failed: " ^ err)
   | Ok json ->
       let* summary = required_object_field json "summary" in
-      let* command_focus = optional_object_field json "command_focus" in
       let* incidents =
         let* items = optional_list_field json "incidents" in
         decode_attention_items items
@@ -1167,20 +1261,6 @@ let load_overview ~(host : string) ~(port : int) :
       let* keepers_unread =
         let* items = required_list_field json "keepers_unread" in
         Keeper_snapshot_unread.list_of_json (`List items)
-      in
-      let* top_attention =
-        let fallback =
-          match incidents with
-          | first :: _ -> Some first
-          | [] -> None
-        in
-        match command_focus with
-        | None -> Ok fallback
-        | Some command_focus -> (
-            match Yojson.Safe.Util.member "top_attention" command_focus with
-            | `Null -> Ok fallback
-            | value ->
-                Result.map (fun item -> Some item) (decode_attention_item value))
       in
       let* ov_workspace_health =
         let* workspace_health = required_string_field summary "workspace_health" in
@@ -1202,6 +1282,25 @@ let load_overview ~(host : string) ~(port : int) :
         let counts = keeper_liveness_of_briefs keeper_briefs in
         { counts with klc_unreadable = counts.klc_unreadable + n_unread }
       in
+      (* An unread Keeper gets a Team row too, so the block and the count
+         name the same fleet; its phase is the reason the row was not read. *)
+      let ov_keeper_rows =
+        overview_keeper_rows_of_briefs keeper_briefs
+        @ List.map
+            (fun (unread : Keeper_snapshot_unread.t) ->
+              let reason =
+                match unread.reason with
+                | Keeper_snapshot_unread.Meta_read_failed detail ->
+                    "metadata unread: " ^ detail
+                | Keeper_snapshot_unread.Row_raised detail -> "row raised: " ^ detail
+              in
+              { okp_name = unread.name
+              ; okp_phase = Keeper_phase_unreadable reason
+              ; okp_last_turn_ago_s = None
+              ; okp_paused = None
+              })
+            keepers_unread
+      in
       let ov_mcp_agents = List.length agent_briefs in
       let* ov_generated_at = required_string_field json "generated_at" in
       Ok
@@ -1211,6 +1310,7 @@ let load_overview ~(host : string) ~(port : int) :
           ov_project;
           ov_keepers;
           ov_keeper_liveness;
+          ov_keeper_rows;
           ov_mcp_agents;
           (* The briefing projects one fact onto two lists: an incident is
              also queued for operator attention, as the same JSON row. On the
@@ -1226,7 +1326,6 @@ let load_overview ~(host : string) ~(port : int) :
                    if List.mem item kept then kept else item :: kept)
                  []
             |> List.rev);
-          ov_top_attention = top_attention;
           ov_generated_at;
         }
 
@@ -1626,7 +1725,7 @@ let load_keeper_config_editor ~(host : string) ~(port : int)
 (* The github-identity payload is the fixed record built by
    Keeper_github_identity.observation_to_yojson: hostname, config_dir,
    projected_token_env_names, stored + effective (each
-   authenticated/login/error), effective_probe_scope. Read those fields into a
+   authenticated/login/scopes/error), effective_probe_scope. Read those fields into a
    short human view rather than pretty-printing the raw JSON. Any shape surprise
    (hostname absent, an error envelope, a field of the wrong type) falls back to
    the raw block, so the tab never shows less than the payload carried. *)
@@ -1656,10 +1755,30 @@ let github_identity_lines (json : Yojson.Safe.t) : string list =
           | Some (`String value) -> Some value
           | Some _ | None -> None
         in
+        (* What the token may do, as GitHub listed it. A token GitHub lists
+           no scopes for (a fine-grained PAT, an App token) says so rather
+           than showing an empty list, which would read as "none". *)
+        let scopes =
+          match List.assoc_opt "scopes" af with
+          | Some (`List items) ->
+            " \xc2\xb7 scopes: "
+            ^ (match
+                 List.filter_map
+                   (function `String scope -> Some scope | _ -> None)
+                   items
+               with
+               | [] -> "(none)"
+               | scopes -> String.concat ", " scopes)
+          | Some `Null -> " \xc2\xb7 scopes: not listed by GitHub"
+          (* No key at all is a server that does not report scopes, not a
+             token GitHub lists none for; say nothing rather than the wrong
+             one of the two. *)
+          | Some _ | None -> ""
+        in
         Some
           (match authenticated, login, error with
-           | true, Some who, _ -> "signed in as " ^ who
-           | true, None, _ -> "signed in"
+           | true, Some who, _ -> "signed in as " ^ who ^ scopes
+           | true, None, _ -> "signed in" ^ scopes
            | false, _, Some message -> "not signed in (" ^ message ^ ")"
            | false, _, None -> "not signed in")
       | Some _ | None -> None
@@ -1702,6 +1821,13 @@ let load_keeper_github_identity_view ~(host : string) ~(port : int)
   with
   | Error err -> Error ("github identity load failed: " ^ err)
   | Ok json -> Ok (github_identity_lines json)
+
+let load_keeper_board_quarantines ~(host : string) ~(port : int)
+    ~(keeper_name : string) :
+    (Masc_tui_board_quarantine.t, string) result =
+  match Masc_tui_http.fetch_keeper_board_quarantines ~host ~port ~keeper_name with
+  | Error err -> Error ("board quarantines: " ^ err)
+  | Ok json -> Masc_tui_board_quarantine.decode json
 
 (* What a Keeper can be attached to, and what each of those currently offers
    it. One fetch rather than two: a list of providers and a list of

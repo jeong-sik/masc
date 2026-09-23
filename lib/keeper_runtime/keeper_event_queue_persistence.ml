@@ -127,6 +127,15 @@ let durable_state_exists_unlocked owner =
   || Sys.file_exists (transition_wal_path_of_owner owner)
 ;;
 
+(* Whether the Keeper has a durable queue at all. A missing queue loads as the
+   empty queue, so a caller that must not read "no queue" as "nothing queued"
+   asks this first. *)
+let durable_state_exists_result ~base_path ~keeper_name =
+  match Owner_lock.resolve ~base_path ~keeper_name with
+  | Error error -> Error (owner_error_to_string error)
+  | Ok owner -> Ok (durable_state_exists_unlocked owner)
+;;
+
 let compact_wal_unlocked ~surface ~path owner =
   match
     Fs_compat.rewrite_private_file_durable_locked_result path (fun existing ->

@@ -280,10 +280,21 @@ let test_turn_start_reader_says_unknown_when_the_store_is_unreadable () =
   let keeper_name = "reader" in
   mkdir_p (Filename.concat
     (Filename.concat (Masc.Workspace.keepers_runtime_dir config) keeper_name) "turn-boundaries.jsonl");
+  let before =
+    match Log.Ring.recent ~limit:1 () with
+    | [] -> -1
+    | entry :: _ -> entry.Log.Ring.seq
+  in
   (match Driver.turn_start ~config ~keeper_name ~trace_id:"t" ~messages:source with
    | Front.Turn_boundary_unknown _ -> ()
    | Front.Turn_boundary { end_atom } ->
-     fail (Printf.sprintf "an unreadable boundary store answered atom %d" end_atom))
+     fail (Printf.sprintf "an unreadable boundary store answered atom %d" end_atom));
+  (* Reading decides nothing: the request whose range it opens reports it. *)
+  check int "reading the unknown start logs no warning" 0
+    (Log.Ring.recent ~since_seq:before ~min_level:(Log.level_to_int Log.Warn) ()
+     |> List.filter (fun (entry : Log.Ring.entry) ->
+       Option.equal String.equal entry.keeper_name (Some keeper_name))
+     |> List.length)
 ;;
 
 (* A boundary log whose end lines no longer match the history -- the history

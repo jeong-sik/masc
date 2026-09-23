@@ -672,6 +672,14 @@ let carried_start_range
       let first_atom, front = seed_or_lane in
       Plain (first_atom, front)
   in
+  (match plan with
+   | Plain (_, Turn_start_unknown { reason }) ->
+     Keeper_carried_front.warn_range_opens_on_newest_atom ~keeper_name ~reason
+   | Plain
+       ( _
+       , ( Carried_seed _ | Lane_cut | Turn_start | Librarian_snapshot _
+         | Librarian_progress _ ) )
+   | Absorbed_through _ -> ());
   let carried_messages, first_atom, front =
     match plan with
     | Absorbed_through { first_atom; absorbed_through; boundary_line; working_state } ->

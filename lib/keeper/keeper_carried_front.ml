@@ -271,6 +271,13 @@ let clamp ~atom_count first_atom =
 
 let newest_atom ~atom_count = if atom_count <= 0 then 0 else atom_count - 1
 
+let warn_range_opens_on_newest_atom ~keeper_name ~reason =
+  Log.Keeper.warn
+    ~keeper_name
+    "turn start unknown, the range opens on the newest atom alone: %s"
+    reason
+;;
+
 let halve ~first_atom ~atom_count =
   let first_atom = clamp ~atom_count first_atom in
   let carried = atom_count - first_atom in

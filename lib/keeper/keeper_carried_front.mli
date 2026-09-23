@@ -235,6 +235,12 @@ val newest_atom : atom_count:int -> int
 (** The newest atom of a history of [atom_count] atoms, 0 when it has none:
     where a range opens when the turn start is unknown. *)
 
+val warn_range_opens_on_newest_atom : keeper_name:string -> reason:string -> unit
+(** The WARN a request logs when an unknown turn start is what opened its
+    range, on the newest atom alone. Reading the turn start logs nothing: a
+    turn reads it on every dispatch, and a seed or a Librarian point usually
+    decides the range instead. *)
+
 val halve : first_atom:int -> atom_count:int -> int option
 (** The front moved halfway to the newest atom, or [None] when the range is
     already a single atom and cannot shrink. *)

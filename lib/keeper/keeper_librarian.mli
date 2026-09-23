@@ -164,15 +164,6 @@ type parse_error =
 
 val parse_error_to_string : parse_error -> string
 
-(** The facts to hand {!Keeper_memory_os_current.apply_disposition} as
-    [restated]: each [selection.restated] memory that an applied absorption in
-    [absorbed] goes into. The store never adds them; it uses them to cancel the
-    absorptions into one the keeper took away during the pass (#38186). *)
-val restated_absorption_targets
-  :  selection
-  -> absorbed:Keeper_memory_os_types.absorbed_statement list
-  -> Keeper_memory_os_types.fact list
-
 val selection_of_json_result
   :  ?now:float
   -> input

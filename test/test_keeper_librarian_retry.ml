@@ -669,34 +669,6 @@ let test_a_restatement_keeps_the_stored_fields_and_names_the_rest () =
          ])
 ;;
 
-(* The store is told about the restated memory an absorption goes into, and
-   not one nothing goes into. *)
-let test_restated_absorption_targets_are_only_restatements_something_goes_into () =
-  let parse_ok json =
-    match parse json with
-    | Ok selection -> selection
-    | Error error -> fail (Librarian.parse_error_to_string error)
-  in
-  let absorbing =
-    parse_ok
-      (selection_json
-         ~dropped:[]
-         ~new_claims:[ absorbing_claim ~claim:"keep A" (`List [ `String "m2" ]) () ]
-         ())
-  in
-  check (list string) "A, which B goes into"
-    [ current_a_id ]
-    (List.map Memory.memory_id
-       (Librarian.restated_absorption_targets absorbing ~absorbed:absorbing.absorbed));
-  check int "nothing when the gate applied no absorption" 0
-    (List.length (Librarian.restated_absorption_targets absorbing ~absorbed:[]));
-  let plain =
-    parse_ok (selection_json ~dropped:[] ~new_claims:[ new_claim ~claim:"keep A" () ] ())
-  in
-  check int "a plain restatement is not handed over" 0
-    (List.length (Librarian.restated_absorption_targets plain ~absorbed:plain.absorbed))
-;;
-
 (* Nothing touches A during the pass, and the answer restated A and absorbed B
    into it. B leaves with its row pointing into A, and A is there once. *)
 let test_a_restated_memory_still_current_takes_its_absorptions () =
@@ -726,8 +698,6 @@ let test_a_restated_memory_still_current_takes_its_absorptions () =
         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
         ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
         ~new_claims:selection.new_claims
-        ~restated:
-          (Librarian.restated_absorption_targets selection ~absorbed:selection.absorbed)
         ()
       |> require
     in
@@ -780,8 +750,6 @@ let test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_i
         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
         ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
         ~new_claims:selection.new_claims
-        ~restated:
-          (Librarian.restated_absorption_targets selection ~absorbed:selection.absorbed)
         ()
       |> require
     in
@@ -1761,8 +1729,6 @@ let () =
             test_restating_every_memory_plus_a_merge_applies_the_merge
         ; test_case "a restatement keeps the stored fields and names the rest" `Quick
             test_a_restatement_keeps_the_stored_fields_and_names_the_rest
-        ; test_case "restated absorption targets are only restatements something goes into" `Quick
-            test_restated_absorption_targets_are_only_restatements_something_goes_into
         ; test_case "a restated memory still current takes its absorptions" `Quick
             test_a_restated_memory_still_current_takes_its_absorptions
         ; test_case "a restated memory retracted during the pass stays retracted and keeps its sources" `Quick

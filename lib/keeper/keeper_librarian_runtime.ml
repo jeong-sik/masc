@@ -1241,10 +1241,6 @@ let run_best_effort
                  ; trace_id = input_trace_id inp
                  }
                ~new_claims:selection.new_claims
-               ~restated:
-                 (Keeper_librarian.restated_absorption_targets
-                    selection
-                    ~absorbed:applied_absorbed)
                ()
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })

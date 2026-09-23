@@ -300,15 +300,6 @@ let test_the_note_draws_in_its_own_role () =
    that does not parse takes neither path -- it used to be handed back as it
    arrived, and it arrives from the wire as a tool's recorded input or
    result. *)
-let holds needle text =
-  let n = String.length needle and h = String.length text in
-  let rec walk i =
-    i + n <= h
-    && (String.equal (String.sub text i n) needle || walk (i + 1))
-  in
-  walk 0
-;;
-
 let test_a_payload_that_does_not_parse_is_terminal_safe () =
   let escape = "\027[31m" in
   check bool "an escape does not survive a payload that is not JSON" false

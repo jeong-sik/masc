@@ -625,6 +625,17 @@ let fit_width text width =
       prefix ^ reset ^ String.make (room - prefix_cells) ' ' ^ cut_mark
     else text ^ String.make (width - cells) ' '
 
+(* [fit_width]'s other end: the padding goes in front, so a column of figures
+   -- or of ages beside them -- lines up on its right edge.
+
+   Printf's "%*s" does this too, but it counts bytes. A cell holding the
+   no-value mark, three bytes and one column, came out four cells wide in a
+   six-cell field and pulled the column after it two cells left. *)
+let pad_left text width =
+  let cells = display_width text in
+  if cells >= width then fit_width text width
+  else String.make (width - cells) ' ' ^ text
+
 (* Where a bare URL begins and where it stops. Two readers ask -- the one that
    underlines them and the one that names what they point at -- and they get
    one answer, since a URL ending in one place for the underline and another

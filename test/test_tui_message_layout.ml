@@ -2456,6 +2456,19 @@ let test_a_count_takes_the_number_it_counts () =
     (Layout.count_noun ~plural:"entries" 1 "entry")
 
 
+(* The Keepers roster's TURN cell is right-aligned to six cells. It was
+   padded with Printf's "%*s", which counts bytes, so the no-value mark --
+   three bytes and one column -- left the cell four cells wide and pulled the
+   runtime column after it two cells left. *)
+let test_a_right_aligned_cell_counts_cells_not_bytes () =
+  let width text = Layout.display_width (Layout.pad_left text 6) in
+  check int "an ascii age fills the cell" 6 (width "99d23h");
+  check int "a shorter one still fills it" 6 (width "2m14s");
+  check int "and a three-byte mark fills it too" 6 (width "\xe2\x80\x94");
+  check string "the padding goes in front" "     x" (Layout.pad_left "x" 6);
+  check string "a reading past the cell is cut, not widened" "99d2\xe2\x80\xa6"
+    (Layout.pad_left "99d23h12m" 5)
+
 (* The Board and Keeper roster ages are six cells. Days and hours from a
    hundred days on drew seven, and the column cut the day count out. *)
 let test_a_span_fits_a_six_cell_column () =
@@ -2844,5 +2857,7 @@ let () =
             test_a_count_takes_the_number_it_counts
         ; test_case "a span fits a six-cell column" `Quick
             test_a_span_fits_a_six_cell_column
+        ; test_case "a right-aligned cell counts cells, not bytes" `Quick
+            test_a_right_aligned_cell_counts_cells_not_bytes
         ] )
     ]

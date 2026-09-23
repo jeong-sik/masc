@@ -4649,7 +4649,7 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
     ; (* TURN, not LAST: where the runtime column is hidden this heading and
          TASK sit one cell apart, and "LAST TASK" read as one column over the
          two cells under it. *)
-      Printf.sprintf " %*s" Render_schedule.keeper_last_turn_width "TURN"
+      " " ^ Message_layout.pad_left "TURN" Render_schedule.keeper_last_turn_width
     ; (if columns.kcol_show_runtime then
          " " ^ fit_width "LIFECYCLE / RUNTIME" columns.kcol_runtime
        else "")
@@ -4753,8 +4753,10 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
              | Some text -> text
              | None -> Masc_tui_theme.Glyph.no_value)
        in
-       Printf.sprintf " %s%*s%s" Ansi.dim
-         Render_schedule.keeper_last_turn_width last_turn_age Ansi.reset)
+       Printf.sprintf " %s%s%s" Ansi.dim
+         (Message_layout.pad_left last_turn_age
+            Render_schedule.keeper_last_turn_width)
+         Ansi.reset)
     ; (if columns.kcol_show_runtime then
          " " ^ (Theme.recede ())
          ^ keeper_runtime_cell ~width:columns.kcol_runtime runtime

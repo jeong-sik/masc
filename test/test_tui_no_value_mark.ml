@@ -98,6 +98,21 @@ let test_a_hyphen_left_in_the_drawing_is_a_diff_marker () =
     width_measured_modules
 ;;
 
+(* Where the mark lands, the cell has to be measured in display columns.
+   Printf's "%*s" counts bytes, so the TURN cell of the Keepers roster drew
+   the three-byte mark in four columns of a six-column field and pulled the
+   runtime column after it two cells left. {!Masc_tui_message_layout.pad_left}
+   is the right-aligning pad; nothing in the drawing counts bytes. *)
+let test_no_width_measured_surface_pads_by_bytes () =
+  List.iter
+    (fun module_path ->
+      Alcotest.(check int)
+        (module_path ^ ": no byte-counted field width")
+        0
+        (Ast_grep.count_string_literals ~module_path ~needle:"%*s"))
+    width_measured_modules
+;;
+
 let test_the_mark_is_the_em_dash () =
   Alcotest.(check string) "one column wide, and not a hyphen" "\xe2\x80\x94" mark
 ;;
@@ -110,6 +125,8 @@ let () =
             test_the_mark_is_spelled_in_one_place
         ; Alcotest.test_case "a hyphen left in the drawing is a diff marker" `Quick
             test_a_hyphen_left_in_the_drawing_is_a_diff_marker
+        ; Alcotest.test_case "no width-measured surface pads by bytes" `Quick
+            test_no_width_measured_surface_pads_by_bytes
         ; Alcotest.test_case "the mark is the em dash" `Quick test_the_mark_is_the_em_dash
         ] )
     ]

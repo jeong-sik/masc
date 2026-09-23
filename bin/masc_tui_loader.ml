@@ -491,6 +491,19 @@ let decode_attention_item json =
     | `Assoc _ as nested -> optional_string_field nested "log_ts"
     | _ -> Ok None
   in
+  (* The keeper status bridge puts the blocker's own sentence under
+     [evidence.runtime_blocker]; the summary repeats it inside the Keeper
+     name and class word, which on a narrow row pushes the cause off the
+     end. Absent on every other producer's evidence. *)
+  let* ai_blocker_summary =
+    match Yojson.Safe.Util.member "evidence" json with
+    | `Assoc _ as evidence -> (
+        match Yojson.Safe.Util.member "runtime_blocker" evidence with
+        | `Assoc _ as blocker ->
+            optional_string_field blocker "runtime_blocker_summary"
+        | _ -> Ok None)
+    | _ -> Ok None
+  in
   let ai_evidence_ts =
     Option.bind evidence_log_ts Masc_domain.parse_iso8601_opt
   in
@@ -499,6 +512,7 @@ let decode_attention_item json =
     ; ai_severity
     ; ai_summary
     ; ai_target
+    ; ai_blocker_summary
     ; ai_evidence_ts
     }
 

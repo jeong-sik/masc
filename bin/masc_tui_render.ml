@@ -4537,6 +4537,26 @@ let keeper_runtime_label (runtime : keeper_runtime option) =
         (Tui_decode.keeper_phase_to_string row.kr_phase)
         (Terminal_text.single_line row.kr_runtime_id)
 
+(* The two halves of the runtime cell, so the column that has to be wide
+   enough for them is measured from the same strings that get drawn. *)
+let keeper_runtime_parts (row : keeper_runtime) =
+  let phase =
+    if row.kr_paused then "paused "
+    else if Tui_decode.keeper_phase_is_running row.kr_phase then ""
+    else Tui_decode.keeper_phase_to_string row.kr_phase ^ " "
+  in
+  (phase, Terminal_text.single_line row.kr_runtime_id)
+
+(* What the widest row would spend on this cell. A keeper the roster cannot
+   see draws an em dash, which is one cell. *)
+let keeper_runtime_cells (runtime : keeper_runtime option) =
+  match runtime with
+  | None -> 1
+  | Some row ->
+      let phase, runtime_id = keeper_runtime_parts row in
+      Message_layout.display_width phase
+      + Message_layout.display_width runtime_id
+
 let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
   match runtime with
   | None -> fit_width "\xe2\x80\x94" width
@@ -4552,12 +4572,7 @@ let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
          operator acts on -- a person stopped that one, so nothing is wrong
          with it. The phase this replaces is still on the chat header, which
          draws [kr_phase] unconditionally. *)
-      let phase =
-        if row.kr_paused then "paused "
-        else if Tui_decode.keeper_phase_is_running row.kr_phase then ""
-        else Tui_decode.keeper_phase_to_string row.kr_phase ^ " "
-      in
-      let runtime_id = Terminal_text.single_line row.kr_runtime_id in
+      let phase, runtime_id = keeper_runtime_parts row in
       let phase_width = Message_layout.display_width phase in
       if phase_width >= width then fit_width (keeper_runtime_label runtime) width
       else
@@ -5000,7 +5015,23 @@ let render_keeper_list (state : state) =
             (Theme.warn ()) (List.length observed) (Masc_tui_message_layout.count_noun total "keeper") Ansi.reset)
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
-  let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
+  (* Measured over every reading rather than the rows on screen, so the
+     columns do not move while a reader scrolls. *)
+  let widest_runtime =
+    List.fold_left
+      (fun widest (reading : Keeper_control.reading) ->
+        let runtime =
+          match reading.Keeper_control.liveness with
+          | Keeper_control.Present row -> Some row
+          | Keeper_control.Absent | Keeper_control.Unobserved
+          | Keeper_control.Invalid _ -> None
+        in
+        max widest (keeper_runtime_cells runtime))
+      0 readings
+  in
+  let columns =
+    Render_schedule.allocate_keeper_columns ~inner_width:inner ~widest_runtime
+  in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);

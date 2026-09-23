@@ -83,6 +83,12 @@ module For_testing : sig
   (** The width a later continuity pass will read at, if a refusal left one
       for this trace. *)
 
+  val last_input_capacity :
+    config:Workspace.config -> keeper_name:string
+    -> Keeper_lane_cli_oneshot.input_capacity option
+  (** The CLI limit the next continuity pass fits its range to, if one is
+      remembered for this Keeper. *)
+
   val merge_not_committed :
     Keeper_librarian_runtime.not_committed option
     -> Keeper_librarian_runtime.not_committed

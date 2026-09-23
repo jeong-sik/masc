@@ -379,6 +379,24 @@ val board_post_detail_json :
     Comment fetch errors (rare) silently degrade to empty
     comment list rather than failing the whole response. *)
 
+val board_sub_board_detail_prefix : string
+(** Path prefix of [GET /api/v1/board/sub-boards/<id_or_slug>]. Both the
+    HTTP/1 router and the HTTP/2 gateway match this prefix before the
+    [GET /api/v1/board/<post_id>] arm, so a sub-board path never reaches the
+    post handler. *)
+
+val board_sub_board_detail_json :
+  path:string -> [> `OK | `Bad_request | `Not_found ] * Yojson.Safe.t
+(** [board_sub_board_detail_json ~path] answers
+    [GET /api/v1/board/sub-boards/<id_or_slug>] for both transports.
+
+    | Outcome | Status | Body |
+    |---|---|---|
+    | Empty id after the prefix | [400 Bad Request] | [{"error":"sub_board_id is required"}] |
+    | Unknown id or slug | [404 Not Found] | [{"error": <board error>}] |
+    | Found | [200 OK] | {!Board.sub_board_to_yojson} |
+    *)
+
 (** {1 OPTIONS} *)
 
 val options_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit

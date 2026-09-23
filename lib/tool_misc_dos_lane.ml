@@ -58,7 +58,7 @@ let of_lane ?(extra = []) ~tool_name ~start_time
       ()
   | Error ((Dos_lane.No_machine | Dos_lane.Invalid_request _ | Dos_lane.Held_by _) as e) ->
     reject ~tool_name ~start_time (Dos_lane.error_to_string e)
-  | Error (Dos_lane.Unreadable _ as e) ->
+  | Error ((Dos_lane.Unreadable _ | Dos_lane.Guest_fault _) as e) ->
     Tool_result.make_err ~tool_name ~class_:Tool_result.Runtime_failure ~start_time
       (Dos_lane.error_to_string e)
 ;;
@@ -239,11 +239,7 @@ let resolve_program ?boot ~base_path name =
 
 (* The board hears what happens on the shared machine, the way the MSX lane
    announces its arcade. A refused post does not fail the tool — the machine
-   moved either way.
-
-   This runs as Dos_lane's [announce], under the machine's lock. Posting after
-   the lock was released let a second load or eject finish and post first, so
-   the board told the arcade's history in the wrong order. *)
+   moved either way. *)
 let relay_to_board ~author content =
   try
     let result =
@@ -263,6 +259,47 @@ let relay_to_board ~author content =
   | e ->
     Log.DosLog.warn "arcade relay: board post raised, the machine is unaffected: %s"
       (Printexc.to_string e)
+;;
+
+(* Announcements leave in the order the machine changed, without posting
+   under the machine's lock. That lock is a stdlib Mutex and a board post can
+   suspend its fiber (Eio mutexes, streams); another fiber on the same thread
+   reaching Dos_lane then finds the lock held by its own thread, which raises.
+   So [announce] -- which Dos_lane runs under its lock, in machine order --
+   only queues the line, and [flush_announcements] posts the queue after the
+   call returns. One Eio mutex lets one fiber drain at a time, so the queue's
+   order is the board's order. A line left behind by a failed drain goes out
+   with the next one. *)
+let announcements : (string * string) Queue.t = Queue.create ()
+let announcements_lock = Mutex.create ()
+let posting = Eio.Mutex.create ()
+
+let announce ~author content () =
+  Mutex.protect announcements_lock (fun () -> Queue.push (author, content) announcements)
+;;
+
+let flush_announcements () =
+  let next () = Mutex.protect announcements_lock (fun () -> Queue.take_opt announcements) in
+  try
+    Eio.Mutex.use_rw ~protect:false posting (fun () ->
+      let rec drain () =
+        match next () with
+        | None -> ()
+        | Some (author, content) ->
+          relay_to_board ~author content;
+          drain ()
+      in
+      drain ())
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | e ->
+    Log.DosLog.warn "arcade relay: announcements wait for the next call: %s"
+      (Printexc.to_string e)
+;;
+
+let after_announcing result =
+  flush_announcements ();
+  result
 ;;
 
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
@@ -291,52 +328,71 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
          Dos_lane.load ~who:agent_name ~ledger_dir:(dos_dir ~base_path)
            ~saves_dir:(saves_dir ~base_path (String.trim name)) ~program_name ~program_bytes
            ~files
-           ~announce:(fun () ->
-             relay_to_board ~author:agent_name
-               (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name))
+           ~announce:
+             (announce ~author:agent_name
+                (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name))
        in
-       of_lane_run ~tool_name ~start_time loaded)
+       after_announcing (of_lane_run ~tool_name ~start_time loaded))
 ;;
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =
-  match
-    Dos_lane.eject ~who:agent_name
-      ~announce:(fun () ->
-        relay_to_board ~author:agent_name
-          (Printf.sprintf "%s 님이 기계를 껐습니다" agent_name))
-      ()
-  with
-  | Ok () ->
-    Tool_result.make_ok ~tool_name ~start_time
-      ~data:(`Assoc [ ("ejected", `Bool true) ]) ()
-  | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)
+  after_announcing
+    (match
+       Dos_lane.eject ~who:agent_name
+         ~announce:
+           (announce ~author:agent_name (Printf.sprintf "%s 님이 기계를 껐습니다" agent_name))
+         ()
+     with
+     | Ok () ->
+       Tool_result.make_ok ~tool_name ~start_time
+         ~data:(`Assoc [ ("ejected", `Bool true) ]) ()
+     | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e))
 ;;
 
 (* The hand-off is also the wake-up: the board post names the next holder
    with @, which the board delivers to that Keeper as an explicit mention, so
    the player whose turn it is does not have to poll the machine to find out.
    A post is a message in their queue, not an obligation to answer. *)
+(* [to] is parsed with the board's own agent-id rule, so a name that could
+   never be mentioned -- "@liu-bei", "liu bei", "유비" -- is refused here. The
+   controller would otherwise go to a name no caller has, nobody could move or
+   eject the machine again, and the post meant to wake the next player would
+   address no one. *)
 let handle_pass ~tool_name ~start_time ~agent_name args =
   let to_ =
     match get_string_opt args "to" with
-    | Some t when String.trim t <> "" -> Some (String.trim t)
-    | Some _ | None -> None
+    | None -> Ok None
+    | Some t when String.trim t = "" -> Ok None
+    | Some t ->
+      (match Board_types.Agent_id.parse (String.trim t) with
+       | Ok id -> Ok (Some (Board_types.Agent_id.to_string id))
+       | Error _ ->
+         Error
+           (Printf.sprintf
+              "to %S is not a Keeper name: give the name alone, without @ or spaces" t))
   in
-  let content =
-    match to_ with
-    | Some next -> Printf.sprintf "@%s 님 차례예요. %s 님이 DOS 조종권을 넘겼습니다" next agent_name
-    | None -> Printf.sprintf "%s 님이 DOS 조종권을 내려놓았습니다" agent_name
-  in
-  of_lane ~tool_name ~start_time
-    (Dos_lane.pass ~who:agent_name ~to_
-       ~announce:(fun () -> relay_to_board ~author:agent_name content))
+  match to_ with
+  | Error message -> reject ~tool_name ~start_time message
+  | Ok to_ ->
+    let content =
+      match to_ with
+      | Some next -> Printf.sprintf "@%s 님 차례예요. %s 님이 DOS 조종권을 넘겼습니다" next agent_name
+      | None -> Printf.sprintf "%s 님이 DOS 조종권을 내려놓았습니다" agent_name
+    in
+    after_announcing
+      (of_lane ~tool_name ~start_time
+         (Dos_lane.pass ~who:agent_name ~to_ ~announce:(announce ~author:agent_name content)))
 ;;
 
 let handle_screen ~tool_name ~start_time _args =
   of_lane ~tool_name ~start_time (Dos_lane.screen ())
 ;;
 
-let default_steps = 1_000_000
+(* The whole per-call ceiling: a call that settles stops early, so a large
+   default costs a quick program nothing, while a game whose screen change
+   takes a few million instructions (삼국지3's transitions take 3-4 million)
+   settles in one call instead of coming back busy. *)
+let default_steps = Dos_lane.max_steps_per_call
 
 let handle_step ~tool_name ~start_time ~who args =
   of_lane_run ~tool_name ~start_time

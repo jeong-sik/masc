@@ -291,7 +291,7 @@ let test_misc_tools_name_the_source_they_move () =
     (activity Tool_schemas_misc.Misc_dos_press);
   check string "reading the DOS screen moves nothing" "tool"
     (activity Tool_schemas_misc.Misc_dos_screen);
-  check string "handing the DOS controller on moves nothing" "tool"
+  check string "handing the DOS controller on refreshes the capture that shows the holder" "dos"
     (activity Tool_schemas_misc.Misc_dos_pass);
   check string "interacting with a page moves its document" "browser"
     (activity Tool_schemas_misc.Misc_browser_interact);

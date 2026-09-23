@@ -89,18 +89,20 @@ let interested sources activity = List.exists (function
    activity it produces. Every operation is listed: a tool added to
    {!Tool_schemas_misc.misc_operation} has to say whether it moves an MSX or a
    browser source, instead of joining the generic arm without a word. Reads
-   (screen, peek, ram_diff, tabs, read) do not move a source, and neither does
-   handing the DOS controller on. *)
+   (screen, peek, ram_diff, tabs, read) do not move a source. *)
 let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = function
   | Misc_msx_load | Misc_msx_eject | Misc_msx_restore | Misc_msx_change_disk
   | Misc_msx_press | Misc_msx_step | Misc_msx_step_until_change -> Msx_changed
   | Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_press
-  | Misc_dos_click | Misc_dos_type -> Dos_changed
+  | Misc_dos_click | Misc_dos_type
+  (* Handing the controller on changes no pixel, but the capture carries the
+     holder, so a watcher would keep showing the old one. *)
+  | Misc_dos_pass -> Dos_changed
   | Misc_browser_session | Misc_browser_goto | Misc_browser_act
   | Misc_browser_interact -> Browser_changed
   | Misc_msx_save | Misc_msx_screen | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
-  | Misc_dos_screen | Misc_dos_peek | Misc_dos_pass
+  | Misc_dos_screen | Misc_dos_peek
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_attach
   | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
   | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_lane_updates

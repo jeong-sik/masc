@@ -1249,6 +1249,7 @@
   masc_tui_ask_layout
   masc_tui_ask_projection
   masc_tui_board_detail
+  masc_tui_board_quarantine
   masc_tui_fetched
   masc_tui_attachment
   masc_tui_code_lexer

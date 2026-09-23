@@ -13778,8 +13778,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
               ^ " may or may not have landed: "
               ^ Terminal_text.single_line detail));
       (* Read the rows again whatever the answer: a refusal usually means the
-         row moved, and an unanswered press may have committed. *)
-      launch_keeper_board_quarantines state ~mailbox keeper_name
+         row moved, and an unanswered press may have committed. The slot holds
+         one keeper, so only while that keeper is still the one on screen --
+         reading the pressed one after the operator moved on would replace the
+         rows of the keeper now drawn. *)
+      (match selected_keeper state with
+       | Some keeper when String.equal keeper.k_name keeper_name ->
+           launch_keeper_board_quarantines state ~mailbox keeper_name
+       | Some _ | None -> ())
   | Preset_saved (sink, result) ->
       (match sink, result with
        | Preset_to_chat target, Ok manifest ->
@@ -20767,7 +20773,11 @@ and is loaded on demand through keeper_skill.
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_info ->
            (match selected_keeper state, state.board_quarantine_requeue_inflight with
-            | Some _, Some _ | None, _ -> ()
+            | Some _, Some partition ->
+                report_action state "system"
+                  ("A Board requeue is still waiting for its answer: "
+                   ^ Terminal_text.single_line partition)
+            | None, _ -> ()
             | Some keeper, None ->
                 (match
                    Masc_tui_fetched.view_for ~equal:String.equal

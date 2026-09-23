@@ -765,20 +765,17 @@ let test_lanes_run_detail_footer_appends_the_scroll_position () =
 let test_overview_footer_projects_by_focus () =
   (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
      Tab:next  2:keepers" (and "j/k:tasks  Enter:detail  esc:events …").
-     The projection keeps every pair, relabels j/k by focus, and drops the
-     keys that are dead in the other mode: t only leaves the event list,
-     Right/Enter and Left/Esc only act on a focused task. h/l stays visible
-     because it selects either pane directly. *)
-  check str "events mode keeps t and drops the task keys"
-    ("j/k:events  h/l:pane  m:telemetry  Home/End:top/bottom  t:tasks"
-     ^ "  2:keepers  r:refresh  Tab:next  q:quit")
+     The projection keeps every pair and drops the keys that are dead in the
+     other mode: t only selects the task list, and j/k, Home/End, Right/Enter
+     and Left/Esc only act on it once it is selected. *)
+  check str "unselected keeps t and drops the task keys"
+    ("m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit")
     (Masc_tui_keys.footer_hints_overview ~task_focus:false);
-  (* Both columns and an open task's detail answer Home and End: the events
-     column and the detail as readings the frame clamps, the task column as a
-     row list whose window follows its cursor. So the key is named in both
-     modes rather than in one. *)
+  (* The task column and an open task's detail both answer Home and End: the
+     detail as a reading the frame clamps, the task column as a row list
+     whose window follows its cursor. *)
   check str "tasks mode keeps arrow/Enter/Esc and drops t"
-    ("j/k:tasks  h/l:pane  m:telemetry  Home/End:top/bottom"
+    ("j/k:tasks  m:telemetry  Home/End:top/bottom"
      ^ "  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh"
      ^ "  Tab:next  q:quit")
     (Masc_tui_keys.footer_hints_overview ~task_focus:true)

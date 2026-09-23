@@ -2482,13 +2482,13 @@ let find_executable_in_path name =
                let candidate = Filename.concat dir name in
                if Sys.file_exists candidate then Some candidate else None)
 
-(* Why a server this TUI started is gone, as three events. The events pane
-   is half the screen and cuts each line at its width, so the exit status
-   leads the headline and the reason and the file each start a line of their
-   own. The file is named from the base path, which the header already
-   shows; the absolute path spent the pane on a prefix the reader knows.
-   Events are drawn newest first, so they are added last-to-first to read
-   top down: how it ended, what it said, where the rest is. *)
+(* Why a server this TUI started is gone, as three events. The session log
+   cuts each line at the frame width, so the exit status leads the headline
+   and the reason and the file each start a line of their own. The file is
+   named from the base path, which the header already shows; the absolute
+   path spent the line on a prefix the reader knows. The log is drawn oldest
+   first, so they are added in reading order: how it ended, what it said,
+   where the rest is. *)
 let server_output_location ~port (output : Masc_tui_server_lifecycle.startup_output) =
   match output with
   | Masc_tui_server_lifecycle.Written_to _ ->
@@ -2497,10 +2497,10 @@ let server_output_location ~port (output : Masc_tui_server_lifecycle.startup_out
     Masc_tui_server_lifecycle.describe_output output
 
 let note_server_exit ~note ~port (report : Masc_tui_server_lifecycle.exit_report) =
-  note (server_output_location ~port report.output);
-  note (Masc_tui_server_lifecycle.describe_last_line report.last_line);
   note
-    (Printf.sprintf "masc server exited (%s) before it was ready" report.status)
+    (Printf.sprintf "masc server exited (%s) before it was ready" report.status);
+  note (Masc_tui_server_lifecycle.describe_last_line report.last_line);
+  note (server_output_location ~port report.output)
 
 (* Start a background server on demand and report readiness without blocking
    rendering. The handle prevents duplicate starts while the child is alive. *)
@@ -2709,8 +2709,8 @@ let settle_live_turn state (request : Keeper_chat.request) =
 (* Answer the call the keeper is held at. Runs on its own fiber: the pane stays
    responsive, and a slow server costs the answer rather than the keypress. *)
 (* The Approvals-surface twin of [launch_keeper_approval]: same route, no chat
-   request to correlate with, so the outcome lands in Recent Events instead of
-   a pane's transcript. *)
+   request to correlate with, so the outcome lands in the session log instead
+   of a pane's transcript. *)
 let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
     ~allow =
   (* Answering a held tool call mutates server state over one round trip, like
@@ -6669,8 +6669,8 @@ let row_list (state : state) : row_list option =
   (* The task column, when the cursor is in it and no task's detail is over
      it. The panel is shorter than the list gets and the drawing windows
      around the cursor, so a landing is on screen as soon as the cursor names
-     it. The events column beside it and an open detail are readings rather
-     than lists; [reading_pane] has those. *)
+     it. An open detail is a reading rather than a list; [reading_pane] has
+     it. *)
   | Overview
     when state.task_focus = Right_pane
          && Option.is_none (task_detail_on_screen state) ->
@@ -6745,8 +6745,6 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
          dropped draws the list, and [row_list] owns that. *)
       if Option.is_some (task_detail_on_screen state) then
         pane (fun v -> Task_detail v)
-      else if state.task_focus = Left_pane then
-        pane (fun v -> Overview_events v)
       else None
   | Acting ->
       (match state.acting_detail with
@@ -8548,9 +8546,10 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
 
    A reply is a row in the conversation, drawn into the pane the operator
    typed in: the command list, a queue snapshot, what a preset restore
-   applied and skipped. Recent Events lives on another surface, and a /help
-   answered there is a /help that looks ignored. It falls back to the event
-   log when the pane has no keeper to file the row under.
+   applied and skipped. The session log lives on Metrics, and a /help
+   answered there is a /help that looks ignored. When the pane has no keeper
+   to file the row under, it goes to the footer and the session log, the way
+   a failure does.
 
    A failure is the operator's own step that did not work -- the clipboard
    held no image, a command was missing its argument, an image would not
@@ -8565,7 +8564,8 @@ let chat_notice state ~keeper_name ~kind text =
   match kind, keeper_name with
   | Notice_failure, (Some _ | None) ->
       report_action state "error" (Terminal_text.single_line text)
-  | Notice_reply, None -> add_event state "system" text
+  | Notice_reply, None ->
+      report_action state "system" (Terminal_text.single_line text)
   | Notice_reply, Some keeper ->
       let role = Message_local in
       state.msg_history <-
@@ -12791,7 +12791,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Attach_image_ref _ | Masc_tui_command.Attach_image_ref_missing_value
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
-              the keeper, and the answer lands in Recent Events. *)
+              the keeper, and the answer lands in the session log. *)
            ());
       send_operator_text state ~base_path ~mailbox text;
       true
@@ -16769,7 +16769,7 @@ let main
   (* runtime.toml edit: $EDITOR over the text the Config surface shows,
      then the server's preview validation; only a preview that passes is
      written. A failed preview keeps the operator's text out of the file
-     and puts the validator's words in Recent Events. *)
+     and puts the validator's words in the session log. *)
   (* Connector bind/unbind: the highlighted transport owns the route. The
      form edits only the route body, so its visible selection and mutation
      target cannot disagree. *)
@@ -17991,7 +17991,7 @@ and is loaded on demand through keeper_skill.
            raise Break
        | Masc_tui_exit_signals.Interrupt_armed ->
            state.quit_armed <- false;
-           add_event state "system"
+           report_action state "system"
              (Masc_tui_exit_signals.quit_notice ~key:"Ctrl-C"
                 ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued));
            Render_schedule.request render_schedule Render_schedule.Background
@@ -19163,7 +19163,7 @@ and is loaded on demand through keeper_skill.
            end
            else begin
              state.quit_armed <- true;
-             add_event state "system"
+             report_action state "system"
                (Masc_tui_exit_signals.quit_notice ~key:"q"
                   ~waiting:(Masc_tui_keeper_chat_queue.length state.msg_queued))
            end
@@ -21952,20 +21952,19 @@ and is loaded on demand through keeper_skill.
        | Some ("h" | "l")
          when terminal_columns >= keeper_split_threshold_cols
               && (match state.view with
-                  | Overview | Keepers Keeper_detail | Resources -> true
+                  | Keepers Keeper_detail | Resources -> true
                   | Board ->
                       (match state.board_mode with
                        | Board_read _ -> not state.board_detail_wide
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some (Masc_tui_fetched.current_key state.code_file)
-                  | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals
-                  | Planning
+                  | Overview | Acting | Metrics | Keepers _ | Lanes | Clients
+                  | Approvals | Planning
                   | Schedules | Verification | Harness | Fusion
                   | Memory | Repositories | Changes | Connectors | Runtime | Config
                   | Tools | System_logs -> false) ->
            let focus = if key = Some "h" then Left_pane else Right_pane in
            (match state.view with
-            | Overview -> state.task_focus <- focus
             | Board ->
                 (match state.board_mode with
                  | Board_read _ -> state.board_focus <- focus
@@ -21976,8 +21975,8 @@ and is loaded on demand through keeper_skill.
               when Option.is_some (Masc_tui_fetched.current_key state.code_file)
                    && not state.repository_changes_open ->
                 state.code_focus_file <- focus
-            | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals | Planning
-            | Schedules
+            | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Approvals
+            | Planning | Schedules
             | Memory | Verification | Harness | Fusion | Repositories | Changes
             | Connectors | Runtime | Config | Code | Tools
             | System_logs -> ())
@@ -22681,7 +22680,7 @@ and is loaded on demand through keeper_skill.
                      goto_surface state ~mailbox:async_messages Overview)
             | Overview ->
                 (* Back out one level: an open task detail closes to the panel,
-                   a focused task panel hands j/k back to the event log. *)
+                   a focused task panel lets go of j/k. *)
                 if Option.is_some state.task_detail_id then begin
                   state.task_detail_id <- None;
                   state.task_detail_scroll <- 0
@@ -23130,24 +23129,9 @@ and is loaded on demand through keeper_skill.
             | Overview ->
                 if Option.is_some state.task_detail_id then
                   state.task_detail_scroll <- Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
-                else if state.task_focus = Right_pane then begin
-                  if state.task_cursor < List.length state.tasks - 1 then
-                    state.task_cursor <- state.task_cursor + 1
-                end
-                else begin
-                  let _, _, row_budget =
-                    overview_layout state ~terminal_rows:(surface_rows state)
-                  in
-                  state.overview_event_scroll <-
-                    Render_schedule.scroll_overview_events_older
-                      ~event_count:
-                        (List.length
-                           (Render_schedule.collapse_consecutive
-                              ~key:Masc_tui_types.overview_event_collapse_key
-                              state.events))
-                      ~visible_rows:row_budget.attention_rows
-                      state.overview_event_scroll
-                end
+                else if state.task_focus = Right_pane
+                        && state.task_cursor < List.length state.tasks - 1 then
+                  state.task_cursor <- state.task_cursor + 1
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
@@ -23496,24 +23480,8 @@ and is loaded on demand through keeper_skill.
                   if state.task_detail_scroll > 0 then
                     state.task_detail_scroll <- state.task_detail_scroll - 1
                 end
-                else if state.task_focus = Right_pane then begin
-                  if state.task_cursor > 0 then
-                    state.task_cursor <- state.task_cursor - 1
-                end
-                else begin
-                  let _, _, row_budget =
-                    overview_layout state ~terminal_rows:(surface_rows state)
-                  in
-                  state.overview_event_scroll <-
-                    Render_schedule.scroll_overview_events_newer
-                      ~event_count:
-                        (List.length
-                           (Render_schedule.collapse_consecutive
-                              ~key:Masc_tui_types.overview_event_collapse_key
-                              state.events))
-                      ~visible_rows:row_budget.attention_rows
-                      state.overview_event_scroll
-                end
+                else if state.task_focus = Right_pane && state.task_cursor > 0
+                then state.task_cursor <- state.task_cursor - 1
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
@@ -24285,7 +24253,7 @@ and is loaded on demand through keeper_skill.
                  state.task_cursor <- 0)
         | Some "t" | Some "T" ->
            (* Focus the Overview task panel. The list is always on screen, but
-              j/k belong to the event log until the operator asks for tasks. *)
+              j/k move nothing until the operator asks for tasks. *)
            (match state.view with
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
@@ -24925,8 +24893,9 @@ and is loaded on demand through keeper_skill.
                      (match Masc_tui_config.set_board_sort ~base_path (board_sort_label state.board_sort) with
                       | Ok () -> ()
                       | Error message -> add_event state "error" ("Board sort not saved: " ^ message));
-                     (* The event row is read on the Overview, so it says the
-                        order rather than the token the request carries. *)
+                     (* The session log row is read away from Board, so it
+                        says the order rather than the token the request
+                        carries. *)
                      add_event state "system"
                        ("Board order: "
                         ^ board_sort_explanation state.board_sort);

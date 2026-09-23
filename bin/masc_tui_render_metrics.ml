@@ -334,8 +334,39 @@ let render_section_fleet ~cols (state : state) =
     | Observer_closed { events; reason; _ } ->
         Printf.sprintf "closed %d (%s)" events (Terminal_text.single_line reason)
   in
+  (* This TUI's own log: what it did and what it was told, oldest first so the
+     newest line sits last. The log holds eleven lines ([add_event]); a run of
+     the same line folds into one row with a ×N tail. First in the section so
+     the newest line is on screen without scrolling past the engine
+     readings. *)
+  let session_lines =
+    match state.events with
+    | [] -> [ "    (no events yet)" ]
+    | events ->
+      Masc_tui_render_schedule.collapse_consecutive
+        ~key:session_event_collapse_key events
+      |> List.rev
+      |> List.map (fun ((event : event), run) ->
+             let mark =
+               match session_event_mark event with
+               | None -> ""
+               | Some glyph ->
+                 Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph
+                   Ansi.reset
+             in
+             let tail =
+               if run > 1 then
+                 Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
+               else ""
+             in
+             Printf.sprintf "    %s[%s]%s %s%s%s" Ansi.dim event.timestamp
+               Ansi.reset mark
+               (Terminal_text.single_line event.content)
+               tail)
+  in
   List.map clip
-    ([ title "Engine memory" ] @ gc_lines
+    ([ title "TUI session" ] @ session_lines
+     @ [ ""; title "Engine memory" ] @ gc_lines
      @ [ ""; title "Scheduler lag (producer sample window)" ] @ scheduler_lines
      @ [ ""; title "Transport delivery" ] @ transport_lines @ [ feed_line ])
 

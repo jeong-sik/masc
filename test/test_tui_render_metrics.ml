@@ -477,6 +477,51 @@ let test_transport_block_reads_the_feed () =
     (contains closed "Runtime event feed: closed 3 (eof)")
 ;;
 
+(* The TUI session block is where this process's own log is read. The log is
+   kept newest first; the block lists it oldest first so the newest line is
+   the last one, folds a run of the same line into one row with its count,
+   and marks an error with the chat pane's glyph. *)
+let test_session_block_lists_newest_last () =
+  let state = make_state () in
+  let event timestamp event_type content : Types.event =
+    { timestamp; event_type; content }
+  in
+  state.events <-
+    [ event "10:00:04" "error" "mint failed"
+    ; event "10:00:03" "system" "Manual refresh"
+    ; event "10:00:02" "system" "Manual refresh"
+    ; event "10:00:01" "system" "TUI started"
+    ];
+  let lines =
+    List.map Masc_tui_theme.strip_sgr
+      (Render_metrics.render_section_fleet ~cols:120 state)
+  in
+  let index_of needle =
+    let rec go i = function
+      | [] -> failf "the fleet section has no line with %S" needle
+      | line :: rest -> if contains line needle then i else go (i + 1) rest
+    in
+    go 0 lines
+  in
+  check bool "the block leads the section" true
+    (contains (List.hd lines) "TUI session");
+  check bool "oldest first, newest last" true
+    (index_of "TUI started" < index_of "Manual refresh"
+     && index_of "Manual refresh" < index_of "mint failed");
+  check bool "a run of one line folds with its count" true
+    (contains (List.nth lines (index_of "Manual refresh")) "Manual refresh \xc3\x972");
+  check bool "an error carries the glyph after its clock" true
+    (contains (List.nth lines (index_of "mint failed")) "[10:00:04] \xe2\x9c\x97 mint failed");
+  check bool "the block ends before the engine readings" true
+    (index_of "mint failed" < index_of "Engine memory");
+  state.events <- [];
+  check bool "an empty log says so" true
+    (List.exists
+       (fun line -> contains line "(no events yet)")
+       (List.map Masc_tui_theme.strip_sgr
+          (Render_metrics.render_section_fleet ~cols:120 state)))
+;;
+
 let test_section_resources_lines () =
   let state = make_state () in
   let lines = Render_metrics.render_section_resources ~cols:90 state in
@@ -764,6 +809,8 @@ let () =
         ; test_case "tools" `Quick test_section_tools_lines
         ; test_case "transport block reads the feed" `Quick
             test_transport_block_reads_the_feed
+        ; test_case "session block lists newest last" `Quick
+            test_session_block_lists_newest_last
         ; test_case "fleet_populated" `Quick test_section_fleet_populated
         ; test_case "resources_populated" `Quick test_section_resources_populated
         ; test_case "tools_populated" `Quick test_section_tools_populated

@@ -136,21 +136,19 @@ type event = {
    about the key the operator just pressed. *)
 let last_action_window_s = 12.0
 
-(* The one key the Overview event panel folds identical neighbours by; the
-   renderer and both scroll handlers must count the same folded rows or the
-   scroll range and the drawn range drift apart. *)
-let overview_event_collapse_key event =
+(* The key the TUI session block folds identical neighbours by. *)
+let session_event_collapse_key event =
   event.event_type ^ "\x00" ^ event.content
 ;;
 
-(* What an Overview event row says about its level, beside its clock. The
-   level was recorded on every event and read only by the fold key above, so
-   a failed mint and a first install waiting for its workspace drew the same
-   row: the operator could tell them apart only by reading the sentence.
-   Only an error is marked, with the glyph the chat pane draws for one, so
-   the ordinary rows keep every cell of the panel for their text. A shape and
-   not a colour alone: under NO_COLOR the mark is still there. *)
-let overview_event_mark event =
+(* What a TUI session row says about its level, beside its clock. The level
+   was recorded on every event and read only by the fold key above, so a
+   failed mint and a first install waiting for its workspace drew the same
+   row: the reader could tell them apart only by reading the sentence. Only
+   an error is marked, with the glyph the chat pane draws for one, so the
+   ordinary rows keep every cell for their text. A shape and not a colour
+   alone: under NO_COLOR the mark is still there. *)
+let session_event_mark event =
   if String.equal event.event_type "error" then Some "\xe2\x9c\x97" else None
 ;;
 
@@ -5549,7 +5547,6 @@ type state = {
   mutable task_detail_scroll: int;
   mutable tasks_error: string option;
   mutable events: event list;
-  mutable overview_event_scroll: int;
   mutable keepers: keeper list;
   mutable keepers_error: string option;
   (* The live roster reading, separate from the durable one above: it answers
@@ -7744,7 +7741,6 @@ let create_state
   task_detail_scroll = 0;
   tasks_error = None;
   events = [];
-  overview_event_scroll = 0;
   keepers = [];
   keepers_error = None;
   keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
@@ -8489,7 +8485,6 @@ let composer_extra_rows (state : state) =
     drawing reaching back into the state it is drawing from: the drawing is a
     function of the state again, and every write lives on one side of it. *)
 type clamped_scroll =
-  | Overview_events of int
   | Task_detail of int
   | Board_read of int
   | Message_scroll of int
@@ -8573,7 +8568,6 @@ let scroll_down_from scroll ~by =
   if scroll > max_int - by then max_int else scroll + by
 
 let apply_clamped_scroll (state : state) = function
-  | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
   | Board_read value -> state.board_scroll <- value
   | Message_scroll value -> set_msg_scroll state value

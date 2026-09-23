@@ -315,15 +315,14 @@ let fusion_board_key = b Navigate "B" "Board evidence"
 
 let for_surface = function
   | Overview ->
-      [ b Navigate "j/k" "events" ~help:"scroll events"
-      ; b Navigate "h/l" "pane" ~help:"move between events and tasks"
+      [ b Navigate "j/k" "tasks" ~help:"move through the selected task list"
       ; b Navigate "m" "telemetry"
-          ~help:"system metrics and multicore engine telemetry"
-      ; b Act "t" "tasks" ~help:"hand j/k to the task list"
+          ~help:"system metrics, engine telemetry and this TUI's session log"
+      ; b Act "t" "tasks" ~help:"select the task list for j/k"
       ; b Act "Right / Enter" "open" ~help:"open the selected task"
-      ; b Act "Left / Esc" "back" ~help:"close detail / back to events"
+      ; b Act "Left / Esc" "back" ~help:"close detail / leave the task list"
       ; b Navigate "Home/End" "top/bottom"
-          ~help:"the ends of the events column, or of an open task's detail"
+          ~help:"the ends of the task list, or of an open task's detail"
       ]
       @ listing_meta
   | Acting ->
@@ -1010,21 +1009,17 @@ let footer_hints_prompt_assets =
   config_row ~own ~shared
 
 (* The Overview footer is the same table plus one runtime fact the renderer
-   owns: whether j/k currently drives the task list (task_focus) or the
-   event list. The table stays the SSOT — this projection only relabels
-   j/k and drops the keys that are dead in the current mode (t enters the
-   task list, Enter/Esc act on the focused task), exactly like the old
-   hand-assembled literal did, but without a second key list. *)
+   owns: whether the task list is selected (task_focus). The table stays the
+   SSOT — this projection only drops the keys that are dead in the current
+   mode: t selects the task list, and j/k, Home/End, Enter and Esc act on
+   it only once it is selected. *)
 let footer_hints_overview ~task_focus =
   let dead =
-    if task_focus then [ "t" ] else [ "Right / Enter"; "Left / Esc" ]
+    if task_focus then [ "t" ]
+    else [ "j/k"; "Home/End"; "Right / Enter"; "Left / Esc" ]
   in
   keepers_jump :: for_surface Overview
   |> List.filter (fun b -> not (List.mem b.key dead))
-  |> List.map (fun b ->
-         if b.key = "j/k" then
-           { b with label = (if task_focus then "tasks" else "events") }
-         else b)
   |> hints_of_bindings
 
 (* The Code surface's footer, which the renderer used to spell by hand. It

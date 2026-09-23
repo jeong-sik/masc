@@ -204,7 +204,7 @@ let overview_frame_rows (allocation : Schedule.overview_allocation) =
 let test_overview_rows_share_one_viewport_budget () =
   let max_data =
     Schedule.allocate_overview ~terminal_rows:14
-      ~attention_count:6 ~event_count:0 ~team_count:0 ~task_count:5 ~has_task_error:false
+      ~attention_count:6 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "14-row attention allocation" 3 max_data.attention_rows;
   check int "14-row task allocation" 1 max_data.task_rows;
@@ -213,7 +213,7 @@ let test_overview_rows_share_one_viewport_budget () =
     (overview_frame_rows max_data);
   let task_error =
     Schedule.allocate_overview ~terminal_rows:14
-      ~attention_count:6 ~event_count:0 ~team_count:0 ~task_count:5 ~has_task_error:true
+      ~attention_count:6 ~team_count:0 ~task_count:5 ~has_task_error:true
   in
   check int "task error keeps its reserved row" 1
     task_error.task_error_rows;
@@ -222,56 +222,32 @@ let test_overview_rows_share_one_viewport_budget () =
     (overview_frame_rows task_error);
   let full =
     Schedule.allocate_overview ~terminal_rows:22
-      ~attention_count:6 ~event_count:0 ~team_count:0 ~task_count:5 ~has_task_error:false
+      ~attention_count:6 ~team_count:0 ~task_count:5 ~has_task_error:false
   in
   check int "full viewport restores attention cap" 6 full.attention_rows;
   check int "full viewport restores task cap" 5 full.task_rows;
-  let events_only =
-    Schedule.allocate_overview ~terminal_rows:22
-      ~attention_count:0 ~event_count:6 ~team_count:0 ~task_count:5 ~has_task_error:false
-  in
-  check int "events size the shared panel" 6 events_only.attention_rows;
-  check int "events preserve full task rows" 5 events_only.task_rows;
-  let mixed_panel =
-    Schedule.allocate_overview ~terminal_rows:22
-      ~attention_count:2 ~event_count:4 ~team_count:0 ~task_count:5 ~has_task_error:false
-  in
-  check int "the longer panel column determines shared rows" 4
-    mixed_panel.attention_rows;
-  check int "mixed panel counts preserve full task rows" 5 mixed_panel.task_rows;
-  let compact_events_only =
-    Schedule.allocate_overview ~terminal_rows:14
-      ~attention_count:0 ~event_count:6 ~team_count:0 ~task_count:5 ~has_task_error:false
-  in
-  check int "compact events use remaining panel rows" 3
-    compact_events_only.attention_rows;
-  check int "compact events preserve one task row" 1
-    compact_events_only.task_rows;
   for terminal_rows = 14 to 40 do
     for attention_count = 0 to 8 do
-      for event_count = 0 to 8 do
-        for task_count = 0 to 7 do
-          List.iter
-            (fun has_task_error ->
-              let allocation =
-                Schedule.allocate_overview ~terminal_rows ~attention_count
-                  ~event_count ~team_count:0 ~task_count ~has_task_error
-              in
-              let total = overview_frame_rows allocation in
-              if total > terminal_rows then
-                failf
-                  "overview exceeds viewport: rows=%d attention=%d events=%d tasks=%d error=%b total=%d"
-                  terminal_rows attention_count event_count task_count
-                  has_task_error total;
-              if
-                allocation.attention_rows < 0
-                || allocation.task_error_rows < 0
-                || allocation.task_rows < 0
-              then
-                failf "overview allocation became negative at rows=%d"
-                  terminal_rows)
-            [ false; true ]
-        done
+      for task_count = 0 to 7 do
+        List.iter
+          (fun has_task_error ->
+            let allocation =
+              Schedule.allocate_overview ~terminal_rows ~attention_count
+                ~team_count:0 ~task_count ~has_task_error
+            in
+            let total = overview_frame_rows allocation in
+            if total > terminal_rows then
+              failf
+                "overview exceeds viewport: rows=%d attention=%d tasks=%d error=%b total=%d"
+                terminal_rows attention_count task_count has_task_error total;
+            if
+              allocation.attention_rows < 0
+              || allocation.task_error_rows < 0
+              || allocation.task_rows < 0
+            then
+              failf "overview allocation became negative at rows=%d"
+                terminal_rows)
+          [ false; true ]
       done
     done
   done
@@ -303,24 +279,24 @@ let board_read_frame_rows ~body_line_count ~comment_count
    of the frame is lost. *)
 let test_overview_frame_always_fills_the_terminal () =
   List.iter
-    (fun (attention_count, event_count, task_count, has_task_error) ->
+    (fun (attention_count, task_count, has_task_error) ->
       for terminal_rows = 14 to 80 do
         let allocation =
           Schedule.allocate_overview ~terminal_rows ~attention_count
-            ~event_count ~team_count:0 ~task_count ~has_task_error
+            ~team_count:0 ~task_count ~has_task_error
         in
         check int
-          (Printf.sprintf "rows %d data %d/%d/%d/%b" terminal_rows
-             attention_count event_count task_count has_task_error)
+          (Printf.sprintf "rows %d data %d/%d/%b" terminal_rows
+             attention_count task_count has_task_error)
           terminal_rows
           (overview_frame_rows allocation)
       done)
-    [ (0, 0, 0, false)
-    ; (0, 0, 0, true)
-    ; (6, 0, 5, false)
-    ; (0, 6, 5, false)
-    ; (40, 40, 40, true)
-    ; (1, 1, 1, false)
+    [ (0, 0, false)
+    ; (0, 0, true)
+    ; (6, 5, false)
+    ; (0, 5, false)
+    ; (40, 40, true)
+    ; (1, 1, false)
     ]
 
 (* A long attention list must not take the whole viewport: the backlog is the
@@ -329,18 +305,18 @@ let test_overview_frame_always_fills_the_terminal () =
 let test_overview_task_block_keeps_a_share_of_a_tall_viewport () =
   let crowded =
     Schedule.allocate_overview ~terminal_rows:60
-      ~attention_count:80 ~event_count:0 ~team_count:0 ~task_count:20 ~has_task_error:false
+      ~attention_count:80 ~team_count:0 ~task_count:20 ~has_task_error:false
   in
   check int "the panel stops at its ceiling" 6 crowded.attention_rows;
   check int "every task is still drawn" 20 crowded.task_rows
 
 (* The task block is bounded by its item count rather than by a constant, so a
    tall terminal shows the whole backlog and pads the rest. The panel keeps its
-   ceiling: rows past the sixth are scrolled to, not read at a glance. *)
+   ceiling: past the sixth row its title counts what did not fit. *)
 let test_overview_blocks_grow_to_their_item_counts () =
   let roomy =
     Schedule.allocate_overview ~terminal_rows:60
-      ~attention_count:9 ~event_count:0 ~team_count:0 ~task_count:12 ~has_task_error:false
+      ~attention_count:9 ~team_count:0 ~task_count:12 ~has_task_error:false
   in
   check int "the panel stops at its ceiling" 6 roomy.attention_rows;
   check int "every task is drawn" 12 roomy.task_rows;
@@ -356,7 +332,7 @@ let test_overview_blocks_grow_to_their_item_counts () =
 let test_team_detail_lines_take_only_spare_rows () =
   let tight =
     Schedule.allocate_overview ~terminal_rows:23
-      ~attention_count:6 ~event_count:6 ~team_count:0 ~task_count:5
+      ~attention_count:6 ~team_count:0 ~task_count:5
       ~has_task_error:false
   in
   let spent = Schedule.spend_spare_rows_on_team tight ~extra:3 in
@@ -364,7 +340,7 @@ let test_team_detail_lines_take_only_spare_rows () =
   check int "the backlog is untouched" tight.task_rows spent.task_rows;
   let tall =
     Schedule.allocate_overview ~terminal_rows:40
-      ~attention_count:2 ~event_count:2 ~team_count:4 ~task_count:3
+      ~attention_count:2 ~team_count:4 ~task_count:3
       ~has_task_error:false
   in
   let spent = Schedule.spend_spare_rows_on_team tall ~extra:3 in
@@ -374,7 +350,7 @@ let test_team_detail_lines_take_only_spare_rows () =
   check int "40-row frame is exact" 40 (overview_frame_rows spent);
   let empty =
     Schedule.allocate_overview ~terminal_rows:40
-      ~attention_count:2 ~event_count:2 ~team_count:0 ~task_count:3
+      ~attention_count:2 ~team_count:0 ~task_count:3
       ~has_task_error:false
   in
   let spent = Schedule.spend_spare_rows_on_team empty ~extra:2 in
@@ -386,7 +362,7 @@ let test_team_detail_lines_take_only_spare_rows () =
 let test_overview_team_block_sits_between_panel_and_backlog () =
   let live =
     Schedule.allocate_overview ~terminal_rows:40
-      ~attention_count:10 ~event_count:3 ~team_count:13 ~task_count:687
+      ~attention_count:10 ~team_count:13 ~task_count:687
       ~has_task_error:false
   in
   check int "the panel keeps its ceiling" 6 live.attention_rows;
@@ -396,7 +372,7 @@ let test_overview_team_block_sits_between_panel_and_backlog () =
     (overview_frame_rows live);
   let short =
     Schedule.allocate_overview ~terminal_rows:17
-      ~attention_count:6 ~event_count:0 ~team_count:13 ~task_count:20
+      ~attention_count:6 ~team_count:13 ~task_count:20
       ~has_task_error:false
   in
   check int "a short viewport gives Team no half block" 0 short.team_rows;
@@ -406,7 +382,7 @@ let test_overview_team_block_sits_between_panel_and_backlog () =
       for terminal_rows = 14 to 80 do
         let allocation =
           Schedule.allocate_overview ~terminal_rows 
-            ~attention_count:6 ~event_count:6 ~team_count ~task_count:40
+            ~attention_count:6 ~team_count ~task_count:40
             ~has_task_error:true
         in
         check int
@@ -668,59 +644,6 @@ let test_consecutive_identical_events_fold_to_one_row () =
     folded;
   check (list (pair string int)) "empty stays empty" []
     (Schedule.collapse_consecutive ~key:Fun.id [])
-
-let test_overview_event_window_follows_and_preserves_anchor () =
-  let project = Schedule.project_overview_event_window in
-  let bottom = project ~event_count:6 ~visible_rows:2 max_int in
-  check int "overscroll reaches oldest retained pair" 4 bottom.oew_offset;
-  check int "oldest range begins at five" 5 bottom.oew_first_position;
-  check int "oldest range ends at six" 6 bottom.oew_last_position;
-  let newer = project ~event_count:6 ~visible_rows:2 3 in
-  check int "one upward action moves one row" 3 newer.oew_offset;
-  check int "one upward range begins at four" 4 newer.oew_first_position;
-  check int "one upward range ends at five" 5 newer.oew_last_position;
-  check int "older input saturates at the bottom" 4
-    (Schedule.scroll_overview_events_older ~event_count:6 ~visible_rows:2
-       bottom.oew_offset);
-  check int "newer input moves from the bounded bottom" 3
-    (Schedule.scroll_overview_events_newer ~event_count:6 ~visible_rows:2
-       (Schedule.scroll_overview_events_older ~event_count:6 ~visible_rows:2
-          bottom.oew_offset));
-  let expanded = project ~event_count:6 ~visible_rows:6 bottom.oew_offset in
-  check int "larger viewport clamps to newest" 0 expanded.oew_offset;
-  check int "expanded range starts at one" 1 expanded.oew_first_position;
-  check int "expanded range shows all events" 6 expanded.oew_last_position;
-  let anchored_scroll =
-    Schedule.overview_event_offset_after_prepend ~retained_count:7
-      bottom.oew_offset
-  in
-  let anchored = project ~event_count:7 ~visible_rows:2 anchored_scroll in
-  check int "prepend advances a manual anchor" 5 anchored.oew_offset;
-  check int "anchored range starts at six" 6 anchored.oew_first_position;
-  check int "anchored range retains the old tail" 7 anchored.oew_last_position;
-  check int "newest-following offset stays at zero" 0
-    (Schedule.overview_event_offset_after_prepend ~retained_count:7 0);
-  check int "negative raw anchor normalizes to zero" 0
-    (Schedule.overview_event_offset_after_prepend ~retained_count:7 (-1));
-  check int "retention cap bounds pathological anchor" 10
-    (Schedule.overview_event_offset_after_prepend ~retained_count:11 max_int);
-  let shrunk = project ~event_count:1 ~visible_rows:2 bottom.oew_offset in
-  check int "content shrink clamps to newest" 0 shrunk.oew_offset;
-  check int "single event starts at one" 1 shrunk.oew_first_position;
-  check int "single event ends at one" 1 shrunk.oew_last_position;
-  let empty = project ~event_count:0 ~visible_rows:2 max_int in
-  check int "empty events have zero offset" 0 empty.oew_offset;
-  check int "empty events have no first position" 0 empty.oew_first_position;
-  check int "empty events have no last position" 0 empty.oew_last_position;
-  let hidden = project ~event_count:1 ~visible_rows:0 1 in
-  check int "zero-row window retains a bounded offset" 1 hidden.oew_offset;
-  check int "zero-row window has no first position" 0 hidden.oew_first_position;
-  check int "zero-row window has no last position" 0 hidden.oew_last_position;
-  check int "zero-row older input saturates without overflow" max_int
-    (Schedule.scroll_overview_events_older ~event_count:max_int ~visible_rows:0
-       max_int);
-  check int "negative retained count cannot overflow" 0
-    (Schedule.overview_event_offset_after_prepend ~retained_count:min_int 1)
 
 (* What the runtime ceiling used to be: a constant of 34. The cases below are
    about the other columns, so they hold it still. *)
@@ -2160,8 +2083,6 @@ let () =
             test_board_read_side_layout_opens_head_first
         ; test_case "keeper detail scroll follows current bounds" `Quick
             test_keeper_detail_scroll_normalizes_across_bounds
-        ; test_case "overview events follow and preserve manual anchor" `Quick
-            test_overview_event_window_follows_and_preserves_anchor
         ; test_case "consecutive identical events fold to one row" `Quick
             test_consecutive_identical_events_fold_to_one_row
         ; test_case "keeper columns never exceed their width" `Quick

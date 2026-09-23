@@ -5869,8 +5869,8 @@
  (libraries alcotest masc_tui_board_kind_mark masc_tui_types))
 
 (test
- (name test_tui_overview_event_mark)
- (modules test_tui_overview_event_mark)
+ (name test_tui_session_event_mark)
+ (modules test_tui_session_event_mark)
  (libraries alcotest masc_tui_types))
 
 (test

@@ -568,7 +568,6 @@ let overview_layout (state : state) ~terminal_rows =
   let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
       ~attention_count:(List.length attention_items)
-      ~event_count:(List.length state.events)
       ~team_count
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
@@ -719,26 +718,20 @@ let render_overview (state : state) =
   let attention_items, tasks_error, row_budget =
     overview_layout state ~terminal_rows:rows
   in
-  (* Three verticals plus two panels have to add up to the box the rest of the
-     screen draws. An odd remainder used to be dropped by the division, so on
-     any odd width the Attention/Events band ended one column short of every
-     other row and the right edge stepped in and back out. The odd column goes
-     to the right panel. *)
-  let panel_width = (cols - 3) / 2 in
-  let right_panel_width = cols - 3 - panel_width in
+  (* The panel spans the band the rest of the screen's rows cover: one cell of
+     margin on each side of the frame. *)
+  let panel_width = cols - 2 in
   (* The count used to ride the summary row three lines above, over the very
      rows it counted. It belongs to the panel, and it earns its place only
-     where it says something the rows cannot: that some did not fit. The
-     Events panel beside it states its window the same way. *)
+     where it says something the rows cannot: that some did not fit. *)
   let attention_count = List.length attention_items in
   (* The age cell answers "why is this still here", and a producer that puts
      no time on its evidence leaves it an em dash. Live, that is every item:
      of the nine the briefing queued, eight carry no timestamp at all and the
      ninth writes one under a name this surface does not read, so the column
-     drew nine dashes and spent four cells of a panel that shares its row with
-     the events beside it. It is drawn when some item has an age; summaries
-     still start on one edge, because the column is there or not there for the
-     whole panel. *)
+     drew nine dashes and spent four cells of the panel. It is drawn when some
+     item has an age; summaries still start on one edge, because the column is
+     there or not there for the whole panel. *)
   let attention_shows_age =
     List.exists
       (fun (item : attention_item) ->
@@ -769,38 +762,10 @@ let render_overview (state : state) =
     then with_team
     else counted
   in
-  (* A burst of identical lines (manual refreshes, a broadcast fan-out) folds
-     into one row with a ×N tail; the window scrolls over folded rows. *)
-  let collapsed_events =
-    Render_schedule.collapse_consecutive
-      ~key:Masc_tui_types.overview_event_collapse_key state.events
-  in
-  let event_count = List.length collapsed_events in
-  let event_window =
-    Render_schedule.project_overview_event_window ~event_count
-      ~visible_rows:row_budget.attention_rows state.overview_event_scroll
-  in
-  let events_title =
-    let title =
-      if event_window.oew_first_position = 0 then " TUI Session Events "
-      else
-        Printf.sprintf " TUI Session Events %d-%d/%d "
-          event_window.oew_first_position event_window.oew_last_position
-          event_count
-    in
-    fit_width title (max 0 panel_width)
-  in
-  Buffer.add_string buf (Printf.sprintf " %s%s%s%s%s%s\n"
-    Ansi.bold attention_title Ansi.reset
-    (String.make (max 0 (panel_width - String.length attention_title)) ' ')
-    ((Theme.recede ()) ^ Ansi.box_v ^ Ansi.reset)
-    events_title);
+  Buffer.add_string buf
+    (Printf.sprintf " %s%s%s\n" Ansi.bold attention_title Ansi.reset);
 
   let attention_items_window = Rows.of_list ~first:0 ~height:row_budget.attention_rows attention_items in
-  let collapsed_events_window =
-    Rows.of_list ~first:event_window.oew_offset
-      ~height:row_budget.attention_rows collapsed_events
-  in
   (* What the panel says when it has no item to draw, the way the Tasks panel
      below it does. It said nothing: an overview that answered with no items,
      one not read yet and one that failed all left the panel blank under its
@@ -809,8 +774,7 @@ let render_overview (state : state) =
      panel writes its own two cells of indent ahead of every row, and the
      notes are written for a body that adds its own -- pasted in whole, the
      note sat two cells right of the rows it replaces and of the title above
-     them, while the Events panel beside it put its title and its rows on one
-     column. *)
+     them. *)
   let attention_empty_note =
     match empty_page_of ~snapshot:state.overview ~error:overview_error with
     | Page_empty when on_team_rows > 0 ->
@@ -852,43 +816,15 @@ let render_overview (state : state) =
         in
           (* Fitted once, by the fit that draws the row. Fitting the summary
              here as well meant guessing how many cells the label ahead of it
-             spends, and the events column beside this one guessed one too
-             many: every event row came out a cell over its budget and was
-             marked truncated whether or not anything was cut. The severity
-             badge pads itself to its own column, which is measured from the
-             level names rather than guessed at -- so it is the one part of
-             the row that is finished before it gets here. *)
+             spends. The severity badge pads itself to its own column, which
+             is measured from the level names rather than guessed at -- so it
+             is the one part of the row that is finished before it gets
+             here. *)
           Printf.sprintf "%s %s%s" severity_badge age_cell
             (Terminal_text.single_line a.ai_summary)
     in
-    let event_str =
-      let event_index = i + event_window.oew_offset in
-      match Rows.at collapsed_events_window event_index with
-      | None -> ""
-      | Some (e, run) ->
-        let tail =
-          if run > 1 then Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
-          else ""
-        in
-        (* After the clock, so the clock column stays one column down the
-           panel and only the rows that carry a mark give up its two cells. *)
-        let mark =
-          match Masc_tui_types.overview_event_mark e with
-          | None -> ""
-          | Some glyph ->
-              Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph
-                Ansi.reset
-        in
-        Printf.sprintf "%s[%s]%s %s%s%s"
-          Ansi.dim e.timestamp Ansi.reset
-          mark
-          (Terminal_text.single_line e.content)
-          tail
-    in
-    Buffer.add_string buf (Printf.sprintf "  %s %s%s%s %s\n"
-      (fit_width attention_str (panel_width - 2))
-      (Theme.recede ()) Ansi.box_v Ansi.reset
-      (fit_width event_str (right_panel_width - 2)))
+    Buffer.add_string buf
+      (Printf.sprintf "  %s\n" (fit_width attention_str (panel_width - 2)))
   done;
 
   box_divider buf cols;
@@ -1015,8 +951,7 @@ let render_overview (state : state) =
          (Masc_tui_keys.footer_hints_overview
             ~task_focus:(state.task_focus = Right_pane)));
 
-  finish_surface state ~clamped:(Overview_events event_window.oew_offset) ~surface_key:"overview" ~rows:terminal_rows
-      ~cols buf
+  finish_surface state ~surface_key:"overview" ~rows:terminal_rows ~cols buf
 
 (* One task's event history, appended after the detail body so it rides the
    same scroll. Loaded lazily on detail entry; the id check drops an answer

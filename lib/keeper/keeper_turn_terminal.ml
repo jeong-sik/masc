@@ -84,6 +84,7 @@ let of_failure ?(tool_call_count = 0) ~raw_error err =
         | Keeper_turn_driver.Provider_attempt_effect_fenced _
         | Keeper_turn_driver.Tool_correction_lost _
         | Keeper_turn_driver.Host_stopped_turn _
+        | Keeper_turn_driver.Preempted_before_first_token _
         | Keeper_turn_driver.Runtime_connection_closed _
         | Keeper_turn_driver.Receipt_persistence_failed _
         | Keeper_turn_driver.Gate_replay_repair_required _ ) ->

@@ -1600,6 +1600,7 @@ let test_operator_one_click_cancels_a_cancel_claim () =
       .parse_operator_verdict_json
         (`Assoc
           [ "task_id", `String "task-001"
+          ; "verification_id", `String (verification_id_for_task config "task-001")
           ; "verdict", `String "approve"
           ; "notes", `String "reason confirmed"
           ])
@@ -1722,6 +1723,7 @@ let test_operator_verdict_boundary_is_reachable () =
       .parse_operator_verdict_json
         (`Assoc
           [ "task_id", `String "task-001"
+          ; "verification_id", `String (verification_id_for_task config "task-001")
           ; "verdict", `String "approve"
           ; "notes", `String "evidence checked"
           ])
@@ -1749,11 +1751,98 @@ let test_operator_verdict_parser_rejects_reasonless_rejection () =
     .parse_operator_verdict_json
       (`Assoc
         [ "task_id", `String "task-001"
+        ; "verification_id", `String "vrf-read"
         ; "verdict", `String "reject"
         ])
   with
   | Error message when str_contains message "reason" -> ()
   | Ok _ | Error _ -> Alcotest.fail "reasonless rejection must fail parsing"
+
+(* The operator reads one submission's evidence and clicks. If the producer
+   resubmits in between, the Task now awaits a different submission, and a
+   verdict that only named the Task would land on evidence nobody read. The
+   verdict names the submission the operator read; the commit refuses a stale
+   one with 409 and leaves the Task where it was. *)
+let test_operator_verdict_on_a_superseded_submission_is_refused () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Resubmitted" ~priority:1 ~description:"" in
+    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let submit notes =
+      match
+        Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
+          ~action:Masc_domain.Submit_for_verification ~notes
+          ~prepare_verification_request:
+            (fun ~task ~assignee ~verification_id ~claim ->
+               Verification_protocol.create_submit_request
+                 ~config ~task ~assignee ~verification_id ~claim)
+          ()
+      with
+      | Ok _ -> verification_id_for_task config "task-001"
+      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
+    in
+    let read_by_operator = submit "first evidence" in
+    let current = submit "second evidence" in
+    Alcotest.(check bool) "resubmission issues a fresh verification id" false
+      (String.equal read_by_operator current);
+    let verdict_for verification_id =
+      match
+        Server_routes_http_routes_verification.For_testing.parse_operator_verdict_json
+          (`Assoc
+            [ "task_id", `String "task-001"
+            ; "verification_id", `String verification_id
+            ; "verdict", `String "approve"
+            ])
+      with
+      | Ok request -> request
+      | Error message -> Alcotest.fail message
+    in
+    (match
+       Server_routes_http_routes_verification.For_testing.commit_operator_verdict
+         ~config ~operator_id:"operator-test" (verdict_for read_by_operator)
+     with
+     | Error
+         (Masc_domain.Task
+            (Masc_domain.Task_error.VerificationSuperseded { requested; current = live; _ })
+          as error) ->
+       Alcotest.(check string) "names the submission the operator read"
+         read_by_operator requested;
+       Alcotest.(check string) "names the submission now awaiting" current live;
+       Alcotest.(check bool) "answered as a conflict" true
+         (Server_auth.http_status_of_auth_error error = `Conflict)
+     | Error e ->
+       Alcotest.fail ("wrong refusal: " ^ Masc_domain.masc_error_to_string e)
+     | Ok _ -> Alcotest.fail "a verdict on a superseded submission must be refused");
+    Alcotest.(check string) "the refused verdict leaves the Task awaiting the new submission"
+      current (verification_id_for_task config "task-001");
+    (match
+       Server_routes_http_routes_verification.For_testing.commit_operator_verdict
+         ~config ~operator_id:"operator-test" (verdict_for current)
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    match find_task config "task-001" with
+    | Some { task_status = Masc_domain.Done _; _ } -> ()
+    | Some _ | None -> Alcotest.fail "a verdict on the current submission must complete the Task")
+
+let test_operator_verdict_parser_requires_verification_id () =
+  let parse fields =
+    Server_routes_http_routes_verification.For_testing.parse_operator_verdict_json
+      (`Assoc fields)
+  in
+  (match parse [ "task_id", `String "task-001"; "verdict", `String "approve" ] with
+   | Error message when str_contains message "verification_id" -> ()
+   | Ok _ | Error _ -> Alcotest.fail "a verdict without verification_id must fail parsing");
+  match
+    parse
+      [ "task_id", `String "task-001"
+      ; "verification_id", `String "vrf-read"
+      ; "verdict", `String "approve"
+      ; "verfication_id", `String "vrf-typo"
+      ]
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unknown verdict field must fail parsing"
 
 (* Replaces the approve-notes guard. An approval no longer needs a justification
    string because the caller authenticates the completion authority before this
@@ -2735,6 +2824,10 @@ let () =
         test_operator_one_click_cancels_a_cancel_claim;
       Alcotest.test_case "operator rejection parser requires reason" `Quick
         test_operator_verdict_parser_rejects_reasonless_rejection;
+      Alcotest.test_case "operator verdict on a superseded submission is refused" `Quick
+        test_operator_verdict_on_a_superseded_submission_is_refused;
+      Alcotest.test_case "operator verdict parser requires verification_id" `Quick
+        test_operator_verdict_parser_requires_verification_id;
       Alcotest.test_case "operator rejection requires non-empty reason" `Quick
         test_verdict_rejects_blank_rejection_reason;
     ];

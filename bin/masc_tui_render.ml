@@ -3701,7 +3701,7 @@ let render_schedule_list (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf "%s  %s  %s"
-    (screen_title " MASC Schedules")
+    (screen_title " MASC Keepers / Schedules")
     timestamp
     (connection_badge state) in
 
@@ -4195,7 +4195,7 @@ let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s[%s]%s"
-       (screen_title " MASC Schedules \xe2\x96\xb8 details")
+       (screen_title " MASC Keepers / Schedules \xe2\x96\xb8 details")
        (schedule_status_color row.sch_status)
        (Terminal_text.single_line row.sch_status) Ansi.reset);
   box_divider buf cols;
@@ -7132,10 +7132,24 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  else line)
               connectors
           in
+          let refused_rows =
+            List.map
+              (fun (refusal : Tui_decode.connector_refusal) ->
+                 let name =
+                   match refusal.cr_connector_id with
+                   | Some id -> Terminal_text.single_line id
+                   | None -> Printf.sprintf "connectors[%d]" refusal.cr_row
+                 in
+                 (Theme.bad ()) ^ "    " ^ name ^ "  unreadable: "
+                 ^ Terminal_text.single_line refusal.cr_reason ^ Ansi.reset)
+              snapshot.cs_refused
+          in
           let selected_lines =
-            match List.nth_opt connectors selected_index with
-            | None -> [ Ansi.dim ^ "  (no channel transports registered)" ^ Ansi.reset ]
-            | Some connector ->
+            match List.nth_opt connectors selected_index, snapshot.cs_refused with
+            | None, [] ->
+                [ Ansi.dim ^ "  (no channel transports registered)" ^ Ansi.reset ]
+            | None, _ :: _ -> []
+            | Some connector, _ ->
                 let optional_row label value =
                   match value with
                   | None -> []
@@ -7167,11 +7181,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                       Printf.sprintf "%s (%s)"
                         (Terminal_text.single_line name)
                         (Terminal_text.single_line binding.cb_channel_id)
-                in
-                let runtime_state =
-                  match connector.cn_gateway_state, connector.cn_poll_state with
-                  | Some value, _ | None, Some value -> Some value
-                  | None, None -> None
                 in
                 let store_state =
                   match connector.cn_binding_store_read_ok with
@@ -7227,8 +7236,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                     (Terminal_text.single_line_or ~default:"-" connector.cn_channel)
                 ]
                 @ optional_row "Runtime state"
-                    (Masc_tui_connector_state.runtime_state_to_draw
-                       ~connection:connector.cn_connection runtime_state)
+                    (Masc_tui_connector_state.runtime_state_to_draw connector)
                 @ optional_row "Status source" connector.cn_status_source
                 @ optional_row "Remote endpoint" connector.cn_endpoint
                 @ optional_row "Status file" connector.cn_status_path
@@ -7329,7 +7337,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                  [ (Theme.bad ()) ^ "  refresh failed: "
                    ^ Terminal_text.single_line detail ^ Ansi.reset
                  ])
-          @ transport_rows @ selected_lines
+          @ transport_rows @ refused_rows @ selected_lines
     in
     let automation_lines =
       (* This tab reads the Keeper's own page from the server rather than
@@ -11964,7 +11972,7 @@ let render_tools (state : state) =
   in
   let header =
     Printf.sprintf "%s  %s  %s"
-      (screen_title " MASC Tools") timestamp
+      (screen_title " MASC Config / Tools") timestamp
       (connection_badge state)
   in
   box_top buf cols;
@@ -12630,11 +12638,12 @@ let render_runtime_pick (state : state) =
             c.push (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset);
             1
         | None ->
-            (* The kind badge is 7 cells ("[LANE] ", "[MODEL]"), so the
-               first header cell spans badge and target, as the rows do. *)
+            (* The first header cell spans badge and target, as the rows
+               do. *)
             let header =
               Printf.sprintf "  %s  %s  %s"
-                (fit_width "KIND   TARGET" (7 + target_width))
+                (fit_width "KIND   TARGET"
+                   (Masc_tui_types.runtime_pick_badge_cells + target_width))
                 (fit_width "CONFIGURED ROUTE / MODEL" route_width)
                 (fit_width "PROPERTIES / CANDIDATES"
                    (Masc_tui_types.runtime_pick_properties_room ~cols
@@ -12670,11 +12679,17 @@ let render_runtime_pick (state : state) =
                               | _ -> id)
                            lane.rrl_runtime_ids)
                     in
-                    ( Ansi.cyan ^ "[LANE] " ^ Ansi.reset
+                    ( Ansi.cyan
+                      ^ fit_width Masc_tui_types.runtime_pick_lane_badge
+                          Masc_tui_types.runtime_pick_badge_cells
+                      ^ Ansi.reset
                     , Message_layout.fit_middle target_width (Terminal_text.single_line lane.rrl_id)
                     , fit_width (Terminal_text.single_line chain) route_width )
                 | Masc_tui_types.Pick_model option ->
-                    ( Ansi.dim ^ "[MODEL]" ^ Ansi.reset
+                    ( Ansi.dim
+                      ^ fit_width Masc_tui_types.runtime_pick_model_badge
+                          Masc_tui_types.runtime_pick_badge_cells
+                      ^ Ansi.reset
                     , Message_layout.fit_middle target_width (Terminal_text.single_line option.ro_id)
                     , fit_width
                         (Terminal_text.single_line

@@ -13,6 +13,9 @@
 
 type operator_verdict_request =
   { task_id : string
+  ; verification_id : string
+      (** The submission whose evidence the operator read. A verdict naming
+          a submission that is no longer awaiting one is refused with 409. *)
   ; verdict : Masc_domain.completion_verdict
   ; notes : string
   }
@@ -44,5 +47,5 @@ module For_testing : sig
     config:Workspace.config ->
     operator_id:string ->
     operator_verdict_request ->
-    (Workspace.transition_outcome, string) result
+    (Workspace.transition_outcome, Masc_domain.masc_error) result
 end

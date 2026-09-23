@@ -214,3 +214,9 @@ Librarian 이 자기 Keeper 의 관점으로 판단한다. 새 Gate 나 검사�
 - 영향: atom 위치 digest 가 metadata 를 포함하므로 만든 뒤에 붙이거나 떼면 안 된다.
   `api_common.ml:659-677` 은 metadata 가 빈 user 메시지만 앞 Tool 메시지에 합치므로 요청 모양과
   캐시 앞부분이 바뀐다. `keeper_turn_driver.ml:1402-1418` 의 재생 prefix 도 같은 metadata 를 실어야 한다.
+
+## 9. 배포 뒤 실측 (2026-09-24)
+
+- 1단계(#38378, 03:16 배포): 새 서버가 만든 Librarian 입력 30건 중 30건에 `keeper_id` 가 들어갔다(배포 전 0/200). 15명의 Keeper 에서 확인했다.
+- 2a(#38383, 04:16 배포) 전 기준: 09-23 00:00 부터 배포 전까지 `agent` surface 의 user 줄 60건 중 57건이 `owner` 로 저장됐다. 같은 기간 운영자가 대시보드로 쓴 줄은 50건이었다.
+- 2a 배포 뒤 첫 표본: `codex-mcp-client` 가 `masc_keeper_msg` 로 보낸 줄이 `owner` 로 저장됐다. 등록된 Keeper 가 아니므로 이 PR 의 규칙대로다. 다만 Keeper 가 아닌 에이전트 세션도 운영자는 아니다. 발화자 종류에 에이전트 세션을 따로 둘지는 열린 항목이다.

@@ -737,6 +737,29 @@ let count_field_clears_to_none ~module_path ~binding_name ~field_name =
   !count
 ;;
 
+(* Every [_.field] read inside a binding. Where two places have to agree on
+   what a field means, one of them owns the reading and the other calls it --
+   and the way that arrangement breaks is the second place reading the raw
+   field again, which compiles and looks right. Zero here is the claim that it
+   goes through the owner. *)
+let count_field_reads_in_value_binding ~module_path ~binding_name ~field_name =
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self expression ->
+          (match expression.Parsetree.pexp_desc with
+           | Parsetree.Pexp_field (_, { txt; _ })
+             when String.equal (longident_leaf txt) field_name -> incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self expression)
+    }
+  in
+  List.iter (iter.expr iter)
+    (expressions_of_value_binding ~module_path ~binding_name);
+  !count
+;;
+
 (* Every [x.field <- _] in a module, wherever it sits. A field whose writes
    are meant to funnel through one setter has a count of zero everywhere else,
    and that is a claim a reader can check rather than trust. *)

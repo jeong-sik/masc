@@ -2883,6 +2883,33 @@ let test_lane_run_payload_uses_the_json_document_renderer () =
        ~binding_name:"lane_run_payload_lines" ~callee:"document_markdown")
 ;;
 
+(* Two places decide how many in-flight rows the chat status area holds, and
+   they have to decide it the same way: the pane skips the request the live
+   transcript is already drawing, so the budget has to skip it too. The budget
+   did not, and a single message in flight -- the ordinary case -- left a
+   reserved row nobody drew (#37741).
+
+   A unit test can pin what the shared function answers, but not that both
+   callers ask it. That is a call shape, and the way it comes back is somebody
+   writing [List.length state.msg_inflight] again: it compiles, it reads
+   correctly, and it is wrong by one row. So the budget's reads of the raw
+   field are counted at zero. *)
+let test_the_row_budget_reads_the_in_flight_rows_the_pane_draws () =
+  check int "the budget asks for the rows the pane draws" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_message_status_rows"
+       ~callee:"keeper_message_inflight_drawn");
+  check int "and reads the raw in-flight list nowhere in that sum" 0
+    (Ast_grep.count_field_reads_in_value_binding
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_message_status_rows" ~field_name:"msg_inflight");
+  check int "the pane asks the same question through the same function" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render_chat.ml"
+       ~binding_name:"render_keeper_message"
+       ~callee:"Masc_tui_types.keeper_message_inflight_drawn")
+;;
 
 let () =
   run "masc-tui-http-regression" [
@@ -3037,6 +3064,10 @@ let () =
           "lane run payload uses the JSON document renderer"
           `Quick
           test_lane_run_payload_uses_the_json_document_renderer;
+        test_case
+          "the row budget reads the in-flight rows the pane draws"
+          `Quick
+          test_the_row_budget_reads_the_in_flight_rows_the_pane_draws;
       ]
     )
   ]

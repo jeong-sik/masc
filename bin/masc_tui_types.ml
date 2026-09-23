@@ -10305,6 +10305,31 @@ let keeper_message_activity_rows (state : state) =
       else []) @ queue_rows
 ;;
 
+(* The in-flight requests the chat pane draws a row for.
+
+   A request the live transcript is already drawing gets no row of its own:
+   the transcript says its phase, its age and the tools it is in, and a second
+   row put a second age and an opaque request id above the ACTIVE TURN line.
+   The pane decided that by execution id and the budget did not decide it at
+   all, so with one message in flight -- the ordinary case -- the budget held a
+   row the pane never drew, and the status area gained a blank line while the
+   footer sat one row off (#37741).
+
+   Both read this now. The filter is keyed on the execution id rather than the
+   keeper, so a second message to the same keeper still gets its row, and a
+   request to some other keeper cannot be swallowed by it: an execution id
+   belongs to one turn. *)
+let keeper_message_inflight_drawn (state : state) =
+  match state.msg_live with
+  | Some live
+    when state.msg_target_keeper_name = Some (turn_log_keeper_name live) ->
+    let drawn_by_transcript = turn_log_execution_id live in
+    List.filter
+      (fun entry ->
+        not (String.equal drawn_by_transcript (turn_log_execution_id entry.log)))
+      state.msg_inflight
+  | Some _ | None -> state.msg_inflight
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -10312,7 +10337,7 @@ let keeper_message_status_rows (state : state) =
       -> 0
     | Some _ | None -> 1
   in
-  List.length state.msg_inflight
+  List.length (keeper_message_inflight_drawn state)
   + List.length (keeper_message_activity_rows state)
   + List.length (keeper_observed_interrupt_rows state)
   + unavailable_target

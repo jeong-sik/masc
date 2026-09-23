@@ -364,6 +364,20 @@ let run (ctx : ctx)
         ~base_path:config.base_path
         meta.name;
       Ok result, turn_state
+    | Error err when EC.is_preempted_before_first_token err ->
+      (* The turn yielded to a queued person before its provider produced
+         anything (#38094). No lane was exhausted and no cascade resolved, so
+         none of the failure bookkeeping below applies; the turn ends
+         cancelled and the unified turn settles it as skipped. *)
+      Keeper_registry.mark_turn_runtime_done
+        ~base_path:config.base_path
+        meta.name;
+      Keeper_turn_fsm.emit_transition
+        ~keeper_name:meta.name
+        ~turn_id:keeper_turn_id
+        ~prev:Keeper_turn_fsm.Streaming
+        (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_preempted_by_person);
+      Error err, turn_state
     | Error err ->
       let turn_state =
         match !deferred_runtime_lane_ref with

@@ -282,9 +282,17 @@ let classify ~facts ~new_claims ~absorbed =
       absorbed
     |> List.rev_map (fun (into, members) -> into, List.rev members)
   in
+  (* An absorbing claim is a new one, or a current memory the answer wrote
+     again as it stands: that memory is the claim, so its text is the one
+     the absorbed memories are judged against. *)
+  let claim_of_into into =
+    match claim_of into new_claims with
+    | Some _ as claim -> claim
+    | None -> claim_of into facts
+  in
   List.map
     (fun (into, members) ->
-       match claim_of into new_claims with
+       match claim_of_into into with
        | None -> { into; claim = None; unjudged = members; unjudgeable = []; judgeable = [] }
        | Some claim when String.length claim > state_bytes_limit ->
          (* The claim does not fit the state: nothing it absorbs can be judged

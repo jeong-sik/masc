@@ -105,7 +105,6 @@ val readiness : draft -> row:Masc.Tui_decode.ask_row -> readiness
 
 val request_body :
   answers:Yojson.Safe.t ->
-  actor_id:string option ->
   session_id:string option ->
   Yojson.Safe.t
 

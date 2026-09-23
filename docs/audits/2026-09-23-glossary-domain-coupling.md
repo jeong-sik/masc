@@ -4,7 +4,7 @@
 Keeper, Librarian, Memory, HITL, 접근 제어, Multi Lane(Lane·Runtime·Candidate),
 Schedule, TUI 화면(Attention, Team 블록)이다.
 
-모든 줄 번호는 `origin/main` `5be342827e` 기준이다. 코드는 바꾸지 않았다. 분리 제안은 제안일 뿐이다.
+모든 줄 번호는 `origin/main` `5be342827e` 기준이다. 코드는 바꾸지 않았고 분리안은 제안이다.
 
 TUI 에 Team 블록은 없다. `bin/masc_tui*.ml` 와 `lib/dashboard` 에서 `Team` 을 찾으면
 하나도 안 나온다. 그래서 Team 블록은 아래 표에서 뺐다.
@@ -19,10 +19,10 @@ id 문자열만 들고 있으면 "id 로만"이라고 적었다.
 | Task | Goal | Task 레코드에 `goal_id` 가 없다. 연결은 따로 된 표 `goal_task_links` 가 들고 있다 | `lib/types/types_core.mli:219`, `lib/task/task_goal_assignment.mli:6-7`, `lib/workspace/workspace_goal_index.mli:125` |
 | Goal | Task | Goal 레코드에 Task 목록이 없다. Goal 을 지울 때만 연결 표를 정리한다 | `lib/goal/goal_store.mli:33`, `lib/goal/goal_store.ml:630` |
 | Task(검증 제출) | Board, Fusion | `evidence_refs : string list` 에 `board:<글 id>`, `fusion:<실행 id>` 문자열로 든다 | `lib/types/types_core.mli:120`, `lib/workspace/workspace_verification_store.ml:117-125` |
-| Board | Keeper | Keeper 타입을 안 쓴다. 작성자·대상은 Board 자기 `Agent_id.t` 다. 글 출처는 `Ids.Turn_ref.t` 하나뿐이다 | `lib/board_types/board_types.mli:70-79`, `:112-121` |
+| Board | Keeper | Keeper 타입을 안 쓴다. 작성자·대상은 Board 자기 `Agent_id.t` 다. 글 출처(`post_origin`)에서 Keeper 와 이어지는 필드는 `Ids.Turn_ref.t` 하나뿐이다 | `lib/board_types/board_types.mli:70-79`, `:112-121` |
 | Board | Task, Goal | 전혀 안 든다. `lib/board/dune` 에 task·goal·keeper 라이브러리가 없다 | `lib/board/dune` |
 | Keeper(Board 판정 후보) | Board | 후보 파일이 `Board_dispatch.board_signal` 을 통째로 든다. 제목과 본문이 들어 있다 | `lib/keeper/keeper_board_attention_candidate.mli:148-152`, `lib/board/board_dispatch.mli:73-81`, `lib/keeper/keeper_board_attention_candidate.ml:278-279` |
-| Schedule | Keeper | Keeper 타입을 안 쓴다. 깨울 Keeper 이름은 payload 본문의 `"keeper_name"` 문자열이다. 깨우는 코드는 서버가 넣어 준다 | `lib/schedule/schedule_domain.mli:67-74`, `lib/schedule/schedule_runner.mli:64-89`, `lib/server/server_bootstrap_maintenance.ml:522-523` |
+| Schedule | Keeper | Keeper 타입을 안 쓴다. 깨울 Keeper 이름은 payload 본문의 `"keeper_name"` 문자열이다. 깨우는 코드는 서버가 넣어 준다 | `lib/server/server_schedule_consumers.ml:389`, `lib/schedule/schedule_runner.mli:64-89`, `lib/server/server_bootstrap_maintenance.ml:522-523` |
 | HITL(승인 대기) | Keeper, Task, Goal | `keeper_name`·`task_id`·`goal_id` 를 문자열로 든다. 다만 `Keeper_continuation_channel.t` 는 타입째 든다 | `lib/keeper_contract/keeper_approval_queue_rules_types.mli:129-142` |
 | Keeper 실행 값 | Checkpoint | `Keeper_types.working_context` 는 필드가 `checkpoint` 하나뿐이다 | `lib/keeper_types/keeper_types.mli:36-38` |
 | Librarian 결과 | Memory, Context | `selection` 이 `facts`(Memory OS 타입)와 `working_contexts`(pocket 목록)를 함께 든다 | `lib/keeper/keeper_librarian.mli:114-117` |
@@ -31,7 +31,7 @@ id 문자열만 들고 있으면 "id 로만"이라고 적었다.
 | Runtime(아래층) | Keeper(위층) | `lib/runtime/dune` 이 `masc.keeper_runtime` 을 쓴다. 효과 상세·재시도 시각 판정을 Keeper 모듈에서 가져온다 | `lib/runtime/runtime_claude_code.mli:138`, `lib/runtime/runtime_candidate_backpressure_state.ml:24` |
 | Exact lane 기록부 | Librarian, HITL, Board, Workspace curator | 공용 기록부의 lane 타입이 위층 기능 넷을 이름으로 적는다. `Runtime.exact_lane` 은 Verifier 를 더해 다섯이다 | `lib/exact_lane_run_registry.mli:4-8`, `lib/runtime/runtime.mli:462-467` |
 | Runtime 후보 | Provider 바인딩 | `candidate` 는 바인딩과 최근 rate limit·실패 관측을 든다 | `lib/runtime/runtime_candidate_backpressure.mli:24-39` |
-| Memory queue | Keeper lane | `Keeper_memory_lane` 은 `Keeper_lane.t` 위에 올라탄다. `Runtime_lane`·exact lane 과는 관계없다 | `lib/keeper/keeper_memory_lane.ml:9,18` |
+| Memory queue | Keeper lane | `Keeper_memory_lane` 은 `Keeper_lane.t` 를 쓴다. `Runtime_lane`·exact lane 과는 관계없다 | `lib/keeper/keeper_memory_lane.ml:9,18` |
 | TUI 개요 Attention | 서버 브리핑 | 서버 JSON(`/api/v1/dashboard/briefing`)을 읽는다 | `bin/masc_tui_loader.ml:1145-1213` |
 | TUI Agenda | Task 저장소 | 서버를 거치지 않고 backlog 파일을 직접 읽어 운영자 목록을 다시 계산한다 | `bin/masc_tui_loader.ml:128-131`, `:173-191` |
 
@@ -83,7 +83,7 @@ Librarian 은 checkpoint 저장소 오류 타입을 모르게 된다.
   `runtime_claude_code.mli:138` 은 `Keeper_terminal_effect_detail.t` 를 쓴다.
 - `lib/exact_lane_run_registry.mli:4-8` 과 `lib/runtime/runtime.mli:462-467` 은 Librarian·HITL·Board 판정 같은
   위층 기능을 lane 이름으로 박아 둔다. `lib/runtime/runtime_schema.mli:332-333` 도 `board_attention`·`absorb_gate`
-  두 칸을 설정 타입에 박는다.
+  두 필드를 설정 타입에 박는다.
 - 새 exact lane 을 만들려면 Runtime 타입부터 고쳐야 한다.
 
 제안: 재시도 판정과 효과 상세 타입을 Runtime 쪽 중립 모듈로 옮긴다. lane 이름은 Keeper 층이 정하고
@@ -101,7 +101,7 @@ Board 모듈 타입 대신 Keeper 가 소유한 필드만 적는다.
 
 ### 5. Schedule 소비자가 Keeper 내부 모듈 여럿을 직접 부른다
 
-- Schedule 라이브러리 자체는 깨끗하다. Keeper 를 이름 문자열로만 안다 (`lib/schedule/schedule_domain.mli:67-74`).
+- Schedule 라이브러리 자체는 깨끗하다. Keeper 를 이름 문자열로만 안다. payload 는 추상 타입이고(`lib/schedule/schedule_domain.mli:67-74`), 이름은 서버 consumer 가 꺼낸다(`lib/server/server_schedule_consumers.ml:389`).
 - 그런데 서버의 소비자 `lib/server/server_schedule_consumers.ml` 이 `Keeper_registry`(:405),
   `Keeper_meta_store`(:408), `Keeper_reaction_ledger`(:430-466), `Keeper_owner_registry`(:549),
   `Keeper_event_queue.scheduled_wake`(:1008) 를 한 파일에서 모두 부른다.
@@ -136,7 +136,7 @@ Board 모듈 타입 대신 Keeper 가 소유한 필드만 적는다.
 
 | 이름 | 뜻들 | 근거 | 처리 |
 |---|---|---|---|
-| working context | ① Librarian 의 pocket 묶음 ② Keeper 가 쥔 checkpoint 감싸개 ③ Librarian 입력 필드 | `keeper_librarian.mli:117`, `keeper_types.mli:36-38`, `keeper_librarian.mli:49` | 용어집에 "다른 뜻" 을 적었다. 제안: 코드의 ② 를 `checkpoint_handle` 같은 이름으로 바꾼다 |
+| working context | ① Librarian 의 pocket 묶음 ② Keeper 가 쥔 checkpoint 하나를 담은 값 ③ Librarian 입력 필드 | `keeper_librarian.mli:117`, `keeper_types.mli:36-38`, `keeper_librarian.mli:49` | 용어집에 "다른 뜻" 을 적었다. 제안: 코드의 ② 를 `checkpoint_handle` 같은 이름으로 바꾼다 |
 | lane | ① exact lane ② Runtime Candidate Order ③ Official Client Lane ④ Memory queue ⑤ Keeper fiber 칸 | `exact_lane_run_registry.mli:4`, `runtime_lane.mli:10`, `keeper_memory_lane.ml:9`, `keeper_lane.mli:1-8` | Lane 항목 경계에 ④⑤ 를 더했다. 제안: `Keeper_memory_lane` 을 `Keeper_librarian_queue` 로 |
 | attention | ① Board 판정 후보 ② 운영자 Task 목록 ③ Dashboard 브리핑 항목(3단계) ④ TUI 개요 항목(4단계) | `keeper_board_attention_candidate.mli:148`, `operator_task_attention.mli:25`, `dashboard_attention.mli:17-19`, `bin/masc_tui_types.ml:1236-1241` | Operator Attention 항목에 "다른 뜻" 을 적었다. 제안: ③④ 의 심각도 단계를 하나로 맞춘다 |
 | candidate | Board 판정 후보와 Runtime 후보 | 이미 용어집에 적혀 있다 | 그대로 둔다 |
@@ -148,10 +148,10 @@ Board 모듈 타입 대신 Keeper 가 소유한 필드만 적는다.
 
 | 항목 | 전 | 후 |
 |---|---|---|
-| Board | 공유 발견… 결정을 게시하는 durable 협업 표면 | 에이전트와 사람이 발견·질문·답변·의견·결정을 올리는 공개 게시판. 올린 글은 재시작해도 남는다 |
+| Board | 공유 발견… 결정을 게시하는 durable 협업 표면 | 에이전트와 사람이 발견·질문·답변·의견·결정을 올리는 게시판. 글마다 보는 범위가 있고 재시작해도 남는다 |
 | Schedule | 미래 시점에 Keeper를 깨우는 durable 요청… 외부 효과를 자동 승인하지 않는다 | 정한 시각에 Keeper를 깨우라는 요청… 깨어난 Keeper가 하려는 바깥 작업을 대신 허락하지 않는다 |
 | HITL | Gate의 외부 효과를 사람이 판정하는 비차단 권한 경로 | Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는 경로 |
-| Gate | 외부 효과를… 판정하는 경계 | 바깥에 흔적을 남기는 작업을 실행하기 전에 멈춰 세우는 검문소 |
+| Gate | 외부 효과를… 판정하는 경계 | 바깥에 흔적을 남기는 작업을 실행하기 전에 허락을 받게 하는 단계 |
 | Task | 판정자의 이름은 authority이고… authority 경계에서만 적용된다 | 판정하는 쪽은 authority로, 일을 낸 쪽은 `producer`로 적는다… 판정 에이전트나 인증된 운영자만 내린다 |
 | Memory OS | durable personal facts와 recall을 소유하는 typed memory store | Keeper 하나가 오래 들고 가는 기억(Fact)을 저장하고 다시 꺼내 주는 곳 |
 

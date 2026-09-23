@@ -465,8 +465,8 @@ status: reference
   `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는 **Runtime Candidate Order**다.
   공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
   `Keeper_memory_lane`은 Keeper 하나의 Librarian 작업을 줄 세우는 **Memory queue**다.
-  `Keeper_lane.t`는 Keeper 하나가 쥔 fiber 실행 칸이다. 셋 다 이 항목의 Lane과
-  관계가 없다.
+  `Keeper_lane.t`는 Keeper 하나가 turn을 도는 fiber다. 넷 다 이름만 같고 이 항목의
+  Lane과는 다른 개념이다. Memory queue에 쌓인 일은 나중에 `Librarian` lane에서 돈다.
   → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**
@@ -632,7 +632,7 @@ status: reference
 ## Collaboration State
 
 **Board**
-: 에이전트와 사람이 발견·질문·답변·의견·결정을 올리는 공개 게시판. 올린 글은
+: 에이전트와 사람이 발견·질문·답변·의견·결정을 올리는 게시판. 글마다 보는 범위가 있다. 올린 글은
   재시작해도 남는다.
   글의 `content_updated_at`은 생성 또는 제목·본문·작성자가 실제로 바뀐 시각이다.
   댓글·투표·고정 등 일반 활동이 갱신하는 `updated_at`과 구분한다.
@@ -689,7 +689,8 @@ status: reference
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
   Activity도 커밋된 상태를 표시한다. 맡은 Task의 취소 요청은 검증 제출이고,
   `Todo`는 직접 취소할 수 있다. 실제 `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
-  판정하는 쪽은 authority로, 일을 낸 쪽은 판정 payload의 `producer`로 적는다.
+  판정하는 쪽은 authority로, 일을 낸 쪽은 판정 payload의 `producer`로 적는다. 그 작업
+  관계와 실행 구간은 `producer`의 것이다.
   `AwaitingVerification`인 Task에 claim하면 `Held_pending_verdict`로 거절되므로
   판정 전에는 Keeper가 다시 맡을 수 없다. 완료·취소 판정은 Keeper가 내리지 못하고,
   서버 안의 판정 에이전트나 인증된 운영자만 내린다(**Completion Authority**).
@@ -804,7 +805,7 @@ status: reference
   [Fusion_sink.delivery_failure_code](../../lib/fusion/fusion_sink.mli)
 
 **Gate**
-: 바깥에 흔적을 남기는 작업을 실행하기 전에 멈춰 세우는 검문소. 설정에 따라 늘 허락
+: 바깥에 흔적을 남기는 작업을 실행하기 전에 허락을 받게 하는 단계. 설정에 따라 늘 허락
   (Always Allowed), 자동 판정(Auto Judge), 사람 판정(HITL) 중 하나로 정한다. 판정을
   기다리는 작업이 있어도 다른 작업은 막히지 않는다.
 
@@ -883,8 +884,8 @@ status: reference
   판정은 이 메모를 판정 사유로 덮어쓴다.
 
 **Evidence Reference (증거 참조)**
-: 제출이나 상태 전환에 다는 근거. `evidence_refs` 같은 필드로 나른다. 형식은
-  `artifact:`, `note:`, `board:`, `fusion:` 넷뿐이다. `note:<글>`은 글로 적은 근거다.
+: 관찰·검증·제출·상태 전환에 다는 근거. `evidence_refs` 같은 필드로 나른다. 형식은
+  `artifact:`, `note:`, `board:`, `fusion:` 넷뿐이다. `note:<text>`는 허용된 서술형 근거다.
   Task 인계 요약과 완료 메모도 이 형식으로 바뀌어 붙는다. `note:` 근거는 파일이나
   Board 글, Fusion 실행이 실제로 있다는 증명이 아니다.
   → [Workspace_verification_store](../../lib/workspace/workspace_verification_store.ml),
@@ -1072,9 +1073,8 @@ status: reference
 : Librarian이 Keeper가 아직 처리하지 않은 event·chat 요청을 묶어, 원본 요청에 맥락과
   다음 행동 제안을 붙여 둔 것. 실행 권한도 checkpoint 이력도 아니다. 정리 하나가
   pocket(`Keeper_librarian_context.pocket`)이고, 지금 저장된 pocket 묶음이
-  `Keeper_librarian.selection.working_contexts`다. Memory OS와 같이 Keeper 이름에
-  묶이므로 cluster가 달라도 공유한다(**Cluster** 항목). cluster별 Read Position과는
-  따로 움직인다.
+  `Keeper_librarian.selection.working_contexts`다. Keeper 이름에 묶인다. cluster 사이에서
+  무엇을 같이 쓰는지는 **Cluster** 항목에 적었다.
   **다른 뜻**: 코드의 `Keeper_types.working_context`는 이 묶음이 아니라 실행 중인
   Keeper가 쥔 Checkpoint 하나를 감싼 값이다(**Checkpoint** 항목). 이름만 같다.
   `[typesafeai] context_review = true`이면 새 정리 전체의 의미 보존을 JEV Choice로
@@ -1282,9 +1282,8 @@ status: reference
 
 **Memory OS**
 : Keeper 하나가 오래 들고 가는 기억(Fact)을 저장하고 다시 꺼내 주는 곳.
-  Keeper 이름에 묶이므로, 같은 base path에서 이름이 같은 Keeper는 cluster가 달라도
-  같은 Memory OS와 Working Context를 쓴다. cluster마다 따로인 것은 Turn Boundary와
-  Read Position뿐이다(**Cluster** 항목).
+  operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
+  **Cluster** 항목에 적었다.
 
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은

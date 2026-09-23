@@ -151,7 +151,7 @@ Board 모듈 타입 대신 Keeper 가 소유한 필드만 적는다.
 | Board | 공유 발견… 결정을 게시하는 durable 협업 표면 | 에이전트와 사람이 발견·질문·답변·의견·결정을 올리는 게시판. 글마다 보는 범위가 있고 재시작해도 남는다 |
 | Schedule | 미래 시점에 Keeper를 깨우는 durable 요청… 외부 효과를 자동 승인하지 않는다 | 정한 시각에 Keeper를 깨우라는 요청… 깨어난 Keeper가 하려는 바깥 작업을 대신 허락하지 않는다 |
 | HITL | Gate의 외부 효과를 사람이 판정하는 비차단 권한 경로 | Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는 경로 |
-| Gate | 외부 효과를… 판정하는 경계 | 바깥에 흔적을 남기는 작업을 실행하기 전에 허락을 받게 하는 단계 |
+| Gate | 외부 효과를 Always Allowed, Auto Judge, HITL 중… 판정하는 경계 | 코드의 세 값(`Keeper_gate_mode.t`: `Always_allow`·`Auto_judge`·`Manual`)으로 적는다. 문장은 #38228 것을 쓴다 |
 | Task | 판정자의 이름은 authority이고… authority 경계에서만 적용된다 | 판정하는 쪽은 authority로, 일을 낸 쪽은 `producer`로 적는다… 판정 에이전트나 인증된 운영자만 내린다 |
 | Memory OS | durable personal facts와 recall을 소유하는 typed memory store | Keeper 하나가 오래 들고 가는 기억(Fact)을 저장하고 다시 꺼내 주는 곳 |
 

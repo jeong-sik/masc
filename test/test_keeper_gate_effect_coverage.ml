@@ -912,11 +912,12 @@ let test_auto_judge_allows_speak_as_local_output_without_a_judge () =
 let observed_refused_once ~refusal_kind =
   let stderr =
     match refusal_kind with
-    | Keeper_gate.Socket_denied -> "sandbox denied socket connect()"
-    | Keeper_gate.Write_denied -> "sandbox denied the write"
-    | Keeper_gate.Unspecified -> "" in
+    | Keeper_gate.Socket_rule_not_applied | Keeper_gate.Write_rule_not_applied -> ""
+    | Keeper_gate.Setup_failed ->
+      "masc-exec-shim: Failure(\"box setup refused by unknown rule: \")\n"
+    | Keeper_gate.Unattributed -> "" in
   Keeper_gate.Observed_refused
-    { status = Unix.WEXITED 1; stderr; refusal_kind }
+    { status = Unix.WEXITED 127; stderr; refusal_kind }
 ;;
 
 let observation_unavailable_once () =
@@ -983,10 +984,7 @@ let test_observed_refused_still_defers_without_network_isolation () =
             kind proves the payload was blocked"
            (Keeper_gate.authorization_source_to_string source)
        | Keeper_gate.Unavailable _ -> fail "the queue was unavailable")
-    [ Keeper_gate.Socket_denied
-    ; Keeper_gate.Write_denied
-    ; Keeper_gate.Unspecified
-    ]
+    Keeper_approval_queue_rules_types.observed_refusal_kinds
 ;;
 
 let test_observation_unavailable_always_defers () =
@@ -1031,7 +1029,7 @@ let test_user_notif_capability_does_not_change_observed_refused_decision () =
   match
     Keeper_gate.decide
       ~keeper_always_allow:false
-      ~observe:(fun () -> observed_refused_once ~refusal_kind:Keeper_gate.Socket_denied)
+      ~observe:(fun () -> observed_refused_once ~refusal_kind:Keeper_gate.Socket_rule_not_applied)
       request
   with
   | Keeper_gate.Deferred { reason = Keeper_gate.Judge_requested; _ } -> ()

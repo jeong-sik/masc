@@ -1277,13 +1277,15 @@ type board_post = {
   bp_votes: int;
   bp_comment_count: int;
   bp_created_at: string;
+  bp_created_at_unix: float option;
+      (** Unix seconds of the moment the post appeared. Four of the five sort
+          orders rank or break ties on it, so it is the number those lists are
+          made from. [None] when the post carried no numeric [created_at]. *)
   bp_updated_at: float option;
-      (** Unix seconds of the last move on the post or its comments. The server
-          has always sent it; the list drew neither timestamp, so the one
-          question a board answers -- what is still alive -- had no column, and
-          two of the sort orders ([recent], [updated]) ranked by a number the
-          reader could not see. [None] when the post carried neither this nor a
-          numeric [created_at]: there is no time to measure an age from. *)
+      (** Unix seconds of the last move on the post or its comments. The
+          [updated] order ranks on it. [None] when the post carried neither
+          this nor a numeric [created_at]: there is no time to measure an age
+          from. *)
   bp_hearth: string option;
       (** The sub-board it lives in. 24 of them here, and 1550 of 2171 posts
           sit in [verification] alone — a flat list is 71% one topic with
@@ -2117,6 +2119,40 @@ let board_sort_explanation = function
   | Board_updated -> "latest changed first"
   | Board_discussed -> "most replies first; newer breaks ties"
 ;;
+
+(** Which of a post's two times the sort put the rows in order by. Four of the
+    five orders key or break ties on the moment the post appeared; only
+    [Board_updated] keys on the moment it last changed.
+
+    This is a reading of what the server does, not a rule it follows: the
+    orders are applied in [Board_dispatch.sort_posts] and [Board_sort], and
+    nothing here can see them. It sits beside [board_sort_explanation] because
+    the two answer the same question -- what this order is -- and a server
+    that changed an order would leave both wrong together. Move them
+    together. *)
+type board_sort_time =
+  | Board_time_posted
+  | Board_time_changed
+
+let board_sort_time = function
+  | Board_hot | Board_trending | Board_recent | Board_discussed ->
+      Board_time_posted
+  | Board_updated -> Board_time_changed
+
+(** The word over the list's age column. It names the time the column holds,
+    so the header changes with the sort rather than letting one word stand for
+    both times. Both fit the six cells the column has. *)
+let board_age_header = function
+  | Board_time_posted -> "AGE"
+  | Board_time_changed -> "MOVED"
+
+(** Which of a post's two times the age column measures from. Both are
+    [option] because a post can arrive carrying neither, and the column then
+    has no age to draw. *)
+let board_age_source ~time ~posted ~changed =
+  match time with
+  | Board_time_posted -> posted
+  | Board_time_changed -> changed
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =

@@ -1905,16 +1905,18 @@ let test_a_wide_call_row_ends_with_its_age () =
   check bool "the narrow pane draws no age" false
     (List.exists (contains "50.0s") (List.map text narrow_view.Pane.rows))
 
-(* An age past ninety-nine minutes is wider than the six cells the column
-   is padded to: the row widens the age and keeps every digit. *)
-let test_an_old_call_keeps_every_digit_of_its_age () =
+(* An age past ninety-nine minutes used to spell "120m05s", seven cells in a
+   column padded to six, and the row widened to keep the digits. The ladder
+   carries hours now, so the old age and a fresh one end in the same column. *)
+let test_an_old_call_keeps_the_age_column () =
   let old = [ runner_call ~at:(now -. 7_205.) ~duration_ms:5. ~id:"old" "Read" ] in
   let view =
     Pane.lines ~rows ~cols:wide_cols ~scroll:0
       { (runner_input ()) with Pane.chunks = chunks [ "runner" ] (entries old) }
   in
   let row = List.nth view.Pane.rows first_call_row in
-  check bool "120m05s whole at the edge" true (String.ends_with ~suffix:"5ms 120m05s" (text row));
+  check bool "2h00m in the six cells the column pads to" true
+    (String.ends_with ~suffix:"5ms  2h00m" (text row));
   check int "the row still fits" wide_cols (width row)
 
 let test_a_call_row_names_the_call_a_press_opens () =
@@ -2052,8 +2054,8 @@ let () =
             test_the_wide_fleet_row_keeps_a_long_name_whole
         ; test_case "a wide call row ends with its age" `Quick
             test_a_wide_call_row_ends_with_its_age
-        ; test_case "an old call keeps every digit of its age" `Quick
-            test_an_old_call_keeps_every_digit_of_its_age
+        ; test_case "an old call keeps the age column" `Quick
+            test_an_old_call_keeps_the_age_column
         ] )
     ; ( "responses"
       , [ test_case "each model response gets a bracket beside its calls" `Quick

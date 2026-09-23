@@ -3935,6 +3935,13 @@
   unix))
 
 (test
+ (name test_tui_duration_spelling)
+ (modules test_tui_duration_spelling)
+ (libraries alcotest ast_grep masc_tui_message_layout)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries

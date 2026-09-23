@@ -737,6 +737,12 @@ val span_text : float -> string
     and the one that stopped at minutes drew [12045m] for a nine-day-old
     Fusion run. *)
 
+val elapsed_text : float -> string
+(** How long something took, in seconds: [32ms], [1.2s], then {!span_text}
+    from a minute up -- [6m56s], [1h02m], [8d15h]. The tenths stay only while
+    a reader is comparing them; past a minute they are noise and the ladder
+    takes over. A negative duration reads as [0ms]. *)
+
 val age_text : now:float -> since:float -> string option
 (** How long something has been outstanding, as {!span_text}.
 

@@ -5232,7 +5232,7 @@ let standalone_lane_row ~now ~frame ~(columns : Lane_table.columns) width
   let p50 =
     match lane.sl_p50_elapsed_s with
     | None -> "—"
-    | Some seconds -> Printf.sprintf "%.1fs" seconds
+    | Some seconds -> Message_layout.elapsed_text seconds
   in
   let prefix = standalone_lane_status_style lane.sl_status in
   let line =
@@ -5379,7 +5379,8 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
            they are the same figure. The column is the constrained one -- six
            cells -- so the detail follows it rather than the other way. *)
         match lane.sl_p50_elapsed_s with
-        | Some s -> Printf.sprintf " · p50 latency %.1fs" s
+        | Some s ->
+            Printf.sprintf " · p50 latency %s" (Message_layout.elapsed_text s)
         | None -> ""
       in
       Printf.sprintf "Runs: %d retained (%d ok / %d fail / %d cancel) · %.1f%% success%s"
@@ -5875,7 +5876,7 @@ let render_lane_run_list (state : state) ~lane_id =
           let elapsed =
             match run.lrs_elapsed_s with
             | None -> "—"
-            | Some seconds -> Printf.sprintf "%.1fs" seconds
+            | Some seconds -> Message_layout.elapsed_text seconds
           in
           let line =
             "  "
@@ -6178,7 +6179,8 @@ let lane_run_summary_lines (detail : Tui_decode.lane_run_detail) =
   let elapsed =
     match detail.lrd_elapsed_s with
     | None -> ""
-    | Some seconds -> Printf.sprintf "  ·  %.1fs" seconds
+    | Some seconds ->
+        Printf.sprintf "  ·  %s" (Message_layout.elapsed_text seconds)
   in
   let slot =
     match detail.lrd_answer_source, detail.lrd_selected_slot with

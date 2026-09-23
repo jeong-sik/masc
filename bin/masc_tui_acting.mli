@@ -235,7 +235,9 @@ val duration_of_completion :
     began, or the start has fallen off the end of what the TUI keeps. *)
 
 val elapsed_text : float -> string
-(** A duration in milliseconds as [32ms], [1.2s], or [2m05s]. *)
+(** A duration in milliseconds, spelled by
+    {!Masc_tui_message_layout.elapsed_text}: [32ms], [1.2s], [2m05s],
+    [1h02m]. *)
 
 val evidence_fields : entry -> (string * string option) list
 (** Producer references from one immutable observer event. Missing IDs and

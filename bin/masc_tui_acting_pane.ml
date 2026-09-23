@@ -746,9 +746,10 @@ let rail_span = function
 (* A call's age in the wide pane, at the row's end, in the pane's own age
    wording ({!age_text}): the facts row under an opened call and the focus
    header spell ages that way, and a row and its own detail must not say
-   one age two ways. Padded to six cells, so the ages and the durations
-   before them line up down the list through ninety-nine minutes; an older
-   age widens its own row rather than losing digits to a cut. *)
+   one age two ways. Six cells hold every age the ladder draws below a
+   hundred thousand days, so the ages and the durations before them line up
+   down the whole list. A two-hour call used to spell "120m05s" and widen its
+   own row past the ones around it. *)
 let age_min_cells = 6
 
 (* How many calls a row stands for, after its name: [\xc3\x975]. A run of one

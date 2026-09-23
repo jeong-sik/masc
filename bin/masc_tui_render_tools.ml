@@ -144,7 +144,7 @@ let async_request_observation_lines (state : state) =
         | Async_cancelling -> "cancelling"
       in
       let elapsed = Option.fold ~none:"?s"
-        ~some:(Printf.sprintf "%.1fs") request.ar_elapsed_sec in
+        ~some:Masc_tui_message_layout.elapsed_text request.ar_elapsed_sec in
       tone, Printf.sprintf "   %s · %s · %s · %s · %s"
         (Terminal_text.single_line request.ar_request_id)
         (Terminal_text.single_line request.ar_keeper_name)

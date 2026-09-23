@@ -2095,6 +2095,36 @@ let span_text seconds =
     Printf.sprintf "%dd%02dh" (whole / 86_400) (whole mod 86_400 / 3600)
   else Printf.sprintf "%dd" (whole / 86_400)
 
+(* How long something took, rather than how long ago it was. Below a minute
+   the reading is the point -- a call that took 16.2s and one that took 25.5s
+   are being compared -- so the tenths stay; from a minute up the tenths are
+   noise and the ladder is {!span_text}'s, so a seven-minute p50 reads "6m56s"
+   instead of "415.9s" and an hour-long run reads "1h02m" instead of "62m03s".
+
+   Five draws spelled a duration as raw seconds with no ladder at all: the
+   Standalone lanes table's P50 cell and the p50 line under it, a lane run's
+   elapsed and the same run's detail, and an approval request's age. The lanes
+   screen drew "415.9s" in the table while its own detail block said "2m11s".
+
+   Each rung reads the value already rounded to that rung's precision, so
+   0.9999s is "1.0s" rather than "1000ms", and a span the tenths round up to
+   a minute is handed on rounded -- 59.96s is "1m00s", not the "59s" that
+   {!span_text}'s truncation would draw right after "59.9s". *)
+let milliseconds_in_a_second = 1000.
+let tenths_in_a_second = 10.
+let tenths_in_a_minute = 600.
+
+let elapsed_text seconds =
+  let seconds = Float.max 0. seconds in
+  let milliseconds = Float.round (seconds *. milliseconds_in_a_second) in
+  if milliseconds < milliseconds_in_a_second then
+    Printf.sprintf "%.0fms" milliseconds
+  else
+    let tenths = Float.round (seconds *. tenths_in_a_second) in
+    if tenths < tenths_in_a_minute then
+      Printf.sprintf "%.1fs" (tenths /. tenths_in_a_second)
+    else span_text (tenths /. tenths_in_a_second)
+
 let age_text ~now ~since =
   let seconds = now -. since in
   (* A clock that moved backwards says nothing rather than a negative age. The

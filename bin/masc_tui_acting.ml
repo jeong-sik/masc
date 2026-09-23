@@ -154,12 +154,13 @@ type row = {
   detail : string;
 }
 
+(* The feed measures a call in milliseconds; the spelling is the TUI's one
+   duration ladder, which takes seconds. This ladder used to stop at minutes,
+   so a run over an hour read "62m03s". *)
+let milliseconds_in_a_second = 1000.
+
 let elapsed_text ms =
-  if ms < 1000. then Printf.sprintf "%.0fms" ms
-  else if ms < 60_000. then Printf.sprintf "%.1fs" (ms /. 1000.)
-  else
-    let seconds = int_of_float (ms /. 1000.) in
-    Printf.sprintf "%dm%02ds" (seconds / 60) (seconds mod 60)
+  Masc_tui_message_layout.elapsed_text (ms /. milliseconds_in_a_second)
 
 let turn_number_text turn = Printf.sprintf "turn %d" turn
 

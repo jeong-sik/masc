@@ -49,11 +49,14 @@ Attention / TUI Session Events 띠와 Tasks 사이에 전체 폭 Team 섹션을 
   ○ parked: lane-smith, rondo, rust-hwp-guy, sangsu
 ```
 
-- **무리(닫힌 합타입)**: `Needs_you`(Failing·Crashed, 또는 paused 가 아닌데 phase 가 없는 offline)
-  → `Working`(Running 이고 맡은 열린 Task 가 있음) → `Idle`(그 밖의 살아 있는 phase)
-  → `Parked`(Paused·Stopped·Offline). 같은 무리 안은 이름순이다. 점수나 가중치로 정렬하지 않는다.
-- **막힌 행의 설명**: Attention 항목 중 `target_type = keeper` 이고 `target_id` 가 그 Keeper 인
-  첫 항목의 summary 다. 없으면 phase 단어만 쓴다. TUI 가 원인을 추측하거나 문장을 해석하지 않는다.
+- **무리(닫힌 합타입)**: `Needs_you`(Failing·Crashed, 또는 paused 가 아니고 phase 가 없는데
+  info 가 아닌 Attention 항목이 가리키는 Keeper) → `Working`(살아 있는 phase 이고 맡은 열린
+  Task 가 있음) → `Idle`(그 밖의 살아 있는 phase) → `Parked`(brief 의 `paused` 가 true,
+  또는 Paused·Stopped·Offline, 또는 phase 가 없고 가리키는 항목도 없음). paused Keeper 는
+  autoboot 에서 빠지므로 서버를 다시 띄운 뒤에는 phase 가 null 이다. 그래서 phase 가 아니라
+  `paused` 로 판정한다. 같은 무리 안은 이름순이다. 점수나 가중치로 정렬하지 않는다.
+- **막힌 행의 설명**: Attention 항목 중 `target_type = keeper` 이고 `target_id` 가 그 Keeper 이며
+  severity 가 info 가 아닌 첫 항목의 summary 다. 없으면 phase 단어만 쓴다. TUI 가 원인을 추측하거나 문장을 해석하지 않는다.
 - **일하는 행의 설명**: 그 Keeper 가 assignee 인 Claimed/InProgress Task 중 목록 순서상 첫 Task.
   더 있으면 `+N`, 검증 대기 Task 는 `N awaiting` 으로 붙인다.
 - **Parked**: 한 줄에 이름만 모은다. 운영자가 멈춘 Keeper 는 매 턴 읽을 필요가 없다.

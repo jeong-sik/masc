@@ -163,10 +163,31 @@ let resolve_broadcast_mention_target ~config target =
       config
       ~mention_target:target
 
+(* Who wrote a workspace message, as the recipient's transcript records it.
+   A sender the Keeper registry holds under exactly this name is that Keeper
+   (RFC-0468 §3.2); anyone else is an external author. The registry match is
+   the proof, not the shape of [from_agent]: people and external bots mint
+   the same id shape. *)
+let workspace_message_speaker ~is_registered_keeper ~from_agent
+  : Keeper_chat_store.speaker
+  =
+  let external_author : Keeper_chat_store.speaker =
+    { speaker_id = Some from_agent
+    ; speaker_name = Some from_agent
+    ; speaker_authority = Keeper_chat_store.External
+    }
+  in
+  match Keeper_identity.Keeper_id.of_string from_agent with
+  | Some keeper_id when is_registered_keeper from_agent ->
+    Keeper_chat_store.keeper_speaker keeper_id
+  | Some _ | None -> external_author
+;;
+
 let deliver_broadcast_mention
       ~config
       ~base_path
       ~is_running
+      ~is_registered_keeper
       ~wakeup
       (delivery : Workspace_broadcast.broadcast_delivery)
   =
@@ -202,11 +223,10 @@ let deliver_broadcast_mention
             target delivery.request_id delivery.seq message;
           Workspace_broadcast.Rejected Workspace_broadcast.Invalid_request
         | Some _target_id, Ok delivery_key ->
-          let speaker : Keeper_chat_store.speaker =
-            { speaker_id = Some delivery.from_agent
-            ; speaker_name = Some delivery.from_agent
-            ; speaker_authority = Keeper_chat_store.External
-            }
+          let speaker =
+            workspace_message_speaker
+              ~is_registered_keeper
+              ~from_agent:delivery.from_agent
           in
           let mention_ids =
             target :: meta.Keeper_meta_contract.mention_targets
@@ -381,11 +401,14 @@ let project_workspace_message_to_fleet
     let delivery_key =
       Keeper_chat_delivery_identity.Workspace_message request_id
     in
-    let speaker : Keeper_chat_store.speaker =
-      { speaker_id = Some delivery.from_agent
-      ; speaker_name = Some delivery.from_agent
-      ; speaker_authority = Keeper_chat_store.External
-      }
+    let registered = registered_keepers () in
+    let speaker =
+      workspace_message_speaker
+        ~is_registered_keeper:(fun name ->
+          List.exists
+            (fun (keeper_name, _agent_name) -> String.equal keeper_name name)
+            registered)
+        ~from_agent:delivery.from_agent
     in
     (* Exact comparison against the identities the registry holds, not a minted
        [Keeper_id]. That mint does not round-trip a keeper whose name has three
@@ -407,7 +430,7 @@ let project_workspace_message_to_fleet
     let recipients = ref 0 in
     let appended = ref 0 in
     let failed = ref 0 in
-    registered_keepers ()
+    registered
     |> List.iter (fun (keeper_name, agent_name) ->
       if not (authored_by_recipient ~keeper_name ~agent_name)
       then (
@@ -1784,6 +1807,7 @@ let start_keeper_loops_owned
         ~base_path
         ~is_running:(fun target ->
           Option.is_some (Keeper_registry.get ~base_path target))
+        ~is_registered_keeper:(Keeper_registry.is_registered ~base_path)
         ~wakeup:(Keeper_keepalive.wakeup_keeper ~base_path)
         delivery
     in

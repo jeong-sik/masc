@@ -1705,6 +1705,16 @@ let snapshot_of_yojson ~base_path json =
   | _ -> Error "gate_pending snapshot must be a JSON object"
 ;;
 
+(* The snapshot decode the loader runs, version check first, for a caller that
+   must judge a store before the server opens it (deployment preflight). An
+   entry the loader would drop counts as a refusal here too. *)
+let validate_pending_snapshot ~base_path json =
+  match snapshot_of_yojson ~base_path json with
+  | Error reason -> Error reason
+  | Ok (_, _, _, _, []) -> Ok ()
+  | Ok (_, _, _, _, first :: _) -> Error first
+;;
+
 type decoded_log_row =
   { row : log_row
   ; row_generation : int

@@ -27,7 +27,7 @@ let unavailable_tag = function
 type box_evidence =
   | Acknowledged
   | Refused of Keeper_gate.refusal_kind
-  | Refused_after_a_stage_ran of Keeper_gate.refusal_kind
+  | Partly_refused of Keeper_gate.refusal_kind
   | Unavailable
 
 (* What one stage's receipt says. A multi-stage request (sequence, pipeline,
@@ -53,10 +53,12 @@ let stage_receipt ~expected_mode = function
 ;;
 
 (* The whole request is read from every stage's receipt, never from the first
-   refusal alone: in [a; b] or [a || b] one stage's program can run in an
-   applied box while another stage's box could not be built. Only a request
-   where no stage's box applied is a refusal in which nothing started. The
-   kind is the first refusing stage's. *)
+   refusal alone: in [a; b] or [a || b] one stage's box can apply while
+   another stage's box could not be built. An applied box does not mean that
+   stage's program started ([Exec_failed] is an applied box whose exec
+   failed), but it does mean the request is not one in which every box was
+   refused. Only a request where no stage's box applied is a refusal in which
+   nothing started. The kind is the first refusing stage's. *)
 let box_evidence ~run evidence =
   let expected_mode = match run with
     | Keeper_types_profile_sandbox.Observe -> Exec_ssh_protocol.Observe
@@ -76,7 +78,7 @@ let box_evidence ~run evidence =
   else (
     match first_refusal with
     | None -> Acknowledged
-    | Some kind -> if applied then Refused_after_a_stage_ran kind else Refused kind)
+    | Some kind -> if applied then Partly_refused kind else Refused kind)
 ;;
 
 let observe t () : Keeper_gate.observation =
@@ -92,8 +94,8 @@ let observe t () : Keeper_gate.observation =
           | Refused refusal_kind ->
             Keeper_gate.Observed_refused
               { status = result.status; stderr = result.stderr; refusal_kind }
-          | Refused_after_a_stage_ran refusal_kind ->
-            Keeper_gate.Observed_refused_after_a_stage_ran { refusal_kind }
+          | Partly_refused refusal_kind ->
+            Keeper_gate.Observed_partly_refused { refusal_kind }
           | Unavailable ->
             (* No acknowledgement: the box may or may not have applied.
                That says nothing about a refusal -- say exactly that,

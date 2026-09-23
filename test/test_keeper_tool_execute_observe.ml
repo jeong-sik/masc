@@ -56,8 +56,8 @@ let observation_label = function
     Printf.sprintf "refused signal=%d stderr=%s" signal stderr
   | Gate.Observed_refused { status = Unix.WSTOPPED signal; stderr } ->
     Printf.sprintf "refused stopped=%d stderr=%s" signal stderr
-  | Gate.Observed_refused_after_a_stage_ran { refusal_kind } ->
-    "refused after a stage ran "
+  | Gate.Observed_partly_refused { refusal_kind } ->
+    "partly refused, a stage's box applied "
     ^ Keeper_approval_queue_rules_types.observed_refusal_kind_to_string refusal_kind
   | Gate.Observation_unavailable reason -> "unavailable " ^ reason
 ;;
@@ -138,7 +138,7 @@ let test_each_box_refusal_keeps_its_kind () =
         check bool (label ^ " kind") true (refusal_kind = expected);
         check bool (label ^ " status") true (status = Unix.WEXITED 127)
       | Gate.Observed_result _
-      | Gate.Observed_refused_after_a_stage_ran _
+      | Gate.Observed_partly_refused _
       | Gate.Observation_unavailable _ ->
         failf "%s did not reach the gate as a refusal" label)
     [ Exec_ssh_protocol.Refused_socket, Gate.Socket_rule_not_applied
@@ -148,12 +148,12 @@ let test_each_box_refusal_keeps_its_kind () =
     ]
 ;;
 
-(* A multi-stage request leaves one receipt per stage. When one stage ran in
-   an applied box and another stage's box could not be built, the request is
+(* A multi-stage request leaves one receipt per stage. When one stage's box
+   applied and another stage's box could not be built, the request is
    not a refusal in which nothing started, whichever order the stages came
    in. When every stage was refused it is, and the first stage's kind is the
    one reported. *)
-let test_a_refusal_after_a_stage_ran_is_not_a_refusal () =
+let test_a_refusal_beside_an_applied_box_is_not_a_refusal () =
   let receipt boundary =
     Masc.Keeper_sandbox_remote.Execution_observed
       ( { mode = Exec_ssh_protocol.Observe; boundary }
@@ -167,12 +167,12 @@ let test_a_refusal_after_a_stage_ran_is_not_a_refusal () =
          ~dispatch:(fun _ -> result (Unix.WEXITED 127)))
       ()
   in
-  check observation "ran, then refused"
-    (Gate.Observed_refused_after_a_stage_ran { refusal_kind = Gate.Write_rule_not_applied })
+  check observation "applied, then refused"
+    (Gate.Observed_partly_refused { refusal_kind = Gate.Write_rule_not_applied })
     (observe_with
        [ receipt Exec_ssh_protocol.Sandbox_applied; receipt Exec_ssh_protocol.Refused_write ]);
-  check observation "refused, then ran"
-    (Gate.Observed_refused_after_a_stage_ran { refusal_kind = Gate.Setup_failed })
+  check observation "refused, then applied but exec failed"
+    (Gate.Observed_partly_refused { refusal_kind = Gate.Setup_failed })
     (observe_with
        [ receipt Exec_ssh_protocol.Setup_failed; receipt Exec_ssh_protocol.Exec_failed ]);
   check observation "every stage refused, first kind kept"
@@ -717,8 +717,8 @@ let () =
             test_missing_or_refused_box_receipt_is_not_payload_evidence
         ; test_case "each box refusal keeps its kind" `Quick
             test_each_box_refusal_keeps_its_kind
-        ; test_case "a refusal after a stage ran is not a refusal" `Quick
-            test_a_refusal_after_a_stage_ran_is_not_a_refusal
+        ; test_case "a refusal beside an applied box is not a refusal" `Quick
+            test_a_refusal_beside_an_applied_box_is_not_a_refusal
         ; test_case "no box is unavailable without dispatching" `Quick
             test_no_box_is_unavailable_without_dispatching
         ; test_case "a refused dispatch is unavailable under its tag" `Quick

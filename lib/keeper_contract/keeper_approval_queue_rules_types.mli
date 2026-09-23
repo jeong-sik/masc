@@ -123,8 +123,10 @@ type observed_refusal_kind =
 
 val observed_refusal_kinds : observed_refusal_kind list
 (** Every kind once, in a fixed order. The list is walked through an
-    exhaustive successor match, so a new constructor does not compile until
-    it is given a place in that order. *)
+    exhaustive successor match, so a new constructor needs a successor arm
+    before it compiles. The match alone does not keep it in the list: an arm
+    that ends the walk early drops the kinds after it, and a back-edge loops.
+    The contract tests pin the list against every constructor. *)
 
 val observed_refusal_kind_to_string : observed_refusal_kind -> string
 

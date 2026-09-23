@@ -218,9 +218,10 @@ type observation =
           so the program never started. A nonzero payload exit alone cannot
           construct this outcome. Every stage the request dispatched was
           refused this way, so nothing started. Every kind keeps the judge. *)
-  | Observed_refused_after_a_stage_ran of { refusal_kind : refusal_kind }
+  | Observed_partly_refused of { refusal_kind : refusal_kind }
       (** A multi-stage request (sequence, pipeline, substitution) where at
-          least one stage's program ran in an applied box and at least one
+          least one stage's box applied (its program may or may not have started:
+          an applied box whose exec failed counts) and at least one
           other stage's box could not be built. [refusal_kind] is the first
           refusing stage's. No observation is written to the row, because the
           row's observation says nothing started; the request keeps the

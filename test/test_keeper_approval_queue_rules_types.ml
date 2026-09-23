@@ -72,6 +72,34 @@ let test_observed_stderr_is_bounded_to_its_tail () =
   check int "and drops everything" 3 none.observed_stderr_omitted_bytes
 ;;
 
+(* The list is walked through a successor match, which compiles even when an
+   arm ends the walk early. Every constructor is named here so the list is
+   checked against the type, not against itself. *)
+let test_observed_refusal_kinds_list_every_constructor () =
+  let every_constructor =
+    [ Q.Socket_rule_not_applied; Q.Write_rule_not_applied; Q.Setup_failed; Q.Unattributed ]
+  in
+  (* Adding a constructor makes this match non-exhaustive, which points here. *)
+  List.iter
+    (fun (kind : Q.observed_refusal_kind) ->
+      match kind with
+      | Q.Socket_rule_not_applied | Q.Write_rule_not_applied | Q.Setup_failed | Q.Unattributed ->
+        check bool (Q.observed_refusal_kind_to_string kind ^ " is listed") true
+          (List.mem kind Q.observed_refusal_kinds);
+        check bool (Q.observed_refusal_kind_to_string kind ^ " round-trips") true
+          (Q.observed_refusal_kind_of_string (Q.observed_refusal_kind_to_string kind)
+           = Some kind))
+    every_constructor;
+  check int "one entry per constructor" (List.length every_constructor)
+    (List.length Q.observed_refusal_kinds);
+  check int "no kind listed twice" (List.length Q.observed_refusal_kinds)
+    (List.length (List.sort_uniq compare Q.observed_refusal_kinds));
+  check int "no two kinds share a tag" (List.length Q.observed_refusal_kinds)
+    (List.length
+       (List.sort_uniq String.compare
+          (List.map Q.observed_refusal_kind_to_string Q.observed_refusal_kinds)))
+;;
+
 let test_observed_refusal_decoder_is_closed () =
   let rejects label json =
     match Q.observed_refusal_of_yojson json with
@@ -321,6 +349,8 @@ let () =
     ; ( "observed refusal"
       , [ test_case "JSON round trip" `Quick test_observed_refusal_json_round_trips
         ; test_case "stderr is bounded to its tail" `Quick test_observed_stderr_is_bounded_to_its_tail
+        ; test_case "refusal kinds list every constructor" `Quick
+            test_observed_refusal_kinds_list_every_constructor
         ; test_case "decoder is closed" `Quick test_observed_refusal_decoder_is_closed
         ] )
     ]

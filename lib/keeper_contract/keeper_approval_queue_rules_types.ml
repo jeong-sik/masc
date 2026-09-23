@@ -248,8 +248,8 @@ let observed_refusal_kind_to_string = function
 ;;
 
 (* The list is walked from the first kind through this exhaustive match, so
-   a new constructor does not compile until it is given a place in the
-   order. *)
+   a new constructor needs an arm here before it compiles. Whether it is
+   reached is pinned by the contract tests, not by the match. *)
 let next_observed_refusal_kind = function
   | Socket_rule_not_applied -> Some Write_rule_not_applied
   | Write_rule_not_applied -> Some Setup_failed

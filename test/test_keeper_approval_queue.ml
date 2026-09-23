@@ -4031,6 +4031,61 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        Alcotest.(check string) "content preserved byte-for-byte" original preserved)
 ;;
 
+(* The durable snapshot of a store holding one pending entry with an
+   observation, as the current code writes it, and that entry's JSON. A v10
+   store is this shape with [version] 10 and no [refusal_kind]. *)
+let snapshot_with_one_observed_entry ~base_path =
+  ignore (install_exn ~base_path);
+  ensure_keeper_exists ~base_path ~keeper_name:"queue-v10";
+  let refusal : Rule_types.observed_refusal =
+    { observed_refusal_kind = Rule_types.Setup_failed
+    ; observed_status = Rule_types.Observed_exit 127
+    ; observed_stderr = ""
+    ; observed_stderr_omitted_bytes = 0
+    }
+  in
+  (match
+     AQ.submit_pending
+       ~keeper_name:"queue-v10"
+       ~tool_name:"external-effect"
+       ~call_summary:None
+       ~input:(`Assoc [ "argv", `List [ `String "touch"; `String "w" ] ])
+       ~base_path
+       ~observation:refusal
+       ()
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (AQ.storage_error_to_string error));
+  let snapshot = read_pending_snapshot ~base_path in
+  let entry =
+    match Yojson.Safe.Util.member "pending" snapshot with
+    | `List [ entry ] -> entry
+    | _ -> Alcotest.fail "expected exactly one pending entry"
+  in
+  AQ.For_testing.reset_runtime_state ();
+  snapshot, entry
+;;
+
+let map_fields f = function
+  | `Assoc fields -> `Assoc (f fields)
+  | json -> Alcotest.failf "expected an object, got %s" (Yojson.Safe.to_string json)
+;;
+
+(* The entry as a store written before [refusal_kind] existed holds it. *)
+let without_refusal_kind entry =
+  map_fields
+    (List.map (fun (key, value) ->
+       if String.equal key "observation"
+       then key, map_fields (List.remove_assoc "refusal_kind") value
+       else key, value))
+    entry
+;;
+
+let write_log_row ~base_path row =
+  Out_channel.with_open_text (AQ.For_testing.pending_log_path ~base_path) (fun channel ->
+    output_string channel (Yojson.Safe.to_string row ^ "\n"))
+;;
+
 (* A v10 store is refused by its version before any row is decoded. Its
    observations carry no refusal_kind, and its log rows would otherwise be
    decoded one by one and fail the whole load on the first such row; the
@@ -4043,34 +4098,27 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
       cleanup_dir base_path)
     (fun () ->
        AQ.For_testing.reset_runtime_state ();
-       let v10_observation =
-         `Assoc
-           [ "status", `Assoc [ "kind", `String "exit"; "code", `Int 127 ]
-           ; "stderr", `String ""
-           ; "stderr_omitted_bytes", `Int 0
-           ]
-       in
+       let snapshot, entry = snapshot_with_one_observed_entry ~base_path in
+       let v10_entry = without_refusal_kind entry in
+       let generation = Yojson.Safe.Util.(member "generation" snapshot |> to_int) in
+       let next_sequence = Yojson.Safe.Util.(member "next_sequence" snapshot |> to_int) in
        write_pending_snapshot
          ~base_path
+         (map_fields
+            (List.map (fun (key, value) ->
+               match key with
+               | "version" -> key, `Int 10
+               | "pending" -> key, `List [ v10_entry ]
+               | _ -> key, value))
+            snapshot);
+       write_log_row
+         ~base_path
          (`Assoc
-            [ "version", `Int 10
-            ; "generation", `Int 1
-            ; "next_sequence", `Int 2
-            ; "pending", `List []
-            ; "deliveries", `List []
+            [ "kind", `String "pending_upsert"
+            ; "generation", `Int generation
+            ; "next_sequence", `Int next_sequence
+            ; "entry", v10_entry
             ]);
-       let log_path = AQ.For_testing.pending_log_path ~base_path in
-       Out_channel.with_open_text log_path (fun channel ->
-         output_string
-           channel
-           (Yojson.Safe.to_string
-              (`Assoc
-                 [ "kind", `String "pending_upsert"
-                 ; "generation", `Int 1
-                 ; "next_sequence", `Int 2
-                 ; "entry", `Assoc [ "id", `String "v10-row"; "observation", v10_observation ]
-                 ])
-            ^ "\n"));
        match AQ.install_persistence ~base_path with
        | Ok _ -> Alcotest.fail "a v10 store must fail install"
        | Error
@@ -4081,11 +4129,63 @@ let test_v10_store_requires_runtime_reset_before_rows_are_read () =
              ; _
              }) ->
          Alcotest.(check bool) "the log is left for the operator reset" true
-           (Sys.file_exists log_path)
+           (Sys.file_exists (AQ.For_testing.pending_log_path ~base_path))
        | Error error ->
          Alcotest.failf
            "a v10 store returned the wrong error: %s"
            (AQ.install_error_to_string error))
+;;
+
+(* At the current version, an observation without refusal_kind is refused
+   rather than read with a guessed kind: the snapshot validation names the
+   field, and a log row carrying it fails the load. *)
+let test_a_current_row_without_refusal_kind_is_refused () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       let snapshot, entry = snapshot_with_one_observed_entry ~base_path in
+       let stripped = without_refusal_kind entry in
+       let with_stripped_entry =
+         map_fields
+           (List.map (fun (key, value) ->
+              match key with
+              | "pending" -> key, `List [ stripped ]
+              | _ -> key, value))
+           snapshot
+       in
+       (match AQ.validate_pending_snapshot ~base_path with_stripped_entry with
+        | Ok () -> Alcotest.fail "a current entry without refusal_kind was accepted"
+        | Error reason ->
+          Alcotest.(check bool) "the refusal names the field" true
+            (String_util.contains_substring reason "refusal_kind"));
+       (match AQ.validate_pending_snapshot ~base_path snapshot with
+        | Ok () -> ()
+        | Error reason -> Alcotest.failf "the untouched snapshot was refused: %s" reason);
+       let generation = Yojson.Safe.Util.(member "generation" snapshot |> to_int) in
+       let next_sequence = Yojson.Safe.Util.(member "next_sequence" snapshot |> to_int) in
+       write_pending_snapshot
+         ~base_path
+         (map_fields
+            (List.map (fun (key, value) ->
+               match key with
+               | "pending" -> key, `List []
+               | _ -> key, value))
+            snapshot);
+       write_log_row
+         ~base_path
+         (`Assoc
+            [ "kind", `String "pending_upsert"
+            ; "generation", `Int generation
+            ; "next_sequence", `Int next_sequence
+            ; "entry", stripped
+            ]);
+       match AQ.install_persistence ~base_path with
+       | Ok _ -> Alcotest.fail "a log row without refusal_kind was installed"
+       | Error _ -> ())
 ;;
 
 let test_unreadable_snapshot_fails_closed_and_is_preserved () =
@@ -5825,6 +5925,10 @@ let () =
             "v10 store requires runtime reset before rows are read"
             `Quick
             test_v10_store_requires_runtime_reset_before_rows_are_read
+        ; Alcotest.test_case
+            "a current row without refusal_kind is refused"
+            `Quick
+            test_a_current_row_without_refusal_kind_is_refused
         ; Alcotest.test_case
             "unreadable current snapshot is preserved"
             `Quick

@@ -559,7 +559,7 @@ let handle_tool_execute_typed
                ]
              | Some
                  ( Keeper_gate.Observed_result _
-                 | Keeper_gate.Observed_refused_after_a_stage_ran _
+                 | Keeper_gate.Observed_partly_refused _
                  | Keeper_gate.Observation_unavailable _ )
              | None -> []
            in

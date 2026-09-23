@@ -442,20 +442,24 @@ let recovery_failure_of_client_error = function
 ;;
 
 (* A Gate continuation may only resume the session it was captured in. When
-   that session refuses the resume before any response or tool activity, the
-   vendor's own conversation is full: the resume prompt is the same at every
-   masc capacity, and no fresh start may carry the continuation. That is not an
-   input rejection an operator can retry -- [Retry_previous] would send the
-   same resume -- so it is recorded [Vendor_session_full]: the continuation
+   that session refuses the resume as a context overflow, the vendor's own
+   conversation is full: the resume prompt is the same at every masc capacity,
+   and no fresh start may carry the continuation. That is not an input
+   rejection an operator can retry -- [Retry_previous] would send into the same
+   full session -- so it is recorded [Vendor_session_full]: the continuation
    ends for good ({!Keeper_direct_gate_continuation.session_full} reads it) and
-   the next ordinary turn supersedes it with a fresh session. *)
+   the next ordinary turn supersedes it with a fresh session. Whether a
+   response or tool effect was observed first is kept in the record. *)
 let recovery_failure_of_attempt ~session_mode ~gate_continuation error =
   match session_mode, gate_continuation, error with
   | ( Runtime_claude_code.Resume _
     , true
     , Runtime_claude_code.Context_window_exceeded
-        { tool_effect_attempted = false; response_emitted = false; _ } ) ->
+        { tool_effect_attempted; response_emitted; _ } ) ->
     Session_store.Vendor_session_full
+      (if tool_effect_attempted || response_emitted
+       then Session_store.Activity_observed
+       else Session_store.No_activity_observed)
   | (Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), _ ->
     recovery_failure_of_client_error error
 ;;

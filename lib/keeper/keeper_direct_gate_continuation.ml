@@ -451,20 +451,36 @@ let record_completed ~config ~keeper_name admission =
    refusal. *)
 let session_full_cause ~(checkpoint : Semantic.official_client_checkpoint) ~approval_id
     (expected : Native.t option) =
+  (* The record must be this Gate's own resume: the claim it failed resumed the
+     captured turn, and any session it observed is the captured one. Another
+     Gate's, or a later turn's, full session is not blamed on this one. *)
+  let resumed_this_gate (recovery : Native.recovery_required) =
+    (match recovery.previous_settlement with
+     | Some { Native.session_id; turn_id } ->
+       String.equal session_id checkpoint.session_id
+       && String.equal turn_id checkpoint.turn_id
+     | None -> false)
+    && (match recovery.observed_session_id with
+        | Some observed -> String.equal observed checkpoint.session_id
+        | None -> true)
+  in
   match expected with
   | Some
       { Native.phase =
           Native.Recovery_required
-            { Native.failure = Native.Vendor_session_full; recovery_id; _ }
+            ({ Native.failure = Native.Vendor_session_full activity; recovery_id; _ }
+             as recovery)
       ; client_kind
       ; runtime_id
       ; _
       }
     when client_kind = checkpoint.client_kind
-         && String.equal runtime_id checkpoint.runtime_id ->
+         && String.equal runtime_id checkpoint.runtime_id
+         && resumed_this_gate recovery ->
     Some
       (Keeper_request_failure.Gate_session_full
-         { approval_id; runtime_id; session_id = checkpoint.session_id; recovery_id })
+         { approval_id; runtime_id; session_id = checkpoint.session_id; recovery_id
+         ; activity })
   | Some
       { Native.phase =
           ( Native.Ready | Native.Start _ | Native.Active _ | Native.Turn_inflight _

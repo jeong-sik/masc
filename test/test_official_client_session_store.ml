@@ -833,7 +833,8 @@ let test_vendor_session_full_ends_the_continuation_and_frees_the_session () =
     in
     let full =
       require_recovery ~base_path ~keeper_name ~expected:resumed_claim
-        ~failure:Vendor_session_full ~detail:"the resumed session is full"
+        ~failure:(Vendor_session_full No_activity_observed)
+        ~detail:"the resumed session is full"
         ~required_at:7.0
       |> Result.get_ok
     in
@@ -844,10 +845,20 @@ let test_vendor_session_full_ends_the_continuation_and_frees_the_session () =
     in
     let recovery_id =
       match reloaded.phase with
-      | Recovery_required { failure = Vendor_session_full; recovery_id; _ } -> recovery_id
+      | Recovery_required
+          { failure = Vendor_session_full No_activity_observed; recovery_id; _ } -> recovery_id
       | Recovery_required _ | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
         fail "the full-session record did not keep its failure"
     in
+    check bool "the record ends this Gate" true
+      (Option.is_some
+         (Keeper_direct_gate_continuation.session_full_cause ~checkpoint
+            ~approval_id:"approval-1" (Some reloaded)));
+    check bool "another Gate's full session is not blamed on this one" true
+      (Option.is_none
+         (Keeper_direct_gate_continuation.session_full_cause
+            ~checkpoint:{ checkpoint with turn_id = "turn-0" }
+            ~approval_id:"approval-2" (Some reloaded)));
     check bool "the continuation is refused once its session is full" true
       (Result.is_error
          (validate_continuation ~checkpoint ~expected:(Some reloaded)

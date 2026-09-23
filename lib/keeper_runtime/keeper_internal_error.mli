@@ -45,6 +45,16 @@ val official_client_input_rejection_to_string : official_client_input_rejection 
 val official_client_input_rejection_of_string : string -> official_client_input_rejection option
 val official_client_recovery_summary : official_client_recovery -> string
 
+(** What a Gate continuation's session had done in the refused attempt before
+    the vendor refused its resume as full. [Activity_observed] means a response
+    or a tool effect was observed; its evidence stays with the attempt. *)
+type vendor_session_activity =
+  | No_activity_observed
+  | Activity_observed
+
+val vendor_session_activity_to_string : vendor_session_activity -> string
+val vendor_session_activity_of_string : string -> vendor_session_activity option
+
 type provider_rejection = {
   provider_label : string;
   reason : string;

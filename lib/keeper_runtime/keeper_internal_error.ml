@@ -57,6 +57,19 @@ let official_client_input_rejection_of_string = function
   | "effect_fenced" -> Some Effect_fenced
   | _ -> None
 
+type vendor_session_activity =
+  | No_activity_observed
+  | Activity_observed
+
+let vendor_session_activity_to_string = function
+  | No_activity_observed -> "no_activity_observed"
+  | Activity_observed -> "activity_observed"
+
+let vendor_session_activity_of_string = function
+  | "no_activity_observed" -> Some No_activity_observed
+  | "activity_observed" -> Some Activity_observed
+  | _ -> None
+
 let official_client_recovery_summary { runtime_id; recovery_id; reason } =
   Printf.sprintf
     "Official-client session for runtime %s requires recovery %s (%s); local claim refused before provider dispatch."

@@ -23,6 +23,10 @@ type input_rejection_reason = Keeper_internal_error.official_client_input_reject
   | Bootstrap_floor_exceeded
   | Effect_fenced
 
+type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
+  | No_activity_observed
+  | Activity_observed
+
 type recovery_failure =
   | Transient_spawn_failed
   | Owner_stopped_turn
@@ -33,9 +37,10 @@ type recovery_failure =
   | Host_hook_failed
   | State_persistence_failed
   | Process_restarted
-  | Vendor_session_full
+  | Vendor_session_full of vendor_session_activity
       (** A Gate continuation resumed its original session and the vendor
-          refused it as full before any response or tool activity. Only that
+          refused it as full; the argument says whether a response or tool
+          effect was observed first. Only that
           session may carry the continuation, so the continuation is over:
           {!validate_continuation} refuses it, [Retry_previous] is
           unavailable, and, like every failure other than [Input_rejected],

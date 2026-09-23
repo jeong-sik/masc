@@ -60,6 +60,7 @@ type cause =
       ; runtime_id : string
       ; session_id : string
       ; recovery_id : string
+      ; activity : Keeper_internal_error.vendor_session_activity
       }
   | Reply_contract_rejected of
       { field : reply_contract_field
@@ -250,14 +251,18 @@ let summary_of_cause = function
     Printf.sprintf "%s: %s" (continuation_stage_clause stage) (one_line detail)
   | User_row_unpersisted { detail } ->
     Printf.sprintf "Storing the message failed: %s" (one_line detail)
-  | Gate_session_full { approval_id; runtime_id; session_id; recovery_id } ->
+  | Gate_session_full { approval_id; runtime_id; session_id; recovery_id; activity } ->
     Printf.sprintf
       "Gate %s cannot continue: the %s session %s is full, so this continuation \
-       ended for good (recovery %s). The next message starts a new session."
+       ended for good (recovery %s).%s The next message starts a new session."
       (one_line approval_id)
       (one_line runtime_id)
       (one_line session_id)
       (one_line recovery_id)
+      (match activity with
+       | Keeper_internal_error.No_activity_observed -> ""
+       | Keeper_internal_error.Activity_observed ->
+         " A response or tool effect was observed before the refusal.")
   | Reply_contract_rejected { field = _; detail } -> one_line detail
   | No_visible_reply { stage; had_blocks = _ } ->
     (match stage with
@@ -402,13 +407,14 @@ let cause_to_yojson = function
       ]
   | User_row_unpersisted { detail } ->
     `Assoc [ "kind", `String "user_row_unpersisted"; "detail", `String detail ]
-  | Gate_session_full { approval_id; runtime_id; session_id; recovery_id } ->
+  | Gate_session_full { approval_id; runtime_id; session_id; recovery_id; activity } ->
     `Assoc
       [ "kind", `String "gate_session_full"
       ; "approval_id", `String approval_id
       ; "runtime_id", `String runtime_id
       ; "session_id", `String session_id
       ; "recovery_id", `String recovery_id
+      ; "activity", `String (Keeper_internal_error.vendor_session_activity_to_string activity)
       ]
   | Reply_contract_rejected { field; detail } ->
     `Assoc
@@ -566,15 +572,19 @@ let cause_of_yojson (json : Yojson.Safe.t) =
         | "user_row_unpersisted" ->
           detail_only kind fields (fun detail -> User_row_unpersisted { detail })
         | "gate_session_full" ->
-          require kind [ "approval_id"; "runtime_id"; "session_id"; "recovery_id" ] fields
+          require kind
+            [ "approval_id"; "runtime_id"; "session_id"; "recovery_id"; "activity" ] fields
             (fun () ->
                Result.bind (string_field kind fields "approval_id") (fun approval_id ->
                  Result.bind (string_field kind fields "runtime_id") (fun runtime_id ->
                    Result.bind (string_field kind fields "session_id") (fun session_id ->
-                     Result.map
-                       (fun recovery_id ->
-                          Gate_session_full { approval_id; runtime_id; session_id; recovery_id })
-                       (string_field kind fields "recovery_id")))))
+                     Result.bind (string_field kind fields "recovery_id") (fun recovery_id ->
+                       Result.map
+                         (fun activity ->
+                            Gate_session_full
+                              { approval_id; runtime_id; session_id; recovery_id; activity })
+                         (labelled kind "activity"
+                            Keeper_internal_error.vendor_session_activity_of_string fields))))))
         | "reply_contract_rejected" ->
           require kind [ "field"; "detail" ] fields (fun () ->
             Result.bind

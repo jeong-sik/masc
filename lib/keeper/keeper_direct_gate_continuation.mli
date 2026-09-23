@@ -47,7 +47,7 @@ val session_full : config:Workspace.config -> keeper_name:string -> admission ->
 
 (** The decision {!session_full} makes once the session is loaded: [Some] only
     for a [Vendor_session_full] recovery on the checkpoint's own client kind and
-    runtime. *)
+    runtime whose failed claim resumed the checkpoint's own session and turn. *)
 val session_full_cause : checkpoint:Keeper_semantic_execution.official_client_checkpoint ->
   approval_id:string -> Keeper_official_client_session_store.t option ->
   Keeper_request_failure.cause option

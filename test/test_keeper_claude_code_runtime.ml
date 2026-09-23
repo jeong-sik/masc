@@ -1099,7 +1099,9 @@ let test_keeper_shrinks_history_after_statusless_context_error
          let full = load_state base_path in
          let recovery_id = match full.phase with
            | Recovery_required
-               { failure = Keeper_official_client_session_store.Vendor_session_full
+               { failure =
+                   Keeper_official_client_session_store.Vendor_session_full
+                     Keeper_official_client_session_store.No_activity_observed
                ; recovery_id
                ; _
                } -> recovery_id
@@ -1109,7 +1111,8 @@ let test_keeper_shrinks_history_after_statusless_context_error
          (match Keeper_direct_gate_continuation.session_full_cause ~checkpoint
              ~approval_id:"approval-full" (Some full) with
           | Some (Keeper_request_failure.Gate_session_full
-              { approval_id; runtime_id; session_id; recovery_id = recorded }) ->
+              { approval_id; runtime_id; session_id; recovery_id = recorded
+              ; activity = Keeper_internal_error.No_activity_observed }) ->
             check string "the failure names the Gate" "approval-full" approval_id;
             check string "the failure names the runtime" checkpoint.runtime_id runtime_id;
             check string "the failure names the full session" checkpoint.session_id session_id;
@@ -2028,6 +2031,37 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
     true
 ;;
 
+(* A Gate continuation's resume refused as full ends the Gate whatever it did
+   first; the record keeps whether a response or tool effect came first. *)
+let test_gate_resume_overflow_is_session_full () =
+  let map = Keeper_claude_code_runtime.For_testing.recovery_failure_of_attempt in
+  let overflow ~tool_effect_attempted ~response_emitted =
+    Runtime_claude_code.Context_window_exceeded
+      { message = "Prompt is too long"; tool_effect_attempted; response_emitted }
+  in
+  let resume = Runtime_claude_code.Resume { session_id = "session-1" } in
+  check bool "no activity"
+    (map ~session_mode:resume ~gate_continuation:true
+       (overflow ~tool_effect_attempted:false ~response_emitted:false)
+     = Keeper_official_client_session_store.(Vendor_session_full No_activity_observed))
+    true;
+  check bool "after a tool effect"
+    (map ~session_mode:resume ~gate_continuation:true
+       (overflow ~tool_effect_attempted:true ~response_emitted:false)
+     = Keeper_official_client_session_store.(Vendor_session_full Activity_observed))
+    true;
+  check bool "after a response"
+    (map ~session_mode:resume ~gate_continuation:true
+       (overflow ~tool_effect_attempted:false ~response_emitted:true)
+     = Keeper_official_client_session_store.(Vendor_session_full Activity_observed))
+    true;
+  check bool "an ordinary resume keeps the input fence"
+    (map ~session_mode:resume ~gate_continuation:false
+       (overflow ~tool_effect_attempted:true ~response_emitted:false)
+     = Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true
+;;
+
 let test_native_action_observer_keeps_exact_provider_identity () =
   let seen = ref [] in
   let observe ~official_turn ~identity ~tool_name =
@@ -2786,6 +2820,8 @@ let () =
             "context overflow maps to input-rejected recovery"
             `Quick
             test_context_overflow_maps_to_input_rejected_recovery
+        ; test_case "Gate resume overflow is session-full" `Quick
+            test_gate_resume_overflow_is_session_full
         ; test_case
             "pre-effect provider rejection keeps failover open"
             `Quick

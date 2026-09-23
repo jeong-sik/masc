@@ -66,8 +66,8 @@ module For_testing : sig
     -> Runtime_claude_code.error
     -> Keeper_official_client_session_store.recovery_failure
   (** The recovery failure an attempt records. A Gate continuation's resume
-      refused as a context overflow before any response or tool activity is
-      [Vendor_session_full]; everything else is
+      refused as a context overflow is [Vendor_session_full], carrying whether
+      a response or tool effect was observed first; everything else is
       {!recovery_failure_of_client_error}. *)
 end
 
@@ -175,10 +175,10 @@ val run :
     A context overflow on a [Resume] is the vendor's own conversation, which a
     smaller range does not change. Without a continuation the shrink retry
     starts fresh and carries the shrunk range; a Gate continuation, bound to
-    its original session, ends the turn on the typed overflow instead. When
-    that overflow came before any response or tool activity the session is
-    recorded [Vendor_session_full]: the Gate operation fails for good and the
-    next ordinary turn starts a fresh session.
+    its original session, ends the turn on the typed overflow instead, and the
+    session is recorded [Vendor_session_full] whether or not a response or tool
+    effect came first: the Gate operation fails for good and the next ordinary
+    turn starts a fresh session.
 
     A [Start] is unchanged: the system prompt file carries the Keeper prompt
     and every System message, and the prompt carries the history and the

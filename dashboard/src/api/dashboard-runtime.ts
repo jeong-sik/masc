@@ -1274,7 +1274,8 @@ export type DashboardOfficialClientRecoveryFailure =
   | 'host_hook_failed'
   | 'state_persistence_failed'
   | 'process_restarted'
-  | 'vendor_session_full'
+  | 'vendor_session_full_no_activity'
+  | 'vendor_session_full_after_activity'
 
 export type DashboardOfficialClientKind = 'codex' | 'claude_code' | 'antigravity'
 
@@ -1412,7 +1413,8 @@ const OFFICIAL_CLIENT_RECOVERY_FAILURES = new Set<DashboardOfficialClientRecover
   'host_hook_failed',
   'state_persistence_failed',
   'process_restarted',
-  'vendor_session_full',
+  'vendor_session_full_no_activity',
+  'vendor_session_full_after_activity',
 ])
 
 const OFFICIAL_CLIENT_KINDS = new Set<DashboardOfficialClientKind>([

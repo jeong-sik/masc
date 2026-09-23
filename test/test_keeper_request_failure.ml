@@ -191,6 +191,14 @@ let every_cause =
       ; runtime_id = "claude_code"
       ; session_id = "session-1"
       ; recovery_id = "00000000-0000-4000-8000-000000000001"
+      ; activity = Kie.No_activity_observed
+      }
+  ; Krf.Gate_session_full
+      { approval_id = "approval-2"
+      ; runtime_id = "codex"
+      ; session_id = "thread-1"
+      ; recovery_id = "00000000-0000-4000-8000-000000000002"
+      ; activity = Kie.Activity_observed
       }
   ; Krf.Reply_contract_rejected { field = Krf.Reply_payload; detail = "not an object" }
   ; Krf.Reply_contract_rejected { field = Krf.Turn_outcome; detail = "missing" }

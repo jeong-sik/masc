@@ -237,8 +237,11 @@ let decode_checks node =
   match Option.bind (field "commits" node) (field "nodes") with
   | Some (`List []) -> Some Checks_none
   | Some (`List (last :: _)) ->
+    (* The query asks for [statusCheckRollup], so only an explicit [null]
+       means "no checks"; a missing key is a shape this reader does not know. *)
     (match Option.bind (field "commit" last) (field "statusCheckRollup") with
-     | None | Some `Null -> Some Checks_none
+     | None -> None
+     | Some `Null -> Some Checks_none
      | Some rollup ->
        (match field "state" rollup with
         | Some (`String state) -> check_state_of_wire state
@@ -247,7 +250,8 @@ let decode_checks node =
 
 let decode_review node =
   match field "reviewDecision" node with
-  | None | Some `Null -> Some Review_none
+  | Some `Null -> Some Review_none
+  | None -> None
   | Some (`String decision) -> review_state_of_wire decision
   | Some _ -> None
 
@@ -277,10 +281,12 @@ type graphql_error_kind =
   | Error_rate_limited
   | Error_other
 
+(* Only a NOT_FOUND on the repository itself means the reader cannot see the
+   repository; one on a nested field says nothing about the repository. *)
 let graphql_error_kind error =
-  match field "type" error with
-  | Some (`String "NOT_FOUND") -> Error_not_found
-  | Some (`String "RATE_LIMITED") -> Error_rate_limited
+  match field "type" error, field "path" error with
+  | Some (`String "NOT_FOUND"), Some (`List [ `String "repository" ]) -> Error_not_found
+  | Some (`String "RATE_LIMITED"), _ -> Error_rate_limited
   | _ -> Error_other
 
 type page =
@@ -338,7 +344,6 @@ let decode_page ~repo_slug (response : response) =
 let failure_of_status (response : response) =
   match response.status with
   | 401 -> Some Token_rejected
-  | 404 -> Some Repository_not_visible
   | 429 -> Some (Rate_limited { reset_at = response.rate_limit_reset })
   | 403 when response.rate_limit_remaining = Some 0 ->
     Some (Rate_limited { reset_at = response.rate_limit_reset })
@@ -447,20 +452,15 @@ let refresh ~now ~http_post ~base_path ~previous =
   | Error reason ->
     { reader; repositories_error = Some reason; repositories = previous.repositories }
   | Ok repos ->
-    let previous_pulls id =
-      match
-        List.find_opt (fun entry -> String.equal entry.repository_id id) previous.repositories
-      with
-      | Some entry -> entry.pulls
-      | None -> Pulls_not_read
-    in
     let entry (repo : Repo_manager_types.repository) =
       let slug = github_slug_of_remote repo.url in
       let pulls =
         match slug, credential with
         | None, _ -> Pulls_not_github
         | Some slug, Ok { token; keeper = _ } -> read_repository ~now ~http_post ~token slug
-        | Some _, Error _ -> previous_pulls repo.id
+        (* An earlier read would show checks and reviews the server can no
+           longer vouch for; [reader] says why nothing is read now. *)
+        | Some _, Error _ -> Pulls_not_read
       in
       { repository_id = repo.id; url = repo.url; slug; pulls }
     in

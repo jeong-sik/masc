@@ -61,7 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- masc-tui replaces its stored operator token once it has expired instead of carrying it. It read only `auth/masc-tui.token`, never the credential record that holds the expiry, so after its self-minted 30-day token ran out every start found the same file and every admin read — the Keeper GitHub identity view among them — came back `401 token_expired`, shown as "the operator token this masc-tui presented was refused". The stored token is now checked with `Auth.verify_token`; an expired one is re-minted at startup and the notice says the old one expired. A token that expires while masc-tui is running still needs a restart (#38136).
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result

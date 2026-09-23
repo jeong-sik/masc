@@ -167,12 +167,31 @@ let test_keeper_tag () =
   let author = strip (tag "k-author") in
   check bool "the Keeper's first PR is tagged" true (contains "#6" author);
   check bool "its second PR is counted" true (contains "+1" author);
-  (* The glyph is the first PR's check state, not a fixed mark: k-author's
+  (* The glyph is the first PR's check state, not a fixed mark. k-author's
      first PR (6) passes and its second (8) fails, so the tag carries the
      passing glyph and not the failing one. *)
   check bool "the first PR's passing checks are drawn" true (contains "\xe2\x9c\x93" author);
   check bool "a later failing PR does not change the first glyph" false
     (contains "\xe2\x9c\x97" author);
+  (* A reading whose first PR fails separates "the glyph comes from the state"
+     from "the glyph is a fixed mark": a hard-coded "\xe2\x9c\x93" would pass
+     both checks above, but not this one. *)
+  let failing_first =
+    { every_state with
+      repositories =
+        [ entry "masc"
+            (Server.Pulls_read
+               { observed_at
+               ; undecodable = 0
+               ; pulls = [ pull ~author:(Some "k-author") ~checks:Server.Checks_failing 6 ]
+               })
+        ]
+    }
+  in
+  let failing = strip (Pulls.keeper_tag (decode failing_first) "k-author") in
+  check bool "a failing first PR draws the failing glyph" true (contains "\xe2\x9c\x97" failing);
+  check bool "a failing first PR does not draw the passing glyph" false
+    (contains "\xe2\x9c\x93" failing);
   check string "a Keeper with no PR gets no tag" "" (tag "k-idle");
   check string "a PR author who is no Keeper is on no row" "" (tag "someone");
   let unread =

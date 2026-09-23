@@ -80,9 +80,10 @@ val restore : base_path:string -> string -> (restore_report, string) result
 (** Saves the current state as [_autosave-<stamp>] (a free name is picked
     if the stamp is taken), then applies the named preset surface by surface.
     Only the load and the autosave can fail the whole call; each surface
-    reports what it applied and what it skipped. An override whose saved
-    contract revision no longer matches the prompt's current body is skipped
-    with that reason, as the boot-time restore would refuse it. *)
+    reports what it applied and what it skipped. An override that no
+    longer renders under the prompt's current contract is skipped with that
+    reason, as the boot-time restore would refuse it. One written against an
+    older default body is applied. *)
 
 val runtime_text_with :
   current_assignments:(string * string) list ->

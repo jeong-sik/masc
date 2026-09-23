@@ -9838,19 +9838,6 @@ let runtime_pick_column_widths ~cols items =
   in
   target, shared - target
 
-(* The authority line under the Runtime title: where every reading on this
-   screen comes from, and what the last probe found. It is one sentence of
-   clauses, and with a fleet on screen it asked for about 197 cells with every
-   count a single digit -- the frame gives 96 at the 100 columns the PTY
-   harness opens and 136 at 140, so it was cut mid-word at every width a
-   terminal is likely to have. What the cut took was the tail: the config path
-   this whole screen is a reading of, and a cut path names a file that does not
-   exist.
-
-   The shape is the Memory fleet header's (#36497): pack at clause marks rather
-   than at any space, continuation rows under the same indent. A clause carries
-   its own qualifier -- "2 probe-only" counts runtimes the probe reached and
-   the config does not name, so a row ending at "2" claims something else. *)
 (* The three fleet totals, in one place. The Overview, the lane rows and the
    Runtime authority row all say them, and a screen that folds its own copy
    keeps compiling while the two answers drift. It lives here rather than in
@@ -9875,6 +9862,19 @@ let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
   in
   turns, tokens, cost
 
+(* The authority line under the Runtime title: where every reading on this
+   screen comes from, and what the last probe found. It is one sentence of
+   clauses, and with a fleet on screen it asked for about 197 cells with every
+   count a single digit -- the frame gives 96 at the 100 columns the PTY
+   harness opens and 136 at 140, so it was cut mid-word at every width a
+   terminal is likely to have. What the cut took was the tail: the config path
+   this whole screen is a reading of, and a cut path names a file that does not
+   exist.
+
+   The shape is the Memory fleet header's (#36497): pack at clause marks rather
+   than at any space, continuation rows under the same indent. A clause carries
+   its own qualifier -- "2 probe-only" counts runtimes the probe reached and
+   the config does not name, so a row ending at "2" claims something else. *)
 let runtime_authority_rows ~cols (state : state) : string list =
   let single_line = Tui_decode.sanitize_terminal_text in
   let clauses =
@@ -10308,8 +10308,12 @@ let fleet_token_sparkline (state : state) =
   braille_sparkline tokens
 ;;
 
+(* The header's `$` reading. It is the same sum the Runtime authority row
+   says, so it comes from the same fold: a rule about what counts (dropping
+   cancelled turns, say) that lands in only one of them would compile. *)
 let fleet_total_cost_usd (state : state) =
-  List.fold_left (fun acc (k : keeper) -> acc +. k.k_total_cost_usd) 0.0 state.keepers
+  let _, _, cost = aggregate_keeper_stats state.keepers in
+  cost
 ;;
 
 let conversation_urls (state : state) : string list =

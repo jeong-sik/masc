@@ -113,7 +113,10 @@ type repository_entry =
 type snapshot =
   { reader : reader
   ; repositories_error : string option
-      (** The registered repository list could not be read. *)
+      (** The rows are from an earlier refresh, and why: the registered
+          repository list could not be read, or the refresh raised. A
+          sentence for the operator, not a code to match on. [None] after
+          any refresh that read the list. *)
   ; repositories : repository_entry list
   ; rejected_token_digest : string option
       (** BLAKE256 hex of the token GitHub last refused, never the token
@@ -157,7 +160,7 @@ val read_repository :
     next page. *)
 
 val refresh :
-  now:(unit -> float) -> http_post:http_post -> base_path:string -> previous:snapshot -> snapshot
+  now:(unit -> float) -> http_post:http_post -> config:Workspace.config -> previous:snapshot -> snapshot
 (** One full read: resolve the reader, load the registered repositories and
     read each GitHub one. A repository whose previous answer was
     [Token_rejected] for the same token, or [Rate_limited] with a reset time
@@ -174,6 +177,11 @@ val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 val current : unit -> snapshot
 (** The latest refresh, or {!initial} before the first one ends. *)
 
-val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
+val refresh_raised : previous:snapshot -> exn -> snapshot
+(** What {!start} publishes when {!refresh} raises: [previous] with
+    [repositories_error] saying so. *)
+
+val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> config:Workspace.config -> unit
 (** Forks the refresh loop under [sw]: one {!refresh} immediately, then one
-    every 60 seconds. Cancelled with [sw]. *)
+    every 60 seconds. A refresh that raises publishes {!refresh_raised}.
+    Cancelled with [sw]. *)

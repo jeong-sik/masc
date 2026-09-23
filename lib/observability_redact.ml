@@ -163,8 +163,12 @@ let rec shrink_json_to_budget (budget : int) (json : Yojson.Safe.t) : Yojson.Saf
 ;;
 
 (* A JSON document is redacted leaf by leaf ([redact_json_strings]): each
-   string value is scanned on its own, and sensitive keys are masked. The
-   serialized document is never scanned as one text. [url_credential] runs
+   string value and each key is scanned on its own, and sensitive keys are
+   masked. The stored value is always the redacted tree serialized again,
+   never the input text: Yojson accepts [//] and [/* */] comments and drops
+   them, so a comment holding a credential never reaches the tree, and the
+   input text would carry it into the log. The serialized document is never
+   scanned as one text either. [url_credential] runs
    from [://] to the next [@], and a serialized document has no spaces, so on
    the whole text it spans from one member's URL to another member's e-mail
    address and replaces the quotes and commas between them — the stored value
@@ -174,18 +178,17 @@ let truncate_json_document ?(max_len = default_max_len) (s : string) : string =
   | exception Yojson.Json_error _ -> redact_preview ~max_len s
   | json ->
     let redacted = redact_json_strings json in
-    if String.length s <= max_len && redacted = json then String.trim s
-    else
-      (* [shrink_json_to_budget] bounds the document it returns, but the
-         serialized form can still grow past that bound: a string leaf spends
-         two characters per escaped byte. Measure the result and shrink again
-         on a smaller budget until it fits — halving reaches a string, which
-         always fits. *)
-      let rec fit budget =
-        let out = shrink_json_to_budget budget redacted |> Yojson.Safe.to_string in
-        if String.length out <= max_len || budget <= 1 then out
-        else fit (budget / 2)
-      in
-      fit max_len
+    (* [shrink_json_to_budget] returns a document that already fits as it is,
+       so a small one is only serialized again. It bounds the document it
+       returns, but the serialized form can still grow past that bound: a
+       string leaf spends two characters per escaped byte. Measure the result
+       and shrink again on a smaller budget until it fits — halving reaches a
+       string, which always fits. *)
+    let rec fit budget =
+      let out = shrink_json_to_budget budget redacted |> Yojson.Safe.to_string in
+      if String.length out <= max_len || budget <= 1 then out
+      else fit (budget / 2)
+    in
+    fit max_len
 ;;
 

@@ -418,6 +418,16 @@ let test_truncate_json_document_list_fits () =
    | exception Yojson.Json_error e ->
      Alcotest.fail ("stored value is not JSON: " ^ e))
 
+(* Keys are text too: a credential in a key is redacted, and two keys that
+   redact to the same text both stay, in order. *)
+let test_redact_json_strings_redacts_keys () =
+  let json =
+    `Assoc [ ("https://a:one@x", `Int 1); ("https://b:two@x", `Int 2) ]
+  in
+  let out = Yojson.Safe.to_string (Observability_redact.redact_json_strings json) in
+  Alcotest.(check string) "both members kept, keys redacted"
+    {|{"https[REDACTED]x":1,"https[REDACTED]x":2}|} out
+
 let () =
   Alcotest.run "observability_redact"
     [
@@ -469,6 +479,8 @@ let () =
             test_truncate_json_document_string_leaf_fits;
           Alcotest.test_case "truncate_json_document list fits the budget" `Quick
             test_truncate_json_document_list_fits;
+          Alcotest.test_case "redact_json_strings redacts keys" `Quick
+            test_redact_json_strings_redacts_keys;
         ] );
       ( "tool_observability",
         [

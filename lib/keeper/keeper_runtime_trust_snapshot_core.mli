@@ -24,10 +24,14 @@ type t =
   ; disposition_reason : string
   ; receipt_operator_disposition : (string * string) option
   (** The operator disposition and reason of the receipt the snapshot shows,
-      as that receipt wrote them. [None] when the snapshot shows its own
-      verdict instead (a pending approval, an unreadable approval queue, a
-      runtime blocker, or no receipt): it has no classifier of its own, so it
-      reports no operator disposition rather than a guessed one. *)
+      as that receipt wrote them: [raw.receipt_operator_disposition] when the
+      approval queue reads empty. [None] when the snapshot shows its own
+      verdict instead (a pending approval, an unreadable approval queue, or no
+      receipt in [raw]): it has no classifier of its own, so it reports no
+      operator disposition rather than a guessed one. While a runtime blocker
+      is active, the effect shell passes no receipt in [raw]
+      ([Keeper_runtime_trust_snapshot]), so the blocker's verdict shows and
+      this is [None]. *)
   ; needs_attention : bool
   ; attention_reason : string option
   ; next_human_action : string option

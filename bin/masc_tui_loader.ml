@@ -419,11 +419,16 @@ let add_event (state : state) event_type content =
 (* An outcome the operator pressed a key for, rather than something that
    happened on its own. It goes to the session log like any other event, and
    to the footer, because the log is drawn by Metrics alone: the operator who
-   pressed [a] on Workspace reads there whether the registration landed, the
-   declaration was refused, or the editor never started. *)
+   pressed [a] on Workspace reads on Workspace whether the registration
+   landed, the declaration was refused, or the editor never started. Every
+   call site that answers a key or a command, or finishes the request one
+   started, uses this; [add_event] alone is for what happened on its own --
+   the feed, a failed poll, the server's lifecycle. The footer copy is one
+   line: a server's reason can carry newlines. *)
 let report_action (state : state) event_type content =
   add_event state event_type content;
-  state.last_action <- Some (content, Unix.gettimeofday ())
+  state.last_action <-
+    Some (Masc_tui_ansi.Terminal_text.single_line content, Unix.gettimeofday ())
 
 (** HTTP JSON decoding helpers. These intentionally fail closed for the TUI
     dashboard surfaces: an empty list means the API really returned an empty

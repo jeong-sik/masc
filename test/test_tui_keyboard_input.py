@@ -9633,10 +9633,10 @@ def repository_add_interaction(requests: HttpRequests) -> Interaction:
     key was pressed on says what happened.
 
     Every outcome of this action -- the registration, a refused declaration,
-    an editor that never started -- went to the event log, and the event log
-    is drawn by Overview alone. So the operator who pressed the key stood on
-    the one surface that could not answer them, and a repository that was
-    registered looked exactly like nothing at all."""
+    an editor that never started -- went only to the session log, which
+    another surface draws. So the operator who pressed the key stood on a
+    surface that could not answer them, and a repository that was registered
+    looked exactly like nothing at all."""
 
     def interact(
         process: subprocess.Popen[bytes],

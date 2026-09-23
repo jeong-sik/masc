@@ -1,4 +1,5 @@
 module Observer = Masc_tui_observer
+module Message_layout = Masc_tui_message_layout
 
 type filter =
   | Turns
@@ -358,9 +359,13 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
          one part that can be missing. *)
       let tokens =
         match (t.Observer.tc_input_tokens, t.Observer.tc_output_tokens) with
-        | Some i, Some o -> Printf.sprintf "in %d out %d" i o
-        | Some i, None -> Printf.sprintf "in %d" i
-        | None, Some o -> Printf.sprintf "out %d" o
+        | Some i, Some o ->
+            Printf.sprintf "in %s out %s" (Message_layout.compact_count i)
+              (Message_layout.compact_count o)
+        | Some i, None ->
+            Printf.sprintf "in %s" (Message_layout.compact_count i)
+        | None, Some o ->
+            Printf.sprintf "out %s" (Message_layout.compact_count o)
         | None, None -> ""
       in
       let cost =
@@ -745,9 +750,13 @@ let row_of_chunk chunk =
   let tools_text = chunk_tools_text tools in
   let tokens =
     match chunk.ck_tokens with
-    | Some i, Some o -> Printf.sprintf " \xc2\xb7 in %d out %d" i o
-    | Some i, None -> Printf.sprintf " \xc2\xb7 in %d" i
-    | None, Some o -> Printf.sprintf " \xc2\xb7 out %d" o
+    | Some i, Some o ->
+        Printf.sprintf " \xc2\xb7 in %s out %s" (Message_layout.compact_count i)
+          (Message_layout.compact_count o)
+    | Some i, None ->
+        Printf.sprintf " \xc2\xb7 in %s" (Message_layout.compact_count i)
+    | None, Some o ->
+        Printf.sprintf " \xc2\xb7 out %s" (Message_layout.compact_count o)
     | None, None -> ""
   in
   let cost =

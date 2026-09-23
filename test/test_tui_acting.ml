@@ -149,9 +149,9 @@ let test_turns_fold_the_two_planes_into_one_row_per_turn () =
     "newest first: 51 running, 50 and 49 settled with ledger durations"
     [ "\xe2\x96\xb6 kpr-07 turn 51 | running"
     ; "\xe2\x96\xa0 kpr-07 turn 50 | keeper_artifact_read 6ms \xc2\xb7 in \
-       39237 out 76 \xc2\xb7 $0.0102"
+       39.2k out 76 \xc2\xb7 $0.0102"
     ; "\xe2\x96\xa0 kpr-07 turn 49 | masc_schedule_list 63ms \xc2\xb7 in \
-       39050 out 70 \xc2\xb7 $0.0100"
+       39.0k out 70 \xc2\xb7 $0.0100"
     ]
     (List.map text rows)
 
@@ -173,8 +173,39 @@ let test_a_settle_joins_the_open_turn_it_ends_despite_the_number () =
   check int "one turn, not two" 1 (List.length rows);
   check (list string)
     "the keeper's number, settled, with the ledger call on the same row"
-    [ "\xe2\x96\xa0 kpr-08 turn 3084 | Read 12ms \xc2\xb7 in 2000 out 40 \xc2\xb7 $0.0040" ]
+    [ "\xe2\x96\xa0 kpr-08 turn 3084 | Read 12ms \xc2\xb7 in 2.0k out 40 \xc2\xb7 $0.0040" ]
     (List.map text rows)
+
+(* The feed row and the Acting pane's own block draw the same turn's token
+   figures. Captured live 2026-09-24: a wkbl-web-leader turn drew
+   "in 411465 out 3" on the Activity feed while the block beside it spelled
+   the same reading "411.5k". Six digits in a detail column are read as a
+   length, not a number, and two surfaces disagreeing about one figure is the
+   reader's problem either way. *)
+let holds needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i =
+    i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1))
+  in
+  n = 0 || scan 0
+
+let test_a_settled_row_spells_its_tokens_the_way_the_pane_does () =
+  let k = "kpr-09" in
+  let rows =
+    Acting.chunk_rows ~traces:[]
+      (entries_of
+         [ agent_core ~kind:Observer.Turn_started ~turn:114 k
+         ; turn_settled ~keeper:k ~turn:114 ~input:411_465 ~output:3
+             ~cost:0.0258
+         ])
+  in
+  match List.map text rows with
+  | [ row ] ->
+    check string "the ladder's reading" "411.5k"
+      (Masc_tui_message_layout.compact_count 411_465);
+    check bool "the row carries it" true (holds "in 411.5k out 3" row);
+    check bool "and never spells the digits out" false (holds "411465" row)
+  | drawn -> failf "expected one settled row, got %d" (List.length drawn)
 
 (* What is not turn lifecycle stays its own row, in feed position. *)
 let test_turns_pass_non_lifecycle_rows_through () =
@@ -738,13 +769,13 @@ let test_a_return_with_no_start_held_has_no_duration () =
 
 let test_keeper_rows_say_what_the_keeper_did () =
   check string "a settlement carries tokens, cost, and calls"
-    "\xe2\x96\xa0 largo turn done | turn 2086 \xc2\xb7 in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
+    "\xe2\x96\xa0 largo turn done | turn 2086 \xc2\xb7 in 73.9k out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
     (text (Acting.row_of_event ~at:100. ~duration_ms:None (settled "largo")));
   (* A settle that carried no number drops the turn from the detail rather
      than drawing [turn ?] there. Each part carries no separator of its own,
      so the figures do not open with one when the turn is the missing part. *)
   check string "an unnumbered settlement opens on its figures"
-    "\xe2\x96\xa0 largo turn done | in 73877 out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
+    "\xe2\x96\xa0 largo turn done | in 73.9k out 358 \xc2\xb7 $0.0258 \xc2\xb7 0 calls"
     (text
        (Acting.row_of_event ~at:100. ~duration_ms:None
           (match settled "largo" with
@@ -1422,6 +1453,8 @@ let () =
             test_a_settle_joins_the_open_turn_it_ends_despite_the_number
         ; test_case "a running turn names its in-flight call" `Quick
             test_a_running_turn_names_its_in_flight_call
+        ; test_case "a settled row spells its tokens the way the pane does"
+            `Quick test_a_settled_row_spells_its_tokens_the_way_the_pane_does
         ; test_case "turns pass non-lifecycle rows through" `Quick
             test_turns_pass_non_lifecycle_rows_through
         ; test_case "turns do not readmit what the scope hides" `Quick

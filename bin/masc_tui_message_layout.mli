@@ -436,6 +436,12 @@ val count_noun : ?plural:string -> int -> string -> string
 (** [count_noun 1 "line"] is ["1 line"], [count_noun 2 "line"] is ["2 lines"].
     [?plural] names an irregular plural: [count_noun ~plural:"entries" 3 "entry"]. *)
 
+val compact_count : int -> string
+(** A figure read at a glance rather than counted digit by digit:
+    [compact_count 411465] is ["411.5k"], [compact_count 358] is ["358"].
+    Thousands and millions keep a tenth, which is what parts 73.9k from
+    73.2k. *)
+
 val cut_mark : string
 (** What a cut leaves behind in place of the text it dropped.
 

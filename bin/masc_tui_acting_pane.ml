@@ -256,12 +256,7 @@ let detail_label_cells = 4
 let age_text ~now at = Acting.elapsed_text (Float.max 0. (now -. at) *. 1000.)
 let last_event_text ~now at = "last event " ^ age_text ~now at
 
-let compact_count n =
-  let thousand = 1_000 and million = 1_000_000 in
-  if n >= million then Printf.sprintf "%.1fM" (float_of_int n /. float_of_int million)
-  else if n >= thousand then
-    Printf.sprintf "%.1fk" (float_of_int n /. float_of_int thousand)
-  else string_of_int n
+let compact_count = Masc_tui_message_layout.compact_count
 
 (* Input and output as two parts, for the focus block. The input part is what
    a turn re-sends on every call, so it is what makes a twelve-call turn read

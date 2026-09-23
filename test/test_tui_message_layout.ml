@@ -2637,6 +2637,24 @@ let test_a_clause_wider_than_the_row_is_wrapped_not_cut () =
   check string "the words survive in order" "one clause that is far too wide"
     (String.concat " " rows)
 
+(* The one ladder for a figure a reader reads at a glance. It lived in the
+   Acting pane while the feed rows beside it spelled the same figures out:
+   one live turn drew "in 411465 out 3" on Activity and "411.5k" in the block
+   next to it. *)
+let test_compact_count_reads_at_a_glance () =
+  Alcotest.(check string) "under a thousand keeps its digits" "358"
+    (Layout.compact_count 358);
+  Alcotest.(check string) "a thousand keeps a tenth" "2.0k"
+    (Layout.compact_count 2_000);
+  Alcotest.(check string) "the tenth is what parts near neighbours" "73.9k"
+    (Layout.compact_count 73_877);
+  Alcotest.(check bool) "so two near figures do not read alike" true
+    (Layout.compact_count 73_877 <> Layout.compact_count 73_212);
+  Alcotest.(check string) "millions the same way" "1.5M"
+    (Layout.compact_count 1_500_000);
+  Alcotest.(check string) "and the boundary belongs to the larger unit" "1.0k"
+    (Layout.compact_count 1_000)
+
 let () =
   run "tui_message_layout"
     [
@@ -2844,5 +2862,7 @@ let () =
             test_a_count_takes_the_number_it_counts
         ; test_case "a span fits a six-cell column" `Quick
             test_a_span_fits_a_six_cell_column
+        ; test_case "compact count reads at a glance" `Quick
+            test_compact_count_reads_at_a_glance
         ] )
     ]

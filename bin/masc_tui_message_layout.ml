@@ -608,6 +608,24 @@ let count_noun ?plural count singular =
   in
   Printf.sprintf "%d %s" count noun
 
+(* A figure a reader reads at a glance rather than counts the digits of. The
+   Acting pane already spelled its token counts this way while the feed rows
+   beside it spelled the same figures out: one live turn drew "in 411465 out
+   3" on Activity while the pane's own block drew "411.5k" for the same
+   reading. Six digits in a detail column are read as a length, not a number.
+
+   Thousands keep a tenth; the tenth is what parts 73.9k from 73.2k, and a
+   whole-thousand rounding would draw them alike. *)
+let thousand = 1_000
+let million = 1_000_000
+
+let compact_count n =
+  if n >= million then
+    Printf.sprintf "%.1fM" (float_of_int n /. float_of_int million)
+  else if n >= thousand then
+    Printf.sprintf "%.1fk" (float_of_int n /. float_of_int thousand)
+  else string_of_int n
+
 let cut_mark = "…"
 let cut_mark_cells = display_width cut_mark
 

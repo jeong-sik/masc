@@ -3805,7 +3805,15 @@
  (modules test_tui_acting)
  ; masc for the call log's disposition vocabulary the ledger rows are typed
  ; with, agent_core for the schedule contract they carry.
- (libraries alcotest masc agent_core masc_tui_acting masc_tui_observer))
+ ; masc_tui_message_layout so the row's token figure is asked of the ladder
+ ; that draws it rather than spelled again here.
+ (libraries
+  alcotest
+  masc
+  agent_core
+  masc_tui_acting
+  masc_tui_message_layout
+  masc_tui_observer))
 
 (test
  (name test_tui_observer)

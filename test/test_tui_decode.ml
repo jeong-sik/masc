@@ -2741,7 +2741,14 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "skill_body_bytes", `Int 4981
       ; "skills_left_out", `List []
       ; "skill_resource_read_max_bytes", `Int 65536
-      ; "count", `Int 1
+      ; "count", `Int 2
+        (* The origin shape here mirrors what
+           Keeper_effective_tool_surface.origin_to_yojson actually emits, and
+           the values are the ones test_keeper_effective_tool_surface pins on
+           the producer side. The second tool splits the two branches: a
+           descriptor origin carries no skill_provenance at all, so its
+           source id must read as None rather than inheriting the first
+           tool's. *)
       ; ( "tools"
         , `List
             [ `Assoc
@@ -2749,9 +2756,26 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                 ; ( "origin"
                   , `Assoc
                       [ "kind", `String "composition_skill"
-                      ; "skill_source"
-                        , `String "skills/work-intake/SKILL.md"
+                      ; ( "skill_provenance"
+                        , `Assoc
+                            [ ( "identity"
+                              , `Assoc
+                                  [ "source_id", `String "shared-catalog"
+                                  ; "package_id", `String "work-intake"
+                                  ; "name", `String "work-intake"
+                                  ] )
+                            ; ( "directory"
+                              , `String "/srv/shared-agent-skills/work-intake" )
+                            ; ( "source"
+                              , `Assoc
+                                  [ "path", `String "/srv/shared-agent-skills" ]
+                              )
+                            ] )
                       ] )
+                ]
+            ; `Assoc
+                [ "name", `String "Read"
+                ; "origin", `Assoc [ "kind", `String "descriptor" ]
                 ] ] )
       ; "tool_surface_sha256", `String (String.make 64 'a')
       ]
@@ -2772,7 +2796,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                  ets_skill_discovery_bytes;
                  ets_skill_eager_body_bytes;
                  ets_skill_body_bytes;
-                 ets_tools = [ tool ];
+                 ets_tools = [ tool; bare_tool ];
                  ets_tool_surface_sha256 = Some digest;
                  _
                });
@@ -2786,6 +2810,17 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         (Skill_reference.list_to_yojson ets_instruction_skills
          |> Yojson.Safe.to_string);
       Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
+      (* Without this the Tools screen prints a bare "composition_skill" for
+         every skill tool: the decoder used to read origin.skill_source,
+         which no producer has emitted since the surface moved to
+         skill_provenance. *)
+      Alcotest.(check (option string))
+        "composition tool names its configured skill source"
+        (Some "shared-catalog") tool.et_skill_source_id;
+      Alcotest.(check string) "plain tool origin" "descriptor" bare_tool.et_origin;
+      Alcotest.(check (option string))
+        "a tool with no skill behind it names no source"
+        None bare_tool.et_skill_source_id;
       Alcotest.(check string) "profile name" "work-intake" profile.esp_name;
       Alcotest.(check string)
         "profile keeps the exact editable reference"
@@ -2810,8 +2845,10 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check int) "Skill discovery bytes" 369 ets_skill_discovery_bytes;
       Alcotest.(check int) "Skill eager bytes" 0 ets_skill_eager_body_bytes;
       Alcotest.(check int) "Skill body bytes" 4981 ets_skill_body_bytes;
-      Alcotest.(check (option string)) "SKILL.md source"
-        (Some "skills/work-intake/SKILL.md") tool.et_skill_source;
+      (* The skill source is asserted above, against the shape the producer
+         emits. This used to pin a SKILL.md path that no producer has sent
+         since the surface moved to skill_provenance -- the fixture was the
+         only thing still producing it. *)
       Alcotest.(check int) "digest length" 64 (String.length digest)
   | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
 
@@ -3206,6 +3243,7 @@ let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
    are the ones every connector emits. *)
 let connector_json ?(id = "slack") ?(available = `Bool true)
     ?(connected = `Bool true) ?(status = "connected")
+    ?(gateway_state = `String "connected") ?(poll_state = `Null)
     ?(channel = `String "#release-deployment")
     ?(pid = `Int 4242)
     ?(bindings =
@@ -3226,7 +3264,8 @@ let connector_json ?(id = "slack") ?(available = `Bool true)
     ; ("capabilities", `List [ `String "post" ])
     ; ("error", `String "")
     ; ("status_source", `String "in_process_gateway")
-    ; ("gateway_state", `String "connected")
+    ; ("gateway_state", gateway_state)
+    ; ("poll_state", poll_state)
     ; ("trigger_policy", `String "mention_only")
     ; ("gate_base_url", `Null)
     ; ("binding_store_path", `String ".gate/runtime/slack/bindings.json")
@@ -3280,6 +3319,11 @@ let test_decode_connector_snapshot_reads_the_live_shape () =
              c.Tui_decode.cn_bot_token_present;
            Alcotest.(check (option int)) "server pid" (Some 4242)
              c.Tui_decode.cn_pid;
+           Alcotest.(check bool) "typed gateway state" true
+             (c.Tui_decode.cn_gateway_state
+              = Some Tui_decode.Connector_gateway_connected);
+           Alcotest.(check bool) "no poll state" true
+             (c.Tui_decode.cn_poll_state = None);
            Alcotest.(check bool) "typed directory state" true
              (c.Tui_decode.cn_directory_state
               = Some Tui_decode.Connector_directory_partial);
@@ -3315,6 +3359,55 @@ let test_decode_connector_configured_but_unreachable () =
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+let test_decode_connector_reads_a_poll_state () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json ~gateway_state:`Null
+             ~poll_state:(`String "degraded") ()
+         ])
+  with
+  | Ok { Tui_decode.cs_connectors = [ c ]; _ } ->
+      Alcotest.(check bool) "typed poll state" true
+        (c.Tui_decode.cn_poll_state = Some Tui_decode.Connector_poll_degraded);
+      Alcotest.(check bool) "no gateway state" true
+        (c.Tui_decode.cn_gateway_state = None)
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* A gateway or poll state the server's state machines never produce is not
+   read as some nearby state. The row that carries it is refused on its own:
+   the transports beside it still decode, and the refusal names the row. *)
+let test_decode_connector_refuses_only_the_row_with_an_unknown_state () =
+  match
+    Tui_decode.decode_connector_snapshot
+      (connector_snapshot_json
+         [ connector_json ~id:"discord" ~gateway_state:(`String "half_open") ()
+         ; connector_json ~id:"imessage" ~gateway_state:`Null
+             ~poll_state:(`String "idle") ()
+         ; connector_json ~id:"slack" ()
+         ])
+  with
+  | Error err -> Alcotest.failf "one bad row failed the snapshot: %s" err
+  | Ok snapshot ->
+      Alcotest.(check (list string)) "the readable row still decodes"
+        [ "slack" ]
+        (List.map
+           (fun (c : Tui_decode.connector) -> c.cn_id)
+           snapshot.Tui_decode.cs_connectors);
+      Alcotest.(check (list (pair (option string) int)))
+        "each unreadable row is refused by name and position"
+        [ (Some "discord", 0); (Some "imessage", 1) ]
+        (List.map
+           (fun (r : Tui_decode.connector_refusal) ->
+              (r.cr_connector_id, r.cr_row))
+           snapshot.Tui_decode.cs_refused);
+      List.iter
+        (fun (r : Tui_decode.connector_refusal) ->
+           Alcotest.(check bool) "the refusal carries its reason" true
+             (String.length r.cr_reason > 0))
+        snapshot.Tui_decode.cs_refused
+
 let test_decode_connector_hides_nonpositive_pid () =
   match
     Tui_decode.decode_connector_snapshot
@@ -3343,14 +3436,21 @@ let test_decode_connector_absent_flags_are_off () =
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+(* A row the TUI cannot read is refused as that row, never drawn as a
+   connector and never dropped without a trace. *)
+let expect_only_row_refused label result =
+  match result with
+  | Error err -> Alcotest.failf "%s: one bad row failed the snapshot: %s" label err
+  | Ok { Tui_decode.cs_connectors = []; cs_refused = [ refusal ]; _ } ->
+      Alcotest.(check (option string)) (label ^ ": refusal names the row")
+        (Some "slack") refusal.Tui_decode.cr_connector_id
+  | Ok _ -> Alcotest.failf "%s: the row was not refused" label
+
 let test_decode_connector_rejects_contradictory_connection () =
-  match
-    Tui_decode.decode_connector_snapshot
-      (connector_snapshot_json
-         [ connector_json ~available:(`Bool false) ~connected:(`Bool true) () ])
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "connected while unavailable must be rejected"
+  expect_only_row_refused "connected while unavailable"
+    (Tui_decode.decode_connector_snapshot
+       (connector_snapshot_json
+          [ connector_json ~available:(`Bool false) ~connected:(`Bool true) () ]))
 
 let test_decode_connector_keeps_connected_but_unavailable_distinct () =
   match
@@ -3367,20 +3467,17 @@ let test_decode_connector_keeps_connected_but_unavailable_distinct () =
   | Error err -> Alcotest.failf "decode failed: %s" err
 
 let test_decode_connector_rejects_a_malformed_binding () =
-  match
-    Tui_decode.decode_connector_snapshot
-      (connector_snapshot_json
-         [ connector_json
-             ~bindings:
-               (`List
-                 [ `Assoc
-                     [ ("keeper_name", `String "pinewood-pr-jira-checker") ]
-                 ])
-             ()
-         ])
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "a binding without channel_id must not disappear"
+  expect_only_row_refused "a binding without channel_id"
+    (Tui_decode.decode_connector_snapshot
+       (connector_snapshot_json
+          [ connector_json
+              ~bindings:
+                (`List
+                  [ `Assoc
+                      [ ("keeper_name", `String "pinewood-pr-jira-checker") ]
+                  ])
+              ()
+          ]))
 
 let test_decode_connector_order_is_stable () =
   match
@@ -3590,6 +3687,14 @@ let test_decode_repository_requires_resolved_local_path () =
    failed Librarian with no ordinary snapshot may still have source evidence;
    the decoder must keep both axes instead of collapsing that row to
    memoryless. *)
+(* A keeper row that does not decode is refused on its own and the others
+   still decode, so "the payload is not accepted" is either a whole-snapshot
+   error or at least one refused row. *)
+let memory_health_rejects json =
+  match Tui_decode.decode_memory_health_snapshot json with
+  | Error _ -> true
+  | Ok snapshot -> snapshot.Tui_decode.mhs_refused_keepers <> []
+
 let empty_memory_context_cycle =
   `Assoc ["saved", `Null; "saved_read_error", `Null; "read_position", `Null;
     "read_position_read_error", `Null; "rewriting_through", `Null;
@@ -3743,7 +3848,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       | _ -> Alcotest.fail "synthesis stop or atom frontier lost")
    | Error detail -> Alcotest.fail detail);
   List.iter (fun invalid -> Alcotest.(check bool) "invalid synthesis cannot look caught up" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects (
       (context_payload (replace_field "synthesis" invalid cycle)))))
     [replace_field "state" (`String "drained") synthesis;
      replace_field "trace_id" `Null synthesis;
@@ -3764,7 +3869,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       | _ -> Alcotest.fail "absorbed position lost")
    | Error detail -> Alcotest.fail detail);
   List.iter (fun invalid -> Alcotest.(check bool) "invalid context observation rejected" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot (context_payload invalid))))
+    (memory_health_rejects ((context_payload invalid))))
     [ replace_field "prepared" (replace_field "input" (replace_field "frontier" frontier absorbed) prepared) cycle
     ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null absorbed) prepared) cycle
     ; replace_field "prepared" (replace_field "input" (replace_field "frontier" position input) prepared) cycle
@@ -3777,6 +3882,70 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     ; replace_field "prepared" (replace_field "input" (replace_field "kind" (`String "accepted") input) prepared) cycle
     ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null input) prepared) cycle
     ];
+  (* How the last Librarian pass ended is a closed set on both sides: a
+     stopped or crashed pass keeps the server's cause on its constructor, and
+     a spelling this build does not know fails the decode instead of reaching
+     the screen as a raw word. *)
+  let with_librarian ~stopped_keepers updates =
+    let with_row =
+      map_keeper 0
+        (fun keeper -> match keeper with
+         | `Assoc fields ->
+           `Assoc (List.map (fun (key, value) -> key,
+             if key = "librarian"
+             then List.fold_left (fun row (name, v) -> replace_field name v row) value updates
+             else value) fields)
+         | _ -> keeper)
+        json
+    in
+    match with_row with
+    | `Assoc fields ->
+      `Assoc (List.map (fun (key, value) -> key,
+        if key = "alert_summary"
+        then replace_field "librarian_stopped_keepers" (`Int stopped_keepers) value
+        else value) fields)
+    | other -> other
+  in
+  (match Tui_decode.decode_memory_health_snapshot
+           (with_librarian ~stopped_keepers:1
+              [ "state", `String "stopped"
+              ; "detail", `String "the range could not be read"
+              ; "last_failure_kind", `String "exact_execution_failure"
+              ]) with
+   | Ok snapshot ->
+     let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
+     Alcotest.(check bool) "a stopped pass keeps its cause" true
+       (librarian.mlh_state = Some (Tui_decode.Pass_stopped "the range could not be read"));
+     Alcotest.(check bool) "the failure kind is decoded" true
+       (librarian.mlh_last_failure_kind = Some Tui_decode.Failure_exact_execution)
+   | Error detail -> Alcotest.fail detail);
+  (* A row this build cannot read is refused on its own: the other keeper
+     still decodes and the refusal names the keeper and the reason, so a newer
+     server does not blank the pane. *)
+  List.iter
+    (fun (label, stopped_keepers, updates, reason) ->
+       match
+         Tui_decode.decode_memory_health_snapshot (with_librarian ~stopped_keepers updates)
+       with
+       | Error detail -> Alcotest.failf "%s: the whole snapshot was refused: %s" label detail
+       | Ok snapshot ->
+         Alcotest.(check (list string)) (label ^ ": the other keeper still decodes")
+           [ "healthy" ]
+           (List.map (fun keeper -> keeper.Tui_decode.mkh_keeper_id) snapshot.mhs_keepers);
+         (match snapshot.mhs_refused_keepers with
+          | [ { Tui_decode.mkr_keeper_id = Some "source-only"; mkr_reason } ] ->
+            Alcotest.(check bool) (label ^ ": the refusal says why") true
+              (String_util.contains_substring mkr_reason reason)
+          | _ -> Alcotest.failf "%s: expected one refusal naming source-only" label))
+    [ "a state this build does not know is refused", 1, [ "state", `String "paused" ],
+      "unsupported librarian state: paused"
+    ; "a stopped pass without its cause is refused", 1, [ "state", `String "stopped" ],
+      "missing its detail"
+    ; "a caught-up pass with a cause is refused", 0, [ "detail", `String "stray" ],
+      "carries a detail"
+    ; "a failure kind this build does not know is refused", 0,
+      [ "last_failure_kind", `String "quota" ], "unsupported librarian failure kind: quota"
+    ];
   let unknown_unread = map_keeper 0
       (fun keeper -> match keeper with
        | `Assoc fields ->
@@ -3784,7 +3953,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
            if key = "librarian" then replace_field "unread_atom_turns" `Null value else value) fields)
        | _ -> keeper) json in
   Alcotest.(check bool) "unknown unread cannot report a zero fleet total" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot unknown_unread));
+    (memory_health_rejects (unknown_unread));
   let unknown_total = match unknown_unread with
     | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key,
         if key = "totals" then replace_field "librarian_unread_turns" `Null value else value) fields)
@@ -3810,7 +3979,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
         else value) fields)
     | json -> json in
   Alcotest.(check bool) "an unmeasured continuity lag cannot leave the fleet count at zero" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot (with_continuity `Null)));
+    (memory_health_rejects ((with_continuity `Null)));
   (match Tui_decode.decode_memory_health_snapshot
            (with_continuity_totals ~behind:0 ~unmeasured:1 (with_continuity `Null)) with
    | Ok snapshot ->
@@ -3830,9 +3999,9 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
        snapshot.mhs_total_librarian_continuity_unread_atoms
    | Error detail -> Alcotest.fail detail);
   Alcotest.(check bool) "a continuity sum that disagrees with the rows is refused" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot (with_continuity (`Int 4))));
+    (memory_health_rejects ((with_continuity (`Int 4))));
   Alcotest.(check bool) "a negative continuity lag is refused" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects (
        (with_continuity_totals ~behind:(-1) ~unmeasured:0 (with_continuity (`Int (-1))))));
   let mismatched_totals =
     match json with
@@ -3933,7 +4102,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   List.iter
     (fun (label, invalid) ->
        Alcotest.(check bool) label true
-         (Result.is_error (Tui_decode.decode_memory_health_snapshot invalid)))
+         (memory_health_rejects (invalid)))
     [ "fleet total mismatch rejects", mismatched_totals
     ; "negative unread turn count rejects", negative_unread
     ; "unknown librarian state rejects", unknown_librarian_state
@@ -4122,7 +4291,7 @@ let test_decode_memory_alert_keeps_the_code_contract () =
    | Error err -> Alcotest.failf "a well-formed alert failed to decode: %s" err);
   let rejected label json =
     Alcotest.(check bool) label true
-      (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
+      (memory_health_rejects (json))
   in
   rejected "an unknown code has no variant to decode into"
     (memory_alert_snapshot ~code:"librarian_on_fire" ~severity:"error"
@@ -4270,20 +4439,20 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
   (* Both halves of the disagreement: a marker with a number, and a rewrite
      target the cut already reached. *)
   Alcotest.(check bool) "a read error beside a position is refused" true
-    (Result.is_error
-       (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects
+       (
           (snapshot_with
              (cycle ~read_position:(Some 12887) ~read_error:(Some "progress_unreadable")
                 ~rewriting_through:None ()))));
   Alcotest.(check bool) "a rewrite target at the cut is refused" true
-    (Result.is_error
-       (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects
+       (
           (snapshot_with
              (cycle ~read_position:(Some 12887) ~read_error:None
                 ~rewriting_through:(Some 7694) ()))));
   Alcotest.(check bool) "a rewrite target without a cut is refused" true
-    (Result.is_error
-       (Tui_decode.decode_memory_health_snapshot
+    (memory_health_rejects
+       (
           (snapshot_with
              (cycle ~saved:false ~read_position:(Some 12887) ~read_error:None
                 ~rewriting_through:(Some 12888) ()))))
@@ -4299,7 +4468,7 @@ let test_decode_memory_health_rejects_stale_schema () =
       ]
   in
   Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
-    (Result.is_error (Tui_decode.decode_memory_health_snapshot json))
+    (memory_health_rejects (json))
 
 let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound () =
   `Assoc
@@ -10453,6 +10622,10 @@ let () =
           test_decode_connector_snapshot_reads_the_live_shape;
         Alcotest.test_case "configured is not reachable" `Quick
           test_decode_connector_configured_but_unreachable;
+        Alcotest.test_case "poll state is typed" `Quick
+          test_decode_connector_reads_a_poll_state;
+        Alcotest.test_case "unknown runtime state refuses only its row" `Quick
+          test_decode_connector_refuses_only_the_row_with_an_unknown_state;
         Alcotest.test_case "nonpositive pid is omitted" `Quick
           test_decode_connector_hides_nonpositive_pid;
         Alcotest.test_case "absent flags are off" `Quick

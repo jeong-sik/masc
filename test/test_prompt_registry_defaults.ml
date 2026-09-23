@@ -608,6 +608,17 @@ let () =
                 (Prompt_registry.get_prompt "keeper");
               check string "override source" "override"
                 (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper"));
+          test_case "set_override accepts a body past 10000 bytes" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              (* 4000 Hangul syllables: 12000 bytes, the shape of a Korean base
+                 prompt that the old byte cap refused. *)
+              let override_text = String.concat "" (List.init 4000 (fun _ -> "가")) in
+              check bool "wider than the old cap" true (String.length override_text > 10000);
+              (match Prompt_registry.set_override "keeper" override_text with
+              | Ok () -> ()
+              | Error msg -> fail msg);
+              check string "large override value" override_text
+                (Prompt_registry.get_prompt "keeper"));
           test_case "clear_override reverts to file" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               (match

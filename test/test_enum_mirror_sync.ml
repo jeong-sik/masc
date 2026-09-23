@@ -147,9 +147,6 @@ let test_schedule_contract_mirrors () =
         (List.sort_uniq String.compare owner)
         (advertised_values_for_schemas Tool_schemas_schedule.schemas ~property))
     [ "status", Schedule_contract_values.status_selector_strings
-    ; "requested_by_kind", Schedule_contract_values.actor_kind_strings
-    ; "scheduled_by_kind", Schedule_contract_values.actor_kind_strings
-    ; "cancelled_by_kind", Schedule_contract_values.actor_kind_strings
     ; "source", Schedule_contract_values.schedule_source_strings
     ; "recurrence_kind", Schedule_contract_values.recurrence_kind_strings
     ; "owner", Schedule_contract_values.owner_kind_strings

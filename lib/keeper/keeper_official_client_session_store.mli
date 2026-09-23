@@ -23,6 +23,10 @@ type input_rejection_reason = Keeper_internal_error.official_client_input_reject
   | Bootstrap_floor_exceeded
   | Effect_fenced
 
+type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
+  | No_activity_observed
+  | Activity_observed
+
 type recovery_failure =
   | Transient_spawn_failed
   | Owner_stopped_turn
@@ -33,6 +37,14 @@ type recovery_failure =
   | Host_hook_failed
   | State_persistence_failed
   | Process_restarted
+  | Vendor_session_full of vendor_session_activity
+      (** A Gate continuation resumed its original session and the vendor
+          refused it as full; the argument says whether a response or tool
+          effect was observed first. Only that
+          session may carry the continuation, so the continuation is over:
+          {!validate_continuation} refuses it, [Retry_previous] is
+          unavailable, and, like every failure other than [Input_rejected],
+          the next claim supersedes it with a fresh session. *)
 
 type failure_disposition =
   | Transient
@@ -117,8 +129,18 @@ type transient_release_record =
     external snapshot available to this vendor turn, not persistent history
     injection. Canonical_source_guard binds the pre-projection source used by
     a client without replacement support; it does not claim all source bytes
-    were delivered. No receipt asserts that the model understood its contents. *)
-type context_delivery = Prepared_start_context | Replaced_configuration | Canonical_source_guard
+    were delivered. Held_by_vendor_session records a resume that sent none of
+    the canonical snapshot: the vendor session holds the conversation and the
+    system prompt it recorded at its first launch, and MASC sent only its
+    composed per-turn context in front of the user prompt
+    ({!Keeper_official_client_host.resume_prompt}). Its snapshot hash names the
+    canonical history MASC held at that turn, not bytes the model read. No
+    receipt asserts that the model understood its contents. *)
+type context_delivery =
+  | Prepared_start_context
+  | Replaced_configuration
+  | Canonical_source_guard
+  | Held_by_vendor_session
 
 type context_frontier =
   { snapshot_sha256 : string
@@ -365,6 +387,8 @@ val resolve_recovery :
 (** Resolve one exact recovery claim with compare-and-swap authority.
     [Retry_previous] restores the last settled session and drops only the turn
     that failed, so the next claim re-attempts the same ordinal against it.
+    A [Vendor_session_full] recovery has no [Retry_previous]: the same
+    resume would be refused again.
     [Restart_fresh] abandons the conversation, so the ordinal restarts with it
     and the next claim asks for ordinal 1 -- the same reset an automatic
     supersede performs. Repeating the same recovery id and decision returns the

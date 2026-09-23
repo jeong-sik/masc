@@ -441,11 +441,11 @@ def make_bundle(root: Path):
     )
     frame_rows = (
         [
-            "MASC Tools 14:10:47 [connected]",
+            "MASC Config / Tools 14:10:47 [connected]",
             f"receipt_sha256={receipt_sha256}",
         ],
         [
-            "MASC Tools 14:10:48 [connected]",
+            "MASC Config / Tools 14:10:48 [connected]",
             f"receipt_sha256={receipt_sha256}",
             "q quit  ↑↓ scroll",
         ],
@@ -884,7 +884,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             bundle = make_bundle(Path(raw))
             for frame in bundle["tui"]["frames"]:
-                frame["visible_text"] = "MASC Tools 14:10:47 [connected]"
+                frame["visible_text"] = "MASC Config / Tools 14:10:47 [connected]"
                 frame["visible_text_sha256"] = verifier.digest(
                     frame["visible_text"].encode()
                 )
@@ -905,7 +905,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 name = f"tui-three-frame-{index:03d}.png"
                 payload = png(1200, 900 + index)
                 (bundle["tui_root"] / name).write_bytes(payload)
-                visible_text = "MASC Tools 14:10:47 [connected]\n" + receipt_line
+                visible_text = "MASC Config / Tools 14:10:47 [connected]\n" + receipt_line
                 frames.append(
                     {
                         "visible_text": visible_text,

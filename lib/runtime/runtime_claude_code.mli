@@ -29,7 +29,11 @@ type config =
         reads any string as the prompt, so an empty one replaces the built-in
         prompt with nothing rather than keeping it. A caller that wants the
         built-in prompt plus its own text needs a different flag
-        ([--append-system-prompt]), which this client does not send. *)
+        ([--append-system-prompt]), which this client does not send.
+        On a [Resume] the client sends the system prompt it recorded at the
+        session's first launch until the conversation is compacted
+        ([--system-prompt-snapshot], default on), so text placed here on a
+        resume does not reach the model before then. *)
   ; admission_timeout_s : float
     (** Finite bound for the post-spawn initialize exchange and callbacks
         before the user turn is written. *)

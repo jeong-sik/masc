@@ -162,7 +162,7 @@ val resolve_and_render_prompt_template :
 
 val set_override : string -> string -> (unit, string) result
 (** Validates and installs an override.  Rejects invalid
-    keys, empty / oversized (>10000 chars) values, and
+    keys, empty values, and
     unexpected template variables (a variable in the
     template that the registered [meta_tbl] entry does
     not declare). *)

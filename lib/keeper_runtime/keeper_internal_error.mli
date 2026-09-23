@@ -45,6 +45,16 @@ val official_client_input_rejection_to_string : official_client_input_rejection 
 val official_client_input_rejection_of_string : string -> official_client_input_rejection option
 val official_client_recovery_summary : official_client_recovery -> string
 
+(** What a Gate continuation's session had done in the refused attempt before
+    the vendor refused its resume as full. [Activity_observed] means a response
+    or a tool effect was observed; its evidence stays with the attempt. *)
+type vendor_session_activity =
+  | No_activity_observed
+  | Activity_observed
+
+val vendor_session_activity_to_string : vendor_session_activity -> string
+val vendor_session_activity_of_string : string -> vendor_session_activity option
+
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -227,6 +237,12 @@ and masc_internal_error =
           failed. The runtime flattened this into a sentence and the chat pane
           read the sentence back to decide what to draw (RFC-0454 §1.3); it is
           the value now, so the screen matches a constructor. *)
+  | Preempted_before_first_token of { runtime_id : string }
+      (** An autonomous turn gave up its provider attempt before the first
+          streaming event because a person queued behind it (RFC-0441). The
+          provider produced nothing and did not fail, and the turn did no
+          work: its source stays pending and runs fresh on a later cycle. It
+          is neither a success nor a failure of the turn (#38094). *)
   | Runtime_connection_closed of {
       runtime_id : string;
       detail : string;
@@ -290,6 +306,7 @@ type wire_kind =
   | Wire_provider_attempt_effect_fenced
   | Wire_tool_correction_lost
   | Wire_host_stopped_turn
+  | Wire_preempted_before_first_token
   | Wire_runtime_connection_closed
   | Wire_receipt_persistence_failed
   | Wire_gate_replay_repair_required
@@ -324,3 +341,6 @@ val classify_masc_internal_error_of_string :
 
 val classify_masc_internal_error :
   Agent_core.Error.t -> masc_internal_error option
+
+val is_preempted_before_first_token : Agent_core.Error.t -> bool
+(** [true] for {!Preempted_before_first_token} carried on the error (#38094). *)

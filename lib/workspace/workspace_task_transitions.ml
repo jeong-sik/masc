@@ -261,12 +261,8 @@ let transition_task_outcome_r
                  { expected; actual }) ->
             Error
               (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    (Printf.sprintf
-                       "Task %s verification id mismatch (expected=%s current=%s)"
-                       task_id
-                       expected
-                       actual)))
+                 (Masc_domain.Task_error.VerificationSuperseded
+                    { task_id; requested = expected; current = actual }))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint =
               match task_assignee_of_status task.task_status with
@@ -887,12 +883,8 @@ let commit_verdict_r
                     { expected; actual }) ->
                Error
                  (Masc_domain.Task
-                    (Masc_domain.Task_error.InvalidState
-                       (Printf.sprintf
-                          "Task %s verification id mismatch (expected=%s current=%s)"
-                          task_id
-                          expected
-                          actual)))
+                    (Masc_domain.Task_error.VerificationSuperseded
+                       { task_id; requested = expected; current = actual }))
              | Error Workspace_task_lifecycle.Verification_pending_verdict
              | Error Workspace_task_lifecycle.Verification_submission_required
              | Error Workspace_task_lifecycle.Invalid_transition ->

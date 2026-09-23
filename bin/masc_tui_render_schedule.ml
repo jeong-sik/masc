@@ -184,13 +184,16 @@ type overview_allocation = {
    are scrolled to, not read at a glance. *)
 let overview_panel_row_cap = 6
 
+(* Header, summary, dividers, panel title, task title, footer: the Overview
+   rows no block can give up. *)
+let overview_fixed_rows = 10
+
 (* The Team block's title row and the divider under it. *)
 let overview_team_chrome_rows = 2
 
-let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
+let allocate_overview ~terminal_rows ~attention_count ~event_count
     ~team_count ~task_count ~has_task_error =
-  (* Ten rows are invariant chrome; the cluster/project row is present only
-     after a briefing has loaded. What is left is shared by the Attention /
+  (* Ten rows are invariant chrome. What is left is shared by the Attention /
      Recent Events panel and the task block, and whatever neither needs becomes
      filler so the frame reaches the bottom of the terminal.
 
@@ -198,8 +201,7 @@ let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~event_count
      They used to stop at six and five rows whatever the terminal offered, so a
      44-row window drew 22 rows of frame and left its own footer sitting in the
      middle of the screen with the backlog cut off above it. *)
-  let fixed_rows = 10 + (if has_cluster then 1 else 0) in
-  let available = max 0 (terminal_rows - fixed_rows) in
+  let available = max 0 (terminal_rows - overview_fixed_rows) in
   let desired_panel_rows = max 1 (max attention_count event_count) in
   let desired_task_error_rows = if has_task_error then 1 else 0 in
   let desired_task_rows =

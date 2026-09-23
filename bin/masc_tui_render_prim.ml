@@ -2064,66 +2064,35 @@ let planning_rollup_row ~cols (rollup : planning_rollup) =
               if value = 0 then None else Some (counter phase glyph name value))
        |> String.concat "  ")
 
-(* The transport tail of the Overview's cluster row.
-
-   It named the path carrying the traffic in the wire's words --
-   "websocket", "grpc_subscribe", "streamable_http" -- two fields before
-   naming those same paths in the row's own ("ws", "grpc"), so one path wore
-   two spellings on one row: the guide's own example reads
-   "websocket/steady  sse 3  ws 1  grpc :8936". With SSE carrying the traffic
-   the word "sse" appeared twice, two cells apart, meaning "this is the path"
-   and then "one session".
-
-   The mark that says which of a strip of places is the current one goes on
-   the entry that path already has, so the row spends one cell instead of a
-   repeated name and loses the underscored wire tokens. Streamable HTTP has
-   no session count in the reading, so it earns an entry only while it is the
-   path in use -- otherwise the row would carry a name with nothing to say. *)
-let transport_summary (transport : Tui_decode.transport_health) =
-  let open Masc.Transport_metrics in
-  (* Two cells before every entry, the way the surface strip spaces its names,
-     and the mark takes the second of them -- so the names sit on one column
-     whether or not the path is the one in use. *)
-  let entry kind text =
-    (if transport.th_primary_path = kind then " " ^ Masc_tui_theme.Glyph.current_entry
-     else "  ")
-    ^ text
+(* The transport's own readings are on Metrics. The Overview keeps one item
+   while the outbound queue is under pressure, since that delays what every
+   other row there reports; a steady queue, or no reading, says nothing. *)
+let transport_attention_item (transport : Tui_decode.transport_health option) =
+  let item severity word : Masc_tui_types.attention_item =
+    { ai_kind = "transport_queue_pressure"
+    ; ai_severity = severity
+    ; ai_summary =
+        Printf.sprintf "transport queue pressure %s (m: Metrics)" word
+    ; ai_target =
+        Masc_tui_types.Attention_other
+          { target_type = "transport"; target_id = None }
+    ; ai_blocker_summary = None
+    ; ai_evidence_ts = None
+    }
   in
-  let websocket =
-    match transport.th_websocket_sessions with
-    | Some sessions -> Printf.sprintf "ws %d" sessions
-    | None -> "ws off"
-  in
-  let grpc =
-    match transport.th_grpc_port with
-    | Some port -> Printf.sprintf "grpc :%d" port
-    | None -> "grpc off"
-  in
-  (* No wildcard: a path added to the reading has to decide here whether the
-     row can name it. *)
-  let streamable_http =
-    match transport.th_primary_path with
-    | Streamable_http -> [ entry Streamable_http "http" ]
-    | Grpc_subscribe | Websocket | Sse -> []
-  in
-  let paths =
-    String.concat ""
-      ([ entry Sse (Printf.sprintf "sse %d" transport.th_sse_sessions)
-       ; entry Websocket websocket
-       ; entry Grpc_subscribe grpc
-       ]
-      @ streamable_http)
-  in
-  let dropped =
-    if transport.th_events_dropped = 0 then ""
-    else Printf.sprintf "  dropped %d" transport.th_events_dropped
-  in
-  (* Queue pressure and the dropped count are two readings of the same queue,
-     so they sit together at the tail rather than one of them riding a path
-     name at the head. *)
-  Printf.sprintf "%s  %s%s" paths
-    (queue_pressure_kind_to_string transport.th_queue_pressure)
-    dropped
+  match transport with
+  | None -> None
+  | Some transport -> (
+      let word =
+        Masc.Transport_metrics.queue_pressure_kind_to_string
+          transport.th_queue_pressure
+      in
+      match transport.th_queue_pressure with
+      | Masc.Transport_metrics.Steady -> None
+      | Masc.Transport_metrics.Watch ->
+          Some (item Masc_tui_types.Attention_warning word)
+      | Masc.Transport_metrics.High ->
+          Some (item Masc_tui_types.Attention_bad word))
 
 (* The Backlog counts, each with the mark its Task rows wear. Claimed had no
    mark here while a claimed Task row draws the half circle, so the one count a

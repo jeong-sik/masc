@@ -289,7 +289,6 @@ list, Recent Events, and active tasks.
 ```
  MASC Overview  [me]  10:54:52  [connected]
    Health: bad  Keepers: 10  MCP agents: 2  Approvals: 0  Incidents: 4
-   Cluster: default          Project: me       sse 3 ▸ws 1  grpc :8936  steady
  Attention                              | Recent Events 1-5/5
  [bad ] analyst needs operator atten~   | [10:54:52] TUI started
  [warn] sangsu has external attention   |
@@ -311,32 +310,19 @@ uses for a failure, just after the clock; every other level keeps that cell
 for its text. The mark is a shape rather than a colour alone, so it holds
 under `NO_COLOR`.
 
-The tail of the cluster row is what the server reports about its own delivery
-paths: one entry per path, then the queue's pressure and its drop count. It
-rides that row rather than taking one of its own, so a short viewport does not
-trade an event line for it. A path that is not listening reads `off` rather
-than as zero sessions, because those are different facts, and a nonzero drop
-count is spelled out - a steady queue that drops is not a healthy transport.
+The server's delivery paths and this TUI's runtime event feed are on Metrics
+(`m`), in the Transport delivery block, which reads the transport health
+itself: the path carrying the traffic, the gRPC port or `off`, SSE and
+WebSocket sessions, dropped events, queue pressure, and the feed as
+`live N`, `opening`, `closed N (reason)` or `off`. The feed is opened after
+the first refresh that reaches the server and reopened on the refresh cadence
+after it closes. Every keeper's tool calls, turn boundaries, heartbeats, and
+turn done rows arrive on it; this build keeps the last 1,000 and counts what
+falls off the end.
 
-The path carrying the traffic wears the same `▸` the surface strip puts on the
-tab you are on. The row used to name that path again in front of the entries,
-in the wire's spelling - `websocket/steady` beside `ws 1` - so one path wore
-two names on one row. Streamable HTTP has no session count in this reading, so
-it appears only while it is the path in use.
-
-This tail is read only while Overview is the current surface.
-
-The same row ends with the runtime event feed: `feed: live 1240` while the
-TUI is subscribed to `GET /mcp?sse_kind=observer` and counting the frames it
-has received, `feed: opening` while the MCP session and the subscription are
-being set up, and `feed: closed after N` once the stream has ended (the
-reason is in Recent Events and on the Activity status row) -
-the count stays so a stream that dropped after a thousand events and one that
-never opened do not read alike. The feed is opened after the first refresh
-that reaches the server and reopened on the refresh cadence after it closes;
-both transitions land in Recent Events. Every keeper's tool calls, turn
-boundaries, heartbeats, and turn done rows arrive on it; this build keeps
-the last 1,000 and counts what falls off the end.
+Overview draws one Attention item for the transport, and only while the
+outbound queue's pressure is `watch` (warning) or `high` (bad). A steady queue
+adds nothing.
 
 Tasks show terminal states in Planning rollups but not in this list. A task
 detail that is open when its task turns terminal stays open - the detail reads

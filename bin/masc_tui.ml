@@ -10751,8 +10751,9 @@ let refresh_status results =
 let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
     ~board_hearth ~system_log_level ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
-  (* Only the Overview row shows this, so a refresh on another surface does not
-     spend a request on it. [None] leaves whatever the last read observed. *)
+  (* Metrics draws the transport and the Overview reads its queue pressure,
+     so a refresh on another surface does not spend a request on it. [None]
+     leaves whatever the last read observed. *)
   let http_transport =
     when_needed needs.needs_transport (fun () ->
         load_transport_health ~host ~port)

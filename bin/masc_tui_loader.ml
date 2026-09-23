@@ -1268,8 +1268,6 @@ let load_overview ~(host : string) ~(port : int) :
         let* workspace_health = required_string_field summary "workspace_health" in
         decode_workspace_health workspace_health
       in
-      let* ov_cluster = required_string_field summary "cluster" in
-      let* ov_project = required_string_field summary "project" in
       (* Counted from the lists the briefing carries. The summary object
          holds workspace_health, cluster, and project and nothing else --
          [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
@@ -1308,8 +1306,6 @@ let load_overview ~(host : string) ~(port : int) :
       Ok
         {
           ov_workspace_health;
-          ov_cluster;
-          ov_project;
           ov_keepers;
           ov_keeper_liveness;
           ov_keeper_rows;

@@ -2057,8 +2057,6 @@ type overview_keeper = {
 
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
-  ov_cluster: string;
-  ov_project: string;
   ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_liveness: keeper_liveness_counts;
   ov_keeper_rows: overview_keeper list;
@@ -2958,8 +2956,14 @@ and surface_needs_of_surface : surface -> surface_needs = function
      different machinery. *)
   | Approvals ->
       { nothing with needs_operator_approvals = true; needs_asks = true }
+  (* The Transport delivery block reads the transport health itself, so it
+     is not whatever an Overview refresh happened to leave behind. *)
   | Metrics ->
-      { nothing with needs_keeper_roster = true; needs_fleet_safety = true }
+      { nothing with
+        needs_keeper_roster = true
+      ; needs_fleet_safety = true
+      ; needs_transport = true
+      }
   | Memory | Lanes | Clients | Schedules | Verification | Harness | Fusion
   | Repositories | Code | Changes | Connectors | Runtime | Config | Resources
   | Tools ->

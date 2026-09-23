@@ -544,13 +544,18 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
   in
   (title, List.filteri (fun index _ -> index < team_rows) rows)
 
+(* Every item the Overview has to place: the transport's, then the
+   briefing's. *)
+let overview_attention (state : state) =
+  Option.to_list (transport_attention_item state.transport)
+  @
+  match state.overview with
+  | None -> []
+  | Some overview -> overview.ov_attention_items
+
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows =
-  let all_attention =
-    match state.overview with
-    | None -> []
-    | Some overview -> overview.ov_attention_items
-  in
+  let all_attention = overview_attention state in
   let tasks_error = Terminal_text.optional_single_line state.tasks_error in
   let team_count =
     match overview_team state with
@@ -562,7 +567,6 @@ let overview_layout (state : state) ~terminal_rows =
   in
   let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
-      ~has_cluster:(Option.is_some state.overview)
       ~attention_count:(List.length attention_items)
       ~event_count:(List.length state.events)
       ~team_count
@@ -709,58 +713,6 @@ let render_overview (state : state) =
   in
   box_line buf cols summary_line;
 
-  (* Cluster/project line *)
-  (match ov with
-   | None -> ()
-   | Some o ->
-         (* The transport summary rides this row rather than taking one of its
-            own: a narrow viewport must not trade an event line for it. A path
-            that is not listening reads "off" instead of zero sessions, and
-            dropped events are called out because a steady queue that drops is
-            not a healthy transport. *)
-         let transport_tail =
-           match state.transport with
-           | None -> ""
-           | Some t -> transport_summary t
-         in
-         (* The runtime event feed rides the same tail. "live N" counts the
-            frames this stream has delivered; a closed feed keeps its count
-            and says why it closed, so a stream that dropped after a thousand
-            events and one that never opened do not read alike.
-
-            Both states put the count straight after the state word, because
-            the count is the same quantity in both and the pair is what tells
-            a reader what the number counts. The closed arm read "closed after
-            N", and a bare number behind "after" reads as a duration -- how
-            long it lasted, not how much it carried -- while its own sibling
-            one frame earlier had used that number as a count. Dropping the
-            word also returns six cells to a row this comment already guards
-            from the reason string. *)
-         let observer_summary =
-           match state.observer with
-           | Observer_off -> ""
-           | Observer_opening -> "  feed: opening"
-           | Observer_live { events; _ } -> Printf.sprintf "  feed: live %d" events
-           | Observer_closed { events; _ } ->
-               (* The reason is in TUI Session Events and on the Activity status
-                  row; here it would push the count off a narrow row. *)
-               Printf.sprintf "  feed: closed %d" events
-         in
-         (* Neither name is padded to a column. Both are fixed for the
-            session, so nothing to their right moves between frames, and
-            the 24 and 20 cells they used to be padded to were blank on
-            the live workspace ("default", "me") while the transport
-            tail behind them was cut to "ws …" beside the roster pane. *)
-         let cluster_line =
-           Printf.sprintf "  Cluster: %s%s%s  Project: %s%s%s"
-             Ansi.dim
-             (Terminal_text.single_line o.ov_cluster)
-             Ansi.reset
-             (Terminal_text.single_line o.ov_project)
-             transport_tail observer_summary
-       in
-       box_line buf cols cluster_line);
-
   box_divider buf cols;
 
   (* Attention panel *)
@@ -798,9 +750,7 @@ let render_overview (state : state) =
      and the briefing's total do not disagree without a reason on screen,
      and an empty panel is not read as "nothing needs attention". *)
   let on_team_rows =
-    match ov with
-    | None -> 0
-    | Some o -> List.length o.ov_attention_items - attention_count
+    List.length (overview_attention state) - attention_count
   in
   let attention_title =
     let counted =
@@ -12755,8 +12705,8 @@ let render_acting (state : state) =
     | Observer_off -> "feed: off"
     | Observer_opening -> "feed: opening"
     | Observer_live { events; _ } -> Printf.sprintf "feed: live %d" events
-    (* Same shape as the Overview row: the count sits straight after the state
-       word, so it reads as the count its "live N" sibling above uses. *)
+    (* The count sits straight after the state word, so it reads as the count
+       its "live N" sibling above uses. *)
     | Observer_closed { events; reason; _ } ->
         Printf.sprintf "feed: closed %d (%s)" events
           (Terminal_text.single_line reason)

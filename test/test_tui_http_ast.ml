@@ -2498,15 +2498,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields "render_overview"
     [ "workspace"
     ; "overview_error"
-    ; "ov_cluster"
-    ; "ov_project"
     ; "ai_summary"
     ; "content"
-      (* [th_primary_path] and [th_queue_pressure] left this list because they
-         left the category. Both are closed variants now, rendered through
-         [Transport_metrics.*_kind_to_string], so the renderer has no arbitrary
-         text to sanitize -- the type removed what the sanitizer was for. Asking
-         for the call here would ask the renderer to sanitize a constructor. *)
     ];
   check_fields "overview_layout" [ "tasks_error" ];
   (* The Team block prints Keeper names and task text that producers wrote. *)

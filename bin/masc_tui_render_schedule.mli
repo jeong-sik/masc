@@ -85,7 +85,6 @@ val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allo
 
 val allocate_overview :
   terminal_rows:int ->
-  has_cluster:bool ->
   attention_count:int ->
   event_count:int ->
   team_count:int ->

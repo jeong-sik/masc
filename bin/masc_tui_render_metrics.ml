@@ -311,16 +311,33 @@ let render_section_fleet ~cols (state : state) =
   let transport_lines = match state.transport with
     | None -> [ "    " ^ not_observed ]
     | Some transport ->
-      [ Printf.sprintf "    SSE sessions %d · WebSocket sessions %s · dropped events %d"
+      [ Printf.sprintf "    Primary path %s · gRPC %s"
+          (Masc.Transport_metrics.primary_path_kind_to_string transport.th_primary_path)
+          (Option.fold ~none:"off" ~some:(Printf.sprintf ":%d") transport.th_grpc_port)
+      ; Printf.sprintf "    SSE sessions %d · WebSocket sessions %s · dropped events %d"
           transport.th_sse_sessions
           (Option.fold ~none:"unreported" ~some:string_of_int transport.th_websocket_sessions)
           transport.th_events_dropped
       ; "    Queue pressure: " ^ Masc.Transport_metrics.queue_pressure_kind_to_string transport.th_queue_pressure ]
   in
+  (* This TUI's own subscription to the runtime event feed. The count sits
+     straight after the state word in both states, the way the Activity
+     status row puts it, so a closed feed's number reads as the frames it
+     carried. *)
+  let feed_line =
+    "    Runtime event feed: "
+    ^
+    match state.observer with
+    | Observer_off -> "off"
+    | Observer_opening -> "opening"
+    | Observer_live { events; _ } -> Printf.sprintf "live %d" events
+    | Observer_closed { events; reason; _ } ->
+        Printf.sprintf "closed %d (%s)" events (Terminal_text.single_line reason)
+  in
   List.map clip
     ([ title "Engine memory" ] @ gc_lines
      @ [ ""; title "Scheduler lag (producer sample window)" ] @ scheduler_lines
-     @ [ ""; title "Transport delivery" ] @ transport_lines)
+     @ [ ""; title "Transport delivery" ] @ transport_lines @ [ feed_line ])
 
 let timestamp_utc at =
   let tm = Unix.gmtime at in

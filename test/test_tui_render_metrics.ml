@@ -440,6 +440,43 @@ let test_section_fleet_lines () =
     lines
 ;;
 
+(* The Transport delivery block is where the transport and this TUI's event
+   feed are read: the path in use, the gRPC port, the sessions, the queue and
+   the feed's count after its state word. *)
+let test_transport_block_reads_the_feed () =
+  let state = make_state () in
+  state.transport <-
+    Some
+      { Decode.th_primary_path = Masc.Transport_metrics.Streamable_http
+      ; th_queue_pressure = Masc.Transport_metrics.Watch
+      ; th_sse_sessions = 0
+      ; th_websocket_sessions = Some 0
+      ; th_grpc_port = None
+      ; th_events_dropped = 2
+      };
+  state.observer <- Types.Observer_live { session_id = "s-1"; since = 0.; events = 85 };
+  let text =
+    String.concat "\n"
+      (List.map Masc_tui_theme.strip_sgr
+         (Render_metrics.render_section_fleet ~cols:160 state))
+  in
+  check bool "the path in use and the gRPC listener" true
+    (contains text "Primary path streamable_http \xc2\xb7 gRPC off");
+  check bool "dropped events" true (contains text "dropped events 2");
+  check bool "queue pressure" true (contains text "Queue pressure: watch");
+  check bool "the feed, count after the state word" true
+    (contains text "Runtime event feed: live 85");
+  state.observer <-
+    Types.Observer_closed { reason = "eof"; at = 0.; events = 3 };
+  let closed =
+    String.concat "\n"
+      (List.map Masc_tui_theme.strip_sgr
+         (Render_metrics.render_section_fleet ~cols:160 state))
+  in
+  check bool "a closed feed keeps its count and says why" true
+    (contains closed "Runtime event feed: closed 3 (eof)")
+;;
+
 let test_section_resources_lines () =
   let state = make_state () in
   let lines = Render_metrics.render_section_resources ~cols:90 state in
@@ -725,6 +762,8 @@ let () =
         ; test_case "scheduler sample availability" `Quick test_scheduler_sample_availability
         ; test_case "resources" `Quick test_section_resources_lines
         ; test_case "tools" `Quick test_section_tools_lines
+        ; test_case "transport block reads the feed" `Quick
+            test_transport_block_reads_the_feed
         ; test_case "fleet_populated" `Quick test_section_fleet_populated
         ; test_case "resources_populated" `Quick test_section_resources_populated
         ; test_case "tools_populated" `Quick test_section_tools_populated

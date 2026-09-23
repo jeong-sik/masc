@@ -2667,9 +2667,9 @@ def keeper_detail_overscroll_interaction(
         completed = False
         try:
             wait_for_output(
-                process, master_fd, output, b"cluster-a", start=0, timeout=10.0
+                process, master_fd, output, b"Health: ", start=0, timeout=10.0
             )
-            cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+            cluster_end = output.find(b"Health: ") + len(b"Health: ")
             wait_for_output(
                 process,
                 master_fd,
@@ -2794,8 +2794,8 @@ def keeper_selection_identity_interaction(
     output: bytearray,
     base_path: str,
 ) -> None:
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+    wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+    cluster_end = output.find(b"Health: ") + len(b"Health: ")
     wait_for_output(
         process,
         master_fd,
@@ -2900,7 +2900,7 @@ def cli_base_path_overrides_environment_interaction(
     output: bytearray,
     _base_path: str,
 ) -> None:
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
     frame = send_and_wait(
         process,
         master_fd,
@@ -2930,7 +2930,7 @@ def ctrl_y_reaches_the_tui_interaction(
     has no VDSUSP, so there the check on the key is skipped and the press is
     the whole test.
     """
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
     if hasattr(termios, "VDSUSP"):
         cc = termios.tcgetattr(slave_fd)[6][termios.VDSUSP]
         dsusp = cc if isinstance(cc, int) else cc[0]
@@ -3703,8 +3703,8 @@ def assert_overview_event_rows(
 
     wait_for_output(process, master_fd, output, b"TUI started", start=0, timeout=10.0)
     wait_for_output(process, master_fd, output, b"task-5", start=0, timeout=3.0)
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=3.0)
-    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+    wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=3.0)
+    cluster_end = output.find(b"Health: ") + len(b"Health: ")
     wait_for_output(
         process,
         master_fd,
@@ -3988,8 +3988,8 @@ def keeper_ask_answer_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+        cluster_end = output.find(b"Health: ") + len(b"Health: ")
         wait_for_output(
             process, master_fd, output, FRAME_END, start=cluster_end, timeout=3.0
         )
@@ -4272,8 +4272,8 @@ def approval_selection_identity_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+        cluster_end = output.find(b"Health: ") + len(b"Health: ")
         wait_for_output(
             process,
             master_fd,
@@ -4773,8 +4773,8 @@ def board_reference_interaction(fixtures: HttpFixtures) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+        cluster_end = output.find(b"Health: ") + len(b"Health: ")
         wait_for_output(
             process, master_fd, output, FRAME_END, start=cluster_end, timeout=3.0
         )
@@ -4838,7 +4838,7 @@ def board_json_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+        wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
         tab_until(process, master_fd, output, b"MASC Keepers")
         tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (2)"))
         resize_and_wait(
@@ -4902,8 +4902,8 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+        cluster_end = output.find(b"Health: ") + len(b"Health: ")
         wait_for_output(
             process,
             master_fd,
@@ -5037,8 +5037,8 @@ def open_loaded_board(
     *,
     post_count: int,
 ) -> None:
-    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
-    cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+    wait_for_output(process, master_fd, output, b"Health: ", start=0, timeout=10.0)
+    cluster_end = output.find(b"Health: ") + len(b"Health: ")
     wait_for_output(
         process,
         master_fd,
@@ -5133,10 +5133,18 @@ def board_detail_authority_interaction(
         try:
             open_loaded_board(process, master_fd, output, post_count=2)
             fixtures["/api/v1/board?sort_by=hot"] = late_list
-            fixtures["/api/v1/dashboard/briefing"] = (
-                200,
-                overview_event_briefing("late-list-applied"),
-            )
+            # The Overview draws the new briefing's attention item, which is
+            # how the walk below knows the refresh reached it.
+            late_briefing = overview_event_briefing()
+            late_briefing["attention_items"] = [
+                {
+                    "kind": "fixture_marker",
+                    "severity": "info",
+                    "summary": "late-list-applied",
+                    "target_type": "board",
+                }
+            ]
+            fixtures["/api/v1/dashboard/briefing"] = (200, late_briefing)
 
             read_available(master_fd, output)
             os.write(master_fd, b"r")
@@ -13857,17 +13865,8 @@ def run_observer_reconnect_regression(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             resize_and_wait(process, master_fd, output, rows=38, columns=150, needle=b"MASC Overview")
-            wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
-            # The cluster and project names sit two cells apart, not in
-            # 24- and 20-cell columns: the live names are "default" and
-            # "me", and the blank padding cut the transport tail to
-            # "ws …" beside the roster pane.
-            summary = screen_text(bytes(output))
-            if b"Cluster: cluster-a  Project: project-a  " not in summary:
-                raise AssertionError(
-                    f"the Overview pads its cluster and project names: {summary!r}"
-                )
             send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+            wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
             send_and_wait(process, master_fd, output, b"f", b"scope actions")
             send_and_wait(process, master_fd, output, b"\r", b"Tool use ID: before-disconnect")
             releases[0].set()
@@ -13986,8 +13985,8 @@ def run_acting_call_evidence_regression(executable: str) -> None:
     def interact(process, master_fd, _slave_fd, output, _base_path):
         try:
             resize_and_wait(process, master_fd, output, rows=35, columns=140, needle=b"MASC Overview")
-            wait_for_output(process, master_fd, output, b"feed: live 2", start=0, timeout=10)
             send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
+            wait_for_output(process, master_fd, output, b"feed: live 2", start=0, timeout=10)
             # A folded turn is never silently opened as one of its calls.
             aggregate_start = len(output)
             os.write(master_fd, b"\r")
@@ -14067,7 +14066,8 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # Spelling the number here made a wording change to the row a change
         # to this file, and editing this file puts the whole walk inside the
         # gate's twelve-minute step alongside every other suite the change
-        # selects.
+        # selects. The row is on Activity's status line.
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         wait_for_output(
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
@@ -14162,9 +14162,13 @@ def task_dispatch_interaction(requests: HttpRequests) -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        # The closed feed row says the MCP session was opened; it is on
+        # Activity's status line, and the composer is read on the Overview.
+        send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         wait_for_output(
             process, master_fd, output, b"feed: closed", start=0, timeout=10.0
         )
+        tab_until(process, master_fd, output, b"MASC Overview")
         send_and_wait(process, master_fd, output, b"i", b"\xe2\x80\xba to alpha")
         send_and_wait(process, master_fd, output, b"/task Lanes surface", b"/task Lanes surface")
         os.write(master_fd, b"\r")

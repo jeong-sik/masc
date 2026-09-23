@@ -377,8 +377,8 @@ let overview_team_detail_lines (state : state) =
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
-   what a short viewport loses first is the paused and stopped names and the
-   holders outside the fleet, then idle Keepers -- never a stuck one. *)
+   what a short viewport loses first is the name lines and the holders
+   outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
     ~quota_line ~detail_lines ~pr_tag_of_keeper =
   let name_cells =
@@ -403,7 +403,8 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       match row.group with
       | Overview_team.Needs_you -> ("!", Theme.bad ())
       | Overview_team.Working -> ("\xe2\x97\x8f", Theme.info ())
-      | Overview_team.Idle | Overview_team.Paused | Overview_team.Stopped ->
+      | Overview_team.Idle | Overview_team.No_phase | Overview_team.Paused
+      | Overview_team.Stopped ->
           ("\xc2\xb7", Ansi.dim)
     in
     let age =
@@ -439,11 +440,12 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       (fit_width (Terminal_text.single_line (Overview_team.phase_word row.keeper)) 10)
       Ansi.reset Ansi.dim (fit_width age 3) Ansi.reset pr_tag detail
   in
-  let names_line label = function
+  let off_glyph = "\xe2\x97\x8b" in
+  let names_line glyph label = function
     | [] -> []
     | names ->
         let still_held = List.fold_left (fun sum (_, held) -> sum + held) 0 names in
-        [ Printf.sprintf "%s\xe2\x97\x8b %s: %s%s%s" Ansi.dim label
+        [ Printf.sprintf "%s%s %s: %s%s%s" Ansi.dim glyph label
             (String.concat ", "
                (List.map (fun (name, _) -> Terminal_text.single_line name) names))
             Ansi.reset
@@ -481,8 +483,9 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
   let rows =
     List.map keeper_line stuck @ Option.to_list quota_line
     @ List.map keeper_line others
-    @ names_line "paused" team.paused
-    @ names_line "stopped" team.stopped
+    @ names_line "?" "no phase" team.no_phase
+    @ names_line off_glyph "paused" team.paused
+    @ names_line off_glyph "stopped" team.stopped
     @ holders_line @ detail_lines
   in
   let total = List.length rows in
@@ -495,6 +498,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       [ (Overview_team.Needs_you, "need you")
       ; (Overview_team.Working, "working")
       ; (Overview_team.Idle, "idle")
+      ; (Overview_team.No_phase, "no phase")
       ; (Overview_team.Paused, "paused")
       ; (Overview_team.Stopped, "stopped")
       ]

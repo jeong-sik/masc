@@ -14371,7 +14371,7 @@ def unread_keeper_counted_interaction() -> Interaction:
 
 def paused_and_stopped_briefing() -> HttpResponse:
     # One Keeper the operator paused (the flag, whatever the phase), one
-    # paused by phase, one stopped and one running.
+    # paused by phase, one stopped, one with no phase and one running.
     return (
         200,
         {
@@ -14389,6 +14389,7 @@ def paused_and_stopped_briefing() -> HttpResponse:
                 {"name": "k-flagged", "phase": None, "paused": True},
                 {"name": "k-halted", "phase": "paused", "paused": False},
                 {"name": "k-stopped", "phase": "stopped", "paused": False},
+                {"name": "k-unknown", "phase": None, "paused": False},
                 {"name": "k-running", "phase": "running", "last_turn_ago_s": 30},
             ],
             "keepers_unread": [],
@@ -14406,7 +14407,8 @@ def paused_apart_from_stopped_interaction() -> Interaction:
     ) -> None:
         # Each count in the Team title is the Keepers on the line it names.
         for needle in (
-            b"1 idle \xc2\xb7 2 paused \xc2\xb7 1 stopped",
+            b"1 idle \xc2\xb7 1 no phase \xc2\xb7 2 paused \xc2\xb7 1 stopped",
+            b"? no phase: k-unknown",
             b"paused: k-flagged, k-halted",
             b"stopped: k-stopped",
         ):

@@ -17,12 +17,16 @@ type group =
       (** Alive ([Running], [Draining], [Restarting]) and holds a Claimed or
           InProgress task. *)
   | Idle  (** Alive with no such task. *)
+  | No_phase
+      (** Not paused, no phase in the briefing, and no item above info
+          severity names the Keeper: where it is is unknown. Drawn as one
+          line of names. *)
   | Paused
       (** The brief says [paused: true] (whatever the phase and the attention
           list say), or the phase is [Paused]. Drawn as one line of names. *)
   | Stopped
-      (** Not paused, and [Stopped], [Offline], or no phase and nothing
-          asking for the operator. Drawn as one line of names. *)
+      (** Not paused, and the phase is [Stopped] or [Offline]. Drawn as one
+          line of names. *)
 
 type detail =
   | Blocker of {
@@ -50,6 +54,9 @@ type row = {
 type t = {
   rows : row list;
       (** Needs_you, then Working, then Idle; by name inside a band. *)
+  no_phase : (string * int) list;
+      (** [No_phase] Keeper names, by name, with the open tasks each still
+          holds. *)
   paused : (string * int) list;
       (** [Paused] Keeper names, by name, with the open tasks each still
           holds: work behind a paused Keeper is work nobody is doing. *)
@@ -71,7 +78,7 @@ val project :
 
 val drawn_rows : t -> int
 (** Rows the block draws below its title: one per [rows] entry, one for the
-    paused names and one for the stopped names when there are any, one for
+    no-phase, the paused and the stopped names when there are any, one for
     [other_holders] when there are any. The row budget asks for this many. *)
 
 val count : t -> group -> int
@@ -80,7 +87,7 @@ val drawn_items : t -> rows:int -> Masc_tui_types.attention_item list
 (** The attention items the block's first [rows] rows draw. The block draws
     its [Needs_you] rows first, and only a [Blocker] row draws an item --
     one item, even when several name the Keeper. A working or idle row, the
-    paused and stopped lines and the holders line draw none. *)
+    name lines and the holders line draw none. *)
 
 val settle :
   t ->

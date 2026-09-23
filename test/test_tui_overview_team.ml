@@ -93,6 +93,7 @@ let test_bands_order_stuck_then_working_then_idle () =
     "paused Keepers roll into one paused line, with the work they still hold"
     [ ("lane-smith", 0); ("parked-fixture-keeper", 1) ] team.paused;
   check (list (pair string int)) "no Keeper is stopped" [] team.stopped;
+  check (list (pair string int)) "every Keeper has a phase" [] team.no_phase;
   check int "need you" 2 (Team.count team Team.Needs_you);
   check int "working" 1 (Team.count team Team.Working);
   check int "idle" 1 (Team.count team Team.Idle);
@@ -340,8 +341,9 @@ let test_an_info_item_is_not_a_blocker () =
   in
   check (list string) "an info item alone does not make Needs_you" []
     (names phase_less.rows);
-  check (list (pair string int)) "it is stopped" [ ("stuck-fixture-keeper", 0) ]
-    phase_less.stopped;
+  check (list (pair string int)) "its place is unknown"
+    [ ("stuck-fixture-keeper", 0) ] phase_less.no_phase;
+  check (list (pair string int)) "not stopped" [] phase_less.stopped;
   let failing =
     Team.project
       ~keepers:[ keeper "x" (phase "failing") ]
@@ -357,10 +359,11 @@ let test_an_info_item_is_not_a_blocker () =
         summary
   | _ -> fail "a failing Keeper named by a bad item is a Blocker row"
 
-(* A Keeper the operator paused and one that stopped are two populations:
-   the Team title counts each on its own line, so "paused" never counts a
-   Keeper that stopped on its own. *)
-let test_paused_and_stopped_are_counted_apart () =
+(* A Keeper the operator paused, one that stopped and one with no phase are
+   three populations: the Team title counts each on its own line, so
+   "paused" never counts a stopped Keeper and "stopped" never counts one the
+   briefing said nothing about. *)
+let test_paused_stopped_and_no_phase_are_counted_apart () =
   let team =
     Team.project
       ~keepers:
@@ -377,10 +380,13 @@ let test_paused_and_stopped_are_counted_apart () =
   check (list (pair string int)) "the paused line"
     [ ("by-flag", 0); ("by-phase", 0) ] team.paused;
   check (list (pair string int)) "the stopped line, with held work"
-    [ ("gone", 0); ("halted", 1); ("no-entry", 0) ] team.stopped;
+    [ ("gone", 0); ("halted", 1) ] team.stopped;
+  check (list (pair string int)) "the no-phase line" [ ("no-entry", 0) ]
+    team.no_phase;
   check int "paused count" 2 (Team.count team Team.Paused);
-  check int "stopped count" 3 (Team.count team Team.Stopped);
-  check int "one row per name line" 2 (Team.drawn_rows team)
+  check int "stopped count" 2 (Team.count team Team.Stopped);
+  check int "no-phase count" 1 (Team.count team Team.No_phase);
+  check int "one row per name line" 3 (Team.drawn_rows team)
 
 let () =
   run "tui_overview_team"
@@ -412,8 +418,8 @@ let () =
             test_a_paused_keeper_without_a_phase_stays_paused
         ; test_case "paused wins over a stuck phase" `Quick
             test_paused_wins_over_a_stuck_phase
-        ; test_case "paused and stopped are counted apart" `Quick
-            test_paused_and_stopped_are_counted_apart
+        ; test_case "paused, stopped and no phase are counted apart" `Quick
+            test_paused_stopped_and_no_phase_are_counted_apart
         ; test_case "an info item is not a blocker" `Quick
             test_an_info_item_is_not_a_blocker
         ] )

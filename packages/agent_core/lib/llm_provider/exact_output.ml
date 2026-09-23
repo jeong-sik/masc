@@ -1882,6 +1882,16 @@ let execution_failure_may_advance (error : execution_error) =
        and response as evidence; an interrupted/unknown dispatch is not this
        case, and neither is a status whose refusal body was not received. *)
     receipt_dispatch_count error.receipt = 1
+  | Provider_response_refused { refusal = Context_overflow; _ }, Response_received ->
+    (* The provider refused this input as larger than its window, before
+       generating. A window is a property of the binding, as its quota and its
+       deadline are: the successor carries its own and may take the same
+       input. When every candidate refuses, the walk ends on the last refusal
+       and the caller still reads the size from every advance it made. On the
+       Librarian lane (2026-09-22) 105 passes ended here at glm-5.3-flash
+       ("Prompt exceeds max length") and never reached the lane's declared
+       Claude CLI slot. *)
+    receipt_dispatch_count error.receipt = 1
   | Invalid_json_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The response arrived and terminated, but this binding routed the whole
@@ -1895,10 +1905,10 @@ let execution_failure_may_advance (error : execution_error) =
   | Missing_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
   (* The remaining refusals do not advance, as before this classification
-     existed ([Payment_required] was promoted above: the successor bills a
-     different account). Promoting any other one
-     needs its own argument about whether the successor can serve the same
-     input, which this change does not make. *)
+     existed ([Payment_required] and [Context_overflow] were promoted above:
+     the successor bills a different account, or carries its own window).
+     Promoting any other one needs its own argument about whether the
+     successor can serve the same input. *)
   | ( Provider_response_refused
         { refusal =
             ( Auth_failed
@@ -1906,7 +1916,6 @@ let execution_failure_may_advance (error : execution_error) =
             | Invalid_request
             | Refusal_body_not_received
             | Not_found
-            | Context_overflow
             | Input_capacity
             | Network_error
             | Timeout )
@@ -1922,7 +1931,8 @@ let execution_failure_may_advance (error : execution_error) =
             | Rate_limited
             | Overloaded
             | Server_error
-            | Payment_required )
+            | Payment_required
+            | Context_overflow )
         ; _
         }
     , (Not_started | Before_dispatch | Dispatch_started | Terminal) )

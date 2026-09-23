@@ -508,15 +508,12 @@ let freshness_row_of_inspection (inspection : checkout_inspection) =
   }
 
 let checkout_inspection_of_remote ~catalog (ic : Keeper_sandbox_remote_checkouts.inspected_checkout) : checkout_inspection =
-  let origin =
-    match ic.origin_url with
-    | Some o -> Ok o
-    | None -> Error "remote origin URL unavailable"
-  in
   let catalog_resolution =
-    match origin with
-    | Ok origin -> resolve_catalog ~catalog ~origin
-    | Error error -> Origin_unavailable error
+    match ic.origin with
+    | Keeper_sandbox_remote_checkouts.Origin_url origin -> resolve_catalog ~catalog ~origin
+    (* No origin remote: no catalog repository's checkout. *)
+    | Origin_not_configured -> Unregistered
+    | Origin_unread -> Origin_unavailable "remote origin URL unavailable"
   in
   let freshness =
     match catalog_resolution with

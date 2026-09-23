@@ -11,6 +11,7 @@ let test_parse_probe_json_complete () =
           "name": "masc",
           "git_link": "directory",
           "origin": "https://github.com/jeong-sik/masc.git",
+          "origin_state": "present",
           "branch": "main",
           "head": "abcdef123456",
           "dirty": false,
@@ -25,6 +26,7 @@ let test_parse_probe_json_complete () =
           "name": "wt-fix",
           "git_link": "pointer_file",
           "origin": "https://github.com/jeong-sik/masc.git",
+          "origin_state": "present",
           "branch": "fix/remote",
           "head": "123456abcdef",
           "dirty": true,
@@ -54,7 +56,9 @@ let test_parse_probe_json_complete () =
        (match c1.checkout.git_link with
         | C.Git_directory -> ()
         | C.Git_pointer_file -> fail "expected Git_directory");
-       check (option string) "c1 origin" (Some "https://github.com/jeong-sik/masc.git") c1.origin_url;
+       (match c1.origin with
+        | R.Origin_url url -> check string "c1 origin" "https://github.com/jeong-sik/masc.git" url
+        | R.Origin_not_configured | R.Origin_unread -> fail "expected c1 origin url");
        check (result string string) "c1 branch" (Ok "main") c1.branch;
        check (result string string) "c1 head" (Ok "abcdef123456") c1.head;
        check (result (pair bool int) string) "c1 dirty" (Ok (false, 0)) c1.dirty;
@@ -83,6 +87,7 @@ let test_parse_probe_json_limit_checkout_budget () =
           "name": "c1",
           "git_link": "directory",
           "origin": null,
+          "origin_state": "unavailable",
           "branch": null,
           "head": null,
           "dirty": null,
@@ -146,7 +151,7 @@ let expect_error what expected raw =
 let row_with fields =
   Printf.sprintf
     {|{"checkouts": [{"relative_path": "c1", "name": "c1", %s
-       "origin": null, "branch": null, "head": null, "dirty": null,
+       "origin": null, "origin_state": "unavailable", "branch": null, "head": null, "dirty": null,
        "changed_files": null, "target_ref": null, "upstream_head": null,
        "ahead": null, "behind": null}], "scanned": 1, "limit": null}|}
     fields
@@ -175,7 +180,7 @@ let test_half_a_status_is_an_error () =
     "dirty without changed_files"
     "checkouts[0]: dirty and changed_files come from one status read; only one is present"
     {|{"checkouts": [{"relative_path": "c1", "name": "c1", "git_link": "directory",
-       "origin": null, "branch": null, "head": null, "dirty": true,
+       "origin": null, "origin_state": "unavailable", "branch": null, "head": null, "dirty": true,
        "changed_files": null, "target_ref": null, "upstream_head": null,
        "ahead": null, "behind": null}], "scanned": 1, "limit": null}|}
 ;;
@@ -189,6 +194,75 @@ let test_an_unknown_limit_is_an_error () =
     "budget absent"
     "budget: expected an integer, got null"
     {|{"checkouts": [], "scanned": 1, "limit": {"kind": "checkout_budget_exhausted"}}|}
+;;
+
+let origin_row ~state ~origin =
+  Printf.sprintf
+    {|{"checkouts": [{"relative_path": "c1", "name": "c1", "git_link": "directory",
+       "origin": %s, "origin_state": %S, "branch": null, "head": null, "dirty": null,
+       "changed_files": null, "target_ref": null, "upstream_head": null,
+       "ahead": null, "behind": null}], "scanned": 1, "limit": null}|}
+    origin
+    state
+;;
+
+let test_origin_state_is_decoded_or_refused () =
+  (match R.parse_probe_json ~root:"/root" (origin_row ~state:"missing" ~origin:"null") with
+   | Ok (_, [ { origin = R.Origin_not_configured; _ } ]) -> ()
+   | Ok _ -> fail "missing must decode as Origin_not_configured"
+   | Error detail -> failf "missing: %s" detail);
+  expect_error
+    "unknown state"
+    {|checkouts[0]: origin_state: unknown value "gone"|}
+    (origin_row ~state:"gone" ~origin:"null");
+  expect_error
+    "present without a url"
+    {|checkouts[0]: origin_state "present" disagrees with origin|}
+    (origin_row ~state:"present" ~origin:"null")
+;;
+
+(* The probe itself, on a real tree: a checkout without an origin remote says
+   so instead of reading as an origin that could not be looked up. *)
+let test_probe_tells_a_missing_origin_from_a_configured_one () =
+  let root = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf "masc-probe-%d" (Unix.getpid ())) in
+  let run cmd =
+    if Sys.command cmd <> 0 then failf "command failed: %s" cmd
+  in
+  let init name =
+    let dir = Filename.concat root name in
+    run (Printf.sprintf "mkdir -p %s && git -C %s init -q" (Filename.quote dir) (Filename.quote dir));
+    dir
+  in
+  let with_origin = init "with-origin" in
+  ignore (init "no-origin");
+  run
+    (Printf.sprintf
+       "git -C %s remote add origin https://github.com/jeong-sik/masc.git"
+       (Filename.quote with_origin));
+  let out = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf "masc-probe-%d.json" (Unix.getpid ())) in
+  run
+    (Printf.sprintf
+       "cd %s && python3 -c %s '[]' 32 8192 > %s"
+       (Filename.quote root)
+       (Filename.quote R.For_testing.probe_script)
+       (Filename.quote out));
+  let raw = In_channel.with_open_bin out In_channel.input_all in
+  ignore (Sys.command (Printf.sprintf "rm -rf %s %s" (Filename.quote root) (Filename.quote out)));
+  match R.parse_probe_json ~root raw with
+  | Error detail -> failf "probe output did not decode: %s" detail
+  | Ok (_, inspections) ->
+    let origin_of (ic : R.inspected_checkout) =
+      ( ic.checkout.relative_path
+      , match ic.origin with
+        | R.Origin_url url -> "url " ^ url
+        | R.Origin_not_configured -> "not configured"
+        | R.Origin_unread -> "unread" )
+    in
+    check
+      (list (pair string string))
+      "origins"
+      [ "no-origin", "not configured"; "with-origin", "url https://github.com/jeong-sik/masc.git" ]
+      (List.sort compare (List.map origin_of inspections))
 ;;
 
 let test_the_wrong_top_level_shapes_are_errors () =
@@ -217,6 +291,13 @@ let () =
         ; test_case "half a status" `Quick test_half_a_status_is_an_error
         ; test_case "unknown limit" `Quick test_an_unknown_limit_is_an_error
         ; test_case "wrong top-level shapes" `Quick test_the_wrong_top_level_shapes_are_errors
+        ] )
+    ; ( "origin"
+      , [ test_case "origin_state is decoded or refused" `Quick test_origin_state_is_decoded_or_refused
+        ; test_case
+            "the probe tells a missing origin from a configured one"
+            `Quick
+            test_probe_tells_a_missing_origin_from_a_configured_one
         ] )
     ]
 ;;

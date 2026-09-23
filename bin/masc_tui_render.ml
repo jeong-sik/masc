@@ -3548,7 +3548,7 @@ let render_schedule_list (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf "%s  %s  %s"
-    (screen_title " MASC Schedules")
+    (screen_title " MASC Keepers / Schedules")
     timestamp
     (connection_badge state) in
 
@@ -4042,7 +4042,7 @@ let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s[%s]%s"
-       (screen_title " MASC Schedules \xe2\x96\xb8 details")
+       (screen_title " MASC Keepers / Schedules \xe2\x96\xb8 details")
        (schedule_status_color row.sch_status)
        (Terminal_text.single_line row.sch_status) Ansi.reset);
   box_divider buf cols;
@@ -11811,7 +11811,7 @@ let render_tools (state : state) =
   in
   let header =
     Printf.sprintf "%s  %s  %s"
-      (screen_title " MASC Tools") timestamp
+      (screen_title " MASC Config / Tools") timestamp
       (connection_badge state)
   in
   box_top buf cols;

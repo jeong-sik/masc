@@ -133,6 +133,9 @@ type forecast_carried_origin =
       (** No ledger since the server started: the range that turn's record measured. *)
   | Carried_halved_after_refusal of { retry : int }
   | Carried_evicted_after_refusal of { retry : int }
+  | Carried_turn_start_after_seed_refusal
+      (** No Librarian point, and the range a seed opened was refused as too
+          large: the turn's front moved to the turn boundary. *)
   | Carried_turn_start of { end_atom : int }
       (** No front to start from: this turn's own atoms, from the end of the
           last completed turn. *)

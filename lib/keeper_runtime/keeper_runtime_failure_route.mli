@@ -87,6 +87,24 @@ type rotate_class =
           every [Http_client.ProviderFailure] kind, so a route that called
           this terminal disagreed with the walk that already moves on
           (task-1642) *)
+  | Request_refused
+      (** the provider refused this request body without a machine-readable
+          reason, or with a size status
+          ({!Llm_provider.Retry.Unknown_invalid_request},
+          {!Llm_provider.Retry.Request_body_refused_by_provider}). Another
+          declared candidate may accept the same semantic input, and the
+          driver's [attempt_rejected_should_try_next] moves the lane there in
+          the same turn *)
+  | Provider_wire_defect
+      (** the bytes that arrived broke the provider's declared wire format
+          ([Malformed_payload], [Unknown_event], [Oversized_payload]). The
+          same path sends the same bytes again; the next candidate is a
+          different provider attempt, and
+          [Runtime_attempt_fsm.should_try_next] rotates on every
+          [Http_client.ProviderFailure] kind *)
+  | Server_error_not_transient
+      (** a 5xx the provider marked as not transient. The same path answers
+          the same way; the walk rotates on every 5xx *)
 
 (** What the driver had observed of tool effects when it fenced a provider
     attempt. Only the two dispositions that fence an attempt appear here:
@@ -105,7 +123,9 @@ type fence_disposition =
 
 (** Typed terminal classes that mechanical retry or rotation cannot change. *)
 type terminal_class =
-  | Deterministic_request  (** request-body/schema rejections; retry is futile *)
+  | Deterministic_request
+      (** a request body that did not parse, or an input past a declared
+          serving bound; no candidate accepts it *)
   | Context_overflow  (** typed context-window overflow *)
   | Session_claim_refused
       (** an official client refused its durable session claim before provider
@@ -117,7 +137,7 @@ type terminal_class =
   | Config_mismatch  (** invalid/missing configuration or API key *)
   | Provider_integration
       (** provider response unparseable / unknown variant / provider-terminal
-          / sub-500 unclassified server errors *)
+          / a non-transient server error whose code is outside the 5xx class *)
   | Terminal_effect_dependency_unavailable
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure

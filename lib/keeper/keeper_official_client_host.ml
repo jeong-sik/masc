@@ -132,6 +132,33 @@ let is_composed_system_context (message : Agent_core.Types.message) =
   || Runtime_model_input_tail_window.is_working_state message
 ;;
 
+let history_role_label = function
+  | Agent_core.Types.System -> "SYSTEM:\n"
+  | Agent_core.Types.User -> "USER:\n"
+  | Agent_core.Types.Assistant -> "ASSISTANT:\n"
+  | Agent_core.Types.Tool -> "TOOL:\n"
+;;
+
+(* A blank line between rendered messages and before the goal. *)
+let resume_section_separator = "\n\n"
+
+let is_carried_on_resume message =
+  is_composed_system_context message || Keeper_official_task_reference.is_reference message
+;;
+
+let resume_prompt ~goal messages =
+  let context =
+    messages
+    |> List.filter is_carried_on_resume
+    |> List.map (fun (message : Agent_core.Types.message) ->
+      history_role_label message.role ^ encode_history_message message)
+    |> String.concat resume_section_separator
+  in
+  match String_util.trim_nonempty context with
+  | None -> goal
+  | Some context -> context ^ resume_section_separator ^ goal
+;;
+
 let last_tool_results messages =
   messages
   |> List.rev

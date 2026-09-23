@@ -147,7 +147,26 @@ val run :
 
     It reports [Whole_input_transmitted] only on a [Start], the one branch
     whose prompt carries the history. A [Resume] reports
-    [Held_by_client_session] and sends the goal alone: the accumulated
-    conversation is the CLI's, not this process's, so it cannot be measured
-    here -- which is what the composition line for this lane has said all
-    along. *)
+    [Held_by_client_session]: the accumulated conversation is the CLI's, not
+    this process's, so it cannot be measured here.
+
+    On a [Resume] Claude Code sends the system prompt it recorded at the
+    session's first launch, not the [--system-prompt-file] this process
+    writes, until the conversation is compacted. The resume prompt is
+    therefore {!Keeper_official_client_host.resume_prompt}: the per-turn
+    context carrier, the Librarian working state and the historical task
+    reference in front of the goal. Any other per-turn System message must
+    carry one of the markers {!Keeper_official_client_host.is_carried_on_resume}
+    reads, or a resumed session never sees it. The canonical conversation is
+    not sent, and the session's context frontier records
+    [Held_by_vendor_session]. A resume reports no window observation and no
+    carried front: the range the projection measures is not what it sends.
+
+    A context overflow on a [Resume] is the vendor's own conversation, which a
+    smaller range does not change. Without a continuation the shrink retry
+    starts fresh and carries the shrunk range; a Gate continuation, bound to
+    its original session, ends the turn on the typed overflow instead.
+
+    A [Start] is unchanged: the system prompt file carries the Keeper prompt
+    and every System message, and the prompt carries the history and the
+    goal. *)

@@ -210,6 +210,7 @@ let test_operation_payload_preserves_connector_route () =
         ~external_message_id:(Some "message-1")
         ~workspace_id:(Some "guild-1")
         ~extra_mentions:[]
+        ~sender_keeper:None
         ~user_row_origin:Keeper_chat_store.Needs_append
     with
     | Ok encoded -> encoded
@@ -242,7 +243,54 @@ let test_operation_payload_preserves_connector_route () =
   check bool
     "unknown field is rejected"
     true
-    (Result.is_error (Keeper_chat_operation_payload.source_of_json unknown))
+    (Result.is_error (Keeper_chat_operation_payload.source_of_json unknown));
+  (* One source names one speaker: a connector person and a sender Keeper
+     cannot both be on it (RFC-0468 §3.2). *)
+  let keeper_id =
+    match Keeper_identity.Keeper_id.of_string "masc-the-leader" with
+    | Some keeper_id -> keeper_id
+    | None -> fail "keeper id fixture"
+  in
+  check bool
+    "a sender Keeper beside an external speaker is refused on write"
+    true
+    (Result.is_error
+       (Keeper_chat_operation_payload.source_to_json
+          ~submitted_by:"gate:discord:guild-1:user-9"
+          ~thread_id:"keeper:route"
+          ~continuation_channel:continuation
+          ~surface
+          ~channel:"discord"
+          ~channel_user_id:"user-9"
+          ~channel_user_name:"User"
+          ~channel_workspace_id:"guild-1"
+          ~conversation_id:(Some "discord:guild-1:channel:thread-7")
+          ~external_message_id:(Some "message-1")
+          ~workspace_id:(Some "guild-1")
+          ~extra_mentions:[]
+          ~sender_keeper:(Some keeper_id)
+          ~user_row_origin:Keeper_chat_store.Needs_append));
+  let claimed_keeper =
+    match encoded with
+    | `Assoc fields ->
+      `Assoc
+        (("sender_keeper", `String "masc-the-leader")
+         :: List.remove_assoc "sender_keeper" fields)
+    | _ -> fail "source encoder returned a non-object"
+  in
+  check bool
+    "a sender Keeper beside an external speaker is refused on read"
+    true
+    (Result.is_error (Keeper_chat_operation_payload.source_of_json claimed_keeper));
+  let without_sender_field =
+    match encoded with
+    | `Assoc fields -> `Assoc (List.remove_assoc "sender_keeper" fields)
+    | _ -> fail "source encoder returned a non-object"
+  in
+  check bool
+    "a source without the sender_keeper field is refused"
+    true
+    (Result.is_error (Keeper_chat_operation_payload.source_of_json without_sender_field))
 ;;
 
 let rec await_terminal owner operation_id remaining =
@@ -1738,7 +1786,7 @@ let test_owner_coalesces_compatible_messages_and_preserves_other_conversations (
       ~continuation_channel ~surface:Surface_ref.Agent ~channel:"" ~channel_user_id:""
       ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None
       ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
-      ~user_row_origin:Keeper_chat_store.Needs_append with
+      ~sender_keeper:None ~user_row_origin:Keeper_chat_store.Needs_append with
     | Ok source -> source | Error detail -> fail detail in
   let payload message user_blocks = Keeper_chat_operation_payload.input_to_json
     ~message ~user_blocks ~turn_instructions:None ~surface_context:None ~attachments:[] in
@@ -1787,7 +1835,8 @@ let test_batch_member_interrupt_before_wire_binding ~interactive () =
   let source = match Keeper_chat_operation_payload.source_to_json ~submitted_by:"alice" ~thread_id
       ~continuation_channel ~surface:Surface_ref.Agent ~channel:"" ~channel_user_id:""
       ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None ~external_message_id:None
-      ~workspace_id:None ~extra_mentions:[] ~user_row_origin:Keeper_chat_store.Needs_append with
+      ~workspace_id:None ~extra_mentions:[] ~sender_keeper:None
+      ~user_row_origin:Keeper_chat_store.Needs_append with
     | Ok source -> source | Error detail -> fail detail in
   let input message = Keeper_chat_operation_payload.input_to_json ~message ~user_blocks:[]
     ~turn_instructions:None ~surface_context:None ~attachments:[] in
@@ -2899,6 +2948,7 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
            ~external_message_id:None
            ~workspace_id:None
            ~extra_mentions:[]
+           ~sender_keeper:None
            ~user_row_origin:Keeper_chat_store.Needs_append
          |> Result.get_ok
        in

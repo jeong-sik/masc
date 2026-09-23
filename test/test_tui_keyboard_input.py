@@ -3505,17 +3505,22 @@ def assert_row_budgeted_surfaces(
         process,
         master_fd,
         output,
-        rows=15,
+        rows=16,
         columns=100,
         needle=b"MASC Overview",
         controls=(FULL_REDRAW,),
         final_cursor=b"\x1b[?25l",
     )
-    for expected in (b"attention-1", b"attention-2", b"task-1", b"q:quit"):
+    # At 16 rows the Attention panel holds three of the six items. The
+    # smallest surface the TUI draws is 15 rows, where it drops the composer
+    # and keeps the same three, so three is the tightest this panel gets. The
+    # budget checked here is that the panel stops where its rows stop: the
+    # third item is the last one drawn and the fourth is not.
+    for expected in (b"attention-1", b"attention-3", b"task-1", b"q:quit"):
         if expected not in overview:
-            raise AssertionError(f"13-row Overview omitted {expected!r}: {overview!r}")
-    if b"attention-3" in overview:
-        raise AssertionError(f"13-row Overview exceeded its row budget: {overview!r}")
+            raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
+    if b"attention-4" in overview:
+        raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
 
     resize_and_wait(
         process,

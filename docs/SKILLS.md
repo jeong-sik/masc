@@ -33,7 +33,8 @@ Keeper는 `keeper_skill_publish`로 새 package를 직접 발행한다
 쓰는 곳은 `project-agents` source 하나로 정해져 있고 Keeper가 고르지 못한다.
 편집기 `create`와 같은 parser로 검증하고, 이미 있는 이름은 `package_already_exists`로
 거절하며 덮어쓰지 않는다. 쓴 뒤 catalog snapshot을 다시 발행하므로 다음 턴이
-돌려받은 Skill Reference로 찾는다. 발행마다 감사 원장에 `skill_write` 한 줄을
+돌려받은 Skill Reference로 찾는다. 단 meta 에 `skills` 목록을 선언한 Keeper 는
+그 목록에 이름이 있을 때만 본다(`Keeper_skill_catalog.project_turn ~names`). 발행마다 감사 원장에 `skill_write` 한 줄을
 남긴다(Keeper 이름, 참조, `evidence`). `evidence`는 기록만 하고 참인지 판정하지 않는다.
 삭제는 운영자의 편집기 DELETE 경로로 한다.
 

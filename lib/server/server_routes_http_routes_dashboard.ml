@@ -988,7 +988,7 @@ let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome 
   Server_skill_write_audit.record
     (Mcp_server.workspace_config state)
     ~agent_id:agent_name
-    ~reference
+    ~subject:(Server_skill_write_audit.Published reference)
     ~source_text
     ~status
     ~outcome

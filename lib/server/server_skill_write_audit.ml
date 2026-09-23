@@ -11,7 +11,20 @@ let line_count text =
     if Char.equal text.[String.length text - 1] '\n' then newlines else newlines + 1)
 ;;
 
-let record config ~agent_id ~reference ~source_text ~status ?evidence ~outcome () =
+type subject =
+  | Published of Skill_reference.t
+  | Attempted of
+      { source_id : string
+      ; package_id : string
+      }
+
+let subject_fields = function
+  | Published reference -> [ "reference", Skill_reference.to_yojson reference ]
+  | Attempted { source_id; package_id } ->
+    [ "attempted", `Assoc [ "source_id", `String source_id; "package_id", `String package_id ] ]
+;;
+
+let record config ~agent_id ~subject ~source_text ~status ?evidence ~outcome () =
   let evidence_field =
     match evidence with
     | None -> []
@@ -24,15 +37,15 @@ let record config ~agent_id ~reference ~source_text ~status ?evidence ~outcome (
       ~action:(Audit_log.Custom "skill_write")
       ~details:
         (`Assoc
-           ([ "reference", Skill_reference.to_yojson reference
-            ; ( "candidate_revision"
-              , `String
-                  (Skill_reference.content_revision_of_source_text source_text
-                   |> Skill_reference.content_revision_to_string) )
-            ; "bytes", `Int (String.length source_text)
-            ; "lines", `Int (line_count source_text)
-            ; "status", `String status
-            ]
+           (subject_fields subject
+            @ [ ( "candidate_revision"
+                , `String
+                    (Skill_reference.content_revision_of_source_text source_text
+                     |> Skill_reference.content_revision_to_string) )
+              ; "bytes", `Int (String.length source_text)
+              ; "lines", `Int (line_count source_text)
+              ; "status", `String status
+              ]
             @ evidence_field))
       ~outcome
       ()

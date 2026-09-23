@@ -61,7 +61,28 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
          ~source_text:request.source_text
          ~refresh
      with
-     | Error error -> Error (refusal_of_editor_error error)
+     | Error error ->
+       let refusal = refusal_of_editor_error error in
+       (match cause_of_editor_error error with
+        | Publish.Write_outcome_unknown ->
+          (* The write began and may have committed: a SKILL.md left on disk
+             reaches the catalog at the next refresh. Record who tried and
+             with what evidence, so such a Skill never appears unattributed. *)
+          Server_skill_write_audit.record
+            config
+            ~agent_id:request.actor
+            ~subject:
+              (Server_skill_write_audit.Attempted
+                 { source_id = project_agents_source_id
+                 ; package_id = Skill_reference.package_id_to_string request.package_id
+                 })
+            ~source_text:request.source_text
+            ~status:"write_outcome_unknown"
+            ~evidence:(Publish.evidence_to_list request.evidence)
+            ~outcome:(Audit_log.Failure (Server_skill_editor.error_to_string error))
+            ()
+        | Publish.Request_refused | Publish.Source_unavailable -> ());
+       Error refusal
      | Ok outcome ->
        let preview, status, audit_outcome, result =
          match outcome with
@@ -84,7 +105,7 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
        Server_skill_write_audit.record
          config
          ~agent_id:request.actor
-         ~reference:preview.profile.reference
+         ~subject:(Server_skill_write_audit.Published preview.profile.reference)
          ~source_text:request.source_text
          ~status
          ~evidence:(Publish.evidence_to_list request.evidence)

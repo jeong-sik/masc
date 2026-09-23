@@ -109,7 +109,7 @@ equivalent explicitly on every node that has one.
 - **Keeper publish:** `keeper_skill_publish` takes `package_id`, the whole `SKILL.md`
   as `source_text`, and a non-empty `evidence` list (Memory fact ids, turn or tool
   call references). It creates the package in the `project-agents` source and
-  republishes the catalog; the returned `reference` is what later turns find. An
+  republishes the catalog; the returned `reference` is what later turns find, except a Keeper whose meta declares a `skills` list sees it only once that list names it. An
   existing name is refused as `package_already_exists`. `created_but_unpublished`
   means the file was written but the catalog was not republished. Operators delete
   published Skills through the editor.

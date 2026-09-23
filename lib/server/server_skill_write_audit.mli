@@ -5,13 +5,24 @@
     rather than starting a new one (["a\nb\n"] -> 2). *)
 val line_count : string -> int
 
+(** What the row is about. [Published] names the exact reference the editor
+    created. [Attempted] names the package a write began on when the editor
+    cannot prove whether it committed: a [SKILL.md] may still be on disk and
+    reach the catalog at the next refresh, so the attempt is recorded too. *)
+type subject =
+  | Published of Skill_reference.t
+  | Attempted of
+      { source_id : string
+      ; package_id : string
+      }
+
 (** Append a [skill_write] row. [evidence] is the Keeper's own list and is
     recorded as given; the operator route passes none. A failing audit append
     is logged, never raised, except cancellation. *)
 val record :
   Workspace.config ->
   agent_id:string ->
-  reference:Skill_reference.t ->
+  subject:subject ->
   source_text:string ->
   status:string ->
   ?evidence:string list ->

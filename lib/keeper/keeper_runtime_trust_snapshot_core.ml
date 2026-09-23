@@ -23,25 +23,40 @@ type t =
   ; next_human_action : string option
   }
 
+(* The snapshot's own verdict when it shows no receipt verdict: the approval
+   queue or a runtime blocker decides, or nothing is wrong. Closed, so the
+   operator disposition is chosen per verdict below instead of being parsed
+   back out of a display label. *)
+type fallback_verdict =
+  | Fallback_pass
+  | Fallback_alert
+
+let fallback_display = function
+  | Fallback_pass -> "Pass"
+  | Fallback_alert -> "Alert"
+;;
+
 let fallback_disposition raw =
   match raw.approval_queue with
-  | Approval_queue_unavailable -> "Alert", "approval_queue_unavailable"
+  | Approval_queue_unavailable -> Fallback_alert, "approval_queue_unavailable"
   | Approval_queue_available pending_approval_count when pending_approval_count > 0 ->
-    "Alert", "pending_operator_decision"
+    Fallback_alert, "pending_operator_decision"
   | Approval_queue_available _ ->
     (match raw.runtime_blocker_class with
      | Some (Ok (Keeper_meta_contract.Runtime_exhausted _)) ->
-       "Alert", "runtime_exhausted"
-     | Some (Ok _) -> "Alert", "critical_block"
-     | Some (Error _) -> "Alert", "unknown_runtime_blocker"
-     | None -> "Pass", "healthy")
+       Fallback_alert, "runtime_exhausted"
+     | Some (Ok _) -> Fallback_alert, "critical_block"
+     | Some (Error _) -> Fallback_alert, "unknown_runtime_blocker"
+     | None -> Fallback_pass, "healthy")
 ;;
 
-let operator_disposition_of_display ~disposition ~disposition_reason =
-  match disposition with
-  | "Pass" -> "pass", disposition_reason
-  | "Blocked" | "Pause" -> "fail_open_next_runtime", disposition_reason
-  | "Alert" | _ -> "unknown", disposition_reason
+(* Every alert above names its cause in the reason and asks a person to act on
+   it: decide the pending approval, repair the queue store the snapshot cannot
+   read, or clear the runtime blocker. [Disp_unknown] reports a receipt the
+   classifier could not place, which none of these is. *)
+let fallback_operator_disposition = function
+  | Fallback_pass -> Keeper_execution_receipt.Disp_pass
+  | Fallback_alert -> Keeper_execution_receipt.Disp_operator_action_required
 ;;
 
 let display_disposition_requires_attention = function
@@ -49,7 +64,7 @@ let display_disposition_requires_attention = function
   | _ -> false
 ;;
 
-let effective_disposition raw ~fallback_disposition ~fallback_reason =
+let effective_disposition raw ~fallback ~fallback_reason =
   match raw.approval_queue, raw.receipt_operator_disposition with
   | Approval_queue_available 0, Some (operator_disposition, operator_reason) ->
     let disposition, disposition_reason =
@@ -60,22 +75,18 @@ let effective_disposition raw ~fallback_disposition ~fallback_reason =
     disposition, disposition_reason, operator_disposition, operator_reason
   | Approval_queue_unavailable, _
   | Approval_queue_available _, _ ->
-    let operator_disposition, operator_disposition_reason =
-      operator_disposition_of_display
-        ~disposition:fallback_disposition
-        ~disposition_reason:fallback_reason
-    in
-    ( fallback_disposition
+    ( fallback_display fallback
     , fallback_reason
-    , operator_disposition
-    , operator_disposition_reason )
+    , Keeper_execution_receipt.operator_disposition_kind_to_string
+        (fallback_operator_disposition fallback)
+    , fallback_reason )
 ;;
 
 let decide raw =
-  let fallback_disposition, fallback_reason = fallback_disposition raw in
+  let fallback, fallback_reason = fallback_disposition raw in
   let disposition, disposition_reason, operator_disposition,
       operator_disposition_reason =
-    effective_disposition raw ~fallback_disposition ~fallback_reason
+    effective_disposition raw ~fallback ~fallback_reason
   in
   let needs_attention =
     raw.attention_needs_attention

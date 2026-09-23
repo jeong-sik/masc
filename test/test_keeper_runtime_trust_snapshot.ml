@@ -131,14 +131,22 @@ let test_trust_blocker_uses_structured_state () =
   let healthy = decide None in
   Alcotest.(check string) "no blocker is healthy" "healthy"
     healthy.disposition_reason;
+  Alcotest.(check string) "no blocker leaves nothing for the operator" "pass"
+    healthy.operator_disposition;
   let blocked = decide (Some (Ok Masc.Keeper_meta_contract.Internal_bridge_exception)) in
   Alcotest.(check string) "bridge failure is not a guessed sandbox violation"
     "critical_block" blocked.disposition_reason;
   Alcotest.(check bool) "blocker requires attention" true blocked.needs_attention;
+  (* A blocker the snapshot names is a cause it knows. "unknown" is the
+     receipt classifier's word for a turn it could not place. *)
+  Alcotest.(check string) "a named blocker asks the operator to act"
+    "operator_action_required" blocked.operator_disposition;
   let unknown = decide (Some (Error "unknown_sandbox_status")) in
   Alcotest.(check string) "unknown class is visible without prose classification"
     "unknown_runtime_blocker" unknown.disposition_reason;
-  Alcotest.(check bool) "unknown class remains visible" true unknown.needs_attention
+  Alcotest.(check bool) "unknown class remains visible" true unknown.needs_attention;
+  Alcotest.(check string) "an undecoded blocker still asks the operator to act"
+    "operator_action_required" unknown.operator_disposition
 ;;
 
 let test_active_blocker_overrides_success_until_cleared () =
@@ -738,6 +746,15 @@ let test_operator_disposition_display_uses_typed_parser () =
   check_case ~operator_disposition:"operator_action_required"
     ~operator_disposition_reason:"authorization_refused" ~expected_disposition:"Blocked"
     ~expected_reason:"authorization_refused";
+  (* The reason is left empty on purpose: a wire the parser rejected would
+     fall back to "unmapped_operator_disposition", so only a decoded kind
+     yields this reason. *)
+  check_case ~operator_disposition:"effect_review_required"
+    ~operator_disposition_reason:"" ~expected_disposition:"Alert"
+    ~expected_reason:"effect_review_required";
+  check_case ~operator_disposition:"effect_review_required"
+    ~operator_disposition_reason:"provider_attempt_effect_fenced"
+    ~expected_disposition:"Alert" ~expected_reason:"provider_attempt_effect_fenced";
   check_case ~operator_disposition:"blocked_runtime" ~operator_disposition_reason:""
     ~expected_disposition:"Alert" ~expected_reason:"unmapped_operator_disposition";
   check_case ~operator_disposition:"<missing operator_disposition field>"
@@ -1006,7 +1023,7 @@ let test_approval_queue_failure_remains_typed_unavailable () =
          (snapshot |> member "disposition_reason" |> to_string);
        Alcotest.(check string)
          "unavailable queue overrides stale receipt disposition"
-         "unknown"
+         "operator_action_required"
          (snapshot |> member "operator_disposition" |> to_string);
        Alcotest.(check bool)
          "unavailable queue needs attention"

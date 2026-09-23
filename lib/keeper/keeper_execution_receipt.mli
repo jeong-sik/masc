@@ -167,9 +167,18 @@ type operator_disposition_kind =
   | Disp_operator_action_required
   (** The turn is terminal and names a known operator-only repair. No runtime
       continuation or fallback is claimed. *)
+  | Disp_effect_review_required
+  (** The cause is known and the Keeper keeps running, but the turn may have
+      changed something outside the process and nothing proves whether it
+      did. The turn is not replayed; a person checks the effect. *)
   | Disp_user_cancelled
   | Disp_skipped
   | Disp_unknown
+  (** The classifier found no arm for this receipt: a classifier gap to fix,
+      not a turn whose cause is known. Only the last arm of
+      [operator_disposition] returns it, and that arm pairs it with
+      [Reason_unmapped_runtime_state] and counts
+      [ReceiptUnmappedDisposition]. *)
 
 val operator_disposition_kind_to_string : operator_disposition_kind -> string
 val operator_disposition_kind_of_string : string -> operator_disposition_kind option
@@ -215,6 +224,12 @@ type operator_disposition_reason =
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_transcript_corruption
+  (** Admission refused the stored history before provider dispatch
+      ({!Keeper_terminal_reason.Transcript_corruption}), because it broke in a
+      way no synthesized tool result repairs. Paired with
+      [Disp_operator_action_required]: every later turn fails at the same
+      message until an operator repairs the history with a checkpoint
+      purge. *)
   | Reason_official_client_recovery_required
   (** A durable official-client session refused its claim before provider
       dispatch and remains held until explicit recovery resolution. Paired
@@ -222,11 +237,11 @@ type operator_disposition_reason =
       fallback is claimed. *)
   | Reason_provider_attempt_effect_fenced
   (** The provider attempt did not prove whether an effect occurred. Paired
-      with [Disp_unknown] so operator attention remains required, while the
-      receipt is no longer counted as an unmapped classifier regression. *)
+      with [Disp_effect_review_required]: the Keeper keeps running and a
+      person checks the effect. *)
   | Reason_tool_correction_lost
   (** The fenced turn also recorded typed pre_tool_use rejections
-      (masc#28885). Same [Disp_unknown] pairing as
+      (masc#28885). Same [Disp_effect_review_required] pairing as
       [Reason_provider_attempt_effect_fenced]; the label separates a lost
       correction from an ordinary fenced provider failure. *)
   | Reason_accept_rejected
@@ -238,9 +253,10 @@ type operator_disposition_reason =
       say what the system did about it, which is the more specific fact. *)
   | Reason_terminal_effect_failed
   (** The tool that ends the turn by producing an external artifact failed, or
-      returned no typed receipt for what it did. Paired with [Disp_unknown]:
-      whether the artifact reached the outside world is unknown, the turn is
-      never replayed and the stimulus is retired, so a human decides. Same
+      returned no typed receipt for what it did. Paired with
+      [Disp_effect_review_required]: whether the artifact reached the outside
+      world is unknown, the turn is never replayed and the stimulus is
+      retired, so a human decides. Same
       pairing as [Reason_provider_attempt_effect_fenced] and
       [Reason_tool_correction_lost]; only the label differs. *)
   | Reason_unmapped_runtime_state
@@ -251,8 +267,9 @@ val operator_disposition_reason_to_string : operator_disposition_reason -> strin
     Exposed for test access; the runtime path consumes it via [append]. *)
 val operator_disposition : t -> operator_disposition_kind * operator_disposition_reason
 
-(** [needs_operator_broadcast disposition] returns true when the disposition
-    indicates a silent dead-end that operators must be notified about. *)
+(** [needs_operator_broadcast disposition] is true for the three kinds a person
+    has to act on: [Disp_operator_action_required],
+    [Disp_effect_review_required] and [Disp_unknown]. *)
 val needs_operator_broadcast : operator_disposition_kind -> bool
 
 val append : Workspace.config -> t -> unit

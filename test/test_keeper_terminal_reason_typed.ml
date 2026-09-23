@@ -239,7 +239,7 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure
   else if
     String.equal terminal_reason Keeper_internal_error.incomplete_tool_transcript_kind
-  then R.Disp_unknown, R.Reason_transcript_corruption
+  then R.Disp_operator_action_required, R.Reason_transcript_corruption
   else if
     String.equal
       terminal_reason
@@ -250,12 +250,12 @@ let frozen_operator_disposition (receipt : R.t)
     String.equal
       terminal_reason
       Keeper_internal_error.provider_attempt_effect_fenced_kind
-  then R.Disp_unknown, R.Reason_provider_attempt_effect_fenced
+  then R.Disp_effect_review_required, R.Reason_provider_attempt_effect_fenced
   else if
     String.equal terminal_reason Keeper_internal_error.tool_correction_lost_kind
-  then R.Disp_unknown, R.Reason_tool_correction_lost
+  then R.Disp_effect_review_required, R.Reason_tool_correction_lost
   else if String.equal terminal_reason "terminal_effect_failed"
-  then R.Disp_unknown, R.Reason_terminal_effect_failed
+  then R.Disp_effect_review_required, R.Reason_terminal_effect_failed
   else if config_invalid
   then R.Disp_operator_action_required, R.Reason_config_invalid
   else if authorization_refused
@@ -437,9 +437,12 @@ let () =
         terminal_reason_code = Keeper_internal_error.incomplete_tool_transcript_kind
       }
   in
+  (* Nothing was dispatched, so there is no effect to review, and the broken
+     history fails every later turn until an operator purges it. *)
   check
-    "transcript corruption stays a typed alert, not a pause"
-    (transcript_corruption = (R.Disp_unknown, R.Reason_transcript_corruption));
+    "transcript corruption asks the operator to repair the history"
+    (transcript_corruption
+     = (R.Disp_operator_action_required, R.Reason_transcript_corruption));
   check
     "transcript corruption emits operator broadcast"
     (R.needs_operator_broadcast (fst transcript_corruption));
@@ -549,8 +552,12 @@ let () =
       }
   in
   check
-    "tool-correction-lost keeps operator attention with its own typed reason"
-    (lost_disposition = (R.Disp_unknown, R.Reason_tool_correction_lost));
+    "tool-correction-lost asks for an effect review under its own typed reason"
+    (lost_disposition
+     = (R.Disp_effect_review_required, R.Reason_tool_correction_lost));
+  check
+    "tool-correction-lost emits an operator broadcast"
+    (R.needs_operator_broadcast (fst lost_disposition));
   check
     "tool-correction-lost reason has the canonical dashboard wire"
     (String.equal
@@ -558,20 +565,26 @@ let () =
        lost_wire);
   let unmapped_metric = Keeper_metrics.(to_string ReceiptUnmappedDisposition) in
   let unmapped_before = Masc.Otel_metric_store.metric_value_or_zero unmapped_metric () in
-  let fenced_disposition =
-    R.operator_disposition
-      { base_receipt with
-        terminal_reason_code = fenced_wire
-      ; error_kind = Some (R.error_kind_of_string "internal")
-      ; outcome = `Error
-      ; runtime_outcome = R.Runtime_failed
-      }
+  let fenced_receipt =
+    { base_receipt with
+      terminal_reason_code = fenced_wire
+    ; error_kind = Some (R.error_kind_of_string "internal")
+    ; outcome = `Error
+    ; runtime_outcome = R.Runtime_failed
+    }
   in
+  let fenced_disposition = R.operator_disposition fenced_receipt in
   let unmapped_after = Masc.Otel_metric_store.metric_value_or_zero unmapped_metric () in
   check
-    "provider-attempt fence keeps operator attention with a typed reason"
+    "provider-attempt fence asks for an effect review with a typed reason"
     (fenced_disposition
-     = (R.Disp_unknown, R.Reason_provider_attempt_effect_fenced));
+     = (R.Disp_effect_review_required, R.Reason_provider_attempt_effect_fenced));
+  (* What an operator and the dashboard read is the receipt row, so check the
+     wire it carries, not only the pair. *)
+  check
+    "a fenced receipt row carries effect_review_required"
+    (Json_util.get_string (R.to_json fenced_receipt) "operator_disposition"
+     = Some "effect_review_required");
   check
     "provider-attempt fence reason has the canonical dashboard wire"
     (String.equal
@@ -710,6 +723,7 @@ let operator_disposition_kinds =
   ; R.Disp_retry_later
   ; R.Disp_pass_next_model
   ; R.Disp_operator_action_required
+  ; R.Disp_effect_review_required
   ; R.Disp_user_cancelled
   ; R.Disp_skipped
   ; R.Disp_unknown
@@ -809,6 +823,63 @@ let () =
     "test_keeper_terminal_reason_typed: matrix cases=%d mismatches=%d\n"
     !count
     !mismatches
+;;
+
+(* [Disp_unknown] means the classifier had no arm for the receipt, and the arm
+   that returns it is the one that pairs it with [Reason_unmapped_runtime_state]
+   and counts [ReceiptUnmappedDisposition]. So for every receipt the three
+   agree. A known cause that returns [Disp_unknown] from its own arm breaks the
+   agreement: its arm names its own reason and counts nothing (#38414). *)
+let () =
+  let unmapped_metric = Keeper_metrics.(to_string ReceiptUnmappedDisposition) in
+  let shown_disagreements = 10 in
+  let disagreements = ref [] in
+  List.iter
+    (fun code ->
+       List.iter
+         (fun outcome ->
+            List.iter
+              (fun runtime_outcome ->
+                 let receipt =
+                   { base_receipt with
+                     terminal_reason_code = code
+                   ; outcome
+                   ; runtime_outcome
+                   }
+                 in
+                 let before =
+                   Masc.Otel_metric_store.metric_value_or_zero unmapped_metric ()
+                 in
+                 let disposition, reason = R.operator_disposition receipt in
+                 let after =
+                   Masc.Otel_metric_store.metric_value_or_zero unmapped_metric ()
+                 in
+                 let unknown = disposition = R.Disp_unknown in
+                 let unmapped_reason = reason = R.Reason_unmapped_runtime_state in
+                 let counted = not (Float.equal before after) in
+                 if not (unknown = unmapped_reason && unknown = counted)
+                 then
+                   disagreements
+                   := Printf.sprintf
+                        "code=%S out=%s ro=%s got=%s counted=%b"
+                        code
+                        (R.outcome_kind_to_string outcome)
+                        (R.runtime_outcome_to_string runtime_outcome)
+                        (disp_pair_to_string (disposition, reason))
+                        counted
+                      :: !disagreements)
+              runtime_outcomes)
+         outcomes)
+    codes;
+  let disagreements = List.rev !disagreements in
+  check
+    (Printf.sprintf
+       "Disp_unknown comes only from the unmapped arm (%d disagreement(s)): %s"
+       (List.length disagreements)
+       (String.concat
+          "; "
+          (List.filteri (fun index _ -> index < shown_disagreements) disagreements)))
+    (disagreements = [])
 ;;
 
 let () =
@@ -2018,7 +2089,22 @@ let () =
     "the bare kind still decodes to the same variant"
     (match Tr.of_wire Keeper_internal_error.terminal_effect_failed_kind with
      | Tr.Terminal_effect_failed _ -> true
-     | _ -> false)
+     | _ -> false);
+  let disposition =
+    R.operator_disposition
+      { base_receipt with
+        terminal_reason_code = wire
+      ; error_kind = Some (R.error_kind_of_string "internal")
+      ; outcome = `Error
+      ; runtime_outcome = R.Runtime_failed
+      }
+  in
+  check
+    "a receipt on that wire asks for an effect review"
+    (disposition = (R.Disp_effect_review_required, R.Reason_terminal_effect_failed));
+  check
+    "a receipt on that wire emits an operator broadcast"
+    (R.needs_operator_broadcast (fst disposition))
 ;;
 
 (* RFC-0454 D1: a terminal effect failure says what failed as a typed value,

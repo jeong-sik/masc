@@ -15,6 +15,12 @@ let of_kind ~operator_disposition_reason = function
   | Keeper_execution_receipt.Disp_operator_action_required ->
     ( "Blocked",
       reason_or_default ~operator_disposition_reason "operator_action_required" )
+  | Keeper_execution_receipt.Disp_effect_review_required as kind ->
+    (* Not "Blocked": the Keeper keeps running. What the turn may have done
+       outside still needs a person, so it stays an alert. *)
+    ( "Alert",
+      reason_or_default ~operator_disposition_reason
+        (Keeper_execution_receipt.operator_disposition_kind_to_string kind) )
   | Keeper_execution_receipt.Disp_user_cancelled ->
     ("Blocked", reason_or_default ~operator_disposition_reason "cancelled")
   | Keeper_execution_receipt.Disp_unknown ->

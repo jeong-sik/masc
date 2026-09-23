@@ -40,6 +40,7 @@ type operator_disposition_kind =
   | Disp_retry_later
   | Disp_pass_next_model
   | Disp_operator_action_required
+  | Disp_effect_review_required
   | Disp_user_cancelled
   | Disp_skipped
   | Disp_unknown
@@ -50,6 +51,7 @@ let operator_disposition_kind_to_string = function
   | Disp_retry_later -> "retry_later"
   | Disp_pass_next_model -> "pass_next_model"
   | Disp_operator_action_required -> "operator_action_required"
+  | Disp_effect_review_required -> "effect_review_required"
   | Disp_user_cancelled -> "user_cancelled"
   | Disp_skipped -> "skipped"
   | Disp_unknown -> "unknown"
@@ -61,6 +63,7 @@ let operator_disposition_kind_of_string = function
   | "retry_later" -> Some Disp_retry_later
   | "pass_next_model" -> Some Disp_pass_next_model
   | "operator_action_required" -> Some Disp_operator_action_required
+  | "effect_review_required" -> Some Disp_effect_review_required
   | "user_cancelled" -> Some Disp_user_cancelled
   | "skipped" -> Some Disp_skipped
   | "unknown" -> Some Disp_unknown
@@ -157,12 +160,13 @@ let operator_disposition (receipt : t)
   match terminal_reason with
   | _ when input_required -> Disp_pass, Reason_input_required
   | Keeper_terminal_reason.Transcript_corruption _ ->
-    (* An incomplete tool transcript no longer parks the Keeper: boot-time
-       tail recovery closes the open cycles a process death leaves, and the
-       turn otherwise follows the ordinary typed route. Keep the operator
-       alert with the typed reason rather than claiming a pause that no
-       longer happens. *)
-    Disp_unknown, Reason_transcript_corruption
+    (* Admission refused the stored history before provider dispatch, so
+       nothing left the process. What reaches this arm is a break no
+       synthesized tool result repairs: the Keeper cannot save a checkpoint
+       and fails every later turn at the same message, and boot recovery
+       leaves that latch standing. An operator repairs the history with a
+       checkpoint purge. *)
+    Disp_operator_action_required, Reason_transcript_corruption
   | Keeper_terminal_reason.Official_client_recovery_required _ ->
     (* The refusal happened while claiming the local durable session, before
        provider dispatch. The same session remains held until an operator
@@ -170,16 +174,15 @@ let operator_disposition (receipt : t)
        continuation. *)
     Disp_operator_action_required, Reason_official_client_recovery_required
   | Keeper_terminal_reason.Provider_attempt_effect_fenced _ ->
-    (* Same-turn replay stays forbidden, and the runtime lifecycle remains
-       responsible for selecting a later turn. Keep the operator alert, but
-       classify the canonical typed failure instead of incrementing the
-       unmapped-state regression metric. *)
-    Disp_unknown, Reason_provider_attempt_effect_fenced
+    (* Same-turn replay stays forbidden, and the runtime lifecycle selects a
+       later turn, so the Keeper keeps running. Nothing proves whether the
+       attempt changed anything outside, so a person checks the effect. *)
+    Disp_effect_review_required, Reason_provider_attempt_effect_fenced
   | Keeper_terminal_reason.Tool_correction_lost _ ->
     (* Identical disposition to the fence above; only the label differs so a
        lost correction (masc#28885) is countable apart from an ordinary
        fenced provider failure. *)
-    Disp_unknown, Reason_tool_correction_lost
+    Disp_effect_review_required, Reason_tool_correction_lost
   | Keeper_terminal_reason.Terminal_effect_failed _ ->
     (* Third member of the same family: the turn's closing tool may or may not
        have put something outside the process, so the turn is never replayed
@@ -188,7 +191,7 @@ let operator_disposition (receipt : t)
        the retry-label guards — a degraded retry elsewhere in the turn must
        not relabel an alert this one earns on its own. Until now it reached
        the operator as an unmapped state (#29929). *)
-    Disp_unknown, Reason_terminal_effect_failed
+    Disp_effect_review_required, Reason_terminal_effect_failed
   | Keeper_terminal_reason.Runtime_exhausted _ ->
     Disp_fail_open_next_runtime, Reason_runtime_exhausted
   | Keeper_terminal_reason.Capacity_backpressure _ ->
@@ -473,7 +476,9 @@ let to_json receipt =
    receipt evidence; it makes no watchdog or liveness claim for a keeper that
    did not produce a receipt. *)
 let needs_operator_broadcast = function
-  | Disp_operator_action_required | Disp_unknown -> true
+  | Disp_operator_action_required
+  | Disp_effect_review_required
+  | Disp_unknown -> true
   | Disp_pass
   | Disp_fail_open_next_runtime
   | Disp_retry_later

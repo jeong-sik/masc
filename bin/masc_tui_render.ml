@@ -874,8 +874,10 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
      lines keep the text column, so long handoff summaries stay readable. *)
   let labeled_lines label text =
     let width = max 10 (cols - 16) in
-    Message_layout.wrap_words ~max_cells:width
-      (Terminal_text.single_line text)
+    (* The block has rows, so a line break in the text takes one instead of
+       being spelled into the sentence. Of the 718 tasks on this workspace
+       406 are written with line breaks. *)
+    Masc_tui_text_block.rows ~max_cells:width text
     |> List.mapi
          (fun index line ->
             if index = 0 then Printf.sprintf "  %-8s %s" label line
@@ -6203,9 +6205,17 @@ let render_clients (state : state) =
       16 clients
     |> min 24
   in
+  (* The column carries a reading only where a client is bound to a Keeper
+     under a name of its own. Where no row has one, its cells and header are
+     seventeen blank columns, and the clock at the end of the row is what
+     loses them: "last seen 01:4…" is not a time. *)
+  let acting_for_drawn = Masc_tui_types.clients_act_for_others clients in
+  let acting_for_header =
+    if acting_for_drawn then Printf.sprintf "%-16s " "ACTING FOR" else ""
+  in
   let col_hdr =
-    Printf.sprintf "  %-9s %-*s %-10s %-16s %-9s %s" "STATUS" name_width
-      "NAME" "TYPE" "KEEPER" "TASK" "LAST SEEN"
+    Printf.sprintf "  %-9s %-*s %-10s %s%-9s %s" "STATUS" name_width "NAME"
+      "TYPE" acting_for_header "TASK" "LAST SEEN"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -6240,10 +6250,17 @@ let render_clients (state : state) =
           let open Masc.Tui_decode in
           let status = client_status_to_string row.cr_status in
           let name = Terminal_text.single_line row.cr_name in
+          (* Both sides sanitized before they are compared: the cell is
+             drawn from this reading, and a name that differs only in the
+             bytes [Terminal_text] strips is the same name on screen. *)
           let keeper =
-            match row.cr_keeper_name with
-            | Some keeper -> Terminal_text.single_line keeper
-            | None -> "-"
+            match
+              Masc_tui_types.client_acting_for ~name
+                ~keeper_name:
+                  (Option.map Terminal_text.single_line row.cr_keeper_name)
+            with
+            | Some keeper -> keeper
+            | None -> ""
           in
           let task =
             match row.cr_current_task with
@@ -6251,10 +6268,10 @@ let render_clients (state : state) =
             | None -> "-"
           in
           let line =
-            Printf.sprintf "  %-9s %s %-10s %-16s %-9s %s" status
+            Printf.sprintf "  %-9s %s %-10s %s%-9s %s" status
               (fit_width name name_width)
               (fit_width (Terminal_text.single_line row.cr_agent_type) 10)
-              (fit_width keeper 16)
+              (if acting_for_drawn then fit_width keeper 16 ^ " " else "")
               (fit_width task 9)
               (* The clock alone, which the header's own clock gives a
                  distance to -- so in the header's zone. The clock was cut
@@ -8055,11 +8072,26 @@ let render_verification_list (state : state) =
             ^ Render_schedule.verification_row ~submitter_width ~title_width
                 { Render_schedule.vrow_task =
                     Terminal_text.single_line r.vr_task_id
+                  (* Which question this row asks. It read an [intent] field
+                     the queue has never sent, so the column was blank on
+                     every row ever drawn while the answer sat beside it in
+                     the claim. *)
+                  (* The domain's own words, which also fit the column:
+                     "cancellation" folds to "ca\xe2\x80\xa6ation" in eight
+                     cells. *)
                 ; vrow_verdict =
-                    (match r.vr_intent with
-                     | Some intent ->
-                         Masc_domain.verification_intent_to_string intent
-                     | None -> "")
+                    (match r.vr_ask with
+                     | Masc.Tui_decode.Asks_completion ->
+                         Masc_domain.verification_intent_to_string
+                           Masc_domain.Complete_task
+                     | Asks_cancellation _ ->
+                         Masc_domain.verification_intent_to_string
+                           Masc_domain.Cancel_task
+                     (* The row does not say which verdict it waits on, and
+                        neither does this cell. A word here would be one the
+                        record never wrote. *)
+                     | Ask_unstated -> ""
+                     | Unrecognised_ask word -> Terminal_text.single_line word)
                 ; vrow_submitted_by =
                     Terminal_text.single_line r.vr_submitted_by
                 ; vrow_evidence = evidence
@@ -8195,17 +8227,35 @@ let verification_detail_lines ~width
   ; field "Title" request.vr_task_title
   ; field "Submitted by" request.vr_submitted_by
   ; field "Waits on"
-      (match request.vr_intent with
-       | Some Masc_domain.Cancel_task ->
+      (match request.vr_ask with
+       | Masc.Tui_decode.Asks_cancellation _ ->
            "cancel -- only an operator's verdict clears it"
-       | Some Masc_domain.Complete_task -> "complete"
-       | None -> "not joined (history view)")
+       | Asks_completion -> "complete"
+       | Ask_unstated -> "the record does not say"
+       | Unrecognised_ask word ->
+           Printf.sprintf "%s -- a word this build does not know"
+             (Terminal_text.single_line word))
     (* In the terminal's zone, like every other Created on a detail. This
        one printed the server's RFC 3339 text, offset and all, under a header
        clock in local time. *)
   ; field "Created" (Terminal_text.short_timestamp request.vr_created_at)
   ; Ansi.dim, ""
   ]
+  (* The case for stopping the Task, which is the whole of what an operator
+     decides on a cancellation: the artifacts and evidence below answer a
+     completion, and a stop is not asking about them. Wrapped, because the
+     reason is prose and a cut one argues nothing. *)
+  @ (match request.vr_ask with
+     | Masc.Tui_decode.Asks_completion | Ask_unstated | Unrecognised_ask _ -> []
+     | Asks_cancellation (Some reason) ->
+         wrapped_block "WHY IT SHOULD STOP" reason @ [ (Ansi.dim, "") ]
+     (* A stop submitted before the record kept the case has none. The block
+        says the copy is missing rather than drawing an empty heading, which
+        would read as a stop nobody argued for. *)
+     | Asks_cancellation None ->
+         wrapped_block "WHY IT SHOULD STOP"
+           "This request kept no copy of the case for stopping."
+         @ [ (Ansi.dim, "") ])
   (* [Kind], [What is being judged] and [What moves it forward] stood here.
      Their three fields were literals in the producer -- "normal", "" and "" --
      so the three rows read the same on every request this pane has ever

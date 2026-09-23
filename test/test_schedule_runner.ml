@@ -890,7 +890,8 @@ let test_runner_status_snapshot_tracks_liveness () =
   check int "wake unregistered keeper count" 1
     (json_int "wake_skipped_unregistered_keeper" wake_counts);
   check int "wake failed count" 1 (json_int "wake_failed" wake_counts);
-  (* Three successful ticks so far: totals keep what last_counts forgot. *)
+  (* Four successful ticks so far (one held-only, all zero): totals keep what
+     last_counts forgot. *)
   let totals =
     match json_field "totals" wake_degraded with
     | Some totals -> totals

@@ -1078,22 +1078,16 @@ let test_keeper_shrinks_history_after_statusless_context_error
          let scoped_path = In_channel.with_open_bin (marker ^ ".path") In_channel.input_all in
          check bool "System file cleaned after rejected and successful turns" false (Sys.file_exists scoped_path))
          [first_system_marker; second_system_marker];
-       (if native_gate then (
-         let snapshot marker = In_channel.with_open_bin marker In_channel.input_all
-           |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string in
-         let full = snapshot first_system_marker and shrunk = snapshot second_system_marker in
-         let messages value = Yojson.Safe.Util.member "messages" value in
-         check string "large replacement file preserves full initial canonical snapshot"
-           (Yojson.Safe.to_string (`List (List.map Keeper_official_client_context_codec.to_json initial_messages)))
-           (Yojson.Safe.to_string (messages full));
-         check bool "projected retry is smaller in the replacement file" true
-           (List.length (Yojson.Safe.Util.to_list (messages shrunk)) < List.length initial_messages);
-         List.iter (fun value ->
-           let digest = messages value |> Yojson.Safe.to_string
-             |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
-           check string "file transport preserves projected provenance hash" digest
-             Yojson.Safe.Util.(value |> member "snapshot_sha256" |> to_string)) [full; shrunk]
-       ));
+       (if native_gate then
+          (* A resume sends no canonical snapshot on either attempt: the
+             vendor session holds the conversation and reuses the system
+             prompt it recorded at its first launch. *)
+          List.iter (fun marker ->
+            check bool "resume system file carries no canonical snapshot" false
+              (String_util.contains_substring
+                 (In_channel.with_open_bin marker In_channel.input_all)
+                 "masc.official-client-canonical-context.v1"))
+            [first_system_marker; second_system_marker]);
        (if native_gate then
           (* A native continuation sends only its new input; the official
              session already owns the prior history, including the Gate. *)
@@ -1292,6 +1286,32 @@ let test_keeper_settles_and_resumes () =
       {tool_use_id="native-call";content="completed native effect";outcome=Tool_succeeded;
        json=Some (`Assoc ["receipt",`String "native-proof"]);content_blocks=None}]] in
   let prompt_marker = Filename.concat base_path "resume-prompt.json" in
+  let start_system_marker = Filename.concat base_path "start-system.txt" in
+  (* The two messages the host composes for each turn: the per-turn context
+     carrier and the Librarian working state. *)
+  let carrier : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text "MASC_TURN_CONTEXT memory revision 903" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+    }
+  in
+  let working_state : Agent_core.Types.message =
+    { role = System
+    ; content = [ Text "MASC_WORKING_STATE two asks answered" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Runtime_model_input_tail_window.working_state_metadata
+    }
+  in
+  let rendered (message : Agent_core.Types.message) =
+    Keeper_official_client_host.history_role_label message.role
+    ^ Keeper_official_client_host.encode_history_message message
+  in
+  let has_canonical_snapshot wire =
+    String_util.contains_substring wire "masc.official-client-canonical-context.v1"
+  in
   (* What each turn reported about its own model input. The start/resume split
      the rest of this test pins on the wire has to be the same split the
      record carries, or the metrics row describes a request that was not
@@ -1313,6 +1333,7 @@ let test_keeper_settles_and_resumes () =
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
        with_fixture
+         ~system_marker:start_system_marker
          [ Emit_and_read mcp_initialize; Emit mcp_initialized_notification;
            Emit_and_read mcp_list; Emit_and_read mcp_call;
            Emit (assistant ~turn_id:"turn-1" "MASC_CLAUDE_FIRST")
@@ -1323,7 +1344,8 @@ let test_keeper_settles_and_resumes () =
              run_keeper_turn
                ~tools:[tool]
                ~initial_messages:
-                 [ message User "earlier user"; message Assistant "earlier assistant" ]
+                 [ message User "earlier user"; message Assistant "earlier assistant"
+                 ; carrier ]
                ~base_path
                ~cli_path
                ~goal:"FIRST_GOAL"
@@ -1347,6 +1369,19 @@ let test_keeper_settles_and_resumes () =
             (List.length messages > 0)
         | Keeper_official_client_host.Held_by_client_session ->
           fail "a started conversation reported nothing to attribute");
+       (* A start still writes the composed context into the system prompt
+          the client records for the session. *)
+       let start_system_wire =
+         In_channel.with_open_bin start_system_marker In_channel.input_all
+       in
+       check bool "a start's system prompt carries the turn context" true
+         (String_util.contains_substring start_system_wire
+            (Keeper_official_client_host.encode_history_message carrier));
+       check bool "a start's system prompt carries no canonical snapshot" false
+         (has_canonical_snapshot start_system_wire);
+       (match (load_state base_path).context_frontier with
+        | Some { delivery = Prepared_start_context; _ } -> ()
+        | Some _ | None -> fail "a start did not record its prepared context");
        reports := [];
        let first = load_state base_path in
        let session_id =
@@ -1363,7 +1398,7 @@ let test_keeper_settles_and_resumes () =
            match
              run_keeper_turn
                ~tools:[tool]
-               ~initial_messages:native_history
+               ~initial_messages:(carrier :: working_state :: native_history)
                ~system_prompt:"Updated core instructions"
                ~base_path
                ~cli_path
@@ -1383,34 +1418,48 @@ let test_keeper_settles_and_resumes () =
        let raw =
          Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
        in
-       check string
-         "resume sends only current goal"
-         "SECOND_GOAL"
-         (content_of_wire_message raw);
+       (* Claude Code resumes with the system prompt it recorded at the
+          session's first launch, so what changes per turn rides in front of
+          the resume prompt and the conversation the session holds is not
+          sent again. *)
+       let resume_prompt = content_of_wire_message raw in
+       let position text =
+         match Astring.String.find_sub ~sub:text resume_prompt with
+         | Some index -> index
+         | None -> fail ("resume prompt is missing " ^ text)
+       in
+       check bool "resume prompt opens with the turn context" true
+         (String.starts_with ~prefix:(rendered carrier) resume_prompt);
+       check bool "the working state follows the turn context" true
+         (position (rendered carrier) < position (rendered working_state));
+       check bool "resume prompt ends with the goal" true
+         (String.ends_with ~suffix:"\n\nSECOND_GOAL" resume_prompt);
+       check bool "resume prompt does not replay the conversation" false
+         (String_util.contains_substring resume_prompt "Native correction");
        let system_wire = In_channel.with_open_bin system_marker In_channel.input_all in
        let scoped_path = In_channel.with_open_bin (system_marker ^ ".path") In_channel.input_all in
        check bool "replacement context file removed after child settles" false (Sys.file_exists scoped_path);
-       check bool "core instructions replace the prior prompt" true
+       check bool "core instructions lead the resume system prompt" true
          (String.starts_with ~prefix:"Updated core instructions" system_wire);
-       let snapshot = system_wire |> String.split_on_char '\n'
-         |> List.find_map (fun line -> match Yojson.Safe.from_string line with
-           | `Assoc fields as value when List.assoc_opt "schema" fields =
-               Some (`String "masc.official-client-canonical-context.v1") -> Some value
-           | _ -> None | exception Yojson.Json_error _ -> None)
-         |> function Some value -> value | None -> fail "missing canonical context on system wire" in
-       check string "native conversation and completed tool receipt stay exact"
-         (Yojson.Safe.to_string (`List (List.map Keeper_official_client_context_codec.to_json native_history)))
-         (snapshot |> Yojson.Safe.Util.member "messages" |> Yojson.Safe.to_string);
+       check bool "resume system prompt carries no canonical snapshot" false
+         (has_canonical_snapshot system_wire);
+       check bool "resume system prompt carries no conversation" false
+         (String_util.contains_substring system_wire "Native correction");
+       check bool "resume system prompt carries no composed context" false
+         (String_util.contains_substring system_wire "MASC_TURN_CONTEXT"
+          || String_util.contains_substring system_wire "MASC_WORKING_STATE");
        (match reported_input () with
-        | Keeper_official_client_host.Held_by_client_session -> fail "current canonical context was transmitted"
-        | Keeper_official_client_host.Whole_input_transmitted messages ->
-          check int "current canonical context is attributed" 2 (List.length messages));
+        | Keeper_official_client_host.Held_by_client_session -> ()
+        | Keeper_official_client_host.Whole_input_transmitted _ ->
+          fail "a resume reported the conversation the vendor session holds as sent");
        check int "resumed context does not repeat official tool effect" 1 !effect_count;
        let second = load_state base_path in
        (match second.context_frontier with
-        | Some {acknowledged_turn=Some receipt;delivery=Replaced_configuration;_} ->
-          check string "frontier bound to resumed vendor turn" "turn-2" receipt.turn_id
-        | Some _ | None -> fail "missing settled replacement context receipt");
+        | Some {acknowledged_turn=Some receipt;delivery=Held_by_vendor_session;message_count;_} ->
+          check string "frontier bound to resumed vendor turn" "turn-2" receipt.turn_id;
+          check int "frontier counts the canonical history, not the composed context"
+            (List.length native_history) message_count
+        | Some _ | None -> fail "a resume did not record that the vendor session holds the context");
        check int "durable cumulative turns" 2 second.turn_count;
        match second.phase with
        | Settled { session_id = settled_session; turn_id = "turn-2" } ->

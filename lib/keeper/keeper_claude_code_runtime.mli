@@ -147,7 +147,15 @@ val run :
 
     It reports [Whole_input_transmitted] only on a [Start], the one branch
     whose prompt carries the history. A [Resume] reports
-    [Held_by_client_session] and sends the goal alone: the accumulated
-    conversation is the CLI's, not this process's, so it cannot be measured
-    here -- which is what the composition line for this lane has said all
-    along. *)
+    [Held_by_client_session]: the accumulated conversation is the CLI's, not
+    this process's, so it cannot be measured here.
+
+    On a [Resume] Claude Code sends the system prompt it recorded at the
+    session's first launch, not the [--system-prompt-file] this process
+    writes, until the conversation is compacted. The resume prompt is
+    therefore {!Keeper_official_client_host.resume_prompt}: the per-turn
+    context carrier and the Librarian working state in front of the goal.
+    The canonical conversation is not sent, and the session's context
+    frontier records [Held_by_vendor_session]. A [Start] is unchanged: the
+    system prompt file carries the Keeper prompt and every System message,
+    and the prompt carries the history and the goal. *)

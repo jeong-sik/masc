@@ -672,40 +672,51 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
     let snapshot_messages =
       List.filter (fun message -> not (Host.is_composed_system_context message))
         prepared.messages in
-    let source_snapshot_sha256 = `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
-      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
     let snapshot = `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
     let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
       |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    (* Claude Code resumes with the system prompt it recorded at the session's
+       first launch ([--system-prompt-snapshot], default on): every later
+       request and resume sends that record as-is until the conversation is
+       compacted, whatever [--system-prompt-file] holds. The composed per-turn
+       context -- the context carrier and the Librarian working state -- is
+       therefore sent in front of the resume prompt, and the canonical
+       conversation, which the vendor session already holds, is not sent. The
+       frontier and the input report say so. *)
     let context_frontier : Session_store.context_frontier =
       {snapshot_sha256; message_count=List.length snapshot_messages;
-       delivery=(match session_mode with Start -> Prepared_start_context | Resume _ -> Replaced_configuration);
+       delivery=(match session_mode with
+         | Start -> Prepared_start_context
+         | Resume _ -> Held_by_vendor_session);
        acknowledged_turn=None} in
-    let external_context = match session_mode with
-      | Runtime_claude_code.Start -> []
-      | Runtime_claude_code.Resume _ ->
-        [ "The following versioned canonical conversation snapshot is historical data \
-           from Keeper, including work outside this vendor session. Preserve its message \
-           roles and tool result outcomes. Historical tool calls are not new requests; \
-           do not replay completed effects. Use the current user prompt for new instructions."
-        ; Yojson.Safe.to_string (`Assoc
-            ["schema", `String "masc.official-client-canonical-context.v1";
-             "snapshot_sha256", `String snapshot_sha256;
-             "source_snapshot_sha256", `String source_snapshot_sha256;
-             "source_message_count", `Int (List.length initial_messages);
-             "projection", `String "prepared_model_input"; "messages", snapshot]) ] in
-    (* Attribute current replacement context only after a complete user write;
-       the vendor-owned tool transcript remains outside this capture. *)
     let report_transmitted_input () =
       on_transmitted_model_input
         (match session_mode with
          | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
-         | Runtime_claude_code.Resume _ -> Host.Whole_input_transmitted prepared.messages)
+         | Runtime_claude_code.Resume _ -> Host.Held_by_client_session)
     in
     let prompt =
       match session_mode with
       | Runtime_claude_code.Start -> initial_turn_prompt ~history ~goal
-      | Runtime_claude_code.Resume _ -> goal
+      | Runtime_claude_code.Resume _ -> Host.resume_prompt ~goal prepared.messages
+    in
+    (* A resume file only takes effect once the conversation is compacted and
+       the client records a new prompt. It keeps the composed context out, so
+       that record never holds a stale copy of what each resume prompt carries
+       fresh. *)
+    let system_file_messages =
+      match session_mode with
+      | Runtime_claude_code.Start -> system_messages
+      | Runtime_claude_code.Resume _ ->
+        prepared.messages
+        |> List.filter_map (fun (message : Agent_core.Types.message) ->
+          match message.role with
+          | Agent_core.Types.System when not (Host.is_composed_system_context message) ->
+            Some (Host.encode_history_message message)
+          | Agent_core.Types.System
+          | Agent_core.Types.User
+          | Agent_core.Types.Assistant
+          | Agent_core.Types.Tool -> None)
     in
     (* [None] means "masc named no system prompt, take the client's built-in
        one" since #33072 stopped passing [--system-prompt ""]. The probe and
@@ -715,7 +726,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
        empty (#33165). *)
     let system_prompt =
       Some
-        ((prepared.system_prompt :: system_messages) @ external_context
+        ((prepared.system_prompt :: system_file_messages)
          |> List.filter (fun text -> String.trim text <> "")
          |> String.concat "\n\n"
          |> String.trim)

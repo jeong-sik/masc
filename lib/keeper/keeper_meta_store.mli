@@ -153,6 +153,14 @@ val read_effective_meta :
 val read_effective_meta_presence :
   Workspace.config -> string -> (meta_presence, string) result
 
+(** The presence together with the Keeper identity minted from the requested
+    name. The name is parsed once, here: a blank name is [Error] and every
+    [Ok] carries an identity (RFC-0468 §3.1). *)
+val read_effective_meta_presence_named :
+  Workspace.config ->
+  string ->
+  (Keeper_identity.Keeper_id.t * meta_presence, string) result
+
 (** Durably replace the complete current snapshot. The per-Keeper Owner is the
     only production caller and therefore the only write authority. Any failed
     durability stage remains an error even when the renamed bytes are visible

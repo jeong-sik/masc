@@ -40,6 +40,12 @@ type goal_context =
 type input =
   { turn_ref : Ids.Turn_ref.t
   ; goal_context : goal_context
+  ; keeper_id : Keeper_identity.Keeper_id.t
+    (** The Keeper whose memory this pass curates: the name the calling lane
+        already holds, minted through {!Keeper_identity.Keeper_id.of_string},
+        so it is case-folded. The prompt shows it as host-attached data so the
+        librarian reads the conversation from this Keeper's side and knows
+        whom [keeper_instructions] addresses (RFC-0468 §3.1). *)
   ; keeper_instructions : string
     (** The same instructions the keeper's own system prompt carries.
         The librarian curates on the keeper's behalf, so it judges

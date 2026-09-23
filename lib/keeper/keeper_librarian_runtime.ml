@@ -190,13 +190,6 @@ let with_working_contexts_rule variables =
     (render_prompt Prompt_names.librarian_working_contexts_rule [])
 ;;
 
-let librarian_prompt_variables input =
-  with_working_contexts_rule (Keeper_librarian.prompt_variables input)
-;;
-
-let render_librarian_prompt input =
-  Result.bind (librarian_prompt_variables input) (render_prompt Prompt_names.librarian)
-;;
 
 type librarian_prompt_material =
   { resolution : Prompt_registry.prompt_resolution
@@ -243,6 +236,15 @@ let prompt_variables_of_pass pass input =
     Keeper_librarian.continuity_prompt_variables input
       ~continuity:(Keeper_librarian_continuity.prompt_json prepared)
   | Working_context_pass -> Keeper_librarian.working_context_prompt_variables input
+;;
+
+let librarian_prompt_variables ?continuity input =
+  let pass = Memory_pass continuity in
+  with_working_contexts_rule (prompt_variables_of_pass pass (input_for_pass pass input))
+;;
+
+let render_librarian_prompt input =
+  Result.bind (librarian_prompt_variables input) (render_prompt Prompt_names.librarian)
 ;;
 
 let resolve_librarian_prompt pass input =

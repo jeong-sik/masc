@@ -1742,10 +1742,14 @@ let github_identity_lines (json : Yojson.Safe.t) : string list =
     in
     let auth_status = function
       | Some (`Assoc af) ->
+        (* A missing key is not a negative answer. This read "not signed in"
+           for a server that left the key out or changed its type, which is
+           the opposite of the truth for a Keeper that is signed in, and the
+           operator's next move on that row is to sign in again. *)
         let authenticated =
           match List.assoc_opt "authenticated" af with
-          | Some (`Bool value) -> value
-          | Some _ | None -> false
+          | Some (`Bool value) -> `Known value
+          | Some _ | None -> `Unreported
         in
         let login =
           match List.assoc_opt "login" af with
@@ -1779,10 +1783,13 @@ let github_identity_lines (json : Yojson.Safe.t) : string list =
         in
         Some
           (match authenticated, login, error with
-           | true, Some who, _ -> "signed in as " ^ who ^ scopes
-           | true, None, _ -> "signed in" ^ scopes
-           | false, _, Some message -> "not signed in (" ^ message ^ ")"
-           | false, _, None -> "not signed in")
+           | `Known true, Some who, _ -> "signed in as " ^ who ^ scopes
+           | `Known true, None, _ -> "signed in" ^ scopes
+           | `Known false, _, Some message -> "not signed in (" ^ message ^ ")"
+           | `Known false, _, None -> "not signed in"
+           | `Unreported, _, Some message ->
+               "sign-in not reported (" ^ message ^ ")"
+           | `Unreported, _, None -> "sign-in not reported")
       | Some _ | None -> None
     in
     match string_field "hostname" with

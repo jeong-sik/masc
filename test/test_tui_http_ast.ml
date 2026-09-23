@@ -2760,6 +2760,20 @@ let test_the_github_identity_rows_are_compared_before_they_are_drawn () =
        ~binding_name:"github_identity_lines" ~callee:"String.equal")
 ;;
 
+(* A server that leaves "authenticated" out, or sends it as something other
+   than a boolean, is not a server saying no. The row read "not signed in"
+   for it, which is the opposite of the truth for a Keeper that is signed in
+   and sends the operator to sign in again. Absence is its own reading. *)
+let test_an_unreported_sign_in_is_not_a_refusal () =
+  let holds needle =
+    Ast_grep.count_exact_string_literals_in_value_binding
+      ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"auth_status" ~needle
+  in
+  check int "the missing key has a reading of its own" 1
+    (holds "sign-in not reported");
+  check int "and the server's own no keeps its words" 1 (holds "not signed in")
+;;
+
 (* A failed turn used to be drawn twice: the server records it in the
    transcript, the pane records it in the session, and the filter that drops
    session rows the transcript holds could only see the role. Every error row
@@ -3123,6 +3137,10 @@ let () =
           "the GitHub identity rows are compared before they are drawn"
           `Quick
           test_the_github_identity_rows_are_compared_before_they_are_drawn;
+        test_case
+          "an unreported sign-in is not a refusal"
+          `Quick
+          test_an_unreported_sign_in_is_not_a_refusal;
         test_case
           "the session row filter reads the transcript"
           `Quick

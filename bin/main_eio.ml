@@ -2741,7 +2741,7 @@ let keeper_github_keeper_arg =
 
 let keeper_github_hostname_arg =
   let doc = "GitHub hostname." in
-  Arg.(value & opt string "github.com" & info [ "hostname" ] ~docv:"HOST" ~doc)
+  Arg.(value & opt string Keeper_github_identity.default_hostname & info [ "hostname" ] ~docv:"HOST" ~doc)
 
 let keeper_github_action_cmd name doc run =
   let invoke base_path keeper_name hostname =
@@ -2858,19 +2858,22 @@ let keeper_github_cmd =
         $ keeper_github_hostname_arg
         $ keeper_github_token_arg)
   in
-  (* Status and logout still read and write this host's directory. For a
-     Remote_ssh Keeper they therefore answer about the host, which is what
-     they did before this command learned about lanes; closing that is
-     RFC-sized work on [observe] and [logout_argv], not a lane switch. *)
+  (* Status reads the machine the login was written to, so a Remote_ssh
+     Keeper answers from its endpoint and needs the same runtime [login] opens.
+     Logout still runs [gh auth logout] against this host's directory. *)
   let status =
     keeper_github_action_cmd
       "status"
       "Observe stored and effective Keeper GitHub identities."
       (fun ~config ~(meta : Keeper_meta_contract.keeper_meta) ~hostname ->
-        Keeper_github_identity.run_cli_status
-          ~config
-          ~keeper_name:meta.Keeper_meta_contract.name
-          ~hostname)
+        Eio_main.run
+        @@ fun env ->
+        Process_eio.init
+          ~cwd_default:(Eio.Stdenv.cwd env)
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env);
+        Keeper_github_identity.run_cli_status ~observe:(fun () ->
+          Keeper_github_login_lane.observe ~config ~meta ~hostname))
   in
   let logout =
     keeper_github_action_cmd

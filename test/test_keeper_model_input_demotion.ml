@@ -1001,6 +1001,76 @@ let no_resend_after_a_checkpoint_or_another_error () =
   Alcotest.(check int) "asked once" 1 !asked
 ;;
 
+(* A Wide keeper keeps earlier turns verbatim: its ordinary boundary is 0.
+   A refused request that carried earlier-turn and current-turn tool results
+   demotes only the current turn's: from the turn boundary, or the newest atom
+   alone when the boundary could not be read. *)
+let only_the_current_turn_is_demoted () =
+  let earlier_bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
+  let earlier = history_with_tool_bodies earlier_bodies in
+  let current =
+    assistant "search batch"
+    :: List.mapi
+         (fun i size ->
+            tool_message
+              ~id:(Printf.sprintf "search-%d" i)
+              (String.make size (Char.chr (Char.code 'a' + i))))
+         newest_bodies
+  in
+  let messages = earlier @ current in
+  let turn_start =
+    Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
+  in
+  let base_path = Filename.temp_dir "demote" "" in
+  let compose_with turn_boundary =
+    Try_provider.For_testing.compose_carried_model_input
+      ~input_policy:Masc.Keeper_input_policy.Wide
+      ~measure_message_bytes
+      ~front:
+        (Some
+           { Masc.Keeper_carried_front.first_atom = 0
+           ; front_digest = Option.get (Window.atom_opening_digest messages 0)
+           ; source = Masc.Keeper_carried_front.Ledger
+           })
+      ~history_digest_at:(Window.atom_opening_digest messages)
+      ~current_turn_results:(demoted_after_refusal messages)
+      ~base_path
+      ~demote_before:0
+      ~turn_boundary
+      messages
+  in
+  let composed =
+    compose_with (Masc.Keeper_carried_front.Turn_boundary { end_atom = turn_start })
+  in
+  Alcotest.(check int) "the range still opens on the earlier turns" 0
+    composed.Try_provider.projection.Window.dropped_atoms;
+  Alcotest.(check int) "the demotion starts at the turn boundary" turn_start
+    composed.Try_provider.demote_from;
+  Alcotest.(check int) "only the current turn's results are planned"
+    (List.length newest_bodies)
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  let carried = markers composed.Try_provider.projection.Window.messages in
+  List.iter
+    (fun body ->
+       Alcotest.(check bool) "an earlier-turn body goes verbatim" true
+         (List.exists (String.equal body) carried))
+    earlier_bodies;
+  List.iteri
+    (fun i size ->
+       let body = String.make size (Char.chr (Char.code 'a' + i)) in
+       Alcotest.(check bool)
+         (Printf.sprintf "current-turn body %d leaves" i)
+         false
+         (List.exists (String.equal body) carried))
+    newest_bodies;
+  let unknown =
+    compose_with (Masc.Keeper_carried_front.Turn_boundary_unknown { reason = "unreadable" })
+  in
+  Alcotest.(check int) "an unknown boundary demotes the newest atom alone"
+    (snd (Window.annotate messages) - 1)
+    unknown.Try_provider.demote_from
+;;
+
 (* Demotion can shrink an atom only down to its non-demotable residue. The
    demoted view goes out and the provider judges it. *)
 let still_oversized_after_demotion_is_transmitted_demoted () =
@@ -1148,6 +1218,10 @@ let () =
             "a refused turn resends its results as markers once"
             `Quick
             a_refused_turn_resends_its_results_as_markers_once
+        ; Alcotest.test_case
+            "only the current turn is demoted"
+            `Quick
+            only_the_current_turn_is_demoted
         ; Alcotest.test_case
             "a refused turn with nothing to demote is not resent"
             `Quick

@@ -874,9 +874,10 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
    the current turn's own tool results runs on the refusal path, never at
    composition time: after a size refusal that the lane's own answer did not
    turn into an accepted request, [current_turn_results] is
-   [Current_turn_demoted] and the RFC-0351 §4 boundary sits past every atom
-   the refused request carried, so those results leave as externalized
-   markers ([current_turn_demotion_sequence]). *)
+   [Current_turn_demoted] and the atoms from the turn boundary to the end of
+   the refused request join the demotion, so this turn's results leave as
+   externalized markers while earlier turns stay as the policy composes them
+   ([current_turn_demotion_sequence]). *)
 type current_turn_results =
   | Current_turn_verbatim
   | Current_turn_demoted of { refused_atom_count : int }
@@ -894,6 +895,10 @@ type composed =
   ; history_atom_count : int
   ; origin : Keeper_carried_front.origin
   ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
+  ; demote_from : int
+        (* The first atom the demotion may touch: 0 but for a demoted current
+           turn on a range whose earlier turns stay verbatim, where it is the
+           turn's first atom. *)
   ; demote_before : int
         (* The boundary the demotion actually applied: 0 when demotion is off,
            the refused request's atom count once the current turn is demoted. *)
@@ -924,7 +929,7 @@ type attempt_state =
            attempt produces, which lie past the refused atoms, go verbatim. *)
   ; current_turn_demotion : (unit -> int option) option ref
         (* Set by each composition: the atom count of the request it composed
-           when demoting every tool result in those atoms would carry fewer
+           when demoting this turn's tool results in those atoms would carry fewer
            bytes, [None] when it would change nothing. *)
   }
 
@@ -969,11 +974,11 @@ let applied_demote_before ~base_path ~demote_before =
   if String.equal base_path "" then 0 else demote_before
 ;;
 
-let demotion_plan ~measure_message_bytes ~base_path ~demote_before messages =
+let demotion_plan ?(demote_from = 0) ~measure_message_bytes ~base_path ~demote_before messages =
   match applied_demote_before ~base_path ~demote_before with
   | 0 -> { Keeper_model_input_demotion.messages; pending = [] }
   | demote_before ->
-    Keeper_model_input_demotion.plan ~measure_message_bytes ~demote_before messages
+    Keeper_model_input_demotion.plan ~demote_from ~measure_message_bytes ~demote_before messages
 ;;
 
 let compose_carried_model_input
@@ -1007,24 +1012,41 @@ let compose_carried_model_input
   (* A range that opens on a seed reaches behind this turn, so its aged tool
      results are demoted at the turn boundary on either path that carries
      one. A range that opens at the turn boundary or at a Librarian point
-     carries no atom behind it that demotion could shorten. After a size
-     refusal every tool result the refused request carried is demoted,
-     whatever the policy and the continuity. *)
-  let demote_before =
+     carries no atom behind it that demotion could shorten. *)
+  let ordinary_demote_before =
+    match input_policy, continuity with
+    | Keeper_input_policy.Small, _ -> demote_before
+    | Keeper_input_policy.Wide, Some (Summarized _ | Absorbed _) -> 0
+    | Wide, Some Without_snapshot ->
+      (match front with
+       | Some (_ : Keeper_carried_front.seed) -> demote_before
+       | None -> 0)
+    | Wide, None -> demote_before
+  in
+  (* After a size refusal this turn's own atoms join the demotion, whatever
+     the policy and the continuity: from where this turn began -- the turn
+     boundary, or the newest atom alone when the boundary could not be read
+     -- to the end of the refused request. Earlier turns stay as the policy
+     composes them: when the ordinary boundary already reaches this turn the
+     two ranges meet and one range from 0 covers both, and when it demotes
+     nothing the range starts at this turn. *)
+  let demote_from, demote_before =
     match current_turn_results with
-    | Current_turn_demoted { refused_atom_count } -> refused_atom_count
-    | Current_turn_verbatim ->
-      (match input_policy, continuity with
-       | Keeper_input_policy.Small, _ -> demote_before
-       | Keeper_input_policy.Wide, Some (Summarized _ | Absorbed _) -> 0
-       | Wide, Some Without_snapshot ->
-         (match front with
-          | Some (_ : Keeper_carried_front.seed) -> demote_before
-          | None -> 0)
-       | Wide, None -> demote_before)
+    | Current_turn_verbatim -> 0, ordinary_demote_before
+    | Current_turn_demoted { refused_atom_count } ->
+      let turn_start =
+        match turn_boundary with
+        | Keeper_carried_front.Turn_boundary { end_atom } ->
+          Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom
+        | Keeper_carried_front.Turn_boundary_unknown _ ->
+          Keeper_carried_front.newest_atom ~atom_count:history_atom_count
+      in
+      if ordinary_demote_before >= turn_start
+      then 0, refused_atom_count
+      else turn_start, refused_atom_count
   in
   let planned =
-    demotion_plan ~measure_message_bytes ~base_path ~demote_before messages
+    demotion_plan ~demote_from ~measure_message_bytes ~base_path ~demote_before messages
   in
   let projection, transmitted_bytes, origin =
     match continuity, front with
@@ -1107,6 +1129,7 @@ let compose_carried_model_input
   ; history_atom_count
   ; origin
   ; outlived_seed
+  ; demote_from
   ; demote_before = applied_demote_before ~base_path ~demote_before
   }
 ;;
@@ -1395,10 +1418,15 @@ let bounded_model_input_projection
     in
     (* Completed-turn evidence, not attempt seed length, protects unfinished
        resumed tool work. Capacity refusal does not move this boundary. *)
+    (* Zero when the policy demotes nothing ([demotion_base_path] empty, as on
+       Wide), so a demoted current turn does not take the earlier turns with
+       it: its range then starts at this turn. *)
     let demote_before =
-      match ctx.turn_boundary with
-      | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom
-      | Keeper_carried_front.Turn_boundary_unknown _ -> 0
+      applied_demote_before ~base_path:demotion_base_path
+        ~demote_before:
+          (match ctx.turn_boundary with
+           | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom
+           | Keeper_carried_front.Turn_boundary_unknown _ -> 0)
     in
     let view =
       request_view
@@ -2487,7 +2515,7 @@ let halve_front ~digest_at ~move_ledger ~hold ~first_atom ~retry =
    lane's own answer, which on a turn with an absorbed point is one attempt --
    ends with a refusal [refusal_evicts] names, [same_run_retry_authorized]
    holds, and [demotable] names the refused request's atom count because
-   demoting every tool result in those atoms would carry fewer bytes,
+   demoting this turn's tool results in those atoms would carry fewer bytes,
    [demote] makes the compositions demote them and [resend] runs once on the
    same candidate; its result is returned as it is. The range is not
    narrowed. Nothing to demote, or any other failure, returns the failure at

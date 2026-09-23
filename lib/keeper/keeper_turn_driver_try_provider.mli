@@ -512,9 +512,11 @@ type current_turn_results =
           as they are. *)
   | Current_turn_demoted of { refused_atom_count : int }
       (** A request carrying [refused_atom_count] atoms was refused for size:
-          every tool result in those atoms, the current turn's own included,
-          goes as its externalized marker (#28845). Atoms appended after them,
-          the results a resent attempt produces, go as they are. *)
+          every tool result from the turn boundary (the newest atom alone
+          when the boundary is unknown) up to [refused_atom_count] goes as its
+          externalized marker (#28845). Earlier turns go as the policy
+          composes them, and atoms appended after the refused ones, the
+          results a resent attempt produces, go as they are. *)
 
 val current_turn_demotion_sequence :
   same_run_retry_authorized:(unit -> bool) ->
@@ -528,7 +530,7 @@ val current_turn_demotion_sequence :
     keeper-context-window-in-tokens §10.4, §13.9). When [first] fails with a
     refusal {!carried_range_eviction_sequence} would move the front for,
     [same_run_retry_authorized] holds, and [demotable] names the refused
-    request's atom count because demoting every tool result in those atoms
+    request's atom count because demoting this turn's tool results in it
     would carry fewer bytes, [demote] is told and [resend] runs once; its
     result is returned as it is. The range is not narrowed. With nothing to
     demote, and on every other failure, the failure is returned at once. *)
@@ -582,14 +584,18 @@ type composed =
         (** A front this history does not open with the same message, dropped
             by {!Keeper_carried_front.for_history} with the reason; the
             request started over. *)
+  ; demote_from : int
+        (** The first atom the demotion may touch: 0, or this turn's first
+            atom under {!Current_turn_demoted} when the policy keeps earlier
+            turns verbatim. *)
   ; demote_before : int
         (** The boundary the demotion applied: 0 when demotion is off, the
             refused request's atom count under {!Current_turn_demoted}. *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
-    atoms older than [demote_before], or over every atom the refused request
-    carried under {!Current_turn_demoted}, then the carried range from [front], or from
+    atoms older than [demote_before], joined under {!Current_turn_demoted} by
+    this turn's atoms up to the refused request's end, then the carried range from [front], or from
     [turn_boundary] without one (§13.4). Nothing here measures the
     request against a limit. *)
 

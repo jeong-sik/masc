@@ -1538,10 +1538,13 @@ status: reference
     `dropped`에 넣고, 현재 상태 claim의 `absorbs`에 넣지 않는다.
     코드 규칙: absorb gate는 판정 모델에게 흡수된 Fact의 문장마다 새 claim이 그 내용을
     말하는지 묻는다. 말하지 않는 문장이 하나라도 있으면 그 Fact는 흡수되지 않고 현재
-    Fact로 남는다. 답 전체가 거절되지는 않고 새 claim은 그대로 적용된다(#38056).
-    흡수 대상(`into`)이 잠근 시점의 스냅숏에도, 이번 답의 새 claim에도 없으면(회차 도중
-    Keeper가 그 Fact를 철회하거나 `supersedes`로 대체한 경우) 그 흡수는 적용하지 않는다.
-    원문은 현재 Fact로 남고, 지워진 대상은 되살아나지 않으며, warn 로그만 남는다(#38231).
+    Fact로 남는다. 새 claim은 원칙적으로 적용되나, `absorbs`에 지정한 기억 중 어느 것도
+    흡수되지 않은 claim이 기존 기억의 사본이면 역방향 사본 판정(Reverse Copy Judgment)을
+    거쳐 저장하지 않고 버린다(#38056·#38243). 흡수 대상(`into`)이 잠근 시점의 스냅숏에도,
+    이번 답의 새 claim에도 없으면(회차 도중 Keeper가 그 Fact를 철회하거나 `supersedes`로
+    대체한 경우) 그 흡수는 적용하지 않는다. 원문은 현재 Fact로 남고, 지워진 대상은
+    되살아나지 않으며, Librarian 실행 기록(`run` 출력)에 실제로 적용된 흡수와 미적용
+    흡수를 구분해 남긴다(#38231·#38267).
   - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
     적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
     커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고
@@ -1551,6 +1554,30 @@ status: reference
     id, 자기 자신 id, `source_path`와의 동시 지정, 그리고 대체될 Fact를 전제로
     삼는 유도 claim(`supersedes_premise_of_successor`)은 모두 거절되며 아무것도 적지 않는다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.ml) · [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli) · [librarian.md](../../config/prompts/librarian.md)
+
+**Reverse Copy Judgment (역방향 사본 판정)**
+: Librarian 회차가 내놓은 새 claim 중 `absorbs`에 기억을 적었으나 실제로는 그 중
+  아무것도 흡수하지 못한 claim에 대해, 남겨진 기억들이 그 claim의 내용을 이미
+  담고 있는지 묻는 역방향 판정. "새 claim은 항상 적용된다"는 기본 규칙의 단 하나의
+  예외다(RFC-0463 §2.8·#38243).
+  - 배경: Librarian이 매 회차 같은 주제를 조금씩 다른 문장으로 다시 써서 기존 Fact가
+    흡수되지 않고 paraphrase 사본이 무한 축적되는 문제를 막는다.
+  - 전이 및 판정:
+    - 대상: `absorbs`에 기억을 나열했으나 absorb gate에서 0건만 흡수 승인된 새 claim.
+      단, `supersedes`로 대체 대상이 지정된 claim은 제외한다(`Continues_a_dropped_memory` —
+      버리면 대체 대상만 사라지고 빈자리가 남기 때문).
+    - 절차: 남겨진 원본 기억들을 최대 `state_bytes_limit` 바이트 크기로 묶어 상태를
+      구성하고, 새 claim을 문장 단위(`statements`)로 쪼개어 판정 모델에 묻는다.
+    - 경계: 점수가 `conveyed_boundary`를 엄격히 넘을 때만 전달된 것으로 인정하며,
+      동점(tie)은 claim을 버리지 않도록 미전달로 본다.
+    - 결과: 모든 문장이 전달되었으면 `Copy`로 판정해 원장에 저장하지 않고
+      탈락시킨다(`without_copies`). 전달되지 않은 문장이 하나라도 있으면
+      `Carries_new_statement`로 정상 적용한다. 판정 실패나 크기 초과 등
+      `Not_judged`(`Gate_judgment_failed`·`No_source_fits_the_state`·`Statement_too_large`·`No_statement`·`Request_failed`)인
+      경우에도 기존처럼 정상 적용한다.
+  - 저장 및 표면: 탈락된 claim은 원장에 쓰이지 않고 로그에 남으며, Librarian 회차
+    실행 결과의 `copy_checks`에 각 판정 결과(`verdict`)와 호출 횟수가 기록된다.
+  → [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli)
 
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는

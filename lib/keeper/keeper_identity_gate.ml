@@ -150,7 +150,7 @@ let send_call
   | Ok transports ->
     Keeper_identity_tools.run_call
       ~transports
-      ~base_path:config.Workspace.base_path
+      ~config
       ~keeper_name:meta.name
       ~provider
       ~remote_name

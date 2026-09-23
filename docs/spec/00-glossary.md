@@ -29,10 +29,8 @@ status: reference
   `agent_completed`·`agent_yielded`는 걸린 시간(`elapsed_s`)을, `agent_failed`는 걸린
   시간과 오류의 `error_code`·`error`를, `agent_input_required`는 요청(`request`)을
   payload에 싣는다. 이 event들은 payload의 `task_id`에 **Agent run ID**를 싣는다 —
-  `Event_envelope.fresh_id`가 만드는 `evt-` 접두 id이고, `agent_lifecycle_events`가
-  `AgentStarted`에서 연 run id를 그대로 쓴다. 이 값은 MASC **Task**의 id가 아니다.
-  필드 이름이 `task_id`라 Activity row가 이것을 Task로 읽어 `evt-…`를 그대로 찍은
-  적이 있다(#37910에서 고침).
+  `agent_lifecycle_events`가 `AgentStarted`에서 연 run id를 그대로 쓴다. 그 id가 무엇이고
+  Activity가 어떻게 읽는지는 **Agent run ID** 항목에 있다.
   → [Agent_core.Event_bus](../../packages/agent_core/lib/event_bus.mli),
   [agent_lifecycle_events](../../packages/agent_core/lib/agent/agent_lifecycle_events.ml)
 
@@ -67,7 +65,7 @@ status: reference
 : 이 저장소에서 서로 다른 넷을 가리킨다. 문장에 어느 것인지 함께 적는다.
   (1) TUI Harness 화면: 평가자 판정을 읽는 TUI 표면. 코드의 화면 이름은 `Harness`지만
   키 표가 운영자에게 보이는 이름은 "Planning / Task Verdicts"이고
-  (`bin/masc_tui_keys.ml:1233`), 상세에서 `y`(agree)·`x`(overrule)로 그 판정에 답한다
+  ([`masc_tui_keys.ml`](../../bin/masc_tui_keys.ml)의 판 이름 표), 상세에서 `y`(agree)·`x`(overrule)로 그 판정에 답한다
   (`render_harness_detail`). (2) Eval Harness: Keeper 에이전트의 시나리오 기반 행동
   평가(`lib/eval_harness.mli`). scenario·grader·metric 타입과 runner·summary 를
   정의하고 eval CLI 와 dashboard 가 소비한다. (3) Lab Safety Harness: Dashboard Lab
@@ -93,8 +91,7 @@ status: reference
   모인다. detail에 제어 바이트가 있으면 먼저 한 줄로 평탄화하고, 200바이트를 넘는 사유는
   UTF-8 문자 경계에서 자른 뒤 `[+N bytes]`로 버린 양을 적는다 — 로그를 한 줄씩 읽는
   데다, 백트레이스 하나가 한 줄을 킬로바이트로 만들면 이 줄의 목적이 사라지기 때문이다.
-  이 줄이 끝의 유일한 기록이다: 로그에는 기동 줄만 있어, 끝난 세션은 사유를 남기지
-  않았다. **Terminal Reason**과 다른 축이다 —
+  세션이 끝난 사유는 이 줄에만 남는다. **Terminal Reason**과 다른 축이다 —
   Terminal Reason은 끝난 Keeper turn의 영수증 필드이고, Exit Reason은 TUI 프로세스
   세션이 끝난 까닭이다.
   → [Masc_tui_exit_reason](../../bin/masc_tui_exit_reason.mli), [TUI 안내](../TUI-GUIDE.md)
@@ -153,14 +150,14 @@ status: reference
   targetless discovery를 끈다. 정확한 Keeper 지목과 broadcast, 게시글 작성자 및 해당 댓글의 부모 댓글
   작성자에게 보내는 전달에는 영향을 주지 않으며 Task 할당이나 실행 권한도 아니다.
   `mention_targets`는 정확한 주소 토큰이고 `board_interests`는 의미 판정의 입력이므로
-  서로 fallback하지 않는다. v7 판정 경계는 현재 typed signal과
-  `keeper_role {name, board_interests}`만 사용한다. 과거 post/comment thread,
+  서로 fallback하지 않는다. 판정 입력은 typed signal과
+  `keeper_role {name, board_interests}`뿐이다. 과거 post/comment thread,
   instructions, runtime/task identity, mention 목록은 저장하거나 보내지 않는다.
 
 **Board Attention Candidate (Board 판정 후보)**
 : Board_attention lane이 판정할 게시물 하나. 어떤 모델 호출보다 먼저 durable하게
   저장되고, 생애가 `Pending → Judged → Consumed`다. exact-flow 실패가 확정되면 먼저
-  `Quarantine Quarantined`로 투영되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
+  격리(`Quarantine`, 상태값 `Quarantined`) 상태가 되고, 운영자 소유의 복구가 이전 도메인 상태를 잃지
   않고 `Requeue_requested`를 거쳐 `Requeued`로 올린다. 판정은 소유 lane이 그 후보
   판정을 durable하게 적용·소비할 때만 넘어가고, 전달 실패는 마지막 실패 증거를 남길
   뿐 후보를 소비하지 않는다. 대기 작업에는 벽시계 만료가 없다. **`Runtime` 항목과
@@ -362,9 +359,8 @@ status: reference
 : vision 도구가 이미지를 읽을 때 호출하는 runtime의 순서(`[runtime].media_failover`,
   "vision read fleet"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
   Keeper turn은 여기로 파견하지 않고, turn의 이미지 재라우팅은 자기 lane 안에 머문다.
-  이름의 "failover"는 런타임 후보 순서를 가리키던 옛 단어의 잔재이고, 이 키는 그와
-  다른 메커니즘이다 — 키 이름에 옛 단어가 남는 유일한 곳이며, 운영자 설정 파일 호환을
-  위해 동결되었다.
+  Keeper turn이 실패했을 때 다음 runtime을 고르는 **Runtime Candidate Order**와는 다른
+  장치다.
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
@@ -372,6 +368,8 @@ status: reference
   의 생성자 넷(`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`)이
   `all_lanes`로 열거된다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
   Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
+  경계: 같은 단어를 두 곳이 더 쓴다. `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는
+  **Runtime Candidate Order**이고, 공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
   → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**
@@ -502,8 +500,7 @@ status: reference
   있을 때만)·`Detail_only`(상세가 열려 있을 때만). 상세를 가진 판은 한 푸터로 두 상태를
   그리므로, 이 축이 없으면 화면에서 안 먹는 키를 정확히 하나 광고한다 — 상세가 열린 뒤의
   `Right / Enter`, 닫힌 동안의 `[ / ]`. 푸터는 `~detail_open`으로 자기 상태를 말하고,
-  그 인자를 빠뜨린 판은 예전처럼 모든 바인딩을 광고한다. `has_detail_scoped_keys`가
-  그런 판을 잡는다.
+  그 인자가 없으면 모든 바인딩을 광고한다. `has_detail_scoped_keys`가 그런 판을 잡는다.
   → [masc_tui_keys.mli](../../bin/masc_tui_keys.mli)
 
 **Connector Connection (커넥터 연결)**
@@ -819,9 +816,7 @@ status: reference
   Keeper의 admission을 소유하고 있어, autoboot 호출자가 boot-scan shutdown
   inventory(`blocked_keeper_names`)를 들고 표시한다. boot recovery가 회수
   가능한 operation을 같은 bootstrap에서 정산하면 supervisor의 주기 pass가 그
-  Keeper를 등록한다. 배제된 Keeper는 excluded list에 찍는다 — 2026-07-21
-  wedge에서는 한 Keeper가 boot set과 excluded list 양쪽에서 조용히 빠져
-  장애가 autoboot 보고에서 보이지 않았다.
+  Keeper를 등록한다. 배제된 Keeper는 이 이유와 함께 excluded list에 찍는다.
   → [keeper_runtime.mli](../../lib/keeper/keeper_runtime.mli)
 
 **Checkpoint**
@@ -1076,10 +1071,10 @@ status: reference
   `working_state` 인자이고 Continuity Snapshot 파일에 저장된다. 턴은 이 값이 덮는
   atom들을 보내는 대신 이 값을 보낸다. 저장본이 덮는 범위와 이 값이 대신하는 범위는
   같다.
-  요약을 못 실은 띠는 닫힌 셋이다(`working_state_left_out`) — 요약이 Atom을
-  밀어내는 경우, 실을 turn이 없는 경우, 요약이 창에 안 맞는 경우다. 관측 이름과
-  카운터는 그 카탈로그를 따른다(`keeper_official_client_host.mli`). 요약이 빠져도
-  turn은 거절하지 않고 WARN으로 알린다.
+  공식 클라이언트 lane에서 요약을 못 싣는 경우는 셋이다(`working_state_left_out`) — 요약이
+  Atom을 밀어내는 경우, 실을 turn이 없는 경우, 요약이 창에 안 맞는 경우다. 관측 이름과
+  카운터는 그 셋을 따른다([`keeper_official_client_host.ml`](../../lib/keeper/keeper_official_client_host.ml)).
+  요약이 빠져도 turn은 거절하지 않고 WARN으로 알린다.
   → [Keeper_librarian.selection](../../lib/keeper/keeper_librarian.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
 **Continuity Synthesis Observation (대화 요약 진행 관측)**
@@ -1122,12 +1117,13 @@ status: reference
   - 연속성 회차(`Keeper_librarian_continuity`): 스냅숏이 덮은 앞부분을 다시 쓰는 회차.
     완료된 대화 구간을 요약해 Continuity Snapshot을 만든다. 커밋은 durable 회차의
     위치를 바꾸지 않는다.
-  두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 규칙을 공유한다(RFC
-  librarian-lifecycle §4.3). durable 회차는 실패 표식을 루프 메모리에 두고 가장 오래된
-  한 턴으로 좁힌다. 연속성 회차는 좁힌 폭(Continuity Width)을 다음 회차로 넘긴다.
+  두 회차는 따로 밀리고(Continuity Lag), 실패 뒤 범위를 좁히는 방식도 다르다(RFC
+  librarian-lifecycle §4.3). durable 회차는 실패 종류를 보지 않고, 실패 표식을 루프
+  메모리에 두고 가장 오래된 한 턴으로 좁힌다. 연속성 회차는 실패 종류를 보고 크기
+  때문인 실패에서만 좁히며, 좁힌 폭(Continuity Width)을 다음 회차로 넘긴다.
   → [keeper_librarian_durable_consumer](../../lib/keeper/keeper_librarian_durable_consumer.mli) · [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli)
 
-**Continuity Lag (연속성 밀림)**
+**Continuity Lag (요약이 밀린 정도)**
 : 연속성 회차가 얼마나 뒤처졌나 — Librarian의 읽은 위치(Read Position)의 `end_atom`에서
   연속성 스냅숏이 덮은 끝(`Keeper_continuity_observation.frontier.end_atom`)을 뺀 atom 수.
   같은 trace를 가리킬 때만 세고, 스냅숏이 앞서면 세지 않는다. health JSON의
@@ -1150,8 +1146,8 @@ status: reference
   좁은 값만 남는다. 끝 atom이 아니라 폭을 남기므로 커밋한 회차 다음에는 같은 자리가
   아니라 그다음 자리를 읽는다. 좁히는 것은 작은 요청이 같은 벽을 피할 수 있는 실패뿐이고,
   그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli:47`)가 들고, 원인별 판정
-  규칙은 RFC-librarian-lifecycle §4.3이 정한다. 판정은 걸음의 마지막 슬롯이 아니라 걸음
-  전체에 묻는다. 폭은 backlog를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
+  규칙은 RFC-librarian-lifecycle §4.3이 정한다. 마지막 후보 하나가 아니라 후보를 차례로
+  시도한 전체 결과로 판정한다. 폭은 backlog를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
   거절했던 범위가 이제 들어간다는 증거가 아니다. 루프
   메모리에만 있으므로 서버가 재시작하면 폭은 사라지고 다시 전부 읽기부터 시작한다(RFC
   librarian-lifecycle §4.3).

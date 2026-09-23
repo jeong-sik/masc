@@ -3389,8 +3389,7 @@ describe('fetchKeeperConfig', () => {
           world: { key: 'keeper.world', source: 'override', text: 'world text' },
           capabilities: { key: 'keeper.capabilities', source: 'file', text: 'capabilities text' },
         },
-        effective_system_prompt: 'full prompt',
-        assembled_system_prompt: 'assembled prompt',
+        system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt' },
         unified_user_message_preview: 'world state',
       },
       execution: {
@@ -3515,6 +3514,37 @@ describe('fetchKeeperConfig', () => {
     await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrowError(
       'Invalid keeper config response: max_context_override must be a positive safe integer or null',
     )
+  })
+
+  it('decodes the system prompt union and fails only that field on an unknown shape (#38354)', async () => {
+    const unavailable = {
+      state: 'unavailable',
+      reason: 'constitution_unreadable',
+      path: '/base/.masc/constitution/articles.jsonl',
+      detail: 'Sys_error("Is a directory")',
+    }
+    const body = (value: unknown) =>
+      `{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"input_policy":"small","activation_mode":"manual","skills":{"names":null},"prompt":{"instructions":"be exact","system_prompt":${JSON.stringify(value)}}}`
+    const fetchWith = (value: unknown) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(body(value), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    fetchWith(unavailable)
+    expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual(unavailable)
+
+    fetchWith({ ...unavailable, reason: 'something_else' })
+    const unknownReason = await fetchKeeperConfig('keeper-sangsu')
+    expect(unknownReason.prompt.system_prompt).toEqual({
+      state: 'decode_failed',
+      detail: 'unknown unavailable reason "something_else"',
+    })
+    expect(unknownReason.prompt.instructions).toBe('be exact')
+
+    fetchWith({ state: 'later' })
+    expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual({
+      state: 'decode_failed',
+      detail: 'unknown prompt state "later"',
+    })
   })
 
   it('rejects a missing max_context_override wire field', async () => {

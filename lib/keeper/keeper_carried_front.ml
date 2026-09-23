@@ -6,6 +6,7 @@ type source =
   | Halved_after_refusal of { retry : int }
   | Evicted_after_refusal of { retry : int }
   | Turn_start_after_seed_refusal
+  | Turn_start_after_librarian_refusal
 
 type seed =
   { first_atom : int
@@ -17,6 +18,7 @@ type origin =
   | Carried of source
   | Librarian_snapshot of { end_atom : int; boundary_line : int }
   | Librarian_progress of { end_atom : int }
+  | Past_librarian_point of { librarian_end_atom : int; source : source }
   | Turn_start of { end_atom : int }
   | Turn_start_unknown of { reason : string }
 
@@ -295,6 +297,7 @@ let source_to_string = function
   | Halved_after_refusal { retry } -> Printf.sprintf "halved_after_refusal#%d" retry
   | Evicted_after_refusal { retry } -> Printf.sprintf "evicted_after_refusal#%d" retry
   | Turn_start_after_seed_refusal -> "turn_start_after_seed_refusal"
+  | Turn_start_after_librarian_refusal -> "turn_start_after_librarian_refusal"
 ;;
 
 let seed_to_json (seed : seed) =
@@ -308,12 +311,13 @@ let seed_to_json (seed : seed) =
 let origin_to_string = function
   | Librarian_snapshot _ -> "librarian_snapshot"
   | Librarian_progress _ -> "librarian_progress"
+  | Past_librarian_point { source; _ } -> "past_librarian_point:" ^ source_to_string source
   | Carried source -> source_to_string source
   | Turn_start _ -> "turn_start"
   | Turn_start_unknown _ -> "turn_start_unknown"
 ;;
 
-let origin_to_json = function
+let rec origin_to_json = function
   | Librarian_snapshot { end_atom; boundary_line } ->
     `Assoc [ "kind", `String "librarian_snapshot"; "end_atom", `Int end_atom;
              "boundary_line", `Int boundary_line ]
@@ -326,10 +330,37 @@ let origin_to_json = function
     `Assoc [ "kind", `String "evicted_after_refusal"; "retry", `Int retry ]
   | Carried Turn_start_after_seed_refusal ->
     `Assoc [ "kind", `String "turn_start_after_seed_refusal" ]
+  | Carried Turn_start_after_librarian_refusal ->
+    `Assoc [ "kind", `String "turn_start_after_librarian_refusal" ]
+  | Past_librarian_point { librarian_end_atom; source } ->
+    `Assoc
+      [ "kind", `String "past_librarian_point"
+      ; "librarian_end_atom", `Int librarian_end_atom
+      ; "front", origin_to_json (Carried source)
+      ]
   | Librarian_progress { end_atom } ->
     `Assoc [ "kind", `String "librarian_progress"; "end_atom", `Int end_atom ]
   | Turn_start { end_atom } ->
     `Assoc [ "kind", `String "turn_start"; "end_atom", `Int end_atom ]
   | Turn_start_unknown { reason } ->
     `Assoc [ "kind", `String "turn_start_unknown"; "reason", `String reason ]
+;;
+
+type librarian_gap =
+  { gap_start_atom : int
+  ; gap_end_atom : int
+  }
+
+let librarian_gap ~snapshot_cut ~read_position ~accepted_start =
+  let covered =
+    match snapshot_cut, read_position with
+    | Some cut, Some read -> Some (max cut read)
+    | Some cut, None -> Some cut
+    | None, Some read -> Some read
+    | None, None -> None
+  in
+  match covered with
+  | Some covered when accepted_start > covered ->
+    Some { gap_start_atom = covered; gap_end_atom = accepted_start }
+  | Some _ | None -> None
 ;;

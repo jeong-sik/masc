@@ -6,7 +6,9 @@
     {!Keeper_turn_driver_try_provider.choose_range_start}: a Librarian
     continuity snapshot that fits the history, else the Librarian's read
     position in it, else a seed this history still holds, else where the
-    last completed turn on this history ended ({!Turn_start}). The turn's
+    last completed turn on this history ended ({!Turn_start}). A Librarian
+    point yields to a later start the provider accepted
+    ({!Past_librarian_point}). The turn's
     composition and the next-request forecast both ask it. This module holds
     the vocabulary of that choice -- the seed, the turn start, and the
     {!origin} a request reports -- and the reads that produce a seed.
@@ -49,6 +51,11 @@ type source =
       (** With no Librarian point, the provider refused the range a seed
           opened as too large: the front moved to the turn boundary, and the
           turn shares that position with its later candidates and lanes. *)
+  | Turn_start_after_librarian_refusal
+      (** With a Librarian point, the provider refused as too large a range
+          that opened before the turn boundary -- at the point, or at the
+          accepted start past it: the front moved to the turn boundary for
+          the rest of the turn (RFC librarian-lifecycle §4.10, rule 1). *)
 
 type seed =
   { first_atom : int
@@ -86,6 +93,14 @@ type origin =
           read into memory, and nothing in the request summarizes them. Taken
           when no saved continuity snapshot fits this history and the
           position does (RFC keeper-context-window-in-tokens §13.6). *)
+  | Past_librarian_point of { librarian_end_atom : int; source : source }
+      (** A Librarian point at [librarian_end_atom], and a later start the
+          provider accepted on this history ([source]: the newest
+          response-observed turn record, or this turn's boundary after a
+          size refusal). The range opens at that start (RFC
+          librarian-lifecycle §4.10, rule 2). The atoms from the point up to
+          it are not sent; which of them are also not in memory is
+          {!librarian_gap}'s answer, which weighs the read position too. *)
   | Turn_start of { end_atom : int }
       (** No absorbed point and no seed: the range begins where the last
           completed turn on this history ended, so only this turn's own
@@ -258,6 +273,41 @@ val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind], one per constructor: [ledger];
     [turn_record] with [turn]; [halved_after_refusal] or
     [evicted_after_refusal] with [retry]; [turn_start_after_seed_refusal];
+    [turn_start_after_librarian_refusal];
     [librarian_snapshot] with [end_atom] and [boundary_line];
-    [librarian_progress] with [end_atom]; [turn_start] with [end_atom]; or
+    [librarian_progress] with [end_atom]; [past_librarian_point] with
+    [librarian_end_atom] and [front], the {!Carried} object of its source;
+    [turn_start] with [end_atom]; or
     [turn_start_unknown] with [reason]. *)
+
+(** The atoms that are in neither the request nor memory while a request
+    starts at [gap_end_atom], past everything the Librarian covers (RFC
+    librarian-lifecycle §4.10, rule 3). [gap_end_atom] is excluded. *)
+type librarian_gap =
+  { gap_start_atom : int
+  ; gap_end_atom : int
+  }
+
+val librarian_gap
+  :  snapshot_cut:int option
+  -> read_position:int option
+  -> accepted_start:int
+  -> librarian_gap option
+(** The one rule for the gap. What the Librarian covers ends at the later of
+    its continuity snapshot's cut and its durable read position: the atoms
+    before the cut are summarized, the atoms before the read position are
+    in memory. The gap runs from there to just before [accepted_start], the
+    start the provider last accepted. [None] when [accepted_start] is at or
+    before that end, or when neither position is known. A request that
+    starts past its Librarian point therefore need not leave a gap: a
+    snapshot cut S behind a read position R, with the request starting at R,
+    skips only atoms the Librarian has already read.
+
+    [snapshot_cut] is taken as covered whether or not the snapshot fits the
+    current history. A snapshot that no longer fits stays in its file with
+    nothing on disk marking it: the turn driver finds the mismatch only by
+    comparing it with the checkpoint on each request, and then sends no
+    working state. So while such a snapshot remains, with its cut past the
+    read position, this counts the gap short: from the cut rather than from
+    the read position. Telling the two apart needs that history comparison,
+    and the alarm does not make it. *)

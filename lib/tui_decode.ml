@@ -7467,6 +7467,23 @@ let decode_tool_approval_mode_overrides json =
   in
   loop [] items
 
+(* The detail pane is where an operator reads the request whole, so the input
+   arrives there as it was stored. A row whose input is not an object has no
+   keys to show; it carries the server's flattened preview under a label that
+   says so, because sitting that possibly-truncated wall under "input"
+   promised a whole it never was. *)
+type gate_input_rows =
+  | Rows of (string * string) list
+      (** One field per key of the stored input object: the key is the label,
+          the value is what the producer stored -- strings whole, every other
+          value as compact JSON. The order is the producer's, because a
+          producer that leads with the field the operator reads is making a
+          statement the serializer must not rearrange. *)
+  | Flattened of string option
+      (** The server's flattened preview, and the fact that this detail
+          cannot draw the input per key. [None] means the server recorded no
+          preview either; the pane says so rather than drawing nothing. *)
+
 type gate_pending_phase =
   | Gate_queued
   | Gate_judging
@@ -7479,6 +7496,14 @@ type gate_pending = {
   gp_operation : string;
   gp_display_tool : string;
   gp_input_preview : string option;
+      (** The one-line summary the queue row and the approvals payload line
+          show. A [tool_execute] row leads with the command it would run;
+          every other operation keeps the server's flattened preview. *)
+  gp_input_rows : gate_input_rows;
+      (** The detail pane's copy of the input, uncut. [Rows] is one field per
+          key of the stored input object -- strings whole, other values as
+          compact JSON. [Flattened] says this input never was an object, so
+          the pane draws the server preview under a label that names it. *)
   gp_execution_cwd : string option;
   gp_execution_sandbox : string option;
   gp_waiting_s : float option;
@@ -7625,6 +7650,48 @@ let gate_execution_site ~operation envelope =
   then (None, None)
   else match envelope with Some envelope -> execute_gate_site envelope | None -> (None, None)
 
+(* The server's preview is what the wire carries, cut at 200 bytes. The
+   detail pane used to sit that wall under the label "input" and call it the
+   input; a [tool_execute] row whose command could not be assembled fell into
+   it silently. Both rows keep the preview for their one-line summaries. The
+   detail pane draws [gp_input_rows] instead, which is the whole stored input,
+   one field per key, in the order the producer wrote it. *)
+let gate_input_rows ~operation ~server_preview envelope =
+  let object_keys json =
+    match json with
+    | `Assoc args ->
+      let field (key, value) =
+        let text =
+          match value with
+          | `String text -> text
+          | other -> Yojson.Safe.to_string other
+        in
+        (key, text)
+      in
+      Some (Rows (List.map field args))
+    | _ -> None
+  in
+  let input_rows =
+    if String.equal operation Keeper_tool_execute_runtime.gate_operation then
+      (* The command arguments are the input; the envelope's outer keys are
+         the envelope. Where it would run is already a pane row of its own,
+         and the schema URN is not something an operator decides on. *)
+      match envelope with
+      | Some args -> object_keys (member "input" args)
+      | None -> None
+    else
+      match envelope with
+      | Some json -> object_keys json
+      | None -> None
+  in
+  let flattened = server_preview in
+  match input_rows with
+  | Some rows -> rows
+  | None -> Flattened flattened
+
+(* The row keeps its one-line summary: a queue line is a queue line, and
+   there the command must still lead. The detail is where the input is read
+   whole, and that is [gp_input_rows]. *)
 let gate_input_preview ~operation ~server_preview envelope =
   if not (String.equal operation Keeper_tool_execute_runtime.gate_operation)
   then server_preview
@@ -7742,6 +7809,9 @@ let decode_gate_pending json =
       gp_display_tool = gate_display_tool ~operation:gp_operation input;
       gp_input_preview =
         gate_input_preview ~operation:gp_operation
+          ~server_preview:gp_input_preview input;
+      gp_input_rows =
+        gate_input_rows ~operation:gp_operation
           ~server_preview:gp_input_preview input;
       gp_execution_cwd = fst (gate_execution_site ~operation:gp_operation input);
       gp_execution_sandbox =

@@ -487,7 +487,7 @@ let record
        })
 ;;
 
-let record_rule ~base_path ~event_type (rule : approval_rule) =
+let record_rule ~base_path ~event_type ?actor (rule : approval_rule) =
   record
     ~base_path
     ~event_type
@@ -495,7 +495,16 @@ let record_rule ~base_path ~event_type (rule : approval_rule) =
     ~keeper_name:rule.keeper_name
     ~tool_name:rule.tool_name
     ?source_approval_id:rule.source_approval_id
+    ?actor
     ()
+;;
+
+let record_rule_created ~base_path (rule : approval_rule) =
+  record_rule ~base_path ~event_type:Rule_created ?actor:rule.created_by rule
+;;
+
+let record_rule_deleted ~base_path ~deleted_by (rule : approval_rule) =
+  record_rule ~base_path ~event_type:Rule_deleted ~actor:deleted_by rule
 ;;
 
 let audit_scan_window ?keeper_name n =

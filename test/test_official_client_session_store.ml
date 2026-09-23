@@ -1706,6 +1706,79 @@ let test_unchanged_canonical_source_still_resumes () =
     | Ok _ -> fail "unchanged source did not resume the vendor session"
     | Error detail -> fail ("unchanged source was refused: " ^ detail))
 
+type failed_resume =
+  { claim_again : updated_at:float -> (t, string) result
+  ; recovery : t
+  ; recovery_id : string
+  ; settlement : settlement
+  ; snapshot_sha256 : string
+  }
+
+(* Settle one turn, claim a resume of it, and fail that resume into recovery.
+   [fail_from] names the phase the failure is raised from. *)
+type failure_phase = From_start | From_turn_inflight
+
+let failed_resume ~base_path ~keeper_name ~delivery ~fail_from =
+  let runtime_id = "antigravity.default" in
+  let snapshot_sha256 = String.make 64 'c' in
+  let frontier = Some { snapshot_sha256; message_count = 2; delivery;
+    acknowledged_turn = None } in
+  let claim_again ~expected ~updated_at =
+    claim_with_context_frontier ~context_frontier:frontier ~base_path ~keeper_name
+      ~expected ~client_kind:Antigravity ~owner_epoch ~runtime_id
+      ~tool_surface_sha256:empty_surface ~updated_at in
+  let settlement = { session_id = "conversation-1"; turn_id = "turn-1" } in
+  let run_turn ~claimed ~turn_id ~at =
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:settlement.session_id ~updated_at:at |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:settlement.session_id ~updated_at:(at +. 1.) |> Result.get_ok in
+    mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:settlement.session_id ~turn_id
+      ~turn_count:starting.turn_count ~updated_at:(at +. 2.) |> Result.get_ok in
+  let first = claim_again ~expected:None ~updated_at:1. |> Result.get_ok in
+  let started = run_turn ~claimed:first ~turn_id:settlement.turn_id ~at:2. in
+  let settled = settle ~base_path ~keeper_name ~expected:started
+    ~session_id:settlement.session_id ~turn_id:settlement.turn_id ~updated_at:5.
+    |> Result.get_ok in
+  let resumed = claim_again ~expected:(Some settled) ~updated_at:6. |> Result.get_ok in
+  let failing = match fail_from with
+    | From_start -> resumed
+    | From_turn_inflight -> run_turn ~claimed:resumed ~turn_id:"turn-2" ~at:7. in
+  let recovery = require_recovery ~base_path ~keeper_name ~expected:failing
+    ~failure:Transport_interrupted ~detail:"transport closed mid-turn"
+    ~required_at:10. |> Result.get_ok in
+  let recovery_id = match recovery.phase with
+    | Recovery_required required -> required.recovery_id
+    | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+      fail "resumed claim did not enter recovery" in
+  (* The next claim reads the binding as it is after the resolution. *)
+  { claim_again = (fun ~updated_at ->
+      claim_again ~expected:(load ~base_path ~keeper_name |> Result.get_ok) ~updated_at)
+  ; recovery; recovery_id; settlement; snapshot_sha256 }
+
+let resolve ~base_path ~keeper_name failed resolution =
+  let resolved, _ = resolve_recovery ~base_path ~keeper_name ~expected:failed.recovery
+    ~recovery_id:failed.recovery_id ~resolution ~resolved_by:"operator"
+    ~resolved_at:11. |> Result.get_ok in
+  check bool "resolved binding survives reopen" true
+    (load ~base_path ~keeper_name = Ok (Some resolved));
+  resolved
+
+let check_retry_resumes ~base_path ~keeper_name ~fail_from =
+  let failed = failed_resume ~base_path ~keeper_name
+      ~delivery:Canonical_source_guard ~fail_from in
+  let retried = resolve ~base_path ~keeper_name failed Retry_previous in
+  check bool "retry restores the acknowledged source" true
+    (validate_unchanged_context ~expected:(Some retried)
+       ~snapshot_sha256:failed.snapshot_sha256 = Ok ());
+  match failed.claim_again ~updated_at:12. with
+  | Ok { phase = Start { previous_settlement = Some resumed_from; _ }; _ } ->
+    check bool "retry resumes the settled conversation" true
+      (resumed_from = failed.settlement)
+  | Ok _ -> fail "Retry_previous became a fresh conversation"
+  | Error detail -> fail ("claim after Retry_previous was refused: " ^ detail)
+
 (* Retry_previous promises the same conversation. A claim clears the frontier
    acknowledgement and only [settle] sets it, so a recovery resolved back to
    the settlement has to restore it. Without it the next guarded claim cannot
@@ -1713,47 +1786,41 @@ let test_unchanged_canonical_source_still_resumes () =
    operator's retry quietly becomes a restart. *)
 let test_retry_previous_keeps_the_guarded_conversation () =
   with_workspace "masc-retry-guarded-" (fun base_path ->
-    let keeper_name = "retry-guarded" in
-    let runtime_id = "antigravity.default" in
-    let snapshot_sha256 = String.make 64 'c' in
-    let guard = Some { snapshot_sha256; message_count = 2;
-      delivery = Canonical_source_guard; acknowledged_turn = None } in
-    let claim_guarded ~expected ~updated_at =
-      claim_with_context_frontier ~context_frontier:guard ~base_path ~keeper_name
-        ~expected ~client_kind:Antigravity ~owner_epoch ~runtime_id
-        ~tool_surface_sha256:empty_surface ~updated_at in
-    let settlement = { session_id = "conversation-1"; turn_id = "turn-1" } in
-    let first = claim_guarded ~expected:None ~updated_at:1. |> Result.get_ok in
-    let active = mark_active ~base_path ~keeper_name ~expected:first
-      ~session_id:settlement.session_id ~updated_at:2. |> Result.get_ok in
-    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
-      ~session_id:settlement.session_id ~updated_at:3. |> Result.get_ok in
-    let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
-      ~session_id:settlement.session_id ~turn_id:settlement.turn_id
-      ~turn_count:starting.turn_count ~updated_at:4. |> Result.get_ok in
-    let settled = settle ~base_path ~keeper_name ~expected:started
-      ~session_id:settlement.session_id ~turn_id:settlement.turn_id ~updated_at:5.
-      |> Result.get_ok in
-    let resumed = claim_guarded ~expected:(Some settled) ~updated_at:6. |> Result.get_ok in
-    let recovery = require_recovery ~base_path ~keeper_name ~expected:resumed
-      ~failure:Transport_interrupted ~detail:"transport closed mid-turn"
-      ~required_at:7. |> Result.get_ok in
-    let recovery_id = match recovery.phase with
-      | Recovery_required required -> required.recovery_id
-      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
-        fail "resumed claim did not enter recovery" in
-    let retried, _ = resolve_recovery ~base_path ~keeper_name ~expected:recovery
-      ~recovery_id ~resolution:Retry_previous ~resolved_by:"operator"
-      ~resolved_at:8. |> Result.get_ok in
-    check bool "retried binding survives reopen" true
-      (load ~base_path ~keeper_name = Ok (Some retried));
-    check bool "retry restores the acknowledged source" true
-      (validate_unchanged_context ~expected:(Some retried) ~snapshot_sha256 = Ok ());
-    match claim_guarded ~expected:(Some retried) ~updated_at:9. with
-    | Ok { phase = Start { previous_settlement = Some resumed_from; _ }; _ } ->
-      check bool "retry resumes the settled conversation" true (resumed_from = settlement)
-    | Ok _ -> fail "Retry_previous became a fresh conversation"
-    | Error detail -> fail ("claim after Retry_previous was refused: " ^ detail))
+    check_retry_resumes ~base_path ~keeper_name:"retry-guarded" ~fail_from:From_start)
+;;
+
+(* The same retry when the failure came from a started vendor turn. *)
+let test_retry_previous_from_an_inflight_turn_keeps_the_conversation () =
+  with_workspace "masc-retry-inflight-" (fun base_path ->
+    check_retry_resumes ~base_path ~keeper_name:"retry-inflight"
+      ~fail_from:From_turn_inflight)
+;;
+
+(* Restart_fresh abandons the conversation, so nothing is acknowledged. *)
+let test_restart_fresh_leaves_the_frontier_unacknowledged () =
+  with_workspace "masc-restart-guarded-" (fun base_path ->
+    let keeper_name = "restart-guarded" in
+    let failed = failed_resume ~base_path ~keeper_name
+        ~delivery:Canonical_source_guard ~fail_from:From_start in
+    let restarted = resolve ~base_path ~keeper_name failed Restart_fresh in
+    check bool "restart is ready" true (restarted.phase = Ready);
+    match restarted.context_frontier with
+    | Some { acknowledged_turn = None; _ } -> ()
+    | Some { acknowledged_turn = Some _; _ } -> fail "restart acknowledged a settlement"
+    | None -> fail "restart dropped the frontier")
+;;
+
+(* Only a guarded frontier is re-acknowledged; a session-held one is kept. *)
+let test_retry_previous_keeps_a_vendor_held_frontier () =
+  with_workspace "masc-retry-held-" (fun base_path ->
+    let keeper_name = "retry-held" in
+    let failed = failed_resume ~base_path ~keeper_name
+        ~delivery:Held_by_vendor_session ~fail_from:From_start in
+    let retried = resolve ~base_path ~keeper_name failed Retry_previous in
+    check bool "retry returns to the settlement" true
+      (retried.phase = Settled failed.settlement);
+    check bool "held frontier is unchanged" true
+      (retried.context_frontier = failed.recovery.context_frontier))
 ;;
 
 let () =
@@ -1763,6 +1830,12 @@ let () =
       , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
         ; test_case "retry previous keeps the guarded conversation" `Quick
             test_retry_previous_keeps_the_guarded_conversation
+        ; test_case "retry previous from an in-flight turn keeps the conversation" `Quick
+            test_retry_previous_from_an_inflight_turn_keeps_the_conversation
+        ; test_case "restart fresh leaves the frontier unacknowledged" `Quick
+            test_restart_fresh_leaves_the_frontier_unacknowledged
+        ; test_case "retry previous keeps a vendor-held frontier" `Quick
+            test_retry_previous_keeps_a_vendor_held_frontier
         ; test_case "changed canonical source claims a fresh session" `Quick
             test_changed_canonical_source_claims_a_fresh_session
         ; test_case "unchanged canonical source still resumes" `Quick

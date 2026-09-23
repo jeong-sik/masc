@@ -394,36 +394,44 @@ let emit_resolved_cost_event
       ~(usage_resolution : Keeper_usage_resolution.t)
       ~usage_trust
   =
-  let usage, usage_missing =
-    match usage_resolution.delta with
-    | Some usage -> usage, false
-    | None ->
-      ( { Keeper_usage_resolution.input_tokens = 0
-        ; output_tokens = 0
-        ; cache_creation_input_tokens = 0
-        ; cache_read_input_tokens = 0
-        ; cost_usd = None
-        }
-      , true )
-  in
-  Keeper_hooks_agent_core.emit_cost_event
-    ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
-    ~agent_name:meta.Keeper_meta_contract.name
-    ~task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
-    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-    ~keeper_turn_id
-    ~agent_core_turn_ordinal:result.Keeper_agent_run.final_agent_core_turn_ordinal
-    ~model:result.model_used
-    ~input_tokens:usage.input_tokens
-    ~output_tokens:usage.output_tokens
-    ~cost_usd:(Option.value ~default:0.0 usage.cost_usd)
-    ~cache_creation_input_tokens:usage.cache_creation_input_tokens
-    ~cache_read_input_tokens:usage.cache_read_input_tokens
-    ~usage_missing
-    ~usage_projection:Cost_ledger.Resolved_delta
-    ~usage_trust
-    ?telemetry:result.inference_telemetry
+  match result.Keeper_agent_run.final_agent_core_turn_ordinal with
+  | None ->
+    (* The run collected no provider response in this process (#38066). The
+       per-turn raw cost row is written by the AfterTurn hook, so a replayed
+       turn was already costed by the process that collected it, and a
+       preempted or pre-provider [InputRequired] run made no provider call. *)
     ()
+  | Some agent_core_turn_ordinal ->
+    let usage, usage_missing =
+      match usage_resolution.delta with
+      | Some usage -> usage, false
+      | None ->
+        ( { Keeper_usage_resolution.input_tokens = 0
+          ; output_tokens = 0
+          ; cache_creation_input_tokens = 0
+          ; cache_read_input_tokens = 0
+          ; cost_usd = None
+          }
+        , true )
+    in
+    Keeper_hooks_agent_core.emit_cost_event
+      ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
+      ~agent_name:meta.Keeper_meta_contract.name
+      ~task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~keeper_turn_id
+      ~agent_core_turn_ordinal
+      ~model:result.model_used
+      ~input_tokens:usage.input_tokens
+      ~output_tokens:usage.output_tokens
+      ~cost_usd:(Option.value ~default:0.0 usage.cost_usd)
+      ~cache_creation_input_tokens:usage.cache_creation_input_tokens
+      ~cache_read_input_tokens:usage.cache_read_input_tokens
+      ~usage_missing
+      ~usage_projection:Cost_ledger.Resolved_delta
+      ~usage_trust
+      ?telemetry:result.inference_telemetry
+      ()
 ;;
 
 type decision_outcome =

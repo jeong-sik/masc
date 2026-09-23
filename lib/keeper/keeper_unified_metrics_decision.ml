@@ -366,7 +366,7 @@ let append_decision_record
                 ("resolved_model_id", `Null);
                 ("outcome", `String "success");
                 ("turn_count", `Int r.turn_count);
-                ("agent_core_turn_ordinal", `Int r.final_agent_core_turn_ordinal);
+                ("agent_core_turn_ordinal", Json_util.int_opt_to_json r.final_agent_core_turn_ordinal);
                 ("stop_reason", `String stop_reason_str);
                 ("usage_reported", `Bool r.usage_reported);
                 ("telemetry_reported", `Bool telemetry_reported);

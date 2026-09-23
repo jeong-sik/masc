@@ -1996,14 +1996,17 @@ let run_turn
                                  ~response_text
                                  result.stop_reason)
                         in
-                        (match turn_outcome, !final_agent_core_turn_ordinal_ref with
-                         | Error e, _ -> Error e
-                         | Ok _, None ->
-                           Error
-                             (Agent_core.Error.Internal
-                                "successful Agent.run returned without an \
-                                 AfterTurn ordinal")
-                         | Ok turn_outcome, Some final_agent_core_turn_ordinal ->
+                        (* No AfterTurn ordinal is a success, not an internal
+                           error: a settled-turn replay, a pre-first-token
+                           preemption and a first-turn [InputRequired] all end
+                           Ok without collecting a provider response here
+                           (#38066). *)
+                        (match turn_outcome with
+                         | Error e -> Error e
+                         | Ok turn_outcome ->
+                           let final_agent_core_turn_ordinal =
+                             !final_agent_core_turn_ordinal_ref
+                           in
                            Keeper_agent_run_finalize_response.finalize
                              ~config ~meta ~publication_recovery
                              ~ctx_snapshot:ctx_work

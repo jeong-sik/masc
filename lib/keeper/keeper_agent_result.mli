@@ -36,7 +36,13 @@ type run_result =
   ; ctx_composition : Keeper_agent_prompt_metrics.ctx_composition_metrics
   ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
-  ; final_agent_core_turn_ordinal : int
+  ; final_agent_core_turn_ordinal : int option
+      (** The provider turn whose response this process collected last (the
+          [AfterTurn] ordinal). [None] when the run succeeded without
+          collecting one here: a durable resume that replays an already-settled
+          turn, a pre-first-token preemption (RFC-0441), or a first turn that
+          stopped at [InputRequired] before the provider call. Such a run is
+          not a failure; it has no provider response of its own to cost. *)
   ; usage : Agent_core.Types.api_usage
   ; usage_reported : bool
   ; usage_scope : Runtime_usage_scope.t

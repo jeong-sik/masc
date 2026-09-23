@@ -4234,7 +4234,7 @@ let assert_production_keeper_result result =
     "MASC_SUBSCRIPTION_OK"
     result.Keeper_agent_run.response_text;
   check int "production Keeper turn count" 1 result.turn_count;
-  check int "production after-turn ordinal" 1 result.final_agent_core_turn_ordinal;
+  check (option int) "production after-turn ordinal" (Some 1) result.final_agent_core_turn_ordinal;
   check bool "production measured observation" true
     (Option.is_some result.runtime_observation);
   check bool "official client does not fabricate AGENT_CORE checkpoint" true

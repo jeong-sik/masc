@@ -1121,7 +1121,7 @@ let () =
     ; runtime_observation = None
     ; cooperative_boundary = None
     ; turn_count = 1
-    ; final_agent_core_turn_ordinal = 0
+    ; final_agent_core_turn_ordinal = Some 0
     ; usage
     ; usage_reported = true
     ; usage_scope
@@ -1218,7 +1218,30 @@ max-concurrent = 1
       let total_calls = List.fold_left
         (fun total (stats : Model_inference_metrics.model_stats) ->
            total + stats.total_tool_calls) 0 aggregate.models in
-      check "persisted decision reaches dashboard model metrics" (total_calls = 3)
+      check "persisted decision reaches dashboard model metrics" (total_calls = 3);
+      check "decision records the collected AfterTurn ordinal"
+        (Yojson.Safe.Util.(row |> member "telemetry" |> member "agent_core_turn_ordinal")
+         = `Int 0);
+      (* #38066: a run that succeeded without collecting a provider response
+         in this process (settled-turn replay, pre-first-token preemption,
+         pre-provider InputRequired) has no ordinal. It is recorded as null,
+         not refused as an internal error. *)
+      Masc.Keeper_unified_metrics_decision.append_decision_record
+        ~config ~meta ~observation ~latency_ms:3 ~outcome:"success"
+        ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+        ~execution_path:Masc.Keeper_unified_metrics_decision.Autonomous_cycle
+        ~degraded_retry_applied:None
+        ~degraded_retry_deferred:None
+        ~result:(Some { result with final_agent_core_turn_ordinal = None }) ();
+      let uncollected_row = Fs_compat.load_file log_path |> String.split_on_char '\n'
+        |> List.filter (fun row -> row <> "") |> List.rev |> List.hd
+        |> Yojson.Safe.from_string in
+      check "a run without a collected provider turn records a null ordinal"
+        (Yojson.Safe.Util.(
+           uncollected_row |> member "telemetry" |> member "agent_core_turn_ordinal")
+         = `Null);
+      check "a run without a collected provider turn is still a success row"
+        (Yojson.Safe.Util.member "outcome" uncollected_row = `String "success")
     in
     Masc.Keeper_execution_outcome.create
       ~lane:Masc.Keeper_execution_outcome.Direct

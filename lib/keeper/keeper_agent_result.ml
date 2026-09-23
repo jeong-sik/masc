@@ -88,7 +88,7 @@ type run_result =
   ; ctx_composition : ctx_composition_metrics
   ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
-  ; final_agent_core_turn_ordinal : int
+  ; final_agent_core_turn_ordinal : int option
   ; usage : Agent_core.Types.api_usage
   ; usage_reported : bool
   ; usage_scope : Runtime_usage_scope.t

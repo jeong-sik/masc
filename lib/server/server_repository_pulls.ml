@@ -591,12 +591,14 @@ let repository_keepers ~observed_at ~(fleet : fleet_checkouts) entry =
         })
 
 let pull_keepers entry pull =
+  (* A head branch in a fork is not a branch of this repository, so no
+     checkout of this repository can be on it, whatever the join knows. *)
+  if pull.cross_repository
+  then Join_read { keepers = []; keepers_unread = 0 }
+  else
   match entry.keepers with
   | Keepers_not_inspected -> Join_not_inspected
   | Keepers_unlisted { error; observed_at = _ } -> Join_keepers_unlisted error
-  (* A head branch in a fork is not a branch of this repository, so no
-     checkout of this repository can be on it. *)
-  | Keepers_listed _ when pull.cross_repository -> Join_read { keepers = []; keepers_unread = 0 }
   | Keepers_listed { on_repository; observed_at = _ } ->
     let on_branch k = List.exists (String.equal pull.head_branch) k.branches in
     let keepers =
@@ -697,6 +699,20 @@ let join_keepers ~now ~(inspect_checkouts : inspect_checkouts) ~base_path snapsh
           (fun entry -> { entry with keepers = repository_keepers ~observed_at ~fleet entry })
           snapshot.repositories
     })
+
+let join_failed ~observed_at ~error snapshot =
+  { snapshot with
+    repositories =
+      List.map
+        (fun entry ->
+          { entry with
+            keepers =
+              (if has_open_pulls entry.pulls
+               then Keepers_unlisted { observed_at; error }
+               else Keepers_not_inspected)
+          })
+        snapshot.repositories
+  }
 
 (* --- JSON --- *)
 
@@ -907,9 +923,11 @@ let start ~sw ~clock ~(config : Workspace.config) =
           | joined -> Atomic.set projection joined
           | exception (Eio.Cancel.Cancelled _ as e) -> raise e
           | exception exn ->
-            Log.Server.warn
-              "repository_pulls: keeper join raised %s; the pull requests keep the previous join"
-              (Printexc.to_string exn)));
+            let error = "Keeper join raised " ^ Printexc.to_string exn in
+            Log.Server.warn "repository_pulls: %s" error;
+            (* The previous join would otherwise be carried forward by every
+               later refresh and read as current. *)
+            Atomic.set projection (join_failed ~observed_at:(now ()) ~error snapshot)));
       Eio.Time.sleep clock poll_interval_s;
       loop ()
     in

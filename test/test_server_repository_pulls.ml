@@ -481,7 +481,7 @@ let test_keepers_join_by_exact_branch () =
     "before the join"
     [ 1, None, (None, Some "Keeper checkouts were not inspected")
     ; 2, None, (None, Some "Keeper checkouts were not inspected")
-    ; 3, None, (None, Some "Keeper checkouts were not inspected")
+    ; 3, Some [], (Some 0, None)
     ]
     (List.map join_of (json_pulls read));
   let inspections = ref [] in
@@ -530,7 +530,7 @@ let test_unlisted_keepers_say_so () =
     "no pull request reads as having no Keeper"
     [ 1, None, (None, Some "keepers directory unreadable")
     ; 2, None, (None, Some "keepers directory unreadable")
-    ; 3, None, (None, Some "keepers directory unreadable")
+    ; 3, Some [], (Some 0, None)
     ]
     (List.map join_of (json_pulls joined))
 
@@ -547,6 +547,46 @@ let test_no_open_pull_means_no_inspection () =
   let empty = Pulls.refresh ~now ~http_post ~base_path ~previous:Pulls.initial in
   let _ = Pulls.join_keepers ~now ~inspect_checkouts:refuse ~base_path empty in
   ()
+
+(* Which playground scan answers mean "no checkout" and which mean "may be on
+   any branch". *)
+let test_scan_errors_map_to_absent_or_unread () =
+  let module P = Masc.Keeper_playground_checkouts in
+  let kind = function
+    | Pulls.Checkouts_read _ -> "read"
+    | Pulls.Checkouts_absent -> "absent"
+    | Pulls.Checkouts_unread _ -> "unread"
+  in
+  Alcotest.(check (list string))
+    "scan answers"
+    [ "read"; "absent"; "unread"; "unread"; "unread" ]
+    (List.map
+       (fun scan -> kind (Pulls.checkouts_of_scan scan))
+       [ Ok { Control.scan_rows = []; scan_truncated = None }
+       ; Error (P.Root_missing { root = "/w" })
+       ; Error (P.Root_not_directory { root = "/w"; kind = "file" })
+       ; Error (P.Root_unreadable { root = "/w"; detail = "EACCES" })
+       ; Error (P.Root_probe_unreachable { root = "/w"; reason = "timeout" })
+       ])
+
+let test_fork_pull_joins_no_keeper_in_any_join_state () =
+  let _, read = pulls_read () in
+  let fork_join snapshot =
+    List.filter_map
+      (fun ((number, _, _) as join) -> if number = 3 then Some join else None)
+      (List.map join_of (json_pulls snapshot))
+  in
+  let expected = [ 3, Some [], (Some 0, None) ] in
+  Alcotest.check join_testable "before any join" expected (fork_join read);
+  let base_path = ready_base_path ~token:"gho_fork" in
+  let unlisted =
+    Pulls.join_keepers
+      ~now
+      ~inspect_checkouts:(fun ~catalog:_ -> Error "keepers directory unreadable")
+      ~base_path
+      read
+  in
+  Alcotest.check join_testable "keeper list unreadable" expected (fork_join unlisted)
 
 let test_github_slug () =
   List.iter
@@ -601,5 +641,13 @@ let () =
             "no open pull request means no inspection"
             `Quick
             test_no_open_pull_means_no_inspection
+        ; Alcotest.test_case
+            "scan errors map to absent or unread"
+            `Quick
+            test_scan_errors_map_to_absent_or_unread
+        ; Alcotest.test_case
+            "a fork pull request joins no keeper in any join state"
+            `Quick
+            test_fork_pull_joins_no_keeper_in_any_join_state
         ] )
     ]

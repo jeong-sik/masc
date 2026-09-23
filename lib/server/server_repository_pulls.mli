@@ -260,6 +260,12 @@ val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 val current : unit -> snapshot
 (** The latest refresh, or {!initial} before the first one ends. *)
 
+val checkouts_of_scan :
+  (Keeper_sandbox_control.checkout_scan, Keeper_playground_checkouts.scan_error) result ->
+  keeper_checkouts_read
+(** [Root_missing] is {!Checkouts_absent}; every other scan error is
+    {!Checkouts_unread} with its text. *)
+
 val inspect_fleet_checkouts : config:Workspace.config -> inspect_checkouts
 (** {!Keeper_sandbox_control.checkout_scan} for every persisted Keeper,
     against the one [catalog]. A shared-mount Keeper costs up to six git calls

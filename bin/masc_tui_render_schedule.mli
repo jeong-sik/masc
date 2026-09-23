@@ -19,23 +19,9 @@ val normalize_keeper_detail_scroll :
 
 val collapse_consecutive : key:('a -> string) -> 'a list -> ('a * int) list
 (** Fold consecutive runs with the same key into (newest element, run length),
-    preserving order. The Overview event log draws a burst of identical lines
-    (six manual refreshes, a broadcast fan-out) as one row with a [×N] tail
-    instead of spending its whole panel repeating itself. *)
-
-type overview_event_window = {
-  oew_offset : int;
-  oew_first_position : int;
-  oew_last_position : int;
-}
-
-val project_overview_event_window :
-  event_count:int -> visible_rows:int -> int -> overview_event_window
-val scroll_overview_events_older :
-  event_count:int -> visible_rows:int -> int -> int
-val scroll_overview_events_newer :
-  event_count:int -> visible_rows:int -> int -> int
-val overview_event_offset_after_prepend : retained_count:int -> int -> int
+    preserving order. The TUI session block on Metrics draws a burst of
+    identical lines (six manual refreshes, a broadcast fan-out) as one row with
+    a [×N] tail instead of spending its rows repeating itself. *)
 
 module Input_wait : sig
   type 'a poll_result =
@@ -86,7 +72,6 @@ val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allo
 val allocate_overview :
   terminal_rows:int ->
   attention_count:int ->
-  event_count:int ->
   team_count:int ->
   task_count:int ->
   has_task_error:bool ->

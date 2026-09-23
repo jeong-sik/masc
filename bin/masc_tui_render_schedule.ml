@@ -81,8 +81,8 @@ let normalize_keeper_detail_scroll ~line_count ~content_height scroll =
 
 (* A repeated action writes the same line again and again — six manual
    refreshes spent six of the eleven event rows saying one thing. Consecutive
-   runs with the same key fold into their newest element and a count; the
-   window and scroll then move over folded rows, so a burst costs one row. *)
+   runs with the same key fold into their newest element and a count, so a
+   burst costs one row. *)
 let collapse_consecutive ~key items =
   let fold collapsed item =
     match collapsed with
@@ -91,46 +91,6 @@ let collapse_consecutive ~key items =
     | _ -> (item, 1) :: collapsed
   in
   List.rev (List.fold_left fold [] items)
-
-type overview_event_window = {
-  oew_offset : int;
-  oew_first_position : int;
-  oew_last_position : int;
-}
-
-let project_overview_event_window ~event_count ~visible_rows scroll =
-  let event_count = max 0 event_count in
-  let visible_rows = max 0 visible_rows in
-  let maximum_offset = max 0 (event_count - visible_rows) in
-  let oew_offset = max 0 (min scroll maximum_offset) in
-  let visible_count = min visible_rows (event_count - oew_offset) in
-  let oew_first_position = if visible_count = 0 then 0 else oew_offset + 1 in
-  let oew_last_position = if visible_count = 0 then 0 else oew_offset + visible_count in
-  { oew_offset; oew_first_position; oew_last_position }
-
-let scroll_overview_events_older ~event_count ~visible_rows scroll =
-  let event_count = max 0 event_count in
-  let visible_rows = max 0 visible_rows in
-  let current = project_overview_event_window ~event_count ~visible_rows scroll in
-  let next_offset =
-    if current.oew_offset >= event_count then current.oew_offset
-    else current.oew_offset + 1
-  in
-  (project_overview_event_window ~event_count ~visible_rows
-     next_offset).oew_offset
-
-let scroll_overview_events_newer ~event_count ~visible_rows scroll =
-  let current = project_overview_event_window ~event_count ~visible_rows scroll in
-  (project_overview_event_window ~event_count ~visible_rows
-     (current.oew_offset - 1)).oew_offset
-
-let overview_event_offset_after_prepend ~retained_count scroll =
-  let retained_count = max 0 retained_count in
-  let maximum_offset = if retained_count = 0 then 0 else retained_count - 1 in
-  if scroll <= 0 || maximum_offset = 0 then 0
-  else
-    let bounded = min scroll maximum_offset in
-    if bounded = maximum_offset then maximum_offset else bounded + 1
 
 module Input_wait = struct
   type 'a poll_result =
@@ -179,9 +139,8 @@ type overview_allocation = {
   filler_rows : int;
 }
 
-(* Rows the Attention / Recent Events panel may take. A reader scans this panel
-   for what needs attention now, not for history; past six rows the older rows
-   are scrolled to, not read at a glance. *)
+(* Rows the Attention panel may take. A reader scans this panel for what needs
+   attention now; past six rows the title counts what did not fit. *)
 let overview_panel_row_cap = 6
 
 (* Header, summary, dividers, panel title, task title, footer: the Overview
@@ -191,10 +150,10 @@ let overview_fixed_rows = 10
 (* The Team block's title row and the divider under it. *)
 let overview_team_chrome_rows = 2
 
-let allocate_overview ~terminal_rows ~attention_count ~event_count
+let allocate_overview ~terminal_rows ~attention_count
     ~team_count ~task_count ~has_task_error =
-  (* Ten rows are invariant chrome. What is left is shared by the Attention /
-     Recent Events panel and the task block, and whatever neither needs becomes
+  (* Ten rows are invariant chrome. What is left is shared by the Attention
+     panel and the task block, and whatever neither needs becomes
      filler so the frame reaches the bottom of the terminal.
 
      The blocks are bounded by how many items they have, not by a constant.
@@ -202,7 +161,7 @@ let allocate_overview ~terminal_rows ~attention_count ~event_count
      44-row window drew 22 rows of frame and left its own footer sitting in the
      middle of the screen with the backlog cut off above it. *)
   let available = max 0 (terminal_rows - overview_fixed_rows) in
-  let desired_panel_rows = max 1 (max attention_count event_count) in
+  let desired_panel_rows = max 1 attention_count in
   let desired_task_error_rows = if has_task_error then 1 else 0 in
   let desired_task_rows =
     if task_count <= 0 then if has_task_error then 0 else 1 else task_count
@@ -215,11 +174,11 @@ let allocate_overview ~terminal_rows ~attention_count ~event_count
 
      The panel used to stop at six rows whatever the terminal offered, which
      wasted a tall window; removing that cap let it grow without bound, and on
-     a short viewport it starved the backlog -- eight events pushed the fifth
-     task off a 23-row screen. Reserving by what the tasks want rather than by
+     a short viewport it starved the backlog -- eight panel rows pushed the
+     fifth task off a 23-row screen. Reserving by what the tasks want rather than by
      a fixed fraction keeps all three cases: a tall terminal gives both blocks
      everything they ask for and turns the rest into filler, a 23-row one still
-     shows five tasks however many events arrive, and a viewport with three
+     shows five tasks however many attention items arrive, and a viewport with three
      spare rows still spends two of them on attention, which is the alert
      surface and wins when almost nothing fits. *)
   (* The panel keeps its six-row ceiling. #29696 removed it so a tall window

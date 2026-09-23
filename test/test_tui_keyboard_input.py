@@ -11451,6 +11451,134 @@ def keeper_gate_mode_footer_interaction(
 
     return interact
 
+CONNECTORS_PATH = "/api/v1/gate/connectors"
+CONNECTOR_NAMES_PATH = "/api/v1/gate/connector/names"
+CONNECTOR_UNBIND_PATH = "/api/v1/gate/connector/unbind"
+
+
+def connector_unbind_all_fixtures(
+    requests: HttpRequests | None = None,
+) -> HttpFixtures:
+    """alpha holds two Discord channels, beta one; one of alpha's is rebound.
+
+    The name directory knows 111 only, so the other channel has to say its
+    name is unknown. The unbind answers 409 for 333 -- the server's reply when
+    the channel now names another Keeper -- so the result has a skip in it.
+    """
+    fixtures = keeper_runtime_http_fixtures()
+
+    def connectors() -> HttpResponse:
+        # With [requests], a removed binding leaves the list once its unbind
+        # was answered 200 -- the reading the post-unbind reload must show.
+        removed = {
+            json.loads(body)["channel_id"]
+            for path, body in (requests or [])
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        } - {"333"}
+        bindings = [
+            {"channel_id": channel, "keeper_name": keeper}
+            for channel, keeper in (("111", "alpha"), ("444", "beta"), ("333", "alpha"))
+            if channel not in removed
+        ]
+        return (
+            200,
+            {
+                "connectors": [
+                    {
+                        "connector_id": "discord",
+                        "display_name": "Discord",
+                        "status": "connected",
+                        "available": True,
+                        "connected": True,
+                        "configured_bindings": bindings,
+                    }
+                ],
+                "total": 1,
+                "active_count": 1,
+            },
+        )
+
+    fixtures[CONNECTORS_PATH] = connectors
+    fixtures[CONNECTOR_NAMES_PATH] = (
+        200,
+        {
+            "connector_id": "discord",
+            "kind": "channel",
+            "mapping_scope": "workspace",
+            "path": "connector_names/discord/channel",
+            "total": 1,
+            "has_more": False,
+            "mappings": [{"id": "111", "name": "general"}],
+        },
+    )
+
+    def unbind(body: bytes) -> HttpResponse:
+        channel = json.loads(body).get("channel_id")
+        if channel == "333":
+            return (409, {"error": "binding changed"})
+        return (200, {"ok": True})
+
+    fixtures[CONNECTOR_UNBIND_PATH] = RequestHttpResponse(unbind)
+    return fixtures
+
+
+def run_keeper_unbind_all_channels_regression(executable: str) -> None:
+    """U twice on the Channels tab removes every binding of that Keeper.
+
+    #38167: the tab removed one binding per two presses, so five channels
+    took ten presses and five selections. The first U names what it will
+    remove; the second sends one conditional unbind per binding and reports
+    each answer. beta's binding is not sent at all.
+    """
+    requests: HttpRequests = []
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
+        # [ from Info wraps to Runs; Channels is two further back.
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Runs")
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Automation")
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Channels")
+        wait_for_output(process, master_fd, output, b"333 (name unknown)",
+                        start=0, timeout=5.0)
+        drain_until_quiet(process, master_fd, output)
+        listed = screen_text(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        if b"general (111)" not in listed:
+            raise AssertionError(
+                f"the binding list did not name channel 111: {listed!r}"
+            )
+        send_and_wait(process, master_fd, output, b"U",
+                      b"unbind all armed: press U again")
+        if any(path.startswith(CONNECTOR_UNBIND_PATH) for path, _ in requests):
+            raise AssertionError(f"the first U sent an unbind: {requests!r}")
+        send_and_wait(process, master_fd, output, b"U",
+                      b"unbind all of alpha: 1 removed, 1 kept, 0 not found, 0 failed")
+        sent = sorted(
+            (json.loads(body)["channel_id"], json.loads(body)["keeper_name"])
+            for path, body in requests
+            if path.startswith(CONNECTOR_UNBIND_PATH)
+        )
+        if sent != [("111", "alpha"), ("333", "alpha")]:
+            raise AssertionError(
+                f"unbind all did not send exactly alpha's two bindings: {sent!r}"
+            )
+        # The pane reads the bindings again after the write: 111 is gone and
+        # 333, kept by the 409, is still alpha's.
+        wait_for_output(process, master_fd, output, b"1 here / 2 total",
+                        start=0, timeout=5.0)
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="U U on the Channels tab unbinds every binding of the Keeper",
+        interact=interact,
+        http_fixtures=connector_unbind_all_fixtures(requests),
+        http_requests=requests,
+    )
+
+
 def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
     """Beside the acting pane the row is 92 cells; a strip wider than that
     used to be cut from the right, so the Keeper detail's Runs tab and
@@ -14510,6 +14638,7 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures=enter_split_fixtures,
     )
     run_tab_strip_keeps_current_entry_regression(executable)
+    run_keeper_unbind_all_channels_regression(executable)
     run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()

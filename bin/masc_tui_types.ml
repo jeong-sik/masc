@@ -5730,10 +5730,19 @@ type state = {
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
+  (* A binding write landed while a load was in flight; read once more when
+     that load answers. *)
+  mutable connectors_reload_after_inflight: bool;
   mutable connectors_scroll: int;
   mutable connectors_cursor: int;
   mutable connectors_binding_cursor: int;
   mutable connector_unbind_armed: (string * string * string) option;
+  (* The first [U] on the Channels tab: whose bindings, and exactly which.
+     The second press sends these and no others, so a binding that appeared
+     after the first press is not removed without being named. *)
+  mutable connector_unbind_all_armed:
+    (string * Masc_tui_connector_unbind.target list) option;
+  mutable connector_unbind_all_inflight: bool;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
@@ -7710,10 +7719,13 @@ let create_state
   connectors = None;
   connectors_error = None;
   connectors_inflight = false;
+  connectors_reload_after_inflight = false;
   connectors_scroll = 0;
   connectors_cursor = 0;
   connectors_binding_cursor = 0;
   connector_unbind_armed = None;
+  connector_unbind_all_armed = None;
+  connector_unbind_all_inflight = false;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;

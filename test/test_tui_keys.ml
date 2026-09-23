@@ -2302,7 +2302,7 @@ let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   ; Detail_secrets, []
   ; Detail_github, [ "L"; "P"; "1"; "2" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
-  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u" ]
+  ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u"; "U U" ]
   ; Detail_automation, []
   ; Detail_runs, []
   ]
@@ -2323,6 +2323,8 @@ let test_key_atoms_read_the_table_notation () =
        [ "s"; "o" ]);
   Alcotest.(check bool) "Channels takes e" true
     (List.mem "e" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
+  Alcotest.(check bool) "Channels takes U for unbind all" true
+    (List.mem "U" (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_channels));
   Alcotest.(check (list string)) "Info takes nothing" []
     (Masc_tui_keys.keeper_detail_tab_taken_keys Detail_info)
 

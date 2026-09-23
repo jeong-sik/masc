@@ -7593,7 +7593,7 @@ let launch_keeper_run_next state ~mailbox request =
 (* Fetch the runtime catalogue and assignments for the picker. *)
 (* Append one runtime to a lane's candidate order. Appending rather than
    replacing is the whole point: a lane whose two slots share a provider has
-   no failover when that provider is down, and the fix is one more candidate
+   no next candidate when that provider is down, and the fix is one more candidate
    from somewhere else, not a different single one. The server previews the
    resulting runtime.toml and refuses an unknown id, so this sends and reads
    the verdict rather than validating here. *)

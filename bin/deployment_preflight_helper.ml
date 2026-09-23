@@ -933,7 +933,7 @@ let provider_input_store =
   ; scan =
       (fun ~base_path ->
          let keepers_dir =
-           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+           Masc.Workspace.keepers_runtime_dir_for_base_path base_path
          in
          let store_dir =
            Common.keeper_runtime_store_dirname Common.Keeper_provider_inputs
@@ -1007,7 +1007,7 @@ let turn_record_store =
   ; scan =
       (fun ~base_path ->
          let keepers_dir =
-           Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers"
+           Masc.Workspace.keepers_runtime_dir_for_base_path base_path
          in
          let store_dir =
            Common.keeper_runtime_store_dirname Common.Keeper_turn_records

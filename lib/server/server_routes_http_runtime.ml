@@ -1530,6 +1530,19 @@ let board_post_detail_json ~config ~voter
       in
       (`OK, Yojson.Safe.to_string json)
 
+let board_sub_board_detail_prefix = "/api/v1/board/sub-boards/"
+
+let board_sub_board_detail_json ~path =
+  match extract_path_param ~prefix:board_sub_board_detail_prefix path with
+  | None ->
+    (`Bad_request, `Assoc [ ("error", `String "sub_board_id is required") ])
+  | Some sub_board_id ->
+    (match Board_dispatch.get_sub_board ~sub_board_id with
+     | Ok sb -> (`OK, Board.sub_board_to_yojson sb)
+     | Error e ->
+       ( `Not_found,
+         `Assoc [ ("error", `String (Board_tool.board_error_to_string e)) ] ))
+
 (** CORS preflight handler *)
 let options_handler request reqd =
   let request_authority = Server_request_authority.current_exn () in

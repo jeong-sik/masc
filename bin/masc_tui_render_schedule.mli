@@ -506,19 +506,23 @@ val board_no_styles : board_row_styles
     surface that dresses the whole line -- has nothing to spell out. *)
 
 val board_age_text : now:float -> float option -> string
-(** The AGE cell: the span since the post last moved, or ["—"] when the post
-    carried no time. *)
+(** The age cell: the span since the time the caller chose, or ["—"] when the
+    post carried no such time. Which time that is follows the sort, which
+    {!Masc_tui_types.board_sort_time} answers. *)
 
 val board_title_width : inner_width:int -> int
 (** What the title has after the named columns, never below a floor. [inner_width]
     is what the row has left of the frame, the four cells of lead ahead of the
     mark already taken off. *)
 
-val board_header_row : title_width:int -> string
+val board_header_row : age_header:string -> title_width:int -> string
+(** [age_header] is the word over the age column, which names the time the
+    column holds. *)
 
 val board_row :
   ?close:string ->
   styles:board_row_styles ->
+  age_header:string ->
   title_width:int ->
   board_row_values ->
   string

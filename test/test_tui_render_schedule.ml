@@ -1428,7 +1428,7 @@ let test_headers_fit_their_columns () =
         , Schedule.harness_header_row
             ~reason_width:(Schedule.harness_reason_width ~inner_width) )
       ; ( "board"
-        , Schedule.board_header_row
+        , Schedule.board_header_row ~age_header:"AGE"
             ~title_width:(Schedule.board_title_width ~inner_width) )
       ]
     in
@@ -1786,12 +1786,12 @@ let board_probe =
   }
 
 let board_row_of ~title_width values =
-  Schedule.board_row ~styles:Schedule.board_no_styles ~title_width values
+  Schedule.board_row ~styles:Schedule.board_no_styles ~age_header:"AGE" ~title_width values
 
 let test_board_columns_hold_their_offsets () =
   for inner_width = 80 to 240 do
     let title_width = Schedule.board_title_width ~inner_width in
-    let header = Schedule.board_header_row ~title_width in
+    let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
     let row = board_row_of ~title_width board_probe in
     check_left_cell "ID" "A" ~header ~row ~inner_width;
     check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
@@ -1814,8 +1814,8 @@ let test_board_columns_with_styles_hold_their_offsets () =
   in
   for inner_width = 80 to 240 do
     let title_width = Schedule.board_title_width ~inner_width in
-    let header = Schedule.board_header_row ~title_width in
-    let row = Schedule.board_row ~styles ~title_width board_probe in
+    let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
+    let row = Schedule.board_row ~styles ~age_header:"AGE" ~title_width board_probe in
     check_left_cell "ID" "A" ~header ~row ~inner_width;
     check_left_cell "HEARTH" "B" ~header ~row ~inner_width;
     check_left_cell "AUTHOR" "C" ~header ~row ~inner_width;
@@ -1911,7 +1911,7 @@ let test_a_board_row_is_as_wide_as_its_header () =
   List.iter
     (fun inner_width ->
       let title_width = Schedule.board_title_width ~inner_width in
-      let header = Schedule.board_header_row ~title_width in
+      let header = Schedule.board_header_row ~age_header:"AGE" ~title_width in
       let width text = Masc_tui_message_layout.display_width text in
       List.iter
         (fun (name, values) ->

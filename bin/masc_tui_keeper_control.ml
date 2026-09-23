@@ -61,21 +61,22 @@ let roster_of_reading ~errors ~rows ~truncated ~total =
   else Roster_complete rows
 
 type roster_failure =
-  | Roster_unauthorized
+  | Roster_unauthorized of Masc_tui_credential.server_reason
   | Roster_unreachable of string
   | Roster_malformed of string
 
 let roster_failure_message ~credential_sent = function
-  | Roster_unauthorized ->
+  | Roster_unauthorized reason ->
       Printf.sprintf
         "live keeper status and lifecycle actions are unavailable: %s"
-        (Masc_tui_credential.refusal ~credential_sent)
+        (Masc_tui_credential.refusal ~credential_sent reason)
   | Roster_unreachable detail -> "live keeper status unavailable: " ^ detail
   | Roster_malformed detail -> "live keeper status unreadable: " ^ detail
 
 let roster_failure_of_status ~status ~body =
   match status with
-  | 401 | 403 -> Roster_unauthorized
+  | 401 | 403 ->
+      Roster_unauthorized (Masc_tui_credential.server_reason_of_body body)
   | _ ->
       Roster_unreachable
         (match response_detail ~status body with

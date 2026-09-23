@@ -608,25 +608,54 @@ let render_memory_body ~cols ~budget (state : state)
   let missing_reading waiting =
     if Option.is_some state.memory_health_error then field_failed else waiting
   in
+  (* Every reading in this header is a labelled row that asks the frame for its
+     width. The row that carried the Ordinary and Librarian readings together
+     needed 176 cells with every count a single digit, while the frame gives 96
+     at the 100 columns the PTY harness opens and 136 at 140 -- so it was cut
+     mid-word at every width a terminal is likely to have, and the tail it lost
+     was the one saying the failure count restarts with the server. A cut count
+     reads as a running total. A count is not a thing to spell halfway.
+
+     The shape is the one this file already uses for the History field: wrap at
+     the width the label leaves, continuation rows hanging under the label so a
+     row starting with a number still has its subject above it. The break is a
+     clause mark rather than any space, because "0 failures since server start"
+     and "0 failures" are different claims (#36497). *)
+  let push_labelled label body =
+    let prefix = "  " ^ label ^ " " in
+    let prefix_cells = Message_layout.display_width prefix in
+    let room = max 1 (framed_inner_width cols - prefix_cells) in
+    Message_layout.pack_clauses ~max_cells:room body
+    |> List.iteri (fun index line ->
+           push
+             ((if index = 0 then prefix else String.make prefix_cells ' ') ^ line))
+  in
   (match state.memory_health with
    | None -> push ("  Total: " ^ missing_reading "waiting for memory snapshots")
    | Some snapshot ->
-       push (Printf.sprintf "  Total %s · %d ordinary + %d source · recall %s tok · %s"
-         (Masc_tui_message_layout.count_noun (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
-         snapshot.mhs_total_facts snapshot.mhs_total_source_facts
-         (recall_tokens
-            (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
-         (Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper")));
+       push_labelled "Total"
+         (Printf.sprintf "%s · %d ordinary + %d source · recall %s tok · %s"
+            (Masc_tui_message_layout.count_noun
+               (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
+            snapshot.mhs_total_facts snapshot.mhs_total_source_facts
+            (recall_tokens
+               (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
+            (Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper")));
   (match state.memory_health with
    | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
    | Some snapshot ->
-       push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %s turns unread · %d atoms behind in continuity (%d keepers not measured) · %d failures since server start"
-         snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
-         snapshot.mhs_total_support_invalidations
-         (Option.fold ~none:"?" ~some:string_of_int snapshot.mhs_total_librarian_unread_turns)
-         snapshot.mhs_total_librarian_continuity_unread_atoms
-         snapshot.mhs_total_librarian_continuity_unmeasured
-         snapshot.mhs_total_librarian_failures));
+       push_labelled "Ordinary:"
+         (Printf.sprintf "%d observed / %d derived · %d support invalidations"
+            snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
+            snapshot.mhs_total_support_invalidations);
+       push_labelled "Librarian:"
+         (Printf.sprintf
+            "%s turns unread · %d atoms behind in continuity (%d keepers not measured) · %d failures since server start"
+            (Option.fold ~none:"?" ~some:string_of_int
+               snapshot.mhs_total_librarian_unread_turns)
+            snapshot.mhs_total_librarian_continuity_unread_atoms
+            snapshot.mhs_total_librarian_continuity_unmeasured
+            snapshot.mhs_total_librarian_failures));
   push info_bar;
   let search_bar =
     if query <> "" then

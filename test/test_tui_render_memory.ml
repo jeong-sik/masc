@@ -451,10 +451,10 @@ let test_render_memory_body_with_keepers () =
   check bool "rows rendered" true (!count > 0 && !count <= 20)
 ;;
 
-(* RFC librarian-lifecycle §4.9: a continuity lag the server could not take
-   prints as "?", since zero is what a caught-up keeper shows, and the fleet
-   header carries the measured sum beside how many keepers it left out. *)
-let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
+(* A populated fleet: one keeper whose continuity lag the server could not
+   take, one that is three atoms behind. Every count in it is a single digit,
+   which is what makes the header's width the header's own doing. *)
+let fleet_health : Decode.memory_health_snapshot =
   let with_lag (keeper : Decode.memory_keeper_health) lag =
     { keeper with
       mkh_librarian = { keeper.mkh_librarian with Decode.mlh_continuity_unread_atoms = lag } }
@@ -485,27 +485,93 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
     ; mhs_starving_keepers = 0
     }
   in
-  (* The Librarian line is drawn for the selected keeper only, so each keeper
-     is read at its own cursor. *)
-  let render cursor =
-    let state = make_state () in
-    state.memory_health <- Some health;
-    state.memory_health_cursor <- cursor;
-    let lines = ref [] in
-    Render_memory.render_memory_body ~cols:100 ~budget:20 state
-      ~push:(fun line -> lines := line :: !lines)
-      ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
-      ~push_selected:(fun line -> lines := line :: !lines)
-      ~push_divider:(fun () -> ())
-      ~push_empty:(fun () -> ());
-    String.concat "\n" !lines
-  in
+  health
+
+(* The Librarian line is drawn for the selected keeper only, so each keeper
+   is read at its own cursor. *)
+let fleet_rows ~cols ~cursor =
+  let state = make_state () in
+  state.memory_health <- Some fleet_health;
+  state.memory_health_cursor <- cursor;
+  let lines = ref [] in
+  Render_memory.render_memory_body ~cols ~budget:20 state
+    ~push:(fun line -> lines := line :: !lines)
+    ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
+    ~push_selected:(fun line -> lines := line :: !lines)
+    ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  List.rev !lines
+
+(* RFC librarian-lifecycle §4.9: a continuity lag the server could not take
+   prints as "?", since zero is what a caught-up keeper shows, and the fleet
+   header carries the measured sum beside how many keepers it left out. *)
+let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
+  let render cursor = String.concat "\n" (fleet_rows ~cols:100 ~cursor) in
   let both = render 0 ^ "\n" ^ render 1 in
   check bool "an unmeasured lag prints as a question, not as zero" true
     (contains "continuity behind ?" both);
   check bool "a measured lag prints its number" true (contains "continuity behind 3" both);
   check bool "the header sums the measured keepers and counts the rest" true
     (contains "3 atoms behind in continuity (1 keepers not measured)" both)
+;;
+
+(* #36497. The fleet header is the block above the sort row, and it used to be
+   one line carrying both subjects: 176 cells with every count a single digit,
+   against the 96 the frame gives at the 100 columns the PTY harness opens. It
+   did not fit at 140 either. The frame cut it mid-word, and what it cut away
+   was "since server start" -- the phrase that says the failure count restarts
+   with the server -- so "0 failures" read as a running total.
+
+   Scoped to the header rows on purpose: the rows below are the grid's, and a
+   width check that swept the whole surface would fail for someone else's
+   reasons. *)
+let fleet_header_rows ~cols =
+  let rows = fleet_rows ~cols ~cursor:0 |> List.map Masc_tui_theme.strip_sgr in
+  let rec above = function
+    | [] -> []
+    | row :: _ when contains "Sort [s]:" row -> []
+    | row :: rest -> row :: above rest
+  in
+  above rows
+
+let test_the_fleet_header_fits_the_frame_it_is_drawn_in () =
+  List.iter
+    (fun cols ->
+      let inner = Masc_tui_frame.inner_width ~cols in
+      List.iter
+        (fun row ->
+          let width = Layout.display_width row in
+          if width > inner then
+            failf "at %d columns a header row of %d cells does not fit %d: %s"
+              cols width inner row)
+        (fleet_header_rows ~cols))
+    [ 80; 100; 110; 120; 140 ]
+;;
+
+let test_the_header_keeps_each_count_with_the_phrase_that_dates_it () =
+  List.iter
+    (fun cols ->
+      let rows = fleet_header_rows ~cols in
+      List.iter
+        (fun clause ->
+          check bool
+            (Printf.sprintf "%d columns keeps %S whole on one row" cols clause)
+            true
+            (List.exists (fun row -> contains clause row) rows))
+        [ "0 failures since server start"
+        ; "3 atoms behind in continuity (1 keepers not measured)"
+        ; "0 support invalidations"
+        ])
+    [ 80; 100; 110; 120; 140 ]
+;;
+
+(* The row count is the price this pays, and it is worth pinning: a wider
+   frame spends fewer rows on the header, and the harness default spends one
+   more than a wide terminal does. *)
+let test_a_wider_frame_spends_fewer_rows_on_the_header () =
+  let rows cols = List.length (fleet_header_rows ~cols) in
+  check bool "140 columns is not worse than 100" true (rows 140 <= rows 100);
+  check bool "100 columns is not worse than 80" true (rows 100 <= rows 80)
 ;;
 
 (* How the last pass ended and what the journal last failed with are drawn
@@ -1363,6 +1429,12 @@ let () =
         ; test_case "memory_body_with_keepers" `Quick test_render_memory_body_with_keepers
         ; test_case "the librarian line says when the continuity lag is unknown" `Quick
             test_the_librarian_line_says_when_the_continuity_lag_is_unknown
+        ; test_case "the fleet header fits the frame it is drawn in" `Quick
+            test_the_fleet_header_fits_the_frame_it_is_drawn_in
+        ; test_case "the header keeps each count with the phrase that dates it"
+            `Quick test_the_header_keeps_each_count_with_the_phrase_that_dates_it
+        ; test_case "a wider frame spends fewer rows on the header" `Quick
+            test_a_wider_frame_spends_fewer_rows_on_the_header
         ; test_case "the librarian line speaks the pass ending and its cause" `Quick
             test_the_librarian_line_speaks_the_pass_ending_and_its_cause
         ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting

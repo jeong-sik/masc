@@ -2552,9 +2552,93 @@ let test_a_turn_span_wraps_inside_the_block_budget () =
   check bool "the span does not widen the block"
     true (widest (rows_at 80 opens) <= widest (rows_at 80 plain))
 
+(* A header row of counts is a list of clauses, and the clause is the unit that
+   carries the qualifier. The Memory fleet header is the row these were written
+   for: it needed 176 cells with every count a single digit, against a frame
+   that gives 96 at the 100 columns the PTY harness opens. *)
+let memory_fleet_librarian_clauses =
+  "0 turns unread \xc2\xb7 3 atoms behind in continuity (1 keepers not \
+   measured) \xc2\xb7 0 failures since server start"
+
+let test_a_row_ends_where_a_clause_ends () =
+  check (list string) "the break lands on the clause mark"
+    [ "0 turns unread \xc2\xb7 3 atoms behind in continuity (1 keepers not \
+       measured)"
+    ; "0 failures since server start"
+    ]
+    (Layout.pack_clauses ~max_cells:83 memory_fleet_librarian_clauses)
+
+let test_wrapping_at_spaces_would_change_what_the_row_claims () =
+  (* The input that splits the two functions apart. Without it, a packer that
+     simply called wrap_words would pass every other assertion here. *)
+  let wrapped = Layout.wrap_words ~max_cells:83 memory_fleet_librarian_clauses in
+  check (option string) "a space break ends the row at a bare count"
+    (Some
+       "0 turns unread \xc2\xb7 3 atoms behind in continuity (1 keepers not \
+        measured) \xc2\xb7 0 failures")
+    (List.nth_opt wrapped 0);
+  let packed = Layout.pack_clauses ~max_cells:83 memory_fleet_librarian_clauses in
+  check bool "the clause packer keeps the qualifier with its count" true
+    (List.exists
+       (fun row -> row = "0 failures since server start")
+       packed)
+
+let test_every_packed_row_fits_the_room () =
+  List.iter
+    (fun room ->
+      List.iter
+        (fun row ->
+          if Layout.display_width row > room then
+            failf "row of %d cells in a room of %d: %s"
+              (Layout.display_width row) room row)
+        (Layout.pack_clauses ~max_cells:room memory_fleet_librarian_clauses))
+    [ 20; 30; 40; 63; 83; 123; 200 ]
+
+let test_packing_keeps_every_clause () =
+  List.iter
+    (fun room ->
+      let packed =
+        String.concat " " (Layout.pack_clauses ~max_cells:room memory_fleet_librarian_clauses)
+      in
+      List.iter
+        (fun needle ->
+          check bool
+            (Printf.sprintf "room %d keeps %S" room needle)
+            true
+            (let n = String.length needle in
+             let rec seek i =
+               i + n <= String.length packed
+               && (String.sub packed i n = needle || seek (i + 1))
+             in
+             seek 0))
+        [ "0 turns unread"; "0 failures since server start" ];
+      check bool
+        (Printf.sprintf "room %d cuts nothing" room)
+        false (carries_cut_mark packed))
+    [ 30; 40; 63; 83; 123 ]
+
+let test_a_clause_wider_than_the_row_is_wrapped_not_cut () =
+  let rows = Layout.pack_clauses ~max_cells:12 "one clause that is far too wide" in
+  check bool "more than one row" true (List.length rows > 1);
+  check bool "no cut mark" false (carries_cut_mark (String.concat " " rows));
+  check string "the words survive in order" "one clause that is far too wide"
+    (String.concat " " rows)
+
 let () =
   run "tui_message_layout"
     [
+      ( "clause packing"
+      , [ test_case "a row ends where a clause ends" `Quick
+            test_a_row_ends_where_a_clause_ends
+        ; test_case "wrapping at spaces would change what the row claims" `Quick
+            test_wrapping_at_spaces_would_change_what_the_row_claims
+        ; test_case "every packed row fits the room" `Quick
+            test_every_packed_row_fits_the_room
+        ; test_case "packing keeps every clause and cuts nothing" `Quick
+            test_packing_keeps_every_clause
+        ; test_case "a clause wider than the row is wrapped, not cut" `Quick
+            test_a_clause_wider_than_the_row_is_wrapped_not_cut
+        ] );
       ( "bare links"
       , [ test_case "dressed and bounded" `Quick
             test_bare_links_are_dressed_and_bounded

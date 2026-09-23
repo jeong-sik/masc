@@ -674,6 +674,7 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
                   [ "todo", `Int 0
                   ; "claimed", `Int 0
                   ; "in_progress", `Int 0
+                  ; "awaiting_verification", `Int 0
                   ; "done", `Int 0
                   ; "cancelled", `Int 0
                   ] )
@@ -839,6 +840,7 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
           [ "todo", `Int 6
           ; "claimed", `Int 7
           ; running_key, `Int 8
+          ; "awaiting_verification", `Int 11
           ; "done", `Int 9
           ; "cancelled", `Int 10
           ] )
@@ -989,6 +991,10 @@ let test_decode_planning_snapshot_current_contract () =
       Alcotest.(check int) "todo" 6 snapshot.pl_backlog.pb_todo;
       Alcotest.(check int) "claimed" 7 snapshot.pl_backlog.pb_claimed;
       Alcotest.(check int) "in progress" 8 snapshot.pl_backlog.pb_running;
+      (* Its own count, not folded into the one above: the surface draws the
+         waiting Tasks beside the ones being worked. *)
+      Alcotest.(check int) "awaiting verification" 11
+        snapshot.pl_backlog.pb_awaiting_verification;
       Alcotest.(check int) "backlog done" 9 snapshot.pl_backlog.pb_done;
       Alcotest.(check int) "cancelled" 10 snapshot.pl_backlog.pb_cancelled;
       Alcotest.(check string) "generated at" "2026-08-21T05:06:07Z"

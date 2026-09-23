@@ -107,4 +107,21 @@ describe('OfficialClientSessionPanel', () => {
     })
   })
 
+  it('does not offer retry for a full vendor session', async () => {
+    apiMocks.fetchOfficialClientSession.mockReset().mockResolvedValue({
+      ...recoveryResponse,
+      session: {
+        ...recoveryResponse.session,
+        phase: { ...recoveryResponse.session.phase, failure: 'vendor_session_full_after_activity' as const },
+      },
+    })
+    const view = render(html`<${OfficialClientSessionPanel} />`)
+
+    await waitFor(() => {
+      expect(view.getByTestId('official-client-session-recovery-required').textContent)
+        .toContain('vendor_session_full_after_activity')
+    })
+    expect(view.queryByTestId('official-client-session-retry-previous')).toBeNull()
+    expect(view.getByTestId('official-client-session-restart-fresh')).toBeTruthy()
+  })
 })

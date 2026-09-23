@@ -480,7 +480,7 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
   match Repo_store.load_all ~base_path with
   | Error reason ->
     { reader
-    ; repositories_error = Some reason
+    ; repositories_error = Some ("repository list unread: " ^ reason)
     ; repositories = previous.repositories
     ; rejected_token_digest = previous.rejected_token_digest
     }
@@ -624,6 +624,13 @@ let current () = Atomic.get projection
 (* RFC-0465 §3: pull request state changes at the pace a person reads it, and
    three repositories every 60 s spend about 4% of the reader account's
    5000 GraphQL points an hour. *)
+(* The previous rows stay, but not as a current reading: a refresh that
+   raises on every tick would otherwise show the last good counts
+   indefinitely with nothing saying they stopped updating. The next refresh
+   that returns sets [repositories_error] from its own reading. *)
+let refresh_raised ~previous exn =
+  { previous with repositories_error = Some ("refresh raised " ^ Printexc.to_string exn) }
+
 let poll_interval_s = 60.0
 
 let start ~sw ~clock ~config =
@@ -641,15 +648,9 @@ let start ~sw ~clock ~config =
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         let error = "refresh raised " ^ Printexc.to_string exn in
-         Log.Server.warn "repository_pulls: %s; keeping the previous rows" error;
-         (* The previous rows stay, but not as a current reading: a refresh
-            that raises on every tick would otherwise show the last good
-            counts indefinitely with nothing saying they stopped updating.
-            [repositories_error] is what readers already treat as "these
-            rows may be old". *)
-         let previous = current () in
-         Atomic.set projection { previous with repositories_error = Some error });
+         Log.Server.warn "repository_pulls: refresh raised %s; keeping the previous rows"
+           (Printexc.to_string exn);
+         Atomic.set projection (refresh_raised ~previous:(current ()) exn));
       Eio.Time.sleep clock poll_interval_s;
       loop ()
     in

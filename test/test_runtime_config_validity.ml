@@ -3089,7 +3089,24 @@ let test_runtime_toml_accepts_every_binding_key_it_reads () =
      repeat-last-n = 64\n\
      return-progress = true\n"
   in
-  match Runtime_toml.parse_string (binding_with_extra extra) with
+  (* The Ollama options (repeat-penalty, repeat-last-n) load only on an
+     ollama-http provider, so this binding is declared on one. *)
+  let toml =
+    "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     is-default = true\n\
+     context-low-water-tokens = 300\n"
+    ^ extra
+    ^ "\n[runtime]\ndefault = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string toml with
   | Error errs ->
     fail
       (String.concat "; "

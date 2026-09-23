@@ -226,8 +226,9 @@ pretending to render content. With detail focused, `[`/`]` read the previous
 or next resource without returning to the list. Responses are URI-stamped, so
 a slow older read cannot replace a newer selection. `Ctrl-W` switches between
 list and detail, and `j`/`k` move whichever pane has focus. The selected
-Keeper's Channels tab shows transport status; `b`/`u` open a binding form with
-that Keeper already named.
+Keeper's Channels tab shows transport status; `b` opens a binding form with
+that Keeper already named, and `U` `U` removes all of its bindings (see
+[Keeper detail](#keeper-detail)).
 
 Tools has five deliberately different questions under `p`: `available` is
 the effective surface delivered to the selected Keeper now; `async runs` is
@@ -589,6 +590,28 @@ collapsing to zero.
    Last Turn:             2026-08-23T01:53:26
   j/k:scroll  l:logs  m:message  Esc:back  Tab:next  q:quit  r:refresh
 ```
+
+The Channels tab lists every transport and its channel bindings. A channel
+reads `name (id)` when the connector's name directory knows it, and
+`id (name unknown)` when it does not.
+
+| Key | Effect |
+|-----|--------|
+| `j` / `k` | move between transports |
+| `J` / `K` | move between the selected transport's bindings |
+| `b` | bind a channel to this Keeper (`$EDITOR` form) |
+| `e` | reassign the selected binding |
+| `u` `u` | remove the selected binding; the first press names it, the second removes it |
+| `U` `U` | remove every binding this Keeper holds, on every transport; the first press lists the channels, the second sends them |
+
+`U` `U` sends one unbind per binding with the Keeper's name as a condition, so
+a channel rebound to another Keeper after the first press is left as is.
+Recent Events gets one line per binding -- removed, kept (now bound to
+another Keeper), not found (with the server's words), or FAILED with the
+server's reason, failures last -- and the footer shows the count of each and
+names the channels that failed. A transport whose binding list the server
+could not read is named in the prompt as not included. On this tab `U` is unbind-all; the runtime picker stays on `U`
+everywhere else in Keeper detail.
 
 ### Keeper logs
 

@@ -405,7 +405,8 @@ let test_excluded_last_slot_preserves_domain_failure () =
        ()
    with
    | Ok ((_selection, _output), selected_slot) ->
-     failf "contract-invalid only usable slot unexpectedly answered as %s" selected_slot
+     failf "contract-invalid only usable slot unexpectedly answered as %s"
+       (Runtime.served_slot_id selected_slot)
    | Error error ->
      check bool "filtered flow reports domain rejection" true
        (Runtime.For_testing.classified_error_kind error

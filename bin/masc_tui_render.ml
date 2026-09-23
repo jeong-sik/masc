@@ -5257,18 +5257,27 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     else "Runs: no runs retained yet"
   in
   let slot_distribution =
-    match lane.sl_selected_slots with
-    | [] -> []
-    | scs ->
-        let dist =
-          String.concat ", "
+    (* Every finished run, by who answered it. The slot counts cover only
+       runs that named a slot; the rest come from the server by why they
+       named none. On Board Attention most of those are Vendor System One,
+       which answers before any slot is bound (#37296), so a reader who saw
+       only the slots would take its answers for missing records. *)
+    let dist =
+      match lane.sl_selected_slots with
+      | [] -> []
+      | scs ->
+        [ String.concat ", "
             (List.map
                (fun (sc : Tui_decode.standalone_lane_slot_count) ->
                   Printf.sprintf "%s: %d"
                     (Terminal_text.single_line sc.slsc_slot_id) sc.slsc_count)
-               scs)
-        in
-        wrap Ansi.reset ("Slot selection history: " ^ dist)
+               scs) ]
+    in
+    match dist @ standalone_lane_runs_without_slot_parts lane with
+    | [] -> []
+    | parts ->
+      wrap Ansi.reset
+        ("Slot selection history: " ^ String.concat " \xc2\xb7 " parts)
   in
   wrap Ansi.bold
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
@@ -7330,12 +7339,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                     state.keepers
                 in
                 let binding_reference (binding : Tui_decode.connector_binding) =
-                  match binding.cb_channel_name with
-                  | None -> Terminal_text.single_line binding.cb_channel_id
-                  | Some name ->
-                      Printf.sprintf "%s (%s)"
-                        (Terminal_text.single_line name)
-                        (Terminal_text.single_line binding.cb_channel_id)
+                  Masc_tui_connector_unbind.channel_label
+                    ~channel_id:binding.cb_channel_id
+                    ~channel_name:binding.cb_channel_name
                 in
                 let store_state =
                   match connector.cn_binding_store_read_ok with

@@ -61,7 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- Keeper status no longer carries `execution_context.pr_history`, and the dashboard's repository panel no longer draws PR and worktree sections. The field read a `.playground_pr_history.jsonl` file that no code writes, and `active_worktrees` had no producer; neither ever held a row, so both only suggested a record that did not exist (#38095).
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result

@@ -229,7 +229,17 @@ val write_list_sidebar :
   Buffer.t ->
   rows:int ->
   cols:int ->
-  title:string -> focused:bool -> labels:string list -> selected:int -> unit
+  title:string ->
+  focused:bool ->
+  ?holding:int ->
+  labels:string list ->
+  selected:int ->
+  unit ->
+  unit
+(** An index beside a detail pane. [holding] is what the surface holds when
+    that is more than [labels] was given -- the Board's page of fifty out of a
+    board of a hundred and ninety-eight -- and the row spells the pair the way
+    the surface's own header does. *)
 
 val data_unreliable_row : cols:int -> string -> string
 

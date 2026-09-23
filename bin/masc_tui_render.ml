@@ -1295,7 +1295,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
         ~focused:false
         ~labels:
           (List.map (fun (row : Tui_decode.task) -> row.title) state.tasks)
-        ~selected:state.task_cursor;
+        ~selected:state.task_cursor ();
       let answer =
         task_detail_pane state ~rows ~cols:(cols - left_cols) task right_buf
       in
@@ -1444,7 +1444,7 @@ let render_approval_detail (state : state) (row : approval_row) =
     write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Approvals"
       ~focused:false
       ~labels:(List.map approval_sidebar_label (approval_items state))
-      ~selected:state.approval_cursor;
+      ~selected:state.approval_cursor ();
     approval_detail_pane state ~clamped:scroll ~rows
       ~cols:(cols - left_cols) row right_buf;
     write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf
@@ -2331,6 +2331,22 @@ let board_heading_with_tail ~cols head tail =
    with, so the two cannot drift apart. *)
 let census_separator = "  \xc2\xb7  "
 
+(* What the board holds behind this page: the census over the whole board, or
+   over the hearth being read when one is narrowed, since the listing itself
+   is narrowed server-side. A hearth the census has not counted leaves the
+   page to speak for itself.
+
+   The list's title and the reader's index both state it, so it is read once
+   here rather than derived twice. *)
+let board_holding (state : state) =
+  match state.board_hearth with
+  | Some hearth -> List.assoc_opt hearth state.board_hearths
+  | None -> (
+      match state.board_hearths with
+      | [] -> None
+      | census ->
+          Some (List.fold_left (fun sum (_, count) -> sum + count) 0 census))
+
 let board_hearth_census_line ~cols (state : state) =
   match state.board_hearths with
   | [] ->
@@ -2438,19 +2454,7 @@ let render_board_list (state : state) =
      read that failed, "(0)" read as a board with nothing on it. A count
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
-  (* What the board holds behind this page: the census over the whole board,
-     or over the hearth being read when one is narrowed, since the listing
-     itself is narrowed server-side. A hearth the census has not counted
-     leaves the page to speak for itself. *)
-  let holding =
-    match state.board_hearth with
-    | Some hearth -> List.assoc_opt hearth state.board_hearths
-    | None ->
-        (match state.board_hearths with
-         | [] -> None
-         | census ->
-             Some (List.fold_left (fun sum (_, count) -> sum + count) 0 census))
-  in
+  let holding = board_holding state in
   let header = Printf.sprintf "%s %s%s  %s  %s"
     (screen_title " MASC Board")
     (match state.board_posts, board_list_page state ~error:board_list_error with
@@ -3035,8 +3039,9 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
   in
   write_list_sidebar buf ~rows ~cols ~title:"Board"
     ~focused:(state.board_focus = Left_pane)
+    ?holding:(board_holding state)
     ~labels:(List.map format_sidebar_post state.board_posts)
-    ~selected
+    ~selected ()
 
 let render_board_read (state : state) (list_post : board_post) =
   let terminal_rows, cols = get_terminal_size () in
@@ -3826,7 +3831,7 @@ let render_planning_detail (state : state)
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Planning"
         ~focused:false
         ~labels:(List.map format_sidebar_goal goals)
-        ~selected;
+        ~selected ();
       let scroll =
         planning_detail_pane state ~armed ~confirmation ~rows ~cols:(cols - left_cols) goal
           right_buf
@@ -4518,7 +4523,11 @@ let render_schedule_detail (state : state) (row : schedule_row) =
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Schedules"
-        ~focused:false ~labels ~selected:state.schedule_cursor;
+        ~focused:false
+        ?holding:
+          (Option.bind state.schedules (fun snapshot ->
+               snapshot.scs_request_count))
+        ~labels ~selected:state.schedule_cursor ();
       let answer =
         schedule_detail_pane state ~rows ~cols:(cols - left_cols) row
           right_buf
@@ -8908,7 +8917,7 @@ let render_verification_detail (state : state) request =
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Task Review"
-        ~focused:false ~labels ~selected:state.verification_cursor;
+        ~focused:false ~labels ~selected:state.verification_cursor ();
       let answer =
         verification_detail_pane state ~rows ~cols:(cols - left_cols) request
           right_buf
@@ -9372,7 +9381,7 @@ let render_harness_detail (state : state) verdict =
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Verdicts"
-        ~focused:false ~labels ~selected:state.harness_cursor;
+        ~focused:false ~labels ~selected:state.harness_cursor ();
       let answer =
         harness_detail_pane state ~rows ~cols:(cols - left_cols) verdict
           right_buf
@@ -10245,7 +10254,7 @@ let render_fusion_detail (state : state) run_id =
          no matching row; the domain selection stays optional. *)
       let selected = Option.value (fusion_detail_entry_index state) ~default:(-1) in
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Fusion"
-        ~focused:false ~labels ~selected;
+        ~focused:false ~labels ~selected ();
       let answer =
         fusion_detail_pane state ~rows ~cols:(cols - left_cols) run_id
           right_buf

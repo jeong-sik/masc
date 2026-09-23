@@ -199,7 +199,11 @@ module Codex_error_info : sig
 
   type t =
     | Session_budget_exceeded
-    | Usage_limit_exceeded
+    | Usage_limit_exceeded of { resets_at : int option }
+        (** [resets_at] is the unix second the exhausted usage windows open
+            again, read from the [account/rateLimits/updated] notifications
+            this turn received before the refusal. [None] when no received
+            window is exhausted, or one that is names no reset. *)
     | Rate_limit_exceeded
     | Server_overloaded
     | Cyber_policy

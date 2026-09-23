@@ -208,7 +208,10 @@ let dynamic_tool_bytes = Runtime_official_client_tool.dynamic_tool_bytes
    v2/ErrorNotification.json, definitions.CodexErrorInfo), without
    [contextWindowExceeded]: that value is read into
    {!error.Context_window_exceeded}, so a failed turn never carries it.
-   A value the schema does not name is kept whole in [Unrecognized]. *)
+   A value the schema does not name is kept whole in [Unrecognized].
+   [Usage_limit_exceeded] carries the reset the turn's
+   [account/rateLimits/updated] notifications named for the exhausted
+   windows ({!Rate_limits}); the error itself names none. *)
 module Codex_error_info = struct
   type non_steerable_turn_kind =
     | Review
@@ -216,7 +219,7 @@ module Codex_error_info = struct
 
   type t =
     | Session_budget_exceeded
-    | Usage_limit_exceeded
+    | Usage_limit_exceeded of { resets_at : int option }
     | Rate_limit_exceeded
     | Server_overloaded
     | Cyber_policy
@@ -893,11 +896,111 @@ let turn_error_detail ~message error_fields =
   | annotations -> message ^ " (" ^ String.concat " " annotations ^ ")"
 ;;
 
+(* [AccountRateLimitsUpdatedNotification] from the app-server's generated
+   protocol schema (codex-cli 0.156.0, [codex app-server generate-json-schema],
+   v2/AccountRateLimitsUpdatedNotification.json). Each update is sparse and
+   names one limit by [limitId]; the schema says a null value is unavailable
+   in that update and does not clear what was observed before, so a window
+   stands until an update reports it again. One account reports several
+   limits: a live Codex session that hit its weekly limit reported the
+   exhausted [codex] window with its reset, then a [premium] limit with no
+   windows, then refused the turn. Keeping the windows per limit is what lets
+   the refusal still find the first one. *)
+module Rate_limits = struct
+  type window =
+    { used_percent : int
+    ; resets_at : int option
+    }
+
+  type limit =
+    { primary : window option
+    ; secondary : window option
+    }
+
+  type t = (string option * limit) list
+
+  let empty : t = []
+  let stage = "account/rateLimits/updated"
+
+  (* [usedPercent] at which the window has no usage left. *)
+  let exhausted_percent = 100
+
+  let window_of_json = function
+    | `Assoc fields ->
+      let* used_percent = required_int stage "usedPercent" fields in
+      let* resets_at =
+        match List.assoc_opt "resetsAt" fields with
+        | None | Some `Null -> Ok None
+        | Some (`Int resets_at) -> Ok (Some resets_at)
+        | Some _ -> protocol_error stage "field \"resetsAt\" must be an integer or null"
+      in
+      Ok { used_percent; resets_at }
+    | _ -> protocol_error stage "rate-limit window must be an object"
+  ;;
+
+  let reported_window name fields =
+    match List.assoc_opt name fields with
+    | None | Some `Null -> Ok None
+    | Some json ->
+      let* window = window_of_json json in
+      Ok (Some window)
+  ;;
+
+  let update (limits : t) params =
+    let* fields = assoc_at stage params in
+    let* snapshot = required_member stage "rateLimits" fields in
+    let* snapshot_fields = assoc_at stage snapshot in
+    let* limit_id = optional_string stage "limitId" snapshot_fields in
+    let* primary = reported_window "primary" snapshot_fields in
+    let* secondary = reported_window "secondary" snapshot_fields in
+    let merge reported previous =
+      match reported with
+      | Some _ -> reported
+      | None -> previous
+    in
+    let limit =
+      match List.assoc_opt limit_id limits with
+      | Some previous ->
+        { primary = merge primary previous.primary
+        ; secondary = merge secondary previous.secondary
+        }
+      | None -> { primary; secondary }
+    in
+    Ok ((limit_id, limit) :: List.remove_assoc limit_id limits)
+  ;;
+
+  (* The usage limit lifts only when every exhausted window has opened, so
+     the release is the latest reset among them. An exhausted window that
+     names no reset leaves the release unknown. *)
+  let usage_limit_resets_at (limits : t) =
+    let exhausted =
+      List.concat_map
+        (fun (_, { primary; secondary }) ->
+           List.filter_map
+             (function
+               | Some window when window.used_percent >= exhausted_percent -> Some window
+               | Some _ | None -> None)
+             [ primary; secondary ])
+        limits
+    in
+    match exhausted with
+    | [] -> None
+    | first :: rest ->
+      List.fold_left
+        (fun latest window ->
+           match latest, window.resets_at with
+           | Some latest, Some resets_at -> Some (Int.max latest resets_at)
+           | None, _ | Some _, None -> None)
+        first.resets_at
+        rest
+  ;;
+end
+
 type codex_error_info_reading =
   | Context_window
   | Turn_failure of Codex_error_info.t
 
-let codex_error_info_of_json json =
+let codex_error_info_of_json ~usage_limit_resets_at json =
   let open Codex_error_info in
   let unrecognized = Turn_failure (Unrecognized json) in
   let http_status_code fields =
@@ -916,7 +1019,8 @@ let codex_error_info_of_json json =
   match json with
   | `String "contextWindowExceeded" -> Context_window
   | `String "sessionBudgetExceeded" -> Turn_failure Session_budget_exceeded
-  | `String "usageLimitExceeded" -> Turn_failure Usage_limit_exceeded
+  | `String "usageLimitExceeded" ->
+    Turn_failure (Usage_limit_exceeded { resets_at = usage_limit_resets_at })
   | `String "rateLimitExceeded" -> Turn_failure Rate_limit_exceeded
   | `String "serverOverloaded" -> Turn_failure Server_overloaded
   | `String "cyberPolicy" -> Turn_failure Cyber_policy
@@ -960,17 +1064,18 @@ let codex_error_info_of_json json =
     unrecognized
 ;;
 
-let turn_error_of_fields ~tool_effect_attempted ~message error_fields =
+let turn_error_of_fields ~usage_limit_resets_at ~tool_effect_attempted ~message
+    error_fields =
   let detail = turn_error_detail ~message error_fields in
   match List.assoc_opt "codexErrorInfo" error_fields with
   | None | Some `Null -> Turn_failed { detail; codex_error_info = None }
   | Some json ->
-    (match codex_error_info_of_json json with
+    (match codex_error_info_of_json ~usage_limit_resets_at json with
      | Context_window -> Context_window_exceeded { message; tool_effect_attempted }
      | Turn_failure info -> Turn_failed { detail; codex_error_info = Some info })
 ;;
 
-let turn_error ~tool_effect_attempted fields =
+let turn_error ~usage_limit_resets_at ~tool_effect_attempted fields =
   match List.assoc_opt "error" fields with
   | Some (`Assoc error_fields) ->
     let message =
@@ -979,14 +1084,15 @@ let turn_error ~tool_effect_attempted fields =
         String.trim message
       | _ -> "turn failed without a typed error message"
     in
-    turn_error_of_fields ~tool_effect_attempted ~message error_fields
+    turn_error_of_fields ~usage_limit_resets_at ~tool_effect_attempted ~message
+      error_fields
   | Some _ | None ->
     Turn_failed
       { detail = "turn failed without an error object"; codex_error_info = None }
 ;;
 
 let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
-    ~tool_effect_attempted params =
+    ~usage_limit_resets_at ~tool_effect_attempted params =
   let stage = "turn/completed" in
   let* fields = assoc_at stage params in
   let* terminal_thread_id = required_string stage "threadId" fields in
@@ -1001,7 +1107,8 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
     else
       let* status = required_string stage "status" turn_fields in
       match status with
-      | "failed" -> Error (turn_error ~tool_effect_attempted turn_fields)
+      | "failed" ->
+        Error (turn_error ~usage_limit_resets_at ~tool_effect_attempted turn_fields)
       | "interrupted" -> Error Turn_interrupted
       | "inProgress" -> protocol_error stage "terminal notification carried inProgress status"
       | "completed" ->
@@ -1143,7 +1250,7 @@ let cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id par
 ;;
 
 let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final
-    ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event =
+    ~seen_fallback ~seen_usage ~rate_limits ~open_tool_call_ids ~on_stream_event =
   let* message = io.receive () in
   match message with
   | Response _ | Response_error _ ->
@@ -1169,12 +1276,13 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~rate_limits
       ~open_tool_call_ids
       ~on_stream_event
   | Server_request { id; method_ = "mcpServer/elicitation/request"; params } ->
     let* () = cancel_unhandled_elicitation io ~thread_id ~turn_id ~on_stream_event ~id params in
     await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id
-      ~seen_final ~seen_fallback ~seen_usage ~open_tool_call_ids ~on_stream_event
+      ~seen_final ~seen_fallback ~seen_usage ~rate_limits ~open_tool_call_ids ~on_stream_event
   | Server_request { id; method_; _ } ->
     reject_server_request io id;
     Error (Unsupported_server_request method_)
@@ -1198,6 +1306,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~rate_limits
       ~open_tool_call_ids:[]
       ~on_stream_event
   | Notification { method_ = "item/plan/delta" as method_; params } ->
@@ -1212,6 +1321,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~rate_limits
       ~open_tool_call_ids:[]
       ~on_stream_event
   | Notification
@@ -1231,6 +1341,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~rate_limits
       ~open_tool_call_ids
       ~on_stream_event
   | Notification { method_ = "item/started"; params } ->
@@ -1258,7 +1369,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
     in
     await_turn_terminal
       io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final ~seen_fallback
-      ~seen_usage ~open_tool_call_ids ~on_stream_event
+      ~seen_usage ~rate_limits ~open_tool_call_ids ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
     let* item = active_turn_item ~stage ~thread_id ~turn_id params in
@@ -1297,6 +1408,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~rate_limits
       ~open_tool_call_ids
       ~on_stream_event
   | Notification { method_ = "error"; params } ->
@@ -1321,6 +1433,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~seen_final
         ~seen_fallback
         ~seen_usage
+        ~rate_limits
         ~open_tool_call_ids
         ~on_stream_event
     else
@@ -1329,6 +1442,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       let* message = required_string stage "message" error_fields in
       Error
         (turn_error_of_fields
+           ~usage_limit_resets_at:(Rate_limits.usage_limit_resets_at rate_limits)
            ~tool_effect_attempted:(!tool_call_count > 0)
            ~message
            error_fields)
@@ -1339,10 +1453,36 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         ~turn_id
         ~seen_final
         ~seen_fallback
+        ~usage_limit_resets_at:(Rate_limits.usage_limit_resets_at rate_limits)
         ~tool_effect_attempted:(!tool_call_count > 0)
         params
     in
     Ok (text, seen_usage)
+  (* Account-wide, so it names no thread or turn. It is kept only to date a
+     usage-limit refusal; an update this client cannot read leaves the
+     windows already read as they were and does not fail the turn. *)
+  | Notification { method_ = "account/rateLimits/updated"; params } ->
+    let rate_limits =
+      match Rate_limits.update rate_limits params with
+      | Ok updated -> updated
+      | Error error ->
+        Log.Runtime_agent.warn
+          "Codex app-server rate-limit update not read: %s"
+          (error_to_string error);
+        rate_limits
+    in
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
+      ~seen_usage
+      ~rate_limits
+      ~open_tool_call_ids
+      ~on_stream_event
   | Notification { method_ = "thread/tokenUsage/updated"; params } ->
     let* usage = token_usage_notification ~thread_id ~turn_id params in
     let seen_usage =
@@ -1359,6 +1499,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~rate_limits
       ~open_tool_call_ids
       ~on_stream_event
   (* App-server progress and account notifications are observational. Protocol
@@ -1374,6 +1515,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~seen_usage
+      ~rate_limits
       ~open_tool_call_ids
       ~on_stream_event
 ;;
@@ -1604,6 +1746,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       ~seen_final:None
       ~seen_fallback:None
       ~seen_usage:None
+      ~rate_limits:Rate_limits.empty
       ~open_tool_call_ids:[]
       ~on_stream_event
   in

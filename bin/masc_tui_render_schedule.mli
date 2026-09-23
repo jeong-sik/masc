@@ -389,6 +389,12 @@ val fusion_row :
     where it used to be unbounded in the header and cut at fourteen in the
     row. *)
 
+val task_list_sidebar_label : title:string -> task_id:string -> string
+(** A Tasks list row beside the task detail. The id goes after the title
+    because the frame folds a label from the middle: titles that share an
+    opening and an ending draw the same row, and the id at the end is what
+    parts them. *)
+
 val fusion_sidebar_label :
   status:string -> time:string -> keeper:string -> run_id:string -> string
 

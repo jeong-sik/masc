@@ -994,6 +994,22 @@ let allocate_fusion_columns ~inner_width ~keeper_width =
   let fcol_run = max 3 (inner_width - named - fcol_keeper) in
   { fcol_keeper; fcol_run; fcol_show_preset }
 
+(* The Tasks list pane beside the detail drew a row's title and nothing else,
+   and the frame folds a label from the middle, keeping its opening and its
+   ending. Titles that share both and differ only in between all draw the same
+   row.
+
+   Measured on the live backlog 2026-09-24, 694 open tasks folded to the
+   pane's room: titles alone left 30 rows in four groups that read alike, 18
+   of them "[triage]...(jeong-sik/masc)". With the task id after the title all
+   694 read differently; with it in front, 31 rows still read alike, because
+   the fold takes the middle out either way and the ids of a group share their
+   opening. So the id goes last, where the fold keeps it.
+
+   The full-width list row already spells the id; only the pane beside the
+   detail dropped it. *)
+let task_list_sidebar_label ~title ~task_id = title ^ "  " ^ task_id
+
 let fusion_header_row columns =
   Table.header_row
     (fusion_cells columns fusion_no_values)

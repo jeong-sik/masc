@@ -100,6 +100,37 @@ let test_a_row_never_runs_past_the_frame () =
         (Masc_tui_message_layout.display_width row))
     rows
 
+(* The Tasks pane's own titles are the other shape: they share an opening and
+   an ending and differ in between, which is exactly what a middle fold takes
+   out. Measured on the live backlog 2026-09-24, 694 open tasks at this pane's
+   room: the titles alone drew 30 rows in four groups that read alike, 18 of
+   them "[triage]...(jeong-sik/masc)". The task id goes after the title, where
+   the fold keeps it, and all 694 read differently; in front of the title 31
+   rows still read alike, because a group's ids share their opening too. *)
+let triage_title number =
+  Printf.sprintf "[triage] #%d TUI \xed\x99\x94\xeb\xa9\xb4 (jeong-sik/masc)" number
+
+let test_titles_that_share_both_ends_are_parted_by_the_id () =
+  let room = Masc_tui_frame.inner_width ~cols:Masc_tui_roster_pane.pane_cols in
+  let fold label = Masc_tui_message_layout.fit_middle room label in
+  let bare_first = fold (triage_title 30858)
+  and bare_second = fold (triage_title 30904) in
+  Alcotest.(check string)
+    "the titles alone fold to the same row" bare_first bare_second;
+  let first =
+    fold
+      (Masc_tui_render_schedule.task_list_sidebar_label
+         ~title:(triage_title 30858) ~task_id:"task-1174")
+  and second =
+    fold
+      (Masc_tui_render_schedule.task_list_sidebar_label
+         ~title:(triage_title 30904) ~task_id:"task-1175")
+  in
+  Alcotest.(check bool) "with the id they part" true (first <> second);
+  Alcotest.(check bool) "and each row ends in its own id" true
+    (String.ends_with ~suffix:"task-1174" first
+    && String.ends_with ~suffix:"task-1175" second)
+
 let () =
   Alcotest.run "tui_sidebar_index_fold"
     [ ( "sidebar index"
@@ -109,5 +140,8 @@ let () =
             test_the_fold_holds_still_under_the_cursor
         ; Alcotest.test_case "a row never runs past the frame" `Quick
             test_a_row_never_runs_past_the_frame
+        ; Alcotest.test_case
+            "titles that share both ends are parted by the id" `Quick
+            test_titles_that_share_both_ends_are_parted_by_the_id
         ] )
     ]

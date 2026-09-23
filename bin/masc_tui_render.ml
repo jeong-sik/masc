@@ -1294,7 +1294,11 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Tasks"
         ~focused:false
         ~labels:
-          (List.map (fun (row : Tui_decode.task) -> row.title) state.tasks)
+          (List.map
+             (fun (row : Tui_decode.task) ->
+               Render_schedule.task_list_sidebar_label ~title:row.title
+                 ~task_id:row.id)
+             state.tasks)
         ~selected:state.task_cursor;
       let answer =
         task_detail_pane state ~rows ~cols:(cols - left_cols) task right_buf

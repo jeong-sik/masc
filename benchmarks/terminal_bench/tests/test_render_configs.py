@@ -8,16 +8,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "configs"))
 
 from render_configs import (  # noqa: E402
     ARMS,
+    BENCH_LANE,
     COMPOSITION_FENCE,
     REPO_ROOT,
     TASK_SKILL_SOURCE_ID,
     effective_runtime_id,
     composition_skill_names,
     instruction_skill_names,
+    keeper_route,
     keeper_toml,
     provider_parallel_suppression_contract,
     render_arm,
 )
+
+
+def fallbacks(arm):
+    """What an arm must be given after its model: a failover arm needs a second
+    model, every other arm refuses one."""
+    return ("anthropic.claude-sonnet-5",) if ARMS[arm]["failover"] else ()
 
 
 def task_skills(tmp_path, name="task-guide"):
@@ -65,11 +73,15 @@ def test_skill_classification_agrees_with_the_files():
 def test_arms_cover_spec():
     # b-h are the spec's ablation chain; k is the keeper-pool arm that
     # agents/keeper_tools_agent.py renders (no keeper is pre-started).
-    assert set(ARMS) == {"b", "c", "d", "e", "f", "g", "h", "k"}
+    assert set(ARMS) == {"b", "c", "d", "e", "f", "g", "h", "k", "l"}
     assert ARMS["b"]["keepers"] == 1
     assert ARMS["f"]["keepers"] == 4
     assert ARMS["g"]["keepers"] == 8
     assert ARMS["k"]["keepers"] == 4
+    # l is arm e plus a candidate order, and the only arm with one.
+    assert {a for a, spec in ARMS.items() if spec["failover"]} == {"l"}
+    assert {k: v for k, v in ARMS["l"].items() if k != "failover"} == {
+        k: v for k, v in ARMS["e"].items() if k != "failover"}
 
 
 def test_arm_b_skills_off():
@@ -114,7 +126,7 @@ def test_skills_tree_copied_only_for_skills_arms():
 def test_task_skills_are_common_input_without_changing_arm_treatments(tmp_path, arm):
     out = render_arm(
         arm, "anthropic.claude-fable-5", "high", out_root=tmp_path / "out",
-        task_skills_dir=task_skills(tmp_path))
+        task_skills_dir=task_skills(tmp_path), fallback_runtime_ids=fallbacks(arm))
     runtime = tomllib.loads((out / "runtime.toml").read_text())
     sources = runtime["skills"]["sources"]
     assert sources[0] == {
@@ -165,7 +177,8 @@ def test_absent_task_skills_keep_the_existing_render(tmp_path):
 
 @pytest.mark.parametrize("arm", list(ARMS))
 def test_parallel_arm_sets_request_policy_without_changing_model_facts(arm):
-    root = render_arm(arm, runtime_id="anthropic.claude-fable-5", effort="high")
+    root = render_arm(arm, runtime_id="anthropic.claude-fable-5", effort="high",
+                      fallback_runtime_ids=fallbacks(arm))
     config = tomllib.loads((root / "runtime.toml").read_text())
     binding = config["claude"]["claude-fable-5"]
     assert binding["disable-parallel-tool-use"] is (not ARMS[arm]["parallel"])
@@ -507,3 +520,67 @@ def test_limits_openrouter_cannot_state_are_refused(monkeypatch, endpoints, reas
     with pytest.raises(ValueError, match=reason):
         render_configs.openrouter_limits("vendor/model")
     render_configs.openrouter_limits.cache_clear()
+
+
+GLM = "openrouter.z-ai/glm-5.3"
+DEEPSEEK = "openrouter.deepseek/deepseek-v4-pro"
+
+
+def test_the_failover_arm_renders_every_model_and_a_lane_that_routes_the_keeper(
+        openrouter_lists, tmp_path):
+    # #37952: a one-model keeper has nowhere to go when a refusal says the next
+    # candidate must be a different model, so the trial ends as Turn_exception.
+    out = render_arm("l", runtime_id=GLM, effort="high", out_root=tmp_path,
+                     fallback_runtime_ids=(DEEPSEEK,))
+    runtime = tomllib.loads((out / "runtime.toml").read_text())
+    ids = ["openrouter.z-ai-glm-5.3", "openrouter.deepseek-deepseek-v4-pro"]
+    # Order is the lane's whole meaning: the arm's model first.
+    assert runtime["runtime"]["lanes"] == {BENCH_LANE: {"candidates": ids}}
+    # The keeper is routed by the lane, not by its head runtime.
+    assert runtime["runtime"]["default"] == BENCH_LANE
+    assert keeper_route("l", GLM, (DEEPSEEK,)) == BENCH_LANE
+    for binding, wire in (("z-ai-glm-5.3", "z-ai/glm-5.3"),
+                          ("deepseek-deepseek-v4-pro", "deepseek/deepseek-v4-pro")):
+        model = runtime["models"][binding]
+        assert model["api-name"] == wire
+        assert model["max-context"] == 111616
+        assert model["capabilities"]["max-output-tokens"] == 16384
+        assert runtime["openrouter"][binding]["disable-parallel-tool-use"] is False
+    assert openrouter_lists == ["z-ai/glm-5.3", "deepseek/deepseek-v4-pro"]
+    # A lane cannot be an exact-output cli slot; those keep the head runtime.
+    exact = runtime["runtime"]["exact_output_lanes"]
+    assert exact["hitl_auto_judge"]["cli_slots"] == [ids[0]]
+    assert exact["board_attention_exact"]["cli_slots"] == [ids[0]]
+    # Arm e's treatments otherwise.
+    assert (out / "keepers" / "bench-1.toml").read_text() == keeper_toml("e")
+
+
+def test_single_model_arms_have_no_lane_and_route_by_their_runtime(openrouter_lists):
+    out = render_arm("e", runtime_id=GLM, effort="high")
+    runtime = tomllib.loads((out / "runtime.toml").read_text())
+    assert "lanes" not in runtime["runtime"]
+    assert runtime["runtime"]["default"] == "openrouter.z-ai-glm-5.3"
+    assert list(runtime["models"]) == ["z-ai-glm-5.3"]
+    assert keeper_route("e", GLM) == "openrouter.z-ai-glm-5.3"
+
+
+@pytest.mark.parametrize("arm, fallbacks, reason", [
+    ("e", (DEEPSEEK,), "renders one model"),
+    ("l", (), "at least one fallback"),
+    ("l", (GLM,), "different models"),
+    ("l", ("anthropic.claude-sonnet-5",), "share one provider"),
+    ("l", ("openrouter",), "must be '<provider>.<model>'"),
+])
+def test_candidate_orders_that_cannot_measure_failover_are_refused_before_writing(
+        openrouter_lists, tmp_path, arm, fallbacks, reason):
+    with pytest.raises(ValueError, match=reason):
+        render_arm(arm, runtime_id=GLM, effort="high", out_root=tmp_path,
+                   fallback_runtime_ids=fallbacks)
+    assert not (tmp_path / arm).exists()
+    assert openrouter_lists == []
+
+
+def test_the_failover_arm_refuses_an_official_client():
+    with pytest.raises(ValueError, match="official client"):
+        render_arm("l", runtime_id="claude_code.claude-sonnet-5", effort="high",
+                   fallback_runtime_ids=("claude_code.claude-opus-5",))

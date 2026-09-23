@@ -223,15 +223,19 @@ let current_memory_ids facts =
    time. The rows are written just before a snapshot replace, so a replace
    that failed leaves rows for a pass that never committed (RFC-0456 §4.2). Two of their
    shapes are exact to recognise: a row for a fact that is still current is
-   not an absorption, and a row repeating another row's memory_id and into
-   states the same thing, kept once at its last write.
+   not an absorption, and a row repeating another row's memory_id and the
+   claim its into reaches (below) states the same thing, kept once at its
+   last write.
 
    A claim a pass made can itself be absorbed by a later pass, so a row's
    [into] may name a claim that is gone too. The rows say where that claim
    went, and [into] is followed along them to the claim at the end: a current
-   one, or the last one the rows name. A chain that comes back to a claim it
-   already passed stops there. Only a claim that never became current, or
-   whose own absorption has no row, ends as [into_current = false].
+   one, or the last one the rows name. When the rows send one claim to
+   several places, a current one is taken, since only a committed pass makes
+   its claim current; with none current, the latest row is taken. A chain
+   that would come back to a claim it already passed stops at the claim
+   before it. Only a claim that never became current, or whose own
+   absorption has no row, ends as [into_current = false].
 
    [answered_by] names the current claims that answer this search themselves.
    A row whose claim is one of them says the same thing again and is left
@@ -263,47 +267,56 @@ let search_absorbed_facts ~keepers_dir ~keeper_id ~current_ids ~answered_by ~que
            not (StringSet.mem row.memory_id current_ids))
         rows
     in
-    let last_write : (string * string, int) Hashtbl.t = Hashtbl.create 64 in
-    List.iteri
-      (fun index (row : Keeper_memory_absorbed.record) ->
-         Hashtbl.replace last_write (row.memory_id, row.into) index)
-      absorbed;
-    let statements =
-      List.filteri
-        (fun index (row : Keeper_memory_absorbed.record) ->
-           Hashtbl.find_opt last_write (row.memory_id, row.into) = Some index)
-        absorbed
-    in
-    let whole_query, fragments =
-      answering
-        ~claim_of:(fun (row : Keeper_memory_absorbed.record) ->
-          row.fact.Keeper_memory_os_types.claim)
-        ~query
-        statements
-    in
     let into_of =
       List.fold_left
         (fun into_of (row : Keeper_memory_absorbed.record) ->
-           StringMap.add row.memory_id row.into into_of)
+           StringMap.update
+             row.memory_id
+             (function
+               | Some kept
+                 when StringSet.mem kept current_ids
+                      && not (StringSet.mem row.into current_ids) -> Some kept
+               | Some _ | None -> Some row.into)
+             into_of)
         StringMap.empty
-        statements
+        absorbed
     in
     let rec chain_end ~passed id =
-      if StringSet.mem id current_ids || StringSet.mem id passed
+      if StringSet.mem id current_ids
       then id
       else (
+        let passed = StringSet.add id passed in
         match StringMap.find_opt id into_of with
         | None -> id
-        | Some next -> chain_end ~passed:(StringSet.add id passed) next)
+        | Some next when StringSet.mem next passed -> id
+        | Some next -> chain_end ~passed next)
     in
     let resolve (row : Keeper_memory_absorbed.record) =
       let into = chain_end ~passed:(StringSet.singleton row.memory_id) row.into in
       { row; into; into_current = StringSet.mem into current_ids }
     in
+    let resolved = List.map resolve absorbed in
+    let last_write : (string * string, int) Hashtbl.t = Hashtbl.create 64 in
+    List.iteri
+      (fun index (m : absorbed_match) ->
+         Hashtbl.replace last_write (m.row.Keeper_memory_absorbed.memory_id, m.into) index)
+      resolved;
+    let statements =
+      List.filteri
+        (fun index (m : absorbed_match) ->
+           Hashtbl.find_opt last_write (m.row.Keeper_memory_absorbed.memory_id, m.into) = Some index)
+        resolved
+    in
+    let whole_query, fragments =
+      answering
+        ~claim_of:(fun (m : absorbed_match) ->
+          m.row.Keeper_memory_absorbed.fact.Keeper_memory_os_types.claim)
+        ~query
+        statements
+    in
     Ok
       { matches =
           whole_query @ fragments
-          |> List.map resolve
           |> List.filter (fun (m : absorbed_match) ->
             not (StringSet.mem m.into answered_by))
           |> take limit

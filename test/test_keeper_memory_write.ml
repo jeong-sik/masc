@@ -1883,6 +1883,75 @@ let test_absorbed_rows_follow_later_merges_and_leave_room () =
     (List.map (string_field "text") (matches (search ~meta:crowded ~source:"all" ~limit:2)))
 ;;
 
+(* Rows a failed pass left can send a claim to one that never became current,
+   and rows can loop. Following [into], a claim the rows send to a current
+   claim goes there even when a later failed pass sent it elsewhere, and a
+   loop stops at the claim before it would come back. *)
+let test_absorbed_chain_prefers_current_and_stops_before_a_loop () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "absorbed-chain-edges" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let id = Masc.Keeper_memory_os_types.memory_id in
+  let committed = fact "delta holds the release notes" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ committed ];
+  let xray = fact "xray deploys on monday" in
+  let alpha = fact "alpha holds the release notes" in
+  let never_current = fact "echo holds the release notes" in
+  let yankee = fact "yankee deploys on sunday" in
+  let bravo = fact "bravo waits for yankee" in
+  let row ~trace_id (absorbed : Masc.Keeper_memory_os_types.fact) into =
+    { Masc.Keeper_memory_absorbed.recorded_at = Time_compat.now ()
+    ; trace_id
+    ; memory_id = id absorbed
+    ; into = id into
+    ; fact = absorbed
+    }
+  in
+  (match
+     Masc.Keeper_memory_absorbed.append_all
+       ~keepers_dir
+       ~keeper_id:meta.name
+       [ row ~trace_id:"first-pass" xray alpha
+       ; row ~trace_id:"committed-pass" alpha committed
+       ; row ~trace_id:"failed-pass" alpha never_current
+       ; row ~trace_id:"loop-pass" yankee bravo
+       ; row ~trace_id:"loop-pass" bravo yankee
+       ]
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
+  let found =
+    match
+      Runtime.keeper_memory_search_json
+        ~config
+        ~meta
+        ~ctx_work:(empty_ctx ())
+        ~args:
+          (`Assoc
+              [ "query", `String "deploys"; "source", `String "absorbed"; "limit", `Int 10 ])
+      |> Yojson.Safe.from_string
+      |> json_field "matches"
+    with
+    | `List items -> items
+    | _ -> Alcotest.fail "matches is a list"
+  in
+  Alcotest.(check (list (triple string string bool)))
+    "a current claim is preferred over a failed pass, and a loop stops before it returns"
+    [ "xray deploys on monday", id committed, true
+    ; "yankee deploys on sunday", id bravo, false
+    ]
+    (List.map
+       (fun matched ->
+          ( string_field "text" matched
+          , string_field "into" matched
+          , json_field "into_current" matched = `Bool true ))
+       found)
+;;
+
 (* A keeper asks in several words, and a claim rarely holds them as one run of
    text. A claim answers when it holds the whole query or every word of it, in
    any order. The whole-query answers come first, so a search the substring
@@ -2688,6 +2757,10 @@ let () =
             "absorbed rows follow later merges and leave room"
             `Quick
             test_absorbed_rows_follow_later_merges_and_leave_room
+        ; Alcotest.test_case
+            "absorbed chain prefers current and stops before a loop"
+            `Quick
+            test_absorbed_chain_prefers_current_and_stops_before_a_loop
         ; Alcotest.test_case
             "a query of several words is answered"
             `Quick

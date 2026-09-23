@@ -66,6 +66,14 @@ type create_outcome =
       { preview : preview
       ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
       }
+  | Created_but_shadowed of
+      { preview : preview
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      ; winner : Skill_catalog_snapshot.identity
+      }
+      (** Written and published, but an earlier source declares the same
+          name. The catalog keeps the new package as a shadow of [winner],
+          and Keeper turns list Skills by name, so they see [winner]. *)
   | Created_but_unpublished of
       { preview : preview
       ; reason : string
@@ -159,6 +167,10 @@ val delete :
 val access_to_string : access -> string
 val recovery_disposition_to_string : recovery_disposition -> string
 val delete_unpublished_reason_to_string : delete_unpublished_reason -> string
+
+(** The audit reason for [Created_but_shadowed]: the winning source and
+    package. *)
+val shadowed_reason : Skill_catalog_snapshot.identity -> string
 val error_recovery : error -> (string * recovery_disposition) option
 val error_code : error -> string
 val error_to_string : error -> string

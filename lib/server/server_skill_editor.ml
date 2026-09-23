@@ -59,6 +59,11 @@ type create_outcome =
       { preview : preview
       ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
       }
+  | Created_but_shadowed of
+      { preview : preview
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      ; winner : Skill_catalog_snapshot.identity
+      }
   | Created_but_unpublished of
       { preview : preview
       ; reason : string
@@ -159,6 +164,13 @@ let recovery_cause_to_string = function
 let delete_unpublished_reason_to_string = function
   | Publication_failed reason -> reason
   | Publication_cancelled -> "snapshot refresh cancelled"
+;;
+
+let shadowed_reason winner =
+  Printf.sprintf
+    "shadowed by %s/%s, which declares the same name in an earlier source"
+    (Skill_reference.identity_source_id_to_string winner)
+    (Skill_reference.identity_package_id_to_string winner)
 ;;
 
 let recovery_cause_to_yojson = function
@@ -384,6 +396,19 @@ let published_snapshot = function
   | Skill_catalog_snapshot_service.Published snapshot
   | Unchanged snapshot -> Ok snapshot
   | Workspace_retired -> Error "workspace retired during Skill publication"
+;;
+
+(* The earlier source's entry that holds [identity]'s name, when there is
+   one. [resolve_reference] finds shadowed entries too, so a reference that
+   resolves is not yet one that Keeper turns see: they list effective entries
+   by name (RFC keeper-self-authored-skills). *)
+let shadow_winner snapshot identity =
+  List.find_map
+    (fun (shadow : Skill_catalog_snapshot.shadow) ->
+       if Skill_reference.equal_identity shadow.shadowed identity
+       then Some shadow.winner
+       else None)
+    (Skill_catalog_snapshot.shadows snapshot)
 ;;
 
 let save ~base_path ~reference ~source_text ~refresh =
@@ -641,13 +666,14 @@ let create ~base_path ~source_id ~package_id ~source_text ~refresh =
                    published
                    preview.profile.reference
                with
-               | Ok _ ->
-                 Ok
-                   (Created_and_published
-                      { preview
-                      ; snapshot_revision =
-                          Skill_catalog_snapshot.snapshot_revision published
-                      })
+               | Ok entry ->
+                 let snapshot_revision =
+                   Skill_catalog_snapshot.snapshot_revision published
+                 in
+                 (match shadow_winner published entry.identity with
+                  | None -> Ok (Created_and_published { preview; snapshot_revision })
+                  | Some winner ->
+                    Ok (Created_but_shadowed { preview; snapshot_revision; winner }))
                | Error _ ->
                  Ok
                    (Created_but_unpublished
@@ -1151,6 +1177,14 @@ let create_outcome_to_yojson = function
       ; "preview", preview_to_yojson preview
       ; ( "snapshot_revision"
         , `String (Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision) )
+      ]
+  | Created_but_shadowed { preview; snapshot_revision; winner } ->
+    `Assoc
+      [ "status", `String "created_but_shadowed"
+      ; "preview", preview_to_yojson preview
+      ; ( "snapshot_revision"
+        , `String (Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision) )
+      ; "winner", Skill_catalog_snapshot.identity_to_yojson winner
       ]
   | Created_but_unpublished { preview; reason } ->
     `Assoc

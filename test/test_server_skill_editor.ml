@@ -338,6 +338,7 @@ let test_create_publishes_without_host_path_input () =
    with
    | Ok (Editor.Created_and_published { preview; _ }) ->
      check string "generated profile" "instruction" preview.profile.kind
+   | Ok (Created_but_shadowed _) -> fail "the only source's Skill was shadowed"
    | Ok (Created_but_unpublished _) -> fail "generated Skill was not published"
    | Error error -> fail (Editor.error_to_string error));
   let persisted = Filename.concat base_path "skills/generated/SKILL.md" in
@@ -353,6 +354,86 @@ let test_create_publishes_without_host_path_input () =
    | Error Editor.Package_already_exists -> ()
    | Error error -> fail ("wrong duplicate error: " ^ Editor.error_to_string error)
    | Ok _ -> fail "create-only path overwrote an existing package")
+;;
+
+(* When two sources declare one name, the earlier source wins and the later
+   package is its shadow (RFC keeper-self-authored-skills). Keeper turns list
+   Skills by name, so a create that lands behind an earlier source is written
+   and published but never seen, and the answer has to say whose package is
+   seen instead. *)
+let test_create_behind_an_earlier_source_names_the_winner () =
+  with_workspace @@ fun base_path ->
+  let operator_root = Filename.concat base_path "operator-skills" in
+  Unix.mkdir operator_root 0o700;
+  Unix.mkdir (Filename.concat base_path "skills") 0o700;
+  Unix.mkdir (Filename.concat operator_root "shared") 0o700;
+  write_file
+    (Filename.concat operator_root "shared/SKILL.md")
+    (named_skill_text "shared" "The operator's procedure." "# Operator");
+  let config_text =
+    "[skills]\nresource-read-max-bytes = 65536\n\n\
+     [[skills.sources]]\nid = \"operator\"\nanchor = \"base-path\"\n\
+     path = \"operator-skills\"\naccess = \"read-only\"\n\n\
+     [[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\n\
+     path = \"skills\"\naccess = \"read-write\"\n"
+  in
+  let workspace =
+    match Service.workspace_of_base_path ~base_path with
+    | Ok workspace -> workspace
+    | Error _ -> fail "workspace fixture was rejected"
+  in
+  let refresh () =
+    Ok
+      (Service.refresh
+         ~workspace
+         ~user_home:None
+         ~read_config:(fun () -> Service.Config_text config_text))
+  in
+  (match refresh () with
+   | Ok (Service.Published _ | Unchanged _) -> ()
+   | Ok Workspace_retired | Error _ -> fail "snapshot fixture was not published");
+  let source_id =
+    match Skill_source_config.source_id_of_string "workspace" with
+    | Ok value -> value
+    | Error detail -> fail detail
+  in
+  let create package_id =
+    Editor.create
+      ~base_path
+      ~source_id
+      ~package_id
+      ~source_text:(named_skill_text package_id "A later procedure." "# Later")
+      ~refresh
+  in
+  (match create "shared" with
+   | Ok (Editor.Created_but_shadowed { preview; winner; _ } as outcome) ->
+     check string "winner source" "operator"
+       (Skill_reference.identity_source_id_to_string winner);
+     check string "winner package" "shared"
+       (Skill_reference.identity_package_id_to_string winner);
+     check string "the shadow is the created package" "workspace"
+       (Skill_reference.identity_source_id_to_string preview.profile.reference.identity);
+     let json = Editor.create_outcome_to_yojson outcome in
+     check string "receipt status" "created_but_shadowed"
+       Yojson.Safe.Util.(member "status" json |> to_string);
+     check bool "receipt names the winner" true
+       (Yojson.Safe.Util.member "winner" json
+        = Skill_catalog_snapshot.identity_to_yojson winner)
+   | Ok (Created_and_published _) ->
+     fail "a package behind an earlier source was reported as the one Keepers see"
+   | Ok (Created_but_unpublished { reason; _ }) -> fail ("not published: " ^ reason)
+   | Error error -> fail (Editor.error_to_string error));
+  check bool "the shadowed package is still written" true
+    (Sys.file_exists (Filename.concat base_path "skills/shared/SKILL.md"));
+  (* Control: the same sources, a name no earlier source declares. *)
+  match create "fresh" with
+  | Ok (Editor.Created_and_published _) -> ()
+  | Ok (Created_but_shadowed { winner; _ }) ->
+    fail
+      ("a name no earlier source declares was shadowed by "
+       ^ Skill_reference.identity_package_id_to_string winner)
+  | Ok (Created_but_unpublished { reason; _ }) -> fail ("not published: " ^ reason)
+  | Error error -> fail (Editor.error_to_string error)
 ;;
 
 let read_file path =
@@ -971,6 +1052,8 @@ let () =
             test_saved_but_unpublished_is_explicit
         ; test_case "create publishes without host path input" `Quick
             test_create_publishes_without_host_path_input
+        ; test_case "create behind an earlier source names the winner" `Quick
+            test_create_behind_an_earlier_source_names_the_winner
         ; test_case "delete exact reference and publish" `Quick
             test_delete_exact_reference_and_publish
         ; test_case "delete stale revision does not mutate" `Quick

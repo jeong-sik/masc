@@ -110,9 +110,11 @@ equivalent explicitly on every node that has one.
   as `source_text`, and a non-empty `evidence` list (Memory fact ids, turn or tool
   call references). It creates the package in the `project-agents` source and
   republishes the catalog; the returned `reference` is what later turns find, except a Keeper whose meta declares a `skills` list sees it only once that list names it. An
-  existing name is refused as `package_already_exists`. `created_but_unpublished`
-  means the file was written but the catalog was not republished. Operators delete
-  published Skills through the editor.
+  existing package in `project-agents` is refused as `package_already_exists`.
+  `created_but_shadowed` means an earlier source already declares the name: the
+  package is written and published, but Keeper turns see `winner` under that name.
+  `created_but_unpublished` means the file was written but the catalog was not
+  republished. Operators delete published Skills through the editor.
 - Editor creation never overwrites an existing package. Saving an edit checks that the file
   still holds the revision you loaded, validates the document and the composition
   plan, writes it, and republishes the workspace snapshot. `saved_but_unpublished`

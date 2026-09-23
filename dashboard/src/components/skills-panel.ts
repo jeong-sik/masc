@@ -13,6 +13,7 @@ import {
   previewSkillSource,
   readSkillSource,
   saveSkillSource,
+  type SkillCreateReceipt,
   type SkillEvidenceResponse,
   type SkillCompositionEvidence,
   type SkillEditorLoaded,
@@ -157,6 +158,19 @@ export function resourceReadBoundLabel(config: SkillSnapshotConfig): string {
     return 'resource read max unavailable'
   }
   return `resource read max ${formatBytes(config.resource_read_max_bytes)}`
+}
+
+/** A shadowed create is written and published, but an earlier source holds
+ * the name, so Keepers see the winner; the line names it. */
+export function createReceiptMessage(receipt: SkillCreateReceipt): string {
+  switch (receipt.status) {
+    case 'created_and_published':
+      return 'created and published'
+    case 'created_but_shadowed':
+      return `created and published, but shadowed by ${receipt.winner.source_id}/${receipt.winner.package_id}: Keepers see that one`
+    case 'created_but_unpublished':
+      return `created but NOT published: ${receipt.reason}`
+  }
 }
 
 export function stateMessage(state: Exclude<SkillsResponse['state'], 'ready'>): string {
@@ -697,9 +711,7 @@ export function SkillsPanel() {
               package_id: createName.value,
               source_text: sourceText,
             })
-            createStatus.value = receipt.status === 'created_and_published'
-              ? 'created and published'
-              : `created but NOT published: ${receipt.reason}`
+            createStatus.value = createReceiptMessage(receipt)
             response.value = await fetchSkills()
           } catch (cause) {
             createStatus.value = cause instanceof Error ? cause.message : String(cause)

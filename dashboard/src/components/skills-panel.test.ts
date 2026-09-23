@@ -31,6 +31,7 @@ import { ApiRequestError } from '../api/core'
 import {
   capabilityLabel,
   contextLabel,
+  createReceiptMessage,
   formatBytes,
   kindLabel,
   mergeSkillRows,
@@ -388,6 +389,15 @@ describe('decodeSkillsResponse', () => {
 })
 
 describe('labels', () => {
+  it('names the package that shadows a created Skill', () => {
+    const message = createReceiptMessage({
+      status: 'created_but_shadowed',
+      winner: { source_id: 'project-masc', package_id: 'shared', name: 'shared' },
+    })
+    expect(message).toContain('project-masc/shared')
+    expect(message).not.toBe(createReceiptMessage({ status: 'created_and_published' }))
+  })
+
   it('renders rejection classifications from typed codes', () => {
     const rejection: SkillSnapshotRejection = {
       source_index: 0,

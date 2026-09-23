@@ -2,7 +2,7 @@
 title: "키퍼가 직접 만드는 Skill"
 status: Accepted
 created: 2026-09-11
-updated: 2026-09-23
+updated: 2026-09-24
 author: claude-main
 ---
 
@@ -83,6 +83,7 @@ author: claude-main
 
 출력은 editor 의 결과를 타입 그대로 투영해요.
 - `Created_and_published` → 참조와 snapshot revision
+- `Created_but_shadowed` → 참조, snapshot revision, 같은 이름을 먼저 선언해 이긴 패키지(`winner`)
 - `Created_but_unpublished` → 이유
 - `error_code` 와 문장
 

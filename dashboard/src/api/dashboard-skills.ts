@@ -1571,12 +1571,14 @@ export async function saveSkillSource(
 }
 
 /** Mirror of Server_skill_editor.create_outcome_to_yojson: the server
- * answers exactly created_and_published or created_but_unpublished (with
- * the reason). Anything else is drift, not a state to invent a label for —
- * the old `?? 'created'` default reported a status the server never sends
- * and hid the not-published reason. */
+ * answers exactly created_and_published, created_but_shadowed (with the
+ * earlier source's package that holds the name, which Keepers see instead)
+ * or created_but_unpublished (with the reason). Anything else is drift, not
+ * a state to invent a label for — the old `?? 'created'` default reported a
+ * status the server never sends and hid the not-published reason. */
 export type SkillCreateReceipt =
   | { status: 'created_and_published' }
+  | { status: 'created_but_shadowed'; winner: SkillIdentity }
   | { status: 'created_but_unpublished'; reason: string }
 
 export function decodeSkillCreateReceipt(raw: unknown): SkillCreateReceipt {
@@ -1584,6 +1586,15 @@ export function decodeSkillCreateReceipt(raw: unknown): SkillCreateReceipt {
     const record = raw as Record<string, unknown>
     if (record.status === 'created_and_published') {
       return { status: 'created_and_published' }
+    }
+    if (record.status === 'created_but_shadowed') {
+      const winner = Schema.decodeUnknownEither(
+        SkillIdentitySchema,
+        STRICT_PARSE_OPTIONS,
+      )(record.winner)
+      if (Either.isRight(winner)) {
+        return { status: 'created_but_shadowed', winner: winner.right }
+      }
     }
     if (record.status === 'created_but_unpublished' && typeof record.reason === 'string') {
       return { status: 'created_but_unpublished', reason: record.reason }

@@ -95,6 +95,16 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
                ; snapshot_revision =
                    Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision
                } )
+         | Created_but_shadowed { preview; snapshot_revision; winner } ->
+           ( preview
+           , "created_but_shadowed"
+           , Audit_log.Failure (Server_skill_editor.shadowed_reason winner)
+           , Publish.Created_but_shadowed
+               { reference = preview.profile.reference
+               ; snapshot_revision =
+                   Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision
+               ; winner
+               } )
          | Created_but_unpublished { preview; reason } ->
            ( preview
            , "created_but_unpublished"

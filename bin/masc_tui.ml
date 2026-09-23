@@ -17489,37 +17489,75 @@ and is loaded on demand through keeper_skill.
                 with
                 | Error detail -> report_action state "error" ("Skill create failed: " ^ detail)
                 | Ok json ->
-                  (* The server answers exactly created_and_published or
+                  (* The server answers exactly created_and_published,
+                     created_but_shadowed(+winner) or
                      created_but_unpublished(+reason). The old "created"
                      default reported a status the server never sends and
                      swallowed the not-published reason — the save path
                      below already reports it; the create path now does
-                     the same. *)
+                     the same, in the footer of the surface [c] was pressed
+                     on, as #32069 meant for every editor-backed outcome. *)
                   (match json_assoc_member_opt "status" json with
                    | Some (`String "created_and_published") ->
-                     add_event
+                     report_action
                        state
                        "system"
                        (Printf.sprintf
                           "created and published · %s/%s"
                           source_id
                           package_id)
+                   | Some (`String "created_but_shadowed") ->
+                     (* An earlier source declares the same name, so Keepers
+                        see that package; the winner leads because the
+                        footer cuts the tail first. *)
+                     let winner_field field =
+                       match json_assoc_member_opt "winner" json with
+                       | Some winner ->
+                         (match json_assoc_member_opt field winner with
+                          | Some (`String value) -> Some value
+                          | Some _ | None -> None)
+                       | None -> None
+                     in
+                     (match winner_field "source_id", winner_field "package_id" with
+                      | Some winner_source, Some winner_package ->
+                        report_action
+                          state
+                          "error"
+                          (Terminal_text.single_line
+                             (Printf.sprintf
+                                "shadowed by %s/%s: %s/%s was created and \
+                                 published, but Keepers see that one"
+                                winner_source
+                                winner_package
+                                source_id
+                                package_id))
+                      | None, _ | _, None ->
+                        report_action
+                          state
+                          "error"
+                          (Printf.sprintf
+                             "%s/%s: shadowed create receipt named no winner"
+                             source_id
+                             package_id))
                    | Some (`String "created_but_unpublished") ->
                      let reason =
                        match json_assoc_member_opt "reason" json with
                        | Some (`String reason) -> reason
                        | _ -> "(no reason reported)"
                      in
-                     add_event
+                     (* The event log escapes an entry where it draws it; the
+                        footer draws what it is given. *)
+                     report_action
                        state
                        "error"
-                       (Printf.sprintf
-                          "%s/%s was created but NOT published: %s"
-                          source_id
-                          package_id
-                          reason)
+                       (Terminal_text.single_line
+                          (Printf.sprintf
+                             "%s/%s was created but NOT published: %s"
+                             source_id
+                             package_id
+                             reason))
                    | Some (`String other) ->
-                     add_event
+                     report_action
                        state
                        "error"
                        (Printf.sprintf
@@ -17528,7 +17566,7 @@ and is loaded on demand through keeper_skill.
                           package_id
                           other)
                    | Some _ | None ->
-                     add_event
+                     report_action
                        state
                        "error"
                        (Printf.sprintf

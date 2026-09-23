@@ -422,6 +422,7 @@ let test_cancel_reason_labels_documented () =
     ; F.Cancelled_provider_timeout, "provider_timeout"
     ; F.Cancelled_fleet_shutdown, "fleet_shutdown"
     ; F.Cancelled_input_required, "input_required"
+    ; F.Cancelled_preempted_by_person, "preempted_by_person"
     ]
   in
   List.iter

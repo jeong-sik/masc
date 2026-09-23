@@ -9851,6 +9851,30 @@ let runtime_pick_column_widths ~cols items =
    than at any space, continuation rows under the same indent. A clause carries
    its own qualifier -- "2 probe-only" counts runtimes the probe reached and
    the config does not name, so a row ending at "2" claims something else. *)
+(* The three fleet totals, in one place. The Overview, the lane rows and the
+   Runtime authority row all say them, and a screen that folds its own copy
+   keeps compiling while the two answers drift. It lives here rather than in
+   the renderer because the renderer is an executable module: a test cannot
+   link it, and this is the first of those screens whose row count a test
+   reads. *)
+let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
+  let turns =
+    List.fold_left
+      (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_turns)
+      0 keepers
+  in
+  let tokens =
+    List.fold_left
+      (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_tokens)
+      0 keepers
+  in
+  let cost =
+    List.fold_left
+      (fun acc (k : Tui_decode.keeper) -> acc +. k.Tui_decode.k_total_cost_usd)
+      0.0 keepers
+  in
+  turns, tokens, cost
+
 let runtime_authority_rows ~cols (state : state) : string list =
   let single_line = Tui_decode.sanitize_terminal_text in
   let clauses =
@@ -9895,21 +9919,7 @@ let runtime_authority_rows ~cols (state : state) : string list =
           match state.keepers with
           | [] -> []
           | keepers ->
-              let turns =
-                List.fold_left
-                  (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_turns)
-                  0 keepers
-              in
-              let tokens =
-                List.fold_left
-                  (fun acc (k : Tui_decode.keeper) -> acc + k.Tui_decode.k_total_tokens)
-                  0 keepers
-              in
-              let cost =
-                List.fold_left
-                  (fun acc (k : Tui_decode.keeper) -> acc +. k.Tui_decode.k_total_cost_usd)
-                  0.0 keepers
-              in
+              let turns, tokens, cost = aggregate_keeper_stats keepers in
               [ Printf.sprintf
                   "fleet: %d keepers \xc2\xb7 %d turns \xc2\xb7 %s tok \xc2\xb7 $%.2f"
                   (List.length keepers) turns (format_context_tokens tokens) cost

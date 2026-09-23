@@ -171,11 +171,9 @@ let keepers_for_runtime (state : state) (runtime_id : string) : Tui_decode.keepe
            | Some def -> String.equal def runtime_id
            | None -> false)
 
-let aggregate_keeper_stats (keepers : Tui_decode.keeper list) =
-  let turns = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc + k.k_total_turns) 0 keepers in
-  let tokens = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc + k.k_total_tokens) 0 keepers in
-  let cost = List.fold_left (fun acc (k : Tui_decode.keeper) -> acc +. k.k_total_cost_usd) 0.0 keepers in
-  turns, tokens, cost
+(* [aggregate_keeper_stats] lives in Masc_tui_types, which this file opens:
+   the Runtime authority row needs the same three totals and a second copy
+   here is a copy that can go stale while both screens keep compiling. *)
 
 (* Pure preparation shared with the loop. Terminal dimensions are the raw
    cached measurement, before the surface strip and composer reserve rows. *)

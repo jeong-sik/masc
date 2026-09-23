@@ -3654,12 +3654,19 @@ let test_server_refusal_advances_once_to_successor status =
       | _ -> fail "HTTP server refusal lost its typed cause")
 ;;
 
+(* Which of its own deadlines the first candidate misses: the header deadline
+   ([connect_timeout_s]) or the total deadline ([body_timeout_s]), which ends
+   a request with no headers when it is the earlier one. *)
+type sent_deadline =
+  | Header_deadline
+  | Total_deadline
+
 (* A sent request that gets no answer within its binding's deadline advances to
    the declared successor, which carries its own deadline. The server answers
    every POST after a delay; only the first candidate's deadline is shorter
    than that delay, and loopback connects well inside it, so the deadline
    falls after dispatch. *)
-let test_sent_timeout_advances_once_to_successor () =
+let test_sent_timeout_advances_once_to_successor deadline () =
   let timed_out_id = "sent-timeout-first" in
   let successor_id = "sent-timeout-successor" in
   let (result, advances, observed_advance), posts =
@@ -3668,13 +3675,23 @@ let test_sent_timeout_advances_once_to_successor () =
       ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
-      [ catalog_entry
-          ~connect_timeout_s:(Some 0.5)
-          ~id:timed_out_id
-          ~base_url
-          ~native:true
-          ~json:true
-          ()
+      [ (match deadline with
+         | Header_deadline ->
+           catalog_entry
+             ~connect_timeout_s:(Some 0.5)
+             ~id:timed_out_id
+             ~base_url
+             ~native:true
+             ~json:true
+             ()
+         | Total_deadline ->
+           catalog_entry
+             ~body_timeout_s:0.5
+             ~id:timed_out_id
+             ~base_url
+             ~native:true
+             ~json:true
+             ())
       ; catalog_entry ~id:successor_id ~base_url ~native:true ~json:true ()
       ]
     @@ fun snapshot ->
@@ -3707,11 +3724,18 @@ let test_sent_timeout_advances_once_to_successor () =
    | Some (failed, next, cause, phase, dispatch_count) ->
      check string "the timed-out candidate" timed_out_id failed;
      check string "the declared successor" successor_id next;
-     (match cause with
-      | EO.Completion_failed
-          { error = Http_client.TimeoutError { phase = Http_client.Http_operation; _ }; _ }
+     (match deadline, cause with
+      | ( Header_deadline
+        , EO.Completion_failed
+            { error = Http_client.TimeoutError { phase = Http_client.Http_operation; _ }
+            ; _
+            } )
+      | ( Total_deadline
+        , EO.Completion_failed
+            { error = Http_client.TimeoutError { phase = Http_client.Wall_clock; _ }; _ } )
         -> ()
-      | _ -> fail "the first candidate did not end on its sent-request deadline");
+      | (Header_deadline | Total_deadline), _ ->
+        fail "the first candidate did not end on its sent-request deadline");
      check bool "the timed-out request was dispatched" true (phase = EO.Dispatch_started);
      check int "the timed-out candidate records one dispatch" 1 dispatch_count
    | None -> fail "a sent-request timeout did not request an advance");
@@ -4702,9 +4726,13 @@ let () =
         ; test_case "HTTP 529 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 529)
         ; test_case
-            "a sent request past its deadline advances once to the declared successor"
+            "a sent request past its header deadline advances once to the declared successor"
             `Quick
-            test_sent_timeout_advances_once_to_successor
+            (test_sent_timeout_advances_once_to_successor Header_deadline)
+        ; test_case
+            "a sent request past its total deadline advances once to the declared successor"
+            `Quick
+            (test_sent_timeout_advances_once_to_successor Total_deadline)
         ; test_case "HTTP 200 body deadline advances with truthful evidence" `Quick
             (test_body_deadline_advances_after_settlement ~http_status:200 ~settle:true)
         ; test_case "HTTP 201 body deadline uses the same successor contract" `Quick

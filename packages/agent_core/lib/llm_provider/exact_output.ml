@@ -1824,8 +1824,25 @@ let execution_failure_may_advance (error : execution_error) =
      keeps it as a fact. On the Librarian lane (2026-09-23) 51 of 85 failed
      runs ended this way at the first slot, and their successors were never
      tried. *)
-  | Completion_failed { error = Http_client.TimeoutError _; _ }, Dispatch_started ->
-    receipt_dispatch_count error.receipt = 1
+  | Completion_failed { error = Http_client.TimeoutError { phase; _ }; _ }, Dispatch_started ->
+    (match phase with
+     (* [post_sync_once] ends a sent request that has no response headers
+        with one of these two: the header deadline ([connect_timeout_s]) or
+        the total deadline ([body_timeout_s]) when it is the earlier one. *)
+     | Http_client.Http_operation | Http_client.Wall_clock ->
+       receipt_dispatch_count error.receipt = 1
+     (* The exact transport does not produce these after dispatch. One that
+        starts to needs its own argument that the successor may serve the
+        same input. *)
+     | Http_client.Queue
+     | Http_client.First_token
+     | Http_client.Capacity_backpressure
+     | Http_client.Non_streaming_body
+     | Http_client.Stream_body
+     | Http_client.Stream_idle _
+     | Http_client.Provider_step
+     | Http_client.Cli_stdout_idle
+     | Http_client.Unknown_timeout -> false)
   | Response_body_deadline_exceeded, Response_received ->
     (* No domain validator ran for this incomplete response. Advance through
        the caller's existing settlement callback, retaining the dispatched

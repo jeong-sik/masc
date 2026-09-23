@@ -227,6 +227,12 @@ and masc_internal_error =
           failed. The runtime flattened this into a sentence and the chat pane
           read the sentence back to decide what to draw (RFC-0454 §1.3); it is
           the value now, so the screen matches a constructor. *)
+  | Preempted_before_first_token of { runtime_id : string }
+      (** An autonomous turn gave up its provider attempt before the first
+          streaming event because a person queued behind it (RFC-0441). The
+          provider produced nothing and did not fail, and the turn did no
+          work: its source stays pending and runs fresh on a later cycle. It
+          is neither a success nor a failure of the turn (#38094). *)
   | Runtime_connection_closed of {
       runtime_id : string;
       detail : string;
@@ -290,6 +296,7 @@ type wire_kind =
   | Wire_provider_attempt_effect_fenced
   | Wire_tool_correction_lost
   | Wire_host_stopped_turn
+  | Wire_preempted_before_first_token
   | Wire_runtime_connection_closed
   | Wire_receipt_persistence_failed
   | Wire_gate_replay_repair_required

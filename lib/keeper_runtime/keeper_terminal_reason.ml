@@ -120,7 +120,10 @@ let of_masc_internal_kind wire = function
     Internal_error wire
   | Keeper_internal_error.Wire_resumable_cli_session
   | Keeper_internal_error.Wire_receipt_persistence_failed
-  | Keeper_internal_error.Wire_gate_replay_repair_required -> Unknown wire
+  | Keeper_internal_error.Wire_gate_replay_repair_required
+  (* #38094: a preempted turn is settled as skipped and writes no terminal
+     receipt, so this wire has no trace to classify from yet. *)
+  | Keeper_internal_error.Wire_preempted_before_first_token -> Unknown wire
 ;;
 
 (* Two stages. The keeper's own internal-error kinds are looked up in the

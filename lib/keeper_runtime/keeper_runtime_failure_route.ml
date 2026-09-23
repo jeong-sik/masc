@@ -140,6 +140,14 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      this arrived as an untyped [Internal] string and landed on exactly this
      route. *)
   | Keeper_internal_error.Host_stopped_turn _ -> exhaust_failure Internal_opaque
+  (* A person queued behind this autonomous turn before its provider produced
+     anything (RFC-0441). The turn yields to them; walking to the next
+     candidate would start another provider call while they wait, and the
+     abandoned candidate did not fail, so the walk ends here with no rest or
+     demotion noted (Exhausted_visible_alive notes none). The keeper then
+     settles the turn as skipped, not failed (#38094). *)
+  | Keeper_internal_error.Preempted_before_first_token _ ->
+    exhaust_failure Internal_opaque
   (* The runtime's transport closed. This used to reach agent-core as
      [ProviderUnavailable], and [route_of_provider_error] answers
      [observe_retry Server_error] for that; the typed value must not change

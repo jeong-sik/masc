@@ -34,6 +34,7 @@ let terminal_effect_failed_kind = "terminal_effect_failed"
    spelling. The remaining two kinds have no such consumer policy yet. *)
 let official_client_recovery_required_kind = "official_client_recovery_required"
 let host_stopped_turn_kind = "host_stopped_turn"
+let preempted_before_first_token_kind = "preempted_before_first_token"
 let runtime_connection_closed_kind = "runtime_connection_closed"
 
 (** Why the durable official-client session refuses a new local claim.
@@ -364,6 +365,7 @@ and masc_internal_error =
       runtime_id : string;
       stop : host_turn_stop;
     }
+  | Preempted_before_first_token of { runtime_id : string }
   | Runtime_connection_closed of {
       runtime_id : string;
       detail : string;
@@ -599,6 +601,11 @@ and masc_internal_error_to_json = function
       ; "runtime_id", `String (runtime_id_to_string runtime_id)
       ; "stop", `String (host_turn_stop_to_string stop)
       ]
+  | Preempted_before_first_token { runtime_id } ->
+    `Assoc
+      [ "kind", `String preempted_before_first_token_kind
+      ; "runtime_id", `String (runtime_id_to_string runtime_id)
+      ]
   | Runtime_connection_closed { runtime_id; detail; turn_accepted } ->
     `Assoc
       [ "kind", `String runtime_connection_closed_kind
@@ -751,6 +758,7 @@ let summary_of_masc_internal_error = function
      RFC-0454 exists to undo. The row gets a typed [failure] field in P3
      (RFC-0454 D3); these arms answer then. *)
   | Host_stopped_turn _
+  | Preempted_before_first_token _
   | Runtime_connection_closed _
   | Resumable_cli_session _
   | Internal_unhandled_exception _
@@ -776,6 +784,7 @@ type wire_kind =
   | Wire_provider_attempt_effect_fenced
   | Wire_tool_correction_lost
   | Wire_host_stopped_turn
+  | Wire_preempted_before_first_token
   | Wire_runtime_connection_closed
   | Wire_receipt_persistence_failed
   | Wire_gate_replay_repair_required
@@ -794,6 +803,7 @@ let wire_kind_of_masc_internal_error = function
   | Provider_attempt_effect_fenced _ -> Wire_provider_attempt_effect_fenced
   | Tool_correction_lost _ -> Wire_tool_correction_lost
   | Host_stopped_turn _ -> Wire_host_stopped_turn
+  | Preempted_before_first_token _ -> Wire_preempted_before_first_token
   | Runtime_connection_closed _ -> Wire_runtime_connection_closed
   | Receipt_persistence_failed _ -> Wire_receipt_persistence_failed
   | Gate_replay_repair_required _ -> Wire_gate_replay_repair_required
@@ -812,6 +822,7 @@ let wire_kind_to_string = function
   | Wire_provider_attempt_effect_fenced -> provider_attempt_effect_fenced_kind
   | Wire_tool_correction_lost -> tool_correction_lost_kind
   | Wire_host_stopped_turn -> host_stopped_turn_kind
+  | Wire_preempted_before_first_token -> preempted_before_first_token_kind
   | Wire_runtime_connection_closed -> runtime_connection_closed_kind
   | Wire_receipt_persistence_failed -> "receipt_persistence_failed"
   | Wire_gate_replay_repair_required -> "gate_replay_repair_required"
@@ -833,6 +844,7 @@ let all_wire_kinds =
   ; Wire_provider_attempt_effect_fenced
   ; Wire_tool_correction_lost
   ; Wire_host_stopped_turn
+  ; Wire_preempted_before_first_token
   ; Wire_runtime_connection_closed
   ; Wire_receipt_persistence_failed
   ; Wire_gate_replay_repair_required
@@ -865,6 +877,7 @@ let runtime_id_of_masc_internal_error = function
   | Provider_attempt_effect_fenced { runtime_id; _ }
   | Tool_correction_lost { runtime_id; _ }
   | Host_stopped_turn { runtime_id; _ }
+  | Preempted_before_first_token { runtime_id }
   | Runtime_connection_closed { runtime_id; _ } ->
       let runtime_id = runtime_id_to_string runtime_id in
       if String.equal (String.trim runtime_id) "" then "unknown"
@@ -947,6 +960,7 @@ let accept_no_progress_retry_kind = function
   | Provider_attempt_effect_fenced _
   | Tool_correction_lost _
   | Host_stopped_turn _
+  | Preempted_before_first_token _
   | Runtime_connection_closed _
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ ->
@@ -1232,6 +1246,13 @@ and parse_masc_internal_error_json (json : Yojson.Safe.t) :
              (fun stop -> Host_stopped_turn { runtime_id; stop })
              (host_turn_stop_of_string stop)
          | _ -> None)
+      | Some (`String kind)
+        when String.equal kind preempted_before_first_token_kind
+             && exact_fields [ "kind"; "runtime_id" ] fields ->
+        (match string_opt_of_assoc "runtime_id" json with
+         | Some runtime_id when String.trim runtime_id <> "" ->
+           Some (Preempted_before_first_token { runtime_id })
+         | Some _ | None -> None)
       | Some (`String kind)
         when String.equal kind runtime_connection_closed_kind
              && exact_fields

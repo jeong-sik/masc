@@ -95,10 +95,9 @@ let selected_runtime_result ?official_client_settlement (runtime : Runtime.t) ~l
     result
 ;;
 
-(* Whether the candidate answered at all. An attempt that yielded before any
-   provider turn completed -- the pre-first-token yield that
-   [Runtime_agent.yielded_pre_first_token] builds when a person queues behind
-   a silent provider -- did not, so it is no evidence the candidate is back. *)
+(* Whether the candidate answered at all. An attempt that stopped before any
+   provider turn completed did not, so it is no evidence the candidate is
+   back. *)
 let run_result_answered (run_result : Runtime_agent.run_result) =
   match run_result.Runtime_agent.stop_reason with
   | Runtime_agent.Completed -> true

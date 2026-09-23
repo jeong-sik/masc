@@ -1957,6 +1957,7 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_official_client_recovery_required_names: string list;
   fs_active_task_owner_without_fiber_count: int;
   fs_completion_authority_pending_count: int;
+  fs_active_task_owner_scan_error_count: int;
 }
 
 type planning_goal_history = Tui_decode.planning_goal_history
@@ -9630,12 +9631,22 @@ let approval_items (state : state) =
    seen from. The badge number is therefore the SUM of approval rows and open
    questions, not an approval count: a badge of 3 may be three approvals,
    three questions, or a mix. *)
-let approvals_surface_pending (state : state) =
-  List.length (approval_items state)
-  +
-  match state.asks_snapshot with
-  | Some snapshot -> List.length (Masc_tui_ask_projection.open_rows snapshot)
+(* The questions behind the count, so the three places that say how many there
+   are cannot count different things: this surface's title, the block heading
+   above the questions themselves, and the badge below. [None] is a reading
+   that has not come back, which is not the same answer as a reading with no
+   question in it -- the block draws nothing for the first and says so for the
+   second. *)
+let approvals_open_questions (state : state) =
+  Option.map Masc_tui_ask_projection.open_rows state.asks_snapshot
+
+let approvals_open_question_count (state : state) =
+  match approvals_open_questions state with
+  | Some rows -> List.length rows
   | None -> 0
+
+let approvals_surface_pending (state : state) =
+  List.length (approval_items state) + approvals_open_question_count state
 
 let is_surface_active (state : state) (s : surface) =
   match s with
@@ -10294,6 +10305,31 @@ let keeper_message_activity_rows (state : state) =
       else []) @ queue_rows
 ;;
 
+(* The in-flight requests the chat pane draws a row for.
+
+   A request the live transcript is already drawing gets no row of its own:
+   the transcript says its phase, its age and the tools it is in, and a second
+   row put a second age and an opaque request id above the ACTIVE TURN line.
+   The pane decided that by execution id and the budget did not decide it at
+   all, so with one message in flight -- the ordinary case -- the budget held a
+   row the pane never drew, and the status area gained a blank line while the
+   footer sat one row off (#37741).
+
+   Both read this now. The filter is keyed on the execution id rather than the
+   keeper, so a second message to the same keeper still gets its row, and a
+   request to some other keeper cannot be swallowed by it: an execution id
+   belongs to one turn. *)
+let keeper_message_inflight_drawn (state : state) =
+  match state.msg_live with
+  | Some live
+    when state.msg_target_keeper_name = Some (turn_log_keeper_name live) ->
+    let drawn_by_transcript = turn_log_execution_id live in
+    List.filter
+      (fun entry ->
+        not (String.equal drawn_by_transcript (turn_log_execution_id entry.log)))
+      state.msg_inflight
+  | Some _ | None -> state.msg_inflight
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -10301,7 +10337,7 @@ let keeper_message_status_rows (state : state) =
       -> 0
     | Some _ | None -> 1
   in
-  List.length state.msg_inflight
+  List.length (keeper_message_inflight_drawn state)
   + List.length (keeper_message_activity_rows state)
   + List.length (keeper_observed_interrupt_rows state)
   + unavailable_target

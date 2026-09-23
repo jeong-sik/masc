@@ -180,8 +180,10 @@ let provider_error_terminal_reason_code = function
     ^ provider_timeout_suffix timeout_phase
   | Llm_provider.Error.InvalidRequest _ -> "provider_error_invalid_request"
   | Llm_provider.Error.NotFound _ -> "provider_error_not_found"
-  | Llm_provider.Error.ProviderTerminal { reason; _ } ->
-    Printf.sprintf "provider_error_terminal:%s" reason
+  | Llm_provider.Error.ProviderTerminal { kind; _ } ->
+    Printf.sprintf
+      "provider_error_terminal:%s"
+      (Llm_provider.Error.provider_terminal_reason kind)
 ;;
 
 let terminal_reason_code_of_core_error = function

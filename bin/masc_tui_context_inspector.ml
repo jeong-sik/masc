@@ -78,6 +78,7 @@ type forecast_carried_origin =
   | Carried_from_turn_record of { turn : int }
   | Carried_halved_after_refusal of { retry : int }
   | Carried_evicted_after_refusal of { retry : int }
+  | Carried_turn_start_after_seed_refusal
   | Carried_turn_start of { end_atom : int }
   | Carried_turn_start_unknown of { reason : string }
 
@@ -724,6 +725,8 @@ let decode_forecast_origin = function
       let* retry_json = field "retry" fields in
       let* retry = nonnegative_int "origin.retry" retry_json in
       Ok (Carried_evicted_after_refusal { retry })
+    else if String.equal kind "turn_start_after_seed_refusal" then
+      Ok Carried_turn_start_after_seed_refusal
     else if String.equal kind "turn_start" then
       let* end_atom_json = field "end_atom" fields in
       let* end_atom = nonnegative_int "origin.end_atom" end_atom_json in

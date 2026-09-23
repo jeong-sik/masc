@@ -211,6 +211,12 @@ blocking_lints() {
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "TUI graceful restart fixture" env TUI_GRACEFUL_RESTART_SELF_TEST=1 bash scripts/tui-graceful-restart.sh
+  # The fixture above checks the pieces; this drives the whole script against a
+  # real process and a real signal, then runs the same cycle against a copy with
+  # the SIGTERM removed and requires the checks to fail. It refuses to run at all
+  # if a TUI surface is already up, because the script it drives finds surfaces
+  # machine-wide and would restart yours.
+  run_lint "TUI graceful restart, one real cycle" bash scripts/test-tui-graceful-restart-e2e.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
   run_lint "Stale-worktree cleanup keeps commits" bash scripts/test-cleanup-stale-worktrees.sh
   # A guard nobody runs is a document. Twice a guard sat red on untouched main

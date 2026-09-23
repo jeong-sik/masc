@@ -914,7 +914,9 @@ let test_prompt_transmission_boundary () =
   with_fixture [ init_result; account_chatgpt; thread_result; turn_result; turn_failed ]
     (fun path ->
       (match run_fixture ~on_prompt_sent:report path with
-       | Error (Runtime_codex_app_server.Turn_failed "fixture provider rejection") -> ()
+       | Error
+           (Runtime_codex_app_server.Turn_failed
+              { detail = "fixture provider rejection"; codex_error_info = None }) -> ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "provider rejection became success");
       check int "provider rejection keeps transmitted evidence" 2 !sent);
@@ -1363,7 +1365,7 @@ let test_failed_turn_keeps_typed_error_fields () =
     [ init_result; account_chatgpt; thread_result; turn_result; failed ]
     (fun path ->
       match run_fixture path with
-      | Error (Runtime_codex_app_server.Turn_failed detail) ->
+      | Error (Runtime_codex_app_server.Turn_failed { detail; codex_error_info = None }) ->
         check
           bool
           "provider sentence survives"
@@ -1398,6 +1400,65 @@ let test_failed_turn_uses_official_context_error_enum () =
       | Ok _ -> fail "typed context overflow incorrectly reported as completed")
 ;;
 
+(* A weekly usage limit arrives as a terminal [error] notification whose
+   [codexErrorInfo] is the schema's [usageLimitExceeded]. The client read only
+   [contextWindowExceeded] from that field, so this failure reached the keeper
+   as an unclassified turn failure. *)
+let test_error_notification_reads_usage_limit () =
+  let terminal =
+    {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"You've hit your usage limit. Try again later.","codexErrorInfo":"usageLimitExceeded","additionalDetails":null}}}|}
+  in
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result; terminal ]
+    (fun path ->
+      match run_fixture path with
+      | Error
+          (Runtime_codex_app_server.Turn_failed
+             { codex_error_info =
+                 Some Runtime_codex_app_server.Codex_error_info.Usage_limit_exceeded
+             ; detail = _
+             }) -> ()
+      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Ok _ -> fail "usage limit notification did not fail the turn")
+;;
+
+(* The object variants carry the upstream HTTP status, and a value the schema
+   does not name is kept whole rather than read as some known class. *)
+let test_failed_turn_reads_object_and_unknown_error_info () =
+  let failed info =
+    Printf.sprintf
+      {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"fixture failure","codexErrorInfo":%s}}}}|}
+      info
+  in
+  let run info =
+    with_fixture
+      [ init_result; account_chatgpt; thread_result; turn_result; failed info ]
+      (fun path -> run_fixture path)
+  in
+  (match run {|{"responseStreamDisconnected":{"httpStatusCode":502}}|} with
+   | Error
+       (Runtime_codex_app_server.Turn_failed
+          { codex_error_info =
+              Some
+                (Runtime_codex_app_server.Codex_error_info.Response_stream_disconnected
+                   { http_status_code = Some 502 })
+          ; detail = _
+          }) -> ()
+   | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+   | Ok _ -> fail "stream disconnect reported as completed");
+  match run {|"newVendorCode"|} with
+  | Error
+      (Runtime_codex_app_server.Turn_failed
+         { codex_error_info =
+             Some
+               (Runtime_codex_app_server.Codex_error_info.Unrecognized
+                  (`String "newVendorCode"))
+         ; detail = _
+         }) -> ()
+  | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+  | Ok _ -> fail "unknown error info reported as completed"
+;;
+
 (* The named-field form could not distinguish "the server sent no scalar" from
    "the scalar is called something else": both printed the sentence with no
    annotation. That is what a live Keeper produced on 2026-08-11 after the narrow
@@ -1413,7 +1474,7 @@ let test_failed_turn_keeps_unnamed_error_scalars () =
     [ init_result; account_chatgpt; thread_result; turn_result; failed ]
     (fun path ->
       match run_fixture path with
-      | Error (Runtime_codex_app_server.Turn_failed detail) ->
+      | Error (Runtime_codex_app_server.Turn_failed { detail; codex_error_info = None }) ->
         check
           bool
           "provider sentence survives"
@@ -1520,7 +1581,9 @@ let test_failed_turn_is_not_completion () =
     [ init_result; account_chatgpt; thread_result; turn_result; failed ]
     (fun path ->
       match run_fixture path with
-      | Error (Runtime_codex_app_server.Turn_failed "fixture failure") -> ()
+      | Error
+        (Runtime_codex_app_server.Turn_failed
+           { detail = "fixture failure"; codex_error_info = None }) -> ()
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "failed turn incorrectly reported as completed")
 ;;
@@ -1548,7 +1611,9 @@ let test_retry_notifications_are_observational () =
     [ init_result; account_chatgpt; thread_result; turn_result; terminal ]
     (fun path ->
        match run_fixture path with
-       | Error (Runtime_codex_app_server.Turn_failed "provider gave up") -> ()
+       | Error
+         (Runtime_codex_app_server.Turn_failed
+            { detail = "provider gave up"; codex_error_info = None }) -> ()
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "terminal error notification did not fail the turn")
 ;;
@@ -5146,6 +5211,10 @@ let () =
             test_failed_turn_keeps_typed_error_fields
         ; test_case "failed turn uses official context error enum" `Quick
             test_failed_turn_uses_official_context_error_enum
+        ; test_case "error notification reads usage limit" `Quick
+            test_error_notification_reads_usage_limit
+        ; test_case "failed turn reads object and unknown error info" `Quick
+            test_failed_turn_reads_object_and_unknown_error_info
         ; test_case "failed turn keeps unnamed error scalars" `Quick
             test_failed_turn_keeps_unnamed_error_scalars
         ; test_case "history bytes sum text only" `Quick

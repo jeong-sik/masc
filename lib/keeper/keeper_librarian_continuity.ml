@@ -61,8 +61,11 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
   | Ok checkpoint ->
     let messages = C.exact_snapshot_messages checkpoint in
     match S.checkpoint_prefix_range ~trace_id ~lines ~messages with
-    | Error S.Uncovered_history -> Ok (No_source Source_unreadable)
-    | Error error -> Error (S.error_to_string error)
+    | Error (S.Uncovered_history | S.Unmatched_history) -> Ok (No_source Source_unreadable)
+    | Error
+        ((S.Range_stopped _ | S.Trace_mismatch | S.History_changed | S.Prefix_changed
+         | S.Invalid_snapshot _ | S.Read_failed _ | S.Write_failed _) as error) ->
+      Error (S.error_to_string error)
     | Ok range ->
       let fitting_previous = match previous with
         | Some snapshot -> (match S.restore ~trace_id ~lines ~messages snapshot with

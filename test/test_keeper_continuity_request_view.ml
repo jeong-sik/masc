@@ -215,6 +215,37 @@ let test_turn_start_reader_says_unknown_when_the_store_is_unreadable () =
      fail (Printf.sprintf "an unreadable boundary store answered atom %d" end_atom))
 ;;
 
+(* A boundary log whose end lines no longer match the history -- the history
+   was rewritten or renumbered after they were written -- is an unknown start,
+   not the start: 0 would send the whole history, the provider would refuse
+   it, and the failed turn would write no end line to fix the next one. A log
+   with no end line of this trace is a first turn, and that one is 0. *)
+let test_turn_start_is_unknown_when_no_end_line_matches_the_history () =
+  let base_path = Filename.temp_dir "turn-start-unmatched-" "" in
+  let config = Masc.Workspace.default_config base_path in
+  let keeper_name = "renumbered" in
+  let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  (match Driver.turn_start ~config ~keeper_name ~trace_id ~messages:source with
+   | Front.Turn_boundary { end_atom = 0 } -> ()
+   | Front.Turn_boundary { end_atom } ->
+     fail (Printf.sprintf "a log with no end line answered atom %d" end_atom)
+   | Front.Turn_boundary_unknown { reason } ->
+     fail ("a log with no end line answered unknown: " ^ reason));
+  let position = match Boundary.position_of_messages source with
+    | Ok position -> position | Error detail -> fail detail in
+  mkdir_p (Filename.concat keepers_dir keeper_name);
+  (match Boundary.append ~keepers_dir ~keeper_id:keeper_name
+     { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
+         { turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+           history_at_start = Boundary.Fresh_history; position } } with
+   | Ok () -> () | Error error -> fail (Boundary.append_error_to_string error));
+  let rewritten = [pinned; text T.User "Rebuild the patch."; text T.Assistant "The rebuild passed."] in
+  (match Driver.turn_start ~config ~keeper_name ~trace_id ~messages:rewritten with
+   | Front.Turn_boundary_unknown _ -> ()
+   | Front.Turn_boundary { end_atom } ->
+     fail (Printf.sprintf "an end line that matches nothing answered atom %d" end_atom))
+;;
+
 let progress ~trace_id ~end_atom ~last_atom_digest : Progress.t =
   { position = { Progress.trace_id; end_atom; last_atom_digest }; boundary_lines_seen = 1 }
 ;;
@@ -406,8 +437,8 @@ let test_completed_boundary_protects_resumed_work () =
     | [T.ToolUse fields] when fields.id = "completed" ->
       {m with content = [T.ToolUse {fields with id = "changed"}]}
     | _ -> m) resumed in
-  check bool "mismatching completed atom never authorizes demotion" true
-    (Result.is_error (completed_end lines mismatched));
+  check bool "mismatching completed atom is an unmatched history, not the start" true
+    (completed_end lines mismatched = Error Snapshot.Unmatched_history);
   let baseline = List.map (fun (line, record) -> line,
     Result.map (fun (record : Boundary.record) ->
       match record.event with
@@ -483,7 +514,8 @@ let test_an_unusable_snapshot_starts_without_it () =
   let moved = [pinned; text T.User "Start over on the docs"; text T.Assistant "Docs drafted."; fresh] in
   let moved_digest = Window.atom_opening_digest moved in
   (match Driver.prepare_continuity ~trace_id ~lines ~messages:moved snapshot with
-   | Error (Snapshot.Trace_mismatch | Snapshot.History_changed | Snapshot.Uncovered_history) -> ()
+   | Error (Snapshot.Trace_mismatch | Snapshot.History_changed | Snapshot.Uncovered_history
+           | Snapshot.Unmatched_history) -> ()
    | Ok _ | Error _ -> fail "the fixture's moved history still fits the snapshot");
   (match
      (absorbed_view
@@ -657,6 +689,7 @@ let () = run "continuity request projection"
                test_case "covered prefix validation per request" `Quick test_each_request_validates_frozen_covered_messages;
                test_case "without a snapshot the range starts at the turn start" `Quick test_without_snapshot_starts_at_the_turn_start;
                test_case "the reader says unknown when the boundary store is unreadable" `Quick test_turn_start_reader_says_unknown_when_the_store_is_unreadable;
+               test_case "the reader says unknown when no end line matches the history" `Quick test_turn_start_is_unknown_when_no_end_line_matches_the_history;
                test_case "absorbed history starts at the Librarian's position" `Quick
                  test_absorbed_history_starts_at_the_librarians_position;
                test_case "an unusable snapshot starts without it" `Quick

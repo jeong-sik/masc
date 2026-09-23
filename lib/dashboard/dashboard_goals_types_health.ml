@@ -37,7 +37,7 @@ let goal_fsm_next_actions ~goal_phase =
     Goal_phase.Request_complete;
     Goal_phase.Drop;
     Goal_phase.Reopen;
-    (* RFC-0387 stage 2: the verifier's proof commits are the only moves out
+    (* RFC-0387 stage 2: the verifier's proof commits move a goal only out
        of [Verifying]; on every other phase they are invalid and the filter
        below drops them. Criterion verdicts are phase-neutral ([Already]), so
        they never read as a next step. *)

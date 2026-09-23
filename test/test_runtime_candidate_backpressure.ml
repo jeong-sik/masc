@@ -48,9 +48,7 @@ let test_failed_attempt_has_no_expiry () =
   match (State.observe ~now:1e12 noted).State.failed_attempt with
   | Some (State.Failed_attempt { noted_at; failure = State.Provider_timeout }) ->
       Alcotest.(check (float 0.)) "original observation retained" 10. noted_at
-  | Some
-      (State.Failed_attempt
-        { failure = State.Server_error | State.Network_transient | State.Access_refused; _ })
+  | Some (State.Failed_attempt { failure = State.Server_error | State.Network_transient; _ })
   | None ->
       Alcotest.fail "a failed attempt was ended or rewritten by the clock"
 ;;
@@ -63,25 +61,9 @@ let test_failed_attempt_delayed_observation_keeps_newer () =
   match delayed.State.failed_attempt with
   | Some (State.Failed_attempt { noted_at; failure = State.Network_transient }) ->
       Alcotest.(check (float 0.)) "newer observation kept" 20. noted_at
-  | Some
-      (State.Failed_attempt
-        { failure = State.Server_error | State.Provider_timeout | State.Access_refused; _ })
+  | Some (State.Failed_attempt { failure = State.Server_error | State.Provider_timeout; _ })
   | None ->
       Alcotest.fail "an older failure replaced a newer one"
-;;
-
-let test_access_refusal_has_no_expiry () =
-  let noted =
-    State.note_failed_attempt ~noted_at:10. ~failure:State.Access_refused State.empty
-  in
-  match (State.observe ~now:1e12 noted).State.failed_attempt with
-  | Some (State.Failed_attempt { noted_at; failure = State.Access_refused }) ->
-    Alcotest.(check (float 0.)) "access evidence retained" 10. noted_at
-  | Some
-      (State.Failed_attempt
-        { failure = State.Server_error | State.Network_transient | State.Provider_timeout; _ })
-  | None ->
-    Alcotest.fail "access refusal was ended or rewritten by the clock"
 ;;
 
 (* The two observations answer different questions, so neither erases the
@@ -165,8 +147,6 @@ let () =
             test_rate_limit_delayed_observation_keeps_newer_hint
         ; Alcotest.test_case "a failed attempt has no expiry" `Quick
             test_failed_attempt_has_no_expiry
-        ; Alcotest.test_case "access refusal has no expiry" `Quick
-            test_access_refusal_has_no_expiry
         ; Alcotest.test_case "a delayed failed attempt keeps the newer one" `Quick
             test_failed_attempt_delayed_observation_keeps_newer
         ; Alcotest.test_case "rate limit and failed attempt are independent" `Quick

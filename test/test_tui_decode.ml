@@ -9386,6 +9386,17 @@ let decoded_execute_preview ~preview ~input =
       | [ pending ] -> pending.Tui_decode.gp_input_preview
       | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
 
+let decoded_execute_rows ~preview ~input =
+  match
+    Tui_decode.decode_gate_snapshot
+      (gate_snapshot_json ~queue:(`List [ execute_gate_row ~preview ~input ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_pending with
+      | [ pending ] -> pending.Tui_decode.gp_input_rows
+      | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
 (* The envelope opens with the schema URN and an absolute cwd, so the command
    sat off the right edge of the row at every terminal width. This is the
    shape and the preview text observed on screen with seven rows waiting. *)
@@ -9526,6 +9537,96 @@ let test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape () =
     Alcotest.(option string)
     "an argv that is not words keeps the server preview"
     (Some observed_execute_preview) preview
+
+let test_decode_execute_row_details_the_whole_command () =
+  (* The summary line may be cut; the detail pane may not be. The stored
+     input's own keys are the detail's fields, so argv rides whole no matter
+     how long the command is. A list rides as the JSON it is: joined with
+     spaces, ["rm"; "-rf"; "a b"] and ["rm"; "-rf"; "a"; "b"] would draw as
+     the same line and the word boundaries the operator approves between
+     would be gone. *)
+  let long_url = String.make 180 'x' in
+  let rows =
+    decoded_execute_rows ~preview:"{\"cut\":true}"
+      ~input:
+        (`Assoc
+           [ ( "input",
+               `Assoc
+                 [ ("cwd", `String "/home/keeper/playground/polisher");
+                   ( "argv",
+                     `List
+                       [ `String "git"; `String "clone";
+                         `String ("https://example.org/" ^ long_url) ] );
+                 ] );
+           ])
+  in
+  match rows with
+  | Tui_decode.Rows fields ->
+    Alcotest.check Alcotest.int "one field per stored key" 2 (List.length fields);
+    Alcotest.check
+      Alcotest.(option string)
+      "argv is whole, not the cut summary"
+      (Some
+         (Yojson.Safe.to_string
+            (`List
+               [ `String "git"; `String "clone";
+                 `String ("https://example.org/" ^ long_url) ])))
+      (List.assoc_opt "argv" fields)
+  | Tui_decode.Flattened _ ->
+    Alcotest.fail "an object input must draw key by key"
+
+let test_decode_connector_row_holds_a_korean_body_whole () =
+  (* The queue's 200-byte preview spends its budget on JSON keys first, so a
+     1,500-character Korean body showed 52 characters of itself. The detail
+     carries the body as its own field, and the preview budget never
+     touches it. *)
+  let body = String.concat "" (List.init 1500 (fun _ -> "\xea\xb0\x80")) in
+  let row =
+    `Assoc
+      [ ("id", `String "appr-9");
+        ("keeper_name", `String "messenger");
+        ("tool_name", `String "connector_post");
+        ("input_preview", `String "{\"connector\":\"discord\",\"channel_id\"");
+        ( "input",
+          `Assoc
+            [ ("connector", `String "discord");
+              ("channel_id", `String "123");
+              ("content", `String body);
+            ] );
+      ]
+  in
+  match
+    Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:(`List [ row ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+    match snapshot.Tui_decode.gs_pending with
+    | [ pending ] -> (
+      match pending.Tui_decode.gp_input_rows with
+      | Tui_decode.Rows fields ->
+        Alcotest.check
+          Alcotest.(option string)
+          "the Korean body is carried whole"
+          (Some body) (List.assoc_opt "content" fields)
+      | Tui_decode.Flattened _ ->
+        Alcotest.fail "an object input must draw key by key")
+    | rows -> Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
+let test_decode_execute_row_with_no_command_names_the_preview () =
+  (* This is the quiet fallback the detail pane used to have: a command that
+     would not assemble sank into the flattened preview under the label
+     "input". Now the pane is told what it is showing, and says so. *)
+  let rows =
+    decoded_execute_rows ~preview:observed_execute_preview
+      ~input:(`Assoc [ ("input", `String "not an object") ])
+  in
+  match rows with
+  | Tui_decode.Flattened preview ->
+    Alcotest.check
+      Alcotest.(option string)
+      "the server preview is kept" (Some observed_execute_preview) preview
+  | Tui_decode.Rows _ ->
+    Alcotest.fail "a non-object input has no keys to show"
 
 let test_decode_gate_row_of_another_operation_keeps_its_preview () =
   (* A memory_write row already leads with its title, and nothing here should
@@ -11333,6 +11434,13 @@ let () =
           test_decode_execute_gate_row_quotes_a_word_with_a_space;
         Alcotest.test_case "an unknown execute shape keeps the preview" `Quick
           test_decode_execute_gate_row_keeps_the_preview_on_an_unknown_shape;
+        Alcotest.test_case "an execute detail draws the whole command" `Quick
+          test_decode_execute_row_details_the_whole_command;
+        Alcotest.test_case "a connector body is carried whole" `Quick
+          test_decode_connector_row_holds_a_korean_body_whole;
+        Alcotest.test_case
+          "a command that will not assemble names the flattened preview" `Quick
+          test_decode_execute_row_with_no_command_names_the_preview;
         Alcotest.test_case "another operation keeps its preview" `Quick
           test_decode_gate_row_of_another_operation_keeps_its_preview;
         Alcotest.test_case "a null queue is empty with modes" `Quick

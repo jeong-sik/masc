@@ -424,6 +424,17 @@ let test_refusal_distinguishes_absent_from_rejected () =
                (Control.Roster_unauthorized reason)))
    | Control.Roster_unreachable _ | Control.Roster_malformed _ ->
        Alcotest.fail "a 401 is a refusal");
+  (match
+     Control.roster_failure_of_status ~status:403
+       ~body:{|{"error":"only your own queued message can be prioritized"}|}
+   with
+   | Control.Roster_unreachable detail ->
+       Alcotest.(check bool) "a 403 without an auth code keeps the server's words" true
+         (has "only your own" detail);
+       Alcotest.(check bool) "and says the server answered with a 403" true
+         (has "HTTP 403" detail)
+   | Control.Roster_unauthorized _ | Control.Roster_malformed _ ->
+       Alcotest.fail "a 403 without an auth code is not a credential refusal");
   (* The other failures say nothing about credentials either way. *)
   List.iter
     (fun credential_sent ->

@@ -63,6 +63,7 @@ let selection_output =
 let input () : Librarian.input =
   { turn_ref = Ids.Turn_ref.make ~trace_id:"trace-librarian-preference" ~absolute_turn:1
   ; goal_context = Masc.Keeper_librarian.No_task
+  ; keeper_id = Masc_test_deps.keeper_id_fixture "preference-keeper"
   ; keeper_instructions = "Curate current memory."
   ; current = None
   ; messages =

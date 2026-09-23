@@ -215,6 +215,14 @@ let current_meta_json_fixture ~name () =
   | Error detail ->
     failwith ("current_meta_json_fixture could not build current meta: " ^ detail)
 
+(** The identity a fixture [Keeper_librarian.input] names as the Keeper whose
+    memory it curates. Raises [Failure] on a blank name, which no fixture
+    should pass. *)
+let keeper_id_fixture name =
+  match Masc.Keeper_identity.Keeper_id.of_string name with
+  | Some id -> id
+  | None -> failwith "keeper_id_fixture: the keeper name is blank"
+
 (** Walk up the directory tree from [Sys.getcwd()] until [dune-project] is
     found, then return that directory.
     Raises [Failure] with a descriptive message if the marker file

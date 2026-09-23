@@ -996,6 +996,19 @@ let test_reconciliation_failure_detail () =
       check bool (label ^ " does not paste the server body") false
         (has "auth_error_code" detail))
     [ ("absent", absent); ("rejected", rejected) ];
+  (* A 403 with no auth code is the handler refusing the request, so the
+     detail is the server's answer, not the credential remedy. *)
+  let handler_refusal : Chat.error =
+    Chat.Http_error
+      { status = 403; body = {|{"error":"only your own queued message can be prioritized"}|} }
+  in
+  let handler_detail =
+    Chat.reconciliation_failure_detail ~credential_sent:true handler_refusal
+  in
+  check bool "a handler refusal keeps the server's words" true
+    (has "only your own queued message" handler_detail);
+  check bool "a handler refusal does not send the operator to masc login" false
+    (has "masc login" handler_detail);
   let upstream : Chat.error =
     Chat.Http_error { status = 503; body = "owner_stopping" }
   in
@@ -1093,7 +1106,7 @@ let test_batch_preserves_original_user_history_once () =
       ~continuation_channel ~surface:(Masc.Surface_ref.Dashboard {session_id=None})
       ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
       ~conversation_id:None ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
-      ~user_row_origin:History.Needs_append |> ok in
+      ~sender_keeper:None ~user_row_origin:History.Needs_append |> ok in
     let ids = List.map (fun id -> Keeper_chat_operation.Operation_id.of_string id |> ok)
       ["batch-original-one"; "batch-original-two"] in
     List.iter2 (fun operation_id message ->

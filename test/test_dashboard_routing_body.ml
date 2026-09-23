@@ -163,12 +163,18 @@ let () =
                 {|{"lane":"exact/coding","action":"create","runtime_ids":["runpod_mtp.qwen"]}|};
               expect_error "create-exact-known"
                 ~message:{|"exact/board_attention_exact" names another route, not a lane|}
-                {|{"lane":"exact/board_attention_exact","action":"create","runtime_ids":["runpod_mtp.qwen"]}|})
+                {|{"lane":"exact/board_attention_exact","action":"create","runtime_ids":["runpod_mtp.qwen"]}|};
+              expect_error "create-exact-bare"
+                ~message:{|"exact/" names another route, not a lane|}
+                {|{"lane":"exact/","action":"create","runtime_ids":["runpod_mtp.qwen"]}|})
         ; Alcotest.test_case "rename refuses an exact/ name to take" `Quick
             (fun () ->
               expect_error "rename-to-exact"
                 ~message:{|"exact/coding" names another route, not a lane|}
-                {|{"lane":"runpod_mtp.qwen","action":"rename","to":"exact/coding"}|})
+                {|{"lane":"runpod_mtp.qwen","action":"rename","to":"exact/coding"}|};
+              expect_error "rename-to-exact-known"
+                ~message:{|"exact/board_attention_exact" names another route, not a lane|}
+                {|{"lane":"runpod_mtp.qwen","action":"rename","to":"exact/board_attention_exact"}|})
         ; Alcotest.test_case "remove names a declared lane and carries no ids" `Quick
             (fun () ->
               check_case "remove"

@@ -13,7 +13,8 @@ The due request wakes its Keeper; it does not authorize later effects. When \
 the creating turn has a routable continuation, the runtime records that \
 exact route as the result destination; otherwise it records an explicit \
 no-delivery policy. A due time before the current second is refused with \
-error_kind due_already_past."""
+error_kind due_already_past. You are recorded as the requester and the \
+scheduler."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.
@@ -137,38 +138,6 @@ description = """
 Allow a masc.keeper_wake schedule whose target keeper has no durable \
 metadata yet. Default false: creation is rejected because such a wake can \
 never be settled until the keeper exists."""
-
-[[params]]
-name = "requested_by_id"
-type = "string"
-description = "Requester actor id. Defaults to operator."
-
-[[params]]
-name = "requested_by_kind"
-type = "string"
-enum = ["human_operator", "automated_actor", "system"]
-
-[[params]]
-name = "requested_by_display_name"
-type = "string"
-description = "Requester display name."
-
-[[params]]
-name = "scheduled_by_id"
-type = "string"
-description = """
-Scheduler actor id. Defaults to the caller's name; required when the \
-endpoint cannot name the caller."""
-
-[[params]]
-name = "scheduled_by_kind"
-type = "string"
-enum = ["human_operator", "automated_actor", "system"]
-
-[[params]]
-name = "scheduled_by_display_name"
-type = "string"
-description = "Scheduler display name."
 
 [[params]]
 name = "source"

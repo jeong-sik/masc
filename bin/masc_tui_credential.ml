@@ -27,7 +27,8 @@ let login_command =
    goes the other way and leaves an admin secret on disk that nothing retires.
    A month outlasts any single sitting and still stops answering for a
    workspace nobody returns to -- and this client mints a replacement on the
-   next start, so crossing it costs the operator nothing. *)
+   next start once the stored one has expired ([Stored_expired] below), so
+   crossing it costs the operator a restart and nothing else. *)
 let self_mint_expiry_hours = 24 * 30
 
 (* A refusal names two situations and only one of them is fixed by providing a
@@ -46,12 +47,28 @@ let remedy =
 let refusal ~credential_sent =
   Printf.sprintf "%s — %s" (refusal_cause ~credential_sent) remedy
 
+(* What the workspace holds for this client, judged the way the server judges
+   it. The file [masc login] writes carries only the bearer; its expiry lives
+   in the credential record beside it. Reading the file alone kept an expired
+   bearer in use forever: every start found it, carried it, and was refused,
+   while the comment above promised a replacement. *)
+type stored_token =
+  | Stored of string
+  | Stored_expired
+  | Not_stored
+
+(* Why a mint happens. The two are different news for the operator: the first
+   is a first start, the second is a credential that ran out. *)
+type mint_reason =
+  | First_token
+  | Replaces_expired
+
 (* Which bearer this client should carry, decided from three facts and nothing
    else, so the decision can be read and tested apart from the file and network
    work that carries it out. *)
 type plan =
   | Use of string
-  | Mint
+  | Mint of mint_reason
   | Go_without
   | No_workspace
 
@@ -64,12 +81,15 @@ type plan =
    from creating one. *)
 let plan ~env_token ~workspace_token ~workspace_requires_token
     ~workspace_initialized =
+  let without_a_usable_token reason =
+    if not workspace_requires_token then Go_without
+    else if workspace_initialized then Mint reason
+    else No_workspace
+  in
   match (env_token, workspace_token) with
-  | Some token, _ | None, Some token -> Use token
-  | None, None ->
-      if not workspace_requires_token then Go_without
-      else if workspace_initialized then Mint
-      else No_workspace
+  | Some token, _ | None, Stored token -> Use token
+  | None, Stored_expired -> without_a_usable_token Replaces_expired
+  | None, Not_stored -> without_a_usable_token First_token
 
 (* What came of carrying the plan out. Returned rather than logged in place so
    the surface decides how loudly to say it.
@@ -87,21 +107,26 @@ let plan ~env_token ~workspace_token ~workspace_requires_token
    itself a second or two later. *)
 type outcome =
   | Held
-  | Minted
+  | Minted of mint_reason
   | Not_required
   | Workspace_pending
   | Mint_failed of string
 
 let outcome_notice = function
   | Held | Not_required -> None
-  | Minted ->
+  | Minted reason ->
+      let what_was_there =
+        match reason with
+        | First_token -> "no operator token was present"
+        | Replaces_expired -> "the stored operator token had expired"
+      in
       Some
         (Printf.sprintf
-           "no operator token was present, so this %s minted one for this \
-            workspace and stored it; it lasts %d days. A server that is \
-            already running rebuilds its credential index on a timer, so the \
-            first reads may still be refused."
-           agent_name
+           "%s, so this %s minted one for this workspace and stored it; it \
+            lasts %d days. A server that is already running rebuilds its \
+            credential index on a timer, so the first reads may still be \
+            refused."
+           what_was_there agent_name
            (self_mint_expiry_hours / 24))
   | Workspace_pending ->
       (* No remedy: none is owed. The operator learns what is missing and
@@ -122,7 +147,7 @@ let outcome_notice = function
    here fails the same way after the server is up. *)
 let outcome_needs_retry = function
   | Workspace_pending -> true
-  | Held | Minted | Not_required | Mint_failed _ -> false
+  | Held | Minted _ | Not_required | Mint_failed _ -> false
 
 (* How loudly the notice is said. A mint and a failure are not the same news:
    both were reported as errors, which reads a working first start as a broken
@@ -132,4 +157,4 @@ let outcome_needs_retry = function
    credential is a fault the operator has to act on. *)
 let outcome_level = function
   | Mint_failed _ -> "error"
-  | Held | Minted | Not_required | Workspace_pending -> "system"
+  | Held | Minted _ | Not_required | Workspace_pending -> "system"

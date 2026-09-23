@@ -262,7 +262,7 @@ let run_with mcp_post =
   Keeper_identity_tools.run_call
     ~transports:
       { Keeper_identity_tools.mcp_post; token_post = never_token_post; discover = never_discover }
-    ~base_path
+    ~config:(Workspace.default_config base_path)
     ~keeper_name
     ~provider:(provider ())
     ~remote_name:"createJiraIssue"

@@ -98,6 +98,16 @@ let current_history_lines own =
   |> List.rev
 ;;
 
+let has_completed_atom_boundary ~trace_id ~lines =
+  current_history_lines (lines_of_trace ~trace_id lines)
+  |> List.exists (fun (_, (written : B.record)) ->
+    match written.event with
+    | B.Turn_ended { position = B.Atom_history _; _ } -> true
+    | B.Turn_ended
+        { position = B.Empty_atom_history | B.No_atom_history | B.Stale_noop; _ }
+    | B.History_restarted _ -> false)
+;;
+
 let may_have_unread ~trace_id ~lines ~progress =
   let own = current_history_lines (lines_of_trace ~trace_id lines) in
   (* Unknown complete rows may contain an atom boundary or restart. Leave

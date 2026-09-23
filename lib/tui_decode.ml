@@ -2301,6 +2301,20 @@ type connector_directory_state =
   | Connector_directory_complete
   | Connector_directory_partial
 
+type connector_gateway_state =
+  | Connector_gateway_disconnected
+  | Connector_gateway_awaiting_hello
+  | Connector_gateway_identifying
+  | Connector_gateway_resuming
+  | Connector_gateway_connected
+  | Connector_gateway_reconnect_pending
+  | Connector_gateway_failed
+
+type connector_poll_state =
+  | Connector_poll_not_started
+  | Connector_poll_polling
+  | Connector_poll_degraded
+
 type connector = {
   cn_id : string;
   cn_display_name : string;
@@ -2311,8 +2325,8 @@ type connector = {
   cn_channel : string option;
   cn_error : string option;
   cn_status_source : string option;
-  cn_gateway_state : string option;
-  cn_poll_state : string option;
+  cn_gateway_state : connector_gateway_state option;
+  cn_poll_state : connector_poll_state option;
   cn_endpoint : string option;
   cn_status_path : string option;
   cn_binding_store_path : string option;
@@ -2361,8 +2375,15 @@ type connector_name_page = {
   cnp_mappings : connector_name_mapping list;
 }
 
+type connector_refusal = {
+  cr_row : int;
+  cr_connector_id : string option;
+  cr_reason : string;
+}
+
 type connector_snapshot = {
   cs_connectors : connector list;
+  cs_refused : connector_refusal list;
   cs_total : int;
   cs_active : int;
 }
@@ -3819,8 +3840,30 @@ let decode_connector json =
   let* cn_channel = optional_string_field json "channel" in
   let* cn_error = optional_string_field json "error" in
   let* cn_status_source = optional_string_field json "status_source" in
-  let* cn_gateway_state = optional_string_field json "gateway_state" in
-  let* cn_poll_state = optional_string_field json "poll_state" in
+  let* raw_gateway_state = optional_string_field json "gateway_state" in
+  let* cn_gateway_state =
+    match nonblank_option raw_gateway_state with
+    | None -> Ok None
+    | Some "disconnected" -> Ok (Some Connector_gateway_disconnected)
+    | Some "awaiting_hello" -> Ok (Some Connector_gateway_awaiting_hello)
+    | Some "identifying" -> Ok (Some Connector_gateway_identifying)
+    | Some "resuming" -> Ok (Some Connector_gateway_resuming)
+    | Some "connected" -> Ok (Some Connector_gateway_connected)
+    | Some "reconnect_pending" -> Ok (Some Connector_gateway_reconnect_pending)
+    | Some "failed" -> Ok (Some Connector_gateway_failed)
+    | Some unknown ->
+      Error (Printf.sprintf "unknown connector gateway state %S" unknown)
+  in
+  let* raw_poll_state = optional_string_field json "poll_state" in
+  let* cn_poll_state =
+    match nonblank_option raw_poll_state with
+    | None -> Ok None
+    | Some "not_started" -> Ok (Some Connector_poll_not_started)
+    | Some "polling" -> Ok (Some Connector_poll_polling)
+    | Some "degraded" -> Ok (Some Connector_poll_degraded)
+    | Some unknown ->
+      Error (Printf.sprintf "unknown connector poll state %S" unknown)
+  in
   let* cn_endpoint = optional_string_field json "gate_base_url" in
   let* cn_status_path = optional_string_field json "status_path" in
   let* cn_binding_store_path = optional_string_field json "binding_store_path" in
@@ -3902,8 +3945,8 @@ let decode_connector json =
     ; cn_channel = nonblank_option cn_channel
     ; cn_error = nonblank_option cn_error
     ; cn_status_source = nonblank_option cn_status_source
-    ; cn_gateway_state = nonblank_option cn_gateway_state
-    ; cn_poll_state = nonblank_option cn_poll_state
+    ; cn_gateway_state
+    ; cn_poll_state
     ; cn_endpoint = nonblank_option cn_endpoint
     ; cn_status_path = nonblank_option cn_status_path
     ; cn_binding_store_path = nonblank_option cn_binding_store_path
@@ -4041,8 +4084,25 @@ let connector_with_name_pages connector ~pages ~error =
 
 let decode_connector_snapshot json =
   let* connectors_json = required_list_field json "connectors" in
-  let* cs_connectors =
-    decode_list "connectors" decode_connector connectors_json
+  let row_connector_id = function
+    | `Assoc fields -> (
+        match List.assoc_opt "connector_id" fields with
+        | Some (`String id) -> nonblank_option (Some id)
+        | Some _ | None -> None)
+    | _ -> None
+  in
+  let cs_connectors, cs_refused =
+    connectors_json
+    |> List.mapi (fun row item ->
+           match decode_connector item with
+           | Ok connector -> Either.Left connector
+           | Error reason ->
+               Either.Right
+                 { cr_row = row
+                 ; cr_connector_id = row_connector_id item
+                 ; cr_reason = reason
+                 })
+    |> List.partition_map Fun.id
   in
   let cs_connectors =
     List.sort
@@ -4051,7 +4111,7 @@ let decode_connector_snapshot json =
   in
   let* cs_total = required_int_field json "total" in
   let* cs_active = required_int_field json "active_count" in
-  Ok { cs_connectors; cs_total; cs_active }
+  Ok { cs_connectors; cs_refused; cs_total; cs_active }
 
 let runtime_probe_refresh_state_to_string = function
   | Runtime_probe_fresh -> "fresh"

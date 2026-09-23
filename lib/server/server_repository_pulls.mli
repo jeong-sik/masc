@@ -1,0 +1,163 @@
+(** Open pull requests of the registered GitHub repositories (RFC-0465 §2-§4).
+
+    The server reads every repository registered in
+    [.masc/config/repositories.toml] whose remote is on github.com, one
+    GraphQL query per repository page, with the token of the Keeper named by
+    runtime.toml [\[repositories\] pr_reader]. Nothing here is persisted:
+    GitHub is the source of these facts, so a restart starts at
+    [Pulls_not_read] and the next read replaces it.
+
+    The reader is resolved again on every refresh. runtime.toml, the Keeper
+    declaration and the Keeper's [github-cli/hosts.yml] token are all read at
+    that moment and nothing is kept between refreshes, so a Keeper that logs
+    in again or out is followed by the next read. When the reader cannot be
+    used, no repository is read with any other credential. *)
+
+(** {1 Pull request facts} *)
+
+type check_state =
+  | Checks_passing
+  | Checks_failing
+  | Checks_running
+  | Checks_none
+      (** The head commit has no status check rollup, or the pull request
+          reported no commit. *)
+
+type review_state =
+  | Review_approved
+  | Review_changes_requested
+  | Review_waiting
+  | Review_none
+      (** GitHub reports no review decision: the base branch requires no
+          review. *)
+
+type pull_request =
+  { repo_slug : string  (** [owner/repo] *)
+  ; number : int
+  ; title : string
+  ; head_branch : string
+  ; draft : bool
+  ; checks : check_state
+  ; review : review_state
+  ; updated_at : float
+  }
+
+type failure =
+  | Repository_not_visible
+      (** GitHub answered 404 or [NOT_FOUND]: the reader's account cannot see
+          this repository (a private repository it has no access to, or a
+          remote that no longer exists). *)
+  | Token_rejected
+      (** 401: the token was refused. Not retried within this refresh; the
+          next refresh reads the token again. *)
+  | Rate_limited of { reset_at : float option }
+      (** GitHub's rate limit. [reset_at] is GitHub's own reset time when the
+          response carried it. *)
+  | Forbidden of { status : int }
+      (** 403 without an exhausted rate limit, e.g. organisation policy. *)
+  | Http_status of { status : int }
+  | Graphql_errors of { messages : string list }
+  | Transport_failed of string
+  | Response_unreadable of string
+      (** The body was not the GraphQL shape this reader asks for. *)
+
+type repository_pulls =
+  | Pulls_not_read  (** Not read since this server started. *)
+  | Pulls_read of
+      { observed_at : float
+      ; pulls : pull_request list
+      ; undecodable : int
+          (** Pull request rows carrying a value this build does not know
+              (a new GitHub enum member, a missing field). They are counted,
+              never folded into [Checks_none] or [Review_none]. *)
+      }
+  | Pulls_failed of
+      { observed_at : float
+      ; failure : failure
+      }
+  | Pulls_not_github  (** The remote is not on github.com; not read. *)
+
+(** {1 Reader} *)
+
+type reader =
+  | Reader_not_declared
+      (** runtime.toml declares no [\[repositories\] pr_reader]. *)
+  | Reader_declaration_invalid of string
+      (** runtime.toml is unreadable, or [pr_reader] is not a Keeper name. *)
+  | Reader_keeper_missing of { keeper : string }
+      (** No [keepers/<keeper>.toml] declares the named Keeper. *)
+  | Reader_token_unavailable of
+      { keeper : string
+      ; reason : string
+      }
+      (** The Keeper exists but its GitHub CLI holds no github.com token. *)
+  | Reader_ready of { keeper : string }
+
+(** {1 Snapshot} *)
+
+type repository_entry =
+  { repository_id : string
+  ; url : string
+  ; slug : string option  (** [owner/repo] when the remote is on github.com. *)
+  ; pulls : repository_pulls
+  }
+
+type snapshot =
+  { reader : reader
+  ; repositories_error : string option
+      (** The registered repository list could not be read. *)
+  ; repositories : repository_entry list
+  }
+
+val initial : snapshot
+(** Before the first refresh: no reader resolved, no repository read. *)
+
+(** {1 Transport} *)
+
+type response =
+  { status : int
+  ; body : string
+  ; rate_limit_remaining : int option
+  ; rate_limit_reset : float option
+      (** GitHub's [x-ratelimit-remaining] and [x-ratelimit-reset] headers. *)
+  }
+
+type http_post =
+  url:string -> token:string -> body:Yojson.Safe.t -> (response, string) result
+(** Injected transport. Production passes {!default_http_post}; tests pass a
+    stub that answers from recorded bodies. *)
+
+val default_http_post : http_post
+(** curl through {!Process_eio}. The token goes to curl on stdin
+    ([-H \@-]), never on the command line where other local users could read
+    it from the process table. *)
+
+(** {1 Reading} *)
+
+val github_slug_of_remote : string -> string option
+(** [owner/repo] for the three spellings git accepts for a github.com remote
+    ([https://github.com/o/r(.git)], [git\@github.com:o/r(.git)],
+    [ssh://git\@github.com/o/r(.git)]); [None] for anything else. *)
+
+val read_repository :
+  now:(unit -> float) -> http_post:http_post -> token:string -> string -> repository_pulls
+(** [read_repository ~now ~http_post ~token slug] reads every open pull
+    request of [slug], following the GraphQL cursor until GitHub reports no
+    next page. *)
+
+val refresh :
+  now:(unit -> float) -> http_post:http_post -> base_path:string -> previous:snapshot -> snapshot
+(** One full read: resolve the reader, load the registered repositories and
+    read each GitHub one. When the reader is not ready, each repository keeps
+    its entry from [previous] (or [Pulls_not_read]) and nothing is fetched. *)
+
+val snapshot_to_yojson : snapshot -> Yojson.Safe.t
+
+(** {1 Projection} *)
+
+val current : unit -> snapshot
+(** The latest refresh, or {!initial} before the first one ends. *)
+
+val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
+(** Forks the refresh loop under [sw]: one {!refresh} immediately, then one
+    every 60 seconds. Cancelled with [sw]. *)

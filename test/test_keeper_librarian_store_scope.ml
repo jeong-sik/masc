@@ -177,6 +177,41 @@ let test_purge_stops_the_running_librarian_unit_first () =
   check bool "no boundaries after the purge" true (read_boundaries a = [])
 ;;
 
+(* Memory events are keyed by claim-hash memory ids, so a same-name keeper
+   created after a purge would count the deleted keeper's retrievals as its own
+   unless the sidecar goes with the keeper. *)
+let test_purge_removes_memory_events () =
+  with_clusters @@ fun a _b ->
+  let module Events = Masc.Keeper_memory_os_events in
+  Fs_compat.mkdir_p (Filename.dirname
+    (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:a.base_path));
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:a.base_path in
+  let path = Events.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
+  let retrieved trace_id : Events.event =
+    { recorded_at = 1.0; memory_id = "sha256:" ^ String.make 64 'a'; trace_id
+    ; kind = Events.Retrieved { query = "pdf pages" } } in
+  let append trace_id = match Events.append ~keepers_dir ~keeper_id:keeper_name
+      (retrieved trace_id) with
+    | Ok () -> ()
+    | Error error -> fail (Events.append_error_to_string error) in
+  let trace_ids () = match Events.read ~keepers_dir ~keeper_id:keeper_name with
+    | Ok rows -> List.map (fun (_, decoded) -> match decoded with
+        | Ok (event : Events.event) -> event.trace_id
+        | Error error -> fail (Events.read_error_to_string error)) rows
+    | Error error -> fail (Events.file_read_error_to_string error) in
+  append "trace-before";
+  check bool "events sidecar written" true (Sys.file_exists path);
+  (match Server_dashboard_http_delete_actions.For_testing.purge_keeper_artifacts
+    a ~keeper_name ~remove_configuration:false
+    { Masc.Keeper_shutdown_types.requested_name = keeper_name } with
+   | Ok () -> ()
+   | Error detail -> failf "artifact purge: %s" detail);
+  check bool "events sidecar removed" false (Sys.file_exists path);
+  append "trace-after";
+  check (list string) "a same-name keeper sees only its own events"
+    [ "trace-after" ] (trace_ids ())
+;;
+
 let test_reads_do_not_create_runtime_directories () =
   with_clusters @@ fun a _b ->
   let root = Workspace.keepers_runtime_dir a in
@@ -196,6 +231,8 @@ let () =
         ; test_case "purge A preserves B" `Quick test_purge_preserves_other_cluster
         ; test_case "purge stops the running Librarian unit first" `Quick
             test_purge_stops_the_running_librarian_unit_first
+        ; test_case "purge removes memory events" `Quick
+            test_purge_removes_memory_events
         ; test_case "reading absent stores creates no directories" `Quick
             test_reads_do_not_create_runtime_directories
         ]

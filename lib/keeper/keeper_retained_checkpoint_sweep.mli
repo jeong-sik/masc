@@ -27,10 +27,10 @@ type error =
           journal that a read-only open cannot roll back; the next startup
           after that store opens tries again. *)
   | Keeper_shares_store_directory of { keeper_name : string }
-      (** A keeper is named like a workspace-scoped runtime store
-          ([Common.Workspace_scoped]), so its directory cannot be told apart
-          from that store's and nothing was removed. Without such a keeper,
-          those directories are skipped as stores. *)
+      (** A keeper is named like a store kept directly under [keepers/]
+          ([Common.Keepers_root_scoped]), so its directory cannot be told
+          apart from that store's and nothing was removed. Without such a
+          keeper, those directories are skipped as stores. *)
 
 val error_to_string : error -> string
 

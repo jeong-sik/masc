@@ -19,18 +19,18 @@ let error_to_string = function
     Printf.sprintf "keeper operation store %s is unreadable: %s" path detail
   | Keeper_shares_store_directory { keeper_name } ->
     Printf.sprintf
-      "keeper %s has the directory of the workspace store of the same name" keeper_name
+      "keeper %s has the directory of the keepers/ store of the same name" keeper_name
 
-(* [keepers/] also holds the workspace-scoped runtime stores, whose
-   directories are not keepers. *)
-let workspace_store_dirnames =
+(* Directories [keepers/] holds beside the keepers. *)
+let keepers_root_store_dirnames =
   List.filter_map
     (fun store ->
        match Common.keeper_runtime_store_placement store with
-       | Common.Workspace_scoped -> Some (Common.keeper_runtime_store_dirname store)
+       | Common.Keepers_root_scoped -> Some (Common.keeper_runtime_store_dirname store)
        | Common.Keeper_scoped_dated
        | Common.Keeper_scoped_versioned
-       | Common.Keeper_scoped_rotated -> None)
+       | Common.Keeper_scoped_rotated
+       | Common.Workspace_scoped -> None)
     Common.keeper_runtime_stores
 
 let retained_suffix = ".json"
@@ -86,7 +86,7 @@ let live_references ~runtime_root =
            is_directory ~follow:true (Filename.concat keepers_dir keeper_name)
            |> Result.map_error unreadable
          in
-         let workspace_store = List.mem keeper_name workspace_store_dirnames in
+         let root_store = List.mem keeper_name keepers_root_store_dirnames in
          let has_metadata () =
            Sys.file_exists
              (Filename.concat keepers_dir
@@ -95,9 +95,9 @@ let live_references ~runtime_root =
          in
          if not keeper_dir
          then Ok live
-         else if workspace_store && has_metadata ()
+         else if root_store && has_metadata ()
          then Error (Keeper_shares_store_directory { keeper_name })
-         else if workspace_store
+         else if root_store
          then Ok live
          else
            let path =

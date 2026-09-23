@@ -148,9 +148,9 @@ let test_symlinked_keeper_directories_are_read () =
     check bool "checkpoint named through a link kept" true (Sys.file_exists path)))
     [true; false]
 
-(* [keepers/tool_usage] and [keepers/trajectories] are workspace stores, not
-   keepers; a stray empty operation store there (seen live) must not stop the
-   sweep. A keeper actually named like one of them stops it instead. *)
+(* [keepers/tool_usage] is a store kept beside the keepers, not a keeper; a
+   stray empty operation store there (seen live) must not stop the sweep. A
+   keeper actually named tool_usage stops it instead. *)
 let test_workspace_store_directories_are_not_keepers () = with_root (fun root ->
   let stray = keeper_store root "tool_usage" in
   write stray "";
@@ -159,13 +159,12 @@ let test_workspace_store_directories_are_not_keepers () = with_root (fun root ->
   let report = sweep root in
   check int "orphan removed despite the stray store" 1 report.removed;
   let keepers_dir = Filename.concat root Common.keepers_runtime_dirname in
-  write (keeper_store root "trajectories") "";
-  write (Filename.concat keepers_dir "trajectories.json") "{}";
+  write (Filename.concat keepers_dir "tool_usage.json") "{}";
   write orphan "{}";
   (match Sweep.run ~runtime_root:root with
-   | Error (Sweep.Keeper_shares_store_directory { keeper_name = "trajectories" }) -> ()
+   | Error (Sweep.Keeper_shares_store_directory { keeper_name = "tool_usage" }) -> ()
    | Error error -> fail (Sweep.error_to_string error)
-   | Ok _ -> fail "a keeper named like a workspace store must stop the sweep");
+   | Ok _ -> fail "a keeper named like a keepers/ store must stop the sweep");
   check bool "orphan kept while that keeper's store is ambiguous" true (Sys.file_exists orphan))
 
 let test_unreadable_store_removes_nothing () = with_root (fun root ->

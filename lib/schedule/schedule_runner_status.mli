@@ -13,7 +13,6 @@ type tick_counts =
   ; dispatch_failed : int
   ; dispatch_unsupported : int
   ; dispatch_start_rejected : int
-  ; dispatch_deferred : int
   ; wake_enqueued : int
   ; wake_skipped_no_keeper : int
   ; wake_skipped_missing_schedule : int
@@ -51,6 +50,11 @@ type snapshot =
           it and still here. Process-local like the rest of this snapshot:
           the durable record of each attempt is the schedule store's wake
           list. *)
+  ; held : Schedule_runner.wake_signal list
+      (** The occurrences the newest successful tick held back, each waiting
+          for its target to consume the previous occurrence. A current state,
+          not a count: it is replaced every tick and never summed into
+          [totals] (#37912). *)
   }
 
 val reset_for_test : unit -> unit

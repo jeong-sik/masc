@@ -2257,8 +2257,10 @@ let test_interval_wake_retries_activation_before_holding_the_next_occurrence () 
           check (float 0.001) "next occurrence keeps its due" 260.0 stored.due_at
         | None -> fail "schedule disappeared after repair");
        let next = tick_ok config ~now:261.0 in
-       check bool "a different occurrence waits for the pending one" true
-         ((List.hd next.dispatches).status = Schedule_runner.Dispatch_deferred);
+       check int "a different occurrence waits for the pending one" 1
+         (List.length next.held);
+       check int "a waiting occurrence is not dispatched" 0
+         (List.length next.dispatches);
        check int "held next occurrence emits no signal" 0 (List.length next.emitted);
        check (list string) "next tick keeps the repaired occurrence"
          [ occurrence_id ] (pending_ids ()))

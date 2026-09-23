@@ -681,9 +681,9 @@ type composed =
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
     atoms older than [demote_before], joined under {!Current_turn_demoted} by
-    this turn's atoms up to the refused request's end, then the carried range from [front], or from
-    [turn_boundary] without one (§13.4). Nothing here measures the
-    request against a limit. *)
+    this turn's atoms up to the refused request's end, then the carried
+    range from where {!choose_range_start} opens it (§13.4, §13.6). Nothing
+    here measures the request against a limit. *)
 
 type request_view =
   { composed : composed

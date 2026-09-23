@@ -105,16 +105,10 @@ let exhaust ~err ~provenance terminal_class =
   Exhausted_visible_alive
     { terminal = terminal_class; provenance; detail = failure_detail err }
 
-let retry_after_of_capacity_hint = function
-  | Keeper_internal_error.Explicit sec -> Some sec
-  | Keeper_internal_error.No_retry_hint -> None
-
 let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_error) =
   let exhaust_failure = exhaust ~err ~provenance:Masc_internal_error in
   match internal with
   | Keeper_internal_error.Resumable_cli_session _ -> rotate Resumable_cli_session
-  | Keeper_internal_error.Capacity_backpressure { retry_after; _ } ->
-    observe_retry ?retry_after:(retry_after_of_capacity_hint retry_after) Provider_capacity
   | Keeper_internal_error.Runtime_exhausted { reason; _ } ->
     (match reason with
      | Keeper_internal_error.Candidates_filtered_after_cycles ->
@@ -138,9 +132,7 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   | Keeper_internal_error.Gate_replay_repair_required _ ->
     exhaust_failure Internal_opaque
   (* The host stopped this turn on purpose. Nothing about the provider failed,
-     so there is no other candidate that would do better; before RFC-0454 P2
-     this arrived as an untyped [Internal] string and landed on exactly this
-     route. *)
+     so there is no other candidate that would do better. *)
   | Keeper_internal_error.Host_stopped_turn _ -> exhaust_failure Internal_opaque
   (* A person queued behind this autonomous turn before its provider produced
      anything (RFC-0441). The abandoned candidate did not fail, so the route
@@ -150,10 +142,10 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      skipped, not failed (#38094). *)
   | Keeper_internal_error.Preempted_before_first_token _ ->
     exhaust_failure Internal_opaque
-  (* The runtime's transport closed. This used to reach agent-core as
-     [ProviderUnavailable], and [route_of_provider_error] answers
-     [observe_retry Server_error] for that; the typed value must not change
-     which runtime is tried next, so it answers the same. *)
+  (* The runtime's transport closed. [route_of_provider_error] answers
+     [observe_retry Server_error] for agent-core's [ProviderUnavailable]; the
+     typed value must not change which runtime is tried next, so it answers
+     the same. *)
   | Keeper_internal_error.Runtime_connection_closed _ ->
     observe_retry Server_error
   (* A local claim refuses the durable session before a provider attempt.
@@ -372,11 +364,6 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
      | Masc_execution -> route_of_masc_internal ~err internal
      | Agent_core_execution -> route_of_error_family ~boundary err)
   | None -> route_of_error_family ~boundary err
-
-let retry_after_of_route = function
-  | Retry_after_observed { retry_after; _ } -> retry_after
-  | Rotate_now _ -> None
-  | Exhausted_visible_alive _ -> None
 
 (* A provider's retry hint that names a wait: present, finite, above zero. *)
 let usable_retry_after = function

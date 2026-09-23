@@ -31,7 +31,6 @@ let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class optio
   | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
   | _ ->
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_backpressure
   | Some (Keeper_turn_driver.Runtime_exhausted { reason; _ }) ->
     Some (Runtime_exhausted (blocker_reason_of_turn_driver_reason reason))
   (* Preserve the pre-existing Config-error policy: this local refusal is
@@ -57,10 +56,9 @@ let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class optio
   | Some (Keeper_turn_driver.Tool_correction_lost _) ->
     Some Tool_correction_lost
   (* Neither blocks the keeper: the host stopped one turn, and a closed
-     runtime connection is retried on the next candidate. Both answered
-     [None] here before RFC-0454 P2 typed them — an [Internal] string and a
-     [ProviderUnavailable] respectively — and a new blocker_class would put
-     a keeper on the supervisor's blocked list that was never blocked. *)
+     runtime connection is retried on the next candidate. A blocker_class
+     here would put a keeper on the supervisor's blocked list that was never
+     blocked. *)
   | Some (Keeper_turn_driver.Host_stopped_turn _)
   | Some (Keeper_turn_driver.Preempted_before_first_token _)
   | Some (Keeper_turn_driver.Runtime_connection_closed _) -> None

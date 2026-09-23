@@ -455,9 +455,6 @@ type eviction_retry =
       }
       (** No block structure to walk: the range halved toward the newest
           atom. *)
-  | Demoted_newest_atom
-      (** The newest atom alone was refused: #28845's demotion of the turn's
-          own tool results was armed for one more request. *)
 
 val carried_range_eviction_sequence :
   same_run_retry_authorized:(unit -> bool) ->
@@ -467,7 +464,6 @@ val carried_range_eviction_sequence :
   evict:(Keeper_carried_range.step -> bool) ->
   hold_front:(Keeper_carried_front.seed -> unit) ->
   halve:(first_atom:int -> atom_count:int -> retry:int -> bool) ->
-  last_resort:(retry:int -> bool) ->
   on_retry:(retry:int -> eviction_retry -> unit) ->
   attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
   unit ->
@@ -481,10 +477,8 @@ val carried_range_eviction_sequence :
     usage counted yet or a single block, [last_request]'s range halves
     toward the newest atom through [halve], which answers [false] when it
     cannot name the halved front by its opening message and so ends the
-    sequence with the refusal in hand; at a single atom [last_resort]
-    may arm one more request with the turn's own tool results demoted
-    (#28845), and answers [false] once used or with nothing to demote, which
-    ends the sequence with the refusal in hand. Every retry follows a move
+    sequence with the refusal in hand, as a refused single atom does
+    ({!current_turn_demotion_sequence} answers what is left). Every retry follows a move
     that [evict] or [halve] reported, so the sequence never resends the range
     that was refused. Every other error ends it at once, as does a refusal
     once [same_run_retry_authorized] is [false]. *)
@@ -512,6 +506,33 @@ val seed_refusal_sequence :
     asked twice. The range is never halved: an accepted boundary request is
     what the ledger records, so the next turn's seed is that boundary. *)
 
+type current_turn_results =
+  | Current_turn_verbatim
+      (** The ordinary demotion boundary: the current turn's tool results go
+          as they are. *)
+  | Current_turn_demoted of { refused_atom_count : int }
+      (** A request carrying [refused_atom_count] atoms was refused for size:
+          every tool result in those atoms, the current turn's own included,
+          goes as its externalized marker (#28845). Atoms appended after them,
+          the results a resent attempt produces, go as they are. *)
+
+val current_turn_demotion_sequence :
+  same_run_retry_authorized:(unit -> bool) ->
+  demotable:(unit -> int option) ->
+  demote:(Agent_core.Error.t -> refused_atom_count:int -> unit) ->
+  first:(unit -> ('ok, Agent_core.Error.t) result) ->
+  resend:(unit -> ('ok, Agent_core.Error.t) result) ->
+  unit ->
+  ('ok, Agent_core.Error.t) result
+(** The last answer to a size refusal, on every continuity (RFC
+    keeper-context-window-in-tokens §10.4, §13.9). When [first] fails with a
+    refusal {!carried_range_eviction_sequence} would move the front for,
+    [same_run_retry_authorized] holds, and [demotable] names the refused
+    request's atom count because demoting every tool result in those atoms
+    would carry fewer bytes, [demote] is told and [resend] runs once; its
+    result is returned as it is. The range is not narrowed. With nothing to
+    demote, and on every other failure, the failure is returned at once. *)
+
 val run_try_provider_with_carried_range_eviction :
   ?continuation_checkpoint:Agent_core.Checkpoint.t ->
   try_provider_ctx ->
@@ -524,7 +545,10 @@ val run_try_provider_with_carried_range_eviction :
     eviction moves the pair's ledger front, the halving holds a seed for the
     rest of this attempt, and each retry is recorded on the runtime
     manifest. A turn with no Librarian point runs under
-    {!seed_refusal_sequence} instead, and a turn with an absorbed point or a
+    {!seed_refusal_sequence} instead, and a turn with an absorbed point runs
+    one attempt. Whatever the continuity, a size refusal left after that is
+    answered by {!current_turn_demotion_sequence} on the same candidate,
+    when the Keeper is offered the artifact reader the markers name. A
     recovery view runs one attempt. *)
 
 val run_try_provider_with_truncation_recovery :
@@ -560,12 +584,12 @@ type composed =
             request started over. *)
   ; demote_before : int
         (** The boundary the demotion applied: 0 when demotion is off, the
-            whole history under the last resort. *)
+            refused request's atom count under {!Current_turn_demoted}. *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): RFC-0363 demotion over the
-    atoms older than [demote_before], or over every atom when the last
-    resort is armed, then the carried range from [front], or from
+    atoms older than [demote_before], or over every atom the refused request
+    carried under {!Current_turn_demoted}, then the carried range from [front], or from
     [turn_boundary] without one (§13.4). Nothing here measures the
     request against a limit. *)
 
@@ -655,7 +679,7 @@ module For_testing : sig
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
     history_digest_at:(int -> string option) ->
-    last_resort:bool ->
+    current_turn_results:current_turn_results ->
     base_path:string ->
     demote_before:int ->
     turn_boundary:Keeper_carried_front.turn_start ->
@@ -669,7 +693,7 @@ module For_testing : sig
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
     history_digest_at:(int -> string option) ->
-    last_resort:bool ->
+    current_turn_results:current_turn_results ->
     base_path:string ->
     demote_before:int ->
     turn_boundary:Keeper_carried_front.turn_start ->
@@ -679,6 +703,12 @@ module For_testing : sig
        Agent_core.Types.message list) ->
     Agent_core.Types.message list ->
     request_view
+
+  val current_turn_demotion : refused:composed -> demoted:composed -> int option
+  (** Whether [demoted], the refused range composed under
+      {!Current_turn_demoted}, carries fewer bytes than [refused], both
+      measured with the plan's placeholders: the refused request's atom count
+      when it does, [None] when there is nothing to demote in it. *)
 
   val carried_front :
     ledger:Keeper_model_input_ledger.t option ref ->
@@ -719,14 +749,6 @@ module For_testing : sig
       request. [false] when [digest_at] has no atom there. Otherwise [hold]
       keeps the seed even if the ledger predates that position and cannot
       move to it; the next composition uses the held front. *)
-
-  val last_resort_demotes :
-    measure_message_bytes:(Agent_core.Types.message -> int) ->
-    base_path:string ->
-    Agent_core.Types.message list ->
-    bool
-  (** Whether the current turn's own atoms carry a tool result the store
-      could hold: what arming the last resort would change. *)
 
   val offload_model_input_cpu : (unit -> 'a) -> 'a
 

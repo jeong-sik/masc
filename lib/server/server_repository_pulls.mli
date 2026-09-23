@@ -44,7 +44,7 @@ type pull_request =
 
 type failure =
   | Repository_not_visible
-      (** GitHub answered 404 or [NOT_FOUND]: the reader's account cannot see
+      (** GitHub answered [NOT_FOUND] on the repository: the reader's account cannot see
           this repository (a private repository it has no access to, or a
           remote that no longer exists). *)
   | Token_rejected
@@ -75,7 +75,9 @@ type repository_pulls =
       { observed_at : float
       ; failure : failure
       }
-  | Pulls_not_github  (** The remote is not on github.com; not read. *)
+  | Pulls_not_github
+      (** The remote is not one of the three github.com spellings
+          {!github_slug_of_remote} reads; not read. *)
 
 (** {1 Reader} *)
 
@@ -148,8 +150,10 @@ val read_repository :
 val refresh :
   now:(unit -> float) -> http_post:http_post -> base_path:string -> previous:snapshot -> snapshot
 (** One full read: resolve the reader, load the registered repositories and
-    read each GitHub one. When the reader is not ready, each repository keeps
-    its entry from [previous] (or [Pulls_not_read]) and nothing is fetched. *)
+    read each GitHub one. When the reader is not ready, nothing is fetched and
+    every GitHub repository reads [Pulls_not_read]: an earlier read is not
+    shown as current. [previous] only stands in when the repository list
+    itself cannot be read. *)
 
 val snapshot_to_yojson : snapshot -> Yojson.Safe.t
 

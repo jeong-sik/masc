@@ -145,13 +145,16 @@ let test_unknown_enum_is_counted () =
           ~review:"null"
           ~rollup:{|{"state":"QUEUED_FOR_SOMETHING_NEW"}|}
       ; pull_node ~number:3 ~branch:"c" ~draft:false ~review:{|"DISMISSED_NEW"|} ~rollup:"null"
+      ; {|{"number":4,"title":"PR 4","headRefName":"d","isDraft":false,
+          "updatedAt":"2026-09-23T01:02:03Z","reviewDecision":null,
+          "commits":{"nodes":[{"commit":{}}]}}|}
       ]
   in
   let http_post, _ = recording_stub [ ok_response body ] in
   let pulls, undecodable =
     Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> read_or_fail
   in
-  Alcotest.(check int) "both unknown members are counted" 2 undecodable;
+  Alcotest.(check int) "unknown members and a missing rollup key are counted" 3 undecodable;
   Alcotest.(check (list int)) "they are not shown as some known state" [ 1 ]
     (List.map (fun (p : Pulls.pull_request) -> p.number) pulls)
 
@@ -162,9 +165,6 @@ let failure_or_fail = function
   | Pulls.Pulls_not_github -> failf "expected Pulls_failed, got Pulls_not_github"
 
 let test_not_visible_is_a_failure_not_an_empty_list () =
-  let http_status_404 =
-    Ok { Pulls.status = 404; body = "{}"; rate_limit_remaining = None; rate_limit_reset = None }
-  in
   let graphql_not_found =
     ok_response
       {|{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],
@@ -176,7 +176,7 @@ let test_not_visible_is_a_failure_not_an_empty_list () =
       match Pulls.read_repository ~now ~http_post ~token:"t" "o/wkbl" |> failure_or_fail with
       | Pulls.Repository_not_visible -> ()
       | _ -> failf "a repository the reader cannot see must read as not visible")
-    [ http_status_404; graphql_not_found ]
+    [ graphql_not_found ]
 
 let test_rate_limit_carries_reset () =
   let limited =

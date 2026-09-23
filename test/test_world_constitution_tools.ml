@@ -259,11 +259,37 @@ let test_removing_an_id_the_world_does_not_hold_is_a_failure () =
         "a hand-written id is refused before the ledger is touched" true
         (failed (remove ~base_path "a-placeholder")))
 
+(* #38354: a ledger that exists but cannot be read is not a world without
+   norms. Before the fix the prompt builder logged and rendered the same text
+   a fresh world gets, so the turn ran without its articles and nothing
+   downstream could tell the two apart. The ledger path is made a directory:
+   the store sees something there, reading it fails, and [load] answers
+   [Unreadable]. *)
+let test_an_unreadable_ledger_is_not_rendered_as_no_articles () =
+  with_world (fun fresh_base ->
+      with_world (fun broken_base ->
+          let ledger = Store.ledger_path ~base_path:broken_base in
+          Fs_compat.mkdir_p ledger;
+          (match Store.load ~base_path:broken_base with
+           | Error (Store.Unreadable _) -> ()
+           | Ok _ -> Alcotest.fail "a directory at the ledger path must be Unreadable");
+          let meta = make_meta "prompt-reader" in
+          let prompt base_path =
+            Masc.Keeper_unified_prompt.build_system_prompt ~meta
+              ~config:(Masc.Workspace.default_config base_path) ()
+          in
+          Alcotest.(check bool)
+            "an unreadable ledger does not build the no-constitution prompt"
+            false
+            (String.equal (prompt fresh_base) (prompt broken_base))))
+
 let () =
   Alcotest.run "world_constitution_tools"
     [ ( "end to end",
         [ Alcotest.test_case "a written norm reaches the turn prompt" `Quick
             test_a_written_norm_reaches_the_turn_prompt;
+          Alcotest.test_case "an unreadable ledger is not rendered as no articles"
+            `Quick test_an_unreadable_ledger_is_not_rendered_as_no_articles;
         ] );
       ( "write",
         [ Alcotest.test_case "a written norm reaches the rendered articles"

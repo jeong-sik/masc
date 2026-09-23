@@ -11,9 +11,15 @@ let runtime id : Masc.Tui_decode.runtime_option =
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 
+(* The width these checks read at. Wide enough that the authority row -- two
+   clauses while no runtime surface has loaded -- stays one row, so the counts
+   below are about the rows each check is named for. *)
+let check_cols = 140
+
 let check_layout state expected =
-  expect "rendering chrome" expected (runtime_surface_listing_chrome state);
-  match scrolled_surface_rows state Runtime with
+  expect "rendering chrome" expected
+    (runtime_surface_listing_chrome ~cols:check_cols state);
+  match runtime_scrolled ~cols:check_cols state with
   | None -> Alcotest.fail "runtime list has no scroll geometry"
   | Some layout -> expect "keyboard shares rendering chrome" expected layout.sc_chrome
 
@@ -306,6 +312,71 @@ let test_cli_probe_is_a_note () =
   Alcotest.(check string) "human-readable native-auth skip" "ADC not probed"
     (runtime_probe_status_label Runtime_provider_skipped_native_auth)
 
+(* The authority row names the file this screen is a reading of. Drawn as one
+   line it asked for 143 cells with no fleet on screen and about 197 with one,
+   while the frame gives 96 at 100 columns -- so the clause it lost was the
+   config path, and a cut path names a file that does not exist (#36497). *)
+let authority_state () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_generated_at_iso = "fixture";
+      rrs_config_path = Some "/Users/operator/work/.masc/config/runtime.toml";
+      rrs_default_runtime_id = Some "assigned";
+      rrs_media_failover = []; rrs_media_failover_declared = [];
+      rrs_runtimes = [runtime "assigned"];
+      rrs_lanes =
+        [{rrl_id = "primary"; rrl_runtime_ids = ["assigned"]; rrl_declared = true}] } in
+  let snapshot = match Masc.Tui_decode.join_runtime_surface
+      ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in
+  state.runtime_surface <- Some snapshot;
+  state
+
+let test_the_authority_row_spells_its_config_path_whole () =
+  let state = authority_state () in
+  let path = "/Users/operator/work/.masc/config/runtime.toml" in
+  let rows_at cols = runtime_authority_rows ~cols state in
+  List.iter
+    (fun cols ->
+      let rows = rows_at cols in
+      let inner = Masc_tui_frame.inner_width ~cols in
+      List.iter
+        (fun row ->
+          Alcotest.(check bool)
+            (Printf.sprintf "row fits the frame at %d columns: %S" cols row)
+            true
+            (Masc_tui_message_layout.display_width row <= inner))
+        rows;
+      Alcotest.(check bool)
+        (Printf.sprintf "the config path is whole at %d columns" cols)
+        true
+        (List.exists
+           (fun row ->
+             let needle = path in
+             let n = String.length needle and h = String.length row in
+             let rec seek i = i + n <= h && (String.sub row i n = needle || seek (i + 1)) in
+             seek 0)
+           rows))
+    [ 80; 100; 110; 120; 140; 180 ];
+  (* A wider frame spends fewer rows on the same sentence, and the widest fits
+     it on one. Without this the packing could return one clause per row at
+     every width and every check above would still pass. *)
+  Alcotest.(check int) "one row once the frame is wide enough" 1
+    (List.length (rows_at 260));
+  Alcotest.(check bool) "a narrow frame spends more rows than a wide one" true
+    (List.length (rows_at 80) > List.length (rows_at 260));
+  (* The budget follows the rows. Counting one authority row at every width put
+     the footer past the frame's last row exactly when the sentence wrapped. *)
+  Alcotest.(check int) "the chrome count follows the rows drawn"
+    (runtime_surface_listing_chrome ~cols:260 state
+     + List.length (rows_at 100) - 1)
+    (runtime_surface_listing_chrome ~cols:100 state);
+  match runtime_scrolled ~cols:100 state with
+  | None -> Alcotest.fail "runtime list has no scroll geometry"
+  | Some layout ->
+      Alcotest.(check int) "the keys move through the drawing's count"
+        (runtime_surface_listing_chrome ~cols:100 state) layout.sc_chrome
+
 let test_search_follows_the_runtime_mode () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
@@ -322,7 +393,7 @@ let test_search_follows_the_runtime_mode () =
   let expect_rows expected =
     Alcotest.(check (option (list string))) "search uses the visible cursor order"
       (Some expected) (surface_row_texts state Runtime);
-    match scrolled_surface_rows state Runtime with
+    match runtime_scrolled ~cols:check_cols state with
     | Some layout -> expect "scroll and search have the same rows" (List.length expected) layout.sc_count
     | None -> Alcotest.fail "runtime list lost its scroll geometry" in
   state.runtime_mode <- Runtime_lanes;
@@ -758,6 +829,8 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "a new view ends what a key said" `Quick test_a_new_view_ends_what_a_key_said;
       Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
       Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode;
+      Alcotest.test_case "the authority row spells its config path whole" `Quick
+        test_the_authority_row_spells_its_config_path_whole;
       Alcotest.test_case "picker target column fits the longest id" `Quick
         test_picker_target_column_fits_the_longest_id;
       Alcotest.test_case "every picker row fits the frame" `Quick

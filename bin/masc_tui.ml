@@ -70,6 +70,11 @@ let scrolled_surface state surface =
   | Memory when Option.is_none state.memory_facts_keeper ->
       let _, cols = get_terminal_size () in
       Some (Masc_tui_render_memory.memory_overview_scrolled ~cols state)
+  (* Runtime's authority row wraps to the terminal width too, so its bound is
+     read at that width for the same reason the Memory overview's is. *)
+  | Runtime ->
+      let _, cols = get_terminal_size () in
+      Masc_tui_types.runtime_scrolled ~cols state
   | _ -> Masc_tui_types.scrolled_surface state surface
 ;;
 

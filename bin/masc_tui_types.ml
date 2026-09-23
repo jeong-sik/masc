@@ -5493,6 +5493,13 @@ type state = {
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
   mutable github_identity_view_error: string option;
+  (* The Info tab's Board-attention rows, keyed by the Keeper they were read
+     for. [requeue_board_quarantine_inflight] holds the partition a requeue
+     press is waiting on, so a second press before the answer is not a second
+     request against the same quarantine. *)
+  mutable keeper_board_quarantines:
+    (string, Masc_tui_board_quarantine.t) Masc_tui_fetched.t;
+  mutable board_quarantine_requeue_inflight: string option;
   mutable github_token_input: string option;
   mutable github_token_save_status: string option;
   (* The scopes the next [L] login asks for beyond gh's minimum. Off until the
@@ -7706,6 +7713,8 @@ let create_state
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;
+  keeper_board_quarantines = Masc_tui_fetched.initial;
+  board_quarantine_requeue_inflight = None;
   github_token_input = None;
   github_token_save_status = None;
   github_login_scopes = [];

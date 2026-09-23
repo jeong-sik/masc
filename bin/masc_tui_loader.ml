@@ -1822,6 +1822,13 @@ let load_keeper_github_identity_view ~(host : string) ~(port : int)
   | Error err -> Error ("github identity load failed: " ^ err)
   | Ok json -> Ok (github_identity_lines json)
 
+let load_keeper_board_quarantines ~(host : string) ~(port : int)
+    ~(keeper_name : string) :
+    (Masc_tui_board_quarantine.t, string) result =
+  match Masc_tui_http.fetch_keeper_board_quarantines ~host ~port ~keeper_name with
+  | Error err -> Error ("board quarantines: " ^ err)
+  | Ok json -> Masc_tui_board_quarantine.decode json
+
 (* What a Keeper can be attached to, and what each of those currently offers
    it. One fetch rather than two: a list of providers and a list of
    attachments cannot disagree if they arrive together. *)

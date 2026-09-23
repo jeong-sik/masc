@@ -23,9 +23,9 @@ let snapshot () =
       [ ( "connectors"
         , `List
             [ connector "discord"
-                [ binding "111" "sangsu"; binding "222" "other"
-                ; binding "333" "sangsu" ]
-            ; connector "slack" [ binding "C9" "sangsu" ]
+                [ binding "111" "unbind-fixture-keeper"; binding "222" "other"
+                ; binding "333" "unbind-fixture-keeper" ]
+            ; connector "slack" [ binding "C9" "unbind-fixture-keeper" ]
             ] )
       ; ("total", `Int 2)
       ; ("active_count", `Int 2)
@@ -57,21 +57,21 @@ let snapshot () =
       List.map named snapshot.cs_connectors
 
 let test_targets_are_the_keepers_bindings_on_every_transport () =
-  let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
-  check (list string) "every sangsu binding, none of the others"
+  let targets = Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()) in
+  check (list string) "every unbind-fixture-keeper binding, none of the others"
     [ "discord/111"; "discord/333"; "slack/C9" ]
     (List.map
        (fun (t : Unbind.target) -> t.connector_id ^ "/" ^ t.channel_id)
        targets);
   check bool "each carries the owner it is conditional on" true
     (List.for_all
-       (fun (t : Unbind.target) -> String.equal t.keeper_name "sangsu")
+       (fun (t : Unbind.target) -> String.equal t.keeper_name "unbind-fixture-keeper")
        targets)
 
 let test_labels_name_the_channel_or_say_the_name_is_unknown () =
   let labels =
     List.map Unbind.target_label
-      (Unbind.targets ~keeper_name:"sangsu" (snapshot ()))
+      (Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()))
   in
   check (list string) "known name with id, unknown name said so"
     [ "general (111)"; "333 (name unknown)"; "C9 (name unknown)" ]
@@ -93,15 +93,15 @@ let test_statuses_split_rebound_and_gone_from_failure () =
     (outcome 401 = Unbind.Failed "why")
 
 let test_a_partial_result_is_not_reported_as_whole () =
-  let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
+  let targets = Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()) in
   let results =
     List.combine targets
       [ Unbind.Failed "HTTP 500"; Unbind.Rebound; Unbind.Removed ]
   in
   check string "the summary counts each kind and names the failures"
-    "unbind all of sangsu: 1 removed, 1 kept, 0 not found, 1 failed -- \
+    "unbind all of unbind-fixture-keeper: 1 removed, 1 kept, 0 not found, 1 failed -- \
      general (111)"
-    (Unbind.summary ~keeper_name:"sangsu" results);
+    (Unbind.summary ~keeper_name:"unbind-fixture-keeper" results);
   check bool "a failure is flagged" true (Unbind.any_failed results);
   check (list string) "one line per binding, failures last"
     [ "unbind Slack C9 (name unknown): removed"
@@ -111,11 +111,11 @@ let test_a_partial_result_is_not_reported_as_whole () =
     (List.map Unbind.outcome_line (Unbind.report_order results))
 
 let test_arm_prompt_names_every_channel () =
-  let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
+  let targets = Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()) in
   check string "count, keeper and each label"
-    "unbind all armed: press U again to remove 3 bindings of sangsu: general \
+    "unbind all armed: press U again to remove 3 bindings of unbind-fixture-keeper: general \
      (111), 333 (name unknown), C9 (name unknown)"
-    (Unbind.arm_prompt ~keeper_name:"sangsu" ~confirm_key:"U" ~unreadable:[]
+    (Unbind.arm_prompt ~keeper_name:"unbind-fixture-keeper" ~confirm_key:"U" ~unreadable:[]
        targets)
 
 (* A transport whose binding store the server could not read has unknown
@@ -145,17 +145,17 @@ let test_an_unreadable_transport_is_named () =
       let unreadable = Unbind.unreadable_transports snapshot.cs_connectors in
       check (list string) "the unreadable transport" [ "Slack" ] unreadable;
       check string "no readable binding is not called none"
-        "unbind all: sangsu has no channel bindings; not included, binding \
+        "unbind all: unbind-fixture-keeper has no channel bindings; not included, binding \
          list unreadable: Slack"
-        (Unbind.nothing_to_unbind ~keeper_name:"sangsu" ~unreadable)
+        (Unbind.nothing_to_unbind ~keeper_name:"unbind-fixture-keeper" ~unreadable)
 
 let test_offer_leads_with_the_key () =
-  let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
+  let targets = Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()) in
   check string "key first, then the channels"
-    "y: also unbind sangsu's 3 channels, or any other key to keep them -- \
+    "y: also unbind unbind-fixture-keeper's 3 channels, or any other key to keep them -- \
      general (111), 333 (name unknown), C9 (name unknown); not included, \
      binding list unreadable: Teams"
-    (Unbind.offer_prompt ~keeper_name:"sangsu" ~unreadable:[ "Teams" ] targets)
+    (Unbind.offer_prompt ~keeper_name:"unbind-fixture-keeper" ~unreadable:[ "Teams" ] targets)
 
 let offer_reading =
   testable
@@ -169,8 +169,8 @@ let offer_reading =
 
 (* The offer was made while frame 4 was the last one presented. *)
 let offer_at_frame_4 () =
-  { Unbind.offer_keeper = "sangsu"
-  ; offer_targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ())
+  { Unbind.offer_keeper = "unbind-fixture-keeper"
+  ; offer_targets = Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ())
   ; offered_at = 4
   }
 
@@ -203,10 +203,10 @@ let test_offer_takes_its_key_only_after_it_was_drawn () =
        ~key:None)
 
 let test_elsewhere_the_offer_only_informs () =
-  let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
+  let targets = Unbind.targets ~keeper_name:"unbind-fixture-keeper" (snapshot ()) in
   check string "names the count and where to remove them"
-    "sangsu still holds 3 channel bindings; U U on its Channels tab removes them"
-    (Unbind.still_bound ~keeper_name:"sangsu" targets)
+    "unbind-fixture-keeper still holds 3 channel bindings; U U on its Channels tab removes them"
+    (Unbind.still_bound ~keeper_name:"unbind-fixture-keeper" targets)
 
 let () =
   run "masc_tui_connector_unbind"

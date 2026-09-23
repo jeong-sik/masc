@@ -1213,17 +1213,20 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 http = spec()
                 http_id = SETUP.render(http, BINARY)[0]
                 SETUP.configure(BINARY, base, http)
-                self.assertEqual(librarian(runtime), dict(slots=[http_id], cli_slots=[]))
+                # Setup rewrites the slots and keeps the seed's output budget.
+                budget = dict(max_output_tokens=8192)
+                self.assertEqual(librarian(runtime), dict(slots=[http_id], cli_slots=[], **budget))
                 client = spec('claude_code')
                 client_id = SETUP.render(client, BINARY)[0]
                 SETUP.configure(BINARY, base, client)
-                self.assertEqual(librarian(runtime), dict(slots=[], cli_slots=[client_id]))
+                self.assertEqual(librarian(runtime), dict(slots=[], cli_slots=[client_id], **budget))
             with tempfile.TemporaryDirectory(prefix='runtime-seed-two-') as tmp:
                 base, runtime = seeded(tmp)
                 models = [spec(), dict(spec(), model='second-owned-model')]
                 ids = [SETUP.render(model, BINARY)[0] for model in models]
                 SETUP.configure_many(BINARY, base, models, ids, default_id=ids[1])
-                self.assertEqual(librarian(runtime), dict(slots=[ids[1]], cli_slots=[]))
+                self.assertEqual(
+                    librarian(runtime), dict(slots=[ids[1]], cli_slots=[], max_output_tokens=8192))
 
     def test_real_validator_accepts_each_transport_and_reuses_identical_connection(self):
         fixture = ROOT / 'scripts/fixtures/release-evidence'

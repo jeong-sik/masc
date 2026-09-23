@@ -823,7 +823,6 @@ let load_resolver_snapshot
              ~base_url
              ~headers:[]
              ~request_path
-             ?max_tokens:capabilities.max_output_tokens
              ?max_context:capabilities.max_context_tokens
              ?enable_thinking:target.enable_thinking
              ?reasoning_effort:target.reasoning_effort
@@ -941,11 +940,12 @@ let admitted_target_catalog_evidence (admitted : admitted_target) = admitted.evi
    per-lane fact, not a per-binding one: the same slot can serve two lanes
    with different budgets, so the override is applied to the lane's own
    admitted handle after the shared catalog lookup, never written back into
-   the cached target. The catalog's [max_output_tokens] is a validation bound
-   (what the model can emit), and sending it as the request budget is what
-   made OpenRouter reserve the whole ceiling and answer 402 on a 400-byte
-   judgment (2026-09-21). The binding identity is untouched: it names the
-   wire, not the budget. *)
+   the cached target. The projection config above carries no [max_tokens]:
+   the catalog's [max_output_tokens] is a validation bound (what the model
+   can emit), not a request value, so without a lane budget the field follows
+   [Backend_openai_request.output_token_receipt] — omitted on the optional
+   envelopes, the catalog fallback only where the wire requires the field.
+   The binding identity is untouched: it names the wire, not the budget. *)
 let admitted_target_with_max_tokens (admitted : admitted_target) max_tokens =
   { admitted with
     target =

@@ -852,17 +852,6 @@ let live_lane_configuration registry lane_id =
             (Runtime_exact_output_registry.lane_resolution_error_to_string
                (Runtime_exact_output_registry.No_admitted_lane_slots { lane_id }))
       }
-  | Error (Runtime_exact_output_registry.Missing_lane_output_budget _) ->
-    Configured
-      { admitted_slots = []
-      ; cli_slots = []
-      ; dropped_slots
-      ; declared_slots
-      ; admission_error =
-          Some
-            (Runtime_exact_output_registry.lane_resolution_error_to_string
-               (Runtime_exact_output_registry.Missing_lane_output_budget { lane_id }))
-      }
 ;;
 
 let snapshot_json () =

@@ -1108,46 +1108,47 @@ let test_an_append_keeps_a_slot_the_registry_dropped () =
                         (Registry.lane_resolution_error_to_string error))
 ;;
 
-(* An HTTP lane that declares no output budget is refused rather than run with
-   the catalog ceiling as its request [max_tokens]. The ceiling is what the
-   model can emit, not what the request asks for; sending it made OpenRouter
-   reserve the whole ceiling and answer 402 on a 400-byte judgment
-   (2026-09-21). A cli-only lane sends no [max_tokens] and stays resolvable. *)
-let test_http_lane_without_output_budget_is_refused () =
-  let lane_id = "budgetless" in
+(* A lane's declared output budget is set on its own admitted targets. A lane
+   that declares none resolves too, and its targets carry no [max_tokens]:
+   the catalog's [max_output_tokens] is what the model can emit, not what the
+   request asks for, so it is never filled in as the request budget. *)
+let test_lane_output_budget_is_optional_and_never_the_catalog_ceiling () =
+  let lane_id = "budget" in
   let resolver_snapshot =
     load_control_snapshot
       (Exact_output.Full_replacement
-         { source = "budgetless-lane"; contents = replacement_catalog })
+         { source = "lane-budget"; contents = replacement_catalog })
   in
-  let publish slot_ids cli_slot_ids max_output_tokens =
-    match
-      Runtime.publish_exact_output_registry
-        ~lanes:
-          [ Runtime_schema.{ id = lane_id; slot_ids; cli_slot_ids; max_output_tokens } ]
-        resolver_snapshot
-    with
-    | Ok registry -> registry
-    | Error detail -> Alcotest.failf "failed to publish budget fixture: %s" detail
+  let request_budget max_output_tokens =
+    let registry =
+      match
+        Runtime.publish_exact_output_registry
+          ~lanes:
+            [ Runtime_schema.
+                { id = lane_id
+                ; slot_ids = [ replacement_target ]
+                ; cli_slot_ids = []
+                ; max_output_tokens
+                }
+            ]
+          resolver_snapshot
+      with
+      | Ok registry -> registry
+      | Error detail -> Alcotest.failf "failed to publish budget fixture: %s" detail
+    in
+    match Registry.resolve_lane registry ~lane_id with
+    | Ok { selected_slots = [ slot ]; _ } ->
+      (Exact_output.projection_target slot.admitted_target).config.max_tokens
+    | Ok _ -> Alcotest.fail "the budget lane resolved to unexpected slots"
+    | Error error ->
+      Alcotest.failf
+        "the budget lane must resolve: %s"
+        (Registry.lane_resolution_error_to_string error)
   in
-  let http_registry = publish [ replacement_target ] [] None in
-  (match Registry.resolve_lane http_registry ~lane_id with
-   | Error (Registry.Missing_lane_output_budget { lane_id = actual }) ->
-     Alcotest.(check string) "the refused lane is named" lane_id actual
-   | Error error ->
-     Alcotest.failf
-       "an HTTP lane with no budget returned the wrong failure: %s"
-       (Registry.lane_resolution_error_to_string error)
-   | Ok _ -> Alcotest.fail "an HTTP lane with no output budget must not resolve");
-  let cli_registry = publish [] [ replacement_target ] None in
-  (match Registry.resolve_lane cli_registry ~lane_id with
-   | Ok { selected_slots = []; cli_slots = [ slot_id ] } ->
-     Alcotest.(check string) "a cli-only lane needs no budget" replacement_target slot_id
-   | Ok _ -> Alcotest.fail "the cli-only lane resolved to unexpected slots"
-   | Error error ->
-     Alcotest.failf
-       "a cli-only lane must resolve without a budget: %s"
-       (Registry.lane_resolution_error_to_string error))
+  Alcotest.(check (option int)) "a declared budget is the request max_tokens"
+    (Some 4_096) (request_budget (Some 4_096));
+  Alcotest.(check (option int)) "no declared budget sends no max_tokens"
+    None (request_budget None)
 ;;
 
 let () =
@@ -1220,8 +1221,8 @@ let () =
             `Quick
             test_an_append_keeps_a_slot_the_registry_dropped
         ; Alcotest.test_case
-            "an HTTP lane with no output budget is refused, a cli-only lane is not"
+            "a lane budget is optional and never the catalog ceiling"
             `Quick
-            test_http_lane_without_output_budget_is_refused
+            test_lane_output_budget_is_optional_and_never_the_catalog_ceiling
         ] ) ]
 ;;

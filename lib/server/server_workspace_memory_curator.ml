@@ -291,9 +291,7 @@ let start ~sw ~base_path =
     | Ok registry ->
       (match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
        | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) -> false
-       | Ok _
-       | Error (Runtime_exact_output_registry.No_admitted_lane_slots _)
-       | Error (Runtime_exact_output_registry.Missing_lane_output_budget _) -> true) in
+       | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> true) in
   start_with ~sw ~base_path ~enabled ~prepare:prepare_execution
 
 module For_testing = struct

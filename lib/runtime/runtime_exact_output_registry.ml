@@ -18,8 +18,8 @@ type admitted_lane =
        and the projection shows the declaration either way. *)
   ; max_output_tokens : int option
     (* The lane's declared output budget, carried verbatim. [None] means the
-       declaration named none; a lane with HTTP slots and no budget is
-       refused at resolution rather than run with the catalog ceiling. *)
+       declaration named none, and the lane's requests carry no [max_tokens]
+       of their own. *)
   }
 
 type rejected_slot =
@@ -107,7 +107,6 @@ type resolved_lane =
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
   | No_admitted_lane_slots of { lane_id : string }
-  | Missing_lane_output_budget of { lane_id : string }
 
 type prepared_replacement =
   { base : t option
@@ -472,29 +471,21 @@ let resolve_lane registry ~lane_id =
     if lane.slots = [] && lane.cli_slots = []
     then Error (No_admitted_lane_slots { lane_id })
     else
-      match lane.slots, lane.max_output_tokens with
-      (* An HTTP lane that declares no output budget is refused, not run with
-         the catalog ceiling. The ceiling is what the model can emit, not what
-         this request asks for; sending it made OpenRouter reserve the whole
-         ceiling and answer 402 on a 400-byte judgment (2026-09-21). A
-         cli-only lane sends no [max_tokens] and needs no budget. *)
-      | _ :: _, None -> Error (Missing_lane_output_budget { lane_id })
-      | slots, budget ->
-        let selected_slots =
-          List.map
-            (fun (slot : admitted_slot) ->
-               let admitted_target =
-                 match budget with
-                 | Some max_tokens ->
-                   Exact_output.admitted_target_with_max_tokens
-                     slot.admitted_target
-                     max_tokens
-                 | None -> slot.admitted_target
-               in
-               ({ slot_id = slot.slot_id; admitted_target } : selected_slot))
-            slots
-        in
-        Ok { selected_slots; cli_slots = lane.cli_slots }
+      let selected_slots =
+        List.map
+          (fun (slot : admitted_slot) ->
+             let admitted_target =
+               match lane.max_output_tokens with
+               | Some max_tokens ->
+                 Exact_output.admitted_target_with_max_tokens
+                   slot.admitted_target
+                   max_tokens
+               | None -> slot.admitted_target
+             in
+             ({ slot_id = slot.slot_id; admitted_target } : selected_slot))
+          lane.slots
+      in
+      Ok { selected_slots; cli_slots = lane.cli_slots }
 ;;
 
 let publication_error_to_string = function
@@ -539,11 +530,6 @@ let lane_resolution_error_to_string = function
     Printf.sprintf "exact-output lane %S is not configured" lane_id
   | No_admitted_lane_slots { lane_id } ->
     Printf.sprintf "exact-output lane %S has no admitted slots" lane_id
-  | Missing_lane_output_budget { lane_id } ->
-    Printf.sprintf
-      "exact-output lane %S declares no max_output_tokens; an HTTP lane must \
-       declare its output budget rather than send the catalog ceiling"
-      lane_id
 ;;
 
 let reservation_error_to_string = function

@@ -56,7 +56,6 @@ slots = ["openrouter.probe"]
 max_output_tokens = 4096
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["openrouter.probe"]
-max_output_tokens = 4096
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["openrouter.probe"]
 max_output_tokens = 4096
@@ -94,7 +93,7 @@ let with_runtime f =
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     Fs_compat.remove_tree root) @@ fun () ->
   Llm_provider.Model_catalog.clear_global ();
-  let load effort =
+  let load ?(lane_id = "librarian_exact") effort =
     let path = Filename.concat root "runtime.toml" in
     Fs_compat.save_file path (runtime_toml effort);
     Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
@@ -107,9 +106,9 @@ let with_runtime f =
      | _ -> fail "expected the API runtime");
     Server_runtime_bootstrap.For_testing.configure_exact_output_registry ~config_root:root ();
     let registry = Registry.current () |> require_ok "published registry" in
-    match Registry.resolve_lane registry ~lane_id:"librarian_exact" with
+    match Registry.resolve_lane registry ~lane_id with
     | Ok { selected_slots = [ slot ]; _ } -> slot.admitted_target
-    | _ -> fail "expected one admitted Librarian slot" in
+    | _ -> failf "expected one admitted %s slot" lane_id in
   f load
 
 let ready target =
@@ -192,9 +191,7 @@ let test_explicit_effort_reaches_serialized_request () =
       Yojson.Safe.Util.(body |> member "reasoning_effort" |> to_string))
     [ Llm_provider.Reasoning_effort.Low; Llm_provider.Reasoning_effort.High ]
 
-let test_declared_lane_budget_reaches_serialized_request () =
-  with_runtime @@ fun load ->
-  let target = load "low" in
+let serialized_body target =
   let projected = EO.projection_target target in
   let preflight =
     Plan.preflight
@@ -205,14 +202,20 @@ let test_declared_lane_budget_reaches_serialized_request () =
     |> require_ok "preflight"
   in
   let plan = Plan.finalize_unmeasured preflight |> require_ok "finalize" in
-  let serialized = Plan.request_body plan in
-  let body = Yojson.Safe.from_string serialized in
-  (* The lane declares 4096 while the catalog ceiling is 384000. The request
-     must carry the lane's budget, not the ceiling: the ceiling is what the
-     model can emit, and sending it made OpenRouter reserve the whole ceiling
-     and answer 402 on a 400-byte judgment (2026-09-21). *)
+  Yojson.Safe.from_string (Plan.request_body plan)
+
+(* The catalog ceiling is 384000. The Librarian lane declares 4096 and its
+   request carries that; the HITL lane declares nothing and its request
+   carries no max_tokens, so the provider's default applies. The ceiling is
+   what the model can emit and is never the request budget. *)
+let test_declared_lane_budget_reaches_serialized_request () =
+  with_runtime @@ fun load ->
   check int "the declared lane budget is the request max_tokens" 4096
-    Yojson.Safe.Util.(body |> member "max_tokens" |> to_int)
+    Yojson.Safe.Util.(serialized_body (load "low") |> member "max_tokens" |> to_int);
+  check bool "a lane with no budget sends no max_tokens" true
+    (Yojson.Safe.Util.(
+       serialized_body (load ~lane_id:"hitl_auto_judge" "low") |> member "max_tokens")
+     = `Null)
 ;;
 
 let () =

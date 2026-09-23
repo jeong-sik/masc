@@ -531,7 +531,8 @@ let test_runtime_config_warning_names_its_authority () =
   in
   let response =
     `Assoc
-      [ ( "config_write"
+      [ "runtime_sync", `String "lane_restarted"
+      ; ( "config_write"
         , `Assoc
             [ "revision", revision
             ; "applied", `Bool true
@@ -561,7 +562,8 @@ let test_runtime_config_warning_names_its_authority () =
        message);
   let malformed =
     `Assoc
-      [ ( "config_write"
+      [ "runtime_sync", `String "lane_restarted"
+      ; ( "config_write"
         , `Assoc
             [ "revision", revision
             ; "applied", `Bool true
@@ -577,6 +579,44 @@ let test_runtime_config_warning_names_its_authority () =
   match config_write_status_message ~keeper_name:"alpha" malformed with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "malformed config warning became clean success"
+
+let test_deferred_runtime_sync_is_named_in_the_status () =
+  let revision =
+    match observed with
+    | `Assoc fields -> List.assoc "config_revision" fields
+    | _ -> Alcotest.fail "observed fixture must be an object"
+  in
+  let response runtime_sync =
+    `Assoc
+      (runtime_sync
+       @ [ ( "config_write"
+           , `Assoc
+               [ "revision", revision
+               ; "applied", `Bool true
+               ; "warnings", `List []
+               ] )
+         ])
+  in
+  (match
+     config_write_status_message ~keeper_name:"alpha"
+       (response [ "runtime_sync", `String "deferred_until_turn_end" ])
+   with
+   | Error detail -> Alcotest.fail detail
+   | Ok (severity, message) ->
+     Alcotest.(check string) "deferral is not an error" "system" severity;
+     Alcotest.(check bool) "deferral says when the settings apply" true
+       (String.ends_with
+          ~suffix:"(a turn is running; the next turn uses the new settings)"
+          message));
+  (match
+     config_write_status_message ~keeper_name:"alpha"
+       (response [ "runtime_sync", `String "failed" ])
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a refusal state became a success status");
+  match config_write_status_message ~keeper_name:"alpha" (response []) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a success without runtime_sync was accepted"
 
 let () =
   Alcotest.run "tui keeper config"
@@ -628,5 +668,7 @@ let () =
             test_unchanged_runtime_assignment_response_decoder
         ; Alcotest.test_case "runtime config warning authority" `Quick
             test_runtime_config_warning_names_its_authority
+        ; Alcotest.test_case "deferred runtime sync status" `Quick
+            test_deferred_runtime_sync_is_named_in_the_status
         ] )
     ]

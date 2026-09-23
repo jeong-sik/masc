@@ -111,6 +111,24 @@ let runtime_synced_result ~keeper_name (updated : keeper_meta) runtime_sync =
         @ [ "meta", Keeper_meta_json.meta_to_json updated ]))
 ;;
 
+(* Every editable field is read per turn or per cycle except one: the egress
+   proxy is forked only when a lane starts in the policy network mode
+   ([Keeper_keepalive.fork_egress_proxy]). A lane that started in another mode
+   has no proxy, so a policy-mode update that skips the lane restart would
+   leave every policy turn without its gateway, and nothing restarts the lane
+   after the turn ends. The registry's bound port is the lane's own answer;
+   comparing old and new meta would miss an earlier update that also skipped
+   the restart. *)
+let running_lane_lacks_policy_proxy ~base_path (updated : keeper_meta) =
+  match updated.network_mode with
+  | Keeper_types_profile_sandbox.Network_none
+  | Keeper_types_profile_sandbox.Network_inherit -> false
+  | Keeper_types_profile_sandbox.Network_policy ->
+    (match Keeper_registry.get ~base_path updated.name with
+     | None -> false
+     | Some entry -> Option.is_none (Atomic.get entry.egress_proxy_port))
+;;
+
 (* The lane swap tears down the registry entry a live turn's finalize path
    still needs: a swap that raced an admitted turn left that turn's slot
    permanently held after its provider run completed (#26542 — a keeper
@@ -388,16 +406,30 @@ let finish_published_update ~supersession ctx updated =
       (match swap_keepalive_lane_fenced ctx updated with
        | Error (Swap_failed result) -> Update_refused result
        | Error (Swap_turn_in_flight info) ->
-         (* The owner publication above already carries the new profile;
-            the turn holding the slot finishes on the meta it was admitted
-            with and the next admitted turn reads the published one. *)
-         let runtime_sync = Deferred_until_turn_end info in
-         Runtime_synced
-           { result =
-               runtime_synced_result ~keeper_name:updated.name updated
-                 runtime_sync
-           ; runtime_sync
-           }
+         if running_lane_lacks_policy_proxy ~base_path:ctx.config.base_path
+              updated
+         then
+           Update_refused
+             (tool_result_error ~class_:Tool_result.Workflow_rejection
+                (Printf.sprintf
+                   "keeper %s configuration was saved and published, but a \
+                    turn holds the keeper's slot, so the keepalive lane was \
+                    not restarted. The running lane has no egress proxy, and \
+                    network_mode=policy needs one: it takes effect only when \
+                    the lane restarts. Call masc_keeper_up again when the \
+                    keeper is idle."
+                   updated.name))
+         else (
+           (* The owner publication above already carries the new profile;
+              the turn holding the slot finishes on the meta it was admitted
+              with and the next admitted turn reads the published one. *)
+           let runtime_sync = Deferred_until_turn_end info in
+           Runtime_synced
+             { result =
+                 runtime_synced_result ~keeper_name:updated.name updated
+                   runtime_sync
+             ; runtime_sync
+             })
        | Ok (stop_outcome, launch_outcome) ->
          (match launch_outcome with
           | Keepalive_started _ ->

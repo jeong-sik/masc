@@ -1046,8 +1046,10 @@ let test_cross_domain_start_keepalive_and_swap () =
              check string "swapped keeper name matches" keeper_name new_entry.name
            | Ok (_, rejected) ->
              fail ("swap keepalive rejected: " ^ Masc.Keeper_keepalive.start_keepalive_outcome_to_string rejected)
-           | Error error ->
-             fail ("swap keepalive tool error: " ^ Tool_result.message error));
+           | Error (Masc.Keeper_turn_up_update.Swap_failed error) ->
+             fail ("swap keepalive tool error: " ^ Tool_result.message error)
+           | Error (Masc.Keeper_turn_up_update.Swap_turn_in_flight _) ->
+             fail "swap keepalive found a turn in flight");
           (match Masc.Keeper_keepalive.stop_keepalive_and_await ~base_path:config.base_path keeper_name with
            | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
            | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
@@ -2409,7 +2411,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            stopped_name
           : Masc.Keeper_keepalive.joined_stop_result))
 
-let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
+let test_update_keeper_defers_lane_swap_while_turn_in_flight () =
   Eio_main.run @@ fun env ->
   install_test_env env;
   Eio.Switch.run @@ fun sw ->
@@ -2486,12 +2488,12 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
        | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
        | Ok (`Busy _) -> fail "Owner unexpectedly busy before the test turn"
        | Ok (`Ran result) ->
-         check bool "mid-turn update is rejected" false
+         check bool "mid-turn update succeeds with the lane swap deferred" true
            (Keeper_types_profile.tool_result_success result);
          let data = Tool_result.data result in
-         check (option string) "rejection is typed"
-           (Some "keeper_turn_in_flight")
-           (Json_util.get_string data "error");
+         check (option string) "deferral is typed"
+           (Some "deferred_until_turn_end")
+           (Json_util.get_string data "runtime_sync");
          check bool "rejection rolls the fence back inside the turn" true
            (Option.is_none
               (owner_shutdown_operation_id_exn
@@ -5534,8 +5536,8 @@ let () =
         test_operator_update_supersedes_exact_blocked_shutdown;
       test_case "field-only update honors TOML-declared profile" `Quick
         test_field_only_update_honors_toml_declared_profile;
-      test_case "update rejects lane swap while turn in flight" `Quick
-        test_update_keeper_rejects_lane_swap_while_turn_in_flight;
+      test_case "update defers lane swap while turn in flight" `Quick
+        test_update_keeper_defers_lane_swap_while_turn_in_flight;
       test_case "cancelled update finishes lane swap" `Quick
         test_update_keeper_cancellation_finishes_lane_swap;
       test_case "keeper up shared boundary outlives calling turn" `Quick

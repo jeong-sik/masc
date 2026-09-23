@@ -953,6 +953,17 @@ let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event 
           : Server_dashboard_http_keeper_api_lifecycle_post.surface_refresh)
   | None -> invalidate_keeper_execution_surfaces ~config ()
 
+(* The [runtime_sync] value on config POST refusals. A successful POST
+   answers with {!Keeper_turn_up_update.runtime_sync_to_wire} instead, so
+   the key always holds one of four strings. *)
+type runtime_sync_refusal =
+  | Runtime_sync_not_attempted
+  | Runtime_sync_failed
+
+let runtime_sync_refusal_to_wire = function
+  | Runtime_sync_not_attempted -> "not_attempted"
+  | Runtime_sync_failed -> "failed"
+
 let respond_config_sync_error
       ?config_write
       ~request
@@ -960,6 +971,7 @@ let respond_config_sync_error
       ~status
       ~name
       ~config_applied
+      ~runtime_sync
       ~code
       ~detail
       ()
@@ -971,7 +983,7 @@ let respond_config_sync_error
       ([ "ok", `Bool false
        ; "keeper", `String name
        ; "config_applied", `Bool config_applied
-       ; "runtime_sync", `Bool false
+       ; "runtime_sync", `String (runtime_sync_refusal_to_wire runtime_sync)
        ; "error", `Assoc [ "code", `String code; "detail", `String detail ]
        ]
        @
@@ -993,7 +1005,8 @@ let respond_config_reconciliation ~request reqd ~name ~error =
        [ "ok", `Bool false
        ; "keeper", `String name
        ; "config_application", `Assoc [ "state", `String "indeterminate" ]
-       ; "runtime_sync", `Bool false
+       ; ( "runtime_sync"
+         , `String (runtime_sync_refusal_to_wire Runtime_sync_not_attempted) )
        ; "error", error
        ; "authoritative_reload_required", `Bool true
        ])
@@ -1009,7 +1022,8 @@ let respond_config_revision_conflict ~request reqd ~name
       [ "ok", `Bool false
       ; "keeper", `String name
       ; "config_applied", `Bool false
-      ; "runtime_sync", `Bool false
+      ; ( "runtime_sync"
+        , `String (runtime_sync_refusal_to_wire Runtime_sync_not_attempted) )
       ; ( "error"
         , `Assoc
             [ "code", `String Keeper_turn_up_update.config_revision_conflict_code
@@ -1118,13 +1132,53 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                               command, so they cannot overwrite runtime counters.
                               [preserve_prompt_defaults] keeps existing prompt
                               fields when the request omits them. *)
-                           let result =
-                             Keeper_turn_up_update.update_keeper
+                           match
+                             Keeper_turn_up_update.update_keeper_outcome
                                ~preserve_prompt_defaults:true
                                ~expected_config_revision
                                keeper_ctx parsed
                                meta0
-                           in
+                           with
+                           | Keeper_turn_up_update.Runtime_synced
+                               { result; runtime_sync } ->
+                             (match runtime_sync with
+                              | Keeper_turn_up_update.Lane_restarted ->
+                                invalidate_config_surfaces
+                                  ~config
+                                  ~name
+                                  (Some
+                                     (Keeper_lifecycle_events.Custom_event
+                                        { verb = Keeper_lifecycle_events.Restarted
+                                        ; phase =
+                                            Some Keeper_state_machine.Running
+                                        }))
+                              | Keeper_turn_up_update.Deferred_until_turn_end _ ->
+                                (* The lane kept running; nothing restarted,
+                                   so no lifecycle event is published. *)
+                                invalidate_config_surfaces ~config ~name None);
+                             let (_st, json) =
+                               Dashboard_http_keeper.keeper_config_json config
+                                 name
+                             in
+                             let sync_field =
+                               ( "runtime_sync"
+                               , `String
+                                   (Keeper_turn_up_update.runtime_sync_to_wire
+                                      runtime_sync) )
+                             in
+                             let json =
+                               match config_write_receipt result, json with
+                               | Some receipt, `Assoc fields ->
+                                 `Assoc
+                                   (sync_field
+                                    :: ("config_write", receipt)
+                                    :: fields)
+                               | None, `Assoc fields -> `Assoc (sync_field :: fields)
+                               | (Some _ | None), _ -> json
+                             in
+                             Http.Response.json_value ~compress:true
+                               ~request:req json reqd
+                           | Keeper_turn_up_update.Update_refused result ->
                            (match
                               Keeper_turn_up_update
                               .config_revision_conflict_of_result result
@@ -1156,13 +1210,11 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                 ~status:`Service_unavailable
                                 ~name
                                 ~config_applied:false
+                                ~runtime_sync:Runtime_sync_not_attempted
                                 ~code:"keeper_config_publication_rolled_back"
                                 ~detail
                                 ()
                             | None ->
-                           if not
-                                (Keeper_types_profile.tool_result_success result)
-                           then (
                              let detail = Keeper_types_profile.tool_result_body result in
                              Log.Keeper.error
                                "dashboard keeper config runtime sync failed keeper=%s: %s"
@@ -1176,31 +1228,10 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                ~status:`Service_unavailable
                                ~name
                                ~config_applied:true
+                               ~runtime_sync:Runtime_sync_failed
                                ~code:"keeper_runtime_sync_failed"
                                ~detail
-                               ())
-                           else (
-                             invalidate_config_surfaces
-                               ~config
-                               ~name
-                               (Some
-                                  (Keeper_lifecycle_events.Custom_event
-                                     { verb = Keeper_lifecycle_events.Restarted
-                                     ; phase =
-                                         Some Keeper_state_machine.Running
-                                     }));
-                             let (_st, json) =
-                               Dashboard_http_keeper.keeper_config_json config
-                                 name
-                             in
-                             let json =
-                               match config_write_receipt result, json with
-                               | Some receipt, `Assoc fields ->
-                                 `Assoc (("config_write", receipt) :: fields)
-                               | Some _, _ | None, _ -> json
-                             in
-                             Http.Response.json_value ~compress:true
-                               ~request:req json reqd)))))))))
+                               ()))))))))
            | None ->
                respond_error reqd "request body must be a JSON object"
          with Yojson.Json_error e ->

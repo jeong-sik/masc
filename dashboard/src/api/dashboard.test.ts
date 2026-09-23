@@ -3744,6 +3744,7 @@ describe('keeper config mutation API', () => {
           selected_runtime_canonical: 'b.two',
           runtime_options: ['a.one', 'b.two'],
         },
+        runtime_sync: 'lane_restarted',
         sources: {
           default_source_kind: 'toml',
           default_manifest_path: '/tmp/.masc/config/keepers/sangsu.toml',
@@ -3785,6 +3786,7 @@ describe('keeper config mutation API', () => {
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: ['ocaml-coding'] },
+        runtime_sync: 'lane_restarted',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -3802,6 +3804,40 @@ describe('keeper config mutation API', () => {
       expected_config_revision: configRevision,
     })
     expect(result.skills.names).toEqual(['ocaml-coding'])
+  })
+
+  it('reads a save deferred until the running turn ends as a success', async () => {
+    const body = (runtimeSync: unknown) => JSON.stringify({
+      name: 'keeper-sangsu',
+      activation_mode: 'autonomous',
+      input_policy: 'small',
+      config_revision: configRevision,
+      max_context_override: null,
+      skills: { names: [] },
+      ...(runtimeSync === undefined ? {} : { runtime_sync: runtimeSync }),
+    })
+    const respond = (runtimeSync: unknown) => vi.fn().mockResolvedValue(
+      new Response(body(runtimeSync), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    vi.stubGlobal('fetch', respond('deferred_until_turn_end'))
+    const deferred = await patchKeeperConfig('keeper-sangsu', {
+      activation_mode: 'autonomous',
+    }, configRevision)
+    expect(deferred.runtime_sync).toBe('deferred_until_turn_end')
+
+    vi.stubGlobal('fetch', respond('failed'))
+    await expect(patchKeeperConfig('keeper-sangsu', {
+      activation_mode: 'autonomous',
+    }, configRevision)).rejects.toThrow('runtime_sync is not a success state')
+
+    vi.stubGlobal('fetch', respond(undefined))
+    await expect(patchKeeperConfig('keeper-sangsu', {
+      activation_mode: 'autonomous',
+    }, configRevision)).rejects.toThrow('runtime_sync is required after a save')
   })
 })
 

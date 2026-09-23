@@ -1685,10 +1685,14 @@ interface KeeperHookIntrospection {
 
 export type KeeperInputPolicy = 'small' | 'wide'
 
+/** What a successful config POST did to the running lane. Absent on GET. */
+export type KeeperConfigRuntimeSync = 'lane_restarted' | 'deferred_until_turn_end'
+
 export interface KeeperConfig {
   name: string
   config_revision: KeeperConfigRevisionState
   config_write?: KeeperConfigWriteReceipt
+  runtime_sync?: KeeperConfigRuntimeSync
   config_transaction_warnings?: KeeperManifestWarning[]
   activation_mode: KeeperActivationMode
   input_policy: KeeperInputPolicy

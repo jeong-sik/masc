@@ -5747,6 +5747,8 @@ let test_config_post_restarts_from_atomic_toml () =
       check bool "write receipt says config applied" true
         Yojson.Safe.Util.
           (response |> member "config_write" |> member "applied" |> to_bool);
+      check string "idle keeper lane restarted" "lane_restarted"
+        Yojson.Safe.Util.(response |> member "runtime_sync" |> to_string);
       check string "write receipt carries exact revision" "sha256"
         Yojson.Safe.Util.
           (response |> member "config_write" |> member "revision"
@@ -5764,6 +5766,84 @@ let test_config_post_restarts_from_atomic_toml () =
         (match Masc.Keeper_registry.get ~base_path:config.base_path name with
          | Some entry -> Masc.Keeper_activation_mode.spontaneous entry.meta.activation_mode
          | None -> false))
+
+(* A turn holding the Owner slot stands in for a keeper mid-turn: the POST
+   runs inside the admitted closure, as a keeper's own masc_keeper_up does. *)
+let post_config_mid_turn ~sw ~clock ~config ~name body =
+  match
+    Masc.Keeper_owner_registry.run_maintenance_if_idle
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:name
+      (fun () ->
+        post_config ~sw ~clock
+          ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+          ~name body)
+  with
+  | Error error -> fail (Masc.Keeper_owner_registry.command_error_to_string error)
+  | Ok (`Busy _) -> fail "Owner unexpectedly busy before the test turn"
+  | Ok (`Ran response) -> response
+
+let test_config_post_mid_turn_defers_runtime_sync () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-mid-turn" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let raw, json =
+    post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
+      {|{"activation_mode":"autonomous"}|}
+  in
+  expect_http_status "mid-turn config write is HTTP 200" 200 raw;
+  let open Yojson.Safe.Util in
+  check string "runtime sync waits for the turn" "deferred_until_turn_end"
+    (json |> member "runtime_sync" |> to_string);
+  check bool "write receipt says config applied" true
+    (json |> member "config_write" |> member "applied" |> to_bool);
+  (match
+     Keeper_toml_loader.parse_toml
+       (In_channel.with_open_bin toml_path In_channel.input_all)
+   with
+   | Error error -> fail error
+   | Ok doc ->
+     check (option string) "activation committed" (Some "autonomous")
+       (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"));
+  (* The caller that reads 200 and moves on is right: a second POST built
+     from a fresh read goes through without a revision conflict. *)
+  let again_raw, again_json =
+    post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
+      {|{"activation_mode":"manual"}|}
+  in
+  expect_http_status "next write from fresh revision is HTTP 200" 200 again_raw;
+  check string "second write is also deferred" "deferred_until_turn_end"
+    (again_json |> member "runtime_sync" |> to_string)
+
+let test_config_post_mid_turn_policy_without_proxy_still_fails () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-mid-turn-policy" in
+  prepare_config_sync_keeper ~sw config name;
+  let (_ : string) = write_config_sync_toml config name in
+  let meta =
+    match Masc.Keeper_meta_store.read_meta config name with
+    | Ok (Some meta) -> meta
+    | Ok None -> fail "keeper metadata missing"
+    | Error error -> fail error
+  in
+  (* A lane registered without an egress proxy: the proxy is forked only
+     when a lane starts in the policy network mode. *)
+  let (_ : Masc.Keeper_registry.registry_entry) =
+    Masc.Keeper_registry.register_offline ~base_path:config.base_path name meta
+  in
+  let raw, json =
+    post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
+      {|{"sandbox_profile":"microvm","network_mode":"policy"}|}
+  in
+  expect_http_status "policy without a proxy is HTTP 503" 503 raw;
+  let open Yojson.Safe.Util in
+  check string "typed runtime sync failure" "keeper_runtime_sync_failed"
+    (json |> member "error" |> member "code" |> to_string);
+  check bool "write itself applied" true
+    (json |> member "config_applied" |> to_bool);
+  check string "runtime sync failed" "failed"
+    (json |> member "runtime_sync" |> to_string)
 
 let test_config_post_materializes_missing_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -5822,7 +5902,8 @@ let test_config_post_rolls_back_missing_runtime_assignment () =
   expect_http_status "HTTP 503" 503 raw;
   let open Yojson.Safe.Util in
   check bool "TOML rolled back" false (json |> member "config_applied" |> to_bool);
-  check bool "runtime not synced" false (json |> member "runtime_sync" |> to_bool);
+  check string "runtime sync not attempted" "not_attempted"
+    (json |> member "runtime_sync" |> to_string);
   check string "typed failure" "keeper_config_publication_rolled_back"
     (json |> member "error" |> member "code" |> to_string);
   check bool "runtime failure preserves rolled-back write receipt" false
@@ -6623,6 +6704,10 @@ let () =
             test_config_patch_remote_endpoint_shape;
           test_case "config POST atomically restarts runtime" `Quick
             test_config_post_restarts_from_atomic_toml;
+          test_case "config POST mid-turn defers runtime sync" `Quick
+            test_config_post_mid_turn_defers_runtime_sync;
+          test_case "config POST mid-turn policy without proxy fails" `Quick
+            test_config_post_mid_turn_policy_without_proxy_still_fails;
           test_case "config POST requires expected revision" `Quick
             test_config_post_requires_expected_revision;
           test_case "stale config POST loses with typed 409" `Quick

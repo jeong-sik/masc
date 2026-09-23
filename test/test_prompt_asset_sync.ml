@@ -53,7 +53,7 @@ let write_runtime_manifest dir paths =
       Out_channel.output_string oc (manifest paths))
 
 let sync ~prompts_dir =
-  Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts ~read:read_embedded
+  Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts ~edit_layer:Managed_asset_sync.No_edit_layer ~read:read_embedded
     ~files:embedded_files ~dest_dir:prompts_dir ()
 
 let test_copies_missing_and_scopes_to_prompts () =
@@ -77,15 +77,26 @@ let test_second_run_is_noop () =
       check (list string) "copied" [] again.Managed_asset_sync.copied;
       check (list string) "overwritten" [] again.Managed_asset_sync.overwritten)
 
+(* The previous binary shipped v1 and this pass wrote it; the file still
+   holds exactly those bytes, so it is the distribution's stale copy. *)
 let test_overwrites_stale_copy () =
   with_temp_prompts_dir (fun dir ->
-      let (_ : Managed_asset_sync.sync_result) = sync ~prompts_dir:dir in
+      let v1 rel =
+        if String.equal rel "prompts/keeper.example.md"
+        then Some "---\ndescription: example\n---\nbody v1\n"
+        else read_embedded rel
+      in
+      let (_ : Managed_asset_sync.sync_result) =
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
+          ~edit_layer:Managed_asset_sync.No_edit_layer ~read:v1
+          ~files:embedded_files ~dest_dir:dir ()
+      in
       let stale = Filename.concat dir "keeper.example.md" in
-      Out_channel.with_open_text stale (fun oc ->
-          Out_channel.output_string oc "body v1 (stale)\n");
       let result = sync ~prompts_dir:dir in
       check (list string) "overwritten" [ "prompts/keeper.example.md" ]
         result.Managed_asset_sync.overwritten;
+      check int "not an operator edit" 0
+        (List.length result.Managed_asset_sync.operator_edits);
       check (list string) "copied" [] result.Managed_asset_sync.copied;
       check string "converged content"
         "---\ndescription: example\n---\nbody v2\n" (read_file stale))
@@ -219,7 +230,7 @@ let test_empty_embedded_set_fails_closed () =
       Out_channel.with_open_text existing (fun oc ->
           Out_channel.output_string oc "must survive a lost embedded tree\n");
       let result =
-        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts ~edit_layer:Managed_asset_sync.No_edit_layer
           ~read:(fun (_ : string) -> None)
           ~files:[ "runtime.toml"; "tools/masc_board_vote.toml" ]
           ~dest_dir:dir
@@ -247,7 +258,7 @@ let test_unsafe_embedded_paths_preserve_runtime_tree () =
         let before_manifest = read_file manifest_path in
         let read_called = ref false in
         let result =
-          Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
+          Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts ~edit_layer:Managed_asset_sync.No_edit_layer
             ~read:(fun _ -> read_called := true; Some "new embedded content\n")
             ~files:[ "prompts/new.md"; "prompts/" ^ unsafe_path ]
             ~dest_dir:dir ()
@@ -342,7 +353,7 @@ let test_symlink_ancestor_cannot_escape_prompt_root () =
           let assets = [ "prompts/link/current.md", "current embedded body\n" ] in
           write_runtime_manifest dir [ "link/current.md"; "link/old.md" ];
           let result =
-            Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
+            Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts ~edit_layer:Managed_asset_sync.No_edit_layer
               ~read:(fun rel -> List.assoc_opt rel assets)
               ~files:(List.map fst assets)
               ~dest_dir:dir
@@ -368,7 +379,7 @@ let test_symlink_ancestor_cannot_escape_prompt_root () =
 let test_unreadable_embedded_entry_is_failed () =
   with_temp_prompts_dir (fun dir ->
       let result =
-        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts ~edit_layer:Managed_asset_sync.No_edit_layer
           ~read:(fun (_ : string) -> None)
           ~files:[ "prompts/ghost.md" ]
           ~dest_dir:dir ()
@@ -381,7 +392,7 @@ let test_unreadable_embedded_entry_is_failed () =
 let test_binary_prompt_assets_sync_without_failure () =
   with_temp_prompts_dir (fun dir ->
       let result =
-        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts ~edit_layer:Managed_asset_sync.No_edit_layer
           ~read:Embedded_config.read
           ~files:Embedded_config.file_list
           ~dest_dir:dir
@@ -402,7 +413,7 @@ let tools_embedded =
 let test_tools_domain_scopes_to_tools () =
   with_temp_prompts_dir (fun dir ->
       let result =
-        Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools ~edit_layer:Managed_asset_sync.No_edit_layer
           ~read:(fun rel -> List.assoc_opt rel tools_embedded)
           ~files:(List.map fst tools_embedded)
           ~dest_dir:dir
@@ -452,7 +463,7 @@ let test_runtime_manifest_projects_the_embedded_set () =
         ]
       in
       let run assets =
-        Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools ~edit_layer:Managed_asset_sync.No_edit_layer
           ~read:(fun rel -> List.assoc_opt rel assets)
           ~files:(List.map fst assets)
           ~dest_dir:dir
@@ -462,7 +473,7 @@ let test_runtime_manifest_projects_the_embedded_set () =
       check int "failed" 0 (List.length first.Managed_asset_sync.failed);
       let managed_by, schema, paths = runtime_manifest dir in
       check string "managed_by" "MASC" managed_by;
-      check string "schema" "masc.tool-managed-assets.v1" schema;
+      check string "schema" "masc.tool-managed-assets.v2" schema;
       check (list string) "paths are exactly the embedded tool files"
         [ "masc_alpha.toml"; "masc_beta.toml"; "masc_gamma.toml" ]
         paths;
@@ -484,7 +495,7 @@ let test_runtime_manifest_projects_the_embedded_set () =
 let test_binary_tool_assets_sync_without_failure () =
   with_temp_prompts_dir (fun dir ->
       let result =
-        Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools ~edit_layer:Managed_asset_sync.No_edit_layer
           ~read:Embedded_config.read
           ~files:Embedded_config.file_list
           ~dest_dir:dir
@@ -492,6 +503,183 @@ let test_binary_tool_assets_sync_without_failure () =
       in
       check (list (pair string string)) "every embedded tool asset synced" []
         result.Managed_asset_sync.failed)
+
+let outcome_testable =
+  testable
+    (fun ppf (outcome : Managed_asset_sync.operator_edit_outcome) ->
+      Format.pp_print_string ppf
+        (match outcome with
+         | Managed_asset_sync.Promoted_to_override { key } -> "promoted " ^ key
+         | Managed_asset_sync.Kept_override_exists { key } -> "kept, override exists " ^ key
+         | Managed_asset_sync.Kept_not_promotable { reason } -> "kept: " ^ reason
+         | Managed_asset_sync.Discarded -> "discarded"))
+    ( = )
+
+let edits result =
+  List.map
+    (fun { Managed_asset_sync.path; outcome } -> path, outcome)
+    result.Managed_asset_sync.operator_edits
+
+let write_file path content =
+  Out_channel.with_open_text path (fun oc -> Out_channel.output_string oc content)
+
+let prompt_embedded =
+  [ ( "prompts/curator.md"
+    , "---\ndescription: curator\ntemplate_variables: [memory]\n---\nKeep what \
+       matters in {{memory}}.\n" )
+  ]
+
+let with_workspace f =
+  with_temp_prompts_dir (fun base ->
+      let prompts = Filename.concat base "prompts" in
+      Unix.mkdir prompts 0o700;
+      f ~base ~prompts)
+
+let prompt_sync ~base ~prompts =
+  Managed_asset_sync.sync ~domain:Managed_asset_sync.Prompts
+    ~edit_layer:
+      (Managed_asset_sync.Prompt_overrides
+         (Prompt_registry.promote_file_edit ~base_path:base))
+    ~read:(fun rel -> List.assoc_opt rel prompt_embedded)
+    ~files:(List.map fst prompt_embedded)
+    ~dest_dir:prompts ()
+
+let edited_curator = "---\ndescription: curator\ntemplate_variables: [memory]\n---\nKeep \
+                      only decisions from {{memory}}.\n"
+
+let overrides_path base = Filename.concat (Filename.concat base ".masc") "prompt_overrides.json"
+
+(* The live case: an operator changed a prompt's behaviour by editing its
+   runtime file. The edit becomes the prompt's override, the file goes back
+   to the distribution copy, and the registry serves the edited text. *)
+let test_edited_prompt_becomes_its_override () =
+  with_workspace (fun ~base ~prompts ->
+      let (_ : Managed_asset_sync.sync_result) = prompt_sync ~base ~prompts in
+      let file = Filename.concat prompts "curator.md" in
+      write_file file edited_curator;
+      let result = prompt_sync ~base ~prompts in
+      check (list (pair string outcome_testable)) "the edit is promoted"
+        [ "prompts/curator.md", Managed_asset_sync.Promoted_to_override { key = "curator" } ]
+        (edits result);
+      check (list string) "not counted as a stale overwrite" []
+        result.Managed_asset_sync.overwritten;
+      check string "the file is the distribution copy again"
+        (List.assoc "prompts/curator.md" prompt_embedded) (read_file file);
+      (match Prompt_override_persistence.load ~path:(overrides_path base) with
+       | Ok [ entry ] ->
+         check string "saved key" "curator" entry.Prompt_override_persistence.key;
+         check string "saved text" "Keep only decisions from {{memory}}."
+           entry.Prompt_override_persistence.value
+       | Ok entries -> failf "expected one saved override, found %d" (List.length entries)
+       | Error error ->
+         failf "override file: %s" (Prompt_override_persistence.error_to_string error));
+      Prompt_registry.clear ();
+      Fun.protect ~finally:Prompt_registry.clear (fun () ->
+          Prompt_registry.set_markdown_dir prompts;
+          Prompt_registry.restore_overrides base;
+          check string "the registry serves the edited text"
+            "Keep only decisions from {{memory}}."
+            (Prompt_registry.get_prompt "curator"));
+      let again = prompt_sync ~base ~prompts in
+      check int "the next pass finds nothing edited" 0
+        (List.length again.Managed_asset_sync.operator_edits))
+
+(* The operator already saved an override for the key. Which text they
+   mean is theirs to say, so the edited file stays and is reported, pass
+   after pass, until they resolve it. *)
+let test_edited_prompt_with_an_override_is_kept () =
+  with_workspace (fun ~base ~prompts ->
+      let (_ : Managed_asset_sync.sync_result) = prompt_sync ~base ~prompts in
+      Unix.mkdir (Filename.concat base ".masc") 0o700;
+      let saved =
+        Prompt_override_persistence.
+          { key = "curator"
+          ; value = "Saved earlier from {{memory}}."
+          ; authored_against = "0"
+          ; template_variables = [ "memory" ]
+          }
+      in
+      (match Prompt_override_persistence.save ~path:(overrides_path base) [ saved ] with
+       | Ok () -> ()
+       | Error error -> failf "%s" (Prompt_override_persistence.error_to_string error));
+      let file = Filename.concat prompts "curator.md" in
+      write_file file edited_curator;
+      List.iter
+        (fun pass ->
+          let result = prompt_sync ~base ~prompts in
+          check (list (pair string outcome_testable)) (pass ^ ": a conflict is reported")
+            [ ( "prompts/curator.md"
+              , Managed_asset_sync.Kept_override_exists { key = "curator" } )
+            ]
+            (edits result);
+          check string (pass ^ ": the edited file is untouched") edited_curator
+            (read_file file))
+        [ "first pass"; "second pass" ];
+      match Prompt_override_persistence.load ~path:(overrides_path base) with
+      | Ok [ entry ] ->
+        check string "the saved override is unchanged" "Saved earlier from {{memory}}."
+          entry.Prompt_override_persistence.value
+      | Ok _ | Error _ -> fail "the saved override changed")
+
+(* Tool definitions have no edit layer. The edit is overwritten, and the
+   operator is told which file lost it. *)
+let test_edited_tool_is_overwritten_and_reported () =
+  with_temp_prompts_dir (fun dir ->
+      let run () =
+        Managed_asset_sync.sync ~domain:Managed_asset_sync.Tools
+          ~edit_layer:Managed_asset_sync.No_edit_layer
+          ~read:(fun rel -> List.assoc_opt rel tools_embedded)
+          ~files:(List.map fst tools_embedded)
+          ~dest_dir:dir ()
+      in
+      let (_ : Managed_asset_sync.sync_result) = run () in
+      let file = Filename.concat dir "masc_board_vote.toml" in
+      write_file file "name = \"masc_board_vote\"\ndescription = \"Mine.\"\n";
+      let result = run () in
+      check (list (pair string outcome_testable)) "the edit is reported"
+        [ "tools/masc_board_vote.toml", Managed_asset_sync.Discarded ]
+        (edits result);
+      check string "and overwritten" (List.assoc "tools/masc_board_vote.toml" tools_embedded)
+        (read_file file);
+      match Managed_asset_sync.operator_edit_lines ~label:"tool" result with
+      | [ line ] ->
+        check bool "the line names the file" true (mentions ~line "tools/masc_board_vote.toml")
+      | lines -> failf "expected one line, found %d" (List.length lines))
+
+(* A manifest from before digests were recorded lists paths only. Every
+   differing file is overwritten as stale, as it always was, and the
+   rewritten manifest carries a digest for each path. *)
+let test_a_digestless_manifest_overwrites_and_gains_digests () =
+  with_temp_prompts_dir (fun dir ->
+      let file = Filename.concat dir "keeper.example.md" in
+      write_file file "an edit nobody recorded\n";
+      write_runtime_manifest dir [ "keeper.example.md"; "behavior/contract.md" ];
+      let result = sync ~prompts_dir:dir in
+      check (list string) "overwritten as stale" [ "prompts/keeper.example.md" ]
+        result.Managed_asset_sync.overwritten;
+      check int "no operator edit" 0 (List.length result.Managed_asset_sync.operator_edits);
+      check int "no failure" 0 (List.length result.Managed_asset_sync.failed);
+      match Yojson.Safe.from_file (Filename.concat dir "managed-assets.json") with
+      | `Assoc fields ->
+        check (option string) "schema" (Some "masc.prompt-managed-assets.v2")
+          (match List.assoc_opt "schema" fields with
+           | Some (`String schema) -> Some schema
+           | Some _ | None -> None);
+        (match List.assoc_opt "sha256" fields with
+         | Some (`Assoc digests) ->
+           check (list string) "a digest per path"
+             [ "behavior/contract.md"; "keeper.example.md" ]
+             (List.sort compare (List.map fst digests));
+           check (option string) "the digest is of the bytes written"
+             (Some
+                (Digestif.SHA256.(
+                   digest_string (List.assoc "prompts/keeper.example.md" embedded)
+                   |> to_hex)))
+             (match List.assoc_opt "keeper.example.md" digests with
+              | Some (`String digest) -> Some digest
+              | Some _ | None -> None)
+         | Some _ | None -> fail "the rewritten manifest has no sha256 object")
+      | _ -> fail "the rewritten manifest is not an object")
 
 let () =
   run "prompt_asset_sync"
@@ -538,5 +726,16 @@ let () =
             test_runtime_manifest_projects_the_embedded_set;
           test_case "binary tool assets sync without failure" `Quick
             test_binary_tool_assets_sync_without_failure;
+        ] );
+      ( "operator edits",
+        [
+          test_case "an edited prompt becomes its override" `Quick
+            test_edited_prompt_becomes_its_override;
+          test_case "an edited prompt with an override is kept" `Quick
+            test_edited_prompt_with_an_override_is_kept;
+          test_case "an edited tool is overwritten and reported" `Quick
+            test_edited_tool_is_overwritten_and_reported;
+          test_case "a digestless manifest overwrites and gains digests" `Quick
+            test_a_digestless_manifest_overwrites_and_gains_digests;
         ] );
     ]

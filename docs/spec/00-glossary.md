@@ -1639,6 +1639,13 @@ status: reference
   한 번 불러, 더할 fact와 버릴 fact와 합칠 fact를 정해 Memory OS에 적는다. 같은
   호출에서 미처리 요청을 묶고 다음 행동을 제안한다. Keeper의 판단을
   대신하지 않는다.
+  Librarian은 자기가 누구를 위해 정리하는지 대상 Keeper의 식별자(`keeper_id`)를
+  입력(`Keeper_librarian.input`)에 필수로 실어 보낸다(RFC-0468 §3.1).
+  세 프롬프트(`librarian`·`librarian.continuity`·`librarian.working_context`)는 이를
+  `keeper_instructions` 옆 호스트 데이터로 전달받아 그 Keeper의 자리에서 대화를
+  읽으며, 안내문의 호칭(\"너\"·\"당신\")이 이 대상 Keeper를 가리킴을 안다.
+  대상 Keeper 이름이 빈 문자열이면 기본값으로 채우지 않고 입력을 거절하거나 유닛을
+  실패 처리한다.
   History를 읽는 경로의 구현 진척은 `RFC-librarian-lifecycle` §8을 본다.
   Agent Core의 읽은 위치가 저장되면 같은 wake에서 남은 이력을 계속 읽는다.
   읽을 것이 없거나 읽기·저장에 실패하면 멈추고, 실패한 범위는 다음 신호에서 다시 읽는다.
@@ -1646,6 +1653,7 @@ status: reference
   이 이름은 프롬프트 category `librarian`(`config/prompts/librarian.md`,
   `workspace_memory_curator.md`)과 CLI `masc-librarian-replay`·`masc-librarian-continuity`가
   공유한다. 셋은 서로 다른 것이고, 어느 것도 Skill이 아니다.
+  → [Keeper_librarian](../../lib/keeper/keeper_librarian.mli)
 
 **Librarian Replay**
 : `masc-librarian-replay` CLI. 라이브 워크스페이스의 turn-boundary 로그와 checkpoint에

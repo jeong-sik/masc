@@ -781,9 +781,11 @@ let consume_one_with_extent
      has already settled (masc#37061). The stop is this pass's answer once the
      atom part has nothing to do, so a drain that reads atoms ends on it. *)
   match selection, official with
-  | R.Stop stop, _ -> Error (Range_stopped stop)
-  | R.Position_in_other_trace position, _ -> Error (Position_in_other_trace position)
-  | R.Baseline _, _ ->
+  | R.Stop stop, (R.Nothing_official | R.Official_read _ | R.Official_stop _) ->
+    Error (Range_stopped stop)
+  | R.Position_in_other_trace position, (R.Nothing_official | R.Official_read _ | R.Official_stop _)
+    -> Error (Position_in_other_trace position)
+  | R.Baseline _, (R.Nothing_official | R.Official_read _ | R.Official_stop _) ->
     (* The atom position is set first; the official lines wait for the next
        call, which the caller makes while a call advances. *)
     (match R.progress_after ~trace_id selection with
@@ -1079,8 +1081,11 @@ let consume_one_with_extent
          interval. The official cursor is not replaced by this commit, so if
          it also sits after this range's end, the next range's bound is that
          same stamp and the rows between would be read by nobody. Then the
-         refusal stands: the pass stops without advancing, and an official
-         line or a clock that comes forward moves it again. Within one trace
+         refusal stands: the pass stops without advancing and the operator
+         sees [Counterpart_interval_non_monotone]. An official line read
+         later moves the official cursor and lifts it; while an official stop
+         holds those lines (RFC §4.10) none is read, so only a range that ends
+         after that stamp, or a purge of the keeper, lifts it. Within one trace
          the inversion says the position and its boundary disagree, and stops
          the pass as before. *)
       let carried_from_another_trace =
@@ -1164,6 +1169,10 @@ let consume_one_with_progress_writer
   (match result, extent with
    | Ok (Nothing_to_read | Baseline_advanced _), _
    | Ok (Progress_advanced _ | Official_advanced _), R.All_unread -> clear_failed key
+   (* Returned only when the atom side has nothing to read: the atom backlog
+      is empty, and the official stop is no wide range that failed. Keeping
+      the marker would narrow every later pass to one turn for good. *)
+   | Error (Official_range_stopped _), _ -> clear_failed key
    | Ok (Progress_advanced _ | Official_advanced _), R.To_first_cut_point
    | Ok Memory_not_committed, _
    | Error _, _ -> ());

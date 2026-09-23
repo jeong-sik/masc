@@ -1238,7 +1238,7 @@ to wake up". Open it through the `go Schedules` palette entry. The selected
 Keeper also exposes its automation in the Automation detail tab.
 
 ```
- MASC Schedules  10:44:57  HTTP [connected]
+ MASC Keepers / Schedules  10:44:57  HTTP [connected]
  ─────────────────────────────────────────────────────────────────────────────
    Requests: 34  (page shows first 20)  ·  Next due: 2026-08-24 09:57:00
  ─────────────────────────────────────────────────────────────────────────────

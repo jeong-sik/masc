@@ -115,7 +115,8 @@ let operator_token_cell = ref None
 
 (* Carry out [Masc_tui_credential.plan]. The environment wins so a single run
    can be pointed at a different credential; otherwise the bearer comes from the
-   workspace, and a workspace that demands one but holds none gets one minted.
+   workspace, and a workspace that demands one but holds none it can use --
+   nothing stored, or a stored one that has expired -- gets one minted.
 
    Minting grants nothing this process did not already have: the credential
    store is a directory under the workspace, so anything that can read the
@@ -127,6 +128,31 @@ let operator_token_cell = ref None
    Admin because that is the role [masc login] issues for this agent, and the
    keeper lifecycle routes the TUI already offers require it -- minting a
    narrower role would leave working surfaces failing. *)
+(* The persisted bearer, checked against its credential record the way the
+   server checks it, so an expired one is replaced here rather than refused on
+   every read. Only expiry is acted on: it is the one verdict this client can
+   answer by itself, with the mint below. Any other objection -- a record that
+   no longer matches the file, say -- is left for the server to make, whose
+   refusal names [masc login]. *)
+let stored_operator_token ~base_path : Masc_tui_credential.stored_token =
+  match
+    Auth_login.read_persisted_token ~base_path ~agent_name:default_agent_name
+  with
+  | None -> Masc_tui_credential.Not_stored
+  | Some token -> (
+      match
+        Auth.verify_token base_path ~agent_name:default_agent_name ~token
+      with
+      | Ok _ -> Masc_tui_credential.Stored token
+      | Error err -> (
+          match Auth_error_kind.classify err with
+          | Auth_error_kind.Token_expired -> Masc_tui_credential.Stored_expired
+          | Auth_error_kind.Token_mismatch | Auth_error_kind.Unauthorized
+          | Auth_error_kind.Forbidden | Auth_error_kind.Agent_not_found
+          | Auth_error_kind.Io_error | Auth_error_kind.Invalid_json
+          | Auth_error_kind.Other ->
+              Masc_tui_credential.Stored token))
+
 let install_operator_token ~base_path ~host ~port =
   let cfg = Auth.load_auth_config base_path in
   (* The auth directory, not the config file: a missing config reads as the
@@ -144,9 +170,7 @@ let install_operator_token ~base_path ~host ~port =
     match
       Masc_tui_credential.plan
         ~env_token:(first_nonempty_env [ Masc_tui_credential.token_env_var ])
-        ~workspace_token:
-          (Auth_login.read_persisted_token ~base_path
-             ~agent_name:default_agent_name)
+        ~workspace_token:(stored_operator_token ~base_path)
         ~workspace_requires_token:(cfg.enabled && cfg.require_token)
         ~workspace_initialized
     with
@@ -159,7 +183,7 @@ let install_operator_token ~base_path ~host ~port =
     | Masc_tui_credential.No_workspace ->
         operator_token_cell := None;
         Masc_tui_credential.Workspace_pending
-    | Masc_tui_credential.Mint -> (
+    | Masc_tui_credential.Mint reason -> (
         match
           Auth_login.mint ~base_path ~host ~port
             ~agent_name:default_agent_name ~role:Masc_domain.Admin
@@ -171,7 +195,7 @@ let install_operator_token ~base_path ~host ~port =
         with
         | Ok report ->
             operator_token_cell := Some report.bearer_token;
-            Masc_tui_credential.Minted
+            Masc_tui_credential.Minted reason
         | Error err ->
             operator_token_cell := None;
             Masc_tui_credential.Mint_failed
@@ -1944,9 +1968,8 @@ let post_schedule_update ~(host : string) ~(port : int) ~(body_json : string) =
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_update"
     ~body:body_json
 
-(** POST /api/v1/tools/masc_schedule_cancel. The authenticated HTTP boundary
-    supplies the canceller identity before the tool validates its argument
-    contract. The reason is a fixed audit phrase -- the arm display already
+(** POST /api/v1/tools/masc_schedule_cancel. The server records the
+    credential's actor as the canceller. The reason is a fixed audit phrase -- the arm display already
     named which schedule the second press cancels. *)
 let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
     : (Yojson.Safe.t, string) result =
@@ -1963,7 +1986,7 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
     argument contract; the kind-specific timing fields arrive already
     assembled by the caller (the form's typed spec builds them), and time
     syntax, cron text, and timezone spellings stay the tool's to validate.
-    The requester rides as this process, a human operator's terminal. *)
+    The server records the credential's actor as requester and scheduler. *)
 let post_schedule_create ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(message : string)
     ~(timing_fields : (string * Yojson.Safe.t) list) :
@@ -1972,10 +1995,6 @@ let post_schedule_create ~(host : string) ~(port : int)
     `Assoc
       ([ ("keeper_name", `String keeper_name)
        ; ("message", `String message)
-       ; ("requested_by_id", `String default_agent_name)
-       ; ("requested_by_kind", `String "human_operator")
-       ; ("scheduled_by_id", `String default_agent_name)
-       ; ("scheduled_by_kind", `String "human_operator")
        ; ("source", `String "operator_request")
        ]
       @ timing_fields)

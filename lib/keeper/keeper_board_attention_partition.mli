@@ -89,8 +89,7 @@ type state =
       ; completed_at : float
       }
   | Settled of { settled_at : float }
-      (** Terminal: a judgment is on record. No transition leaves [Settled] —
-          the only exception is the legacy reclassification below. *)
+      (** Terminal: a judgment is on record. No transition leaves [Settled]. *)
   | Abandoned of { abandoned_at : float }
       (** Terminal for judgment purposes and never reached by [settle]: the
           root gave up its candidate without ever recording one (e.g.
@@ -100,11 +99,7 @@ type state =
           generation) when the matching candidate is still [Resumable_pending]
           — nothing was ever judged. A [Resumable_judged] or
           [Requeued_resumable] match leaves [Abandoned] alone; those belong to
-          [reconcile_quarantines]'s own bookkeeping instead. Ledgers written
-          before this variant existed may still hold the old shape: a
-          [Settled] root whose candidate is [Resumable_pending] is one
-          reclassification row ([Settled] -> [Abandoned]) away from the same
-          reopen path. *)
+          [reconcile_quarantines]'s own bookkeeping instead. *)
   | Blocked of
       { reason : blocked_reason
       ; blocked_at : float

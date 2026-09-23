@@ -133,12 +133,6 @@ type requeue_blocked_outcome =
 let ( let* ) = Result.bind
 let schema_version = 7
 
-(* [schema_version] marks the write format. Readers accept 6 too: ledgers
-   written before [Abandoned] existed contain no such rows, so a v6 ledger is
-   a strict prefix of what v7 writes and never needs a rewrite to load
-   (task-1676). *)
-let readable_schema_versions = [ 6; 7 ]
-
 let state_to_string = function
   | Ready -> "ready"
   | Running _ -> "running"
@@ -570,7 +564,7 @@ let of_yojson json =
   let* version_json = field ~context "schema_version" fields in
   let* () =
     match version_json with
-    | `Int version when List.mem version readable_schema_versions -> Ok ()
+    | `Int version when Int.equal version schema_version -> Ok ()
     | `Int version ->
       Error
         (Printf.sprintf
@@ -790,12 +784,6 @@ let legal_transition previous next =
   | Blocked _, Ready -> true
   | (Completed _ | Blocked _), Settled _ -> true
   | Blocked _, Abandoned _ -> true
-  (* task-1676: [Settled] is fully terminal again. The one exit is the
-     legacy reclassification bridge: pre-[Abandoned] ledgers recorded the
-     "candidate permanently absent" give-up as [Settled], and only those
-     rows may be reclassified (gated on the candidate still being
-     [Resumable_pending] at the reopen site) before reopening. *)
-  | Settled _, Abandoned _ -> true
   | Abandoned _, Ready -> true
   | Ready, _
   | Running _, _
@@ -1245,7 +1233,7 @@ let ensure_roots ~base_path ~keeper_name candidates =
               then Error "candidate Keeper differs from partition ledger Keeper"
               else
                 let* () = valid_time "candidate recorded_at" candidate.recorded_at in
-                let resolve_root ~reopen_settled () =
+                let resolve_root ~reopen_abandoned () =
                   let* context_key = Candidate.Context_key.of_candidate candidate in
                   match Id_map.find_opt candidate.candidate_id view.live_candidate_owner with
                   | Some owner_id ->
@@ -1288,48 +1276,24 @@ let ensure_roots ~base_path ~keeper_name candidates =
                           the deterministic root into a collision with itself and
                           stopped the whole Keeper's attention worker. *)
                        (match historical.state with
-                        | Abandoned _ when reopen_settled ->
-                          (* [reopen_settled] is true only for a candidate
+                        | Abandoned _ when reopen_abandoned ->
+                          (* [reopen_abandoned] is true only for a candidate
                              still [Resumable_pending]: the Candidate ledger
                              never recorded any judgment for it, so an
-                             [Abandoned] root (task-1676) — or its legacy
-                             [Settled] spelling in ledgers written before
-                             task-1660 measured the desync (21 live candidates,
-                             360-378h) — can only be the "candidate
+                             [Abandoned] root can only be the "candidate
                              permanently absent" give-up in
                              [reconcile_quarantines], which never writes a
                              judgment. A [Resumable_judged] or
                              [Requeued_resumable] historical match keeps the
-                             old no-op: those already carry (or are
+                             no-op: those already carry (or are
                              mid-quarantine toward) a judgment, and reopening
                              them here would race the dedicated
                              quarantine-generation bookkeeping in
                              [reconcile_quarantines] instead of going through
-                             it. *)
+                             it. [Settled] never reopens: it records a
+                             judgment. *)
                           let* reopened = advance_state historical Ready in
                           Ok (reopened :: roots)
-                        | Settled { settled_at } when reopen_settled ->
-                          (* Legacy reclassification bridge: ledgers written
-                             before [Abandoned] existed hold this give-up as
-                             [Settled]. Record the reclassification row first
-                             ([Settled] -> [Abandoned], the only transition
-                             that leaves [Settled]), then reopen straight to
-                             [Ready] on top of it — both rows in this same
-                             batch, so the caller observes exactly the shape
-                             the modern path produces (one [Abandoned]
-                             give-up, then [Ready]), and the reopened row
-                             validates against the reclassified one, exactly
-                             as if the give-up had been recorded with
-                             today's shape. The give-up happened when the
-                             legacy row says it did: [settled_at] carries
-                             over, only the name changes. *)
-                          let* reclassified =
-                            advance_state
-                              historical
-                              (Abandoned { abandoned_at = settled_at })
-                          in
-                          let* reopened = advance_state reclassified Ready in
-                          Ok (reopened :: reclassified :: roots)
                         | Ready
                         | Running _
                         | Completed _
@@ -1344,13 +1308,13 @@ let ensure_roots ~base_path ~keeper_name candidates =
                 | Candidate.Requeued_resumable
                     { resumable = Candidate.Resumable_consumed _; _ } -> Ok roots
                 | Candidate.Direct_resumable (Candidate.Resumable_pending _) ->
-                  resolve_root ~reopen_settled:true ()
+                  resolve_root ~reopen_abandoned:true ()
                 | Candidate.Direct_resumable (Candidate.Resumable_judged _)
                 | Candidate.Requeued_resumable
                     { resumable =
                         (Candidate.Resumable_pending _ | Candidate.Resumable_judged _)
                     ; _
-                    } -> resolve_root ~reopen_settled:false ())
+                    } -> resolve_root ~reopen_abandoned:false ())
            (Ok [])
       |> Result.map List.rev
     in

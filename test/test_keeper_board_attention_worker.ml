@@ -2645,8 +2645,8 @@ let test_undrained_outcomes_are_not_routine () =
    a later re-check. The partition never advanced past Completed, so the
    identical error repeated on every heartbeat forever (alpha 170x one day,
    beta 13x/25min the next, before both were data-cut by hand). This pins
-   that the finalizer now settles such a partition once, terminally, and
-   never revisits it. *)
+   that the finalizer now abandons such a partition once and never
+   revisits it. *)
 let test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_retired
   ()
   =
@@ -2932,7 +2932,7 @@ let () =
             `Quick
             test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired
         ; Alcotest.test_case
-            "reconcile_quarantines settles a blocked partition whose candidate was retired"
+            "reconcile_quarantines abandons a blocked partition whose candidate was retired"
             `Quick
             test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_retired
         ] )

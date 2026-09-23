@@ -324,10 +324,14 @@ flowchart TD
   |---|---|---|
   | `Context_overflow` · `Input_capacity` · `Request_body_refused` | 접는다 | 크기 때문이라고 공급자가 말했다 |
   | `Timeout` | 접는다 | §4.3 이 이미 "범위가 커서 생긴 실패"로 센 셋 중 하나다 |
-  | `Invalid_request` | 접는다 | 이유를 모른다. 모르는 것은 진전을 내는 쪽으로 읽는다 |
-  | `Refusal_body_not_received` | 접는다 | 같은 이유로 모른다 |
+  | `Invalid_request` | 접는다 | 요청이 공급자에 닿은 뒤 이유 없이 거절됐다. 창 RFC §10.4 처럼 크기 거절로 읽는다 |
+  | `Refusal_body_not_received` | 접는다 | 같은 이유다. 상태 줄은 왔고 이유가 담긴 본문을 못 읽었다 |
   | `Rate_limited` · `Overloaded` · `Server_error` · `Network_error` | 기다린다 | 요청 자체는 받아들여졌다. 접으면 폭만 잃는다 |
   | `Auth_failed` · `Authorization_refused` · `Payment_required` · `Not_found` | 기다린다 | 크기와 무관하고 운영자가 고쳐야 풀린다. 접어도 같은 거절이 온다 |
+
+  HTTP 거절이 아닌 공급자 오류는 `Exact_output.Completion_failed` 로 온다. 그 안에는 `Http_client.http_error` 갈래와, 요청이 나갔는지(`generation_dispatch_fact`)가 같이 들어 있다(#37899, `keeper_librarian_runtime.ml` 의 `completion_failure_shows_size`). 나가지 않은 요청은 어느 공급자도 판정하지 않았으므로 기다린다. transport 는 연결 수립 시간 초과도 `Http_operation` 으로 보고하므로, 나갔는지를 보지 않으면 한 번도 보내지 않은 요청이 폭을 줄인다. 나간 요청은 크기를 말한 경우에만 접는다. 공급자가 context overflow 라고 말했을 때, 응답 본문이 한도를 넘었을 때, 빈 완료의 stop reason 이 `ContextWindowExceeded`·`MaxTokens` 일 때, 그리고 공급자가 요청 전체를 쥐고 시간 안에 끝내지 못했을 때(`Wall_clock`·`Http_operation`·`First_token`·`Non_streaming_body`·`Stream_body`)다. 나머지는 기다린다. 연결 실패, DNS·TLS, 끊긴 연결, 하드 쿼터, 용량 소진, 설정 오류, provider terminal, 그 밖의 빈 완료가 그렇다. 조용해진 스트림(`Stream_idle`·`Cli_stdout_idle`), 한 단계의 시간 초과(`Provider_step`), 슬롯·용량을 기다린 시간 초과(`Queue`·`Capacity_backpressure`)도 입력 크기를 말하지 않는다.
+
+  **모름의 자리가 판정을 가른다.** 요청이 공급자에 닿은 뒤 이유 없이 거절된 것(위 표의 `Invalid_request`·`Refusal_body_not_received`)만 크기 거절로 읽는다. 전송 계층과 provider 계층의 모름(`NetworkError Unknown`, `Unknown_timeout`, `Unknown_provider_failure`, stop reason 이 `Unknown` 인 빈 완료)은 크기에 대한 증거가 없으므로 기다린다. 2026-09-22 msx-retro-mania 는 이런 모름을 좁힘으로 읽어 폭이 130 에서 16 atom 까지 줄었다.
 
   갈래를 보기 전에 무엇이 갈래를 가진 실패인지 먼저 가른다. 후보가 디스패치에 닿기 전에 걸러진 사전 거절(`Exact_output.Flow_advance_candidate_rejected`)은 요청을 보낸 적이 없으므로 접을지 기다릴지의 근거가 되지 못한다. 그 걸음은 아무 말도 하지 않은 것으로 둔다.
 

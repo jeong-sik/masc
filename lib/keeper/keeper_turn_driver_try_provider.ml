@@ -2064,20 +2064,23 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
          with
          | `Attempt_finished attempt_result -> attempt_result
          | `Attempt_preempted ->
-           (* Synthesized zero-turn durable-stimulus yield: nothing was
-              produced, no checkpoint, source wake stays pending and re-runs
-              fresh. Not an error, so no provider rotation and no failure
-              telemetry. *)
-           (* [ctx.session_id] is the turn's trace id, always present on the
-              autonomous lane where preemption is armed; the [None] arm names a
-              deterministic fallback for this zero-turn yield's cosmetic id
-              rather than defaulting an unknown input. *)
-           let session_id =
-             match ctx.session_id with
-             | Some id -> id
-             | None -> ctx.runtime_id
-           in
-           Ok (Runtime_agent.yielded_pre_first_token ~session_id)
+           (* Nothing was produced and nothing failed. This used to be a
+              synthesized zero-turn run result, which the keeper could only
+              read as a run that succeeded without an AfterTurn ordinal, so
+              every preemption became a failed cycle (#38094). It is its own
+              typed value now: the lane walk ends on it (Keeper_turn_driver),
+              the failure route notes no rest against the candidate, and the
+              unified turn settles it as skipped, leaving the source
+              pending. *)
+           Log.Keeper.info ~keeper_name:ctx.keeper_name
+             "%s: autonomous turn yielded to a queued person before the \
+              provider's first event runtime=%s"
+             ctx.keeper_name
+             ctx.runtime_id;
+           Error
+             (Keeper_internal_error.core_error_of_masc_internal_error
+                (Keeper_internal_error.Preempted_before_first_token
+                   { runtime_id = ctx.runtime_id }))
          | `Attempt_stalled ->
            Error
              (Agent_core.Error.Api
@@ -2768,6 +2771,7 @@ let max_tokens_truncation_error error =
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Host_stopped_turn _
+      | Keeper_internal_error.Preempted_before_first_token _
       | Keeper_internal_error.Runtime_connection_closed _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )

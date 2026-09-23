@@ -1,9 +1,9 @@
 (* The forecast runs the turn's own composition forward. These cases pin
-   the arithmetic on a synthetic history so the numbers are checkable by
-   hand: a seeded front carries everything from it, a front whose atom is
-   gone or opens with another message is dropped, and without a front
-   everything goes. The
-   assembly cases pin the order the request carries its parts. *)
+   the arithmetic on a synthetic history with no Librarian point, so the
+   numbers are checkable by hand: a seeded front carries everything from
+   it, a front whose atom is gone or opens with another message is dropped,
+   and without a front the range starts at the turn start. The assembly
+   cases pin the order the request carries its parts. *)
 
 open Masc
 
@@ -34,6 +34,7 @@ let seed ~messages first_atom : Keeper_carried_front.seed =
 let carry ?front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ?counted_tokens messages =
   Keeper_next_request_forecast.carry
     ~measure:(Keeper_context_core.message_measurer ())
+    ~continuity:(Some Keeper_turn_driver_try_provider.without_snapshot)
     ~front
     ~turn_start
     ~counted_tokens
@@ -769,25 +770,22 @@ let test_observed_boundary_forecast ~marks ~samples ~expected_step ~expected_fro
   in
   let observed = lookup () in
   let step = Option.map (fun marks -> Range.at_turn_boundary ~marks observed) marks in
-  Alcotest.(check bool) "fixture reaches the intended existing policy branch" true
+  Alcotest.(check bool) "fixture reaches the intended marks branch" true
     (match expected_step, step with
      | `No_marks, None -> true
-     | `Unchanged expected, Some (Range.Unchanged actual) -> expected = actual
-     | `Evicted, Some (Range.Evicted { first_atom; _ }) ->
-       first_atom = expected_front
-     | _ -> false);
+     | `Evicted_to expected, Some (Range.Evicted { first_atom; _ }) -> first_atom = expected
+     | (`No_marks | `Evicted_to _), (None | Some (Range.Evicted _ | Range.Unchanged _)) -> false);
   let forecast = Keeper_next_request_forecast.forecast ~config ~keeper_name |> unwrap in
-  let json = Keeper_next_request_forecast.to_json forecast in
-  (* Feed the actual producer payload to the external TUI regression. *)
-  Printf.printf "BOUNDARY_FORECAST %s\n%!" (Yojson.Safe.to_string json);
   Alcotest.(check bool) "forecast preserves the complete observed Table value" true
     (lookup () = observed);
   match forecast.candidates with
   | [ { carried = Some carried; _ } ] ->
     Alcotest.(check (option int)) "last counted stays the actual observation"
       observed.total_tokens carried.counted_tokens;
-    Alcotest.(check int) "forecast uses the driver's boundary front" expected_front
+    Alcotest.(check int) "forecast opens on the ledger's front, as the driver does" expected_front
       carried.first_atom;
+    Alcotest.(check bool) "and names the ledger" true
+      (carried.origin = Keeper_carried_front.Carried Keeper_carried_front.Ledger);
     Alcotest.(check int) "range includes the new wake atom" (13 - expected_front)
       carried.kept_atoms
   | _ -> Alcotest.fail "expected one applicable forecast candidate"
@@ -797,30 +795,17 @@ let () =
     [ ( "boundary"
       , let marks high = Some { Runtime_schema.high_water_tokens = high; low_water_tokens = 600 } in
         (* An initial prefix-only observation then three four-atom blocks,
-           each counted at 400 tokens, gives total 1300. The existing policy
-           removes two blocks to reach 500, so its front is atom 8. *)
+           each counted at 400 tokens, gives total 1300. Marks at 1200 would
+           remove two blocks, but a Keeper turn on a trace always has a
+           continuity choice and the driver judges marks only without one,
+           so the ledger's front stays at atom 0. *)
         let samples = [ 0, Some 100; 4, Some 500; 8, Some 900; 12, Some 1300 ] in
-        let unchanged reason = `Unchanged reason in
-        [ Alcotest.test_case "observed high-water excess forecasts the boundary front" `Quick
+        [ Alcotest.test_case "marks that would evict do not move the forecast's front" `Quick
             (test_observed_boundary_forecast ~marks:(marks 1200) ~samples
-               ~expected_step:`Evicted
-               ~expected_front:8)
+               ~expected_step:(`Evicted_to 8)
+               ~expected_front:0)
         ; Alcotest.test_case "no marks preserve the observed front" `Quick
             (test_observed_boundary_forecast ~marks:None ~samples ~expected_step:`No_marks ~expected_front:0)
-        ; Alcotest.test_case "below high-water preserves the observed front" `Quick
-            (test_observed_boundary_forecast ~marks:(marks 1400) ~samples
-               ~expected_step:(unchanged Keeper_carried_range.Within_high_water) ~expected_front:0)
-        ; Alcotest.test_case "at high-water preserves the observed front" `Quick
-            (test_observed_boundary_forecast ~marks:(marks 1300) ~samples
-               ~expected_step:(unchanged Keeper_carried_range.Within_high_water) ~expected_front:0)
-        ; Alcotest.test_case "unknown total preserves the observed front" `Quick
-            (test_observed_boundary_forecast ~marks:(marks 1200)
-               ~samples:(List.map (fun (atoms, _) -> atoms, None) samples)
-               ~expected_step:(unchanged Keeper_carried_range.Total_unknown) ~expected_front:0)
-        ; Alcotest.test_case "the only block remains despite high-water excess" `Quick
-            (test_observed_boundary_forecast ~marks:(marks 1200)
-               ~samples:[ 0, Some 100; 12, Some 1300 ]
-               ~expected_step:(unchanged Keeper_carried_range.Nothing_evictable) ~expected_front:0)
         ] )
     ; ( "parts"
       , [ Alcotest.test_case "a first-round composition yields the fixed and pinned parts"

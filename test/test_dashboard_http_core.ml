@@ -322,6 +322,13 @@ let test_keeper_sensitive_get_permissions_are_exact () =
     ; "memory-facts"; "working-context"; "file-changes"; "tool-calls" ];
   check bool "safe chat history stays on its ordinary read route" true
     (permission "/api/v1/keepers/fixture-keeper/chat/history" = None);
+  (* The operator snapshot serves the same inventory rows under public read;
+     a per-Keeper door onto them keeps that gate rather than inventing one. *)
+  check bool "board quarantine rows share the operator snapshot's read gate" true
+    (permission
+       ("/api/v1/keepers/fixture-keeper"
+        ^ Server_dashboard_http_keeper_api.keeper_suffix_board_attention_quarantines)
+     = None);
   check bool "checkpoint permission" true
     (permission "/api/v1/keepers/fixture-keeper/checkpoints" = Some Masc_domain.CanAdmin);
   check bool "turn records require authenticated state read" true

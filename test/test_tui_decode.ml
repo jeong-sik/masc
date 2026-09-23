@@ -1,5 +1,42 @@
 open Masc
 
+(* #38205: a schedule row carries the occurrence the runner is holding back.
+   The hold is read, not guessed: absent or null is "not held", an object must
+   name both the occurrence and its due, and any other shape is refused. *)
+let test_decode_schedule_runner_hold_reads_a_held_row () =
+  let row =
+    `Assoc
+      [ "schedule_id", `String "heartbeat"
+      ; ( "runner_hold"
+        , `Assoc
+            [ "occurrence_id", `String "occ-2"
+            ; "due_at", `Float 260.0
+            ; "due_at_iso", `String "1970-01-01T00:04:20Z"
+            ] )
+      ]
+  in
+  match Tui_decode.decode_schedule_runner_hold row with
+  | Ok (Some hold) ->
+      Alcotest.(check string) "occurrence" "occ-2" hold.Tui_decode.srh_occurrence_id;
+      Alcotest.(check string) "due" "1970-01-01T00:04:20Z" hold.Tui_decode.srh_due_at_iso
+  | Ok None -> Alcotest.fail "a held row decoded as not held"
+  | Error err -> Alcotest.fail err
+
+let test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes () =
+  let decode hold = Tui_decode.decode_schedule_runner_hold (`Assoc hold) in
+  let not_held label = function
+    | Ok None -> ()
+    | Ok (Some _) -> Alcotest.failf "%s: decoded as held" label
+    | Error err -> Alcotest.failf "%s: %s" label err
+  in
+  not_held "null" (decode [ "runner_hold", `Null ]);
+  not_held "absent" (decode []);
+  Alcotest.(check bool) "an object without its due is refused" true
+    (Result.is_error
+       (decode [ "runner_hold", `Assoc [ "occurrence_id", `String "occ-2" ] ]));
+  Alcotest.(check bool) "a bare string is refused" true
+    (Result.is_error (decode [ "runner_hold", `String "occ-2" ]))
+
 let test_decode_agent_success () =
   let json =
     `Assoc [
@@ -7940,7 +7977,6 @@ let test_decode_server_identity_reads_telemetry () =
           Alcotest.(check int) "heap_words" 5242880 gc.Tui_decode.sgc_heap_words;
           Alcotest.(check int) "live_words" 2621440 gc.Tui_decode.sgc_live_words;
           Alcotest.(check int) "minor_heap_size" 4194304 gc.Tui_decode.sgc_minor_heap_size;
-          Alcotest.(check int) "space_overhead" 80 gc.Tui_decode.sgc_space_overhead;
           Alcotest.(check int) "minor_collections" 120 gc.Tui_decode.sgc_minor_collections;
           Alcotest.(check int) "major_collections" 5 gc.Tui_decode.sgc_major_collections);
       (match identity.Tui_decode.sid_scheduler with
@@ -11359,6 +11395,12 @@ let () =
           test_required_display_renders_numeric_epoch_as_date
       ; Alcotest.test_case "keeps a present ISO twin verbatim" `Quick
           test_required_display_keeps_rfc3339_string_verbatim
+      ] );
+    ( "schedule runner hold"
+    , [ Alcotest.test_case "reads a held row" `Quick
+          test_decode_schedule_runner_hold_reads_a_held_row
+      ; Alcotest.test_case "reads not held and refuses bad shapes" `Quick
+          test_decode_schedule_runner_hold_reads_not_held_and_refuses_bad_shapes
       ] );
     ( "file change"
     , [ Alcotest.test_case "reads an insert" `Quick test_decode_file_change_reads_an_insert

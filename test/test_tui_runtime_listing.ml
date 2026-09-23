@@ -11,9 +11,15 @@ let runtime id : Masc.Tui_decode.runtime_option =
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 
+(* The width these checks read at. Wide enough that the authority row -- two
+   clauses while no runtime surface has loaded -- stays one row, so the counts
+   below are about the rows each check is named for. *)
+let check_cols = 140
+
 let check_layout state expected =
-  expect "rendering chrome" expected (runtime_surface_listing_chrome state);
-  match scrolled_surface_rows state Runtime with
+  expect "rendering chrome" expected
+    (runtime_surface_listing_chrome ~cols:check_cols state);
+  match runtime_scrolled ~cols:check_cols state with
   | None -> Alcotest.fail "runtime list has no scroll geometry"
   | Some layout -> expect "keyboard shares rendering chrome" expected layout.sc_chrome
 
@@ -306,6 +312,71 @@ let test_cli_probe_is_a_note () =
   Alcotest.(check string) "human-readable native-auth skip" "ADC not probed"
     (runtime_probe_status_label Runtime_provider_skipped_native_auth)
 
+(* The authority row names the file this screen is a reading of. Drawn as one
+   line it asked for 143 cells with no fleet on screen and about 197 with one,
+   while the frame gives 96 at 100 columns -- so the clause it lost was the
+   config path, and a cut path names a file that does not exist (#36497). *)
+let authority_state () =
+  let state = state () in
+  let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
+    { rrs_generated_at_iso = "fixture";
+      rrs_config_path = Some "/Users/operator/work/.masc/config/runtime.toml";
+      rrs_default_runtime_id = Some "assigned";
+      rrs_media_failover = []; rrs_media_failover_declared = [];
+      rrs_runtimes = [runtime "assigned"];
+      rrs_lanes =
+        [{rrl_id = "primary"; rrl_runtime_ids = ["assigned"]; rrl_declared = true}] } in
+  let snapshot = match Masc.Tui_decode.join_runtime_surface
+      ~probe:None ~probe_error:None ~resolved with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail in
+  state.runtime_surface <- Some snapshot;
+  state
+
+let test_the_authority_row_spells_its_config_path_whole () =
+  let state = authority_state () in
+  let path = "/Users/operator/work/.masc/config/runtime.toml" in
+  let rows_at cols = runtime_authority_rows ~cols state in
+  List.iter
+    (fun cols ->
+      let rows = rows_at cols in
+      let inner = Masc_tui_frame.inner_width ~cols in
+      List.iter
+        (fun row ->
+          Alcotest.(check bool)
+            (Printf.sprintf "row fits the frame at %d columns: %S" cols row)
+            true
+            (Masc_tui_message_layout.display_width row <= inner))
+        rows;
+      Alcotest.(check bool)
+        (Printf.sprintf "the config path is whole at %d columns" cols)
+        true
+        (List.exists
+           (fun row ->
+             let needle = path in
+             let n = String.length needle and h = String.length row in
+             let rec seek i = i + n <= h && (String.sub row i n = needle || seek (i + 1)) in
+             seek 0)
+           rows))
+    [ 80; 100; 110; 120; 140; 180 ];
+  (* A wider frame spends fewer rows on the same sentence, and the widest fits
+     it on one. Without this the packing could return one clause per row at
+     every width and every check above would still pass. *)
+  Alcotest.(check int) "one row once the frame is wide enough" 1
+    (List.length (rows_at 260));
+  Alcotest.(check bool) "a narrow frame spends more rows than a wide one" true
+    (List.length (rows_at 80) > List.length (rows_at 260));
+  (* The budget follows the rows. Counting one authority row at every width put
+     the footer past the frame's last row exactly when the sentence wrapped. *)
+  Alcotest.(check int) "the chrome count follows the rows drawn"
+    (runtime_surface_listing_chrome ~cols:260 state
+     + List.length (rows_at 100) - 1)
+    (runtime_surface_listing_chrome ~cols:100 state);
+  match runtime_scrolled ~cols:100 state with
+  | None -> Alcotest.fail "runtime list has no scroll geometry"
+  | Some layout ->
+      Alcotest.(check int) "the keys move through the drawing's count"
+        (runtime_surface_listing_chrome ~cols:100 state) layout.sc_chrome
+
 let test_search_follows_the_runtime_mode () =
   let state = state () in
   let resolved : Masc.Tui_decode.runtime_resolved_snapshot =
@@ -322,7 +393,7 @@ let test_search_follows_the_runtime_mode () =
   let expect_rows expected =
     Alcotest.(check (option (list string))) "search uses the visible cursor order"
       (Some expected) (surface_row_texts state Runtime);
-    match scrolled_surface_rows state Runtime with
+    match runtime_scrolled ~cols:check_cols state with
     | Some layout -> expect "scroll and search have the same rows" (List.length expected) layout.sc_count
     | None -> Alcotest.fail "runtime list lost its scroll geometry" in
   state.runtime_mode <- Runtime_lanes;
@@ -627,6 +698,74 @@ let media_failover_state ?(cursor = 0) ?(declared = [ "a"; "b" ]) ?(admitted = [
   state.slot_editor <- Some { se_target = Media_failover_slots; se_cursor = cursor };
   state
 
+(* The route editor sends the order it read, in full, and it reads that order
+   off the same list the candidate guard watches. After a failed read-back
+   that order is evidence of the state before the last write, so sending it
+   restores whatever that write removed.
+
+   The conversation-lane editor has refused this since the guard was written.
+   The route editor did not: its plan asked only whether a write was in
+   flight, and the pick list put [Pick_media_failover] on the unguarded side
+   of a match whose comment said only the conversation-lane arm sends the
+   order in full. *)
+let test_the_route_editor_will_not_write_from_a_stale_list () =
+  let stale state =
+    state.runtime_surface_generation <- 1;
+    state.runtime_lane_write <- Lane_write_posting;
+    settle_runtime_lane_write state ~written:Runtime_surface_list (Ok ());
+    runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
+      (Error "HTTP 503: down")
+  in
+  let refusal =
+    "refuse: the lane list may be stale; reload it before changing candidates"
+  in
+  let state = media_failover_state () in
+  stale state;
+  Alcotest.(check string) "a move is refused" refusal
+    (slot_plan_text (plan_slot_edit state (Move_slot Move_down)));
+  Alcotest.(check string) "so is a drop" refusal
+    (slot_plan_text (plan_slot_edit state Drop_slot));
+  Alcotest.(check string) "and the stale line says why" stale_after_503
+    (stale_text state);
+  (* An exact lane names the one slot it changes and the writer reads the
+     declared order under its lock, so a stale reading here cannot undo
+     anything and the edit still lands. *)
+  let exact = slot_editor_state () in
+  stale exact;
+  Alcotest.(check string) "an exact lane's drop is untouched"
+    "librarian_exact drop a, cursor stays"
+    (slot_plan_text (plan_slot_edit exact Drop_slot))
+
+(* The pick dispatch lives in the executable, so this is read off its source.
+   It used to decide the same question with a list of constructors written
+   into the match, and that list left [Pick_media_failover] on the unguarded
+   side. *)
+let test_the_pick_dispatch_asks_the_same_question () =
+  Alcotest.(check int) "the dispatch asks which writes send the whole order" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"launch_runtime_lane_pick"
+       ~callee:"Masc_tui_types.runtime_lane_pick_sends_whole_order")
+
+(* Which writes a stale list can undo is one question, asked of the value
+   rather than of a list of constructors written at each dispatch. Both
+   vocabularies answer it exhaustively, so a pick or a slot target added later
+   has to choose a side instead of inheriting the unguarded one. *)
+let test_the_writes_a_stale_list_can_undo_are_named_once () =
+  let pick name expected value =
+    Alcotest.(check bool) name expected
+      (runtime_lane_pick_sends_whole_order value)
+  in
+  pick "a conversation lane sends its whole order" true
+    (Pick_conversation_lane "coding");
+  pick "so does the media failover route" true Pick_media_failover;
+  pick "an exact lane appends one slot" false (Pick_exact_lane "verifier_exact");
+  pick "a new lane sends only the pick" false (Pick_new_lane "fresh");
+  pick "the default is one entry, replaced" false Pick_route_default;
+  Alcotest.(check bool) "the route editor sends its whole order" true
+    (slot_editor_target_sends_whole_order Media_failover_slots);
+  Alcotest.(check bool) "the exact-lane editor names one slot" false
+    (slot_editor_target_sends_whole_order (Exact_lane_slots "verifier_exact"))
+
 let test_the_route_editor_writes_the_whole_order () =
   let state = media_failover_state () in
   Alcotest.(check (list string)) "the route's entries, in call order"
@@ -690,6 +829,8 @@ let () = Alcotest.run "runtime list geometry"
       Alcotest.test_case "a new view ends what a key said" `Quick test_a_new_view_ends_what_a_key_said;
       Alcotest.test_case "CLI probe is informational" `Quick test_cli_probe_is_a_note;
       Alcotest.test_case "search follows Runtime mode and cursor order" `Quick test_search_follows_the_runtime_mode;
+      Alcotest.test_case "the authority row spells its config path whole" `Quick
+        test_the_authority_row_spells_its_config_path_whole;
       Alcotest.test_case "picker target column fits the longest id" `Quick
         test_picker_target_column_fits_the_longest_id;
       Alcotest.test_case "every picker row fits the frame" `Quick
@@ -710,5 +851,11 @@ let () = Alcotest.run "runtime list geometry"
         test_the_picker_offers_only_declared_lanes;
       Alcotest.test_case "the route editor writes the whole order" `Quick
         test_the_route_editor_writes_the_whole_order;
+      Alcotest.test_case "the route editor will not write from a stale list"
+        `Quick test_the_route_editor_will_not_write_from_a_stale_list;
+      Alcotest.test_case "the writes a stale list can undo are named once"
+        `Quick test_the_writes_a_stale_list_can_undo_are_named_once;
+      Alcotest.test_case "the pick dispatch asks the same question" `Quick
+        test_the_pick_dispatch_asks_the_same_question;
       Alcotest.test_case "the route editor edits a partly unresolved route" `Quick
         test_the_route_editor_keeps_an_unresolved_entry_in_place]]

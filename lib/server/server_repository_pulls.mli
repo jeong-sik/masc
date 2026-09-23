@@ -47,9 +47,11 @@ type pull_request =
   ; review : review_state
   ; mergeable : mergeable
   ; author : string option
-      (** The git author name of the head commit. [None] when the pull
-          request reports no commit, or GitHub gives the author or its name
-          as [null]. *)
+      (** The git author name of the newest commit with one parent among
+          the pull request's latest commits (RFC-0465 §2.1): a merge commit
+          is skipped because its author brought the base in. [None] when
+          that window holds no such commit, or GitHub gives its author or
+          name as [null]. *)
   ; updated_at : float
   }
 
@@ -204,10 +206,11 @@ val refresh :
     itself cannot be read. *)
 
 val keeper_of_author : keepers:string list -> pull_request -> string option
-(** [Some author] when the head commit's author name is exactly one of
-    [keepers] (case counts); [None] otherwise. A Keeper leaves the branch
-    after opening a pull request, so the join is by who wrote the last
-    commit, not by which checkout has the branch. The result is for display
+(** [Some author] when the pull request's [author] (its newest single-parent
+    commit's author name) is exactly one of [keepers] (case counts); [None]
+    otherwise. A Keeper leaves the branch after opening a pull request, so the
+    join is by who wrote the last commit, not by which checkout has the
+    branch. The result is for display
     only and is not an identity for authority: any committer can set the
     author name. *)
 

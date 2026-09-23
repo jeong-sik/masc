@@ -39,10 +39,6 @@ name = "fresh_ttl_sec"
 type = "integer"
 
 [[params]]
-name = "keeper_name"
-type = "string"
-
-[[params]]
 name = "model_name"
 type = "string"
 

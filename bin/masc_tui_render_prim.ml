@@ -1536,10 +1536,20 @@ let boxed_surface_chrome_rows = 10
    ANSI is not counted toward the indent -- display_width reads cells, not
    escape bytes. box_line pads content to the inner width, so a row of exactly
    the inner width is filled, not truncated. *)
+(* A block, not a line. [single_line] escapes every control byte, and a
+   newline is one: run over a body whole it prints "\x0A" at each break and
+   hands back one unbroken paragraph. Two of the three questions the live
+   fleet was holding carried newlines in their context -- eleven in one -- so
+   the pane drew the operator's own paragraph breaks into the sentence.
+   [wrap_body] escapes line by line, which covers what the escape is for and
+   leaves the breaks as breaks. *)
 let box_wrapped_field buf cols ~head ~style body =
   let indent = Message_layout.display_width head in
   let avail = max 8 (framed_inner_width cols - indent) in
-  match Message_layout.wrap_words ~max_cells:avail (Terminal_text.single_line body) with
+  match
+    Message_layout.wrap_body ~max_cells:avail
+      ~sanitize:Terminal_text.single_line body
+  with
   | [] -> box_line buf cols head
   | first :: rest ->
       box_line buf cols (head ^ style ^ first ^ Ansi.reset);
@@ -1652,10 +1662,13 @@ let draw_ask_question buf cols (state : state) ~(row : Masc.Tui_decode.ask_row)
       match choice.Masc.Tui_decode.ac_description with
       | None -> ()
       | Some description ->
+        (* Not [single_line] here: the field is a block and the escaping is
+           the block reader's, one line at a time. Sanitising first would
+           leave nothing for it to break on. *)
         box_wrapped_field buf cols
           ~head:"          "
           ~style:Ansi.dim
-          (Terminal_text.single_line description))
+          description)
     question.Masc.Tui_decode.aq_choices;
   (* What the operator has put down so far, in the two shapes a list of
      choices cannot show. *)

@@ -32,6 +32,7 @@ let keeper_suffix_file_changes = "/file-changes"
 let keeper_suffix_fusion = "/fusion"
 let keeper_suffix_operator_note = "/operator-note"
 let keeper_suffix_trajectory = "/trajectory"
+let keeper_suffix_board_attention_quarantines = "/board-attention/quarantines"
 
 let cache_key_string_segment value =
   Printf.sprintf "s%d:%s" (String.length value) value

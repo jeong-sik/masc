@@ -124,6 +124,12 @@ val create_request :
   (schedule_request, string) result
 
 val is_terminal : schedule_status -> bool
+
+val modify_allowed : schedule_status -> bool
+(** Whether a schedule in this status accepts a modify. [Schedule_store]
+    refuses [update_request] with [Transition_refused] exactly when this is
+    [false], and the TUI asks the same function before it opens the editor,
+    so the rule is written once. *)
 val validate_recurrence : recurrence -> (recurrence, string) result
 val check_admission : recurrence -> (recurrence, string) result
 (** Creation-time admission bound. Rejects an [Interval] recurrence whose

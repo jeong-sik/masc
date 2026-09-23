@@ -898,6 +898,24 @@ let handle_keeper_get_subroutes state req request reqd =
          | Ok observation ->
            Server_auth.respond_json_value_with_cors ~status:`OK request reqd
              (Keeper_github_identity.observation_to_yojson observation)))
+  else if ends_with keeper_suffix_board_attention_quarantines then (
+    (* One Keeper's rows of the inventory the operator snapshot already serves
+       for the fleet, under the same public-read policy: same rows, same
+       gate. The snapshot only builds them with [include_keepers], which the
+       TUI's summary read turns off, so a Keeper detail asks here instead. *)
+    let name = extract_name keeper_suffix_board_attention_quarantines in
+    if name = "" then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json "missing keeper name")
+    else if not (Keeper_config.validate_name name) then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json (Printf.sprintf "invalid keeper name: %s" name))
+    else
+      let config = Mcp_server.workspace_config state in
+      Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+        (Keeper_board_attention_quarantine_command.inventory_json
+           ~base_path:config.Workspace.base_path
+           ~keeper_names:[ name ]))
   else if ends_with "/chat/history/page" then
     (* Checked before "/chat/history": [ends_with] would not confuse the two,
        but keeping the longer suffix first means adding a third sub-route later

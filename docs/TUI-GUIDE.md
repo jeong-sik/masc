@@ -1627,11 +1627,16 @@ metadata reachability reading by exact `runtime_id`.
 
 ```
  MASC Runtime (43 lanes, 46 candidates)  degraded / stale  19:20:04  [connected]
-   SSOT: runtime.toml  projections: resolved + probe  2 reachable / 16 failed / 28 skipped
+   SSOT: runtime.toml · projections: resolved + probe · 2 reachable / 16 failed / 28 skipped
+   /Users/operator/work/.masc/config/runtime.toml · 2 probe-only
    LANE           CANDIDATE                  PROVIDER / MODEL         ROUTE / PROBE
    primary        1/3 anthropic.opus         Anthropic / claude-opus ready / reachable
    local          1/1 local.codex            Codex / codex           ready / CLI not probed
 ```
+
+The authority row is one sentence of clauses and breaks at the clause marks
+when the frame is narrower than the sentence, so the config path it ends with
+is spelled whole at every width rather than cut at the right edge.
 
 The authority is `runtime.toml`, read through two server-owned views.
 `GET /api/v1/runtime/resolved` projects lane order, candidate identity and

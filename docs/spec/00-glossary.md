@@ -59,8 +59,8 @@ status: reference
   붙어 그쪽 도구를 가져온다.
 
 **HITL**
-: Human-in-the-Loop의 약어. Gate의 외부 효과를 사람이 판정하는 비차단 권한 경로다.
-  대기 중인 HITL 판정은 다른 Keeper의 턴이나 서로 독립인 작업을 멈추지 않는다.
+: Human-in-the-Loop의 약어. Gate에 걸린 바깥 작업을 사람이 허락하거나 거절하는
+  경로다. 사람의 답을 기다리는 동안에도 다른 Keeper의 턴이나 상관없는 작업은 계속 돈다.
 
 **Surface**
 : 같은 MASC 상태에 접근하고 관찰하는 사용자 표면. TUI, MCP, Dashboard처럼 서로 다른
@@ -234,6 +234,27 @@ status: reference
   - 경계: 이 상태 머신은 Candidate 생애주기(`Pending → Judged → Consumed`,
     `Quarantined`)와 다른 층위다.
   → [Keeper_board_attention_partition](../../lib/keeper/keeper_board_attention_partition.mli)
+
+**Board Attention Quarantine (Board 판정 격리)**
+: Board attention 판정 워커가 정상적으로 완료할 수 없는 후보(`candidate`)와 파티션을
+  격리 보관하는 상태 및 그 인벤토리. 워커는 격리된 항목을 스스로 재시도하지 않으며,
+  오직 운영자의 재투입(`requeue`) 요청으로만 풀려난다(#38260·#38262).
+  - 격리 원인 카테고리(`quarantine_failure_category`): 닫힌 12개 값이다.
+    `Candidate_membership_conflict`·`Durable_partition_invariant`·`Exact_setup_unavailable`·`Exact_flow_replayed`·`Exact_lane_exhausted`(모든
+    HTTP 슬롯 및 CLI tail 거부로 모델 슬롯 소진)·`Exact_flow_bookkeeping_failed`(장부
+    기록 실패)·`Exact_completion_failed`(완료 단계 실패)·`Domain_output_invalid`·`Execution_provenance_mismatch`·`Unexpected_worker_failure`·`Exact_execution_quarantined`(호출
+    단계 미기록)·`Exact_execution_interrupted`(프로세스 재시작으로 바인딩된 실행이
+    끊김. 읽기 전용 모델 호출이라 토큰 외 부작용 없이 재투입 가능).
+  - TUI 표시 및 복구:
+    - Keeper Info 탭에 원인 카테고리별로 집계(건수, 최장 경과 시간, 파티션 ID, 재투입
+      대기 수)되어 표시된다. 수백 건의 슬롯 소진 행이 화면을 덮지 않도록 카테고리당 한 줄로 묶는다.
+    - `Q` 키를 누르면 가장 오래 대기 중인 항목(`oldest_waiting`)부터 원장의
+      `Requeue_requested`로 전이시키며 재투입을 요청한다.
+    - 재투입 요청은 읽을 때의 `quarantine_id`로 펜싱되어, 같은 파티션의 더 새로운 격리 상태를
+      낡은 식별자로 덮어쓰지 않는다.
+    - 서버가 새로 추가한 알 수 없는 카테고리는 떨어뜨리지 않고 `Unreadable_row`로 보존·계수하여
+      격리 수가 화면에서 축소 왜곡되지 않게 한다.
+  → [Keeper_board_attention_candidate](../../lib/keeper/keeper_board_attention_candidate.mli) · [Keeper_board_attention_quarantine_command](../../lib/keeper/keeper_board_attention_quarantine_command.mli) · [Masc_tui_board_quarantine](../../bin/masc_tui_board_quarantine.mli)
 
 **Keeper Cycle**
 : 현재 상태와 event를 관찰하고 Keeper turn 실행 여부를 결정하는 서버 loop의
@@ -511,8 +532,12 @@ status: reference
   `all_exact_lanes`로 열거된다. 실행 기록(`Exact_lane_run_registry.lane`)은 이 중
   `Verifier`를 뺀 넷을 센다. 그 경로를 선언하는 설정은 `Exact-output route`이고,
   Keeper turn이 runtime 후보를 시도하는 순서(`Runtime Candidate Order`)와 다른 층이다.
-  경계: 같은 단어를 두 곳이 더 쓴다. `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는
-  **Runtime Candidate Order**이고, 공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
+  경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
+  `[runtime.lanes.<이름>]` 표와 `Runtime_lane.t`는 **Runtime Candidate Order**다.
+  공식 클라이언트가 turn을 도는 경로는 **Official Client Lane**이다.
+  `Keeper_memory_lane`은 Keeper 하나의 Librarian 작업을 줄 세우는 **Memory queue**다.
+  `Keeper_lane.t`는 Keeper 하나가 turn을 도는 fiber다. 넷 다 이름만 같고 이 항목의
+  Lane과는 다른 개념이다. Memory queue에서 기다리던 일은 나중에 `Librarian` lane에서 돈다.
   → [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli)
 
 **Runtime Candidate Order (런타임 후보 순서)**
@@ -678,7 +703,8 @@ status: reference
 ## Collaboration State
 
 **Board**
-: 공유 발견, 질문, 답변, 의견과 결정을 게시하는 durable 협업 표면.
+: 에이전트와 사람이 발견·질문·답변·의견·결정을 올리는 게시판. 글마다 보는 범위가 있다. 올린 글은
+  재시작해도 남는다.
   글의 `content_updated_at`은 생성 또는 제목·본문·작성자가 실제로 바뀐 시각이다.
   댓글·투표·고정 등 일반 활동이 갱신하는 `updated_at`과 구분한다.
   같은 내용으로 다시 저장하면 `content_updated_at`은 유지한다.
@@ -734,15 +760,11 @@ status: reference
   `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`다.
   Activity도 커밋된 상태를 표시한다. 맡은 Task의 취소 요청은 검증 제출이고,
   `Todo`는 직접 취소할 수 있다. 실제 `Cancelled` 커밋 뒤에 취소 사건을 기록한다.
-  판정자의 이름은 authority이고, 판정 payload의 `producer`가 작업 관계와 실행
-  구간의 소유자다. `AwaitingVerification`은 `Held_pending_verdict`로 claim에
-  응답하므로 Keeper가 다시 맡을 수 없다. 완료·취소 verdict는 Keeper action이
-  아니라 system LLM 또는 인증된 운영자의 authority 경계에서만 적용된다.
-
-**Evidence**
-: 관찰·검증·전환을 근거에 연결하는 분류된 reference. `evidence_refs` 같은 필드로 전달한다.
-  `note:<text>`는 허용된 서술형 근거이며, Task handoff summary와 completion notes도 이
-  형식으로 정규화된다. Note evidence는 artifact나 collaboration source의 증명은 아니다.
+  판정하는 쪽은 authority로, 일을 낸 쪽은 판정 payload의 `producer`로 적는다. 그 작업
+  관계와 실행 구간은 `producer`의 것이다.
+  `AwaitingVerification`인 Task에 claim하면 `Held_pending_verdict`로 거절되므로
+  판정 전에는 Keeper가 다시 맡을 수 없다. 완료·취소 판정은 Keeper가 내리지 못하고,
+  서버 안의 판정 에이전트나 인증된 운영자만 내린다(**Completion Authority**).
 
 **Goal**
 : 장기 의도와 Task 연결을 기록하는 단위. phase는 `Executing`, `Verifying`,
@@ -756,9 +778,9 @@ status: reference
   `admits_self_directed_progress`가 이 경계를 정의한다.
 
 **Schedule (예약)**
-: 미래 시점에 Keeper를 깨우는 durable 요청. 만들기·조회·수정·취소와 기록(노트)
-  추가·조회 도구가 있다. Schedule은 이후 외부 효과를 자동 승인하지 않는다 — payload가
-  낳을 효과의 권한은 소비자의 leaf gate가 쥔다.
+: 정한 시각에 Keeper를 깨우라는 요청. 저장되므로 서버를 다시 켜도 남는다. 만들기·조회·
+  수정·취소와 기록(노트) 추가·조회 도구가 있다. Keeper를 깨울 뿐이고, 깨어난 Keeper가
+  하려는 바깥 작업을 대신 허락하지 않는다. 그 허락은 payload를 처리하는 쪽의 gate가 정한다.
   - 두 식별자: `schedule_id`는 정의를 교체해도 살아남는 안정 id이고,
     `schedule_instance_id`는 정의 하나의 인스턴스마다 새로 발급된다. 그래서 이전 정의의
     wake는 교체된 정의의 증거가 되지 않는다.
@@ -881,8 +903,10 @@ status: reference
 
 **Producer**
 : 판정 쪽 코드가 제출한 에이전트를 부르는 이름. Task 레코드에서는
-  `AwaitingVerification.assignee`에 적힌다(→ Assignee). verification 레코드의 외부
+  `AwaitingVerification.assignee`에 적힌다(→ Assignee). 반려 기록
+  (`pending_completion_rejection`)에는 `producer`로 적힌다. verification 레코드의 외부
   스키마 키 `worker`는 Task 소유권이나 관계를 찾는 데 쓰지 않는다.
+  → [Types_core](../../lib/types/types_core.mli)
 
 **Claim**
 : `Todo` 인 Task 를 맡는 전이. 한 에이전트는 `Claimed` 와 `InProgress` 를 합쳐 하나만
@@ -929,12 +953,28 @@ status: reference
   를 담는다. Release, Submission, cancel 이 쓰고 Claim 과 Start 는 지우지 않는다. 반려
   판정은 이 메모를 판정 사유로 덮어쓴다.
 
-**Evidence Reference**
-: 제출에 다는 증거 참조. `artifact:`, `note:`, `board:`, `fusion:` 네 형식만 열린다.
+**Evidence Reference (증거 참조)**
+: 관찰·검증·제출·상태 전환에 다는 근거. `evidence_refs` 같은 필드로 나른다.
+  검증 저장소가 읽는 형식은 `artifact:`, `note:`, `board:`, `fusion:` 넷이다.
+  `note:<text>`는 허용된 서술형 근거다. Task 전이에 붙이는 `handoff_context.evidence_refs`는
+  이 넷만 받고, 다른 형식이 하나라도 있으면 전이를 거절한다. Task 인계 요약과 완료 메모도
+  이 형식으로 바뀌어 붙는다. `note:` 근거는 파일이나 Board 글, Fusion 실행이 실제로
+  있다는 증명이 아니다. 다른 곳의 `evidence_refs`는 각자 규칙을 따른다. 예를 들어
+  운영자 판정(`Operator_judgment`)은 앞뒤 공백을 자르고 빈 줄만 버릴 뿐 형식은 보지 않는다.
+  → [Workspace_verification_store](../../lib/workspace/workspace_verification_store.ml),
+  [Workspace_task_verification](../../lib/workspace/workspace_task_verification.ml),
+  [Tool_task_completion_review](../../lib/task/tool_task_completion_review.mli)
 
 **Operator Attention**
 : 운영자만 풀 수 있는 Task 의 목록(`Operator_task_attention.item`). 종류는 `Cancel_claim`,
   `Held_without_actor`, `Producer_record_unreadable` 이다.
+  **다른 뜻**: attention이라는 말은 세 곳이 더 쓴다. **Board Attention Candidate**는
+  Keeper가 반응할지 판정할 게시물이다. Dashboard 브리핑의 attention 항목
+  (`Dashboard_attention.attention_item`)과 TUI 개요 화면의 attention 항목
+  (`attention_item`)은 운영자가 먼저 봐야 할 사고·경고 줄이다. 이 목록은 그 줄의
+  재료 중 하나일 뿐이다.
+  → [Operator_task_attention](../../lib/operator_task_attention.mli),
+  [Dashboard_attention](../../lib/dashboard/dashboard_attention.mli)
 
 **Current Task**
 : 에이전트 기록의 `current_task`, Keeper meta 의 `current_task_id`, planning 의 current
@@ -1033,6 +1073,18 @@ status: reference
   (RFC-0465).
   → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
 
+**PR Attribution (PR 귀속)**
+: 열린 GitHub Pull Request를 작업한 Keeper와 잇는 표시 규칙(RFC-0465).
+  `GET /api/v1/repositories/pulls`가 PR의 `author`(머지 커밋을 건너뛴 최신 단일
+  부모 커밋의 작성자 이름, #38277)와 지속된 Keeper 이름(`keepers_listed`)을 대조해
+  일치하는 Keeper에게 귀속한다(`keeper`). 샌드박스 런타임은 실행 환경의
+  `GIT_AUTHOR_NAME`과 `GIT_COMMITTER_NAME`에 그 Keeper 이름을 넣어 커밋에
+  작성자가 남도록 보장한다(#38253). Keeper 목록 조회가 실패하면(`Keepers_list_failed`)
+  PR을 일반(비-Keeper) PR로 오인하지 않고 목록 전체를 미결정으로 둔다. 이 귀속은
+  TUI와 대시보드의 표시 전용(display only)이며, 커미터가 작성자 이름을 임의
+  지정할 수 있으므로 권한(authority)이나 실행 증명으로 삼지 않는다.
+  → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
+
 ## Continuity
 
 **Autoboot Exclusion Reason (자동 부팅 제외 이유)**
@@ -1115,10 +1167,14 @@ status: reference
   실패로 세지 않는다(정당한 거절). `failed`는 metadata·load·commit 실패만 센다.
   → [Keeper_transcript_tail_recovery](../../lib/keeper/keeper_transcript_tail_recovery.mli)
 
-**받은 일 정리**
-: 미처리 event·chat 요청의 원본에 묶인 파생 맥락과 다음 행동 제안. 실행 권한이나
-  checkpoint 이력이 아니다. 코드 이름은 `Keeper_librarian_context`다. 정리 하나가
-  pocket이고, 저장된 현재 pocket 묶음은 Working Context다.
+**Working Context (받은 일 정리)**
+: Librarian이 Keeper가 아직 처리하지 않은 event·chat 요청을 묶어, 원본 요청에 맥락과
+  다음 행동 제안을 붙여 둔 것. 실행 권한도 checkpoint 이력도 아니다. 정리 하나가
+  pocket(`Keeper_librarian_context.pocket`)이고, 지금 저장된 pocket 묶음이
+  `Keeper_librarian.selection.working_contexts`다. Keeper 이름에 묶인다. cluster 사이에서
+  무엇을 같이 쓰는지는 **Cluster** 항목에 적었다.
+  **다른 뜻**: 코드의 `Keeper_types.working_context`는 이 묶음이 아니라 실행 중인
+  Keeper가 쥔 Checkpoint 하나를 감싼 값이다(**Checkpoint** 항목). 이름만 같다.
   `[typesafeai] context_review = true`이면 새 정리 전체의 의미 보존을 JEV Choice로
   평가한다. 원본의 요청·제약·약속과 다음 행동 제안을 함께 보며, 합치는 이전 정리의
   참조 원문도 포함한다. `needs_revision`이면 새 정리의 게시만 보류한다. 미평가·실패·
@@ -1324,10 +1380,9 @@ status: reference
   `Turn_ref`의 trace id가 이 값이다.
 
 **Memory OS**
-: Keeper의 durable personal facts와 recall을 소유하는 typed memory store.
-  현재 Memory OS와 working context는 operator config의 Keeper 이름에 귀속되어,
-  같은 base path에서 같은 이름을 쓰는 Keeper는 cluster가 달라도 공유한다.
-  Turn Boundary와 Read Position만 cluster runtime 좌표로 분리된다.
+: Keeper 하나가 오래 들고 가는 기억(Fact)을 저장하고 다시 꺼내 주는 곳.
+  operator config의 Keeper 이름에 묶인다. cluster 사이에서 무엇을 같이 쓰는지는
+  **Cluster** 항목에 적었다.
 
 **Continuity Snapshot (하던 일 저장본)**
 : 이어서 할 일의 설명과, 그 설명이 대신하는 완료된 History 범위를 함께 담은
@@ -1466,13 +1521,6 @@ status: reference
   `max_context_override`는 별도의 토큰 상한이며, 이 설정이나 채워야 할 목표가 아니다.
   공식 클라이언트는 자체 문맥 처리를 사용하므로 선택값과 실제 적용 여부를 구분한다.
 
-**Working Context**
-: Librarian이 Keeper가 받은 요청을 묶어 저장한 현재 작업 맥락. 각 항목은 받은 일
-  정리가 낸 pocket(`Keeper_librarian_context.pocket`)이고, 현재 묶음은
-  `Keeper_librarian.selection.working_contexts`다. Memory OS와 같은
-  operator-config Keeper 이름 범위이므로 같은 이름의 Keeper는 cluster 간에 공유한다.
-  cluster별 Librarian Read Position과는 별개의 상태다.
-
 **Fact**
 : Memory OS의 기억 하나. 문장(`claim`), `category`, 처음·마지막으로 본 시각,
   `origin`, `basis`로 이뤄진다. id 필드는 없고 Memory ID는 `claim` 글자의
@@ -1485,8 +1533,8 @@ status: reference
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
   `injected`는 Librarian이 대화에서 뽑아 넣은 것이다. Keeper는 자신이 직접 적은
-  현재 Fact만 `supersedes`로 대체할 수 있고, Librarian이 넣은 `injected` Fact나
-  다른 Keeper의 Fact는 대체할 수 없다(#38122).
+  현재 Fact만 `supersedes`로 대체할 수 있고, Librarian이 넣은 `injected` Fact는
+  대체할 수 없다(#38122).
 
 **Basis**
 : Fact가 무엇에 근거하나. `observed`는 읽은 곳(자기 대화 또는 Board 글)을 갖고,
@@ -1511,19 +1559,48 @@ status: reference
     `dropped`에 넣고, 현재 상태 claim의 `absorbs`에 넣지 않는다.
     코드 규칙: absorb gate는 판정 모델에게 흡수된 Fact의 문장마다 새 claim이 그 내용을
     말하는지 묻는다. 말하지 않는 문장이 하나라도 있으면 그 Fact는 흡수되지 않고 현재
-    Fact로 남는다. 답 전체가 거절되지는 않고 새 claim은 그대로 적용된다(#38056).
-    흡수 대상(`into`)이 잠근 시점의 스냅숏에도, 이번 답의 새 claim에도 없으면(회차 도중
-    Keeper가 그 Fact를 철회하거나 `supersedes`로 대체한 경우) 그 흡수는 적용하지 않는다.
-    원문은 현재 Fact로 남고, 지워진 대상은 되살아나지 않으며, warn 로그만 남는다(#38231).
+    Fact로 남는다. 새 claim은 원칙적으로 적용되나, `absorbs`에 지정한 기억 중 어느 것도
+    흡수되지 않은 claim이 기존 기억의 사본이면 역방향 사본 판정(Reverse Copy Judgment)을
+    거쳐 저장하지 않고 버린다(#38056·#38243). 흡수 대상(`into`)이 잠근 시점의 스냅숏에도,
+    이번 답의 새 claim에도 없으면(회차 도중 Keeper가 그 Fact를 철회하거나 `supersedes`로
+    대체한 경우) 그 흡수는 적용하지 않는다. 원문은 현재 Fact로 남고, 지워진 대상은
+    되살아나지 않으며, Librarian 실행 기록(`run` 출력)에 실제로 적용된 흡수와 미적용
+    흡수를 구분해 남긴다(#38231·#38267).
   - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
     적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
     커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고
     원장에 `Revised` 이벤트를 기록한다. 철회와 마찬가지로 대체된 Fact를 전제로 삼던 유도
     Fact들도 함께 무효화되며 영수증의 `removed_memory_ids`와 `support_invalidations`로
-    보고된다. 알 수 없는 id, 이미 지난(non-current) id, `injected` id, 다른 Keeper의
-    id, 자기 자신 id, `source_path`와의 동시 지정, 그리고 대체될 Fact를 전제로
-    삼는 유도 claim(`supersedes_premise_of_successor`)은 모두 거절되며 아무것도 적지 않는다.
+    보고된다. 기억 저장소는 Keeper마다 따로라서, 이 Keeper의 현재 Fact가 아닌 id는
+    알 수 없는 id든 이미 지난 id든 모두 non-current로 거절된다. 그 밖에 `injected` id,
+    대체할 Fact와 글자까지 똑같은 claim(`supersedes_self`), `source_path`와의 동시 지정,
+    대체될 Fact를 전제로 삼는 유도 claim(`supersedes_premise_of_successor`), 근거 경로가
+    없는 유도 claim(`unsupported_derivation`)도 거절되며 아무것도 적지 않는다.
   → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.ml) · [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli) · [librarian.md](../../config/prompts/librarian.md)
+
+**Reverse Copy Judgment (역방향 사본 판정)**
+: Librarian 회차가 내놓은 새 claim 중 `absorbs`에 기억을 적었으나 실제로는 그 중
+  아무것도 흡수하지 못한 claim에 대해, 남겨진 기억들이 그 claim의 내용을 이미
+  담고 있는지 묻는 역방향 판정. "새 claim은 항상 적용된다"는 기본 규칙의 단 하나의
+  예외다(RFC-0463 §2.8·#38243).
+  - 배경: Librarian이 매 회차 같은 주제를 조금씩 다른 문장으로 다시 써서 기존 Fact가
+    흡수되지 않고 paraphrase 사본이 무한 축적되는 문제를 막는다.
+  - 전이 및 판정:
+    - 대상: `absorbs`에 기억을 나열했으나 absorb gate에서 0건만 흡수 승인된 새 claim.
+      단, `supersedes`로 대체 대상이 지정된 claim은 제외한다(`Continues_a_dropped_memory` —
+      버리면 대체 대상만 사라지고 빈자리가 남기 때문).
+    - 절차: 남겨진 원본 기억들을 최대 `state_bytes_limit` 바이트 크기로 묶어 상태를
+      구성하고, 새 claim을 문장 단위(`statements`)로 쪼개어 판정 모델에 묻는다.
+    - 경계: 점수가 `conveyed_boundary`를 엄격히 넘을 때만 전달된 것으로 인정하며,
+      동점(tie)은 claim을 버리지 않도록 미전달로 본다.
+    - 결과: 모든 문장이 전달되었으면 `Copy`로 판정해 원장에 저장하지 않고
+      탈락시킨다(`without_copies`). 전달되지 않은 문장이 하나라도 있으면
+      `Carries_new_statement`로 정상 적용한다. 판정 실패나 크기 초과 등
+      `Not_judged`(`Gate_judgment_failed`·`No_source_fits_the_state`·`Statement_too_large`·`No_statement`·`Request_failed`)인
+      경우에도 기존처럼 정상 적용한다.
+  - 저장 및 표면: 탈락된 claim은 원장에 쓰이지 않고 로그에 남으며, Librarian 회차
+    실행 결과의 `copy_checks`에 각 판정 결과(`verdict`)와 호출 횟수가 기록된다.
+  → [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli)
 
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는

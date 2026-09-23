@@ -9,6 +9,14 @@ val messages_for_librarian
   :  Keeper_librarian.input
   -> (Agent_core.Types.message list, string) result
 
+(** Every variable the [librarian] template is rendered with for a Memory
+    pass, with the [continuity] range when one is attached: the input's own
+    variables and the shared [working_contexts_rule] fragment. *)
+val librarian_prompt_variables
+  :  ?continuity:Keeper_librarian_continuity.prepared
+  -> Keeper_librarian.input
+  -> ((string * string) list, string) result
+
 type extraction_error
 
 val extraction_error_to_string : extraction_error -> string
@@ -50,8 +58,12 @@ type served_slot =
 val served_slot_id : served_slot -> string
 
 type write_scope = Context_only | Context_and_memory
-(** The caller names the evidence's purpose. A queue-source organization pass
-    writes only working Context; a durable range retains Memory processing. *)
+(** The caller names the evidence's purpose. A durable range retains Memory
+    processing. [Context_only] never writes Memory, so it never asks for a
+    Memory judgment: with [continuity] it asks the [librarian.continuity]
+    prompt for the working state alone, and without it the
+    [librarian.working_context] prompt for the working contexts alone. Each
+    answer is refused if it carries any other field. *)
 
 type not_committed =
   { detail : string

@@ -23,6 +23,19 @@ let test_store_directory_names_are_not_keeper_names () =
        | Common.Workspace_scoped -> ())
     Common.keeper_runtime_stores
 
+(* The typed name and [validate_name] answer the same question; the list is
+   not empty, so the checks above are not vacuous. *)
+let test_typed_name_agrees () =
+  check bool "tool_usage is kept under keepers/" true
+    (List.mem "tool_usage" Common.keepers_root_store_dirnames);
+  List.iter
+    (fun dirname ->
+       check bool (dirname ^ " refused as a typed name") true
+         (Result.is_error (Keeper_id.Keeper_name.of_string dirname)))
+    Common.keepers_root_store_dirnames;
+  check bool "ordinary typed name" true
+    (Result.is_ok (Keeper_id.Keeper_name.of_string "masc-pro-builder"))
+
 let test_ordinary_names_still_pass () =
   List.iter
     (fun name -> check bool name true (Keeper_config.validate_name name))
@@ -38,6 +51,7 @@ let () =
     [ ( "name"
       , [ test_case "store directory names are not keeper names" `Quick
             test_store_directory_names_are_not_keeper_names
+        ; test_case "the typed name agrees" `Quick test_typed_name_agrees
         ; test_case "ordinary names still pass" `Quick test_ordinary_names_still_pass
         ; test_case "non-portable names keep their message" `Quick
             test_non_portable_names_keep_their_message

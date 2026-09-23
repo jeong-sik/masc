@@ -111,6 +111,12 @@ val keeper_runtime_store_placement
     for months at roughly 4 MB a day fleet-wide. A store now has to say where
     it lives, and the match is exhaustive, so the next one cannot be added
     without answering. *)
+
+val keepers_root_store_dirnames : string list
+(** Directory names of the stores placed [Keepers_root_scoped]: they sit
+    beside the keeper directories under [keepers/], so no keeper may take one
+    of these names. *)
+
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and
     {!Keeper_identity} can both compute it without depending on each

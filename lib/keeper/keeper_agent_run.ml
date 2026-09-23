@@ -1154,8 +1154,9 @@ let run_turn
            let checkpoint = Keeper_context_runtime.checkpoint_of_context ctx_work in
            let checkpoint = { checkpoint with Agent_core.Checkpoint.session_id = trace_id } in
            (* Each answered Ask is its own User message here, so it carries its
-              answerer as the speaker. Stamped before admission: the admission
-              digest covers the whole message. *)
+              answerer as the speaker. Stamped before admission so the admitted
+              copy already carries it; the admission digest leaves the speaker
+              out, so stamping does not change what was admitted. *)
            let co_inputs = List.fold_left (fun result (ask_id, text, answered_by) ->
              Result.bind result (fun inputs ->
                let evidence_fingerprint = Digestif.SHA256.(digest_string text |> to_hex) in

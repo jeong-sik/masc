@@ -81,8 +81,8 @@ let validate_user_input_metadata metadata =
 ;;
 
 (* The caller's metadata is stamped here, where the durable User message is
-   born, and never added or removed afterwards: message digests and replay
-   prefixes compare the whole message. *)
+   born, and never added or removed afterwards: replay prefixes compare the
+   whole message. *)
 let append_user_input agent ~metadata user_blocks =
   let user_msg =
     { role = User

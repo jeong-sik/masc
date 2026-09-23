@@ -3,8 +3,9 @@
     The speaker is decided where the message is created and travels as
     AGENT_CORE message metadata under {!Agent_core.Types.Input_speaker.key}.
     It is never read back out of the message text, never sent to a provider,
-    and never added to or removed from a message after it was created: message
-    digests and replay prefixes compare the whole message.
+    and never added to or removed from a message after it was created: replay
+    prefixes compare the whole message. The approval admission digest leaves
+    the speaker out ({!Keeper_approval_input_admission}).
 
     A message created before this attribution existed has no entry. Readers
     report that as unknown and do not guess a kind. *)

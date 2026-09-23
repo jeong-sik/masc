@@ -98,9 +98,13 @@ let test_cancelled_memory_commit_resumes_without_reapplication () =
   check bool "new wake recovers persisted range before newer input" true
     ((P.memory_range_id ~config ~keeper_name recovered |> get)=expected_receipt);
   let resumed_calls=ref 0 in
-  let resumed_runner ~runtime_id:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  (* Memory for this range is committed, so the resumed pass is Context-only
+     and asks for the working state alone (#38184). *)
+  let resumed_runner ~runtime_id:_ ~system_prompt:_ ~output_schema ~prompt:_ =
     incr resumed_calls;
-    Ok {|{"new_claims":[],"dropped":[],"working_contexts":[],"working_state":"Meridian is awaiting publication approval."}|} in
+    check bool "resumed pass asks for no Memory field" true
+      (Yojson.Safe.Util.(output_schema |> member "properties" |> member "new_claims") = `Null);
+    Ok {|{"working_state":"Meridian is awaiting publication approval."}|} in
   Queue.For_testing.run_continuity ~cli_runner:resumed_runner ~base_path ~keeper_name ();
   check int "resumption regenerates exactly the unpublished state" 1 !resumed_calls;
   let after=Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get |> some in

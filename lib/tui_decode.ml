@@ -3777,19 +3777,6 @@ let decode_connector_binding json =
   let* cb_keeper_name = required_string_field json "keeper_name" in
   Ok { cb_channel_id; cb_channel_name = nonblank_option cb_channel_name; cb_keeper_name }
 
-let decode_connector_name_mapping json =
-  let* raw_kind = required_string_field json "kind" in
-  let* cnm_kind =
-    match raw_kind with
-    | "channel" -> Ok Connector_channel_name
-    | "person" -> Ok Connector_person_name
-    | "server" -> Ok Connector_server_name
-    | unknown -> Error (Printf.sprintf "unknown connector name kind %S" unknown)
-  in
-  let* cnm_id = required_string_field json "id" in
-  let* cnm_name = required_string_field json "name" in
-  Ok { cnm_kind; cnm_id; cnm_name }
-
 let decode_connector_connection ~status ~available ~connected =
   match status, available, connected with
   | "connected", true, true -> Ok Connector_connected
@@ -3881,13 +3868,6 @@ let decode_connector json =
     optional_string_field json "directory_updated_at"
   in
   let* cn_workspace_id = optional_string_field json "workspace_id" in
-  let* cn_server_names_path = optional_string_field json "server_names_path" in
-  let* cn_channel_names_path = optional_string_field json "channel_names_path" in
-  let* cn_people_names_path = optional_string_field json "people_names_path" in
-  let* name_mappings_json = optional_list_field json "name_mappings" in
-  let* cn_name_mappings =
-    decode_list "name_mappings" decode_connector_name_mapping name_mappings_json
-  in
   let* bindings_json = required_list_field json "configured_bindings" in
   let* cn_bindings =
     decode_list "configured_bindings" decode_connector_binding bindings_json
@@ -3933,10 +3913,18 @@ let decode_connector json =
     ; cn_directory_errors
     ; cn_directory_updated_at = nonblank_option cn_directory_updated_at
     ; cn_workspace_id = nonblank_option cn_workspace_id
-    ; cn_server_names_path = nonblank_option cn_server_names_path
-    ; cn_channel_names_path = nonblank_option cn_channel_names_path
-    ; cn_people_names_path = nonblank_option cn_people_names_path
-    ; cn_name_mappings
+      (* Name evidence does not travel on the connector object. It arrives as
+         one connector name page per kind, and connector_with_name_pages
+         fills these in from those pages -- which is already why the two
+         fields below start empty. The connector used to be read for
+         server_names_path, channel_names_path, people_names_path and
+         name_mappings as well, but no producer has emitted any of them since
+         the page vocabulary landed, so those reads only claimed a source
+         that does not exist. *)
+    ; cn_server_names_path = None
+    ; cn_channel_names_path = None
+    ; cn_people_names_path = None
+    ; cn_name_mappings = []
     ; cn_name_mapping_scope = None
     ; cn_names_error = None
     ; cn_bindings

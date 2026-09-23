@@ -30,6 +30,18 @@ type wake_enqueue_counts =
   ; wake_failed : int
   }
 
+type last_success =
+  { finished_at : float
+  ; held : Schedule_runner.wake_signal list
+      (** The occurrences this tick held back, each waiting for its target to
+          consume the previous occurrence. A current state, not a count: the
+          next successful tick replaces it, and it is never summed into
+          [totals] (#37912). A failed tick does not re-read it, which is why
+          it is kept with the time it was read at rather than on its own
+          (#38411). *)
+  }
+(** The newest tick that succeeded. *)
+
 type snapshot =
   { tick_in_flight : bool
   ; tick_count : int
@@ -38,7 +50,7 @@ type snapshot =
   ; crash_count : int
   ; last_tick_started_at : float option
   ; last_tick_finished_at : float option
-  ; last_success_at : float option
+  ; last_success : last_success option
   ; last_error_at : float option
   ; last_error : string option
   ; last_duration_sec : float option
@@ -50,11 +62,14 @@ type snapshot =
           it and still here. Process-local like the rest of this snapshot:
           the durable record of each attempt is the schedule store's wake
           list. *)
-  ; held : Schedule_runner.wake_signal list
-      (** The occurrences the newest successful tick held back, each waiting
-          for its target to consume the previous occurrence. A current state,
-          not a count: it is replaced every tick and never summed into
-          [totals] (#37912). *)
+  }
+
+type held_occurrence =
+  { signal : Schedule_runner.wake_signal
+  ; observed_at : float
+      (** When the successful tick that saw this hold finished. Ticks that
+          failed after it did not look again, so this is the newest time the
+          hold is known to have stood. *)
   }
 
 val reset_for_test : unit -> unit
@@ -78,13 +93,14 @@ val held_occurrence :
   snapshot ->
   schedule_instance_id:string ->
   schedule_id:string ->
-  Schedule_runner.wake_signal option
+  held_occurrence option
 (** The occurrence of this schedule instance that the newest successful tick
-    held back, if it held one. The same [held] list [/health] reports, looked
-    up for one schedule row so a reader of the schedule list does not rebuild
-    the hold from the keeper queue. *)
+    held back, if it held one, with the time that tick finished. The same
+    [held] list [/health] reports, looked up for one schedule row so a reader
+    of the schedule list does not rebuild the hold from the keeper queue. *)
 
 val snapshot_to_yojson :
   ?now:float -> ?stale_after_sec:float -> snapshot -> Yojson.Safe.t
 (** Render a stable JSON status. [stale_after_sec] is supplied by the caller
-    that owns the runner cadence; this module does not guess runtime policy. *)
+    that owns the runner cadence; this module does not guess runtime policy.
+    [status] is written with {!Schedule_contract_values.runner_status_to_string}. *)

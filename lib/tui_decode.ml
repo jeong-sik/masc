@@ -998,6 +998,13 @@ let preview_line text =
   sanitize_terminal_text (Buffer.contents output)
 ;;
 
+let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =
+  let tm = localtime unix_seconds in
+  Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+    tm.Unix.tm_sec
+;;
+
 (* The date and time beside a record, in the zone the operator's terminal is
    in. It sliced the first nineteen bytes of the server's RFC 3339 string, which
    kept a UTC reading and dropped the [Z] that said so -- "2026-08-22T00:03:00"
@@ -1007,11 +1014,7 @@ let preview_line text =
 let short_timestamp_for_terminal ~localtime text =
   sanitize_terminal_text
     (match Time_codec.parse_rfc3339_opt text with
-     | Some unix_seconds ->
-         let tm = localtime unix_seconds in
-         Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
-           (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-           tm.Unix.tm_sec
+     | Some unix_seconds -> short_timestamp_of_unix_for_terminal ~localtime unix_seconds
      | None ->
          if String.length text > 19 then String.sub text 0 19
          else if String.length text = 0 then "(never)"
@@ -11259,14 +11262,50 @@ let decode_async_request_observation json =
 type schedule_runner_hold =
   { srh_occurrence_id : string
   ; srh_due_at_iso : string
+  ; srh_observed_at : float
   }
 
+(* The server writes [runner_hold] on every row, [null] when nothing is held.
+   A row without the key is a server that does not say, and reading it as
+   [null] would draw a held schedule as a free one (#38413). *)
 let decode_schedule_runner_hold row =
-  match member "runner_hold" row with
+  let* hold = required_member row "runner_hold" in
+  match hold with
   | `Null -> Ok None
-  | `Assoc _ as hold ->
+  | `Assoc _ ->
     let* srh_occurrence_id = required_string_field hold "occurrence_id" in
     let* srh_due_at_iso = required_string_field hold "due_at_iso" in
-    Ok (Some { srh_occurrence_id; srh_due_at_iso })
+    let* observed_at = required_nullable_float_field hold "observed_at" in
+    let* srh_observed_at =
+      match observed_at with
+      | Some time when Float.is_finite time && time >= 0.0 -> Ok time
+      | Some _ | None ->
+        Error "runner_hold observed_at must be a finite, non-negative time"
+    in
+    Ok (Some { srh_occurrence_id; srh_due_at_iso; srh_observed_at })
   | bad -> field_type_error "runner_hold" "an object or null" bad
+;;
+
+let decode_schedule_runner_status snapshot =
+  let* runner = required_object_field snapshot "schedule_runner" in
+  let* word = required_string_field runner "status" in
+  Schedule_contract_values.runner_status_of_string word
+  |> Result.map_error Schedule_contract_values.decode_error_to_string
+;;
+
+type schedule_hold_reading =
+  | Hold_current
+  | Hold_as_of of float
+
+(* Only a runner whose newest tick succeeded cleanly and recently vouches for
+   its list now. Every other status means the list is the one a tick read
+   before, so the hold is drawn at the time it was read (#38411). *)
+let schedule_hold_reading ~(runner : Schedule_contract_values.runner_status) hold =
+  match runner with
+  | Schedule_contract_values.Runner_ok -> Hold_current
+  | Schedule_contract_values.Runner_not_started
+  | Schedule_contract_values.Runner_running
+  | Schedule_contract_values.Runner_stale
+  | Schedule_contract_values.Runner_degraded ->
+    Hold_as_of hold.srh_observed_at
 ;;

@@ -33,6 +33,11 @@ let empty_wake_enqueue_counts =
   }
 ;;
 
+type last_success =
+  { finished_at : float
+  ; held : Schedule_runner.wake_signal list
+  }
+
 type snapshot =
   { tick_in_flight : bool
   ; tick_count : int
@@ -41,13 +46,17 @@ type snapshot =
   ; crash_count : int
   ; last_tick_started_at : float option
   ; last_tick_finished_at : float option
-  ; last_success_at : float option
+  ; last_success : last_success option
   ; last_error_at : float option
   ; last_error : string option
   ; last_duration_sec : float option
   ; last_counts : tick_counts option
   ; totals : tick_counts
-  ; held : Schedule_runner.wake_signal list
+  }
+
+type held_occurrence =
+  { signal : Schedule_runner.wake_signal
+  ; observed_at : float
   }
 
 let zero_counts : tick_counts =
@@ -96,13 +105,12 @@ let empty =
   ; crash_count = 0
   ; last_tick_started_at = None
   ; last_tick_finished_at = None
-  ; last_success_at = None
+  ; last_success = None
   ; last_error_at = None
   ; last_error = None
   ; last_duration_sec = None
   ; last_counts = None
   ; totals = zero_counts
-  ; held = []
   }
 ;;
 
@@ -172,11 +180,10 @@ let record_tick_ok
     ; success_count = current.success_count + 1
     ; last_tick_started_at = Some started_at
     ; last_tick_finished_at = Some finished_at
-    ; last_success_at = Some finished_at
+    ; last_success = Some { finished_at; held = result.Schedule_runner.held }
     ; last_duration_sec = Some (duration ~started_at ~finished_at)
     ; last_counts = Some counts
     ; totals = add_counts current.totals counts
-    ; held = result.Schedule_runner.held
     })
 ;;
 
@@ -206,11 +213,19 @@ let record_tick_crash ~started_at ~finished_at error =
 let snapshot () = Atomic.get state
 
 let held_occurrence snapshot ~schedule_instance_id ~schedule_id =
-  List.find_opt
-    (fun (signal : Schedule_runner.wake_signal) ->
-       String.equal signal.schedule_instance_id schedule_instance_id
-       && String.equal signal.schedule_id schedule_id)
-    snapshot.held
+  match snapshot.last_success with
+  | None -> None
+  | Some { finished_at; held } ->
+    List.find_opt
+      (fun (signal : Schedule_runner.wake_signal) ->
+         String.equal signal.schedule_instance_id schedule_instance_id
+         && String.equal signal.schedule_id schedule_id)
+      held
+    |> Option.map (fun signal -> { signal; observed_at = finished_at })
+;;
+
+let last_success_at snapshot =
+  Option.map (fun (success : last_success) -> success.finished_at) snapshot.last_success
 ;;
 
 
@@ -243,7 +258,7 @@ let option_age ~now = function
 ;;
 
 let latest_error_is_newer snapshot =
-  match snapshot.last_error_at, snapshot.last_success_at with
+  match snapshot.last_error_at, last_success_at snapshot with
   | Some _, None -> true
   | Some error_at, Some success_at -> error_at >= success_at
   | None, _ -> false
@@ -264,7 +279,7 @@ let latest_tick_has_dispatch_failure snapshot =
   | None -> false
 ;;
 
-let status ?now ?stale_after_sec snapshot =
+let status ?now ?stale_after_sec snapshot : Schedule_contract_values.runner_status =
   let stale =
     match now, stale_after_sec, snapshot.last_tick_finished_at with
     | Some now, Some stale_after_sec, Some finished_at ->
@@ -272,16 +287,16 @@ let status ?now ?stale_after_sec snapshot =
     | _ -> false
   in
   if snapshot.tick_in_flight
-  then "running"
+  then Schedule_contract_values.Runner_running
   else if snapshot.tick_count = 0
-  then "not_started"
+  then Schedule_contract_values.Runner_not_started
   else if stale
-  then "stale"
+  then Schedule_contract_values.Runner_stale
   else if latest_error_is_newer snapshot
           || latest_tick_has_dispatch_failure snapshot
           || latest_tick_has_wake_failure snapshot
-  then "degraded"
-  else "ok"
+  then Schedule_contract_values.Runner_degraded
+  else Schedule_contract_values.Runner_ok
 ;;
 
 let snapshot_to_yojson ?now ?stale_after_sec snapshot =
@@ -292,7 +307,10 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
   in
   `Assoc
     [ "schema", `String "masc.schedule.runner_status.v1"
-    ; "status", `String (status ?now ?stale_after_sec snapshot)
+    ; ( "status"
+      , `String
+          (Schedule_contract_values.runner_status_to_string
+             (status ?now ?stale_after_sec snapshot)) )
     ; "tick_in_flight", `Bool snapshot.tick_in_flight
     ; "tick_count", `Int snapshot.tick_count
     ; "success_count", `Int snapshot.success_count
@@ -300,7 +318,7 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
     ; "crash_count", `Int snapshot.crash_count
     ; "last_tick_started_at", Json_util.float_opt_to_json snapshot.last_tick_started_at
     ; "last_tick_finished_at", Json_util.float_opt_to_json snapshot.last_tick_finished_at
-    ; "last_success_at", Json_util.float_opt_to_json snapshot.last_success_at
+    ; "last_success_at", Json_util.float_opt_to_json (last_success_at snapshot)
     ; "last_error_at", Json_util.float_opt_to_json snapshot.last_error_at
     ; ( "last_error"
       , match snapshot.last_error with
@@ -311,21 +329,24 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
     ; "totals", counts_json snapshot.totals
     ; ( "held"
       , `List
-          (List.map
-             (fun (signal : Schedule_runner.wake_signal) ->
-                `Assoc
-                  [ ( "occurrence_id"
-                    , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
-                  ; "schedule_id", `String signal.schedule_id
-                  ; "due_at", `Float signal.due_at
-                  ])
-             snapshot.held) )
+          (match snapshot.last_success with
+           | None -> []
+           | Some { held; _ } ->
+             List.map
+               (fun (signal : Schedule_runner.wake_signal) ->
+                  `Assoc
+                    [ ( "occurrence_id"
+                      , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
+                    ; "schedule_id", `String signal.schedule_id
+                    ; "due_at", `Float signal.due_at
+                    ])
+               held) )
     ; ( "stale_after_sec"
       , match stale_after_sec with
         | None -> `Null
         | Some value -> `Float value )
     ; age_field "last_tick_age_sec" snapshot.last_tick_finished_at
-    ; age_field "last_success_age_sec" snapshot.last_success_at
+    ; age_field "last_success_age_sec" (last_success_at snapshot)
     ; age_field "last_error_age_sec" snapshot.last_error_at
     ]
 ;;

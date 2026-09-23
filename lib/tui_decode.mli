@@ -56,6 +56,12 @@ val preview_line : string -> string
     bytes, this one is for text whose breaks are content: a file's edit, a
     tool call's arguments. *)
 
+val short_timestamp_of_unix_for_terminal :
+  localtime:(float -> Unix.tm) -> float -> string
+(** [YYYY-MM-DD HH:MM:SS] of a Unix time in the zone [localtime] converts to.
+    The same shape {!short_timestamp_for_terminal} draws, for a time the wire
+    carries as a number. *)
+
 val short_timestamp_for_terminal :
   localtime:(float -> Unix.tm) -> string -> string
 (** [YYYY-MM-DD HH:MM:SS] of an RFC 3339 timestamp in the zone [localtime]
@@ -3340,9 +3346,13 @@ val keeper_of_declaration : Keeper_declared_roster.t -> keeper
 
 type schedule_runner_hold =
   { srh_occurrence_id : string
-      (** The occurrence the schedule runner held back on its newest tick. *)
+      (** The occurrence the schedule runner held back on its newest
+          successful tick. *)
   ; srh_due_at_iso : string
       (** When that occurrence came due. *)
+  ; srh_observed_at : float
+      (** When that tick finished: the newest time the hold is known to have
+          stood. *)
   }
 (** A schedule the runner is holding because its target Keeper has not yet
     taken the previous occurrence. The server reads it from the same runner
@@ -3350,5 +3360,30 @@ type schedule_runner_hold =
 
 val decode_schedule_runner_hold :
   Yojson.Safe.t -> (schedule_runner_hold option, string) result
-(** Reads a schedule row's [runner_hold]. [null] or an absent field is a
-    schedule the runner is not holding; an object must carry both fields. *)
+(** Reads a schedule row's [runner_hold]. The key is required: [null] is a
+    schedule the runner is not holding, and a row without the key is refused
+    rather than read as one. An object must carry all three fields, with
+    [observed_at] a finite, non-negative time. *)
+
+val decode_schedule_runner_status :
+  Yojson.Safe.t ->
+  (Schedule_contract_values.runner_status, string) result
+(** Reads [schedule_runner.status] from the schedule list. The object and its
+    [status] are required, and a word outside
+    {!Schedule_contract_values.runner_status} is refused. *)
+
+type schedule_hold_reading =
+  | Hold_current
+      (** The runner's newest tick succeeded cleanly and recently, so the hold
+          is its reading now. *)
+  | Hold_as_of of float
+      (** The runner has not vouched for its list since this time; the hold
+          stood then and may not now. *)
+
+val schedule_hold_reading :
+  runner:Schedule_contract_values.runner_status ->
+  schedule_runner_hold ->
+  schedule_hold_reading
+(** How a hold may be drawn, given the runner status beside it. The runner
+    re-reads its holds only on a tick that succeeds, so every status but
+    [Runner_ok] draws the hold at the time it was read (#38411). *)

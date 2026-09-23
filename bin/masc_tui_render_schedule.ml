@@ -1453,3 +1453,13 @@ let schedule_hold_tag ~due = "held since " ^ due
 
 let schedule_hold_reading ~due =
   schedule_hold_tag ~due ^ ": the keeper has not taken the previous wake yet"
+
+(* The same hold when the runner has not read its list again since (#38411).
+   A tick that fails keeps the list without looking, so the hold is drawn at
+   the time it was [checked], not as the present. The due column beside the
+   row still says when the held occurrence came due. *)
+let schedule_hold_as_of_tag ~checked = "held as of " ^ checked
+
+let schedule_hold_as_of_reading ~checked =
+  schedule_hold_as_of_tag ~checked
+  ^ ": the keeper had not taken the previous wake by then"

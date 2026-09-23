@@ -612,3 +612,14 @@ val schedule_hold_reading : due:string -> string
 (** What the Schedules screen says about a schedule the runner is holding:
     since when its held occurrence has been due, and that it waits for the
     target Keeper to take the previous wake. [due] is already formatted. *)
+
+val schedule_hold_as_of_tag : checked:string -> string
+(** The short form of a hold the runner has not read again since [checked]:
+    the time the hold was seen, in place of since when it has been due. It
+    leads {!schedule_hold_as_of_reading}. *)
+
+val schedule_hold_as_of_reading : checked:string -> string
+(** The same hold in the detail pane: that the keeper had not taken the
+    previous wake as of [checked]. Drawn instead of {!schedule_hold_reading}
+    when the runner status beside the list is not [ok], because a failed tick
+    does not re-read the hold (#38411). [checked] is already formatted. *)

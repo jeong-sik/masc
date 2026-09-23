@@ -16,12 +16,12 @@ val scheduled_automation_dashboard_json :
     automation. This summarizes the schedule store as a small FSM envelope
     plus recent request rows; it does not refresh due state or run work.
 
-    [payload_target] narrows every part of the response -- rows, counts, FSM
-    envelope, and signals -- to the schedules aimed at that target, and the
-    response echoes it in [payload_target_selector] so a scoped page cannot be
-    read as the fleet's. The fleet page caps at 20 rows with active ones first,
-    which is why a Keeper whose schedules are terminal or further down is
-    absent from it; a scoped page is where those are read.
+    [payload_target] narrows every part of the response about schedules --
+    rows, counts, FSM envelope, and signals -- to the schedules aimed at that
+    target, and the response echoes it in [payload_target_selector] so a
+    scoped page cannot be read as the fleet's. The fleet page caps at 20 rows
+    with active ones first, which is why a Keeper whose schedules are terminal
+    or further down is absent from it; a scoped page is where those are read.
 
     Reads the schedule ledger from disk, so callers on an Eio fiber wrap this
     in [Domain_pool_ref.submit_io_or_inline].
@@ -32,9 +32,13 @@ val scheduled_automation_dashboard_json :
     and never rescans one Keeper's complete reaction ledger per row.
 
     Each request row carries [runner_hold]: the occurrence the schedule
-    runner's newest tick held back for that schedule, read from
+    runner's newest successful tick held back for that schedule, read from
     [Schedule_runner_status] (the list [/health] reports as
-    [schedule_runner.held]), or [null] when it holds none.
+    [schedule_runner.held]), or [null] when it holds none. Its [observed_at]
+    is when that tick finished. The response carries the runner's own status
+    once, as [schedule_runner] -- the same object [/health] reports, not
+    narrowed by [payload_target] -- because a tick that fails does not
+    re-read the list, and only that status says whether a hold is current.
 
     A ledger read failure is reported, not hidden: [status] is ["unknown"],
     [counts] / [request_count] / [fsm.active_count] are [null], and

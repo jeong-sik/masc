@@ -1935,6 +1935,8 @@
   masc.embedded_config
   masc.skill_config
   masc.skill_reference
+  ; test_tui_decode names the schedule runner status the TUI decodes into
+  masc.masc_schedule
   bigstringaf
   ; test_terminal_size reads the tty size through the ioctl stub
   terminal_size
@@ -5520,6 +5522,7 @@
 (include stanzas/test_prompt_templates_render.inc)
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
+(include stanzas/test_tui_schedules_hold_says_when_it_was_checked.inc)
 (include stanzas/test_tui_rows.inc)
 (include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_title_counts.inc)

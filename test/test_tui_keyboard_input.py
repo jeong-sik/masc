@@ -12940,6 +12940,10 @@ def runtime_surface_interaction(
 
 SCHEDULES_PATH = "/api/v1/dashboard/scheduled-automation"
 
+# The schedule list's [schedule_runner]: the object /health reports under the
+# same name. The TUI reads its status word; the schema says which object it is.
+SCHEDULE_RUNNER_OK = {"schema": "masc.schedule.runner_status.v1", "status": "ok"}
+
 
 def schedule_detail_http_fixtures() -> HttpFixtures:
     fixtures = overview_event_http_fixtures()
@@ -12951,6 +12955,10 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
             "request_count": 1,
             "truncated": False,
             "fsm": {"next_due_at_iso": "2026-08-25T10:30:00Z"},
+            # The runner's own status rides the list once, as /health reports
+            # it. The loader requires it: a row's runner_hold is only current
+            # while this reads ok.
+            "schedule_runner": SCHEDULE_RUNNER_OK,
             "requests": [
                 {
                     "schedule_instance_id": "instance-proof-701",
@@ -13017,6 +13025,9 @@ def schedule_detail_http_fixtures() -> HttpFixtures:
                         "latest_recorded_at_iso": "2026-08-25T09:31:00Z",
                         "reason": None,
                     },
+                    # Always on the row, null when the runner holds nothing:
+                    # the loader refuses a row without it.
+                    "runner_hold": None,
                 }
             ],
         },

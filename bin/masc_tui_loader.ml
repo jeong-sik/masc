@@ -956,6 +956,7 @@ let decode_schedule_snapshot json =
   in
   let* rows = required_list_field json "requests" in
   let* scs_rows = decode_schedule_rows rows in
+  let* scs_runner_status = Tui_decode.decode_schedule_runner_status json in
   Ok
     { scs_status
     ; scs_read_error
@@ -964,6 +965,7 @@ let decode_schedule_snapshot json =
     ; scs_next_due_iso
     ; scs_counts
     ; scs_rows
+    ; scs_runner_status
     }
 
 (** Load the schedule list from /api/v1/dashboard/scheduled-automation. *)

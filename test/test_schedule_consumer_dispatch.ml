@@ -2674,6 +2674,69 @@ let test_dashboard_row_names_the_occurrence_the_runner_holds () =
   Schedule_runner_status.reset_for_test ()
 ;;
 
+(* #38411: a tick that fails does not read the held list again, so the hold a
+   row carries is the one the last successful tick read. The row says when
+   that was, the page says the runner is no longer ok, and the TUI reads the
+   two together as a hold that stood then. Clearing the hold on the failure
+   instead would have turned "not known" into "not held". *)
+let test_dashboard_hold_keeps_the_time_a_failed_tick_did_not_refresh () =
+  with_workspace
+  @@ fun config ->
+  ignore (persist_keeper_meta config "schedule-keeper" : Keeper_meta_contract.keeper_meta);
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  let page () =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+  in
+  let runner_status page =
+    match Tui_decode.decode_schedule_runner_status page with
+    | Ok status -> status
+    | Error err -> fail err
+  in
+  let hold page =
+    match
+      page
+      |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+      |> Tui_decode.decode_schedule_runner_hold
+    with
+    | Ok (Some hold) -> hold
+    | Ok None -> fail "the TUI read a held row as not held"
+    | Error err -> fail err
+  in
+  let reading page =
+    Tui_decode.schedule_hold_reading ~runner:(runner_status page) (hold page)
+  in
+  Schedule_runner_status.reset_for_test ();
+  (* Times beside the wall clock: the page measures staleness from now, so
+     ticks recorded at zero would read stale before anything failed. *)
+  let first_at = Unix.gettimeofday () in
+  let held_at = first_at +. 1.0 in
+  let failed_at = held_at +. 1.0 in
+  Schedule_runner_status.record_tick_ok ~started_at:first_at ~finished_at:first_at
+    (tick_ok config ~now:201.0);
+  Schedule_runner_status.record_tick_ok ~started_at:held_at ~finished_at:held_at
+    (tick_ok config ~now:261.0);
+  let before = page () in
+  check bool "a hold the newest tick read is drawn as the present" true
+    (reading before = Tui_decode.Hold_current);
+  let held_id = (hold before).Tui_decode.srh_occurrence_id in
+  Schedule_runner_status.record_tick_error ~started_at:failed_at ~finished_at:failed_at
+    "schedule store write failed";
+  let after = page () in
+  check string "the failed tick leaves the hold on the row" held_id
+    (hold after).Tui_decode.srh_occurrence_id;
+  check (float 0.0) "with the time the successful tick read it" held_at
+    (hold after).Tui_decode.srh_observed_at;
+  check bool "the page says the runner is degraded" true
+    (runner_status after = Schedule_contract_values.Runner_degraded);
+  check bool "so the TUI draws the hold as of that time" true
+    (reading after = Tui_decode.Hold_as_of held_at);
+  Schedule_runner_status.reset_for_test ()
+;;
+
 let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
   with_workspace
   @@ fun config ->
@@ -3212,6 +3275,9 @@ let () =
             test_dashboard_keeps_unattributed_damage_out_of_exact_evidence
         ; test_case "dashboard row names the occurrence the runner holds" `Quick
             test_dashboard_row_names_the_occurrence_the_runner_holds
+        ; test_case "dashboard hold keeps the time a failed tick did not refresh"
+            `Quick
+            test_dashboard_hold_keeps_the_time_a_failed_tick_did_not_refresh
         ; test_case "dashboard projects quarantined and unreadable reaction evidence"
             `Quick
             test_dashboard_projects_quarantined_and_unreadable_reaction_evidence

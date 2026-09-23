@@ -223,8 +223,14 @@ let unknown_label_hint = function
    slack/discord are unbound only when the runtime's binding lists say
    so. Any other label is a gate channel label, and without a registry
    the page itself is the only evidence: present -> a legitimate lane,
-   absent -> unknown. Same trimmed-exact comparison as the filter. *)
-let classify_surface ~bindings ~(page_labels : string list) surface =
+   absent -> unknown. A page is one window of the history, so an absence
+   proves the label wrong only when that window is the whole history: no
+   [before] cursor (nothing newer was skipped) and no [has_more] (nothing
+   older remains). Otherwise a gate lane whose rows sit outside the window
+   reads as an empty page, and the cursor keeps paging. Same trimmed-exact
+   comparison as the filter. *)
+let classify_surface ~bindings ~whole_history ~(page_labels : string list)
+    surface =
   let surface = String.trim surface in
   match surface with
   | "dashboard" | "agent" | "broadcast" | "webhook" -> None
@@ -233,7 +239,7 @@ let classify_surface ~bindings ~(page_labels : string list) surface =
   | "discord" ->
       if bindings.discord = [] then Some Unbound_connector else None
   | _ ->
-      if List.mem surface page_labels then None
+      if List.mem surface page_labels || not whole_history then None
       else Some (Unknown_label page_labels)
 
 let respond_unverified ~surface ~limit ~has_more ~notes
@@ -272,7 +278,7 @@ let respond_unverified ~surface ~limit ~has_more ~notes
    wrong is refused with the post-shaped error JSON instead of a
    silent zero-row page. Without [bindings] the projection is exactly
    the pure one the tests and REST reuse already pin down. *)
-let respond ?bindings ~surface ~limit ~has_more ~notes
+let respond ?bindings ~surface ~limit ~before ~has_more ~notes
     (messages : Store.chat_message list) : string =
   let surface = String.trim surface in
   if surface = "" then
@@ -291,8 +297,9 @@ let respond ?bindings ~surface ~limit ~has_more ~notes
     | None -> respond_unverified ~surface ~limit ~has_more ~notes messages
     | Some bindings ->
         (match
-           classify_surface ~bindings ~page_labels:(page_labels messages)
-             surface
+           classify_surface ~bindings
+             ~whole_history:(Option.is_none before && not has_more)
+             ~page_labels:(page_labels messages) surface
          with
          | None ->
              respond_unverified ~surface ~limit ~has_more ~notes messages

@@ -721,17 +721,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                    (Workspace_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
            (let sandbox = Keeper_sandbox.of_meta ~config:config ~meta:m in
-           let playground_abs = sandbox.host_root_abs in
-           (* #10650 + B1 follow-up: keeper-LLM-facing execution_context must
-              not surface host paths.  For Docker keepers the host abs path
-              does not exist inside the container, so the LLM previously
-              echoed [cd <host_abs>] producing ~890/day [No such file or
-              directory] errors.  default_cwd uses
-              [keeper_visible_root_abs] (container path for Docker, host
-              path for Local).  Host-only fields (sandbox_host_root,
-              playground_path) are intentionally omitted — server-side
-              file reads below still use [playground_abs] but never expose
-              it through the JSON response. *)
+           (* The Keeper-facing execution_context carries no host path: a
+              Docker Keeper cannot reach the host root, and a path it cannot
+              open is one it will try to [cd] into. [default_cwd] is the root
+              as the Keeper sees it (container path for Docker, host path for
+              Local). *)
            let keeper_visible_abs = Keeper_sandbox.keeper_visible_root_abs sandbox in
            "execution_context", `Assoc [
              ("sandbox_id", `String sandbox.sandbox_id);
@@ -747,14 +741,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("repository_checkouts",
                Keeper_sandbox_control.repository_checkouts_json
                  ~config:config ~meta:m);
-             ("pr_history",
-               let pr_path = Filename.concat playground_abs
-                 ".playground_pr_history.jsonl" in
-               try
-                 let entries = Fs_compat.load_jsonl pr_path in
-                 (* Last 10 PRs, most recent first *)
-                 `List (List.take 10 (List.rev entries))
-               with Sys_error _ -> `List []);
            ]);
          ]) in
          tool_result_ok_data json))

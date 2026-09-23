@@ -12,6 +12,12 @@ val wire_field_origin : string
 val wire_field_basis : string
 val wire_field_derivations : string
 
+(** Write times of a current fact as the librarian prompt shows them: when the
+    fact was first recorded and when the same claim bytes were last recorded
+    again. *)
+val wire_field_first_seen : string
+val wire_field_last_seen : string
+
 (** On a librarian claim: the short id of the dropped memory this claim
     continues (RFC-0418). *)
 val wire_field_supersedes : string

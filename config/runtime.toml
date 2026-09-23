@@ -2087,6 +2087,15 @@ candidates = [
 # example: pin a test keeper to an explicit runtime
 # canary = "deepseek.deepseek-v4-pro"
 
+# ═══ Repositories ═══════════════════════════════════════════════════
+# 서버가 등록된 GitHub 저장소의 열린 PR 을 60초마다 읽을 때 쓸 토큰의 주인
+# Keeper 다(RFC-0465). 그 Keeper 의 github-cli/hosts.yml 토큰을 읽을 때마다 새로
+# 읽는다. 적지 않으면 PR 을 읽지 않고, /api/v1/repositories/pulls 가 그 이유를
+# 말한다. 이 표에는 pr_reader 말고 다른 키를 쓸 수 없다.
+#
+# [repositories]
+# pr_reader = "<keeper>"
+
 # ═══ Connectors ══════════════════════════════════════════════════════
 # 어떤 인바운드 메시지가 턴을 시작하는지를 커넥터별로 정한다. 운영자가 적어두는
 # 입장이라 설정 파일에서만 읽는다 — 환경변수 경로는 없다.

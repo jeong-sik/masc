@@ -29,6 +29,22 @@ let live ?(keeper_name = "alpha") ?(request_id = "request-1") state admission =
 
 let texts rows = List.map Masc_tui_answering.chat_activity_row_text rows
 
+(* An in-flight entry with no events, so its execution id falls back to its
+   request id ([Keeper_chat_transcript.execution_id]) and two of these are
+   told apart by the id they were created with. *)
+let inflight ?(keeper_name = "alpha") ~request_id ~at () =
+  let log = Tui.turn_log_create ~keeper_name ~request_id ~started_at:at in
+  { Tui.sent_request =
+      { Chat.request_id; keeper_name; message = "request"; attachments = []
+      ; references = [] }
+  ; submitted_at = at
+  ; sent_at = at
+  ; control_generation = 0
+  ; origin = Tui.Direct_submission
+  ; phase = Tui.Turn_streaming
+  ; log
+  }
+
 (* The admission is the live progress row's to say
    ([Masc_tui_keeper_chat_transcript.phase_text], pinned in
    test_tui_keeper_chat_transcript): "sent; not accepted yet", "queued · 3
@@ -208,6 +224,46 @@ let test_esc_hint_follows_the_observed_turn () =
     (List.exists (fun text -> Astring.String.is_infix ~affix:"Esc" text)
        (texts (Tui.keeper_message_activity_rows state)))
 
+(* #37741. The pane skips the in-flight row for the request the live
+   transcript is already drawing -- one age and one request id, not three --
+   and the budget counted it anyway, so with a single message in flight the
+   status area reserved a row nobody drew.
+
+   What is asserted here is the shared answer. That the budget uses it is a
+   call-shape fact, pinned in [test_tui_http_ast]: the budget is a sum of
+   several areas, so asserting its total here would pin those areas too and
+   this test would fail for reasons that have nothing to do with in-flight
+   rows. *)
+let test_only_the_uncovered_in_flight_rows_are_drawn () =
+  let state = state () in
+  ignore (live state (Some Live.Running));
+  check int "the request the transcript draws gets no in-flight row" 0
+    (List.length (Tui.keeper_message_inflight_drawn state));
+  state.msg_inflight
+    <- state.msg_inflight @ [ inflight ~request_id:"request-2" ~at:3. () ];
+  check int "a second message to the same keeper keeps its row" 1
+    (List.length (Tui.keeper_message_inflight_drawn state));
+  state.msg_inflight
+    <- state.msg_inflight
+       @ [ inflight ~keeper_name:"beta" ~request_id:"request-3" ~at:4. () ];
+  check int "another keeper's request keeps its row too" 2
+    (List.length (Tui.keeper_message_inflight_drawn state))
+
+(* Without a live turn on this pane nothing is covered, so every entry draws.
+   Reading [msg_live] alone would be wrong here: a live turn belonging to
+   another keeper draws nothing on this screen and must hide nothing. *)
+let test_a_live_turn_elsewhere_covers_nothing_here () =
+  let state = state () in
+  state.msg_inflight <- [ inflight ~request_id:"request-1" ~at:2. () ];
+  check int "no live turn: the entry draws" 1
+    (List.length (Tui.keeper_message_inflight_drawn state));
+  state.msg_live
+    <- Some
+         (Tui.turn_log_create ~keeper_name:"beta" ~request_id:"request-1"
+            ~started_at:2.);
+  check int "a live turn on another keeper hides nothing here" 1
+    (List.length (Tui.keeper_message_inflight_drawn state))
+
 let () =
   run "TUI chat activity"
     [ "request and lane states",
@@ -226,5 +282,9 @@ let () =
           test_local_queue_is_not_server_admission
       ; test_case "Esc hint follows the observed turn" `Quick
           test_esc_hint_follows_the_observed_turn
+      ; test_case "only the uncovered in-flight rows are drawn" `Quick
+          test_only_the_uncovered_in_flight_rows_are_drawn
+      ; test_case "a live turn elsewhere covers nothing here" `Quick
+          test_a_live_turn_elsewhere_covers_nothing_here
       ] ]
 

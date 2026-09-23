@@ -2839,28 +2839,20 @@ let render_keeper_message (state : state) =
        a second age and an opaque request id above the ACTIVE TURN line, and
        three ages in one frame read as a stuck screen. The row stays for every
        request the transcript is not covering — a second message sent to the
-       same keeper still has to be visible. *)
-    let live_request_id =
-      match state.msg_live with
-      | Some live
-        when state.msg_target_keeper_name
-             = Some (Masc_tui_types.turn_log_keeper_name live) ->
-        Some (Masc_tui_types.turn_log_execution_id live)
-      | Some _ | None -> None
-    in
+       same keeper still has to be visible.
+
+       [keeper_message_inflight_drawn] is where that choice lives, because the
+       row budget has to make the same one. While the choice was written only
+       here, the budget reserved a row for the request the transcript covers
+       and the status area gained a blank line (#37741). *)
     (match
        List.partition
          (fun entry -> String.equal entry.sent_request.keeper_name keeper_name)
-         state.msg_inflight
+         (Masc_tui_types.keeper_message_inflight_drawn state)
      with
      | mine, others ->
          List.iter
            (fun entry ->
-             if
-               not
-                 (Option.equal String.equal live_request_id
-                    (Some (Masc_tui_types.turn_log_execution_id entry.log)))
-             then
              let activity =
                match entry.phase with
                | Turn_streaming ->

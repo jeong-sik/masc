@@ -205,10 +205,14 @@ let memory_context_lines (k : memory_keeper_health) =
               value.mcpo_end_atom (Terminal_text.single_line value.mcpo_trace_id)
           | Context_without_snapshot -> "no snapshot: this turn only"
           | Context_not_applied -> "saved context not applied" in
+        (* The size as a size. The row drew the digit count -- one live block
+           read "446558 request bytes" -- while every other size on this TUI
+           goes through the shared ladder and reads "436.1 KB". The heading a
+           line above already says what was prepared, so the figure needs no
+           noun of its own. *)
         Printf.sprintf "%s · %s · %s"
           (memory_updated_text (Some value.mcp_prepared_at))
-          (Masc_tui_message_layout.count_noun value.mcp_request_bytes
-             "request byte")
+          (Masc_tui_context_inspector.format_bytes value.mcp_request_bytes)
           (Terminal_text.single_line value.mcp_runtime_id), input in
     let synthesis = match cycle.mcc_synthesis with
       | None -> "not observed since server start"

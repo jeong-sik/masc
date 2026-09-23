@@ -586,7 +586,10 @@ let test_render_memory_body_with_keepers () =
   check bool "the read position sits beside the cut" true
     (contains "read to atom 11, 6 atoms past the cut" text);
   check bool "prepared context names observation boundary" true (contains "Request prepared (not provider success)" text);
-  check bool "serialized request bytes shown" true (contains "2048 request bytes" text);
+  (* As a size, through the ladder every other size on this TUI reads. One
+     live block drew "446558 request bytes"; 2048 bytes is 2.0 KB. *)
+  check bool "the request size reads as a size" true (contains "2.0 KB" text);
+  check bool "and not as a digit count" false (contains "2048" text);
   check bool "an absorbed front names the position and says nothing summarizes it" true
     (contains "absorbed to atom 3" text && contains "no summary" text);
   check bool "selected row was called" true !selected_called;

@@ -123,13 +123,17 @@ let refusal ~credential_sent reason =
 type stored_token =
   | Stored of string
   | Stored_expired
+  | Stored_mismatched
   | Not_stored
 
-(* Why a mint happens. The two are different news for the operator: the first
-   is a first start, the second is a credential that ran out. *)
+(* Why a mint happens. Different news for the operator: a first start, a
+   credential that ran out, and a file that no longer matches its record --
+   which is what a mint that failed between its two writes leaves, and what
+   another masc-tui's mint leaves for this one. *)
 type mint_reason =
   | First_token
   | Replaces_expired
+  | Replaces_mismatched
 
 (* Which bearer this client should carry, decided from three facts and nothing
    else, so the decision can be read and tested apart from the file and network
@@ -157,7 +161,40 @@ let plan ~env_token ~workspace_token ~workspace_requires_token
   match (env_token, workspace_token) with
   | Some token, _ | None, Stored token -> Use token
   | None, Stored_expired -> without_a_usable_token Replaces_expired
+  | None, Stored_mismatched -> without_a_usable_token Replaces_mismatched
   | None, Not_stored -> without_a_usable_token First_token
+
+(* Where the bearer this client carries came from. Only one it took from the
+   workspace is this client's to replace: one handed in through the
+   environment is the operator's choice for this run. *)
+type token_source =
+  | From_environment
+  | From_workspace
+
+(* What to do after the server refused the bearer [sent]. The workspace is read
+   again first: a different bearer there that verifies was minted by another
+   masc-tui, and adopting it ends the refusal without a second mint that would
+   refuse that one in turn. Only an expired or mismatched file is minted over. *)
+type refresh =
+  | Adopt of string
+  | Remint of mint_reason
+  | Keep_held
+
+let refresh_plan ~source ~sent ~stored ~workspace_requires_token
+    ~workspace_initialized =
+  match source with
+  | From_environment -> Keep_held
+  | From_workspace -> (
+      match stored with
+      | Stored token when not (String.equal token sent) -> Adopt token
+      | Stored _ -> Keep_held
+      | (Stored_expired | Stored_mismatched | Not_stored) as stored -> (
+          match
+            plan ~env_token:None ~workspace_token:stored
+              ~workspace_requires_token ~workspace_initialized
+          with
+          | Mint reason -> Remint reason
+          | Use _ | Go_without | No_workspace -> Keep_held))
 
 (* What came of carrying the plan out. Returned rather than logged in place so
    the surface decides how loudly to say it.
@@ -187,6 +224,8 @@ let outcome_notice = function
         match reason with
         | First_token -> "no operator token was present"
         | Replaces_expired -> "the stored operator token had expired"
+        | Replaces_mismatched ->
+            "the stored operator token no longer matched its credential record"
       in
       Some
         (Printf.sprintf

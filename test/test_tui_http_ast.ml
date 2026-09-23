@@ -2306,7 +2306,7 @@ let test_missing_operator_token_is_reported () =
   check int "the window comes from the one place that states it" 1
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:"bin/masc_tui_http.ml"
-       ~binding_name:"install_operator_token"
+       ~binding_name:"mint_operator_token"
        ~callees:[]
        ~identifiers:[ "Masc_tui_credential.self_mint_expiry_hours" ]);
   (* Both refusal surfaces must ask what this process actually holds. Passing a

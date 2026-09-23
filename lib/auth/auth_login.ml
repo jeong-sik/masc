@@ -105,10 +105,24 @@ let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
       let create_token = create_token_for_lifetime token_lifetime in
       match create_token base_path ~agent_name ~role with
       | Error err -> Error err
-      | Ok (bearer_token, cred) ->
-          let raw_token_file =
-            persist_raw_token ~base_path ~agent_name bearer_token
-          in
+      | Ok (bearer_token, cred) -> (
+          (* The record is already written; a file that cannot be written is
+             reported rather than raised past the caller, which then says the
+             mint failed. The pair left behind reads as a mismatch, which a
+             client that mints for itself replaces on its next try. *)
+          match persist_raw_token ~base_path ~agent_name bearer_token with
+          | exception (Sys_error detail) ->
+              Error
+                (System
+                   (System_error.IoError
+                      ("could not write the bearer file: " ^ detail)))
+          | exception Unix.Unix_error (error, operation, argument) ->
+              Error
+                (System
+                   (System_error.IoError
+                      (Printf.sprintf "could not write the bearer file: %s(%s): %s"
+                         operation argument (Unix.error_message error))))
+          | raw_token_file ->
           (* [host] arrives from the --host flag, which is documented as the
              address to *bind* and offers 0.0.0.0 for it. These two URLs are
              what the operator opens and pastes, so they need an address that
@@ -139,7 +153,7 @@ let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
               dashboard_url;
               mcp_url;
               mcp_token_env_var = token_env_var;
-            })
+            }))
 
 let to_yojson report =
   Tool_args.ok_assoc

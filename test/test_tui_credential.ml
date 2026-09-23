@@ -181,6 +181,46 @@ let test_a_replacement_says_the_old_one_expired () =
       check bool "it does not claim none was present" false
         (has "no operator token was present" notice)
 
+(* A file the record no longer holds is minted over like an expired one: it is
+   what a mint that failed between its two writes leaves, and what another
+   masc-tui's mint leaves for this one. *)
+let test_a_mismatched_stored_token_is_replaced () =
+  check bool "a demanding workspace replaces it" true
+    (Credential.plan ~env_token:None ~workspace_token:Credential.Stored_mismatched
+       ~workspace_requires_token:true ~workspace_initialized:true
+     = Credential.Mint Credential.Replaces_mismatched);
+  match Credential.outcome_notice (Credential.Minted Credential.Replaces_mismatched) with
+  | None -> fail "a replacement must be reported"
+  | Some notice ->
+      check bool "it says the file no longer matched" true (has "no longer matched" notice)
+
+(* After a refusal the workspace is read again. A different bearer there was
+   minted by another masc-tui and is adopted, not minted over; only an
+   expired or mismatched file is replaced; a bearer from the environment is
+   never this client's to replace. *)
+let test_refresh_after_a_refusal () =
+  let refresh ?(source = Credential.From_workspace) stored =
+    Credential.refresh_plan ~source ~sent:"old" ~stored
+      ~workspace_requires_token:true ~workspace_initialized:true
+  in
+  check bool "a different bearer in the workspace is adopted" true
+    (refresh (Credential.Stored "new") = Credential.Adopt "new");
+  check bool "the same bearer is kept: nothing here can change" true
+    (refresh (Credential.Stored "old") = Credential.Keep_held);
+  check bool "an expired file is minted over" true
+    (refresh Credential.Stored_expired = Credential.Remint Credential.Replaces_expired);
+  check bool "a mismatched file is minted over" true
+    (refresh Credential.Stored_mismatched
+     = Credential.Remint Credential.Replaces_mismatched);
+  check bool "an environment bearer is left alone" true
+    (refresh ~source:Credential.From_environment Credential.Stored_expired
+     = Credential.Keep_held);
+  check bool "an open workspace mints nothing" true
+    (Credential.refresh_plan ~source:Credential.From_workspace ~sent:"old"
+       ~stored:Credential.Stored_expired ~workspace_requires_token:false
+       ~workspace_initialized:true
+     = Credential.Keep_held)
+
 (* The self-mint window is this client's own policy, not the workspace's. The
    workspace default is a day, meant for an operator sitting in front of a
    session; a client left running overnight is exactly what that window
@@ -296,6 +336,9 @@ let () =
             test_an_expired_stored_token_is_replaced
         ; test_case "a replacement says the old one expired" `Quick
             test_a_replacement_says_the_old_one_expired
+        ; test_case "a mismatched stored token is replaced" `Quick
+            test_a_mismatched_stored_token_is_replaced
+        ; test_case "refresh after a refusal" `Quick test_refresh_after_a_refusal
         ; test_case "the self-mint window is the client's own" `Quick
             test_self_mint_window_is_neither_a_day_nor_forever
         ; test_case "only the notable outcomes speak" `Quick

@@ -1610,6 +1610,7 @@
   masc
   masc.ide_memo
   masc.auth
+  masc.masc_process
   masc.masc_random_id
    masc.time_codec
   terminal_size

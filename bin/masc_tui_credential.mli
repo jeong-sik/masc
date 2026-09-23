@@ -58,12 +58,18 @@ type stored_token =
   | Stored_expired
       (** A bearer was persisted and its credential record says it has
           expired. Carrying it would be refused on every read. *)
+  | Stored_mismatched
+      (** A bearer was persisted but its hash is not the one the credential
+          record holds. The record moved on without the file. *)
   | Not_stored
       (** Nothing was persisted for this client. *)
 
 type mint_reason =
   | First_token  (** This client held no bearer at all. *)
   | Replaces_expired  (** The bearer it held had expired. *)
+  | Replaces_mismatched
+      (** The stored bearer no longer matched its credential record: a mint
+          that failed between its two writes, or another masc-tui's mint. *)
 
 type plan =
   | Use of string
@@ -88,6 +94,31 @@ val plan :
     workspace that demands one gets one minted, and a workspace that does not is left alone -- minting
     there would add a durable secret nobody asked for and would not be needed
     to reach anything. *)
+
+type token_source =
+  | From_environment  (** [MASC_TOKEN]: the operator's choice for this run. *)
+  | From_workspace  (** The file [masc login] or a self-mint wrote. *)
+
+type refresh =
+  | Adopt of string
+      (** The workspace holds a different bearer that verifies. *)
+  | Remint of mint_reason
+      (** The workspace holds nothing usable and this client may mint. *)
+  | Keep_held
+      (** Nothing this client can change: an environment bearer, or the
+          workspace still holds the one the server refused. *)
+
+val refresh_plan :
+  source:token_source ->
+  sent:string ->
+  stored:stored_token ->
+  workspace_requires_token:bool ->
+  workspace_initialized:bool ->
+  refresh
+(** What to do after the server refused the bearer [sent]. A different bearer
+    in the workspace was minted by another masc-tui and is adopted rather than
+    minted over, so two clients converge on one bearer instead of refusing
+    each other's. *)
 
 type outcome =
   | Held

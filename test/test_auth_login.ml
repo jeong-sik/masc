@@ -329,6 +329,28 @@ let test_an_expired_persisted_token_is_reported_and_replaced () =
       failf "the replacement must verify: %s"
         (Masc_domain.masc_error_to_string err)
 
+(* The bearer file is written after the record. When it cannot be written the
+   mint answers [Error] instead of raising past its caller, so a client that
+   mints for itself reports a failed mint rather than dying at startup. *)
+let test_a_bearer_file_that_cannot_be_written_is_an_error () =
+  with_temp_dir "auth-login-unwritable" @@ fun base_path ->
+  let agent_name = "masc-tui" in
+  let blocked = Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token") in
+  (* A directory where the file goes: no write can replace it. *)
+  let rec mkdir_p path =
+    if not (Sys.file_exists path) then (
+      mkdir_p (Filename.dirname path);
+      Unix.mkdir path 0o700)
+  in
+  mkdir_p blocked;
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935 ~agent_name
+      ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:(Auth_login.Expires_in_hours 720) ()
+  with
+  | Ok _ -> fail "a mint whose bearer file cannot be written must not succeed"
+  | Error _ -> ()
+
 let string_contains haystack needle =
   let nlen = String.length needle and hlen = String.length haystack in
   if nlen = 0 then true
@@ -414,6 +436,8 @@ let () =
             test_persisted_token_round_trips;
           test_case "an expired persisted token is reported and replaced" `Quick
             test_an_expired_persisted_token_is_reported_and_replaced;
+          test_case "a bearer file that cannot be written is an error" `Quick
+            test_a_bearer_file_that_cannot_be_written_is_an_error;
           test_case "mcp-config renders each client block" `Quick
             test_mcp_client_config_renders_each_client;
         ] );

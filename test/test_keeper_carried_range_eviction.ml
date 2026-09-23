@@ -837,7 +837,8 @@ let absorbed_at ~point history =
   | None -> fail "the read position does not name an atom of this history"
 ;;
 
-let librarian_turn ~point ~accepted ~limit ~boundary history =
+let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
+      ~point ~accepted ~limit ~boundary history =
   let continuity = absorbed_at ~point history in
   let digest_at = Window.atom_opening_digest history in
   let atom_count = List.length history in
@@ -867,7 +868,8 @@ let librarian_turn ~point ~accepted ~limit ~boundary history =
         let first_atom = composed.Try_provider.projection.Window.dropped_atoms in
         last := Some (composed.Try_provider.origin, first_atom);
         sent := first_atom :: !sent;
-        if atom_count - first_atom > limit then Error overflow else Ok first_atom)
+        let atoms = atom_count - first_atom in
+        if atoms > limit || refuses ~atoms then Error refusal else Ok first_atom)
       ()
   in
   (* What the turn record keeps of an accepted request: its first atom, named
@@ -913,6 +915,34 @@ let test_a_librarian_behind_turn_resends_from_the_boundary () =
   check (list int) "one request, from the accepted start" [ 8 ] second_sent;
   check (option int) "the gap still opens at the point" (Some 2)
     (opened_past_the_point second_last)
+;;
+
+(* Live size refusals arrive as [Unknown_invalid_request]: ollama_cloud's
+   "The prompt is too long" with a null code, glm's "Prompt exceeds max
+   length". The boundary resend answers them with its own set
+   ([boundary_resend_on]), not with [refusal_evicts], so the resend still
+   runs once the cutting ladders answer only a typed size refusal (#38286). *)
+let test_an_unattributed_size_refusal_resends_from_the_boundary () =
+  let outcome, sent, recorded, _ =
+    librarian_turn ~refusal:unattributed_refusal ~point:2 ~accepted:None ~limit:8 ~boundary:8
+      (exchanges ~from:0 7)
+  in
+  check (result int reject) "the boundary resend is accepted" (Ok 8) outcome;
+  check (list int) "the point, then the turn boundary" [ 2; 8 ] sent;
+  check (option int) "the accepted start is recorded" (Some 8)
+    (Option.map (fun (seed : Front.seed) -> seed.first_atom) recorded)
+;;
+
+(* A 400 that was not about size draws the same refusal from the boundary:
+   one more request, no accepted start, and the turn ends on that refusal. *)
+let test_a_refusal_not_about_size_ends_the_turn_after_one_resend () =
+  let outcome, sent, recorded, _ =
+    librarian_turn ~refusal:unattributed_refusal ~refuses:(fun ~atoms:_ -> true)
+      ~point:2 ~accepted:None ~limit:100 ~boundary:8 (exchanges ~from:0 7)
+  in
+  check bool "the refusal is the turn's error" true (outcome = Error unattributed_refusal);
+  check (list int) "one resend from the boundary, and nothing after" [ 2; 8 ] sent;
+  check bool "no accepted start is recorded" true (Option.is_none recorded)
 ;;
 
 (* Rules 6 and 7: the resend carries this turn's input and never less. When
@@ -979,6 +1009,10 @@ let () =
             test_a_librarian_behind_turn_resends_from_the_boundary
         ; test_case "a refused boundary resend ends the turn" `Quick
             test_a_refused_boundary_resend_ends_the_turn
+        ; test_case "an unattributed size refusal resends from the boundary" `Quick
+            test_an_unattributed_size_refusal_resends_from_the_boundary
+        ; test_case "a refusal not about size ends the turn after one resend" `Quick
+            test_a_refusal_not_about_size_ends_the_turn_after_one_resend
         ; test_case "the actual request can advance beyond the fallback ledger" `Quick
             (test_a_refused_front_survives_candidate_changes
                ~fallback_atoms:8 ~blocks:true ~warm_fallback:true)

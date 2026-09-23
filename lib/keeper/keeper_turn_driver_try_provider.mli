@@ -596,6 +596,16 @@ val carried_range_eviction_sequence :
     that was refused. Every other error ends it at once, as does a refusal
     once [same_run_retry_authorized] is [false]. *)
 
+val boundary_resend_on : Agent_core.Error.t -> bool
+(** The refusals {!turn_boundary_resend_sequence} answers: a typed size
+    refusal ([ContextOverflow], [Request_body_refused_by_provider]) and a
+    refusal whose reason agent core does not model
+    ([Unknown_invalid_request]), which is how live size refusals arrive.
+    Its own set, not the one the cutting ladders answer: a refusal that was
+    not about size is refused again from the boundary and records no
+    accepted start, and one that was leaves a gap the Librarian still
+    reads. *)
+
 val turn_boundary_resend_sequence :
   same_run_retry_authorized:(unit -> bool) ->
   refused_range:(unit -> (Keeper_carried_front.origin * int) option) ->
@@ -608,8 +618,7 @@ val turn_boundary_resend_sequence :
 (** The retry policy of a turn with a continuity choice, over an injected
     [attempt] (RFC keeper-context-window-in-tokens §13.4; RFC
     librarian-lifecycle §4.10, rule 1). When [attempt] fails with a refusal
-    {!carried_range_eviction_sequence} would move the front for,
-    [refused_range] reports that the refused range opened on a seed
+    {!boundary_resend_on} names, [refused_range] reports that the refused range opened on a seed
     ({!Keeper_carried_front.Carried}), a Librarian point, or an accepted
     start past one, at its first atom, [turn_start_front] names the turn
     boundary strictly after that atom

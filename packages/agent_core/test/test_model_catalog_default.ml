@@ -26,6 +26,10 @@ let with_clean_model_catalog_override f =
    "gpt-5.6-sol silently landed on gpt-5". *)
 let subscription_model_rows =
   [ "claude-opus-5", "claude-opus-5"
+    (* Opus 5.5 needs a row of its own for the same reason as Fable 5.1 below:
+       5.5 reads cached tokens at 0.05x the base input price and 5 reads them
+       at 0.1x, and it refuses forced tool use where 5 takes it. *)
+  ; "claude-opus-5-5", "claude-opus-5-5"
   ; "claude-fable-5", "claude-fable-5"
     (* Fable 5.1 needs a row of its own even though "claude-fable-5" prefixes
        it: 5.1 reads cached tokens at 0.025x the base input price and 5 reads
@@ -37,6 +41,8 @@ let subscription_model_rows =
   ; "gpt-5.6-terra", "gpt-5.6-terra"
   ; "gpt-5.6-luna", "gpt-5.6"
   ; "gpt-5.5", "gpt-5.5"
+  ; "gpt-6-sol", "gpt-6-sol"
+  ; "gpt-6-luna", "gpt-6-luna"
   ; "gpt-5.3-codex-spark", "gpt-5.3-codex-spark"
   ; "gemini-3.7-flash-high", "gemini-3.7-flash"
   ; "gemini-3.7-flash-medium", "gemini-3.7-flash"
@@ -92,6 +98,13 @@ let subscription_model_efforts =
   ; None, "gpt-5.6-sol", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-5.6-terra", [ "none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gpt-5.5", [ "low"; "medium"; "high"; "xhigh" ]
+    (* Probed on /v1/responses 2026-09-23: sol and luna answer 400 for
+       "minimal" with "Supported values are: 'none', 'low', 'medium', 'high',
+       'xhigh', and 'max'". Opus 5.5's ladder is the platform model page's
+       effort parameter set (checked 2026-09-23), as the other Claude rows. *)
+  ; None, "claude-opus-5-5", [ "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-6-sol", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
+  ; None, "gpt-6-luna", [ "none"; "low"; "medium"; "high"; "xhigh"; "max" ]
   ; None, "gemini-3.7-flash-high", [ "low"; "medium"; "high" ]
   ; None, "gemini-3.6-flash-high", [ "minimal"; "low"; "medium"; "high" ]
   ]
@@ -132,6 +145,7 @@ let test_subscription_models_admit_their_reasoning_efforts () =
    whichever change starts running them. *)
 let anthropic_cache_pricing_rows =
   [ "claude-opus-5", 1.25, 0.1
+  ; "claude-opus-5-5", 1.25, 0.05
   ; "claude-sonnet-5", 1.25, 0.1
   ; "claude-fable-5", 1.25, 0.1
   ; "claude-fable-5-1", 1.25, 0.025

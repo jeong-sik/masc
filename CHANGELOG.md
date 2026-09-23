@@ -2,8 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- The model catalog and the seed runtime config carry the three models released on 2026-09-22. `claude-opus-5-5` gets its own catalog row (1M/128K, $4/$20, cache read 0.05x, forced tool use refused) — without it the id lands on the `claude-opus-5` row and bills cache reads at double the real rate — plus Claude Code subscription bindings at low..max. `gpt-6-sol` and `gpt-6-luna` get bare catalog rows (efforts `none`,`low`..`max`, from a /v1/responses parameter probe) and Codex subscription bindings at low..max. Release evidence entries for all three (#38118).
+
 ### Changed
 
+- The Librarian reads a new claim that repeats a current memory word for word
+  as that memory instead of refusing the whole pass as
+  `duplicate_selected_memory_id`: the stored fact keeps its first sighting and
+  its fields, its `absorbs` go into the existing id, a self-absorb does
+  nothing, and two claims with the same text merge. Restating a memory another
+  claim absorbs is a no-op, so the common answer that restates every memory
+  and adds one merged claim now applies the merge. Dropping and restating a
+  memory in one answer, including a `supersedes` whose text repeats the memory
+  it corrects, stays refused as `dropped_memory_id_recreated` (RFC-0397 D3). A
+  restated memory that an absorption goes into is handed to the store again,
+  so a keeper retraction during the pass no longer leaves absorbed rows
+  pointing into a missing id. A restatement whose category or basis differs is
+  logged at INFO with its `memory_id` and the field, not refused (#38048).
 - The keeper failure route and the runtime candidate walk now give the same
   answer for every error the rotation census covers (#38045). A provider's own
   400/413 refusal, a malformed/unknown/oversized wire payload and a
@@ -32,6 +49,17 @@
   renamed concept.
 
 ### Fixed
+- An autonomous turn that yields to a queued person before its provider's first
+  event (RFC-0441) is no longer a failed keeper cycle. The preemption used to
+  return a synthesized zero-turn run result that the keeper could only read as
+  `Internal error: successful Agent.run returned without an AfterTurn ordinal`,
+  so every preemption since #36344 raised the failure count. It is now a typed
+  `Preempted_before_first_token` stop: the lane walk ends on it without rotating
+  or noting a rest against the candidate, the turn FSM ends as
+  `Cancelled preempted_by_person`, and the unified turn settles it as
+  `Turn_skipped`, which leaves the admitted source pending and acknowledges no
+  message. `Runtime_agent.yielded_pre_first_token` is removed, and the
+  preemption now writes one INFO line (#38094).
 
 - A Remote_ssh Keeper's GitHub identity is now read where its login was
   written (#38152). The GitHub tab status and `masc keeper-github status` run
@@ -43,6 +71,7 @@
   to the host. Under a non-default cluster, the GitHub MCP token read and the
   chat-store redaction of `hosts.yml` now use the cluster directory the login
   writes to.
+- Bare `masc` opens a workspace whose Keepers already have history even when none of them is `imp`. The onboarding `keeper_persistence` check read only `keepers/imp.json`, so a workspace whose Keepers were declared by hand (measured: sixteen persisted Keepers, no imp) reported `opening = needs_journey` and was sent back into the setup journey every time. The check now lists every Keeper metadata file and judges each with `validate_current_meta_file_result`, the check the server's boot reconcile applies: satisfied when all pass, invalid naming the files that fail, since the server refuses to boot on them (#38129).
 - On the Agent Core lane a turn whose Librarian has no point yet (`Without_snapshot`: Librarian off, unconfigured, or with no snapshot or read position) starts its request at the seed — the working ledger's front, or the range the newest turn record joined to a response — when one is valid for this history, and at the last completed turn boundary only without one (RFC keeper-context-window-in-tokens §13.4). It used to drop the seed and start at the turn boundary, so after the first turn such a keeper sent only the current turn's atoms and forgot the earlier ones. When the provider refuses a seed range as too large (context overflow, a refused request body, or an unmodelled invalid request — the refusals the no-continuity ladder moves the front for), the turn boundary becomes the turn's front (`Turn_start_after_seed_refusal`) and the same candidate is asked once more from it; later candidates and the official-client lanes in that turn open there too instead of resending the refused range, and a candidate that already opens at the boundary is not asked twice. The accepted request is what the ledger and the turn record keep, so the next turn's seed is that boundary instead of the refused range, and a turn-boundary request that is also refused ends the turn with that refusal. Without this a keeper with its Librarian off grew its range every turn until the provider refused it, and since a refusal records nothing every later turn was refused the same way. A seed range also demotes the aged tool results of earlier turns at the turn boundary, as the no-continuity path does, instead of sending them raw. The range is never halved on this path (#38046).
 - A checkpoint purge puts the Keeper's Librarian catch-up back on its lane when it ends. The purge cancels the running catch-up and discards the wakes that arrive while it holds the files, and nothing resubmitted it, so for a stopped Keeper with a backlog a purge refused for unread atoms was refused again on every retry until a message or a restart. The catch-up is now submitted after every purge exit but cancellation. An unreadable `librarian-progress.json` in the continuity catch-up target is logged with its path and error instead of passing as a missing file (#38042).
 - The Librarian no longer reads less after a connection failure, a quota, or an empty answer. `Exact_output` handed every provider error that was not an HTTP refusal to the Librarian as one bare `Completion_failed`, and the continuity pass read that as a size failure, so on 2026-09-22 msx-retro-mania's read width fell from 130 to 16 atoms over 42 quota and empty-response failures while its keeper's request grew from 150 KB to 806 KB. `Completion_failed` now carries the `Http_client.http_error` that produced it and whether the request was sent. A request never sent keeps the width — the transport reports a connect deadline as an `Http_operation` timeout. A sent one narrows only on a named context overflow, an oversized response, a deadline on the provider's handling of the whole request, or an empty completion stopped by the context window or the output budget; an unclassified transport or provider failure keeps the width. The log line names the kind, e.g. `completion failed (empty_completion:end_turn, sent)` (#38108).

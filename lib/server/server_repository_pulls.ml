@@ -15,6 +15,7 @@ type pull_request =
   ; number : int
   ; title : string
   ; head_branch : string
+  ; cross_repository : bool
   ; draft : bool
   ; checks : check_state
   ; review : review_state
@@ -54,9 +55,14 @@ type reader =
       }
   | Reader_ready of { keeper : string }
 
+type keeper_checkouts_read =
+  | Checkouts_read of Keeper_sandbox_control.checkout_scan
+  | Checkouts_absent
+  | Checkouts_unread of string
+
 type keeper_checkouts =
   { keeper : string
-  ; checkouts : (Keeper_sandbox_control.freshness_row list, string) result
+  ; checkouts : keeper_checkouts_read
   }
 
 type fleet_checkouts = (keeper_checkouts list, string) result
@@ -69,8 +75,14 @@ type keeper_on_repository =
 
 type repository_keepers =
   | Keepers_not_inspected
-  | Keepers_unlisted of string
-  | Keepers_listed of keeper_on_repository list
+  | Keepers_unlisted of
+      { observed_at : float
+      ; error : string
+      }
+  | Keepers_listed of
+      { observed_at : float
+      ; on_repository : keeper_on_repository list
+      }
 
 type keeper_join =
   | Join_not_inspected
@@ -228,7 +240,7 @@ let query =
     pullRequests(states: OPEN, first: $first, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title headRefName isDraft updatedAt reviewDecision
+        number title headRefName isCrossRepository isDraft updatedAt reviewDecision
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       }
     }
@@ -293,19 +305,31 @@ let decode_pull ~repo_slug node =
     ( field "number" node
     , field "title" node
     , field "headRefName" node
+    , field "isCrossRepository" node
     , field "isDraft" node
     , field "updatedAt" node )
   with
   | ( Some (`Int number)
     , Some (`String title)
     , Some (`String head_branch)
+    , Some (`Bool cross_repository)
     , Some (`Bool draft)
     , Some (`String updated_raw) ) ->
     (match
        Time_codec.parse_rfc3339_opt updated_raw, decode_checks node, decode_review node
      with
      | Some updated_at, Some checks, Some review ->
-       Some { repo_slug; number; title; head_branch; draft; checks; review; updated_at }
+       Some
+         { repo_slug
+         ; number
+         ; title
+         ; head_branch
+         ; cross_repository
+         ; draft
+         ; checks
+         ; review
+         ; updated_at
+         }
      | _ -> None)
   | _ -> None
 
@@ -521,34 +545,59 @@ let row_evidence ~repository_id (row : Keeper_sandbox_control.freshness_row) =
 let keeper_on_repository ~repository_id ({ keeper; checkouts } : keeper_checkouts) =
   let branches, unread =
     match checkouts with
-    | Error reason -> [], [ reason ]
-    | Ok rows ->
+    | Checkouts_absent -> [], []
+    | Checkouts_unread reason -> [], [ reason ]
+    | Checkouts_read { Keeper_sandbox_control.scan_rows; scan_truncated } ->
+      (* Checkouts past a stopped discovery were never seen, so any of them
+         may be of this repository. *)
+      let truncated =
+        match scan_truncated with
+        | None -> []
+        | Some limit ->
+          [ "checkout discovery stopped early: "
+            ^ Keeper_playground_checkouts.limit_to_string limit
+          ]
+      in
       List.fold_right
         (fun row (branches, unread) ->
           match row_evidence ~repository_id row with
           | Row_on branch -> branch :: branches, unread
           | Row_unread reason -> branches, reason :: unread
           | Row_elsewhere -> branches, unread)
-        rows
-        ([], [])
+        scan_rows
+        ([], truncated)
   in
   match branches, unread with
   | [], [] -> None
-  | _ -> Some { on_keeper = keeper; branches; unread }
+  | _ :: _, _ | [], _ :: _ -> Some { on_keeper = keeper; branches; unread }
 
-let repository_keepers ~(fleet : fleet_checkouts Lazy.t) ~repository_id = function
-  | Pulls_read _ ->
-    (match Lazy.force fleet with
-     | Error reason -> Keepers_unlisted reason
-     | Ok keepers ->
-       Keepers_listed (List.filter_map (keeper_on_repository ~repository_id) keepers))
-  | Pulls_not_read | Pulls_failed _ | Pulls_not_github -> Keepers_not_inspected
+let has_open_pulls = function
+  | Pulls_read { pulls = _ :: _; _ } -> true
+  | Pulls_read { pulls = []; _ } | Pulls_not_read | Pulls_failed _ | Pulls_not_github -> false
+
+let repository_keepers ~observed_at ~(fleet : fleet_checkouts) entry =
+  if not (has_open_pulls entry.pulls)
+  then Keepers_not_inspected
+  else (
+    match fleet with
+    | Error error -> Keepers_unlisted { observed_at; error }
+    | Ok keepers ->
+      Keepers_listed
+        { observed_at
+        ; on_repository =
+            List.filter_map
+              (keeper_on_repository ~repository_id:entry.repository_id)
+              keepers
+        })
 
 let pull_keepers entry pull =
   match entry.keepers with
   | Keepers_not_inspected -> Join_not_inspected
-  | Keepers_unlisted reason -> Join_keepers_unlisted reason
-  | Keepers_listed on_repository ->
+  | Keepers_unlisted { error; observed_at = _ } -> Join_keepers_unlisted error
+  (* A head branch in a fork is not a branch of this repository, so no
+     checkout of this repository can be on it. *)
+  | Keepers_listed _ when pull.cross_repository -> Join_read { keepers = []; keepers_unread = 0 }
+  | Keepers_listed { on_repository; observed_at = _ } ->
     let on_branch k = List.exists (String.equal pull.head_branch) k.branches in
     let keepers =
       List.filter_map
@@ -561,7 +610,7 @@ let pull_keepers entry pull =
     in
     Join_read { keepers; keepers_unread }
 
-let refresh ~now ~http_post ~inspect_checkouts ~base_path ~previous =
+let refresh ~now ~http_post ~base_path ~previous =
   let now_s = now () in
   let credential = resolve_reader ~base_path in
   let reader =
@@ -584,9 +633,6 @@ let refresh ~now ~http_post ~inspect_checkouts ~base_path ~previous =
       | Some entry -> entry.pulls
       | None -> Pulls_not_read
     in
-    (* One inspection per refresh, shared by every repository, and none when
-       no pull request was read. *)
-    let fleet = lazy (inspect_checkouts ()) in
     let entry (repo : Repo_manager_types.repository) =
       let slug = github_slug_of_remote repo.url in
       let pulls =
@@ -606,7 +652,17 @@ let refresh ~now ~http_post ~inspect_checkouts ~base_path ~previous =
            longer vouch for; [reader] says why nothing is read now. *)
         | Some _, Error _ -> Pulls_not_read
       in
-      let keepers = repository_keepers ~fleet ~repository_id:repo.id pulls in
+      (* The last join stands until {!join_keepers} replaces it, so a reader
+         between the two publications sees it with its own [observed_at]. *)
+      let keepers =
+        match
+          List.find_opt
+            (fun entry -> String.equal entry.repository_id repo.id)
+            previous.repositories
+        with
+        | Some entry -> entry.keepers
+        | None -> Keepers_not_inspected
+      in
       { repository_id = repo.id; url = repo.url; slug; pulls; keepers }
     in
     let repositories = List.map entry repos in
@@ -618,6 +674,29 @@ let refresh ~now ~http_post ~inspect_checkouts ~base_path ~previous =
       | Ok _ | Error _ -> None
     in
     { reader; repositories_error = None; repositories; rejected_token_digest }
+
+type inspect_checkouts =
+  catalog:(Repo_manager_types.repository list, string) result -> fleet_checkouts
+
+let join_keepers ~now ~(inspect_checkouts : inspect_checkouts) ~base_path snapshot =
+  if not (List.exists (fun entry -> has_open_pulls entry.pulls) snapshot.repositories)
+  then
+    { snapshot with
+      repositories =
+        List.map (fun entry -> { entry with keepers = Keepers_not_inspected }) snapshot.repositories
+    }
+  else (
+    (* One catalog read and one fleet inspection, shared by every repository.
+       A catalog that cannot be read reaches every row as
+       [Catalog_unavailable], so those Keepers count as unread. *)
+    let fleet = inspect_checkouts ~catalog:(Repo_store.load_all ~base_path) in
+    let observed_at = now () in
+    { snapshot with
+      repositories =
+        List.map
+          (fun entry -> { entry with keepers = repository_keepers ~observed_at ~fleet entry })
+          snapshot.repositories
+    })
 
 (* --- JSON --- *)
 
@@ -652,6 +731,7 @@ let pull_request_to_yojson ~join pull =
     ; "number", `Int pull.number
     ; "title", `String pull.title
     ; "head_branch", `String pull.head_branch
+    ; "cross_repository", `Bool pull.cross_repository
     ; "draft", `Bool pull.draft
     ; "checks", `String (check_state_to_string pull.checks)
     ; "review", `String (review_state_to_string pull.review)
@@ -709,12 +789,14 @@ let reader_to_yojson = function
 
 let repository_keepers_to_yojson = function
   | Keepers_not_inspected -> `Assoc [ "state", `String "not_inspected" ]
-  | Keepers_unlisted reason ->
-    `Assoc [ "state", `String "unlisted"; "error", `String reason ]
-  | Keepers_listed on_repository ->
+  | Keepers_unlisted { observed_at; error } ->
+    `Assoc
+      [ "state", `String "unlisted"; "observed_at", `Float observed_at; "error", `String error ]
+  | Keepers_listed { observed_at; on_repository } ->
     let strings values = `List (List.map (fun v -> `String v) values) in
     `Assoc
       [ "state", `String "listed"
+      ; "observed_at", `Float observed_at
       ; ( "keepers"
         , `List
             (List.map
@@ -757,44 +839,77 @@ let current () = Atomic.get projection
    5000 GraphQL points an hour. *)
 let poll_interval_s = 60.0
 
-let inspect_fleet_checkouts ~(config : Workspace.config) () =
+let checkouts_of_scan = function
+  | Ok scan -> Checkouts_read scan
+  (* The playground does not exist, e.g. a microvm guest not booted in this
+     process: no checkout to be on any branch. *)
+  | Error (Keeper_playground_checkouts.Root_missing _) -> Checkouts_absent
+  | Error
+      (( Keeper_playground_checkouts.Root_not_directory _
+       | Root_unreadable _
+       | Root_probe_unreachable _ ) as scan_error) ->
+    Checkouts_unread (Keeper_playground_checkouts.scan_error_to_string scan_error)
+
+let inspect_keeper ~(config : Workspace.config) ~catalog keeper =
+  match Keeper_meta_store.read_effective_meta config keeper with
+  | Error reason -> Checkouts_unread ("Keeper metadata: " ^ reason)
+  | Ok None -> Checkouts_unread "Keeper metadata is absent or not decodable"
+  | Ok (Some meta) ->
+    (* One Keeper's failure stays that Keeper's unread reason instead of
+       losing every other Keeper's answer. *)
+    (match Keeper_sandbox_control.checkout_scan ~catalog ~config ~meta () with
+     | scan -> checkouts_of_scan scan
+     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+     | exception exn -> Checkouts_unread ("checkout inspection raised " ^ Printexc.to_string exn))
+
+let inspect_fleet_checkouts ~(config : Workspace.config) ~catalog =
   match Keeper_meta_store.keeper_names_result config with
   | Error reason -> Error reason
   | Ok names ->
     Ok
       (List.map
          (fun keeper ->
-           let checkouts =
-             match Keeper_meta_store.read_effective_meta config keeper with
-             | Error reason -> Error ("Keeper metadata: " ^ reason)
-             | Ok None -> Error "Keeper metadata is absent or not decodable"
-             | Ok (Some meta) ->
-               Keeper_sandbox_control.checkout_freshness_rows ~config ~meta ()
-               |> Result.map_error Keeper_playground_checkouts.scan_error_to_string
-           in
-           ({ keeper; checkouts } : keeper_checkouts))
+           ({ keeper; checkouts = inspect_keeper ~config ~catalog keeper } : keeper_checkouts))
          names)
 
 let start ~sw ~clock ~(config : Workspace.config) =
   let base_path = config.base_path in
+  let now () = Eio.Time.now clock in
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
-      (try
-         let next =
-           refresh
-             ~now:(fun () -> Eio.Time.now clock)
-             ~http_post:default_http_post
-             ~inspect_checkouts:(inspect_fleet_checkouts ~config)
-             ~base_path
-             ~previous:(current ())
-         in
-         Atomic.set projection next
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Server.warn
-           "repository_pulls: refresh raised %s; keeping the previous projection"
-           (Printexc.to_string exn));
+      (* Two publications: the pull requests as soon as GitHub has answered,
+         then the same snapshot joined to the Keepers' checkouts. Inspecting
+         the fleet never delays or discards a pull request read. *)
+      let pulls =
+        match
+          refresh ~now ~http_post:default_http_post ~base_path ~previous:(current ())
+        with
+        | snapshot ->
+          Atomic.set projection snapshot;
+          Some snapshot
+        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+        | exception exn ->
+          Log.Server.warn
+            "repository_pulls: refresh raised %s; keeping the previous projection"
+            (Printexc.to_string exn);
+          None
+      in
+      (match pulls with
+       | None -> ()
+       | Some snapshot ->
+         (match
+            join_keepers
+              ~now
+              ~inspect_checkouts:(inspect_fleet_checkouts ~config)
+              ~base_path
+              snapshot
+          with
+          | joined -> Atomic.set projection joined
+          | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+          | exception exn ->
+            Log.Server.warn
+              "repository_pulls: keeper join raised %s; the pull requests keep the previous join"
+              (Printexc.to_string exn)));
       Eio.Time.sleep clock poll_interval_s;
       loop ()
     in

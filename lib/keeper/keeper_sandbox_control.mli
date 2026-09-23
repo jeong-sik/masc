@@ -98,6 +98,23 @@ val checkout_freshness_rows :
     the total git subprocess time across all checkouts (default
     {!Repo_git.inspection_timeout_sec}). *)
 
+(** A playground's measured rows and, when discovery stopped early or could
+    not read a directory, why: checkouts past that point were never seen. *)
+type checkout_scan = {
+  scan_rows : freshness_row list;
+  scan_truncated : Keeper_playground_checkouts.limit option;
+}
+
+val checkout_scan :
+  ?inspection_budget_sec:float ->
+  catalog:(Repo_manager_types.repository list, string) result ->
+  config:Workspace.config ->
+  meta:keeper_meta ->
+  unit ->
+  (checkout_scan, Keeper_playground_checkouts.scan_error) result
+(** {!checkout_freshness_rows} against a catalog the caller already loaded,
+    keeping a truncated discovery visible instead of flattening it. *)
+
 module For_testing : sig
   val repository_checkouts_json_with_budget :
     inspection_budget_sec:float ->

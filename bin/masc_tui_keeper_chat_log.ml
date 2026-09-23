@@ -329,16 +329,21 @@ let events_error_to_string = function
 (* The error envelope is [masc.keeper_chat_operation.error.v1]:
    [{schema; error = <code>; message}]. The code is the typed fact; the
    message is what the server said, kept only where the code alone does not
-   tell the pane what to do. A 401/403 is about this client's credential, not
-   about the journal, and is said the way every other refused request is. *)
+   tell the pane what to do. A 401/403 that names an auth code is about this
+   client's credential, not about the journal, and is said the way every other
+   refused request is; one without a code is the handler's own answer and
+   goes on to be read like any other. *)
 let decode_events_error ~status ~credential_sent body =
   let rejected detail = Events_undecodable (Printf.sprintf "%d %s" status detail) in
-  if status = 401 || status = 403
-  then
-    Events_refused
-      (Masc_tui_credential.refusal ~credential_sent
-         (Masc_tui_credential.server_reason_of_body body))
-  else
+  let credential_refusal =
+    if status = 401 || status = 403
+    then Masc_tui_credential.server_reason_of_body body
+    else None
+  in
+  match credential_refusal with
+  | Some reason ->
+    Events_refused (Masc_tui_credential.refusal ~credential_sent reason)
+  | None ->
   match Yojson.Safe.from_string body with
   | `Assoc fields ->
     let message =

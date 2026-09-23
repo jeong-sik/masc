@@ -1148,6 +1148,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
                 "attention_queue": [],
                 "attention_items": [],
                 "agent_briefs": [],
+                "keepers_unread": [],
             },
         ),
         "/api/v1/board?sort_by=hot": (200, {"posts": [post]}),
@@ -1170,6 +1171,7 @@ def overview_event_briefing(cluster: str = "cluster-a") -> dict[str, object]:
         "attention_queue": [],
         "attention_items": [],
         "agent_briefs": [],
+        "keepers_unread": [],
     }
 
 
@@ -14010,8 +14012,68 @@ def duplicated_attention_briefing() -> HttpResponse:
             "attention_items": [],
             "agent_briefs": [],
             "keeper_briefs": [],
+            "keepers_unread": [],
         },
     )
+
+
+def unread_keeper_briefing() -> HttpResponse:
+    return (
+        200,
+        {
+            "summary": {
+                "workspace_health": "ok",
+                "cluster": "cluster-a",
+                "project": "project-a",
+            },
+            "generated_at": "2026-09-23T00:00:00Z",
+            "incidents": [],
+            "attention_queue": [],
+            "attention_items": [],
+            "agent_briefs": [],
+            "keeper_briefs": [],
+            # The server listed this Keeper but could not build its row
+            # (#38090). It has no brief, and the Overview still counts it.
+            "keepers_unread": [
+                {
+                    "name": "k-unread",
+                    "reason": "row_raised",
+                    "detail": "Failure(\"default runtime not initialized\")",
+                }
+            ],
+        },
+    )
+
+
+def unread_keeper_counted_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Keepers: 1 (1 unreadable)",
+            start=0,
+            timeout=10.0,
+        )
+        # The Team block names the same Keeper, with why its row was unread.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"k-unread",
+            start=0,
+            timeout=10.0,
+        )
+        # The harness confirms the exit that this first press arms.
+        os.write(master_fd, b"q")
+
+    return interact
 
 
 def attention_drawn_once_interaction() -> Interaction:
@@ -14588,6 +14650,14 @@ def run_keyboard_regression(executable: str) -> None:
         interact=attention_drawn_once_interaction(),
         http_fixtures={
             "/api/v1/dashboard/briefing": duplicated_attention_briefing(),
+        },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Unread keeper counted",
+        interact=unread_keeper_counted_interaction(),
+        http_fixtures={
+            "/api/v1/dashboard/briefing": unread_keeper_briefing(),
         },
     )
     composer_requests: HttpRequests = []

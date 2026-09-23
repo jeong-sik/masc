@@ -3,6 +3,7 @@
 module Keeper_declared_roster = Masc.Keeper_declared_roster
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_status_runtime = Masc.Keeper_status_runtime
+module Keeper_snapshot_unread = Masc.Keeper_snapshot_unread
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_runtime_root_entry = Masc.Keeper_runtime_root_entry
@@ -1215,6 +1216,13 @@ let load_overview ~(host : string) ~(port : int) :
       in
       let* agent_briefs = optional_list_field json "agent_briefs" in
       let* keeper_briefs = optional_list_field json "keeper_briefs" in
+      (* Keepers the server listed but could not build a row for. They are
+         not in [keeper_briefs]; before #38090 they were in neither, and the
+         Overview counted a fleet that had lost a Keeper as a smaller one. *)
+      let* keepers_unread =
+        let* items = required_list_field json "keepers_unread" in
+        Keeper_snapshot_unread.list_of_json (`List items)
+      in
       let* top_attention =
         let fallback =
           match incidents with
@@ -1239,9 +1247,35 @@ let load_overview ~(host : string) ~(port : int) :
          holds workspace_health, cluster, and project and nothing else --
          [lib/dashboard/dashboard_briefing.ml] writes no count into it -- so
          a count read from there was a default dressed as a reading. *)
-      let ov_keepers = List.length keeper_briefs in
-      let ov_keeper_liveness = keeper_liveness_of_briefs keeper_briefs in
-      let ov_keeper_rows = overview_keeper_rows_of_briefs keeper_briefs in
+      (* An unread Keeper is still a Keeper -- the server listed its name --
+         so it is in the count and among the unreadable, the same as a brief
+         whose liveness word this build cannot name. The count stays exact:
+         what is missing is the Keeper's state, not the Keeper. *)
+      let n_unread = List.length keepers_unread in
+      let ov_keepers = List.length keeper_briefs + n_unread in
+      let ov_keeper_liveness =
+        let counts = keeper_liveness_of_briefs keeper_briefs in
+        { counts with klc_unreadable = counts.klc_unreadable + n_unread }
+      in
+      (* An unread Keeper gets a Team row too, so the block and the count
+         name the same fleet; its phase is the reason the row was not read. *)
+      let ov_keeper_rows =
+        overview_keeper_rows_of_briefs keeper_briefs
+        @ List.map
+            (fun (unread : Keeper_snapshot_unread.t) ->
+              let reason =
+                match unread.reason with
+                | Keeper_snapshot_unread.Meta_read_failed detail ->
+                    "metadata unread: " ^ detail
+                | Keeper_snapshot_unread.Row_raised detail -> "row raised: " ^ detail
+              in
+              { okp_name = unread.name
+              ; okp_phase = Keeper_phase_unreadable reason
+              ; okp_last_turn_ago_s = None
+              ; okp_paused = None
+              })
+            keepers_unread
+      in
       let ov_mcp_agents = List.length agent_briefs in
       let* ov_generated_at = required_string_field json "generated_at" in
       Ok

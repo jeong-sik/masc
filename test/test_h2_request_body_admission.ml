@@ -1,5 +1,6 @@
-(* HTTP/2 request bodies are admitted on the terms HTTP/1 applies: the same
-   size ceiling, and on POST /graphql the read gate before the body is read.
+(* HTTP/2 requests are admitted on the terms HTTP/1 applies: the same body
+   size ceiling, on POST /graphql the read gate before the body is read, and
+   on the Board reads the same strict-mode public-read gate.
    Every case runs a real H2 exchange in memory, an h2 client connection
    pumped against a server connection, so what is checked is what a peer
    sees on the wire. *)
@@ -56,7 +57,7 @@ let transfer lane next_write report_write read =
    client still uploading: the exchange then completes only if the server
    answers without waiting for the end of the body. A server that waits stops
    making progress, and the pump fails instead of hanging. *)
-let exchange ~handler ?(headers = []) ~send target =
+let exchange ~handler ?(meth = `POST) ?(headers = []) ~send target =
   let status = ref None in
   let body = Buffer.create 256 in
   let complete = ref false in
@@ -65,7 +66,7 @@ let exchange ~handler ?(headers = []) ~send target =
       ~error_handler:(fun _ -> fail "H2 connection error") ()
   in
   let request =
-    H2.Request.create ~scheme:"http" `POST target
+    H2.Request.create ~scheme:"http" meth target
       ~headers:(H2.Headers.of_list ((":authority", authority) :: headers))
   in
   (* h2 holds HEADERS back until the first body write unless told otherwise,
@@ -272,6 +273,60 @@ let test_authenticated_graphql_post_reads_its_body () =
   in
   check bool "the query in the body was executed" true (project <> `Null)
 
+(* HTTP/1 serves GET /api/v1/board/sub-boards/<id> under with_public_read, so
+   under strict auth a token-less read is refused. Over h2c the same path fell
+   into the post-detail arm, which authorized nothing when no token was sent.
+   The token-holding read must come back as the sub-board, not as a post
+   lookup for "sub-boards/<id>". *)
+let test_board_reads_require_a_token_under_strict_auth () =
+  with_gateway @@ fun ~base_path handler ->
+  Fun.protect ~finally:Masc.Board.reset_global_for_test
+  @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key
+    (Some base_path)
+  @@ fun () ->
+  Fun.protect ~finally:Masc.Board_dispatch.reset_for_test
+  @@ fun () ->
+  Masc.Board.reset_global_for_test ();
+  Masc.Board_dispatch.reset_for_test ();
+  Masc.Board_dispatch.init_jsonl ();
+  Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1")
+  @@ fun () ->
+  let slug = "h2-strict-read" in
+  (match
+     Masc.Board_dispatch.create_sub_board ~slug ~name:"Strict" ~description:""
+       ~owner:"h2-board-reader" ~members:[] ()
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Board_tool.board_error_to_string error));
+  let token =
+    match
+      Auth.create_token base_path ~agent_name:"h2-board-reader"
+        ~role:Masc_domain.Worker
+    with
+    | Ok (token, _) -> token
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let get ?token path =
+    let headers =
+      Option.fold ~none:[]
+        ~some:(fun token -> [ "authorization", "Bearer " ^ token ])
+        token
+    in
+    exchange ~handler ~meth:`GET ~headers ~send:H2.Body.Writer.close path
+  in
+  let sub_board_path = "/api/v1/board/sub-boards/" ^ slug in
+  List.iter
+    (fun path ->
+      check int (path ^ " without a token") 401 (get path).status)
+    [ sub_board_path; "/api/v1/board"; "/api/v1/board/some-post-id" ];
+  let reply = get ~token sub_board_path in
+  check int "sub-board detail with a token" 200 reply.status;
+  check string "answered by the sub-board handler" slug
+    Yojson.Safe.Util.(
+      Yojson.Safe.from_string reply.body |> member "slug" |> to_string);
+  check int "board list with a token" 200 (get ~token "/api/v1/board").status
+
 let () =
   run "H2 request body admission"
     [ ( "body ceiling"
@@ -291,5 +346,9 @@ let () =
             test_unauthenticated_graphql_post_is_refused_before_its_body
         ; test_case "an authenticated POST still reads its body" `Quick
             test_authenticated_graphql_post_reads_its_body
+        ] )
+    ; ( "board read gate"
+      , [ test_case "strict auth refuses token-less Board reads" `Quick
+            test_board_reads_require_a_token_under_strict_auth
         ] )
     ]

@@ -38,12 +38,13 @@ type review_request =
   }
 
 type lookup_surface =
-  | No_lookup_surface
-  | Lookup_tools of
-      { schemas : Types_core.tool_schema list
-      ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result
-      ; root_layout : string list
-      }
+  { schemas : Types_core.tool_schema list
+  ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result
+  }
+
+type lookup_root =
+  | Producer_tree of string list
+  | Producer_root_absent of { root : string }
 
 (* Both outcomes carry the reviewer's stated reason. [Approve] used to be
    nullary, and the parser below read [reason] and then dropped it, so an
@@ -235,17 +236,22 @@ let tool_names schemas =
 
 (* The lookup surface as the judge is told about it: checkable evidence lives
    in the submitted snapshot, and a build claim needs an execution receipt.
-   Same tools and same root whichever slot renders; the slot only says what
-   the judge holds. *)
-let lookup_section lookup =
-  match lookup with
-  | No_lookup_surface -> render Prompt_names.verification_lookup_none []
-  | Lookup_tools { schemas; dispatch = _; root_layout } ->
+   The tools are the same whichever slot renders; the root decides the slot,
+   because a producer with no tree must not be told it has one. *)
+let lookup_section ~(lookup : lookup_surface) ~lookup_root =
+  match lookup_root with
+  | Producer_tree root_layout ->
     let ( let* ) = Result.bind in
     let* lookup_root_layout = root_layout_lines root_layout in
     render
       Prompt_names.verification_lookup_producer_tree
-      [ "lookup_tools", tool_names schemas; "lookup_root_layout", lookup_root_layout ]
+      [ "lookup_tools", tool_names lookup.schemas
+      ; "lookup_root_layout", lookup_root_layout
+      ]
+  | Producer_root_absent { root } ->
+    render
+      Prompt_names.verification_lookup_producer_root_absent
+      [ "lookup_tools", tool_names lookup.schemas; "root", root ]
 ;;
 
 (* A successful lookup is typed by [Tool_result.Completed]. Preserve that
@@ -255,33 +261,31 @@ let lookup_section lookup =
    results stay unchanged, so neither can be mistaken for checked evidence.
    Nothing in MASC parses this projection back or overrides the judge's
    structured verdict. *)
-let lookup_with_evidence_observation = function
-  | No_lookup_surface -> No_lookup_surface
-  | Lookup_tools { schemas; dispatch; root_layout } ->
-    let dispatch ~name ~args =
-      match dispatch ~name ~args with
-      | Tool_result.Completed payload ->
-        let success_observation =
-          `Assoc [ "evidence_lookup_succeeded", `Bool true ]
-        in
-        Tool_result.Completed
-          { payload with
-            data =
-              `Assoc
-                [ "evidence_lookup_succeeded", `Bool true
-                ; "lookup_result", payload.data
-                ]
-          ; content_blocks =
-              Option.map
-                (fun blocks ->
-                   Agent_core.Types.Text
-                     (Yojson.Safe.to_string success_observation)
-                   :: blocks)
-                payload.content_blocks
-          }
-      | (Tool_result.Deferred _ | Tool_result.Failed _) as result -> result
-    in
-    Lookup_tools { schemas; dispatch; root_layout }
+let lookup_with_evidence_observation { schemas; dispatch } =
+  let dispatch ~name ~args =
+    match dispatch ~name ~args with
+    | Tool_result.Completed payload ->
+      let success_observation =
+        `Assoc [ "evidence_lookup_succeeded", `Bool true ]
+      in
+      Tool_result.Completed
+        { payload with
+          data =
+            `Assoc
+              [ "evidence_lookup_succeeded", `Bool true
+              ; "lookup_result", payload.data
+              ]
+        ; content_blocks =
+            Option.map
+              (fun blocks ->
+                 Agent_core.Types.Text
+                   (Yojson.Safe.to_string success_observation)
+                 :: blocks)
+              payload.content_blocks
+        }
+    | (Tool_result.Deferred _ | Tool_result.Failed _) as result -> result
+  in
+  { schemas; dispatch }
 ;;
 
 (* The image-evidence section: data lines (reference, hash, size, media
@@ -313,9 +317,10 @@ let image_evidence_section (req : review_request) =
 let build_prompt
       ~(question : verdict_question)
       ~(lookup : lookup_surface)
+      ~(lookup_root : lookup_root)
       (req : review_request) : (string, string) result =
   let ( let* ) = Result.bind in
-  let* lookup_section = lookup_section lookup in
+  let* lookup_section = lookup_section ~lookup ~lookup_root in
   let { completion_contract; required_evidence; evidence_posture; few_shot_block } =
     question
   in
@@ -673,6 +678,7 @@ let review
       ?(sw : Eio.Switch.t option = None)
       ~(question : verdict_question)
       ~(lookup : lookup_surface)
+      ~(lookup_root : lookup_root)
       ~base_path
       (req : review_request)
   : review_result
@@ -701,7 +707,7 @@ let review
       Log.Task.info "task_id=%s [task-completion-review] %s" req.task_id message)
     ~log_warn:(fun message ->
       Log.Task.warn "task_id=%s [task-completion-review] %s" req.task_id message)
-    ~render_prompt:(fun () -> build_prompt ~question ~lookup req)
+    ~render_prompt:(fun () -> build_prompt ~question ~lookup ~lookup_root req)
     ~lookup:lookup_for_judge
     ~base_path
     ()

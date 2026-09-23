@@ -1438,6 +1438,12 @@ let fetch_operator_snapshot ~(host : string) ~(port : int) :
     ~path:"/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
 
 (** GET /api/v1/runtime/resolved — runtimes and keeper assignments. *)
+(** GET /api/v1/repositories/pulls -- open pull requests of the registered
+    GitHub repositories (RFC-0465). *)
+let fetch_repository_pulls ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/repositories/pulls"
+
 let fetch_runtime_resolved ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/runtime/resolved"

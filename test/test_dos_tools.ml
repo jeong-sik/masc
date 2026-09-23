@@ -271,6 +271,53 @@ let test_a_link_out_of_the_inventory_is_refused () =
           (is_completed (load ~base_path "game"))))
 ;;
 
+(* A game directory often holds several programs: 삼국지3 boots KOEI.COM,
+   which runs OPEN.EXE and MAIN.EXE beside it, and the setup and editor sit
+   there too. The refusal used to ask the caller to name one with no argument
+   to name it by. [boot] is that argument; it names a file inside the
+   directory, folded the way DOS folds, and nothing else. *)
+let test_boot_names_the_program_inside_a_directory () =
+  with_workspace (fun base_path ->
+    let game = Filename.concat (programs_dir ~base_path) "arcade" in
+    mkdir_p game;
+    write_file (Filename.concat game "LOADER.COM") hello_com;
+    write_file (Filename.concat game "SETUP.COM") spinner_com;
+    let unnamed = load ~base_path "arcade" in
+    check bool "two programs and no boot is a question" false (is_completed unnamed);
+    check bool "the question names the argument" true
+      (contains "boot" (Tool_result.message unnamed));
+    let booted =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "loader.com") ]
+    in
+    check bool "boot picks the loader, folded like DOS" true (is_completed booted);
+    check string "the loader is what runs" "LOADER.COM" (string_field "program" booted);
+    check bool "the loader reaches its first key request" true
+      (bool_field "waiting_for_key" booted);
+    let missing =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "MAIN.EXE") ]
+    in
+    check bool "a boot the directory does not hold is refused" false (is_completed missing);
+    write_file (Filename.concat game "SAVE.DAT") "not a program";
+    let data =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "SAVE.DAT") ]
+    in
+    check bool "a boot that is not a program is refused" false (is_completed data);
+    let climbing =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "arcade"); ("boot", `String "../LOADER.COM") ]
+    in
+    check bool "boot is a file name, not a path" false (is_completed climbing);
+    install_program ~base_path "hello.com" hello_com;
+    let single =
+      dispatch ~base_path "masc_dos_load"
+        [ ("program", `String "hello.com"); ("boot", `String "hello.com") ]
+    in
+    check bool "boot on a single file is refused" false (is_completed single))
+;;
+
 (* The step budget is declared per key. Multiplied by a caller-controlled
    number of keys it stopped bounding anything: sixty-four keys at four
    million each is a quarter of a billion instructions run under the

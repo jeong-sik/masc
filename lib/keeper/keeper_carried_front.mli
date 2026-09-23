@@ -6,7 +6,9 @@
     {!Keeper_turn_driver_try_provider.choose_range_start}: a Librarian
     continuity snapshot that fits the history, else the Librarian's read
     position in it, else a seed this history still holds, else where the
-    last completed turn on this history ended ({!Turn_start}). The turn's
+    last completed turn on this history ended ({!Turn_start}). A Librarian
+    point yields to a later start the provider accepted
+    ({!Past_librarian_point}). The turn's
     composition and the next-request forecast both ask it. This module holds
     the vocabulary of that choice -- the seed, the turn start, and the
     {!origin} a request reports -- and the reads that produce a seed.

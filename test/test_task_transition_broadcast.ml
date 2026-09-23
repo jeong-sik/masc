@@ -83,7 +83,8 @@ let contents config ~baseline_seq =
    one: it writes the producer's stated reason where the approved-cancellation
    path reads it back (#38192), and nothing else. A completion claim carries
    no reason, so it writes no record and the path under test is unchanged. *)
-let stub_verification_request config ~task ~assignee ~verification_id ~claim =
+let stub_verification_request config ~task:(task : D.task) ~assignee ~verification_id
+      ~claim =
   match claim with
   | D.Completion_evidence _ -> Ok ()
   | D.Cancellation_reason { reason } ->

@@ -35,8 +35,12 @@ let test_no_field_lets_the_quit_key_through () =
 let test_with_no_field_open_the_quit_key_is_a_quit_key () =
   Alcotest.(check bool) "nothing is typing" true (quit_key_allowed_for None)
 
-(* The count is the guard: a target added to [text_input_target] without a
-   line here leaves this suite measuring fewer fields than exist. *)
+(* The guard against a new field slipping past is the compiler: adding a
+   constructor to [text_input_target] makes [quit_key_allowed_for]'s match
+   non-exhaustive, and warning 8 is an error here. This case guards the other
+   direction -- that the list above keeps naming every field, so the case
+   before it goes on measuring all of them rather than a subset someone
+   trimmed. *)
 let test_the_list_covers_every_target_this_build_has () =
   Alcotest.(check int) "fields counted" 13 (List.length every_text_target);
   let spelled = List.map fst every_text_target in

@@ -2053,7 +2053,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_votes = 0
   ; bp_comment_count = 0
   ; bp_created_at = "2026-09-04T00:00:00Z"
-  ; bp_updated_at = None
+  ; bp_created_at_unix = None; bp_updated_at = None
   ; bp_hearth = None
   ; bp_kind = None
   }
@@ -2234,14 +2234,14 @@ let test_detail_tab_hint_projects_the_table () =
    strip and the sheet, so dropping a binding passed both -- the same shape
    as the drift they were written to close. This list is the contract:
    changing it is a decision, not a slip. Sources are the guarded arms in
-   masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P on the
-   GitHub tab, e for the settings form). *)
+   masc_tui.ml (T/A// at Detail_identity, R at Detail_identity, L/P and one
+   digit per login scope on the GitHub tab, e for the settings form). *)
 let live_tab_keys : (Masc_tui_types.keeper_detail_tab * string list) list =
   [ Detail_info, []
   ; Detail_sandbox, [ "o"; "d/m/s"; "PgUp/PgDn"; "R" ]
   ; Detail_instructions, [ "e" ]
   ; Detail_secrets, []
-  ; Detail_github, [ "L"; "P" ]
+  ; Detail_github, [ "L"; "P"; "1" ]
   ; Detail_identity, [ "arrows+enter"; "T"; "A"; "/"; "R" ]
   ; Detail_channels, [ "j/k"; "J/K"; "PgUp/PgDn"; "b / e / u u" ]
   ; Detail_automation, []

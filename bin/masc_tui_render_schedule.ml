@@ -1261,7 +1261,7 @@ let board_no_styles =
   ; bstyle_replies = ""
   }
 
-let board_cells ?(styles = board_no_styles) ~title_width values =
+let board_cells ?(styles = board_no_styles) ~age_header ~title_width values =
   [ (* The kind mark is a mark, like Planning's proof. A name would be wider
        than the cell holding it, and it carries its own dress: the glyph and
        its colour are chosen together. *)
@@ -1277,7 +1277,7 @@ let board_cells ?(styles = board_no_styles) ~title_width values =
     (* Right, the way Planning's age reads. A span is a number and the two
        screens are read one after the other; left on one and right on the
        other is the drift this description exists to close. *)
-  ; Table.cell ~align:Table.Right ~style:styles.bstyle_age ~header:"AGE"
+  ; Table.cell ~align:Table.Right ~style:styles.bstyle_age ~header:age_header
       ~width:board_age_width values.brow_age
   ; Table.cell ~style:styles.bstyle_score ~header:"SCORE"
       ~width:board_score_width values.brow_score
@@ -1285,21 +1285,27 @@ let board_cells ?(styles = board_no_styles) ~title_width values =
       ~width:board_replies_width values.brow_replies
   ]
 
-(* How long ago the post last moved, or a dash when the post carried no time to
-   measure from. *)
+(* How long ago the time the caller chose was, or a dash when the post carried
+   no such time. Which of a post's two times that is belongs to the sort, not
+   to this cell. *)
 let board_age_text ~now = function
-  | Some updated_at -> Masc_tui_message_layout.span_text (now -. updated_at)
+  | Some at -> Masc_tui_message_layout.span_text (now -. at)
   | None -> "\xe2\x80\x94"
 
 let board_title_width ~inner_width =
-  let named = Table.used_width (board_cells ~title_width:0 board_no_values) in
+  (* The header word does not move the column: [board_age_width] is fixed and
+     both words fit it, so any of them measures the same named width. *)
+  let named =
+    Table.used_width
+      (board_cells ~age_header:"AGE" ~title_width:0 board_no_values)
+  in
   max board_minimum_title_width (inner_width - named)
 
-let board_header_row ~title_width =
-  Table.header_row (board_cells ~title_width board_no_values)
+let board_header_row ~age_header ~title_width =
+  Table.header_row (board_cells ~age_header ~title_width board_no_values)
 
-let board_row ?close ~styles ~title_width values =
-  Table.row ?close (board_cells ~styles ~title_width values)
+let board_row ?close ~styles ~age_header ~title_width values =
+  Table.row ?close (board_cells ~styles ~age_header ~title_width values)
 
 module Terminal_size_cache = struct
   type refresh =

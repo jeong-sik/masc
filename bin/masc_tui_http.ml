@@ -299,6 +299,7 @@ let refusal ~status_code ~body =
   match status_code with
   | 401 | 403 ->
       Masc_tui_credential.refusal ~credential_sent:(operator_token_present ())
+        (Masc_tui_credential.server_reason_of_body body)
   | _ -> Masc.Tui_decode.http_status_error ~status_code ~body
 
 let decode_json ~allow_empty ~status_code ~body =
@@ -2741,13 +2742,25 @@ let call_mcp_resources_read ~(host : string) ~(port : int)
     final identity observation. Every chunk reaches [on_chunk] as it
     arrives; the return says only how the stream ended. *)
 let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(on_chunk : string -> unit) :
-    (unit, string) result =
+    ~(keeper_name : string)
+    ~(scopes : Masc.Keeper_github_identity.login_scope list)
+    ~(on_chunk : string -> unit) : (unit, string) result =
+  let query =
+    match scopes with
+    | [] -> ""
+    | scopes ->
+        "?scopes="
+        ^ percent_encode_query_value
+            (String.concat ","
+               (List.map Masc.Keeper_github_identity.login_scope_to_string
+                  scopes))
+  in
   let url =
     url_of ~host ~port
       ~path:
-        (Printf.sprintf "/api/v1/keepers/%s/github-login"
-           (percent_encode_path_segment keeper_name))
+        (Printf.sprintf "/api/v1/keepers/%s/github-login%s"
+           (percent_encode_path_segment keeper_name)
+           query)
   in
   let headers =
     json_headers (("Accept", "text/event-stream") :: auth_headers ())

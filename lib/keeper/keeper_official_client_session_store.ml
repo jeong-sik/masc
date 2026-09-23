@@ -1269,6 +1269,36 @@ let require_recovery ~base_path ~keeper_name ~expected ~failure ~detail
     { expected with phase = Recovery_required recovery; updated_at = required_at }
 ;;
 
+let conclude_resume_session_full ~base_path ~keeper_name ~expected ~recovery_id
+    ~updated_at =
+  let* () =
+    if Float.is_finite updated_at
+    then Ok ()
+    else Error "official-client session-full updated_at must be finite"
+  in
+  match expected.phase with
+  | Recovery_required
+      ({ failure = Input_rejected Bootstrap_floor_exceeded
+       ; previous_settlement = Some _
+       ; _
+       } as recovery)
+    when String.equal recovery.recovery_id recovery_id ->
+    transition
+      ~base_path
+      ~keeper_name
+      ~expected:(Some expected)
+      { expected with
+        phase =
+          Recovery_required
+            { recovery with failure = Vendor_session_full No_activity_observed }
+      ; updated_at
+      }
+  | Recovery_required _ | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+    Error
+      "only a resumed session's own floor rejection can be concluded as a full \
+       session"
+;;
+
 let incomplete_claim = function
   | Start { owner_epoch; previous_settlement } ->
     Some (owner_epoch, previous_settlement)

@@ -2798,7 +2798,7 @@ let keeper_github_cmd =
         | Error message ->
           prerr_endline message;
           1
-        | Ok lane -> Keeper_github_identity.run_cli_login ~lane)
+        | Ok lane -> Keeper_github_identity.run_cli_login ~lane ~scopes:[])
   in
   let set_token =
     let invoke base_path keeper_name hostname token_opt =

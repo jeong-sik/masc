@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchKeeperGithubIdentity,
+  keeperGithubLoginPath,
   streamKeeperGithubLogin,
   type KeeperGithubIdentityObservation,
   type KeeperGithubLoginEvent,
@@ -87,11 +88,26 @@ async function collectLoginEvents(
   await streamKeeperGithubLogin(
     'sangsu',
     'github.com',
+    [],
     event => events.push(event),
     new AbortController().signal,
   )
   return events
 }
+
+describe('keeperGithubLoginPath', () => {
+  it('asks for no scope unless one is chosen', () => {
+    expect(keeperGithubLoginPath('sangsu', 'github.com', [])).toBe(
+      '/api/v1/keepers/sangsu/github-login?hostname=github.com',
+    )
+  })
+
+  it('carries the chosen scopes beside the hostname', () => {
+    expect(keeperGithubLoginPath('sangsu', 'github.com', ['workflow'])).toBe(
+      '/api/v1/keepers/sangsu/github-login?hostname=github.com&scopes=workflow',
+    )
+  })
+})
 
 describe('streamKeeperGithubLogin', () => {
   it('decodes output, complete, and error frames in order', async () => {
@@ -133,7 +149,7 @@ describe('streamKeeperGithubLogin', () => {
       ),
     )
     await expect(
-      streamKeeperGithubLogin('sangsu', 'github.com', () => {}, new AbortController().signal),
+      streamKeeperGithubLogin('sangsu', 'github.com', [], () => {}, new AbortController().signal),
     ).rejects.toThrow('login already running')
   })
 
@@ -143,7 +159,7 @@ describe('streamKeeperGithubLogin', () => {
       vi.fn(async () => ({ ok: true, body: null }) as unknown as Response),
     )
     await expect(
-      streamKeeperGithubLogin('sangsu', 'github.com', () => {}, new AbortController().signal),
+      streamKeeperGithubLogin('sangsu', 'github.com', [], () => {}, new AbortController().signal),
     ).rejects.toThrow('GitHub login stream is unavailable')
   })
 })

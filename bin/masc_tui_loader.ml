@@ -574,6 +574,7 @@ let decode_board_post ?(require_body = false) json =
       bp_votes;
       bp_comment_count;
       bp_created_at;
+      bp_created_at_unix = created_at_epoch;
       bp_updated_at =
         (match updated_at with
          | Some _ -> updated_at

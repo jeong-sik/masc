@@ -55,6 +55,7 @@ type pull_request = {
 }
 
 type repository_pulls =
+  | Pulls_not_read              (* 재시작 뒤 첫 읽기 전 *)
   | Pulls_read of { observed_at : float; pulls : pull_request list }
   | Pulls_failed of { observed_at : float; error : string }
   | Pulls_not_github            (* GitHub 가 아닌 remote: 읽지 않는다 *)

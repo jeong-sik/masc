@@ -1246,15 +1246,26 @@ status: reference
   후보별 usage 원장에서 읽되, 같은 Keeper turn의 거절이 더 뒤로 옮긴 위치가 있으면
   그 위치를 쓴다. 반 자르기와 묶음 비우기 모두 다음 후보로 이 위치를 전달한다.
   다른 History의 위치는 digest가 맞지 않으므로 쓰지 않는다.
-  이 위치의 출처(`Keeper_carried_front.origin`)는 다섯이다 — `Carried`(seed에서 온
+  이 위치의 출처(`Keeper_carried_front.origin`)는 여섯이다 — `Carried`(seed에서 온
   위치: 원장, turn 기록, 거절 뒤 반 자르기·묶음 비우기, 씨앗 범위 거절 뒤 turn 경계),
   `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),
   `Librarian_progress`(저장본이 이 History에 맞지 않을 때 Librarian의 durable Read
-  Position), `Turn_start`(앞머리도 맞는 저장본도 없음: 이 History에서 마지막으로
+  Position), `Past_librarian_point`(Librarian 지점이 뒤처져 있고 provider가 수용한
+  시작점이 앞서 있을 때 그 수용된 자리에서 시작하는 경계),
+  `Turn_start`(앞머리도 맞는 저장본도 없음: 이 History에서 마지막으로
   끝난 turn이 끝난 자리에서 시작한다), `Turn_start_unknown`(그 경계마저 못 읽음:
   가장 새 Atom 하나에서 시작한다). Agent Core는 맞는 저장본 → Librarian이 읽은
-  위치 → 이 History에 맞는 원장·씨앗 → 마지막으로 끝난 turn의 경계 순으로 고른다.
-  Librarian 지점이 있으면 원장·씨앗은 읽지 않는다. Librarian 지점이 없는 turn에서
+  위치 → Librarian 지점 뒤 수용된 시작점 → 이 History에 맞는 원장·씨앗 → 마지막으로
+  끝난 turn의 경계 순으로 고른다(`choose_range_start`).
+  Librarian 지점이 있으면 원장·씨앗은 읽지 않는다. Librarian 지점이 있거나 그 뒤의
+  수용된 시작점에서 열린 요청이 크기 때문에 거절되면, 도구 마커 재전송 전에 마지막으로
+  완료된 turn 경계부터 동일 후보에 한 번 더 보낸다(`Turn_start_after_librarian_refusal`,
+  RFC librarian-lifecycle §4.10, rule 1). 이 경계 재전송(`turn_boundary_resend_sequence`)은
+  typed size 거절뿐 아니라 실시간 크기 거절 도착 형태인 `Unknown_invalid_request`에도
+  동작한다(`boundary_resend_on`). provider가 수용한 시작점(`accepted_start`)은 최신
+  응답 관측 턴 기록에서 읽혀 다음 turn의 `choose_range_start`로 전달되며, Librarian
+  지점이 뒤처져 있는 동안 요청은 그 자리에서 열리고(`Past_librarian_point`), 결코 이번
+  turn의 경계를 넘지 않는다(`within_turn_boundary`). Librarian 지점이 없는 turn에서
   provider가 씨앗 범위를 크기 때문에 거절하면 turn 경계가 그 turn의 앞머리가 되고
   (`Turn_start_after_seed_refusal`), 같은 후보에 한 번 더 보낸다. 다음 후보와 공식
   클라이언트 레인도 그 경계부터 싣는다. 받아들여진 요청이 원장에 남으므로 다음
@@ -1264,7 +1275,9 @@ status: reference
   시작한다 (`RFC-keeper-context-window-in-tokens` §13.4·§13.6).
   `Librarian_progress`는 그 위치가 이 trace를 지목하고 그 앞 Atom이 위치가 기록한
   Message로 열릴 때만 채택하며, 그때 요청은 읽지 않은 Atom부터 실리고 그 앞을
-  요약하지 않는다. `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞 Atom은
+  요약하지 않는다. `Past_librarian_point`는 Librarian 지점부터 수용된 시작점
+  직전까지의 Atom을 요청에 싣지 않으며, 이 중 요약도 안 되고 메모리에도 없는 Atom들의
+  틈은 `librarian_gap`이 계산한다. `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞 Atom은
   Librarian의 다음 회차를 기다린다. `Turn_start`의 `end_atom`은 그 경계 자체를 적는다 —
   범위가 열린 Atom이 아니라 turn-boundary 저장소가 말하는 완료 경계다. 그래서 경계가
   가장 새 Atom과 같거나 그보다 뒤여도(옛 번호로 남은 경계) 그 값을 그대로 적고, 범위가
@@ -1646,6 +1659,17 @@ status: reference
   이 이름은 프롬프트 category `librarian`(`config/prompts/librarian.md`,
   `workspace_memory_curator.md`)과 CLI `masc-librarian-replay`·`masc-librarian-continuity`가
   공유한다. 셋은 서로 다른 것이고, 어느 것도 Skill이 아니다.
+
+**Librarian Gap (Librarian 틈)**
+: 요청(Request)에도 실리지 않고 Librarian 메모리에도 들어가지 않은 Atom들의 범위
+  (`Keeper_carried_front.librarian_gap`). Librarian이 커버하는 끝은 지속성 스냅숏의
+  자르기(`snapshot_cut`)와 내구성 읽은 위치(`read_position`) 중 나중(뒤쪽) 지점이다 —
+  자르기 이전은 요약되었고, 읽은 위치 이전은 메모리에 있다. provider가 직전 요청에서
+  수용한 시작점(`accepted_start`)이 그 끝보다 뒤쪽에 있을 때, 그 끝부터 `accepted_start`
+  직전까지가 틈이 된다. `accepted_start`가 그 끝 이하이거나 두 위치를 모두 알 수 없으면
+  틈은 없다(`None`). 현재 이력에 맞지 않는 스냅숏이 남아 있는 동안에는 읽은 위치 대신
+  그 자르기부터 계산되어 틈이 짧게 산출될 수 있다 (RFC librarian-lifecycle §4.10, rule 3).
+  → [Keeper_carried_front.librarian_gap](../../lib/keeper/keeper_carried_front.mli)
 
 **Librarian Replay**
 : `masc-librarian-replay` CLI. 라이브 워크스페이스의 turn-boundary 로그와 checkpoint에

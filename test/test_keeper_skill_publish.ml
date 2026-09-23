@@ -48,7 +48,7 @@ let config_text =
     Server_keeper_skill_publish.project_agents_source_id
 ;;
 
-let with_workspace f =
+let with_workspace ?(source_root_exists = true) f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -60,8 +60,10 @@ let with_workspace f =
       Service.retire ~workspace;
       remove_tree base_path)
     (fun () ->
-      Unix.mkdir (Filename.concat base_path ".agents") 0o700;
-      Unix.mkdir (Filename.concat base_path ".agents/skills") 0o700;
+      if source_root_exists
+      then (
+        Unix.mkdir (Filename.concat base_path ".agents") 0o700;
+        Unix.mkdir (Filename.concat base_path ".agents/skills") 0o700);
       let refresh () =
         Ok
           (Service.refresh
@@ -290,6 +292,23 @@ let test_editor_publishes_and_never_overwrites () =
   check string "existing SKILL.md untouched" original (read_file path)
 ;;
 
+(* A workspace that has never had a Skill has no .agents/skills folder, and
+   the live one did not: every publish was refused as source_not_ready. The
+   first publish makes the declared folder and lands the package. *)
+let test_first_publish_creates_the_source_folder () =
+  with_workspace ~source_root_exists:false
+  @@ fun ~base_path ~workspace:_ ~config ~refresh ->
+  Atomic.set Workspace_hooks.keeper_skill_publish_fn
+    (Server_keeper_skill_publish.publish ~refresh);
+  let original = instruction "first" in
+  let result, data = call config (args ~package_id:"first" original) in
+  if result.Keeper_tool_execution.disposition <> Tool_result.Completed ()
+  then fail ("publish did not complete: " ^ Yojson.Safe.to_string data);
+  check string "status" "created_and_published" (string_field "status" data);
+  check string "SKILL.md bytes" original
+    (read_file (Filename.concat base_path ".agents/skills/first/SKILL.md"))
+;;
+
 let () =
   Mirage_crypto_rng_unix.use_default ();
   run
@@ -301,6 +320,8 @@ let () =
         ; test_case "editor outcomes project typed" `Quick test_outcomes_project_typed
         ; test_case "editor path publishes and never overwrites" `Quick
             test_editor_publishes_and_never_overwrites
+        ; test_case "first publish creates the source folder" `Quick
+            test_first_publish_creates_the_source_folder
         ] )
     ]
 ;;

@@ -1376,7 +1376,9 @@ status: reference
 
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
-  `injected`는 Librarian이 대화에서 뽑아 넣은 것이다.
+  `injected`는 Librarian이 대화에서 뽑아 넣은 것이다. Keeper는 자신이 직접 적은
+  현재 Fact만 `supersedes`로 대체할 수 있고, Librarian이 넣은 `injected` Fact나
+  다른 Keeper의 Fact는 대체할 수 없다(#38122).
 
 **Basis**
 : Fact가 무엇에 근거하나. `observed`는 읽은 곳(자기 대화 또는 Board 글)을 갖고,
@@ -1385,20 +1387,29 @@ status: reference
   Fact는 유지되고, 그런 유도가 하나도 없으면 무효가 된다.
 
 **Dropped / Supersedes / Absorbs**
-: Librarian이 기억을 바꾸는 세 가지 말. `dropped`는 이유를 적고 버린다.
-  `supersedes`는 옛 Fact 하나를 새 claim 하나로 고쳐 쓰며(1:1) 옛 id는 `dropped`
-  에도 있어야 한다. `absorbs`는 Fact 여러 개를 새 claim 하나가 대신 말하며(N:1)
-  그 id들은 `dropped`에 없어야 한다. 흡수된 원문은
-  `<keeper>.memory-absorbed.jsonl`에 남는다. Librarian이 말하지 않은 Fact는
-  그대로 남고, 규칙을 어긴 답은 통째로 거절된다. 이미 있는 Fact와 같은 글자를
-  다시 쓰는 것은 새 Fact가 아니라 그 Fact다 — 아무것도 더하지 않고 저장된 Fact를
-  유지하며, 거절이 아니다. 같은 답이 그 Fact를 `dropped`로도 적으면 "사라졌다"와
-  "남는다"를 함께 말한 모순이라 거절한다(`Dropped_memory_id_recreated`).
+: 기억을 정리하거나 갱신하는 말.
+  - Librarian 회차: `dropped`는 이유를 적고 버린다. `supersedes`는 옛 Fact 하나를
+    새 claim 하나로 고쳐 쓰며(1:1) 옛 id는 `dropped`에도 있어야 한다. `absorbs`는
+    Fact 여러 개를 새 claim 하나가 대신 말하며(N:1) 그 id들은 `dropped`에 없어야
+    한다. 흡수된 원문은 `<keeper>.memory-absorbed.jsonl`에 남는다. Librarian이
+    말하지 않은 Fact는 그대로 남고, 규칙을 어긴 답은 통째로 거절된다. 이미 있는
+    Fact와 같은 글자를 다시 쓰는 것은 새 Fact가 아니라 그 Fact다 — 아무것도 더하지
+    않고 저장된 Fact를 유지하며, 거절이 아니다. 같은 답이 그 Fact를 `dropped`로도
+    적으면 "사라졌다"와 "남는다"를 함께 말한 모순이라 거절한다(`Dropped_memory_id_recreated`).
+  - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
+    적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
+    커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고
+    원장에 `Revised` 이벤트를 기록한다. 철회와 마찬가지로 대체된 Fact를 전제로 삼던 유도
+    Fact들도 함께 무효화되며 영수증의 `removed_memory_ids`와 `support_invalidations`로
+    보고된다. 알 수 없는 id, 이미 지난(non-current) id, `injected` id, 다른 Keeper의
+    id, 자기 자신 id, `source_path`와의 동시 지정, 그리고 대체될 Fact를 전제로
+    삼는 유도 claim(`supersedes_premise_of_successor`)은 모두 거절되며 아무것도 적지 않는다.
 
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는
-  `keeper_memory_search` 결과에 나온 것, `revised`는 `supersedes`로 고쳐 써진
-  것이다. `retracted`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
+  `keeper_memory_search` 결과에 나온 것, `revised`는 Librarian의 `supersedes` 또는
+  Keeper의 `keeper_memory_write ?supersedes`로 고쳐 써진 것이다(#38122).
+  `retracted`는 Keeper가 `keeper_memory_retract`로 그 Fact를 id로 지목해
   철회한 것이다. 철회 뒤 같은 claim을 다시 저장하면 같은 Memory ID에 과거 기록이
   붙는다. TUI의 `History: Retracted`는 그 철회 횟수이며, 현재 Fact의 신뢰도나
   강화 정도를 뜻하지 않는다.

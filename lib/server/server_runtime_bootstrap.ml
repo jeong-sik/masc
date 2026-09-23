@@ -1696,11 +1696,19 @@ let install_keeper_gate_persistence state =
       (Keeper_approval_queue.install_error_to_string error)
   | Ok report ->
     Log.Server.info
-      "keeper_gate: installed durable queue base_path=%s pending=%d replayed=%d replay_failed=%d"
+      "keeper_gate: installed durable queue base_path=%s pending=%d replayed=%d replay_failed=%d retired=%d"
       base_path
       report.loaded_pending
       report.replayed_deliveries
-      (List.length report.delivery_replay_failures);
+      (List.length report.delivery_replay_failures)
+      report.retired_deliveries;
+    (match report.delivery_retirement_error with
+     | None -> ()
+     | Some error ->
+       Log.Server.warn
+         "keeper_gate: spent deliveries kept after a failed store write base_path=%s error=%s"
+         base_path
+         (Keeper_approval_queue.storage_error_to_string error));
     (match report.replay_projection_error with
      | None -> ()
      | Some error ->

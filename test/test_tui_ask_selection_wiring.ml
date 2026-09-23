@@ -220,6 +220,23 @@ let test_the_panel_draws_against_a_budget () =
     (Ast_grep.count_calls ~module_path:render ~callee:"Ask_layout.plan" > 0)
 ;;
 
+(* A keeper can hold more than one open ask, and the folded row for each drew
+   the same line: the keeper's name, cut to sixteen cells, and how many
+   questions it holds. Measured on the live Approvals screen 2026-09-24:
+   e-masc-the-leader held two, asked three hours apart, and both rows read
+   "e-masc-the-lead...  1 question waiting".
+
+   [ar_asked_at] was decoded and drawn on no surface. It is what tells the
+   two rows apart, and it is the reading an operator picks the next ask by. *)
+let test_a_folded_ask_says_how_long_it_has_waited () =
+  Alcotest.(check int) "the row reads the ask's clock" 1
+    (Ast_grep.count_field_reads_in_value_binding ~module_path:render
+       ~binding_name:"ask_summary_line" ~field_name:"ar_asked_at");
+  Alcotest.(check int) "and spells it with the shared ladder" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render
+       ~binding_name:"ask_summary_line" ~callee:"Message_layout.span_text")
+;;
+
 let () =
   Alcotest.run "tui_ask_selection_wiring"
     [ ( "selection"
@@ -251,6 +268,10 @@ let () =
     ; ( "ends"
       , [ Alcotest.test_case "the reader reaches its own ends" `Quick
             test_the_reader_reaches_its_own_ends
+        ] )
+    ; ( "folded asks"
+      , [ Alcotest.test_case "a folded ask says how long it has waited" `Quick
+            test_a_folded_ask_says_how_long_it_has_waited
         ] )
     ]
 ;;

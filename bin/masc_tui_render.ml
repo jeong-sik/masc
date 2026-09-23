@@ -1455,18 +1455,33 @@ let render_approval_detail (state : state) (row : approval_row) =
   finish_surface state ~clamped:(Approval_detail_scroll !scroll)
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 
-(* One line for an ask the cursor is not on: who is waiting and how much they
-   asked. What the operator needs from a folded ask is that it exists and can
-   be reached; the choices belong to the one they are on. *)
-let ask_summary_line ~(row : Masc.Tui_decode.ask_row) =
+(* Six cells hold [Message_layout.span_text]'s widest reading ("99d23h"), the
+   same cell the Board and Keeper roster ages take. *)
+let ask_age_cells = 6
+
+(* One line for an ask the cursor is not on: who is waiting, how long, and
+   how much they asked. What the operator needs from a folded ask is that it
+   exists and can be reached; the choices belong to the one they are on.
+
+   The age is here because a keeper can have more than one ask open, and
+   without it the rows for them are the same line twice. Measured on the live
+   Approvals screen: e-masc-the-leader held two, three hours apart, and both
+   read "e-masc-the-lead...  1 question waiting". It is also the reading an
+   operator picks the next ask by -- [ar_asked_at] was decoded and drawn
+   nowhere. *)
+let ask_summary_line ~now ~(row : Masc.Tui_decode.ask_row) =
   let count = List.length row.Masc.Tui_decode.ar_questions in
-  Printf.sprintf " %s%s  %d question%s waiting%s" Ansi.dim
+  Printf.sprintf " %s%s  %s  %d question%s waiting%s" Ansi.dim
     (fit_width (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper) 16)
+    (fit_width
+       (Message_layout.span_text (now -. row.Masc.Tui_decode.ar_asked_at))
+       ask_age_cells)
     count
     (if count = 1 then "" else "s")
     Ansi.reset
 
 let draw_ask_questions buf cols (state : state) ~budget =
+  let now = Unix.gettimeofday () in
   (* Questions Keepers put to a human sit under the approval queue rather than
      in it. Nothing is held waiting on them -- the Keeper that asked kept
      working -- so they are not a queue of blocked calls, but an operator
@@ -1556,7 +1571,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
             (fun index row ->
               if index <> cursor && !printed < plan.Ask_layout.summaries_shown
               then begin
-                box_line buf cols (ask_summary_line ~row);
+                box_line buf cols (ask_summary_line ~now ~row);
                 incr printed
               end)
             rows;

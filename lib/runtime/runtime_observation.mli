@@ -17,6 +17,19 @@ type runtime_attempt = {
   error : string option;
 }
 
+type request_context = {
+  input_tokens : int;
+      (** Inclusive: uncached input plus both cache components. *)
+  cache_creation_input_tokens : int;
+  cache_read_input_tokens : int;
+}
+(** Input side of the newest provider request of the turn: how much of the
+    context window that request occupied. A runtime that reports the turn's
+    spend and the request's occupancy as two different counts (Claude Code's
+    result frame vs. its assistant frames) carries the occupancy here, and
+    the spend in the response usage under [usage_scope]. There is no output
+    side: a request's output count seen mid-stream is not its final count. *)
+
 type runtime_observation = {
   runtime_id : string;
   selected_model : string option;
@@ -29,6 +42,9 @@ type runtime_observation = {
   streaming_inter_chunk_count : int;
   streaming_inter_chunk_avg_ms : float option;
   usage_scope : Runtime_usage_scope.t;
+  request_context : request_context option;
+      (** [None] when the runtime reports no occupancy apart from its
+          response usage. *)
 }
 (** Per-turn runtime execution snapshot.  [attempts] is
     in chronological order (the internal capture stores
@@ -87,6 +103,7 @@ val runtime_observation_with_metrics :
   ?attempt_details_source:string ->
   ?agent_core_internal_runtime_allowed:bool ->
   ?usage_scope:Runtime_usage_scope.t ->
+  ?request_context:request_context ->
   unit ->
   runtime_observation
 (** Materialises a {!runtime_observation} from a finished

@@ -474,6 +474,18 @@ let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
     ~cache_read_input_tokens:usage.cache_read_input_tokens
 ;;
 
+(* Same inclusive convention as [api_usage_of_turn_usage], for the input side
+   of the newest request only: the context it occupied. *)
+let request_context_of_request_input (input : Runtime_claude_code.request_input)
+  : Runtime_observation.request_context
+  =
+  { input_tokens =
+      input.input_tokens + input.cache_creation_input_tokens + input.cache_read_input_tokens
+  ; cache_creation_input_tokens = input.cache_creation_input_tokens
+  ; cache_read_input_tokens = input.cache_read_input_tokens
+  }
+;;
+
 module For_testing = struct
   let claude_error_to_core_error = claude_error_to_core_error
 
@@ -996,7 +1008,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
       (List.length dynamic_tools)
       (Runtime_claude_code.dynamic_tool_bytes dynamic_tools);
     let started_at = Time_compat.now () in
-    let settle_host_stop ~usage stop =
+    let settle_host_stop ~latest_request_input stop =
       match (!session_state).Session_store.phase with
       | Turn_inflight { session_id; turn_id; _ } ->
         let turn_id =
@@ -1051,7 +1063,8 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
             ~turns_used:turn_count
             ~latency_ms:
               (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
-            ~usage:(Option.map api_usage_of_turn_usage usage)
+            ~request_context:
+              (Option.map request_context_of_request_input latest_request_input)
             stop
         in
         let* () =
@@ -1139,13 +1152,14 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
              ~images
         in
         (match client_result with
-         | Error (Runtime_claude_code.Stopped_by_host { stop; usage }) ->
+         | Error (Runtime_claude_code.Stopped_by_host { stop; latest_request_input }) ->
            recovery_failure := Session_store.Host_hook_failed;
            (match stop, !terminal_error with
             | Host.Terminal_tool_boundary _, _
-          when Option.is_some on_official_client_tool_boundary -> settle_host_stop ~usage stop
+          when Option.is_some on_official_client_tool_boundary ->
+              settle_host_stop ~latest_request_input stop
             | _, Some detail -> Error (internal_error detail)
-            | _, None -> settle_host_stop ~usage stop)
+            | _, None -> settle_host_stop ~latest_request_input stop)
          | Error error ->
            (* A resumed session is refused on the vendor's own conversation,
               which a smaller masc range does not change: the resume prompt is
@@ -1211,13 +1225,17 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
            let latency_ms =
              Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)
            in
+           (* The response usage is what the turn spent, from the result
+              frame; the newest request's input rides apart as the context it
+              occupied. *)
            let usage, usage_scope =
-             match turn.usage with
-             | Some (Runtime_claude_code.Latest_request usage) ->
-               Some (api_usage_of_turn_usage usage), Runtime_usage_scope.Per_request
-             | Some (Runtime_claude_code.Turn_total usage) ->
-               Some (api_usage_of_turn_usage usage), Runtime_usage_scope.Turn_total
+             match turn.usage.turn_total with
+             | Some total ->
+               Some (api_usage_of_turn_usage total), Runtime_usage_scope.Turn_total
              | None -> None, Runtime_usage_scope.Usage_scope_unavailable
+           in
+           let request_context =
+             Option.map request_context_of_request_input turn.usage.latest_request_input
            in
            let response =
              { Agent_core.Types.id = turn.turn_id
@@ -1277,6 +1295,7 @@ let run_without_lifecycle ~official_task_reference ~accepts_image_input ~on_sess
                ~attempt_details_source:"claude_code"
                ~agent_core_internal_runtime_allowed:false
                ~usage_scope
+               ?request_context
                ()
            in
            Ok

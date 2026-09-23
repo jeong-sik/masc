@@ -97,6 +97,16 @@ type rate_limit =
   ; overage_disabled_reason : string option
   }
 
+(** Input side of one provider request, read from an assistant frame, in
+    the same exclusive wire convention as {!turn_usage}. The frame's
+    output_tokens is a streaming snapshot, not the request's final count, so
+    it is not carried. *)
+type request_input =
+  { input_tokens : int
+  ; cache_creation_input_tokens : int
+  ; cache_read_input_tokens : int
+  }
+
 (** Usage counts read from a CLI frame. The CLI mirrors Anthropic
     Messages semantics: [input_tokens] is the exclusive wire count (tokens
     after the last cache breakpoint); absent cache fields read as 0. The
@@ -110,12 +120,15 @@ type turn_usage =
   ; cache_read_input_tokens : int
   }
 
+(** Two facts about one client turn that neither stands in for. *)
 type observed_usage =
-  | Latest_request of turn_usage
-      (** Newest assistant request, deduplicated by message id. *)
-  | Turn_total of turn_usage
-      (** Result-frame sum over this client turn's provider calls, used when
-          no assistant request reported usage. Not a context window size. *)
+  { latest_request_input : request_input option
+        (** Newest assistant request, deduplicated by message id: the
+            context that request occupied. Not what the turn spent. *)
+  ; turn_total : turn_usage option
+        (** Result-frame sum over this client turn's provider calls: what
+            the turn spent. Not a context window size. *)
+  }
 
 type turn_result =
   { session_id : string
@@ -126,7 +139,7 @@ type turn_result =
   ; subscription : subscription
   ; rate_limit : rate_limit option
   ; resumed : bool
-  ; usage : observed_usage option
+  ; usage : observed_usage
   }
 
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
@@ -209,12 +222,12 @@ type error =
       }
   | Stopped_by_host of
       { stop : host_stop
-      ; usage : turn_usage option
-        (** The newest assistant frame's usage seen before the host ended
-            the turn, deduplicated by message id: the same one request's
-            figure a completed turn reports. The result frame never
-            arrives after a host stop, so without this the keeper recorded
-            nothing. *)
+      ; latest_request_input : request_input option
+        (** Input side of the newest assistant request seen before the host
+            ended the turn. The result frame never arrives after a host
+            stop, so the turn's spend is not observed; the assistant
+            frames' output counts are streaming snapshots and do not
+            replace it. *)
       }
   | Quota_blocked of
       { api_error_status : int option

@@ -541,7 +541,7 @@ let test_scoped_boundary_error_stops_immediately () =
               (Option.value ~default:"" !terminal_error));
          (match Host.host_stop_result ~runtime_id:runtime_label ~model:"fixture"
              ~session_id:"session" ~turn_id:"turn" ~turns_used:1
-             ~latency_ms:None ~usage:None stop with
+             ~latency_ms:None ~request_context:None stop with
           | Error error ->
             (match Keeper_internal_error.classify_masc_internal_error error with
              | Some (Terminal_effect_failed
@@ -684,7 +684,7 @@ let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
         ~turn_id:"turn-2"
         ~turns_used:2
         ~latency_ms:(Some 1234)
-        ~usage:None
+        ~request_context:None
         (Repeated_tool_call { tool_name = "masc_probe"; repeated_count = 3 })
     with
     | Ok result -> result
@@ -792,7 +792,7 @@ let test_terminal_media_delivery_failure_keeps_applied_effect () =
            ; _}; _} as stop) ->
       (match Host.host_stop_result ~runtime_id:"official-fixture" ~model:"fixture"
         ~session_id:"session-media" ~turn_id:"turn-media" ~turns_used:1
-        ~latency_ms:None ~usage:None stop with
+        ~latency_ms:None ~request_context:None stop with
        | Error _ -> () | Ok _ -> fail "failed media delivery completed the runtime")
     | _ -> fail "completed producer effect hid failed media delivery")
 ;;
@@ -1062,50 +1062,47 @@ let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
       fail "generic deferral did not retain its durable-stimulus terminal stop")
 ;;
 
-(* A live keeper, 2026-09-02: six host-stopped turns recorded output_tokens = 0
-   and "usage telemetry missing" because this projection hardcoded
-   [usage = None]. The adapter now hands over what it measured, and the
-   observation scope has to say so, or the turn record keeps reporting the
-   usage as unavailable next to a non-zero count. *)
-let test_host_stop_carries_measured_usage_into_the_response () =
-  let usage =
-    Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
-      ~input_tokens:300
-      ~output_tokens:30
-      ~cache_creation_input_tokens:0
-      ~cache_read_input_tokens:5
+(* A host stop ends the turn before Claude Code's result frame, so the turn's
+   spend is not observed. The newest assistant frame's output count is a
+   streaming snapshot (2.1.280: 3 and 2 where the result frame said 270), so
+   it must not stand in for the spend; only the input side that request
+   occupied travels, apart from the response usage. *)
+let test_host_stop_carries_request_context_not_spend () =
+  let context : Runtime_observation.request_context =
+    { input_tokens = 305; cache_creation_input_tokens = 0; cache_read_input_tokens = 5 }
   in
-  let project usage =
+  let project request_context =
     match
       Host.host_stop_result
-        ~runtime_id:"official-client-runtime"
-        ~model:"official-client-model"
+        ~runtime_id:"claude-code"
+        ~model:"claude-fixture"
         ~session_id:"session-usage"
         ~turn_id:"turn-usage"
         ~turns_used:1
         ~latency_ms:(Some 900)
-        ~usage
+        ~request_context
         (Terminal_tool_boundary { tool_name = "terminal"; outcome = Terminal_completed })
     with
     | Ok result -> result
     | Error error -> fail (Agent_core.Error.to_string error)
   in
-  let measured = project (Some usage) in
-  check bool "measured usage reaches the response" true
-    (measured.response.usage = Some usage);
+  let measured = project (Some context) in
+  check bool "spend is not observed after a host stop" true
+    (Option.is_none measured.response.usage);
   (match measured.runtime_observation with
    | None -> fail "host stop carried no runtime observation"
    | Some observation ->
-     check bool "measured usage is scoped per request" true
-       (observation.Runtime_observation.usage_scope = Runtime_usage_scope.Per_request));
+     check bool "spend scope stays unavailable" true
+       (observation.Runtime_observation.usage_scope
+        = Runtime_usage_scope.Usage_scope_unavailable);
+     check bool "request context reaches the observation" true
+       (observation.Runtime_observation.request_context = Some context));
   let unmeasured = project None in
-  check bool "no measurement stays absent" true (Option.is_none unmeasured.response.usage);
   (match unmeasured.runtime_observation with
    | None -> fail "host stop carried no runtime observation"
    | Some observation ->
-     check bool "no measurement keeps the scope unavailable" true
-       (observation.Runtime_observation.usage_scope
-        = Runtime_usage_scope.Usage_scope_unavailable))
+     check bool "no request context stays absent" true
+       (Option.is_none observation.Runtime_observation.request_context))
 ;;
 
 let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
@@ -1117,7 +1114,7 @@ let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
       ~turn_id:"turn-terminal"
       ~turns_used:4
       ~latency_ms:(Some 250)
-      ~usage:None
+      ~request_context:None
       (Terminal_tool_boundary { tool_name = "terminal"; outcome })
   in
   (match project Terminal_completed with
@@ -1180,7 +1177,7 @@ let test_terminal_host_stop_runs_completion_hooks_in_order () =
       ~turn_id:"turn-terminal"
       ~turns_used:4
       ~latency_ms:None
-      ~usage:None
+      ~request_context:None
       (Terminal_tool_boundary
          { tool_name = "terminal"; outcome = Terminal_completed })
   in
@@ -2591,9 +2588,9 @@ let () =
             `Quick
             test_repeated_tool_host_stop_is_a_checkpoint_yield
         ; test_case
-            "host stop carries measured usage into the response"
+            "host stop carries request context, not spend"
             `Quick
-            test_host_stop_carries_measured_usage_into_the_response
+            test_host_stop_carries_request_context_not_spend
         ; test_case
             "terminal post-effect failure aborts official-client turn"
             `Quick

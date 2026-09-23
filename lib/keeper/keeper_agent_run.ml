@@ -1898,6 +1898,8 @@ let run_turn
                    =
                    let actual_input_tokens =
                      match result.runtime_observation with
+                     | Some { request_context = Some context; _ } ->
+                       Some context.Runtime_observation.input_tokens
                      | Some { usage_scope = Runtime_usage_scope.Per_request; _ }
                        when usage.input_tokens > 0 -> Some usage.input_tokens
                      | Some _ | None -> None
@@ -2119,6 +2121,22 @@ let run_turn
         in
         let usage : Turn_record.usage =
           match turn_result with
+          | Ok
+              { runtime_observation =
+                  Some { request_context = Some (context : Runtime_observation.request_context); _ }
+              ; _
+              } ->
+            (* A runtime that reports the newest request's occupancy apart from
+               the turn's spend (Claude Code) records that request here: this
+               record's readers ask what one request carried. The request's
+               output count is not known, and the spend is the usage
+               resolution's to record. *)
+            { input_tokens = Some context.input_tokens
+            ; output_tokens = None
+            ; cache_creation_input_tokens = Some context.cache_creation_input_tokens
+            ; cache_read_input_tokens = Some context.cache_read_input_tokens
+            ; scope = Runtime_usage_scope.Per_request
+            }
           | Ok result when result.usage_reported ->
             (* Cache counts travel with the turn rather than being dropped: a large
                input_tokens on a cache-heavy turn and one on a genuinely large prompt

@@ -245,7 +245,9 @@ let test_subscription_turn_and_env_scrub () =
       check string "model" "claude-fixture" turn.model;
       check (option string) "subscription" (Some "team") turn.subscription.subscription_type;
       check bool "new session" false turn.resumed;
-      check bool "no usage block yields none" true (Option.is_none turn.usage))
+      check bool "no assistant usage yields none" true
+        (Option.is_none turn.usage.latest_request_input);
+      check bool "no result usage yields none" true (Option.is_none turn.usage.turn_total))
 ;;
 
 (* A turn that runs many built-in tools carries hundreds of tool_progress and
@@ -540,18 +542,18 @@ let test_dynamic_tool_bytes_counts_every_field () =
     (Runtime_claude_code.dynamic_tool_bytes [ tool; tool ])
 ;;
 
-(* A result-only aggregate remains observable, but does not measure one request's
-   input window. Preserve both its counts and its client-turn provenance. *)
+(* A result-only aggregate is the turn's spend. No assistant frame reported
+   usage, so no request's occupancy is known. *)
 let test_result_usage_is_carried () =
   with_fixture [ Emit assistant; Emit result_with_usage ] (fun path ->
     match run_fixture path with
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok turn ->
-      (match turn.usage with
+      check bool "no request input without an assistant usage" true
+        (Option.is_none turn.usage.latest_request_input);
+      (match turn.usage.turn_total with
        | None -> fail "usage block was dropped"
-       | Some (Runtime_claude_code.Latest_request _) ->
-         fail "a result-only aggregate was labelled as the latest request"
-       | Some (Runtime_claude_code.Turn_total usage) ->
+       | Some usage ->
          (* turn_usage keeps the CLI's exclusive wire counts as-is; the
             inclusive normalization happens in the keeper's api_usage
             mapping. The frame's cache_read 42 must survive the parse and
@@ -562,7 +564,7 @@ let test_result_usage_is_carried () =
          check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens))
 ;;
 
-let test_latest_request_usage_outranks_result_total () =
+let test_latest_request_input_and_result_total_both_travel () =
   with_fixture
     [ Emit assistant_with_usage_a
     ; Emit assistant_with_usage_b
@@ -573,15 +575,56 @@ let test_latest_request_usage_outranks_result_total () =
       match run_fixture path with
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok turn ->
-        match turn.usage with
-        | Some (Runtime_claude_code.Latest_request usage) ->
-          check int "latest counted input, not sum or result total" 200 usage.input_tokens;
-          check int "latest counted output" 20 usage.output_tokens;
-          check int "latest cache read" 5 usage.cache_read_input_tokens;
-          check int "latest absent cache creation" 0 usage.cache_creation_input_tokens
-        | Some (Runtime_claude_code.Turn_total _) ->
-          fail "result total replaced the counted assistant request"
-        | None -> fail "a later uncounted assistant erased the latest usage")
+        (match turn.usage.latest_request_input with
+         | Some input ->
+           check int "latest counted input, not sum or result total" 200
+             input.input_tokens;
+           check int "latest cache read" 5 input.cache_read_input_tokens;
+           check int "latest absent cache creation" 0
+             input.cache_creation_input_tokens
+         | None -> fail "a later uncounted assistant erased the latest request");
+        (match turn.usage.turn_total with
+         | Some total ->
+           check int "spend output is the result frame's" 789 total.output_tokens
+         | None -> fail "the counted assistant request replaced the result total"))
+;;
+
+(* Recorded from Claude Code 2.1.280 on 2026-09-23: one client turn, two
+   provider requests (a Bash round, then the answer). The session id is
+   replaced by the fixture placeholder and the init frame keeps only its
+   identity fields; every other frame is as the CLI wrote it.
+
+   The assistant frames report output 3 and 2: snapshots taken while each
+   response streamed. The result frame reports what the turn spent, 270
+   output tokens. Before this, the turn was recorded with output 2. *)
+let real_two_request_turn_frames () =
+  In_channel.with_open_bin "fixtures/claude_code/cc-2.1.280-two-request-turn.jsonl"
+    In_channel.input_all
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
+  |> List.map (fun line -> Emit line)
+;;
+
+let test_real_two_request_turn_separates_spend_from_occupancy () =
+  with_fixture (real_two_request_turn_frames ()) (fun path ->
+    match run_fixture ~timeout_s:window_outlasting_process_start_s path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn ->
+      check string "text" "Done." turn.text;
+      (match turn.usage.turn_total with
+       | None -> fail "the result frame's total was dropped"
+       | Some total ->
+         check int "spend output is the result frame's 270, not a snapshot" 270
+           total.output_tokens;
+         check int "spend input" 18 total.input_tokens;
+         check int "spend cache read" 40681 total.cache_read_input_tokens;
+         check int "spend cache creation" 7734 total.cache_creation_input_tokens);
+      (match turn.usage.latest_request_input with
+       | None -> fail "the newest request's input was dropped"
+       | Some input ->
+         check int "occupancy is the second request's input" 8 input.input_tokens;
+         check int "occupancy cache read" 22834 input.cache_read_input_tokens;
+         check int "occupancy cache creation" 2747 input.cache_creation_input_tokens))
 ;;
 
 (* A usage block the CLI shapes differently must not fail the turn: the text is
@@ -594,7 +637,7 @@ let test_partial_result_usage_does_not_fail_the_turn () =
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok turn ->
       check string "text survives" "MASC_CLAUDE_OK" turn.text;
-      check bool "partial usage yields none" true (Option.is_none turn.usage))
+      check bool "partial usage yields none" true (Option.is_none turn.usage.turn_total))
 ;;
 
 let test_supported_authentication_modes () =
@@ -1218,13 +1261,12 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
       | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
 ;;
 
-(* A live keeper, 2026-09-02: every host-stopped turn recorded output_tokens = 0
-   because the stop was built with usage = None. The result frame never
-   arrives after a host stop, so the turn's measurement is the newest counted
-   assistant usage, deduplicated by message id. *)
-(* The newest counted frame is the id-less one; the sibling that repeats
+(* The result frame never arrives after a host stop, so the turn's spend is
+   not observed. What the stop carries is the input side of the newest counted
+   assistant request, deduplicated by message id: the context it occupied.
+   The newest counted frame is the id-less one; the sibling that repeats
    msg-usage-a is dropped, so it can never become "newest". *)
-let test_host_stop_carries_the_newest_assistant_usage () =
+let test_host_stop_carries_the_newest_request_input () =
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "masc_probe"
     ; description = "Abort a repeated provider loop"
@@ -1253,15 +1295,15 @@ let test_host_stop_carries_the_newest_assistant_usage () =
     ]
     (fun path ->
       match run_fixture ~dynamic_tools:[ tool ] path with
-      | Error (Runtime_claude_code.Stopped_by_host { usage = Some usage; _ }) ->
+      | Error
+          (Runtime_claude_code.Stopped_by_host { latest_request_input = Some input; _ }) ->
         check int "the newest frame's input, not the turn's sum" 1
-          usage.input_tokens;
-        check int "the newest frame's output" 1 usage.output_tokens;
+          input.input_tokens;
         check int "its cache read, not an earlier frame's" 0
-          usage.cache_read_input_tokens;
-        check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens
-      | Error (Runtime_claude_code.Stopped_by_host { usage = None; _ }) ->
-        fail "host stop dropped the assistant usage"
+          input.cache_read_input_tokens;
+        check int "absent cache creation is 0" 0 input.cache_creation_input_tokens
+      | Error (Runtime_claude_code.Stopped_by_host { latest_request_input = None; _ }) ->
+        fail "host stop dropped the newest request input"
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
 ;;
@@ -2096,8 +2138,10 @@ let () =
         ; test_case "malformed JSON fails closed" `Quick test_malformed_json_fails_closed
         ; test_case "duplicate keys fail closed" `Quick test_duplicate_keys_fail_closed
         ; test_case "result usage is carried" `Quick test_result_usage_is_carried
-        ; test_case "latest request usage outranks result total" `Quick
-            test_latest_request_usage_outranks_result_total
+        ; test_case "latest request input and result total both travel" `Quick
+            test_latest_request_input_and_result_total_both_travel
+        ; test_case "real two-request turn separates spend from occupancy" `Quick
+            test_real_two_request_turn_separates_spend_from_occupancy
         ; test_case
             "dynamic tool bytes counts every field"
             `Quick
@@ -2183,8 +2227,8 @@ let () =
             "dynamic tool abort stops provider loop"
             `Quick
             test_dynamic_tool_abort_stops_the_provider_loop
-        ; test_case "host stop carries the newest assistant usage" `Quick
-            test_host_stop_carries_the_newest_assistant_usage
+        ; test_case "host stop carries the newest request input" `Quick
+            test_host_stop_carries_the_newest_request_input
         ; test_case
             "shared bridge owns exact dispatch"
             `Quick

@@ -49,6 +49,7 @@
   renamed concept.
 
 ### Fixed
+- The endpoint checkout probe of a micro-VM or SSH Keeper now tells an `origin` remote that is not configured from one it could not read, so such a checkout reads `catalog.state = "unregistered"` instead of `origin_unavailable`. A probe row with an unknown or inconsistent `origin_state` is refused rather than decoded (#38180).
 - An autonomous turn that yields to a queued person before its provider's first
   event (RFC-0441) is no longer a failed keeper cycle. The preemption used to
   return a synthesized zero-turn run result that the keeper could only read as

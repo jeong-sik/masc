@@ -1221,7 +1221,10 @@ let run_best_effort
                 gate only narrows the list. A gate switched off, or an
                 excluded Keeper, leaves the answer unchanged; a gate that is
                 on but cannot be asked absorbs nothing; a failed judgment
-                retains unconfirmed originals. *)
+                retains unconfirmed originals. A new claim that absorbed
+                nothing, and whose every statement the memories it named
+                (still current) convey, is a copy of them and is not applied
+                (RFC-0463 section 2.8); any other claim applies as before. *)
              let absorb_gate =
                Keeper_librarian_absorb_gate.run
                  ~observe:(fun observation -> observed_absorb_gate := Some observation)
@@ -1231,6 +1234,10 @@ let run_best_effort
                    | None -> []
                    | Some current -> current.facts)
                  ~new_claims:selection.new_claims
+                 ~superseding:
+                   (List.map
+                      (fun (revision : Keeper_librarian.revision) -> revision.superseded_by)
+                      selection.revisions)
                  ~absorbed:selection.absorbed
                  ()
              in
@@ -1252,7 +1259,10 @@ let run_best_effort
                  { kind = Keeper_memory_os_current.Librarian
                  ; trace_id = input_trace_id inp
                  }
-               ~new_claims:selection.new_claims
+               ~new_claims:
+                 (Keeper_librarian_absorb_gate.without_copies
+                    absorb_gate
+                    selection.new_claims)
                ()
              |> Result.map_error (fun detail ->
                Memory_snapshot_write_failed { detail; selected_slot })

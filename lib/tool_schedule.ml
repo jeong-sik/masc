@@ -243,15 +243,6 @@ let resolve_due_at ~dispatched_at recurrence args =
          })
 ;;
 
-let actor_kind_of_arg args key default =
-  match string_opt args key with
-  | None -> Ok default
-  | Some raw ->
-    (match Schedule_domain.actor_kind_of_string raw with
-     | Ok kind -> Ok kind
-     | Error msg -> Error msg)
-;;
-
 let source_of_arg args =
   match string_opt args "source" with
   | None -> Ok Schedule_domain.Operator_request
@@ -1197,21 +1188,18 @@ let handle_cancel ~tool_name ~start_time ctx args =
 ;;
 
 (* Notes append to the store directly (task-381): the note tool owns the
-   argument contract while the store owns identity and ordering. The author
-   defaults to the caller by the same rule as [scheduled_by] on create: an
-   unnamed caller has to name the author. *)
+   argument contract while the store owns identity and ordering. The author is
+   the caller by the same rule as [scheduled_by] on create. *)
 let handle_note_add ~tool_name ~start_time ctx args =
   match
     let* schedule_id = plain (required_string args "schedule_id") in
     let* body = plain (required_string args "body") in
-    let* author_id =
-      match string_opt args "author_id" with
-      | Some explicit -> Ok explicit
-      | None -> caller_name ctx ~instead:"pass author_id"
+    let* author =
+      caller_actor ctx
+        ~instead:"call with an agent name or a credential that names one"
     in
-    let* author_kind =
-      plain (actor_kind_of_arg args "author_kind" Schedule_domain.Automated_actor)
-    in
+    let author_id = author.Schedule_domain.id in
+    let author_kind = author.kind in
     let now = Time_compat.now () in
     let* note, note_count =
       Schedule_store.append_note

@@ -1297,7 +1297,8 @@ let wake_args ?(extra = []) () =
 (* An MCP caller that gave no name has only a name the endpoint minted for
    its session, which nobody owns across sessions. Where the tool would stand
    on the caller's name -- owner=self, the scheduler, the canceller, a note's
-   author -- such a caller is refused; only a note may name its author. *)
+   author -- such a caller is refused, and naming the actor in the arguments
+   does not help. *)
 let test_an_unnamed_caller_names_the_actor_itself () =
   with_config
   @@ fun config ->
@@ -1472,6 +1473,56 @@ let test_an_update_keeps_the_rows_actors_and_its_target_rule () =
      = Schedule_domain.Human_operator);
   check string "the scheduler is kept" "scheduler-agent"
     stored.Schedule_domain.scheduled_by.Schedule_domain.id
+;;
+
+(* The actor a schedule records is the caller the boundary resolved, not a
+   client-supplied id. The HTTP boundary already replaces the id before the
+   tool sees it (#37149); the MCP path does not stamp, so the tool itself must
+   not trust the argument -- otherwise an MCP caller names any actor it likes
+   on create, cancel and note_add. *)
+let test_a_named_caller_is_the_actor_not_the_argument () =
+  with_config
+  @@ fun config ->
+  let caller = Tool_schedule.Named_caller "real-caller" in
+  let created =
+    dispatch_exn ~caller config Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-actor-binding"
+        ; "due_at_unix", `Float future_due_at
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "spoofed actors"
+        ; "requested_by_id", `String "spoofed-requester"
+        ; "scheduled_by_id", `String "spoofed-scheduler"
+        ])
+  in
+  check bool "create succeeds" true (Tool_result.is_success created);
+  let open Yojson.Safe.Util in
+  check string "requested_by is the caller" "real-caller"
+    (Tool_result.data created |> member "requested_by" |> member "id" |> to_string);
+  check string "scheduled_by is the caller" "real-caller"
+    (Tool_result.data created |> member "scheduled_by" |> member "id" |> to_string);
+  let noted =
+    dispatch_exn ~caller config Tool_schemas_schedule.Add_note
+      (`Assoc
+        [ "schedule_id", `String "sched-actor-binding"
+        ; "body", `String "spoofed author"
+        ; "author_id", `String "spoofed-author"
+        ])
+  in
+  check bool "note succeeds" true (Tool_result.is_success noted);
+  check string "note author is the caller" "real-caller"
+    (Tool_result.data noted |> member "note" |> member "author_id" |> to_string);
+  let cancelled =
+    dispatch_exn ~caller config Tool_schemas_schedule.Cancel_request
+      (`Assoc
+        [ "schedule_id", `String "sched-actor-binding"
+        ; "cancelled_by_id", `String "spoofed-canceller"
+        ; "reason", `String "spoofed"
+        ])
+  in
+  check bool "cancel succeeds" true (Tool_result.is_success cancelled);
+  check string "cancelled_by is the caller" "real-caller"
+    (Tool_result.data cancelled |> member "cancelled_by" |> member "id" |> to_string)
 ;;
 
 (* A call gives one due input, or none when a calendar recurrence derives
@@ -1835,6 +1886,8 @@ let () =
             test_a_keeper_cannot_cancel_another_keepers_schedule
         ; test_case "an update keeps the row's actors and its target rule" `Quick
             test_an_update_keeps_the_rows_actors_and_its_target_rule
+        ; test_case "a named caller is the actor, not the argument" `Quick
+            test_a_named_caller_is_the_actor_not_the_argument
         ; test_case "a call gives exactly one due input" `Quick
             test_a_call_gives_exactly_one_due_input
         ; test_case "due_in_sec counts from the dispatch clock" `Quick

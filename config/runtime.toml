@@ -1593,11 +1593,6 @@ max-context = 262144
 max-prompt-bytes = 262144
 tools-support = true
 streaming = true
-# Runtime_inference.resolve_temperature's own comment records that
-# kimi-for-coding rejects any value other than 1.0 at request time ("only 1 is
-# allowed for this model"). Leaving it unset sends the fleet default and every
-# turn fails on that rejection.
-temperature = 1.0
 
 [models.kimi-for-coding.capabilities]
 supports-image-input = true
@@ -1608,14 +1603,12 @@ supports-multimodal-inputs = true
 wizard-default = true
 
 # K3 on the same plan, at both windows GET /coding/v1/models lists
-# (1048576 and the 262144 k3-256k, 2026-09-22). The endpoint takes temperature
-# 1 only while thinking is on, which is how Keeper requests leave. Not called
-# that day: the plan's weekly quota was spent.
+# (1048576 and the 262144 k3-256k, 2026-09-22). Not called that day: the
+# plan's weekly quota was spent.
 [models.kimi-k3]
 api-name = "k3"
 tools-support = true
 streaming = true
-temperature = 1.0
 
 [models.kimi-k3.capabilities]
 supports-image-input = true
@@ -1629,7 +1622,6 @@ context-low-water-tokens = 70000
 api-name = "k3-256k"
 tools-support = true
 streaming = true
-temperature = 1.0
 
 [models.kimi-k3-256k.capabilities]
 supports-image-input = true

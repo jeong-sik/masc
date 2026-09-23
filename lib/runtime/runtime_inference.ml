@@ -4,11 +4,9 @@
    temperature at every inference boundary for the model. Otherwise the caller's
    explicitly configured subsystem value stands.
 
-   Completes the previously stubbed per-runtime [resolve_temperature] (the
-   [~runtime_id:_] passthrough). Required for
-   a model that rejects the fleet default value: Kimi K2.7 (kimi-for-coding)
-   accepts only temperature = 1.0 and rejects any other at request time
-   ("only 1 is allowed for this model"). *)
+   A model whose endpoint fixes the value is not declared here: its AGENT_CORE
+   catalog row lists [ignored_sampling_parameters] and the request leaves the
+   field out, whatever this resolves to. *)
 let resolve_temperature ~runtime_id ~fallback =
   match Runtime.temperature_of_runtime_id runtime_id with
   | Some temperature -> temperature

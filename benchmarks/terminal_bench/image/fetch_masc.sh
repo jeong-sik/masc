@@ -26,19 +26,22 @@ if [[ -z "${MASC_VERSION}" ]]; then
   echo "[fetch] latest release: v${MASC_VERSION}"
 fi
 
-# The bootstrap writes env_file= into the shim config, a key a shim before
-# 0.35.20 refuses as unknown, and with it every request (masc#36919). The same
-# release is the first whose shim looks an argv program up in path= (masc#36916).
+# The floor is the first release the default arm can run. 0.37.0 is the first
+# whose catalog lets the claude provider serve the unscoped claude-fable-5 and
+# claude-fable-5-1 rows, so a request at effort high is sent instead of refused
+# on the first turn (masc#37849, masc#37924). It also keeps what 0.35.20 fixed:
+# the shim reads the env_file= the bootstrap writes (masc#36919) and looks an
+# argv program up in path= (masc#36916).
 # agents/masc_dist.py reads the same floor before it uploads dist/ to a task
 # container, so binaries fetched before this floor are refused there too. Only
-# X.Y.Z is compared: sort -V puts 0.35.20-rc1 after 0.35.20.
+# X.Y.Z is compared: sort -V puts 0.37.0-rc1 after 0.37.0.
 MIN_MASC_VERSION="$(<"${SCRIPT_DIR}/min_masc_version")"
 if [[ ! "${MASC_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "MASC_VERSION ${MASC_VERSION} is not an X.Y.Z release" >&2
   exit 1
 fi
 if [[ "$(printf '%s\n%s\n' "${MIN_MASC_VERSION}" "${MASC_VERSION}" | sort -V | head -1)" != "${MIN_MASC_VERSION}" ]]; then
-  echo "masc ${MASC_VERSION} is older than ${MIN_MASC_VERSION}, the first release whose shim reads the env_file= the bootstrap writes; use ${MIN_MASC_VERSION} or later" >&2
+  echo "masc ${MASC_VERSION} is older than ${MIN_MASC_VERSION}, the first release the default arm can run (see the floor comment above); use ${MIN_MASC_VERSION} or later" >&2
   exit 1
 fi
 

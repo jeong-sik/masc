@@ -1789,11 +1789,11 @@ let post_operator_confirm ~(host : string) ~(port : int) ~(token : string)
     [state] and [answers] out of the body to say what was chosen. *)
 let post_keeper_ask_answer ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(ask_id : string) ~(answers : Yojson.Safe.t)
-    ~(actor_id : string option) ~(session_id : string option) :
+    ~(session_id : string option) :
     (Yojson.Safe.t, string) result =
   let payload =
     match
-      Masc_tui_ask_projection.request_body ~answers ~actor_id ~session_id
+      Masc_tui_ask_projection.request_body ~answers ~session_id
     with
     | `Assoc fields ->
         `Assoc (("name", `String keeper_name) :: ("ask_id", `String ask_id) :: fields)

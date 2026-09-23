@@ -73,9 +73,7 @@ export async function submitAnswer(row: AskRow): Promise<boolean> {
   askError.value = null
   askConflict.value = null
   try {
-    // No actor_id here (task-1662): the server records the authenticated
-    // caller, so the client has no identity field to send.
-    await answerKeeperAsk(answerRequestBody(row, state.answers, {}))
+    await answerKeeperAsk(answerRequestBody(row, state.answers))
     closeAsk()
     await refreshKeeperAsks()
     return true

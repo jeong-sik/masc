@@ -152,9 +152,8 @@ export type AnswerRequestBody = {
   readonly session_id?: string
 }
 
-/** Who answered is not a body field (task-1662): the server records the
-    authenticated caller's principal and ignores any self-reported actor_id,
-    so the client does not send one. */
+/** The body names the ask and the answers. Who answered is the
+    authenticated caller, which the server takes from the request. */
 export function answerRequestBody(
   row: AskRow,
   answers: readonly AnswerWire[],

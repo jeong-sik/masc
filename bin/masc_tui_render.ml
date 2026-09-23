@@ -28,6 +28,7 @@ module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
+module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
@@ -325,11 +326,67 @@ let overview_team (state : state) =
         (Overview_team.project ~keepers:overview.ov_keeper_rows
            ~tasks:state.tasks ~attention:overview.ov_attention_items)
 
+(* The quota windows the runtime catalogue reports shut, as one line under
+   the Team block's stuck rows: a shut window is usually why the Keepers under it
+   are stuck, and when it reopens is what the operator waits on. Nothing is
+   drawn while every window is open or before the first read -- a line saying
+   "all open" on every frame would be texture. A failed read says so. *)
+(* A failed quota read is said, but as a detail line: it explains no stuck
+   row, so it takes only rows the Overview had spare. *)
+let overview_quota_unread_line (state : state) =
+  match state.overview_quota with
+  | Quota_failed err ->
+      Some
+        (Printf.sprintf "%squota windows unread: %s%s" Ansi.dim
+           (Terminal_text.single_line err) Ansi.reset)
+  | Quota_unread | Quota_read _ -> None
+
+let overview_quota_line (state : state) ~now =
+  match state.overview_quota with
+  | Quota_unread | Quota_failed _ -> None
+  | Quota_read options -> (
+      match Overview_team.shut_windows options with
+      | [] -> None
+      | windows ->
+          let window_text (window : Overview_team.shut_window) =
+            let scope =
+              match window.sw_scope with
+              | Some scope -> Terminal_text.single_line scope
+              | None -> "unscoped"
+            in
+            let reopen =
+              match window.sw_resets_at with
+              | None -> "reopening time not reported"
+              | Some at when at <= now -> "reopen due, not yet re-read"
+              | Some at ->
+                  let tm = Unix.gmtime at in
+                  Printf.sprintf "reopens %02d:%02dZ, in %s" tm.Unix.tm_hour
+                    tm.Unix.tm_min
+                    (keeper_lane_idle_text (int_of_float (at -. now)))
+            in
+            Printf.sprintf "%s%s%s (%d runtime%s) %s" (Theme.warn ()) scope
+              Ansi.reset window.sw_runtimes
+              (if window.sw_runtimes = 1 then "" else "s")
+              reopen
+          in
+          Some
+            (Printf.sprintf "%s\xe2\x8f\xb8%s quota shut: %s" (Theme.warn ())
+               Ansi.reset
+               (String.concat " \xc2\xb7 " (List.map window_text windows))))
+
+let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
+
+(* Lines under the Team block that explain no Keeper row: an unread quota
+   and the pull request summary. *)
+let overview_team_detail_lines (state : state) =
+  Option.to_list (overview_quota_unread_line state) @ overview_pulls_lines state
+
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
-let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols =
+let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
+    ~quota_line ~detail_lines =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -361,7 +418,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols =
     in
     let detail =
       match row.detail with
-      | Overview_team.Blocker { summary; held } ->
+      | Overview_team.Blocker { summary; held; item = _ } ->
           Terminal_text.single_line summary ^ held_tail held
       | Overview_team.Phase_word { word = _; held } ->
           Printf.sprintf "%sno attention item names a cause%s%s" Ansi.dim
@@ -414,7 +471,20 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols =
             Ansi.reset
         ]
   in
-  let rows = List.map keeper_line team.rows @ parked_line @ holders_line in
+  (* The shut-window line explains the stuck rows, so it sits right under
+     them: a viewport with room for one row keeps a stuck Keeper, and the
+     window that stopped it comes next. *)
+  let stuck, others =
+    List.partition
+      (fun (row : Overview_team.row) -> row.group = Overview_team.Needs_you)
+      team.rows
+  in
+  (* Detail lines come last: the layout gives them only rows nothing else
+     wanted, so a short viewport cuts them before any Keeper. *)
+  let rows =
+    List.map keeper_line stuck @ Option.to_list quota_line
+    @ List.map keeper_line others @ parked_line @ holders_line @ detail_lines
+  in
   let total = List.length rows in
   let counts =
     List.filter_map
@@ -479,23 +549,51 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols =
 
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows =
-  let attention_items =
+  let all_attention =
     match state.overview with
     | None -> []
     | Some overview -> overview.ov_attention_items
   in
   let tasks_error = Terminal_text.optional_single_line state.tasks_error in
-  let row_budget =
+  let team_count =
+    match overview_team state with
+    | None -> 0
+    | Some team ->
+        Overview_team.drawn_rows team
+        + Option.fold ~none:0 ~some:(fun _ -> 1)
+            (overview_quota_line state ~now:(Unix.gettimeofday ()))
+  in
+  let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
       ~has_cluster:(Option.is_some state.overview)
       ~attention_count:(List.length attention_items)
       ~event_count:(List.length state.events)
-      ~team_count:
-        (match overview_team state with
-         | None -> 0
-         | Some team -> Overview_team.drawn_rows team)
+      ~team_count
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
+  in
+  (* An item a drawn Team row carries -- a stuck Keeper's row prints its
+     sentence -- is that Keeper's row there; drawn in both places the same
+     stop took two rows and read as two problems. Only items the viewport
+     actually draws on a Team row leave the panel: an item about a running
+     Keeper, a second item about the same Keeper, and the items of rows the
+     budget cuts all stay, because nothing else on screen says them. *)
+  let attention_items, row_budget =
+    match overview_team state with
+    | None -> (all_attention, allocate all_attention)
+    | Some team ->
+        Overview_team.settle team ~attention:all_attention ~allocate
+          ~team_rows:(fun (budget : Render_schedule.overview_allocation) ->
+            budget.team_rows)
+  in
+  (* Detail lines are settled after the Keeper rows: they only take rows
+     nothing else wanted, so they never change which items a row carries. *)
+  let row_budget =
+    match overview_team state with
+    | None -> row_budget
+    | Some _ ->
+        Render_schedule.spend_spare_rows_on_team row_budget
+          ~extra:(List.length (overview_team_detail_lines state))
   in
   attention_items, tasks_error, row_budget
 
@@ -684,13 +782,31 @@ let render_overview (state : state) =
      where it says something the rows cannot: that some did not fit. The
      Events panel beside it states its window the same way. *)
   let attention_count = List.length attention_items in
+  (* Items a drawn Team row carries are drawn there, not here
+     ([overview_layout]). The panel says how many went there, so its count
+     and the briefing's total do not disagree without a reason on screen,
+     and an empty panel is not read as "nothing needs attention". *)
+  let on_team_rows =
+    match ov with
+    | None -> 0
+    | Some o -> List.length o.ov_attention_items - attention_count
+  in
   let attention_title =
-    if attention_count = 0 then " Attention "
-    else if attention_count <= row_budget.attention_rows then
-      Printf.sprintf " Attention %d " attention_count
-    else
-      Printf.sprintf " Attention %d/%d " row_budget.attention_rows
-        attention_count
+    let counted =
+      if attention_count = 0 then " Attention "
+      else if attention_count <= row_budget.attention_rows then
+        Printf.sprintf " Attention %d " attention_count
+      else
+        Printf.sprintf " Attention %d/%d " row_budget.attention_rows
+          attention_count
+    in
+    let with_team =
+      Printf.sprintf "%s+%d on Team " counted on_team_rows
+    in
+    if attention_count > 0 && on_team_rows > 0
+       && String.length with_team <= panel_width
+    then with_team
+    else counted
   in
   (* A burst of identical lines (manual refreshes, a broadcast fan-out) folds
      into one row with a ×N tail; the window scrolls over folded rows. *)
@@ -736,6 +852,8 @@ let render_overview (state : state) =
      column. *)
   let attention_empty_note =
     match empty_page_of ~snapshot:state.overview ~error:overview_error with
+    | Page_empty when on_team_rows > 0 ->
+        Some (Printf.sprintf "(%d on Team rows below)" on_team_rows)
     | Page_empty -> Some "(nothing needs attention)"
     | Page_unread -> Some (String.trim page_unread_note)
     | Page_failed -> None
@@ -817,6 +935,8 @@ let render_overview (state : state) =
        let title, lines =
          overview_team_lines team ~team_rows:row_budget.team_rows
            ~flow:state.task_flow ~cols
+           ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
+           ~detail_lines:(overview_team_detail_lines state)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;
@@ -5114,7 +5234,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
      did work. *)
   let obligation = if lane.sl_required then "Required" else "Optional" in
   let configuration =
-    Tui_decode.standalone_lane_configuration_to_string
+    Tui_decode.standalone_lane_configuration_phrase
       lane.sl_configuration_state
   in
   let last_run =
@@ -5175,24 +5295,33 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     else "Runs: no runs retained yet"
   in
   let slot_distribution =
-    match lane.sl_selected_slots with
-    | [] -> []
-    | scs ->
-        let dist =
-          String.concat ", "
+    (* Every finished run, by who answered it. The slot counts cover only
+       runs that named a slot; the rest come from the server by why they
+       named none. On Board Attention most of those are Vendor System One,
+       which answers before any slot is bound (#37296), so a reader who saw
+       only the slots would take its answers for missing records. *)
+    let dist =
+      match lane.sl_selected_slots with
+      | [] -> []
+      | scs ->
+        [ String.concat ", "
             (List.map
                (fun (sc : Tui_decode.standalone_lane_slot_count) ->
                   Printf.sprintf "%s: %d"
                     (Terminal_text.single_line sc.slsc_slot_id) sc.slsc_count)
-               scs)
-        in
-        wrap Ansi.reset ("Slot selection history: " ^ dist)
+               scs) ]
+    in
+    match dist @ standalone_lane_runs_without_slot_parts lane with
+    | [] -> []
+    | parts ->
+      wrap Ansi.reset
+        ("Slot selection history: " ^ String.concat " \xc2\xb7 " parts)
   in
   wrap Ansi.bold
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
        (Terminal_text.single_line purpose))
   @ wrap state_style
-      (Printf.sprintf "%s lane · configuration %s · %s" obligation
+      (Printf.sprintf "%s lane · %s · %s" obligation
          configuration last_run)
   @ wrap Ansi.dim
       (Printf.sprintf "Config: [runtime.exact_output_lanes.%s]"
@@ -7248,12 +7377,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
                     state.keepers
                 in
                 let binding_reference (binding : Tui_decode.connector_binding) =
-                  match binding.cb_channel_name with
-                  | None -> Terminal_text.single_line binding.cb_channel_id
-                  | Some name ->
-                      Printf.sprintf "%s (%s)"
-                        (Terminal_text.single_line name)
-                        (Terminal_text.single_line binding.cb_channel_id)
+                  Masc_tui_connector_unbind.channel_label
+                    ~channel_id:binding.cb_channel_id
+                    ~channel_name:binding.cb_channel_name
                 in
                 let store_state =
                   match connector.cn_binding_store_read_ok with

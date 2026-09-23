@@ -354,9 +354,58 @@ let test_frame_exit_and_injected_env () =
       request.remote_root;
     check string "raw stdin" "in" stdin;
     check (list (pair string string))
-      "identity env names the mounted snapshot, then allowlisted caller env"
-      [ "GH_CONFIG_DIR", gh_config_dir; "GIT_TERMINAL_PROMPT", "0"; "LANG", "C" ]
+      "identity env names the mounted snapshot and the keeper's commit names, \
+       then allowlisted caller env"
+      [ "GH_CONFIG_DIR", gh_config_dir
+      ; "GIT_TERMINAL_PROMPT", "0"
+      ; "GIT_AUTHOR_NAME", "keeper-a"
+      ; "GIT_COMMITTER_NAME", "keeper-a"
+      ; "LANG", "C"
+      ]
       request.env
+;;
+
+(* An endpoint may allowlist the runner-owned names for callers. The caller's
+   copy must still lose: the frame carries each name once, with the value the
+   runtime chose for this Keeper. *)
+let test_caller_cannot_replace_runner_owned_env () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, frame_path = make_stub ~dir:base_path ~mode:"exit3" in
+  let state =
+    Keeper_sandbox_remote.of_container_exec ~base_path ~keeper_name:"keeper-a"
+      ~remote_root ~gh_config_dir ~injected_env:[]
+      ~env_allowlist:
+        [ "LANG"; "GIT_AUTHOR_NAME"; "GIT_COMMITTER_NAME"; "GH_CONFIG_DIR" ]
+      ~connect_timeout_sec:1 ~max_concurrent_sessions:2 (guest ~cli ())
+  in
+  let runner = Keeper_sandbox_remote.runner ~timeout_sec:2.0 state in
+  ignore
+    (run_request runner ~cwd:None
+       ~env:
+         [| "LANG=C"
+          ; "GIT_AUTHOR_NAME=impostor"
+          ; "GIT_COMMITTER_NAME=impostor"
+          ; "GH_CONFIG_DIR=/impostor/gh"
+         |]
+       ()
+     : Unix.process_status * string * string);
+  match Exec_ssh_protocol.decode_request (read_file frame_path) with
+  | Error error -> fail error
+  | Ok (request, _) ->
+    let values name =
+      List.filter_map
+        (fun (key, value) -> if String.equal key name then Some value else None)
+        request.env
+    in
+    check (list string) "author is the keeper, once" [ "keeper-a" ]
+      (values "GIT_AUTHOR_NAME");
+    check (list string) "committer is the keeper, once" [ "keeper-a" ]
+      (values "GIT_COMMITTER_NAME");
+    check (list string) "GitHub config is the lane's, once" [ gh_config_dir ]
+      (values "GH_CONFIG_DIR");
+    check (list string) "ordinary allowlisted caller env still passes" [ "C" ]
+      (values "LANG")
 ;;
 
 let test_default_cwd_is_the_request_root () =
@@ -702,6 +751,8 @@ let () =
           ; test_case "remote timeout retains its trusted receipt" `Quick
               test_trusted_remote_timeout_retains_receipt
           ; test_case "transport + probe argv" `Quick test_transport_and_probe_argv
+          ; test_case "caller cannot replace runner-owned env" `Quick
+              test_caller_cannot_replace_runner_owned_env
           ; test_case "probe prefers probe_prefix when present" `Quick
               test_container_exec_probe_argv_prefers_probe_prefix
           ; test_case "openssh probe stays one word" `Quick

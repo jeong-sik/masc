@@ -5028,6 +5028,9 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "last_outcome", (if retained = 0 then `Null else `String "succeeded")
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
+    ; ( "runs_without_slot"
+      , `Assoc
+          [ "vendor_system_one", `Int 0; "server_restarted", `Int 0; "no_slot", `Int 0 ] )
     ]
      @ jev)
 
@@ -5100,6 +5103,46 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
     Alcotest.(check bool) "the configuration reader is what refused it" true
       (String.starts_with
          ~prefix:"lanes[0]: standalone lane configuration: unknown value" detail)
+
+(* The lane detail line reads [obligation ^ " lane"], then this clause, then
+   the last run. The caller used to introduce the clause with a noun of its
+   own -- "configuration " ^ the word -- while three of the four words
+   already carry their subject, so the live screen read "configuration not
+   configured" over an unconfigured lane, and the other two would have read
+   "configuration no slot admitted" and "configuration registry unreadable".
+   Each state now says its own subject and the caller says none. *)
+let test_a_lane_configuration_clause_carries_its_own_subject () =
+  let clause = Tui_decode.standalone_lane_configuration_phrase in
+  Alcotest.(check string) "ready" "configuration ready"
+    (clause Tui_decode.Lane_ready);
+  Alcotest.(check string) "configured with nothing admitted"
+    "configured, but no slot admitted" (clause Tui_decode.Lane_slotless);
+  Alcotest.(check string) "unconfigured" "not configured"
+    (clause Tui_decode.Lane_unconfigured);
+  Alcotest.(check string) "registry unreadable" "registry unreadable"
+    (clause Tui_decode.Lane_registry_unavailable);
+  (* Read back in the shape the line draws them: none of the four names the
+     subject a second time. *)
+  List.iter
+    (fun state ->
+      let line =
+        Printf.sprintf "Required lane %s no run has finished" (clause state)
+      in
+      List.iter
+        (fun stutter ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%S does not read %S" line stutter)
+            false
+            (String_util.contains_substring line stutter))
+        [ "configuration not configured"
+        ; "configuration no slot"
+        ; "configuration registry"
+        ])
+    [ Tui_decode.Lane_ready
+    ; Tui_decode.Lane_slotless
+    ; Tui_decode.Lane_unconfigured
+    ; Tui_decode.Lane_registry_unavailable
+    ]
 
 (* The start of the newest run. The fixture has carried it since this suite
    was written and the decoder read it into an underscore, so the field
@@ -10758,6 +10801,8 @@ let () =
           test_decode_memory_alert_keeps_the_code_contract;
         Alcotest.test_case "standalone lane configuration is a closed set" `Quick
           test_decode_standalone_lane_configuration_is_a_closed_set;
+        Alcotest.test_case "a lane configuration clause carries its subject"
+          `Quick test_a_lane_configuration_clause_carries_its_own_subject;
         Alcotest.test_case "memory facts keep both stores" `Quick
           test_decode_memory_facts_keeps_both_stores;
         Alcotest.test_case "memory fact refuses an unknown category" `Quick

@@ -2272,7 +2272,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v10 snapshot" 10 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v11 snapshot" 11 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"

@@ -1226,7 +1226,10 @@ status: reference
   에도 있어야 한다. `absorbs`는 Fact 여러 개를 새 claim 하나가 대신 말하며(N:1)
   그 id들은 `dropped`에 없어야 한다. 흡수된 원문은
   `<keeper>.memory-absorbed.jsonl`에 남는다. Librarian이 말하지 않은 Fact는
-  그대로 남고, 규칙을 어긴 답은 통째로 거절된다.
+  그대로 남고, 규칙을 어긴 답은 통째로 거절된다. 이미 있는 Fact와 같은 글자를
+  다시 쓰는 것은 새 Fact가 아니라 그 Fact다 — 아무것도 더하지 않고 저장된 Fact를
+  유지하며, 거절이 아니다. 같은 답이 그 Fact를 `dropped`로도 적으면 "사라졌다"와
+  "남는다"를 함께 말한 모순이라 거절한다(`Dropped_memory_id_recreated`).
 
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는

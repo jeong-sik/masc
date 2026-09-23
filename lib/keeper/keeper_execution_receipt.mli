@@ -264,6 +264,7 @@ type latest_receipt_summary =
   { latest_outcome : outcome_kind
   ; latest_terminal_reason_code : string
   ; latest_error_message : string option
+    (** [error.message]; [to_json] writes the error as a nested object. *)
   ; latest_ended_at : string
   }
 

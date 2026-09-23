@@ -297,7 +297,7 @@ let test_typed_provider_code_summary_is_the_record () =
   check string "class" "provider_runtime_error" surface.KSB.blocker_class;
   check string "the summary is the record's code and detail"
     (Printf.sprintf "Provider runtime error (%s): %s" code detail)
-    surface.KSB.summary
+    (Lazy.force surface.KSB.summary)
 ;;
 
 let test_provider_timeout_catch_all_stays_provider_runtime_error () =

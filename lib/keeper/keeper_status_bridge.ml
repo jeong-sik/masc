@@ -163,7 +163,7 @@ let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper
   match runtime_blocker_surface_opt config meta with
   | Some blocker ->
     [ "runtime_blocker_class", `String blocker.blocker_class
-    ; "runtime_blocker_summary", `String blocker.summary
+    ; "runtime_blocker_summary", `String (Lazy.force blocker.summary)
     ; "runtime_blocker_facts", runtime_blocker_facts_json meta
     ]
   | None ->

@@ -397,7 +397,7 @@ let test_registry_failure_reason_preserves_typed_configuration_error () =
     Alcotest.(check bool)
       "operator summary excludes raw InvalidConfig detail"
       false
-      (String_util.contains_substring surface.summary secret)
+      (String_util.contains_substring (Lazy.force surface.summary) secret)
   | Some other ->
     Alcotest.failf
       "expected redacted Provider_runtime_error, got %s"

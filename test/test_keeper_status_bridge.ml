@@ -619,7 +619,7 @@ let test_turn_failures_summary_names_the_newest_failed_receipt () =
         | Some surface ->
           Alcotest.(check string)
             "class" "turn_failures" surface.Keeper_status_bridge.blocker_class;
-          surface.Keeper_status_bridge.summary
+          Lazy.force surface.Keeper_status_bridge.summary
         | None -> Alcotest.fail "a turn failure streak must produce a blocker surface"
       in
       let empty = summary () in
@@ -662,7 +662,26 @@ let test_turn_failures_summary_names_the_newest_failed_receipt () =
       Alcotest.(check bool)
         "the non-failed newest receipt is named as such"
         true
-        (contains after_ok "not a failed turn"))
+        (contains after_ok "not a failed turn");
+      (* A provider wall-clock timeout ends the turn on the failure path with a
+         cancelled receipt; that receipt is this streak's cause. *)
+      Dated_jsonl.append
+        store
+        (Keeper_execution_receipt.to_json
+           (receipt_row
+              ~keeper_name
+              ~outcome:`Cancelled
+              ~terminal_reason_code:"api_error_timeout"
+              ~error_message:(Some "provider wall-clock timeout")
+              ~ended_at:"2026-09-23T01:10:00Z"));
+      let after_cancelled = summary () in
+      List.iter
+        (fun (label, needle) ->
+          Alcotest.(check bool) label true (contains after_cancelled needle))
+        [ "labels the cancelled turn", "cancelled"
+        ; "names the cancelled turn's reason", "api_error_timeout"
+        ; "names the cancelled turn's message", "provider wall-clock timeout"
+        ])
 ;;
 
 let () =

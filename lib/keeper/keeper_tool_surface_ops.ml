@@ -235,7 +235,7 @@ let keeper_list_row_json ~runtime_class config name =
             (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
                ~latest_receipt:(fun () ->
                  Keeper_execution_receipt.read_latest_receipt config meta.name)))
-        |> Option.map (fun blocker -> blocker.Keeper_status_bridge.summary)
+        |> Option.map (fun blocker -> Lazy.force blocker.Keeper_status_bridge.summary)
       in
       let keepalive_running =
         Keeper_status_runtime.keepalive_running_of_phase registry_phase

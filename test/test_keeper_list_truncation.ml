@@ -351,7 +351,7 @@ let timeout_reason () =
 let timeout_summary () =
   match (Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
       ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) (timeout_reason ()) with
-  | Some surface -> surface.summary
+  | Some surface -> Lazy.force surface.summary
   | None -> fail "runtime failure did not produce a status summary"
 ;;
 

@@ -9,9 +9,11 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+(** [summary] is lazy: the [turn_failures] summary reads the receipt store,
+    and callers that only need [blocker_class] never force it. *)
 type runtime_blocker_surface = {
   blocker_class : string;
-  summary : string;
+  summary : string Lazy.t;
 }
 
 val blocker_class_of_core_error :

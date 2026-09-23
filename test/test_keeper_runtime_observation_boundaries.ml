@@ -134,7 +134,7 @@ let check_registry_observation terminal ~core_error ~expected ~expected_timeout_
         ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt)) stored with
     | Some surface ->
       Alcotest.(check string) "public status describes the observed failure"
-        expected_summary surface.summary
+        expected_summary (Lazy.force surface.summary)
     | None -> Alcotest.fail "registry cause was missing from public status")
 
 let check_error_observation err expected expected_timeout_prefix () =

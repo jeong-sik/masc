@@ -623,7 +623,10 @@ let latest_receipt_reading_of_json json =
        Latest_receipt
          { latest_outcome
          ; latest_terminal_reason_code
-         ; latest_error_message = Json_util.assoc_string_opt "error_message" json
+         ; latest_error_message =
+             Option.bind
+               (Json_util.assoc_member_opt "error" json)
+               (Json_util.assoc_string_opt "message")
          ; latest_ended_at
          })
 ;;

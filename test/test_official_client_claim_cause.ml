@@ -118,10 +118,10 @@ let check_preserved ~base_path ~keeper_name ~expected error =
              Alcotest.(check string) "public local recovery class"
                "official_client_recovery_required" surface.blocker_class;
              Alcotest.(check string) "public recovery identity"
-               (I.official_client_recovery_summary expected) surface.summary;
+               (I.official_client_recovery_summary expected) (Lazy.force surface.summary);
              `Assoc
                [ "runtime_blocker_class", `String surface.blocker_class
-               ; "runtime_blocker_summary", `String surface.summary ]
+               ; "runtime_blocker_summary", `String (Lazy.force surface.summary) ]
            | None -> Alcotest.fail "registry failure has no public blocker"
          in
          Printf.printf "CLAIM_CAUSE_PROJECTION %s\n%!"

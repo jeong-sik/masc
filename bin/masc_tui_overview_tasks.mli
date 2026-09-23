@@ -51,6 +51,16 @@ val lines :
     count left out, then the backlog line -- each of the two only while a
     task row is still drawn beside it. *)
 
+val row_of : Masc.Tui_decode.task list -> task_id:string -> int option
+(** The open task's position in {!rows}. [None] for a task that has no row
+    -- a [Todo], [Done] or [Cancelled] one opened from the palette, a link or
+    the agenda -- and then no row is highlighted beside its detail. *)
+
+val cursor_after_open : Masc.Tui_decode.task list -> task_id:string -> int
+(** Where the Overview task cursor goes when a task's detail opens: its row,
+    or the first row when it has none, so j/k after the detail closes start
+    from the top of the list rather than from a row nobody chose. *)
+
 val age_text : age_text:(int -> string) -> now:float -> float option -> string
 (** [age_text] applied to the seconds from the given instant to [now]; ["?"]
     when there is no instant to measure from. *)

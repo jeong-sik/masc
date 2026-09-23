@@ -1233,12 +1233,15 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
       let left_cols = keeper_roster_pane_cols in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Tasks"
-        ~focused:false
+      (* The highlight names the task this detail shows, not the cursor: a
+         todo task opened from the palette or a link has no row here, and
+         the row the cursor last rested on would be a different task. *)
+      write_list_sidebar_selection left_buf ~rows ~cols:left_cols
+        ~title:"Tasks" ~focused:false
         ~labels:
           (List.map (fun (row : Tui_decode.task) -> row.title)
              (Overview_tasks.rows state.tasks))
-        ~selected:state.task_cursor;
+        ~selection:(Overview_tasks.row_of state.tasks ~task_id:task.id);
       let answer =
         task_detail_pane state ~rows ~cols:(cols - left_cols) task right_buf
       in

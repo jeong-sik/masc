@@ -19767,6 +19767,9 @@ and is loaded on demand through keeper_skill.
                          state.task_detail_id <- Some task_id;
                          state.task_detail_scroll <- 0;
                          state.task_history <- None;
+                         state.task_cursor <-
+                           Masc_tui_overview_tasks.cursor_after_open
+                             state.tasks ~task_id;
                          launch_task_history_load state
                            ~mailbox:async_messages task_id))
             | _ -> ())
@@ -20103,15 +20106,9 @@ and is loaded on demand through keeper_skill.
                      state.task_history <- None;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id;
-                     let rec index_of i = function
-                       | [] -> None
-                       | (t : Masc_tui_types.task) :: rest ->
-                           if String.equal t.id task_id then Some i
-                           else index_of (i + 1) rest
-                     in
-                     (match index_of 0 (Masc_tui_overview_tasks.rows state.tasks) with
-                      | Some index -> state.task_cursor <- index
-                      | None -> ())
+                     state.task_cursor <-
+                       Masc_tui_overview_tasks.cursor_after_open state.tasks
+                         ~task_id
                  | Some (_, Masc_tui_types.Palette_board_hearth hearth) ->
                      state.board_hearth <- hearth;
                      state.board_cursor <- 0;
@@ -22042,6 +22039,9 @@ and is loaded on demand through keeper_skill.
                  | Overview, Some task_id ->
                      state.task_detail_id <- Some task_id;
                      state.task_history <- None;
+                     state.task_cursor <-
+                       Masc_tui_overview_tasks.cursor_after_open state.tasks
+                         ~task_id;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id
                  | Planning, Some goal_id ->
@@ -24266,18 +24266,10 @@ and is loaded on demand through keeper_skill.
                  state.task_detail_scroll <- 0;
                  state.task_history <- None;
                  launch_task_history_load state ~mailbox:async_messages tid;
-                 let rec index_of i = function
-                   | [] -> None
-                   | (t : Masc_tui_types.task) :: rest ->
-                       if String.equal t.id tid then Some i
-                       else index_of (i + 1) rest
-                 in
-                 (match index_of 0 (Masc_tui_overview_tasks.rows state.tasks) with
-                  | Some idx ->
-                      state.task_cursor <- idx;
-                      state.task_focus <- Right_pane
-                  | None ->
-                      state.task_focus <- Right_pane)
+                 state.task_cursor <-
+                   Masc_tui_overview_tasks.cursor_after_open state.tasks
+                     ~task_id:tid;
+                 state.task_focus <- Right_pane
              | None ->
                  state.task_detail_id <- None;
                  state.task_focus <- Right_pane;

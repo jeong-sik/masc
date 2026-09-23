@@ -231,6 +231,18 @@ val write_list_sidebar :
   cols:int ->
   title:string -> focused:bool -> labels:string list -> selected:int -> unit
 
+val write_list_sidebar_selection :
+  Buffer.t ->
+  rows:int ->
+  cols:int ->
+  title:string ->
+  focused:bool ->
+  labels:string list ->
+  selection:int option ->
+  unit
+(** {!write_list_sidebar} for a list the open item may not be in: [None]
+    highlights no row and leaves the list at its top. *)
+
 val data_unreliable_row : cols:int -> string -> string
 
 val overview_pulse_text : Masc_tui_types.state -> now:float -> string

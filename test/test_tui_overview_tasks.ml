@@ -147,6 +147,22 @@ let test_nothing_held_is_said () =
   check int "the layout asks for both lines" 2
     (Tasks.line_count todo_only backlog)
 
+(* The palette, a followed link, the agenda and the change view all land
+   through [cursor_after_open], and the detail's sidebar highlights
+   [row_of] the open task. *)
+let test_open_todo_highlights_nothing () =
+  check (option int) "a todo task opened from the palette has no row" None
+    (Tasks.row_of tasks ~task_id:"task-1501");
+  check int "the cursor goes back to the first row" 0
+    (Tasks.cursor_after_open tasks ~task_id:"task-1501")
+
+let test_open_held_task_highlights_its_row () =
+  check (option int) "an in-progress task opened from a link is its row"
+    (Some 1)
+    (Tasks.row_of tasks ~task_id:"task-1710");
+  check int "the cursor lands on that row" 1
+    (Tasks.cursor_after_open tasks ~task_id:"task-1710")
+
 let () =
   run "tui_overview_tasks"
     [ ( "overview tasks",
@@ -156,5 +172,9 @@ let () =
         ; test_case "rows are the cursor order" `Quick
             test_rows_are_the_cursor_order
         ; test_case "nothing held is said" `Quick test_nothing_held_is_said
+        ; test_case "an open todo task highlights no row" `Quick
+            test_open_todo_highlights_nothing
+        ; test_case "an open held task highlights its row" `Quick
+            test_open_held_task_highlights_its_row
         ] )
     ]

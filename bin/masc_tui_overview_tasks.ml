@@ -115,6 +115,20 @@ let lines ~height ~cursor tasks backlog =
     if count_lines = 0 then window
     else window @ (More_active (held_count - visible) :: trailer)
 
+let row_of tasks ~task_id =
+  let rec find index = function
+    | [] -> None
+    | (task : Tui_decode.task) :: rest ->
+        if String.equal task.id task_id then Some index
+        else find (index + 1) rest
+  in
+  find 0 (rows tasks)
+
+let first_row = 0
+
+let cursor_after_open tasks ~task_id =
+  Option.value (row_of tasks ~task_id) ~default:first_row
+
 let age_text ~age_text ~now since =
   match since with
   | None -> "?"

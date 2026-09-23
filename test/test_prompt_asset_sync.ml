@@ -513,8 +513,10 @@ let outcome_testable =
          | Managed_asset_sync.Promoted_to_override { key } -> "promoted " ^ key
          | Managed_asset_sync.Promoted_reset_failed { key; reason = _ } ->
            "promoted, reset failed " ^ key
-         | Managed_asset_sync.Kept_override_exists { key } -> "kept, override exists " ^ key
-         | Managed_asset_sync.Kept_not_promotable { reason } -> "kept: " ^ reason
+         | Managed_asset_sync.Preserved_override_exists { key; preserved_at } ->
+           Printf.sprintf "preserved at %s, override exists %s" preserved_at key
+         | Managed_asset_sync.Preserved_not_promotable { reason; preserved_at } ->
+           Printf.sprintf "preserved at %s: %s" preserved_at reason
          | Managed_asset_sync.Discarded -> "discarded"))
     ( = )
 
@@ -594,10 +596,67 @@ let test_edited_prompt_becomes_its_override () =
       check int "the next pass finds nothing edited" 0
         (List.length again.Managed_asset_sync.operator_edits))
 
-(* The operator already saved an override for the key. Which text they
-   mean is theirs to say, so the edited file stays and is reported, pass
-   after pass, until they resolve it. *)
-let test_edited_prompt_with_an_override_is_kept () =
+(* The files a pass wrote beside the managed ones to keep an edit. *)
+let preserved_files prompts =
+  Sys.readdir prompts |> Array.to_list
+  |> List.filter (fun name -> mentions ~line:name ".operator-edit-")
+  |> List.sort compare
+
+let preserved_name file content =
+  Printf.sprintf "%s.operator-edit-%s" file
+    (String.sub Digestif.SHA256.(digest_string content |> to_hex) 0 8)
+
+let curator_v3 =
+  "---\ndescription: curator\ntemplate_variables: [memory]\n---\nKeep the newest \
+   wording for {{memory}}.\n"
+
+let grouped_v3 =
+  "---\ndescription: grouped\n---\n### one\nFirst slot, newer.\n\n### two\nSecond slot.\n"
+
+(* A release after the edit ships a new distribution copy: the pass
+   installs it, since the file holds what the previous pass wrote, and the
+   preserved edit is still there, neither retired nor read as a prompt. *)
+let check_next_release_installs ~name ~base ~prompts ~file ~preserved =
+  let assets =
+    List.map
+      (fun (rel, content) ->
+        if String.equal rel "prompts/curator.md" then rel, curator_v3
+        else if String.equal rel "prompts/grouped.md" then rel, grouped_v3
+        else rel, content)
+      (grouped_embedded :: prompt_embedded)
+  in
+  let result = prompt_sync_with ~assets ~base ~prompts in
+  check int (name ^ ": next release: no operator edit") 0
+    (List.length result.Managed_asset_sync.operator_edits);
+  check (list string) (name ^ ": next release: nothing retired") []
+    result.Managed_asset_sync.removed;
+  check string (name ^ ": next release: the new copy is installed")
+    (List.assoc ("prompts/" ^ file) assets)
+    (read_file (Filename.concat prompts file));
+  check (list string) (name ^ ": next release: the preserved edit stays") [ preserved ]
+    (preserved_files prompts);
+  Prompt_registry.clear ();
+  Fun.protect ~finally:Prompt_registry.clear (fun () ->
+      Prompt_registry.set_markdown_dir prompts;
+      let keys =
+        List.filter_map
+          (function
+            | `Assoc fields ->
+              (match List.assoc_opt "key" fields with
+               | Some (`String key) -> Some key
+               | Some _ | None -> None)
+            | _ -> None)
+          (Prompt_registry.list_prompts ())
+      in
+      check bool (name ^ ": the registry reads the managed prompt") true
+        (List.mem "curator" keys);
+      check bool (name ^ ": and no preserved edit as a prompt") false
+        (List.exists (fun key -> mentions ~line:key "operator-edit") keys))
+
+(* The operator already saved an override for the key, and it stays in
+   force. The edit is kept beside the file, the file goes back to the
+   distribution copy, and a later release still reaches it. *)
+let test_edited_prompt_with_an_override_is_preserved () =
   with_workspace (fun ~base ~prompts ->
       let (_ : Managed_asset_sync.sync_result) = prompt_sync ~base ~prompts in
       Unix.mkdir (Filename.concat base ".masc") 0o700;
@@ -613,23 +672,33 @@ let test_edited_prompt_with_an_override_is_kept () =
        | Ok () -> ()
        | Error error -> failf "%s" (Prompt_override_persistence.error_to_string error));
       let file = Filename.concat prompts "curator.md" in
-      write_file file edited_curator;
+      let preserved = preserved_name "curator.md" edited_curator in
+      (* The second pass meets the same edit again, and the copy already
+         beside the file is left as it is. *)
       List.iter
         (fun pass ->
+          write_file file edited_curator;
           let result = prompt_sync ~base ~prompts in
-          check (list (pair string outcome_testable)) (pass ^ ": a conflict is reported")
+          check (list (pair string outcome_testable)) (pass ^ ": the edit is preserved")
             [ ( "prompts/curator.md"
-              , Managed_asset_sync.Kept_override_exists { key = "curator" } )
+              , Managed_asset_sync.Preserved_override_exists
+                  { key = "curator"; preserved_at = Filename.concat prompts preserved } )
             ]
             (edits result);
-          check string (pass ^ ": the edited file is untouched") edited_curator
-            (read_file file))
-        [ "first pass"; "second pass" ];
-      match Prompt_override_persistence.load ~path:(overrides_path base) with
-      | Ok [ entry ] ->
-        check string "the saved override is unchanged" "Saved earlier from {{memory}}."
-          entry.Prompt_override_persistence.value
-      | Ok _ | Error _ -> fail "the saved override changed")
+          check string (pass ^ ": the file is the distribution copy")
+            (List.assoc "prompts/curator.md" prompt_embedded) (read_file file);
+          check (list string) (pass ^ ": one preserved file") [ preserved ]
+            (preserved_files prompts);
+          check string (pass ^ ": holding the edit") edited_curator
+            (read_file (Filename.concat prompts preserved)))
+        [ "first pass"; "same edit again" ];
+      (match Prompt_override_persistence.load ~path:(overrides_path base) with
+       | Ok [ entry ] ->
+         check string "the saved override is unchanged" "Saved earlier from {{memory}}."
+           entry.Prompt_override_persistence.value
+       | Ok _ | Error _ -> fail "the saved override changed");
+      check_next_release_installs ~name:"override exists" ~base ~prompts
+        ~file:"curator.md" ~preserved)
 
 (* Tool definitions have no edit layer. The edit is overwritten, and the
    operator is told which file lost it. *)
@@ -719,24 +788,35 @@ let test_a_previous_distribution_copy_is_never_promoted () =
         (List.assoc "prompts/curator.md" prompt_embedded)
         (read_file (Filename.concat prompts "curator.md")))
 
-(* An edit that does not map to one override stays in the file, the
-   override file is not touched, and the reason is reported. *)
-let test_unpromotable_edits_are_kept () =
+(* An edit that does not map to one override is kept beside the file, the
+   file goes back to the distribution copy, the override file is not
+   touched, and the reason is reported. A later release still reaches the
+   file. *)
+let test_unpromotable_edits_are_preserved () =
   List.iter
     (fun (name, file, edited, reason_part) ->
       with_workspace (fun ~base ~prompts ->
           let (_ : Managed_asset_sync.sync_result) = prompt_sync ~base ~prompts in
           let path = Filename.concat prompts file in
           write_file path edited;
+          let preserved = preserved_name file edited in
           let result = prompt_sync ~base ~prompts in
           (match edits result with
-           | [ (_, Managed_asset_sync.Kept_not_promotable { reason }) ] ->
+           | [ (_, Managed_asset_sync.Preserved_not_promotable { reason; preserved_at }) ] ->
              check bool (name ^ ": the reason says why") true
-               (mentions ~line:reason reason_part)
-           | found -> failf "%s: expected one kept edit, found %d" name (List.length found));
-          check string (name ^ ": the file keeps the edit") edited (read_file path);
+               (mentions ~line:reason reason_part);
+             check string (name ^ ": the preserved path") (Filename.concat prompts preserved)
+               preserved_at
+           | found ->
+             failf "%s: expected one preserved edit, found %d" name (List.length found));
+          check string (name ^ ": the edit is kept beside the file") edited
+            (read_file (Filename.concat prompts preserved));
+          check string (name ^ ": the file is the distribution copy")
+            (List.assoc ("prompts/" ^ file) (grouped_embedded :: prompt_embedded))
+            (read_file path);
           check bool (name ^ ": no override written") false
-            (Sys.file_exists (overrides_path base))))
+            (Sys.file_exists (overrides_path base));
+          check_next_release_installs ~name ~base ~prompts ~file ~preserved))
     [ ( "slot file"
       , "grouped.md"
       , "---\ndescription: grouped\n---\n### one\nMy slot.\n\n### two\nSecond slot.\n"
@@ -779,8 +859,8 @@ let test_a_failed_reset_after_promotion_is_reported_then_finished () =
         check string "and resets the file"
           (List.assoc "prompts/curator.md" prompt_embedded) (read_file file))
 
-(* The override file cannot be written: nothing was saved, so the edit
-   stays in the file and the reason is reported. *)
+(* The override file cannot be written: nothing was saved there, so the
+   edit is kept beside the file and the reason is reported. *)
 let test_an_unwritable_override_file_keeps_the_edit () =
   if Unix.geteuid () = 0 then ()
   else
@@ -792,10 +872,12 @@ let test_an_unwritable_override_file_keeps_the_edit () =
         write_file file edited_curator;
         let result = with_read_only masc (fun () -> prompt_sync ~base ~prompts) in
         (match edits result with
-         | [ (_, Managed_asset_sync.Kept_not_promotable { reason }) ] ->
+         | [ (_, Managed_asset_sync.Preserved_not_promotable { reason; preserved_at = _ }) ]
+           ->
            check bool "the reason names the write" true (mentions ~line:reason "not written")
-         | found -> failf "expected one kept edit, found %d" (List.length found));
-        check string "the file keeps the edit" edited_curator (read_file file))
+         | found -> failf "expected one preserved edit, found %d" (List.length found));
+        check string "the edit is kept beside the file" edited_curator
+          (read_file (Filename.concat prompts (preserved_name "curator.md" edited_curator))))
 
 let () =
   run "prompt_asset_sync"
@@ -847,15 +929,16 @@ let () =
         [
           test_case "an edited prompt becomes its override" `Quick
             test_edited_prompt_becomes_its_override;
-          test_case "an edited prompt with an override is kept" `Quick
-            test_edited_prompt_with_an_override_is_kept;
+          test_case "an edited prompt with an override is preserved" `Quick
+            test_edited_prompt_with_an_override_is_preserved;
           test_case "an edited tool is overwritten and reported" `Quick
             test_edited_tool_is_overwritten_and_reported;
           test_case "an old-schema manifest reads as none" `Quick
             test_an_old_schema_manifest_reads_as_none;
           test_case "a previous distribution copy is never promoted" `Quick
             test_a_previous_distribution_copy_is_never_promoted;
-          test_case "unpromotable edits are kept" `Quick test_unpromotable_edits_are_kept;
+          test_case "unpromotable edits are preserved" `Quick
+            test_unpromotable_edits_are_preserved;
           test_case "a failed reset after promotion is reported, then finished" `Quick
             test_a_failed_reset_after_promotion_is_reported_then_finished;
           test_case "an unwritable override file keeps the edit" `Quick

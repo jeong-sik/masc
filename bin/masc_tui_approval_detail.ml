@@ -24,6 +24,24 @@ let value_rows ~width value =
           List.map (fun text -> { label = None; text = value_indent ^ text }) wrapped)
       lines
 
+(* The input is the one field the pane draws from a typed source rather than
+   a string, because the string a row shows is a queue-length summary while
+   the pane is where an operator reads the request whole. [Rows] carries the
+   stored input key by key; its values are drawn by the same wrap that draws
+   every other value here, so a field the producer wrote long wraps instead
+   of ending in an ellipsis. [Flattened] is what the wire offers when the
+   input never was an object: the pane keeps it, but under a label that says
+   what it is, because a 200-byte wall that calls itself the input gets read
+   as the whole request. *)
+let input_rows ~(rows : Masc_tui_types.Tui_decode.gate_input_rows) =
+  match rows with
+  | Rows fields when fields <> [] -> fields
+  | Rows [] -> [ ("input", "(the stored input object is empty)") ]
+  | Flattened preview ->
+    [ ( "input (flattened preview, may be cut)"
+      , Option.value ~default:"(the server recorded no input preview)" preview )
+    ]
+
 (* As wide as the longest field name, and no wider than this: a pane whose
    labels ran long would spend the value's room on the column. A field whose
    name is longer keeps the two-row shape. *)

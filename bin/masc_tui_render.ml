@@ -1364,10 +1364,9 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
       ; ( "working directory"
         , Terminal_text.single_line_or ~default:"(not recorded)"
             pending.Tui_decode.gp_execution_cwd )
-      ; "input",
-        (match pending.Tui_decode.gp_input_preview with
-         | Some preview -> preview
-         | None -> "")
+      ; ( "input"
+        , Approval_detail.input_rows ~rows:pending.Tui_decode.gp_input_rows )
+      ]
       ]
     | Operator_row a ->
       [ "actor", a.Masc_tui_operator_projection.ap_actor

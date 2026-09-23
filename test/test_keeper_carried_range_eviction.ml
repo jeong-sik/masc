@@ -571,7 +571,7 @@ let test_an_unattributed_refusal_leaves_the_next_turn_its_whole_range () =
         in
         let composed =
           Try_provider.For_testing.compose_carried_model_input
-            ~measure_message_bytes:(fun _ -> 1) ~front
+            ~measure_message_bytes:(fun _ -> 1) ~accepted:None ~front
             ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim
             ~base_path:"" ~demote_before:0 ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
             history

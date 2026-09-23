@@ -325,11 +325,15 @@ type inventory_freshness =
       (** The server answered from a built inventory. An empty list here does
           mean no tools. *)
 
+(** One tool the keeper's effective surface carries. [et_skill_source_id]
+    names the configured skill source a composition skill came from, read
+    from [origin.skill_provenance.identity.source_id]; it is [None] for any
+    tool with no skill behind it, and for a composition skill whose
+    provenance the producer could not resolve. *)
 type effective_tool = {
   et_name : string;
   et_origin : string;
-  et_group : string option;
-  et_skill_source : string option;
+  et_skill_source_id : string option;
 }
 
 type effective_tool_delivery =

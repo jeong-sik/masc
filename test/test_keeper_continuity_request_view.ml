@@ -284,7 +284,7 @@ let test_absorbed_history_starts_at_the_librarians_position () =
   check bool "the absorbed atom is gone" false (List.mem (text T.User "Build the patch.") sent);
   check bool "the unread atom is sent" true (List.mem fresh sent);
   check bool "no working state is invented" false
-    (List.exists (fun (m : T.message) -> m.metadata = T.Extra_system_context_provenance.metadata) sent);
+    (List.exists Runtime_model_input_tail_window.is_working_state sent);
   (match Driver.validate_continuity ~messages continuity with
    | Ok () -> () | Error _ -> fail "the position it was built from failed its own check");
   let read_all =

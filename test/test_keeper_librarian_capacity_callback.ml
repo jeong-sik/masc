@@ -213,9 +213,13 @@ let test_prefit_real_continuity ~base_path () =
   (match Runtime.For_testing.execute_exact_output_classified ~continuity:None
      ~cli_runner:ordinary_runner ~clock:env#clock ~net:env#net ~base_path ~keeper_id
      ~selected_input:{(input half) with working_context=Context.empty} ~messages:[Agent_core.Types.user_msg "ordinary Memory"] () with
-   | Ok ((selection, _), _) ->
+   | Ok (({ Runtime.selection; continuity_answer }, _), _) ->
      Alcotest.(check bool) "ordinary Memory still accepts null working state" true
-       (Option.is_none selection.Keeper_librarian.working_state)
+       (Option.is_none selection.Keeper_librarian.working_state);
+     Alcotest.(check bool) "and carries no continuity answer" true
+       (match continuity_answer with
+        | Runtime.Memory_only -> true
+        | Runtime.Continuity _ -> false)
    | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error));
   let api_answer = `Assoc ["new_claims", `List []; "dropped", `List [];
     "working_contexts", `List []; "working_state", `String "API saved state."] in
@@ -230,10 +234,13 @@ let test_prefit_real_continuity ~base_path () =
   (match Runtime.For_testing.execute_exact_output_classified ~continuity:(Some half)
      ~clock:env#clock ~net:env#net ~base_path ~keeper_id ~selected_input:{(input half) with working_context=Context.empty}
      ~messages:[Agent_core.Types.user_msg "synthesize completed source"] () with
-   | Ok ((selection, _), slot) ->
+   | Ok (({ Runtime.continuity_answer; _ }, _), slot) ->
      Alcotest.(check string) "API validation advances to declared successor" "valid-state" slot;
      Alcotest.(check (option string)) "API successor supplies working state"
-       (Some "API saved state.") selection.Keeper_librarian.working_state
+       (Some "API saved state.")
+       (match continuity_answer with
+        | Runtime.Continuity { working_state; _ } -> Some working_state
+        | Runtime.Memory_only -> None)
    | Error error -> Alcotest.fail (Runtime.For_testing.classified_error_detail error));
   Alcotest.(check int) "null-state API candidate ran exactly once" 1 (Fixture.post_count invalid_api);
   Alcotest.(check int) "valid API successor ran exactly once" 1 (Fixture.post_count valid_api);

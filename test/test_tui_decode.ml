@@ -4490,20 +4490,39 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
           if key = "librarian" then replace_field "stalled" value current else current) fields)
       | _ -> keeper) json in
   let gap start_atom end_atom =
-    `Assoc [ "gap_start_atom", `Int start_atom; "gap_end_atom", `Int end_atom ] in
-  (match Tui_decode.decode_memory_health_snapshot (with_stalled (gap 2 8)) with
-   | Ok snapshot ->
-     Alcotest.(check (option (pair int int))) "the gap is decoded" (Some (2, 8))
-       (Option.map
-          (fun (s : Tui_decode.memory_librarian_stalled) -> s.mls_gap_start_atom, s.mls_gap_end_atom)
-          (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_stalled)
-   | Error detail -> Alcotest.fail detail);
+    `Assoc
+      [ "kind", `String "gap"; "gap_start_atom", `Int start_atom; "gap_end_atom", `Int end_atom ]
+  in
+  let stalled_of payload =
+    match Tui_decode.decode_memory_health_snapshot (with_stalled payload) with
+    | Ok snapshot -> (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_stalled
+    | Error detail -> Alcotest.fail detail
+  in
+  (match stalled_of (gap 2 8) with
+   | Some (Tui_decode.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 }) -> ()
+   | _ -> Alcotest.fail "the gap (2, 8) must decode as that gap");
   Alcotest.(check bool) "an empty gap is refused" true
     (memory_health_rejects (with_stalled (gap 8 8)));
   Alcotest.(check bool) "a gap with a field this build does not know is refused" true
     (memory_health_rejects
        (with_stalled
-          (`Assoc [ "gap_start_atom", `Int 2; "gap_end_atom", `Int 8; "bytes", `Int 1 ])));
+          (`Assoc
+             [ "kind", `String "gap"; "gap_start_atom", `Int 2; "gap_end_atom", `Int 8
+             ; "bytes", `Int 1 ])));
+  (* A file the gap is read from that did not read decodes as its own state,
+     not as no gap. *)
+  let unmeasured cause =
+    `Assoc [ "kind", `String "unmeasured"; "cause", `String cause; "detail", `String "bad" ]
+  in
+  (match stalled_of (unmeasured "turn_records_unreadable") with
+   | Some
+       (Tui_decode.Stalled_unmeasured
+          { mls_cause = Tui_decode.Stall_turn_records_unreadable; mls_detail = "bad" }) -> ()
+   | _ -> Alcotest.fail "an unreadable turn record must decode as unmeasured, not as no gap");
+  Alcotest.(check bool) "a cause this build does not know is refused" true
+    (memory_health_rejects (with_stalled (unmeasured "disk_on_fire")));
+  Alcotest.(check bool) "a kind this build does not know is refused" true
+    (memory_health_rejects (with_stalled (`Assoc [ "kind", `String "maybe" ])));
   let mismatched_totals =
     match json with
     | `Assoc fields ->

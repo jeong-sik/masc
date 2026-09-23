@@ -1020,11 +1020,25 @@ val memory_librarian_pass_end_cause : memory_librarian_pass_end -> string option
 
 (** RFC librarian-lifecycle §4.10: the atoms the Keeper's requests skip
    because the Librarian stands behind the start the provider last
-   accepted. [mls_gap_end_atom] is that start; the gap ends just before it. *)
-type memory_librarian_stalled = {
-  mls_gap_start_atom : int;
-  mls_gap_end_atom : int;
-}
+   accepted. [mls_gap_end_atom] is that start; the gap ends just before it.
+   [Stalled_unmeasured] is a file the gap is read from that did not read:
+   neither "no gap" nor a gap. *)
+type memory_librarian_stall_cause =
+  | Stall_meta_unreadable
+  | Stall_turn_records_unreadable
+  | Stall_turn_boundary_refused
+  | Stall_snapshot_unreadable
+  | Stall_read_position_unreadable
+
+type memory_librarian_stalled =
+  | Stalled_gap of {
+      mls_gap_start_atom : int;
+      mls_gap_end_atom : int;
+    }
+  | Stalled_unmeasured of {
+      mls_cause : memory_librarian_stall_cause;
+      mls_detail : string;
+    }
 
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
@@ -1044,7 +1058,7 @@ type memory_librarian_health = {
   mlh_last_failure_kind : memory_librarian_failure_kind option;
   mlh_stalled : memory_librarian_stalled option;
       (** [None] while the Librarian point is at or past the start the
-          provider last accepted, or when either file is absent. *)
+          provider last accepted, or when there is no accepted start yet. *)
 }
 
 type memory_context_frontier = {

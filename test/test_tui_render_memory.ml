@@ -669,7 +669,7 @@ let test_the_librarian_line_says_when_the_continuity_lag_is_unknown () =
    own row under the Librarian line, as the atoms it covers, and a keeper with
    no gap prints nothing for it. *)
 let test_the_librarian_line_names_a_stalled_gap () =
-  let stalled =
+  let with_beta stalled =
     { fleet_health with
       Decode.mhs_keepers =
         List.map
@@ -677,16 +677,14 @@ let test_the_librarian_line_names_a_stalled_gap () =
              if String.equal keeper.mkh_keeper_id "beta"
              then
                { keeper with
-                 mkh_librarian =
-                   { keeper.mkh_librarian with
-                     Decode.mlh_stalled =
-                       Some { Decode.mls_gap_start_atom = 2; mls_gap_end_atom = 8 } } }
+                 mkh_librarian = { keeper.mkh_librarian with Decode.mlh_stalled = Some stalled } }
              else keeper)
           fleet_health.mhs_keepers }
   in
-  let render cursor =
+  let render ?(stalled = Decode.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 })
+      cursor =
     let state = make_state () in
-    state.memory_health <- Some stalled;
+    state.memory_health <- Some (with_beta stalled);
     state.memory_health_cursor <- cursor;
     let lines = ref [] in
     Render_memory.render_memory_body ~cols:100 ~budget:20 state
@@ -707,7 +705,22 @@ let test_the_librarian_line_names_a_stalled_gap () =
   check bool "the row fits the frame at 100 columns" true
     (List.exists
        (fun line -> contains row line && String.length line <= 96)
-       (String.split_on_char '\n' (render 1)))
+       (String.split_on_char '\n' (render 1)));
+  check bool "a gap of one atom names that atom, not a range" true
+    (contains "Librarian stalled · atom 5 is in neither the request nor memory"
+       (render ~stalled:(Decode.Stalled_gap { mls_gap_start_atom = 5; mls_gap_end_atom = 6 }) 1));
+  (* A file the gap is read from that did not read is drawn, and drawn as
+     not measured: a silent row would read as no gap. *)
+  let unmeasured =
+    render
+      ~stalled:
+        (Decode.Stalled_unmeasured
+           { mls_cause = Decode.Stall_read_position_unreadable; mls_detail = "bad \027[31mjson" })
+      1
+  in
+  check bool "an unreadable read position is drawn as not measured" true
+    (contains "Librarian stalled · not measured, read position unreadable" unmeasured);
+  check bool "the reader's message is escaped" false (contains "\027[31m" unmeasured)
 ;;
 
 (* #36497. The fleet header is the block above the sort row, and it used to be

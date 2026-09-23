@@ -290,6 +290,23 @@ describe('KeeperMemoryHealth', () => {
     expect(statValue(container, 'librarian-continuity-behind')).toBe('3 (1 못 잼)')
   })
 
+  it('names a one-atom gap as that atom and an unreadable file as not measured', async () => {
+    const librarian = (stalled: KeeperMemoryHealthKeeperEntry['librarian']['stalled']) => ({
+      state: 'drained' as const, detail: null, measured_at: 1_699_999_950,
+      unread_atom_turns: 0, unread_official_turns: 0, continuity_unread_atoms: 0,
+      last_success_at: null, last_failure_kind: null, stalled })
+    mockFetch.mockResolvedValue(makeResponse(
+      [ makeEntry({ librarian: librarian({ kind: 'gap', gap_start_atom: 5, gap_end_atom: 6 }) }),
+        makeEntry({ keeper_id: 'beta', librarian: librarian(
+          { kind: 'unmeasured', cause: 'read_position_unreadable', detail: 'bad json' }) }) ],
+      {},
+    ))
+    render(html`<${KeeperMemoryHealth} />`)
+    await waitFor(() => expect(screen.getByText('beta')).not.toBeNull())
+    expect(screen.getByText('밀림 atom 5')).toBeTruthy()
+    expect(screen.getByText('밀림 측정 못 함 · 읽은 위치 읽기 실패')).toBeTruthy()
+  })
+
   it('renders a fully measured continuity lag without an unmeasured count', async () => {
     mockFetch.mockResolvedValue(makeResponse([makeEntry()], {}))
     const { container } = render(html`<${KeeperMemoryHealth} />`)

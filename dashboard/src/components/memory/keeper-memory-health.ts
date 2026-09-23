@@ -12,6 +12,8 @@ import {
   type KeeperMemoryHealthAlert,
   type KeeperMemoryHealthAlertTarget,
   type KeeperMemoryHealthKeeperEntry,
+  type KeeperMemoryHealthLibrarianStallCause,
+  type KeeperMemoryHealthLibrarianStalled,
   type KeeperMemoryHealthResponse,
 } from '../../api/dashboard'
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
@@ -42,6 +44,31 @@ function hasErrorAlert(alerts: KeeperMemoryHealthAlert[]): boolean {
 
 function alertBadgeClass(alert: KeeperMemoryHealthAlert): string {
   return alert.severity === 'error' ? 'kmh-badge kmh-badge--error' : 'kmh-badge kmh-badge--warn'
+}
+
+// RFC librarian-lifecycle §4.10: a gap of one atom is named as that atom;
+// a file the gap is read from that did not read is its own badge, never
+// the absence of one.
+const LIBRARIAN_STALL_CAUSE_WORDS: Record<KeeperMemoryHealthLibrarianStallCause, string> = {
+  meta_unreadable: 'Keeper meta',
+  turn_records_unreadable: '턴 기록',
+  turn_boundary_refused: '턴 경계',
+  snapshot_unreadable: '연속성 스냅숏',
+  read_position_unreadable: '읽은 위치',
+}
+
+function librarianStalledBadge(stalled: KeeperMemoryHealthLibrarianStalled | null) {
+  if (stalled === null) return ''
+  if (stalled.kind === 'unmeasured') {
+    return html`<div><span class="kmh-badge kmh-badge--warn" title=${stalled.detail}
+      >밀림 측정 못 함 · ${LIBRARIAN_STALL_CAUSE_WORDS[stalled.cause]} 읽기 실패</span></div>`
+  }
+  const last = stalled.gap_end_atom - 1
+  const atoms = last === stalled.gap_start_atom
+    ? `atom ${stalled.gap_start_atom}`
+    : `atom ${stalled.gap_start_atom}–${last}`
+  return html`<div><span class="kmh-badge kmh-badge--warn"
+    title="요청에도 기억에도 아직 없는 구간이에요">밀림 ${atoms}</span></div>`
 }
 
 function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
@@ -84,8 +111,7 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
         <div><small>${entry.librarian.state ?? '아직 측정 전'}</small></div>
         <div><small>${entry.librarian.measured_at === null ? '측정 시각 없음'
           : `마지막 측정 ${new Date(entry.librarian.measured_at * 1000).toLocaleString()}`}</small></div>
-        ${entry.librarian.stalled === null ? '' : html`<div><span class="kmh-badge kmh-badge--warn"
-          title="요청에도 기억에도 아직 없는 구간이에요">밀림 atom ${entry.librarian.stalled.gap_start_atom}–${entry.librarian.stalled.gap_end_atom - 1}</span></div>`}
+        ${librarianStalledBadge(entry.librarian.stalled)}
       </td>
       <td>
         ${starving

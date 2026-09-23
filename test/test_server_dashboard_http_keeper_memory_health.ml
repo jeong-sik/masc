@@ -997,7 +997,9 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
   let gap () =
     match member "stalled" (librarian ()) with
     | `Null -> None
-    | stalled -> Some (int_field "gap_start_atom" stalled, int_field "gap_end_atom" stalled)
+    | stalled ->
+      Alcotest.(check string) "a gap is tagged as one" "gap" (string_field "kind" stalled);
+      Some (int_field "gap_start_atom" stalled, int_field "gap_end_atom" stalled)
   in
   Alcotest.(check (option (pair int int))) "no files, no alarm" None (gap ());
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -1102,7 +1104,23 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
   Alcotest.(check (option (pair int int))) "an accepted start past the point is the gap"
     (Some (2, 8)) (gap ());
   Alcotest.(check bool) "with no drain measured in this process" true
-    (is_null (member "measured_at" (librarian ())))
+    (is_null (member "measured_at" (librarian ())));
+  (* A read position that does not read is neither no gap nor the gap: the
+     payload says which file, so the row is not silent the moment a read
+     breaks, and does not name atoms as missing that it could not weigh. *)
+  let progress_path =
+    P.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+  in
+  let output = open_out progress_path in
+  Fun.protect ~finally:(fun () -> close_out_noerr output) (fun () ->
+    output_string output "{not-json");
+  let stalled = member "stalled" (librarian ()) in
+  Alcotest.(check bool) "an unreadable read position is not null" false (is_null stalled);
+  Alcotest.(check string) "it is tagged unmeasured" "unmeasured" (string_field "kind" stalled);
+  Alcotest.(check string) "and names the file that did not read" "read_position_unreadable"
+    (string_field "cause" stalled);
+  Alcotest.(check bool) "with the reader's message" true
+    (String.length (string_field "detail" stalled) > 0)
 ;;
 
 let () =

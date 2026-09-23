@@ -164,12 +164,29 @@ let memory_context_lines (k : memory_keeper_health) =
   (* RFC librarian-lifecycle §4.10: the atoms requests skip while the
      Librarian stands behind the start the provider last accepted. An alarm,
      not a state anything waits on. On its own row, under the Librarian line,
-     so the frame cutting a long Librarian line never cuts its atom numbers. *)
+     so the frame cutting a long Librarian line never cuts its atom numbers.
+     A file the gap is read from that did not read gets the same row, naming
+     which file: it is neither "no gap" nor a gap. *)
   let librarian_stalled_lines =
     match k.mkh_librarian.mlh_stalled with
-    | Some { mls_gap_start_atom; mls_gap_end_atom } ->
-      [ Printf.sprintf "  Librarian stalled · atoms %d-%d are in neither the request nor memory"
-          mls_gap_start_atom (mls_gap_end_atom - 1) ]
+    | Some (Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
+      let atoms =
+        if mls_gap_end_atom - mls_gap_start_atom = 1
+        then Printf.sprintf "atom %d is" mls_gap_start_atom
+        else Printf.sprintf "atoms %d-%d are" mls_gap_start_atom (mls_gap_end_atom - 1)
+      in
+      [ Printf.sprintf "  Librarian stalled · %s in neither the request nor memory" atoms ]
+    | Some (Stalled_unmeasured { mls_cause; mls_detail }) ->
+      let cause =
+        match mls_cause with
+        | Stall_meta_unreadable -> "keeper meta unreadable"
+        | Stall_turn_records_unreadable -> "turn records unreadable"
+        | Stall_turn_boundary_refused -> "turn boundaries unreadable"
+        | Stall_snapshot_unreadable -> "continuity snapshot unreadable"
+        | Stall_read_position_unreadable -> "read position unreadable"
+      in
+      [ Printf.sprintf "  Librarian stalled · not measured, %s · %s" cause
+          (Terminal_text.preview_line mls_detail) ]
     | None -> []
   in
   let librarian_cause_lines =

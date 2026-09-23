@@ -8,6 +8,7 @@ vi.mock('./core', () => ({
 
 import {
   fetchKeeperMemoryHealth,
+  type KeeperMemoryHealthLibrarianStalled,
   type KeeperMemoryHealthResponse,
 } from './dashboard-misc'
 
@@ -446,14 +447,30 @@ describe('fetchKeeperMemoryHealth', () => {
 
   it('decodes the Librarian_stalled gap and refuses one that does not end after it starts', async () => {
     const payload = keeperMemoryHealthPayload()
-    payload.keepers[0]!.librarian.stalled = { gap_start_atom: 2, gap_end_atom: 8 }
+    payload.keepers[0]!.librarian.stalled = { kind: 'gap', gap_start_atom: 2, gap_end_atom: 8 }
     getMock.mockResolvedValue(payload)
     const response = await fetchKeeperMemoryHealth()
-    expect(response.keepers[0]?.librarian.stalled).toEqual({ gap_start_atom: 2, gap_end_atom: 8 })
+    expect(response.keepers[0]?.librarian.stalled)
+      .toEqual({ kind: 'gap', gap_start_atom: 2, gap_end_atom: 8 })
     expect(response.keepers[1]?.librarian.stalled).toBeNull()
     const empty = keeperMemoryHealthPayload()
-    empty.keepers[0]!.librarian.stalled = { gap_start_atom: 8, gap_end_atom: 8 }
+    empty.keepers[0]!.librarian.stalled = { kind: 'gap', gap_start_atom: 8, gap_end_atom: 8 }
     getMock.mockResolvedValue(empty)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
+  })
+
+  it('decodes an unmeasured Librarian_stalled apart from no gap and refuses an unknown cause', async () => {
+    const payload = keeperMemoryHealthPayload()
+    payload.keepers[0]!.librarian.stalled =
+      { kind: 'unmeasured', cause: 'turn_records_unreadable', detail: 'bad row' }
+    getMock.mockResolvedValue(payload)
+    const response = await fetchKeeperMemoryHealth()
+    expect(response.keepers[0]?.librarian.stalled)
+      .toEqual({ kind: 'unmeasured', cause: 'turn_records_unreadable', detail: 'bad row' })
+    const unknown = keeperMemoryHealthPayload()
+    const raw: unknown = { kind: 'unmeasured', cause: 'disk_on_fire', detail: 'x' }
+    unknown.keepers[0]!.librarian.stalled = raw as KeeperMemoryHealthLibrarianStalled
+    getMock.mockResolvedValue(unknown)
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
   })
 

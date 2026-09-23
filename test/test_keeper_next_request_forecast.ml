@@ -319,7 +319,8 @@ let test_the_librarian_gap_is_read_from_small_files () =
       Option.map
         (fun (g : Keeper_carried_front.librarian_gap) -> g.gap_start_atom, g.gap_end_atom)
         gap
-    | Error detail -> Alcotest.fail detail
+    | Error unmeasured ->
+      Alcotest.fail (Keeper_next_request_forecast.librarian_gap_unmeasured_detail unmeasured)
   in
   Alcotest.(check (option (pair int int))) "no files, no gap" None (gap ());
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -390,7 +391,53 @@ let test_the_librarian_gap_is_read_from_small_files () =
   Alcotest.(check (option (pair int int))) "the Librarian at the accepted start closes it" None
     (gap ());
   read_to 9;
-  Alcotest.(check (option (pair int int))) "and past it" None (gap ())
+  Alcotest.(check (option (pair int int))) "and past it" None (gap ());
+  (* Each file the gap is read from that does not read is its own answer:
+     not "no gap", which would hide the alarm exactly when a read broke, and
+     not "not covered", which would claim atoms are missing that may not
+     be. The Librarian stands at 2 and the request was accepted at 8, so a
+     clean read would be the gap (2, 8). *)
+  read_to 2;
+  Alcotest.(check (option (pair int int))) "the gap the failures below stand in front of"
+    (Some (2, 8)) (gap ());
+  let cause () =
+    match Keeper_next_request_forecast.librarian_gap ~config ~keeper_name with
+    | Ok None -> "no gap"
+    | Ok (Some _) -> "gap"
+    | Error unmeasured -> Keeper_next_request_forecast.librarian_gap_unmeasured_cause unmeasured
+  in
+  let write_raw path text =
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let output = open_out path in
+    Fun.protect ~finally:(fun () -> close_out_noerr output) (fun () -> output_string output text)
+  in
+  let progress_path =
+    Keeper_librarian_progress.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
+  in
+  write_raw progress_path "{not-json";
+  Alcotest.(check string) "an unreadable read position is not counted as uncovered"
+    "read_position_unreadable" (cause ());
+  read_to 2;
+  let snapshot_path = Keeper_librarian_continuity.path ~config ~keeper_name in
+  write_raw snapshot_path "{not-json";
+  Alcotest.(check string) "an unreadable snapshot is not counted as uncovered"
+    "snapshot_unreadable" (cause ());
+  Sys.remove snapshot_path;
+  Alcotest.(check (option (pair int int))) "the snapshot gone, the gap is back" (Some (2, 8))
+    (gap ());
+  (* A newer row that does not decode may be the newest accepted start, so
+     the one found under it is not taken as the answer. *)
+  Dated_jsonl.append store (`Assoc [ "trace_id", `String trace_id; "absolute_turn", `Int 3 ]);
+  Alcotest.(check string) "an undecodable turn record is not no gap" "turn_records_unreadable"
+    (cause ());
+  accepted_at ~turn:4 8;
+  Alcotest.(check (option (pair int int))) "a newer record that decodes answers again"
+    (Some (2, 8)) (gap ());
+  write_raw
+    (Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+    "{not-json\n";
+  Alcotest.(check string) "a refused turn-boundary read is not no gap" "turn_boundary_refused"
+    (cause ())
 
 let component component bytes : Turn_record.input_component = { component; bytes }
 

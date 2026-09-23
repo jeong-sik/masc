@@ -2816,11 +2816,25 @@ type memory_librarian_failure_kind =
 
 (* RFC librarian-lifecycle §4.10: the atoms the Keeper's requests skip
    because the Librarian stands behind the start the provider last
-   accepted. [mls_gap_end_atom] is that start; the gap ends just before it. *)
-type memory_librarian_stalled = {
-  mls_gap_start_atom : int;
-  mls_gap_end_atom : int;
-}
+   accepted. [mls_gap_end_atom] is that start; the gap ends just before it.
+   [Stalled_unmeasured] is a file the gap is read from that did not read:
+   neither "no gap" nor a gap. *)
+type memory_librarian_stall_cause =
+  | Stall_meta_unreadable
+  | Stall_turn_records_unreadable
+  | Stall_turn_boundary_refused
+  | Stall_snapshot_unreadable
+  | Stall_read_position_unreadable
+
+type memory_librarian_stalled =
+  | Stalled_gap of {
+      mls_gap_start_atom : int;
+      mls_gap_end_atom : int;
+    }
+  | Stalled_unmeasured of {
+      mls_cause : memory_librarian_stall_cause;
+      mls_detail : string;
+    }
 
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
@@ -5445,15 +5459,36 @@ let decode_memory_librarian_health keeper_json =
     match member "stalled" json with
     | `Null -> Ok None
     | stalled ->
-      let* () =
-        require_exact_object_fields
-          "librarian stalled" [ "gap_start_atom"; "gap_end_atom" ] stalled
-      in
-      let* mls_gap_start_atom = required_int_field stalled "gap_start_atom" in
-      let* mls_gap_end_atom = required_int_field stalled "gap_end_atom" in
-      if mls_gap_start_atom >= 0 && mls_gap_end_atom > mls_gap_start_atom
-      then Ok (Some { mls_gap_start_atom; mls_gap_end_atom })
-      else Error "librarian stalled gap must end after it starts"
+      let* kind = required_string_field stalled "kind" in
+      (match kind with
+       | "gap" ->
+         let* () =
+           require_exact_object_fields
+             "librarian stalled gap" [ "kind"; "gap_start_atom"; "gap_end_atom" ] stalled
+         in
+         let* mls_gap_start_atom = required_int_field stalled "gap_start_atom" in
+         let* mls_gap_end_atom = required_int_field stalled "gap_end_atom" in
+         if mls_gap_start_atom >= 0 && mls_gap_end_atom > mls_gap_start_atom
+         then Ok (Some (Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }))
+         else Error "librarian stalled gap must end after it starts"
+       | "unmeasured" ->
+         let* () =
+           require_exact_object_fields
+             "librarian stalled unmeasured" [ "kind"; "cause"; "detail" ] stalled
+         in
+         let* cause = required_string_field stalled "cause" in
+         let* mls_cause =
+           match cause with
+           | "meta_unreadable" -> Ok Stall_meta_unreadable
+           | "turn_records_unreadable" -> Ok Stall_turn_records_unreadable
+           | "turn_boundary_refused" -> Ok Stall_turn_boundary_refused
+           | "snapshot_unreadable" -> Ok Stall_snapshot_unreadable
+           | "read_position_unreadable" -> Ok Stall_read_position_unreadable
+           | other -> Error ("unknown librarian stalled cause: " ^ other)
+         in
+         let* mls_detail = required_string_field stalled "detail" in
+         Ok (Some (Stalled_unmeasured { mls_cause; mls_detail }))
+       | other -> Error ("unknown librarian stalled kind: " ^ other))
   in
   let* () =
     if List.for_all

@@ -1531,14 +1531,8 @@ let bounded_model_input_projection
         messages
     in
     let composed = view.composed in
-    (match composed.origin with
-     | Keeper_carried_front.Turn_start_unknown { reason } ->
-       Keeper_carried_front.warn_range_opens_on_newest_atom
-         ~keeper_name:ctx.keeper_name ~reason
-     | Keeper_carried_front.Carried _
-     | Keeper_carried_front.Librarian_snapshot _
-     | Keeper_carried_front.Librarian_progress _
-     | Keeper_carried_front.Turn_start _ -> ());
+    Keeper_carried_front.warn_if_origin_is_unknown_start
+      ~keeper_name:ctx.keeper_name composed.origin;
     let history_atom_count = composed.history_atom_count in
     (* Asked only after a refusal ([current_turn_demotion_sequence]). *)
     state.current_turn_demotion :=
@@ -2695,6 +2689,13 @@ let run_try_provider_with_carried_range_eviction
               (sent.digest_at first_atom)))
         ~hold_front:ctx.hold_carried_front
         ~on_turn_start:(fun error front ->
+          (* The refused seed gives way to the turn start; an unknown one puts
+             the front on the newest atom alone for the rest of the turn. *)
+          (match ctx.turn_boundary with
+           | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+             Keeper_carried_front.warn_range_opens_on_newest_atom
+               ~keeper_name:ctx.keeper_name ~reason
+           | Keeper_carried_front.Turn_boundary _ -> ());
           Log.Keeper.info
             ~keeper_name:ctx.keeper_name
             "model input carried seed refused runtime=%s: the turn's front moves to \

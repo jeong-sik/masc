@@ -2363,10 +2363,10 @@ let warnings_for ~keeper_name ~since_seq =
   |> List.length
 ;;
 
-(* An unknown turn start is reported by the range it opens, not by being
-   read: with a Librarian position in hand the unknown start decides nothing,
-   and the lane says nothing about it. *)
-let test_an_unknown_turn_start_warns_only_when_it_opens_the_range () =
+(* An unknown turn start is reported by the range a lane sends, not by
+   composing one: a Claude Code resume composes a range it never sends, and
+   with a Librarian position in hand the unknown start decides nothing. *)
+let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
   let unknown = Keeper_carried_front.Turn_boundary_unknown { reason = "no end line matches" } in
   let before_opening = latest_log_seq () in
   let opened = start_range ~turn_start:unknown start_seed_messages in
@@ -2375,9 +2375,12 @@ let test_an_unknown_turn_start_warns_only_when_it_opens_the_range () =
      | Host.Turn_start_unknown _ -> true
      | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Librarian_snapshot _
      | Host.Librarian_progress _ -> false);
-  check int "the range it opened is reported once" 1
+  check int "composing the range says nothing" 0
     (warnings_for ~keeper_name:"alpha" ~since_seq:before_opening);
-  let before_librarian = latest_log_seq () in
+  let before_sending = latest_log_seq () in
+  Host.warn_if_sent_on_unknown_start ~keeper_name:"alpha" opened.Host.front;
+  check int "sending it is reported once" 1
+    (warnings_for ~keeper_name:"alpha" ~since_seq:before_sending);
   let decided =
     start_range
       ~librarian_front:(Choice.Librarian_snapshot (absorbed_snapshot ()))
@@ -2388,7 +2391,9 @@ let test_an_unknown_turn_start_warns_only_when_it_opens_the_range () =
      | Host.Librarian_snapshot _ -> true
      | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
      | Host.Librarian_progress _ -> false);
-  check int "an unknown start that opened nothing is not reported" 0
+  let before_librarian = latest_log_seq () in
+  Host.warn_if_sent_on_unknown_start ~keeper_name:"alpha" decided.Host.front;
+  check int "a range the unknown start did not open is not reported" 0
     (warnings_for ~keeper_name:"alpha" ~since_seq:before_librarian)
 ;;
 
@@ -2770,9 +2775,9 @@ let () =
             `Quick
             test_a_seed_without_a_librarian_position_is_unchanged
         ; test_case
-            "an unknown turn start warns only when it opens the range"
+            "an unknown turn start is reported by the range sent"
             `Quick
-            test_an_unknown_turn_start_warns_only_when_it_opens_the_range
+            test_an_unknown_turn_start_is_reported_by_the_range_sent
         ; test_case
             "a later lane cut wins"
             `Quick

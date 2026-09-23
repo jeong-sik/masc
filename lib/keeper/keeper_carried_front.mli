@@ -241,6 +241,10 @@ val warn_range_opens_on_newest_atom : keeper_name:string -> reason:string -> uni
     turn reads it on every dispatch, and a seed or a Librarian point usually
     decides the range instead. *)
 
+val warn_if_origin_is_unknown_start : keeper_name:string -> origin -> unit
+(** {!warn_range_opens_on_newest_atom} when the request's range opened at
+    [Turn_start_unknown]; nothing for any other origin. *)
+
 val halve : first_atom:int -> atom_count:int -> int option
 (** The front moved halfway to the newest atom, or [None] when the range is
     already a single atom and cannot shrink. *)

@@ -731,6 +731,32 @@ let test_origin_json_names_its_kind () =
     Yojson.Safe.Util.(Front.origin_to_json unknown |> member "reason" |> to_string)
 ;;
 
+(* The Agent Core request reports an unknown turn start by the origin of the
+   range it composed: only a range that opened there is reported. *)
+let test_only_an_unknown_start_origin_warns () =
+  let keeper_name = "front-origin" in
+  let latest () =
+    match Log.Ring.recent ~limit:1 () with
+    | [] -> -1
+    | entry :: _ -> entry.Log.Ring.seq
+  in
+  let warnings ~since =
+    Log.Ring.recent ~since_seq:since ~min_level:(Log.level_to_int Log.Warn) ()
+    |> List.filter (fun (entry : Log.Ring.entry) ->
+      Option.equal String.equal entry.keeper_name (Some keeper_name))
+    |> List.length
+  in
+  let before_unknown = latest () in
+  Front.warn_if_origin_is_unknown_start ~keeper_name
+    (Front.Turn_start_unknown { reason = "no end line matches" });
+  check int "a range opened at the unknown start is reported" 1
+    (warnings ~since:before_unknown);
+  let before_others = latest () in
+  List.iter (Front.warn_if_origin_is_unknown_start ~keeper_name)
+    [ Front.Turn_start { end_atom = 3 }; Front.Librarian_progress { end_atom = 2 } ];
+  check int "a range opened anywhere else is not" 0 (warnings ~since:before_others)
+;;
+
 let () =
   run
     "keeper_carried_front"
@@ -789,6 +815,8 @@ let () =
         ; test_case "clamp" `Quick test_clamp_keeps_the_front_on_an_atom
         ; test_case "halve" `Quick test_halve_moves_halfway_and_stops_at_one_atom
         ; test_case "origin json" `Quick test_origin_json_names_its_kind
+        ; test_case "only an unknown start origin warns" `Quick
+            test_only_an_unknown_start_origin_warns
         ] )
     ]
 ;;

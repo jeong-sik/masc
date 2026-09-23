@@ -328,6 +328,28 @@ let test_turn_start_is_unknown_when_no_end_line_matches_the_history () =
      fail (Printf.sprintf "an end line that matches nothing answered atom %d" end_atom))
 ;;
 
+(* Where an unknown turn start is reported, pinned by name: the request that
+   composes a range warns by its origin, a refused seed that falls back to an
+   unknown turn start warns, and an official lane warns where it reports a
+   range it sent. *)
+let test_the_unknown_start_is_reported_where_a_range_opens () =
+  let calls ~module_path ~binding_name ~callee =
+    Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
+  in
+  check int "the Agent Core request warns by its origin" 1
+    (calls ~module_path:"lib/keeper/keeper_turn_driver_try_provider.ml"
+       ~binding_name:"bounded_model_input_projection"
+       ~callee:"Keeper_carried_front.warn_if_origin_is_unknown_start");
+  check int "a refused seed falling back to an unknown start warns" 1
+    (calls ~module_path:"lib/keeper/keeper_turn_driver_try_provider.ml"
+       ~binding_name:"run_try_provider_with_carried_range_eviction"
+       ~callee:"Keeper_carried_front.warn_range_opens_on_newest_atom");
+  check int "an official lane warns for a range it sent" 1
+    (calls ~module_path:"lib/keeper/keeper_turn_driver.ml"
+       ~binding_name:"record_official_client_continuity"
+       ~callee:"Keeper_official_client_host.warn_if_sent_on_unknown_start")
+;;
+
 let progress ~trace_id ~end_atom ~last_atom_digest : Progress.t =
   { position = { Progress.trace_id; end_atom; last_atom_digest }; boundary_lines_seen = 1 }
 ;;
@@ -832,6 +854,7 @@ let () = run "continuity request projection"
                test_case "without a snapshot a seed range demotes earlier tool bodies" `Quick test_without_snapshot_seed_demotes_earlier_tool_bodies;
                test_case "the reader says unknown when the boundary store is unreadable" `Quick test_turn_start_reader_says_unknown_when_the_store_is_unreadable;
                test_case "the reader says unknown when no end line matches the history" `Quick test_turn_start_is_unknown_when_no_end_line_matches_the_history;
+               test_case "the unknown start is reported where a range opens" `Quick test_the_unknown_start_is_reported_where_a_range_opens;
                test_case "absorbed history starts at the Librarian's position" `Quick
                  test_absorbed_history_starts_at_the_librarians_position;
                test_case "the forecast takes the driver's start" `Quick

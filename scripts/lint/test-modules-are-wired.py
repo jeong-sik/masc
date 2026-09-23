@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Every test/*.ml must be named by a dune stanza, or dune silently skips it.
+"""Test wiring agrees with the files in both directions.
+
+A test/*.ml must be named by a dune stanza, or dune silently skips it; and a
+script a stanza runs through `%{dep:<name>.py|.sh}` must exist, or root
+`dune build @runtest` fails with "No rule found".
 
 `test/dune` has no top-level `(modules)` field, so a `test/*.ml` that no stanza
 names is not an error: dune leaves it out of the build, CI stays green, and that
@@ -15,9 +19,16 @@ Wiring sites, all counted:
   - a subdirectory's own `dune` (`test/<d>/*.ml` is matched against
     `test/<d>/dune`)
 
-The baseline is 0 orphans, so the guard is strict: any orphan fails. A guard
-added after the baseline drifts has to carry an allowance forever; this one
-does not.
+The reverse direction: #37016 deleted `test/test_runtime_default_catalog_cli.py`
+and kept its rule and runtest alias. PR checks never run root @runtest, so it
+surfaced four days later as the only error in the release-candidate behavior
+job (run 35811260145), fixed by #38177. A script dependency resolves against
+the directory of the dune file whose stanzas include it, so `test/stanzas/*.inc`
+resolves against `test/`.
+
+The baseline is 0 orphans and 0 missing scripts, so the guard is strict. A
+guard added after the baseline drifts has to carry an allowance forever; this
+one does not.
 """
 from __future__ import annotations
 
@@ -31,6 +42,7 @@ MIN_MODULES = 1000
 
 MODULE_TOKEN = re.compile(r"[A-Za-z0-9_]+")
 INCLUDE = re.compile(r"\(include\s+([^)\s]+)\)")
+SCRIPT_DEP = re.compile(r"%\{dep:([^}\s]+\.(?:py|sh))\}")
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -67,17 +79,26 @@ def orphans(directory: pathlib.Path, dune: pathlib.Path) -> list[str]:
     return [name for name in modules_in(directory) if name not in wired]
 
 
-def scan(repo_root: pathlib.Path) -> tuple[int, list[str]]:
+def missing_scripts(directory: pathlib.Path, dune: pathlib.Path, label: str) -> list[str]:
+    if not dune.is_file():
+        return []
+    named = sorted(set(SCRIPT_DEP.findall(wiring_text(dune))))
+    return [f"{label}/{name}" for name in named if not (directory / name).is_file()]
+
+
+def scan(repo_root: pathlib.Path) -> tuple[int, list[str], list[str]]:
     test_dir = repo_root / "test"
     checked = len(modules_in(test_dir))
     found = [f"test/{name}.ml" for name in orphans(test_dir, test_dir / "dune")]
+    missing = missing_scripts(test_dir, test_dir / "dune", "test")
 
     for dune in sorted(test_dir.glob("*/dune")):
         sub = dune.parent
         checked += len(modules_in(sub))
         found += [f"test/{sub.name}/{name}.ml" for name in orphans(sub, dune)]
+        missing += missing_scripts(sub, dune, f"test/{sub.name}")
 
-    return checked, found
+    return checked, found, missing
 
 
 def self_test() -> int:
@@ -91,14 +112,25 @@ def self_test() -> int:
         (test / "dune").write_text("(include stanzas/wired.inc)\n")
         (test / "stanzas" / "wired.inc").write_text(
             "(test\n (name test_alpha)\n (modules test_alpha)\n (libraries x))\n"
+            "(rule\n (alias runtest-present)\n"
+            " (action (run python3 %{dep:present.py} %{dep:../bin/x.exe})))\n"
+            "(rule\n (alias runtest-gone)\n (action (run python3 %{dep:gone.py})))\n"
         )
+        (test / "present.py").write_text("")
         (test / "test_alpha.ml").write_text("")
         (test / "test_orphan.ml").write_text("")
         (test / "sub" / "dune").write_text("(test\n (name test_sub)\n (modules test_sub))\n")
         (test / "sub" / "test_sub.ml").write_text("")
         (test / "sub" / "test_sub_orphan.ml").write_text("")
 
-        checked, found = scan(root)
+        checked, found, missing = scan(root)
+        if missing == ["test/gone.py"]:
+            print("[PASS] fire: a script a stanza depends on but the tree lacks is reported;"
+                  " an included stanza resolves against test/, and a build product is not a script")
+        else:
+            print(f"[FAIL] wrong missing scripts: {missing}", file=sys.stderr)
+            rc = 1
+
         if checked != 4:
             print(f"[FAIL] expected 4 modules, counted {checked}", file=sys.stderr)
             rc = 1
@@ -113,11 +145,12 @@ def self_test() -> int:
 
         (test / "test_orphan.ml").unlink()
         (test / "sub" / "test_sub_orphan.ml").unlink()
-        _, found = scan(root)
-        if found == []:
+        (test / "gone.py").write_text("")
+        _, found, missing = scan(root)
+        if found == [] and missing == []:
             print("[PASS] pass: a fully wired tree reports nothing")
         else:
-            print(f"[FAIL] a clean tree was reported: {found}", file=sys.stderr)
+            print(f"[FAIL] a clean tree was reported: {found} {missing}", file=sys.stderr)
             rc = 1
 
     return rc
@@ -128,7 +161,7 @@ def main() -> int:
         return self_test()
 
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    checked, found = scan(repo_root)
+    checked, found, missing = scan(repo_root)
 
     if checked < MIN_MODULES:
         print(
@@ -138,6 +171,17 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+
+    rc = 0
+    if missing:
+        print("A script a dune stanza runs is not in the tree, so root @runtest fails:",
+              file=sys.stderr)
+        for name in missing:
+            print(f"  {name}", file=sys.stderr)
+        print(file=sys.stderr)
+        print("Delete the stanza and its runtest alias with the script, or restore the script.",
+              file=sys.stderr)
+        rc = 1
 
     if found:
         print("A test module no dune stanza names, so dune silently skips it:", file=sys.stderr)
@@ -149,10 +193,11 @@ def main() -> int:
             "delete the file. dune builds only what a stanza names.",
             file=sys.stderr,
         )
-        return 1
+        rc = 1
 
-    print(f"test modules: 0 unwired across {checked} module(s)")
-    return 0
+    if rc == 0:
+        print(f"test modules: 0 unwired across {checked} module(s); 0 missing stanza scripts")
+    return rc
 
 
 if __name__ == "__main__":

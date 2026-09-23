@@ -191,7 +191,10 @@ val pull_keepers : repository_entry -> pull_request -> keeper_join
 type snapshot =
   { reader : reader
   ; repositories_error : string option
-      (** The registered repository list could not be read. *)
+      (** The rows are from an earlier refresh, and why: the registered
+          repository list could not be read, or the refresh raised. A
+          sentence for the operator, not a code to match on. [None] after
+          any refresh that read the list. *)
   ; repositories : repository_entry list
   ; rejected_token_digest : string option
       (** BLAKE256 hex of the token GitHub last refused, never the token
@@ -283,10 +286,14 @@ val inspect_fleet_checkouts : config:Workspace.config -> inspect_checkouts
     the upstream ref and ahead/behind), all within that Keeper's 5 s
     inspection budget; an endpoint-owned Keeper costs one remote probe. *)
 
+val refresh_raised : previous:snapshot -> exn -> snapshot
+(** What {!start} publishes when {!refresh} raises: [previous] with
+    [repositories_error] saying so. *)
+
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> config:Workspace.config -> unit
 (** Forks the refresh loop under [sw]: every 60 seconds, starting now, one
     {!refresh} is published as soon as GitHub has answered, then
     {!join_keepers} with {!inspect_fleet_checkouts} is published over it. A
     slow or failing fleet inspection never delays or discards the pull
-    requests. A refresh that raises keeps the previous rows with
-    [repositories_error] set. Cancelled with [sw]. *)
+    requests. A refresh that raises publishes {!refresh_raised}
+    and skips the join. Cancelled with [sw]. *)

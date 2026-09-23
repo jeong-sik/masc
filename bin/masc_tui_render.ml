@@ -387,7 +387,7 @@ let overview_pulls_lines (state : state) =
         match repositories_error with
         | None -> []
         | Some err ->
-            [ Printf.sprintf "%s\xe2\x87\x85 repository list unread, rows may be old: %s%s"
+            [ Printf.sprintf "%s\xe2\x87\x85 pull request rows may be old: %s%s"
                 (Theme.warn ()) (Terminal_text.single_line err) Ansi.reset ]
       in
       let rows =

@@ -535,7 +535,10 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   | Ok () -> Ok (`Assoc [ "ok", `Bool true; "id", `String id ])
 ;;
 
-let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
+let dashboard_gate_rule_delete_http_json
+      ~base_path
+      ~deleted_by
+      ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, string) result
   =
   match Safe_ops.json_string_opt "id" args with
@@ -544,9 +547,9 @@ let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
     (match Keeper_approval_queue_rules.delete_rule ~base_path ~id () with
      | Ok deleted ->
          let audit_receipt =
-           Keeper_approval.Audit.record_rule
+           Keeper_approval.Audit.record_rule_deleted
              ~base_path
-             ~event_type:Keeper_approval.Audit.Rule_deleted
+             ~deleted_by
              deleted
          in
          Ok

@@ -2086,10 +2086,20 @@ let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
     else [ ("cancellation_reason", cancellation_reason) ])
 
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
-    ?(truncated = false) ?(unresolved = []) ?backlog_error ?backlog_recovery
-    requests =
+    ?(truncated = false) ?(unresolved = []) ?unresolved_total ?backlog_error
+    ?backlog_recovery requests =
+  (* Only the awaiting view joins the backlog, so only it counts what it could
+     not resolve; the list beside it is one page. *)
+  let unresolved_total_field =
+    match view, unresolved_total with
+    | "awaiting", None ->
+        [ ("awaiting_unresolved_total", `Int (List.length unresolved)) ]
+    | "awaiting", Some total -> [ ("awaiting_unresolved_total", `Int total) ]
+    | _, _ -> []
+  in
   `Assoc
-    ([ ("updated_at", `String "2026-08-23T09:00:01Z")
+    (unresolved_total_field
+     @ [ ("updated_at", `String "2026-08-23T09:00:01Z")
      ; ("total", `Int total)
      ; ("view", `String view)
      ; ("offset", `Int offset)
@@ -6598,6 +6608,29 @@ let test_decode_verification_separates_an_empty_queue_from_an_unreadable_one ()
       Alcotest.(check (list string)) "and so does what it could not resolve"
         [ "vrf-missing" ] snapshot.Tui_decode.vs_awaiting_unresolved
 
+(* The server sends one page of unresolved ids and the count of all of them.
+   The warning row's "(+N)" is read from the count, so a long list is not
+   reported as a short one. *)
+let test_decode_verification_counts_unresolved_beyond_the_page () =
+  (match
+     Tui_decode.decode_verification_snapshot
+       (verification_snapshot_json ~total:0 ~unresolved:[ "vrf-a" ]
+          ~unresolved_total:5 [])
+   with
+   | Error err -> Alcotest.failf "decode failed: %s" err
+   | Ok snapshot ->
+       Alcotest.(check int) "the count outlives the page" 5
+         snapshot.Tui_decode.vs_awaiting_unresolved_total);
+  let without_count =
+    match verification_snapshot_json ~total:0 [] with
+    | `Assoc fields ->
+        `Assoc (List.remove_assoc "awaiting_unresolved_total" fields)
+    | other -> other
+  in
+  match Tui_decode.decode_verification_snapshot without_count with
+  | Ok _ -> Alcotest.fail "an awaiting view without its count decoded"
+  | Error _ -> ()
+
 (* A queue built from a recovery snapshot holds real rows and is older than
    the workspace. Read as an ordinary queue it would be acted on as current,
    so it arrives on its own field rather than folded into the error. *)
@@ -10862,6 +10895,8 @@ let () =
           test_decode_verification_carries_the_page_and_what_it_could_not_resolve;
         Alcotest.test_case "an empty queue is not an unreadable one" `Quick
           test_decode_verification_separates_an_empty_queue_from_an_unreadable_one;
+        Alcotest.test_case "unresolved ids are counted beyond the page" `Quick
+          test_decode_verification_counts_unresolved_beyond_the_page;
         Alcotest.test_case "a stale queue is not a failed one" `Quick
           test_decode_verification_separates_a_stale_queue_from_a_failed_one;
         Alcotest.test_case "no evidence is not unreadable evidence" `Quick

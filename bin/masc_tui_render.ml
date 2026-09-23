@@ -28,6 +28,7 @@ module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
+module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
@@ -330,13 +331,19 @@ let overview_team (state : state) =
    are stuck, and when it reopens is what the operator waits on. Nothing is
    drawn while every window is open or before the first read -- a line saying
    "all open" on every frame would be texture. A failed read says so. *)
-let overview_quota_line (state : state) ~now =
+(* A failed quota read is said, but as a detail line: it explains no stuck
+   row, so it takes only rows the Overview had spare. *)
+let overview_quota_unread_line (state : state) =
   match state.overview_quota with
-  | Quota_unread -> None
   | Quota_failed err ->
       Some
         (Printf.sprintf "%squota windows unread: %s%s" Ansi.dim
            (Terminal_text.single_line err) Ansi.reset)
+  | Quota_unread | Quota_read _ -> None
+
+let overview_quota_line (state : state) ~now =
+  match state.overview_quota with
+  | Quota_unread | Quota_failed _ -> None
   | Quota_read options -> (
       match Overview_team.shut_windows options with
       | [] -> None
@@ -367,90 +374,19 @@ let overview_quota_line (state : state) ~now =
                Ansi.reset
                (String.concat " \xc2\xb7 " (List.map window_text windows))))
 
-(* One line per registered GitHub repository the server reads pull requests
-   for (RFC-0465): how many are open and how many need a person -- failing
-   checks, changes requested -- beside the Keepers doing the work. A
-   repository that is not on GitHub has nothing to say and draws nothing. A
-   reader the server cannot use is one line saying why, which is the setup
-   step left to take. *)
-let overview_pulls_lines (state : state) =
-  let dim text = Ansi.dim ^ text ^ Ansi.reset in
-  match state.overview_pulls with
-  | Overview_pulls_unread -> []
-  | Overview_pulls_failed err ->
-      [ dim ("\xe2\x87\x85 pull requests unread: " ^ Terminal_text.single_line err) ]
-  | Overview_pulls_read { reader = Pulls_reader_not_ready reason; _ } ->
-      [ dim ("\xe2\x87\x85 pull requests not read: " ^ Terminal_text.single_line reason) ]
-  | Overview_pulls_read
-      { reader = Pulls_reader_ready _; repositories_error; repositories } ->
-      let stale =
-        match repositories_error with
-        | None -> []
-        | Some err ->
-            [ Printf.sprintf "%s\xe2\x87\x85 pull request rows may be old: %s%s"
-                (Theme.warn ()) (Terminal_text.single_line err) Ansi.reset ]
-      in
-      let rows =
-      List.filter_map
-        (fun (row : repository_pulls_row) ->
-          let repository = Terminal_text.single_line row.rp_repository in
-          match row.rp_state with
-          | Repo_not_github -> None
-          | Repo_pulls_not_read ->
-              Some (dim (Printf.sprintf "\xe2\x87\x85 %s  not read yet" repository))
-          | Repo_pulls_failed failure ->
-              Some
-                (Printf.sprintf "%s\xe2\x87\x85%s %s  %snot read: %s%s" (Theme.warn ())
-                   Ansi.reset repository Ansi.dim
-                   (Terminal_text.single_line failure) Ansi.reset)
-          | Repo_pulls_read { pulls; undecodable } ->
-              let count predicate = List.length (List.filter predicate pulls) in
-              let failing =
-                count (fun (pull : open_pull) ->
-                    match pull.op_checks with
-                    | Pull_checks_failing -> true
-                    | Pull_checks_passing | Pull_checks_running | Pull_checks_none -> false)
-              in
-              let changes =
-                count (fun (pull : open_pull) ->
-                    match pull.op_review with
-                    | Pull_review_changes_requested -> true
-                    | Pull_review_approved | Pull_review_waiting | Pull_review_none -> false)
-              in
-              let drafts = count (fun (pull : open_pull) -> pull.op_draft) in
-              let parts =
-                List.filter_map Fun.id
-                  [ Some (Printf.sprintf "%d open" (List.length pulls))
-                  ; (if failing > 0 then
-                       Some (Printf.sprintf "%s%d checks failing%s" (Theme.bad ()) failing Ansi.reset)
-                     else None)
-                  ; (if changes > 0 then
-                       Some (Printf.sprintf "%s%d changes requested%s" (Theme.warn ()) changes Ansi.reset)
-                     else None)
-                  ; (if drafts > 0 then Some (Printf.sprintf "%d draft" drafts) else None)
-                  ; (if undecodable > 0 then
-                       Some (Printf.sprintf "%d unreadable" undecodable)
-                     else None)
-                  ]
-              in
-              Some
-                (Printf.sprintf "%s\xe2\x87\x85%s %s  %s" (Theme.info ()) Ansi.reset
-                   repository
-                   (String.concat " \xc2\xb7 " parts)))
-        repositories
-      in
-      (* A ready reader with nothing on GitHub to read says so; drawing no
-         line would look the same as not having loaded. *)
-      match stale @ rows with
-      | [] -> [ dim "\xe2\x87\x85 pull requests: no registered GitHub repository" ]
-      | lines -> lines
+let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
+
+(* Lines under the Team block that explain no Keeper row: an unread quota
+   and the pull request summary. *)
+let overview_team_detail_lines (state : state) =
+  Option.to_list (overview_quota_unread_line state) @ overview_pulls_lines state
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line ~pulls_lines =
+    ~quota_line ~detail_lines =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -543,9 +479,11 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       (fun (row : Overview_team.row) -> row.group = Overview_team.Needs_you)
       team.rows
   in
+  (* Detail lines come last: the layout gives them only rows nothing else
+     wanted, so a short viewport cuts them before any Keeper. *)
   let rows =
-    List.map keeper_line stuck @ Option.to_list quota_line @ pulls_lines
-    @ List.map keeper_line others @ parked_line @ holders_line
+    List.map keeper_line stuck @ Option.to_list quota_line
+    @ List.map keeper_line others @ parked_line @ holders_line @ detail_lines
   in
   let total = List.length rows in
   let counts =
@@ -624,7 +562,6 @@ let overview_layout (state : state) ~terminal_rows =
         Overview_team.drawn_rows team
         + Option.fold ~none:0 ~some:(fun _ -> 1)
             (overview_quota_line state ~now:(Unix.gettimeofday ()))
-        + List.length (overview_pulls_lines state)
   in
   let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
@@ -648,6 +585,15 @@ let overview_layout (state : state) ~terminal_rows =
         Overview_team.settle team ~attention:all_attention ~allocate
           ~team_rows:(fun (budget : Render_schedule.overview_allocation) ->
             budget.team_rows)
+  in
+  (* Detail lines are settled after the Keeper rows: they only take rows
+     nothing else wanted, so they never change which items a row carries. *)
+  let row_budget =
+    match overview_team state with
+    | None -> row_budget
+    | Some _ ->
+        Render_schedule.spend_spare_rows_on_team row_budget
+          ~extra:(List.length (overview_team_detail_lines state))
   in
   attention_items, tasks_error, row_budget
 
@@ -990,7 +936,7 @@ let render_overview (state : state) =
          overview_team_lines team ~team_rows:row_budget.team_rows
            ~flow:state.task_flow ~cols
            ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
-           ~pulls_lines:(overview_pulls_lines state)
+           ~detail_lines:(overview_team_detail_lines state)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;
@@ -8596,7 +8542,11 @@ let render_verification_list (state : state) =
         | [] -> ()
         | ids ->
             let named = List.filteri (fun i _ -> i < 3) ids in
-            let rest = List.length ids - List.length named in
+            (* The list is one page; the total counts them all. *)
+            let rest =
+              snapshot.Masc.Tui_decode.vs_awaiting_unresolved_total
+              - List.length named
+            in
             box_line_styled buf cols ~style:(Theme.warn ())
               (Printf.sprintf "  waiting on a record this store does not hold: %s%s"
                  (String.concat ", " named)

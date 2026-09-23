@@ -4105,10 +4105,11 @@ ignored_sampling_parameters = ["temperature"]
 # plan currently serves: GET /coding/v1/models on 2026-09-22 names it
 # "K2.8 Preview" with context_length 1048576, up from the 262144 this row
 # carried for K2.7 Code. Output ceiling from the endpoint; no tool_choice on
-# this wire. Temperature and top_p are fixed as on the unscoped row: the
-# keeper default temperature 0.4 answered 400 "invalid temperature: only 1
-# is allowed for this model" (Terminal-Bench trial 2026-09-23T19:15Z), so
-# AGENT_CORE leaves both out.
+# this wire. The keeper default temperature 0.4 answered 400 "invalid
+# temperature: only 1 is allowed for this model" (Terminal-Bench trial
+# 2026-09-23T19:15Z), so AGENT_CORE leaves temperature out. top_p is left
+# out on the unscoped row's evidence (the 2026-07-04 K2.x docs); it has not
+# been sent to the K2.8 alias.
 [[models]]
 id_prefix = "kimi-for-coding"
 provider_name = "kimi_coding"

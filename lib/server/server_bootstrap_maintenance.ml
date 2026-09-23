@@ -443,7 +443,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Server_repository_pulls.start
     ~sw
     ~clock
-    ~base_path:(Mcp_server.workspace_config state).base_path;
+    ~config:(Mcp_server.workspace_config state);
   (* Restore retained tool metrics before installing the live observer. This
      order prevents startup hydration from overwriting a call that completed
      concurrently. A failed read leaves the current snapshot unchanged and is

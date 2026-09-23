@@ -85,18 +85,19 @@ let test_api_auth_rotates_invalid_request_judges () =
       (Agent_core.Error.Api
          (Llm_provider.Retry.InvalidRequest
             { message = "bad body"
-            ; reason = Llm_provider.Retry.Unknown_invalid_request
+            ; reason = Llm_provider.Retry.Json_parse_error
             }))
   with
   | KFR.Exhausted_visible_alive { terminal = KFR.Deterministic_request; _ } -> ()
   | other ->
-    Alcotest.failf "invalid request should exhaust, got %s"
+    Alcotest.failf "an unparsed request should exhaust, got %s"
       (KFR.route_kind_label other)
 
 (* #33057: the driver already moves a lane to its next candidate when masc's
    own pre-wire policy refuses the attempt, but the route labelled that
-   failure a deterministic terminal one. The label now says rotate; the
-   provider-side reasons keep their terminal label. *)
+   failure a deterministic terminal one. The label now says rotate. A
+   provider's own refusal of the body rotates too, because the walk moves on
+   it (#37631); only a JSON parse failure stays terminal. *)
 let test_api_attempt_rejected_routes_as_rotation () =
   check_route
     "pre-wire policy refusal rotates"
@@ -117,8 +118,17 @@ let test_api_attempt_rejected_routes_as_rotation () =
       | other ->
         Alcotest.failf "%s should stay terminal, got %s:%s" label
           (KFR.route_kind_label other) (KFR.route_class_label other))
-    [ "json parse error", Llm_provider.Retry.Json_parse_error
-    ; "unknown 400", Llm_provider.Retry.Unknown_invalid_request
+    [ "json parse error", Llm_provider.Retry.Json_parse_error ];
+  List.iter
+    (fun (label, reason) ->
+      check_route
+        (label ^ " rotates to the next candidate")
+        (KFR.Rotate_now { rotate = KFR.Request_refused })
+        (Agent_core.Error.Api
+           (Llm_provider.Retry.InvalidRequest { message = label; reason })))
+    [ "unknown 400", Llm_provider.Retry.Unknown_invalid_request
+    ; ( "413"
+      , Llm_provider.Retry.Request_body_refused_by_provider { status = 413 } )
     ]
 
 let test_api_input_capacity_is_terminal_judgment () =
@@ -258,7 +268,7 @@ let test_provider_config_judges () =
    completion contract's stop. The provider took the request and the bytes
    that would have said why never came, so the failure passes with time, as a
    dropped transport does. The other wire kinds are defects in what did
-   arrive. *)
+   arrive: the same path sends them again, so they rotate rather than wait. *)
 let test_wire_error_kinds_split_on_what_arrived () =
   let wire kind =
     route_of_agent_core_error
@@ -278,9 +288,9 @@ let test_wire_error_kinds_split_on_what_arrived () =
   List.iter
     (fun kind ->
        match wire kind with
-       | KFR.Exhausted_visible_alive { terminal = KFR.Provider_integration; _ } -> ()
+       | KFR.Rotate_now { rotate = KFR.Provider_wire_defect } -> ()
        | other ->
-         Alcotest.failf "%s should stay a provider integration defect, got %s:%s"
+         Alcotest.failf "%s should rotate as a wire defect, got %s:%s"
            (Llm_provider.Http_client.provider_wire_error_kind_to_string kind)
            (KFR.route_kind_label other) (KFR.route_class_label other))
     [ Llm_provider.Http_client.Malformed_payload
@@ -311,7 +321,7 @@ let test_an_interrupted_generation_observes_a_server_failure () =
     Alcotest.failf "an interruption should read as the provider failing, got %s"
       (Llm_provider.Error.to_string other)
 
-let test_provider_wire_error_is_provider_integration () =
+let test_provider_wire_error_rotates () =
   match
     route_of_agent_core_error
       (Agent_core.Error.Provider
@@ -322,14 +332,29 @@ let test_provider_wire_error_is_provider_integration () =
             ; detail = "malformed JSON"
             }))
   with
-  | KFR.Exhausted_visible_alive
-      { terminal = KFR.Provider_integration
-      ; provenance = KFR.Agent_core_provider_error
-      ; _
-      } -> ()
+  | KFR.Rotate_now { rotate = KFR.Provider_wire_defect } -> ()
   | other ->
-    Alcotest.failf "provider wire error should exhaust provider integration, got %s"
+    Alcotest.failf "provider wire error should rotate, got %s"
       (KFR.route_kind_label other)
+
+(* A 5xx the provider marked as permanent: the walk rotates on every 5xx, so
+   the route says rotate. A non-transient code outside the 5xx class is not a
+   server failure and stays a provider integration defect. *)
+let test_non_transient_server_error_rotates_on_5xx () =
+  let server code =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ServerError
+         { provider = "p"; code; transient = false; detail = "fatal" })
+  in
+  check_route
+    "non-transient 500 rotates"
+    (KFR.Rotate_now { rotate = KFR.Server_error_not_transient })
+    (server 500);
+  match route_of_agent_core_error (server 418) with
+  | KFR.Exhausted_visible_alive { terminal = KFR.Provider_integration; _ } -> ()
+  | other ->
+    Alcotest.failf "a non-5xx server error should exhaust, got %s:%s"
+      (KFR.route_kind_label other) (KFR.route_class_label other)
 
 (* A generation that repeated itself arrived intact: it is the model's
    failure, so the lane rotates to another model instead of exhausting the
@@ -464,6 +489,9 @@ let test_response_observed_per_class () =
     ; rotate KFR.Attempt_rejected
     ; rotate KFR.Refusal_body_not_received
     ; rotate KFR.Runtime_exhausted
+    ; rotate KFR.Request_refused
+    ; rotate KFR.Provider_wire_defect
+    ; rotate KFR.Server_error_not_transient
     ; terminal KFR.Deterministic_request
     ; terminal KFR.Context_overflow
     ; terminal KFR.Session_claim_refused
@@ -652,6 +680,10 @@ let test_route_resumes_on_same_path_per_class () =
     ; "", rotate KFR.Refusal_body_not_received
     ; "", rotate KFR.Generation_repeated
     ; "", rotate KFR.Attempt_rejected
+    ; "", rotate KFR.Provider_reported_failure
+    ; "", rotate KFR.Request_refused
+    ; "", rotate KFR.Provider_wire_defect
+    ; "", rotate KFR.Server_error_not_transient
     ; "", terminal KFR.Deterministic_request
     ; "", terminal KFR.Context_overflow
     ; "", terminal KFR.Session_claim_refused
@@ -699,9 +731,13 @@ let () =
       , [ Alcotest.test_case "quota family hints" `Quick test_provider_quota_family_threads_hint
         ; Alcotest.test_case "config exhausts" `Quick test_provider_config_judges
         ; Alcotest.test_case
-            "wire error is provider integration"
+            "wire error rotates"
             `Quick
-            test_provider_wire_error_is_provider_integration
+            test_provider_wire_error_rotates
+        ; Alcotest.test_case
+            "non-transient 5xx rotates"
+            `Quick
+            test_non_transient_server_error_rotates_on_5xx
         ; Alcotest.test_case
             "empty completion keeps answer observation"
             `Quick

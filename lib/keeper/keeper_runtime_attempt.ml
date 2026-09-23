@@ -36,14 +36,16 @@ let provider_error_to_http_error = function
     http_error ~code ~body:detail
   | Llm_provider.Error.InvalidRequest { reason; _ } ->
     http_error ~code:400 ~body:reason
+  (* [Error.ProviderTerminal] is built only from [Http_client.ProviderTerminal]
+     ([Error.of_http_error]): a session conflict, or a protocol / unknown-variant
+     failure that [ParseError] and [UnknownVariant] below also fold into.
+     Carrying it back as the same transport value keeps the walk where
+     [Runtime_attempt_fsm.should_try_next] puts every provider terminal, and
+     where the failure route puts it ([Provider_integration]). *)
   | Llm_provider.Error.ProviderTerminal { reason; detail; _ } ->
     let body = if String.trim detail = "" then reason else detail in
-    Llm_provider.Http_client.ProviderFailure
-      { kind =
-          Llm_provider.Http_client.Capability_mismatch
-            { capability = Some "permission" }
-      ; message = body
-      }
+    Llm_provider.Http_client.ProviderTerminal
+      { kind = Llm_provider.Http_client.Other reason; message = body }
   | Llm_provider.Error.NotFound { detail; _ } ->
     http_error
       ~code:404

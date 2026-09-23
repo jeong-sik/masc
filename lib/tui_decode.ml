@@ -2185,12 +2185,14 @@ type effective_tool_origin =
   | Instruction_skill_origin
   | Composition_skill_origin of { skill_source_id : string option }
   | Composition_control_origin
+  | Unrecognised_origin of string
 
 let effective_tool_origin_kind = function
   | Descriptor_origin -> "descriptor"
   | Instruction_skill_origin -> "instruction_skill"
   | Composition_skill_origin _ -> "composition_skill"
   | Composition_control_origin -> "composition_control"
+  | Unrecognised_origin kind -> kind
 
 type effective_tool = {
   et_name : string;
@@ -2957,7 +2959,9 @@ let decode_effective_tool json =
         | Some bad -> field_type_error "skill_provenance" "an object or null" bad
       in
       Ok (Composition_skill_origin { skill_source_id })
-    | unknown -> Error (Printf.sprintf "unknown tool origin kind %S" unknown)
+    (* A kind a newer server adds is kept as the word it sent: the Tools
+       column still draws it, and the rest of the surface still loads. *)
+    | unrecognised -> Ok (Unrecognised_origin unrecognised)
   in
   Ok { et_name; et_origin }
 
@@ -5871,9 +5875,12 @@ let decode_verification_request json =
   let* vr_task_id = required_string_field json "task_id" in
   let* vr_task_title = required_string_field json "task_title" in
   let* vr_submitted_by = required_string_field json "submitted_by" in
-  (* [null] is a row the backlog join found nothing for. A word outside the
-     pair is kept as itself rather than folded into either intent, so a
-     vocabulary this build does not know reaches the screen as that word. *)
+  (* [null] is a history-view row: that view joins no backlog, so nothing
+     names the verdict the row waits on. The awaiting view joins it and every
+     row carries a word (Dashboard_verification.filter_by_view). A word
+     outside the pair is kept as itself rather than folded into either intent,
+     so a vocabulary this build does not know reaches the screen as that
+     word. *)
   let* vr_ask =
     let* intent = required_nullable_string_field json "intent" in
     let* reason = required_nullable_string_field json "cancellation_reason" in

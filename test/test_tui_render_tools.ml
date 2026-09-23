@@ -64,7 +64,7 @@ let test_the_surface_line_tells_a_failed_read_from_an_unread_one () =
    said nothing, so the two renderers of one surface disagreed about whether
    the operator is told. The JSON below is the wire shape, run through the
    decoder the live loader uses, so the test fails if either end moves. *)
-let surface_with ~unavailable_skill_names =
+let surface_with ?(tools = []) ~unavailable_skill_names () =
   `Assoc
     [ "status", `String "available"
     ; "keeper_name", `String "surface-fixture-keeper"
@@ -78,7 +78,7 @@ let surface_with ~unavailable_skill_names =
     ; "instruction_skills", `List []
     ; "composition_skills", `List []
     ; "unavailable_skill_names", `List unavailable_skill_names
-    ; "tools", `List []
+    ; "tools", `List tools
     ]
 
 let tools_snapshot ~effective =
@@ -97,11 +97,11 @@ let tools_snapshot ~effective =
     ; "skill_activations", `Null
     ]
 
-let state_showing ~unavailable_skill_names =
+let state_showing ?tools ~unavailable_skill_names () =
   let state = make_state () in
   (match
      Masc.Tui_decode.decode_tool_snapshot
-       (tools_snapshot ~effective:(surface_with ~unavailable_skill_names))
+       (tools_snapshot ~effective:(surface_with ?tools ~unavailable_skill_names ()))
    with
    | Ok snapshot -> state.tools_inventory <- Some snapshot
    | Error detail -> Alcotest.failf "decode failed: %s" detail);
@@ -115,7 +115,7 @@ let surface_text state =
 let test_the_screen_names_a_configured_skill_that_is_not_there () =
   let shown =
     surface_text
-      (state_showing
+      (state_showing ()
          ~unavailable_skill_names:
            [ `Assoc
                [ "name", `String "browser-lanes"
@@ -129,9 +129,52 @@ let test_the_screen_names_a_configured_skill_that_is_not_there () =
   (* Without this the block could be drawn unconditionally and both checks
      above would still pass, so a healthy surface would gain a heading that
      claims something it has no entry for. *)
-  let healthy = surface_text (state_showing ~unavailable_skill_names:[]) in
+  let healthy = surface_text (state_showing ~unavailable_skill_names:[] ()) in
   Alcotest.(check bool) "a healthy surface gains no row" false
     (contains "not in the turn catalog" healthy)
+
+(* The ORIGIN column says where each tool came from: the kind word, and for a
+   composition skill the configured source it was read from. A kind this build
+   does not know is drawn as the word the server sent. Each check reads the
+   row of its own tool, so a word elsewhere on the screen cannot satisfy it. *)
+let test_the_origin_column_names_the_source_of_a_skill_tool () =
+  let tool name origin = `Assoc [ "name", `String name; "origin", `Assoc origin ] in
+  let lines =
+    Masc_tui_render_tools.tools_display_lines
+      (state_showing
+         ~tools:
+           [ tool "keeper_compose_work-intake"
+               [ "kind", `String "composition_skill"
+               ; ( "skill_provenance"
+                 , `Assoc [ "identity", `Assoc [ "source_id", `String "shared-catalog" ] ] )
+               ]
+           ; tool "keeper_compose_unresolved"
+               [ "kind", `String "composition_skill"; "skill_provenance", `Null ]
+           ; tool "keeper_board_list" [ "kind", `String "descriptor" ]
+           ; tool "bridged_call" [ "kind", `String "mcp_bridge" ]
+           ]
+         ~unavailable_skill_names:[] ())
+    |> List.map snd
+  in
+  let origin_of name =
+    match List.find_opt (contains name) lines with
+    | None -> Alcotest.failf "no row for %s" name
+    | Some line ->
+        let rec index_of i =
+          if String.equal (String.sub line i (String.length name)) name then i
+          else index_of (i + 1)
+        in
+        let start = index_of 0 + String.length name in
+        String.trim (String.sub line start (String.length line - start))
+  in
+  Alcotest.(check string) "a composition skill names its source"
+    "composition_skill:shared-catalog" (origin_of "keeper_compose_work-intake");
+  Alcotest.(check string) "an unresolved provenance draws the kind alone"
+    "composition_skill" (origin_of "keeper_compose_unresolved");
+  Alcotest.(check string) "a descriptor draws its kind" "descriptor"
+    (origin_of "keeper_board_list");
+  Alcotest.(check string) "an unknown kind draws the word the server sent"
+    "mcp_bridge" (origin_of "bridged_call")
 
 let () =
   Alcotest.run "masc_tui_render_tools"
@@ -145,5 +188,7 @@ let () =
         ; Alcotest.test_case
             "the screen names a configured skill that is not there" `Quick
             test_the_screen_names_a_configured_skill_that_is_not_there
+        ; Alcotest.test_case "the origin column names a skill tool's source" `Quick
+            test_the_origin_column_names_the_source_of_a_skill_tool
         ] )
     ]

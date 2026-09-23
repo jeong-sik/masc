@@ -1367,6 +1367,14 @@ let remove_field key = function
   | `Assoc fields -> `Assoc (List.remove_assoc key fields)
   | _ -> Alcotest.failf "cannot remove field %s from a non-object" key
 
+let refusal_names what ~key = function
+  | Ok _ -> Alcotest.failf "%s decoded" what
+  | Error err ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s: the refusal names %s" what key)
+        true
+        (String_util.contains_substring err key)
+
 let update_field key update = function
   | `Assoc fields as json -> (
       match List.assoc_opt key fields with
@@ -2118,10 +2126,6 @@ let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
     ; ("cancellation_reason", cancellation_reason)
     ]
 
-let drop_field key = function
-  | `Assoc fields -> `Assoc (List.remove_assoc key fields)
-  | other -> other
-
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
     ?(truncated = false) ?(unresolved = []) ?unresolved_total ?backlog_error
     ?backlog_recovery requests =
@@ -2792,10 +2796,9 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         (* The origin shape here mirrors what
            Keeper_effective_tool_surface.origin_to_yojson actually emits, and
            the values are the ones test_keeper_effective_tool_surface pins on
-           the producer side. The second tool splits the two branches: a
-           descriptor origin carries no skill_provenance at all, so its
-           source id must read as None rather than inheriting the first
-           tool's. *)
+           the producer side. The second tool is the other branch: a
+           descriptor origin carries no skill_provenance at all and decodes
+           as Descriptor_origin, which has no source to name. *)
       ; ( "tools"
         , `List
             [ `Assoc
@@ -3000,8 +3003,38 @@ let test_decode_effective_tool_reads_provenance_by_kind () =
     [ composition
         (Some (`Assoc [ "identity", `Assoc [ "name", `String "x" ] ]))
     ];
-  refused "an origin kind this build does not know"
-    [ tool [ "kind", `String "plugin" ] ]
+  Alcotest.(check bool) "a kind this build does not know is kept as its word" true
+    (origins [ tool [ "kind", `String "plugin" ] ]
+     = [ Tui_decode.Unrecognised_origin "plugin" ]);
+  (* effective_tool_origin_kind is the word the Tools column draws. Encoding
+     each constructor with it and decoding the result must give the same
+     constructor back, so the two spellings of each kind cannot drift. *)
+  let encode origin =
+    tool
+      (("kind", `String (Tui_decode.effective_tool_origin_kind origin))
+       :: (match origin with
+           | Tui_decode.Composition_skill_origin { skill_source_id = Some source_id } ->
+             [ ( "skill_provenance"
+               , `Assoc [ "identity", `Assoc [ "source_id", `String source_id ] ] )
+             ]
+           | Tui_decode.Composition_skill_origin { skill_source_id = None } ->
+             [ "skill_provenance", `Null ]
+           | Tui_decode.Descriptor_origin
+           | Tui_decode.Instruction_skill_origin
+           | Tui_decode.Composition_control_origin
+           | Tui_decode.Unrecognised_origin _ -> []))
+  in
+  let every_origin =
+    [ Tui_decode.Descriptor_origin
+    ; Tui_decode.Instruction_skill_origin
+    ; Tui_decode.Composition_skill_origin { skill_source_id = Some "shared-catalog" }
+    ; Tui_decode.Composition_skill_origin { skill_source_id = None }
+    ; Tui_decode.Composition_control_origin
+    ; Tui_decode.Unrecognised_origin "plugin"
+    ]
+  in
+  Alcotest.(check bool) "every origin survives its own word" true
+    (origins (List.map encode every_origin) = every_origin)
 
 (* Every available surface carries the list, and every entry its reason
    (Keeper_skill_catalog.configured_name_unavailable_to_yojson). Without the
@@ -6812,7 +6845,7 @@ let test_decode_verification_counts_unresolved_beyond_the_page () =
        Alcotest.(check int) "the count outlives the page" 5
          snapshot.Tui_decode.vs_awaiting_unresolved_total);
   let without_count =
-    drop_field "awaiting_unresolved_total" (verification_snapshot_json ~total:0 [])
+    remove_field "awaiting_unresolved_total" (verification_snapshot_json ~total:0 [])
   in
   match Tui_decode.decode_verification_snapshot without_count with
   | Ok _ -> Alcotest.fail "an awaiting view without its count decoded"
@@ -6826,12 +6859,9 @@ let test_decode_verification_counts_unresolved_beyond_the_page () =
 let test_decode_verification_requires_the_awaiting_backlog_fields () =
   List.iter
     (fun field ->
-       match
-         Tui_decode.decode_verification_snapshot
-           (drop_field field (verification_snapshot_json ~total:0 []))
-       with
-       | Ok _ -> Alcotest.failf "an awaiting view without %s decoded" field
-       | Error _ -> ())
+       refusal_names ("an awaiting view without " ^ field) ~key:field
+         (Tui_decode.decode_verification_snapshot
+            (remove_field field (verification_snapshot_json ~total:0 []))))
     [ "awaiting_unresolved"; "backlog_error"; "backlog_recovery" ];
   match
     Tui_decode.decode_verification_snapshot
@@ -6900,18 +6930,16 @@ let test_decode_verification_reads_which_verdict_the_row_waits_on () =
   (* The writer puts the key on every row, null or not. A row without it is
      a broken payload, and reading it as "no reason kept" would say something
      about the record that nobody observed. *)
-  match
-    Tui_decode.decode_verification_snapshot
-      (one
-         (drop_field "cancellation_reason"
-            (verification_request_json ~intent:(`String "cancel") ())))
-  with
-  | Ok _ -> Alcotest.fail "a row without cancellation_reason decoded"
-  | Error _ -> ()
+  refusal_names "a row without cancellation_reason" ~key:"cancellation_reason"
+    (Tui_decode.decode_verification_snapshot
+       (one
+          (remove_field "cancellation_reason"
+             (verification_request_json ~intent:(`String "cancel") ()))))
 
-(* A row the backlog join found nothing for says so. Folding it into either
-   verdict is the queue inventing an answer the record does not hold, and on a
-   stop that answer is the one an operator acts on. *)
+(* A row whose intent is null says so. That is the history view, which joins
+   no backlog. Folding it into either verdict is the queue inventing an answer
+   the record does not hold, and on a stop that answer is the one an operator
+   acts on. *)
 let test_decode_verification_leaves_an_unjoined_row_unstated () =
   let ask json =
     match Tui_decode.decode_verification_snapshot json with
@@ -6922,15 +6950,13 @@ let test_decode_verification_leaves_an_unjoined_row_unstated () =
   Alcotest.(check bool) "a null intent states nothing" true
     (ask (verification_snapshot_json [ verification_request_json ~intent:`Null () ])
      = Tui_decode.Ask_unstated);
-  (* Null is the join's answer; a missing key is no answer at all, so it is
-     refused rather than drawn as an unjoined row. *)
-  (match
-     Tui_decode.decode_verification_snapshot
+  (* The writer puts the key on every row. A row without it is a broken
+     payload, so it is refused rather than drawn as a row that states
+     nothing. *)
+  refusal_names "a row without intent" ~key:"intent"
+    (Tui_decode.decode_verification_snapshot
        (verification_snapshot_json
-          [ drop_field "intent" (verification_request_json ~intent:`Null ()) ])
-   with
-   | Ok _ -> Alcotest.fail "a row without intent decoded"
-   | Error _ -> ());
+          [ remove_field "intent" (verification_request_json ~intent:`Null ()) ]));
   (* A null intent beside a reason is still not a stop this build can claim:
      the field that names the verdict is the one that was empty. *)
   Alcotest.(check bool) "a reason does not supply the missing verdict" true

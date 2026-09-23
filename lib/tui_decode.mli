@@ -332,6 +332,10 @@ type effective_tool_origin =
   | Instruction_skill_origin
   | Composition_skill_origin of { skill_source_id : string option }
   | Composition_control_origin
+  | Unrecognised_origin of string
+      (** A kind this build does not know, kept as the server spelled it so
+          the Tools column still draws it and the rest of the surface still
+          loads. Its provenance is not read. *)
 
 val effective_tool_origin_kind : effective_tool_origin -> string
 (** The [origin.kind] word the server sent. *)
@@ -2827,15 +2831,7 @@ val decode_fleet_safety : Yojson.Safe.t -> (fleet_safety, string) result
 (** Reads the [keeper_fleet_safety] section out of a [/health?full=1] body.
     A body without the section is an error rather than an empty reading: an
     absent section and a healthy fleet are different facts, and rendering the
-    second for the first is how a blocked keeper stays invisible.
-
-    The server sends the section in one of two shapes. A fleet reading carries
-    [schema = "masc.keeper_fleet_operator.v1"] and every field of
-    {!fleet_safety}; a missing count is an error, not zero. When the server's
-    scan raised, the section is its failure placeholder ([component], [status],
-    [component_timed_out], [error]), which carries no counts at all; that is
-    an error naming the server's reason, because zero counts would read as an
-    idle fleet. *)
+    second for the first is how a blocked keeper stays invisible. *)
 val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :

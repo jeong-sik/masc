@@ -446,7 +446,8 @@ let tools_display_lines (state : state) =
                  | Masc.Tui_decode.Composition_skill_origin { skill_source_id = None }
                  | Masc.Tui_decode.Descriptor_origin
                  | Masc.Tui_decode.Instruction_skill_origin
-                 | Masc.Tui_decode.Composition_control_origin -> kind
+                 | Masc.Tui_decode.Composition_control_origin
+                 | Masc.Tui_decode.Unrecognised_origin _ -> kind
                in
                Ansi.dim,
                Tool_table.effective_tool_line

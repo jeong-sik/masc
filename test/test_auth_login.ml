@@ -290,6 +290,45 @@ let test_persisted_token_round_trips () =
       check (option string) "another agent's file is not borrowed" None
         (Auth_login.read_persisted_token ~base_path ~agent_name:"other-agent")
 
+(* masc-tui decides whether to re-mint by asking [Auth.verify_token] about the
+   bearer login persisted, and acts only on [Token_expired]. Both halves of that
+   contract live here: an expired record is reported as expired rather than as
+   a mismatch, and a second mint replaces the file and the record together, so
+   the next start reads a bearer the server accepts. *)
+let test_an_expired_persisted_token_is_reported_and_replaced () =
+  with_temp_dir "auth-login-expired" @@ fun base_path ->
+  let agent_name = "masc-tui" in
+  let mint () =
+    match
+      Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935 ~agent_name
+        ~role:Masc_domain.Admin ~token_env_var:"MASC_TOKEN"
+        ~token_lifetime:(Auth_login.Expires_in_hours 720) ()
+    with
+    | Error err ->
+        failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
+    | Ok report -> report
+  in
+  let first = mint () in
+  (match Auth.load_credential base_path agent_name with
+   | None -> fail "the mint wrote no credential record"
+   | Some cred ->
+       Auth.save_credential base_path
+         { cred with expires_at = Some "2000-01-01T00:00:00Z" });
+  (match Auth.verify_token base_path ~agent_name ~token:first.bearer_token with
+   | Ok _ -> fail "an expired record must not verify"
+   | Error err ->
+       check string "the refusal is expiry, not a mismatch" "token_expired"
+         (Auth_error_kind.to_string (Auth_error_kind.classify err)));
+  let second = mint () in
+  check (option string) "the replacement is what a client reads back"
+    (Some second.bearer_token)
+    (Auth_login.read_persisted_token ~base_path ~agent_name);
+  match Auth.verify_token base_path ~agent_name ~token:second.bearer_token with
+  | Ok _ -> ()
+  | Error err ->
+      failf "the replacement must verify: %s"
+        (Masc_domain.masc_error_to_string err)
+
 let string_contains haystack needle =
   let nlen = String.length needle and hlen = String.length haystack in
   if nlen = 0 then true
@@ -373,6 +412,8 @@ let () =
             test_login_urls_do_not_advertise_a_bind_wildcard;
           test_case "persisted token round-trips" `Quick
             test_persisted_token_round_trips;
+          test_case "an expired persisted token is reported and replaced" `Quick
+            test_an_expired_persisted_token_is_reported_and_replaced;
           test_case "mcp-config renders each client block" `Quick
             test_mcp_client_config_renders_each_client;
         ] );

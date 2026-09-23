@@ -355,6 +355,20 @@ val require_recovery :
     observation. The next claim may supersede it atomically; an operator may
     still resolve it first to choose the previous settlement or a fresh start. *)
 
+val conclude_resume_session_full :
+  base_path:string ->
+  keeper_name:string ->
+  expected:t ->
+  recovery_id:string ->
+  updated_at:float ->
+  (t, string) result
+(** Re-record the exact [Input_rejected Bootstrap_floor_exceeded] recovery of a
+    resumed session as [Vendor_session_full No_activity_observed], keeping its
+    recovery id and evidence. A caller uses it once the same-session shrink
+    retries of a Gate continuation have run out: no smaller input remains, and
+    no other session may carry the continuation. Any other phase or failure is
+    refused. *)
+
 val release_transient :
   base_path:string ->
   keeper_name:string ->

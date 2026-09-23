@@ -11,6 +11,7 @@ const apiRefs = vi.hoisted(() => ({
 vi.mock('../api/dashboard-keeper-github', () => ({
   fetchKeeperGithubIdentity: apiRefs.fetchKeeperGithubIdentity,
   streamKeeperGithubLogin: apiRefs.streamKeeperGithubLogin,
+  KEEPER_GITHUB_LOGIN_SCOPES: [{ scope: 'workflow', note: 'changes CI' }],
 }))
 
 import type {
@@ -94,6 +95,27 @@ describe('KeeperGithubIdentityPanel', () => {
     })
   })
 
+  it('logs in with only the scopes the operator ticked', async () => {
+    apiRefs.streamKeeperGithubLogin.mockImplementation(() => new Promise<void>(() => {}))
+    render(html`<${KeeperGithubIdentityPanel} keeperName="sangsu" />`)
+    await waitFor(() => {
+      expect(screen.getByText('@masc-sangsu-bot')).toBeInTheDocument()
+    })
+    const workflow = screen.getByRole('checkbox')
+    expect(workflow).not.toBeChecked()
+
+    fireEvent.click(screen.getByText('GitHub 로그인'))
+    await waitFor(() => expect(apiRefs.streamKeeperGithubLogin).toHaveBeenCalledTimes(1))
+    expect(apiRefs.streamKeeperGithubLogin.mock.calls[0]?.[2]).toEqual([])
+
+    fireEvent.click(screen.getByText('취소'))
+    fireEvent.click(workflow)
+    expect(workflow).toBeChecked()
+    fireEvent.click(screen.getByText('GitHub 로그인'))
+    await waitFor(() => expect(apiRefs.streamKeeperGithubLogin).toHaveBeenCalledTimes(2))
+    expect(apiRefs.streamKeeperGithubLogin.mock.calls[1]?.[2]).toEqual(['workflow'])
+  })
+
   it('streams login output into the modal and closes by aborting the request', async () => {
     const captured: {
       onEvent: ((event: KeeperGithubLoginEvent) => void) | null
@@ -103,6 +125,7 @@ describe('KeeperGithubIdentityPanel', () => {
       (
         _keeper: string,
         _hostname: string,
+        _scopes: readonly string[],
         onEvent: (event: KeeperGithubLoginEvent) => void,
         signal: AbortSignal,
       ) => {

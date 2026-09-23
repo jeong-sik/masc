@@ -432,7 +432,7 @@ def provider_parallel_suppression_contract(provider: str) -> bool:
 # - Anthropic's enum is low..max with no `none` (thinking is turned off by
 #   `thinking.type`, not by an effort), and "Not every model that supports
 #   `max` supports `xhigh`". The catalog already declares exactly that set for
-#   claude-fable-5, which is the model this benchmark names, so a copy here
+#   claude-fable-5-1, which is the model this benchmark names, so a copy here
 #   would be a second place to keep one fact right.
 #
 # A model whose ladder nobody has declared is refused by
@@ -682,7 +682,7 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser()
     ap.add_argument("arm", choices=sorted(ARMS))
-    ap.add_argument("--runtime-id", default="anthropic.claude-fable-5")
+    ap.add_argument("--runtime-id", default="anthropic.claude-fable-5-1")
     ap.add_argument("--effort", default="high")
     ns = ap.parse_args()
     print(render_arm(ns.arm, ns.runtime_id, ns.effort))

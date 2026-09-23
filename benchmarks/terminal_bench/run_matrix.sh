@@ -3,7 +3,7 @@
 #
 # Every arm over the whole Terminal-Bench 4.0.0 dataset.
 #
-# env: BENCH_MODEL  <masc provider>/<model> (default anthropic/claude-fable-5)
+# env: BENCH_MODEL  <masc provider>/<model> (default anthropic/claude-fable-5-1)
 #      BENCH_ENV    harbor environment: docker (default) or modal
 #      CONCURRENCY  trials at once (default 2)
 set -euo pipefail
@@ -14,7 +14,7 @@ ARMS_CSV="${1:-a,b,c,e,f,h}"
 # The attempts Terminal-Bench's own leaderboard runs use (-k 5 in the
 # terminal-bench README).
 K="${2:-5}"
-MODEL="${BENCH_MODEL:-anthropic/claude-fable-5}"
+MODEL="${BENCH_MODEL:-anthropic/claude-fable-5-1}"
 ENVIRONMENT="${BENCH_ENV:-docker}"
 CONCURRENCY="${CONCURRENCY:-2}"
 TS="$(date +%Y%m%d-%H%M%S)"

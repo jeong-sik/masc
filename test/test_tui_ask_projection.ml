@@ -214,14 +214,14 @@ let test_foreign_draft_contributes_nothing () =
   let d = Ask.skip (Ask.empty_draft ~ask_id:"OTHER") ~question:(List.nth two_questions 0) in
   check_ids "everything missing, which is true" [ "q1"; "q2" ] (missing_ids (Ask.readiness d ~row:r))
 
-let test_request_body_omits_blank_identity () =
-  let body = Ask.request_body ~answers:(`List []) ~actor_id:(Some "  ") ~session_id:None in
-  Alcotest.(check string) "no empty identity fields" {|{"answers":[]}|} (Yojson.Safe.to_string body)
+let test_request_body_omits_blank_session () =
+  let body = Ask.request_body ~answers:(`List []) ~session_id:(Some "  ") in
+  Alcotest.(check string) "no empty session field" {|{"answers":[]}|} (Yojson.Safe.to_string body)
 
-let test_request_body_carries_identity () =
-  let body = Ask.request_body ~answers:(`List []) ~actor_id:(Some "vincent") ~session_id:(Some "s1") in
-  Alcotest.(check string) "identity travels with the answer"
-    {|{"answers":[],"actor_id":"vincent","session_id":"s1"}|}
+let test_request_body_carries_session_and_no_identity () =
+  let body = Ask.request_body ~answers:(`List []) ~session_id:(Some "s1") in
+  Alcotest.(check string) "the body names the session, never who answered"
+    {|{"answers":[],"session_id":"s1"}|}
     (Yojson.Safe.to_string body)
 
 let gate_name = function
@@ -400,8 +400,8 @@ let () =
         ] );
       ( "request",
         [
-          Alcotest.test_case "omits blank identity" `Quick test_request_body_omits_blank_identity;
-          Alcotest.test_case "carries identity" `Quick test_request_body_carries_identity;
+          Alcotest.test_case "omits blank session" `Quick test_request_body_omits_blank_session;
+          Alcotest.test_case "carries session, no identity" `Quick test_request_body_carries_session_and_no_identity;
         ] );
       ( "gate",
         [

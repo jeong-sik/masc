@@ -37,6 +37,7 @@ let syncs_without_failure ~label ~domain () =
   let result =
     Sync.sync
       ~domain
+      ~edit_layer:Sync.No_edit_layer
       ~read:Embedded_config.read
       ~files:Embedded_config.file_list
       ~dest_dir

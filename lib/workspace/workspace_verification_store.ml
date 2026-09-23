@@ -645,10 +645,8 @@ let request_path base_path req_id =
 
 let cancellation_reason_field = "cancellation_reason"
 
-(* The producer's whole claim when it gives up on a task. Absent on a
-   completion request and on every stop submitted before the field existed,
-   which is the same answer to the reader: this record does not carry one. A
-   blank string is not a reason either. *)
+(* The producer's whole claim when it gives up on a task. A completion
+   request carries none. A blank string is not a reason either. *)
 let cancellation_reason_of_output = function
   | `Assoc output_fields ->
     (match List.assoc_opt cancellation_reason_field output_fields with
@@ -670,9 +668,6 @@ let cancellation_reason_of_request_json = function
 
 type cancellation_reason_read =
   | Cancellation_reason_stated of string
-  | Cancellation_reason_absent
-      (** The record is readable and states none: a stop submitted before the
-          record kept a copy, or a request that is not a stop. *)
   | Cancellation_reason_unreadable of string
 
 let read_cancellation_reason ~base_path ~verification_id =
@@ -683,7 +678,10 @@ let read_cancellation_reason ~base_path ~verification_id =
     try
       match cancellation_reason_of_request_json (Safe_ops.read_json_eio path) with
       | Some reason -> Cancellation_reason_stated reason
-      | None -> Cancellation_reason_absent
+      | None ->
+        Cancellation_reason_unreadable
+          (Printf.sprintf "verification record %s states no %s" path
+             cancellation_reason_field)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Cancellation_reason_unreadable (Printexc.to_string exn))

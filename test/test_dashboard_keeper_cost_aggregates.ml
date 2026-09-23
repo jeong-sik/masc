@@ -63,14 +63,6 @@ let float_field key json =
         (Printf.sprintf "field %s is not float: %s"
            key (Yojson.Safe.to_string other))
 
-let list_field key json =
-  match Yojson.Safe.Util.member key json with
-  | `List values -> values
-  | other ->
-      fail
-        (Printf.sprintf "field %s is not list: %s"
-           key (Yojson.Safe.to_string other))
-
 let test_only_current_turn_rows_count_as_cost_samples () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -152,16 +144,83 @@ let test_only_current_turn_rows_count_as_cost_samples () =
     (float_field "p50_latency_ms" aggregate);
   check (float 0.0001) "p95 latency excludes snapshots" 100.0
     (float_field "p95_latency_ms" aggregate);
-  match list_field "model_breakdown" aggregate with
-  | [ item ] ->
-      check string "model breakdown redacted" "runtime"
-        Yojson.Safe.Util.(item |> member "model" |> to_string);
-      check (float 0.0001) "model breakdown cost" 0.5
-        (float_field "cost_usd" item)
-  | other ->
-      fail
-        ("model breakdown should contain only the real call: "
-         ^ Yojson.Safe.to_string (`List other))
+  check int "every counted turn reported a cost" 2
+    (int_field "cost_reported_samples" aggregate);
+  check int "no counted turn left its cost out" 0
+    (int_field "cost_unreported_samples" aggregate)
+
+let turn_row ~ts ~cost ~latency_ms ~total_tokens =
+  Keeper_metrics_record.fields Keeper_metrics_record.Turn
+  @ [
+    ("ts_unix", `Float ts);
+    ("channel", `String "turn");
+    ("cost_usd", cost);
+    ("latency_ms", `Int latency_ms);
+    ( "usage"
+    , `Assoc
+        [ "input_tokens", `Int (total_tokens / 2)
+        ; "output_tokens", `Int (total_tokens - (total_tokens / 2))
+        ; "total_tokens", `Int total_tokens
+        ] );
+  ]
+
+let run_keeper_aggregate ~prefix ~keeper_name rows =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_eio_clock env;
+  let base_dir = temp_dir prefix in
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:None);
+  List.iter (append_metric config keeper_name) rows;
+  Dashboard_http_keeper.keeper_cost_aggregates_json
+    ~config ~keepers:[ make_meta keeper_name ] ~window_minutes:60
+  |> keeper_item
+
+(* Subscription runtimes write [cost_usd: null]. Those turns still count as
+   samples and their tokens still add up, but their cost is not folded into
+   the sum as $0: the aggregate sums the reported costs and says how many
+   turns left theirs out. *)
+let test_unreported_cost_is_counted_not_summed_as_zero () =
+  let ts = Unix.gettimeofday () -. 1.0 in
+  let aggregate =
+    run_keeper_aggregate ~prefix:"keeper_cost_mixed" ~keeper_name:"mixed-keeper"
+      [
+        turn_row ~ts ~cost:(`Float 0.25) ~latency_ms:100 ~total_tokens:10;
+        turn_row ~ts ~cost:`Null ~latency_ms:200 ~total_tokens:1000;
+        turn_row ~ts ~cost:`Null ~latency_ms:300 ~total_tokens:2000;
+      ]
+  in
+  check int "all three turns are samples" 3 (int_field "sample_count" aggregate);
+  check int "one turn reported its cost" 1
+    (int_field "cost_reported_samples" aggregate);
+  check int "two turns did not report a cost" 2
+    (int_field "cost_unreported_samples" aggregate);
+  check (float 0.0001) "sum covers only the reported cost" 0.25
+    (float_field "total_cost_usd" aggregate);
+  check int "tokens of unreported-cost turns still add up" 3010
+    (int_field "total_tokens" aggregate)
+
+let test_all_unreported_cost_leaves_total_unknown () =
+  let ts = Unix.gettimeofday () -. 1.0 in
+  let aggregate =
+    run_keeper_aggregate ~prefix:"keeper_cost_unreported"
+      ~keeper_name:"subscription-keeper"
+      [
+        turn_row ~ts ~cost:`Null ~latency_ms:200 ~total_tokens:1000;
+        turn_row ~ts ~cost:`Null ~latency_ms:300 ~total_tokens:2000;
+      ]
+  in
+  check int "no turn reported a cost" 0
+    (int_field "cost_reported_samples" aggregate);
+  check int "both turns left their cost out" 2
+    (int_field "cost_unreported_samples" aggregate);
+  (match Yojson.Safe.Util.member "total_cost_usd" aggregate with
+   | `Null -> ()
+   | other ->
+       fail
+         ("total cost must stay unknown when no turn reported one, got: "
+          ^ Yojson.Safe.to_string other));
+  check int "tokens are still counted" 3000 (int_field "total_tokens" aggregate)
 
 let () =
   run "dashboard_keeper_cost_aggregates"
@@ -170,5 +229,9 @@ let () =
         [
           test_case "accepts only current turn rows" `Quick
             test_only_current_turn_rows_count_as_cost_samples;
+          test_case "unreported cost is counted, not summed as zero" `Quick
+            test_unreported_cost_is_counted_not_summed_as_zero;
+          test_case "all-unreported cost leaves the total unknown" `Quick
+            test_all_unreported_cost_leaves_total_unknown;
         ] );
     ]

@@ -136,6 +136,10 @@ type action =
 val error_to_string : error -> string
 val phase_name : phase -> string
 val is_terminal : t -> bool
+val checkpoint_references : t -> Keeper_checkpoint_ref.t list
+(** Every Agent Core checkpoint the record can still ask the store for: the
+    one it resumes, a retry's, a Gate wait's and a Gate preparation's. A
+    retained continuation named by no record's list is never read again. *)
 val scope : t -> Keeper_execution_scope_id.t
 val create : id:Keeper_execution_scope_id.t -> input:Yojson.Safe.t -> sources:source_member list -> now:float -> (t, error) result
 (** The producer owns the input codec. Its canonical payload remains available

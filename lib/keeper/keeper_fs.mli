@@ -224,6 +224,9 @@ val session_store_path : Workspace.config -> string
 (** Pure path to the retained trace-session store. Unlike
     {!keeper_session_dir}, this accessor does not create the directory. *)
 
+val session_store_path_for_runtime_root : string -> string
+(** [<runtime_root>/traces]: the session store beside [<runtime_root>/keepers]. *)
+
 val session_store_path_for_base_path : string -> string
 (** Pure path to the retained trace-session store for an already resolved
     runtime base path. This follows the producer's cluster and trace-store rules. *)

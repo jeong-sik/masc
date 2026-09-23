@@ -316,113 +316,123 @@ let registration ~key ~description ~category ~operator_surface
     reg_slot = slot;
   }
 
-(* Registrations one [*.md] file yields, slots first in file order and
-   then the file's own key. A file without frontmatter or without a
-   [description] yields nothing, as does one that fails to read. *)
-let registrations_of_file ~dir file =
-  if not (Filename.check_suffix file ".md") then []
+(* The key a prompt file registers under, when its name can carry one. *)
+let key_of_file file =
+  if not (Filename.check_suffix file ".md") then None
   else
     let key = Filename.remove_extension file in
-    if not (is_valid_prompt_key key) then []
-    else
+    if is_valid_prompt_key key then Some key else None
+
+(* Registrations one [*.md] file's content yields under [key], slots first
+   in file order and then the file's own key. Content without frontmatter
+   or without a [description] yields nothing. *)
+let registrations_of_content ~key content =
+  let meta_pairs, body = parse_frontmatter content in
+  match List.assoc_opt "description" meta_pairs with
+  | None -> []
+  | Some description ->
+      (* DET-OK: [category] is optional frontmatter with the
+         documented schema default [general]; the default does
+         not depend on time, environment, or iteration order. *)
+      let category =
+        match List.assoc_opt "category" meta_pairs with
+        | Some category -> category
+        | None -> "general"
+      in
+      let operator_surface =
+        match List.assoc_opt "operator_surface" meta_pairs with
+        | None -> Types.Primary
+        | Some value -> (
+            match Types.operator_surface_of_string value with
+            | Some surface -> surface
+            | None ->
+                Log.Misc.warn
+                  "prompt %s has unknown operator_surface=%S; keeping it visible as primary"
+                  key value;
+                Types.Primary)
+      in
+      let template_variables =
+        match List.assoc_opt "template_variables" meta_pairs with
+        | Some v -> Frontmatter.list_value v
+        | None -> []
+      in
+      (* A group file registers each [### marker] paragraph as
+         <key>.<marker>, carrying the group's frontmatter surface
+         (the TUI prompt list hides fragments by default, so a
+         merged operator-facing prompt keeps its primary surface)
+         and the variables declared on the marker line. The prose
+         before the first marker is the group's own body and
+         registers under the group key when there is any; a file
+         without markers registers whole. *)
+      let split = split_body body in
+      (* [slot_paragraph] returns the first paragraph of a marker,
+         so a repeated marker is logged and its later paragraph
+         ignored — the registered variables and the text then come
+         from the same paragraph. A marker with no paragraph is
+         logged and not registered. *)
+      let _seen, slots =
+        List.fold_left
+          (fun (seen, slots)
+               (marker, slot_vars, primary_declaration, paragraph) ->
+            if List.mem marker seen then begin
+              Log.Misc.error
+                "prompt %s declares slot %s twice; the first paragraph stands and the later one is ignored"
+                key marker;
+              (seen, slots)
+            end
+            else if String.equal paragraph "" then begin
+              Log.Misc.error
+                "prompt %s slot %s has no paragraph; it is not registered"
+                key marker;
+              (marker :: seen, slots)
+            end
+            else
+              let slot_key = key ^ "." ^ marker in
+              let template_variables =
+                match slot_vars with
+                | None -> []
+                | Some declared -> Frontmatter.list_value declared
+              in
+              let slot_surface, slot_description =
+                match primary_declaration with
+                | None -> (Types.Fragment, description)
+                | Some None -> (Types.Primary, description)
+                | Some (Some own) -> (Types.Primary, own)
+              in
+              ( marker :: seen,
+                registration ~key:slot_key ~description:slot_description
+                  ~category ~operator_surface:slot_surface
+                  ~template_variables
+                  ~slot:(Some (key, marker))
+                :: slots ))
+          ([], []) split.slots
+      in
+      let own =
+        if split.slots = [] || split.preamble <> "" then
+          [
+            registration ~key ~description ~category ~operator_surface
+              ~template_variables ~slot:None;
+          ]
+        else []
+      in
+      List.rev_append slots own
+
+(* Registrations one [*.md] file yields; nothing for a file whose name
+   carries no key or that fails to read. *)
+let registrations_of_file ~dir file =
+  match key_of_file file with
+  | None -> []
+  | Some key -> (
       let path = Filename.concat dir file in
       try
-        let content = In_channel.with_open_text path In_channel.input_all in
-        let meta_pairs, body = parse_frontmatter content in
-        match List.assoc_opt "description" meta_pairs with
-        | None -> []
-        | Some description ->
-            (* DET-OK: [category] is optional frontmatter with the
-               documented schema default [general]; the default does
-               not depend on time, environment, or iteration order. *)
-            let category =
-              match List.assoc_opt "category" meta_pairs with
-              | Some category -> category
-              | None -> "general"
-            in
-            let operator_surface =
-              match List.assoc_opt "operator_surface" meta_pairs with
-              | None -> Types.Primary
-              | Some value -> (
-                  match Types.operator_surface_of_string value with
-                  | Some surface -> surface
-                  | None ->
-                      Log.Misc.warn
-                        "prompt %s has unknown operator_surface=%S; keeping it visible as primary"
-                        key value;
-                      Types.Primary)
-            in
-            let template_variables =
-              match List.assoc_opt "template_variables" meta_pairs with
-              | Some v -> Frontmatter.list_value v
-              | None -> []
-            in
-            (* A group file registers each [### marker] paragraph as
-               <key>.<marker>, carrying the group's frontmatter surface
-               (the TUI prompt list hides fragments by default, so a
-               merged operator-facing prompt keeps its primary surface)
-               and the variables declared on the marker line. The prose
-               before the first marker is the group's own body and
-               registers under the group key when there is any; a file
-               without markers registers whole. *)
-            let split = split_body body in
-            (* [slot_paragraph] returns the first paragraph of a marker,
-               so a repeated marker is logged and its later paragraph
-               ignored — the registered variables and the text then come
-               from the same paragraph. A marker with no paragraph is
-               logged and not registered. *)
-            let _seen, slots =
-              List.fold_left
-                (fun (seen, slots)
-                     (marker, slot_vars, primary_declaration, paragraph) ->
-                  if List.mem marker seen then begin
-                    Log.Misc.error
-                      "prompt %s declares slot %s twice; the first paragraph stands and the later one is ignored"
-                      key marker;
-                    (seen, slots)
-                  end
-                  else if String.equal paragraph "" then begin
-                    Log.Misc.error
-                      "prompt %s slot %s has no paragraph; it is not registered"
-                      key marker;
-                    (marker :: seen, slots)
-                  end
-                  else
-                    let slot_key = key ^ "." ^ marker in
-                    let template_variables =
-                      match slot_vars with
-                      | None -> []
-                      | Some declared -> Frontmatter.list_value declared
-                    in
-                    let slot_surface, slot_description =
-                      match primary_declaration with
-                      | None -> (Types.Fragment, description)
-                      | Some None -> (Types.Primary, description)
-                      | Some (Some own) -> (Types.Primary, own)
-                    in
-                    ( marker :: seen,
-                      registration ~key:slot_key ~description:slot_description
-                        ~category ~operator_surface:slot_surface
-                        ~template_variables
-                        ~slot:(Some (key, marker))
-                      :: slots ))
-                ([], []) split.slots
-            in
-            let own =
-              if split.slots = [] || split.preamble <> "" then
-                [
-                  registration ~key ~description ~category ~operator_surface
-                    ~template_variables ~slot:None;
-                ]
-              else []
-            in
-            List.rev_append slots own
+        In_channel.with_open_text path In_channel.input_all
+        |> registrations_of_content ~key
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
           Log.Misc.error "prompt directory scan: failed to read %s: %s" file
             (Printexc.to_string exn);
-          []
+          [])
 
 (* Every registration under [dir], in [Sys.readdir] order; [] when [dir]
    is not a directory. Takes no lock. *)
@@ -1141,3 +1151,97 @@ let restore_overrides base_path =
               "prompt override %s applies over a default that changed since it was written"
               entry.key)
         candidate)
+
+type file_edit_promotion =
+  | Promoted of { key : string }
+  | Override_exists of { key : string }
+  | Not_promotable of { reason : string }
+
+(* A whole-file edit maps to one override key only when both the
+   distribution copy and the edit register exactly that one key and no slot
+   -- the same registrations the directory scan makes -- and the edit left
+   the frontmatter alone, since an override carries body text, never
+   metadata. The entry is built the way [validated_override] builds one,
+   against the distribution body the file is reset to, and checked the way
+   [restore_overrides] will check it. An override already saved with the
+   same text is this edit promoted by an earlier pass whose reset did not
+   happen, so it counts as promoted. *)
+let single_key_registration ~key content =
+  match registrations_of_content ~key content with
+  | [ { reg_key; reg_meta; reg_slot = None } ] when String.equal reg_key key ->
+      Some reg_meta
+  | [] | [ _ ] | _ :: _ :: _ -> None
+
+let promote_file_edit ~base_path ~file ~embedded ~edited =
+  let not_promotable reason = Not_promotable { reason } in
+  match key_of_file file with
+  | None -> not_promotable "no prompt key reads this file"
+  | Some key -> (
+      let embedded_fields, embedded_body = parse_frontmatter embedded in
+      let edited_fields, edited_body = parse_frontmatter edited in
+      match
+        ( single_key_registration ~key embedded,
+          single_key_registration ~key edited )
+      with
+      | None, _ | _, None ->
+          not_promotable
+            "the file does not register exactly one prompt key without ### slots"
+      | Some _, Some _ when embedded_fields <> edited_fields ->
+          not_promotable
+            "the edit changes the frontmatter, which an override cannot carry"
+      | Some meta, Some _ -> (
+          let value = String.trim edited_body in
+          match unexpected_template_variables meta value with
+          | _ :: _ as undeclared ->
+              not_promotable
+                (Printf.sprintf "the edit uses undeclared template variables: %s"
+                   (String.concat ", " undeclared))
+          | [] when String.equal value "" ->
+              not_promotable "the edited body is empty"
+          | [] ->
+              let path =
+                Filename.concat
+                  (Workspace_utils.masc_dir_from_base_path ~base_path)
+                  "prompt_overrides.json"
+              in
+              with_override_mutation_lock (fun () ->
+                  let saved =
+                    if Sys.file_exists path then
+                      Prompt_override_persistence.load ~path
+                    else Ok []
+                  in
+                  match saved with
+                  | Error error ->
+                      not_promotable
+                        ("prompt_overrides.json does not read: "
+                        ^ Prompt_override_persistence.error_to_string error)
+                  | Ok entries -> (
+                      match
+                        List.find_opt
+                          (fun (entry : Prompt_override_persistence.entry) ->
+                            String.equal entry.key key)
+                          entries
+                      with
+                      | Some entry when String.equal entry.value value ->
+                          Promoted { key }
+                      | Some _ -> Override_exists { key }
+                      | None -> (
+                          let entry =
+                            Prompt_override_persistence.
+                              {
+                                key;
+                                value;
+                                authored_against =
+                                  default_revision ~body:embedded_body;
+                                template_variables =
+                                  sorted_variables meta.template_variables;
+                              }
+                          in
+                          match
+                            save_override_entries base_path (entry :: entries)
+                          with
+                          | Ok () -> Promoted { key }
+                          | Error message ->
+                              not_promotable
+                                ("prompt_overrides.json was not written: "
+                               ^ message))))))

@@ -94,4 +94,11 @@ module For_testing : sig
       session admission fence holds instead of auto-replaying. *)
   val recovery_failure_of_client_error :
     Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
+
+  (** A Gate continuation's resume that overflowed after a tool effect is
+      [Vendor_session_full Activity_observed]; everything else is
+      {!recovery_failure_of_client_error}. *)
+  val recovery_failure_of_attempt :
+    thread_mode:Runtime_codex_app_server.thread_mode -> gate_continuation:bool ->
+    Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
 end

@@ -418,6 +418,12 @@ let overview_pulls_lines (state : state) =
                     | Pull_review_approved | Pull_review_waiting | Pull_review_none -> false)
               in
               let drafts = count (fun (pull : open_pull) -> pull.op_draft) in
+              (* A PR the server has not joined to Keepers is on no Team row;
+                 counting it here keeps "nobody holds it" from being the
+                 reading. *)
+              let not_joined =
+                count (fun (pull : open_pull) -> Option.is_none pull.op_keepers)
+              in
               let parts =
                 List.filter_map Fun.id
                   [ Some (Printf.sprintf "%d open" (List.length pulls))
@@ -428,6 +434,9 @@ let overview_pulls_lines (state : state) =
                        Some (Printf.sprintf "%s%d changes requested%s" (Theme.warn ()) changes Ansi.reset)
                      else None)
                   ; (if drafts > 0 then Some (Printf.sprintf "%d draft" drafts) else None)
+                  ; (if not_joined > 0 then
+                       Some (Printf.sprintf "%s%d not matched to Keepers%s" Ansi.dim not_joined Ansi.reset)
+                     else None)
                   ; (if undecodable > 0 then
                        Some (Printf.sprintf "%d unreadable" undecodable)
                      else None)

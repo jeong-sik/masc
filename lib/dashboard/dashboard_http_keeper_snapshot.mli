@@ -38,6 +38,7 @@ val keeper_cost_aggregates_json :
   config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   window_minutes:int ->
+  now_ts:float ->
   Yojson.Safe.t
 
 val keeper_decisions_json :

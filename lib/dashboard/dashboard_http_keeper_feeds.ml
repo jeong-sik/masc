@@ -76,6 +76,29 @@ let tally_count_fields prefix tally =
   ; prefix ^ "_unread_samples", `Int tally.unread_samples
   ]
 
+(* The longest window a keeper-costs request may ask for. Every day file the
+   window touches is read on each refresh, and the route is a public read,
+   so the window is bounded by what callers ask for: the web cost dashboard
+   offers 30, 60, 360 and 1440 minutes and the TUI Team block asks for 1440.
+   No longer view exists; one that needs it raises this with it. *)
+let keeper_costs_max_window_minutes = 24 * 60
+
+let keeper_costs_default_window_minutes = keeper_costs_max_window_minutes
+
+(* [window] as the request spelled it. Absent is the default; anything that
+   is not a whole number of minutes in [1, max] is refused, never clamped:
+   a clamped answer would be labelled with a window nobody asked for. *)
+let keeper_costs_window_of_query = function
+  | None -> Ok keeper_costs_default_window_minutes
+  | Some raw -> (
+      match int_of_string_opt raw with
+      | Some minutes when minutes >= 1 && minutes <= keeper_costs_max_window_minutes ->
+          Ok minutes
+      | Some _ | None ->
+          Error
+            (Printf.sprintf "window must be a whole number of minutes from 1 to %d, got %S"
+               keeper_costs_max_window_minutes raw))
+
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.
 
     Reads every day file of each keeper's metrics store that the window
@@ -96,8 +119,8 @@ let keeper_cost_aggregates_json
     ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
     ~(window_minutes : int)
+    ~(now_ts : float)
   : Yojson.Safe.t =
-  let now_ts = Unix.gettimeofday () in
   let window_sec = float_of_int window_minutes *. 60.0 in
   let start_ts = now_ts -. window_sec in
   let keeper_items =

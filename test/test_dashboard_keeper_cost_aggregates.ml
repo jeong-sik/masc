@@ -140,7 +140,7 @@ let test_only_current_turn_rows_count_as_cost_samples () =
     ]);
   let aggregate =
     Dashboard_http_keeper.keeper_cost_aggregates_json
-      ~config ~keepers:[ meta ] ~window_minutes:60
+      ~config ~keepers:[ meta ] ~window_minutes:60 ~now_ts:(Unix.gettimeofday ())
     |> keeper_item
   in
   check int "only current turns counted" 2 (int_field "sample_count" aggregate);
@@ -187,6 +187,7 @@ let run_keeper_aggregate ~prefix ~keeper_name rows =
   List.iter (append_metric config keeper_name) rows;
   Dashboard_http_keeper.keeper_cost_aggregates_json
     ~config ~keepers:[ make_meta keeper_name ] ~window_minutes:60
+    ~now_ts:(Unix.gettimeofday ())
   |> keeper_item
 
 (* Subscription runtimes write [cost_usd: null]. Those turns still count as
@@ -408,7 +409,7 @@ let write_dated_rows config keeper_name rows =
       close_out out)
     rows
 
-let aggregate_of_workspace ~prefix ~keeper_name write =
+let aggregate_of_workspace ?(now_ts = Unix.gettimeofday ()) ~prefix ~keeper_name write =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Masc_test_deps.init_eio_clock env;
@@ -416,7 +417,7 @@ let aggregate_of_workspace ~prefix ~keeper_name write =
   ignore (Workspace.init config ~agent_name:None);
   write config;
   Dashboard_http_keeper.keeper_cost_aggregates_json
-    ~config ~keepers:[ make_meta keeper_name ] ~window_minutes
+    ~config ~keepers:[ make_meta keeper_name ] ~window_minutes ~now_ts
   |> keeper_item
 
 let metrics_read aggregate =
@@ -448,24 +449,37 @@ let test_a_busy_window_counts_every_turn () =
   check int "every token adds up" (turns * 10) (int_field "total_tokens" aggregate);
   check string "the whole window was read" "read" (string_field "state" (metrics_read aggregate))
 
-(* A turn one minute inside the window's start sits in the day file of its
-   own date, which is yesterday's whenever the window crosses midnight UTC;
-   a turn one minute before the start is out. *)
+let seconds_per_day = 86_400.0
+
+(* Noon UTC, so the window start is noon of the day before and every row
+   below lands in the day file its timestamp names, whatever the clock. *)
+let fixed_now = 1_789_992_000.0
+
+let start_of_window now = now -. (float_of_int window_minutes *. 60.0)
+
+let () =
+  assert (Float.rem fixed_now seconds_per_day = seconds_per_day /. 2.0)
+
+(* The window is [start, now]: a turn at exactly the start counts, one a
+   millisecond before it does not. The start sits in yesterday's day file,
+   which the reader must open. *)
 let test_the_window_start_day_file_is_read () =
-  let now = Unix.gettimeofday () in
-  let start = now -. float_of_int (window_minutes * 60) in
-  let inside = start +. 60.0 and outside = start -. 60.0 in
+  let now = fixed_now in
+  let start = start_of_window now in
+  let before = start -. 0.001 and inside = start +. 60.0 in
   let aggregate =
-    aggregate_of_workspace ~prefix:"keeper_cost_edge" ~keeper_name:"edge"
+    aggregate_of_workspace ~now_ts:now ~prefix:"keeper_cost_edge" ~keeper_name:"edge"
       (fun config ->
         write_dated_rows config "edge"
-          [ (outside, turn_json ~ts:outside ~tokens:1)
+          [ (before, turn_json ~ts:before ~tokens:1)
+          ; (start, turn_json ~ts:start ~tokens:1000)
           ; (inside, turn_json ~ts:inside ~tokens:10)
           ; (now -. 1.0, turn_json ~ts:(now -. 1.0) ~tokens:100)
           ])
   in
-  check int "the edge turn and today's turn count" 2 (int_field "sample_count" aggregate);
-  check int "the turn before the window does not" 110 (int_field "total_tokens" aggregate)
+  check int "the start, the edge turn and today's turn count" 3
+    (int_field "sample_count" aggregate);
+  check int "the turn before the start does not" 1110 (int_field "total_tokens" aggregate)
 
 (* A row that is not JSON may have been a turn; the count says the sums
    beside it are a floor. *)
@@ -485,29 +499,56 @@ let test_malformed_rows_are_counted () =
 (* A store that cannot be read says so, and its sums say nothing: they are
    not the fragment read before the failure. *)
 let test_an_unreadable_store_is_a_failure () =
-  let now = Unix.gettimeofday () in
+  let now = fixed_now in
+  let today_starts = now -. Float.rem now seconds_per_day in
   let aggregate =
-    aggregate_of_workspace ~prefix:"keeper_cost_unreadable" ~keeper_name:"broken"
-      (fun config ->
-        (* Yesterday's file reads first and is fine; today's fails after it. *)
-        let yesterday = now -. float_of_int (window_minutes * 60) +. 60.0 in
-        write_dated_rows config "broken"
-          [ (yesterday, turn_json ~ts:yesterday ~tokens:10)
-          ; (now -. 1.0, turn_json ~ts:(now -. 1.0) ~tokens:10)
-          ];
+    aggregate_of_workspace ~now_ts:now ~prefix:"keeper_cost_unreadable"
+      ~keeper_name:"broken" (fun config ->
+        (* Yesterday's last second is inside the window and in a file that
+           reads first and is fine; today's file fails after it. *)
+        let yesterday = today_starts -. 1.0 in
+        write_dated_rows config "broken" [ (yesterday, turn_json ~ts:yesterday ~tokens:10) ];
         let base_dir =
           Dated_jsonl.base_dir (Keeper_types_support.keeper_metrics_store config "broken")
         in
-        (* Today's file becomes a directory: a path the store cannot read. *)
+        (* Today's file is a directory: a path the store cannot read. *)
         let dated = Jsonl_writer.dated_path ~base_dir ~ts:now in
-        Sys.remove dated.path;
+        if not (Sys.file_exists (Filename.dirname dated.path)) then
+          Unix.mkdir (Filename.dirname dated.path) 0o755;
         Unix.mkdir dated.path 0o755)
   in
   let read = metrics_read aggregate in
   check string "the read failed" "failed" (string_field "state" read);
   check bool "the failure says why" true (String.length (string_field "reason" read) > 0);
   check int "no fragment is counted" 0 (int_field "sample_count" aggregate);
-  null_field "total_tokens" aggregate
+  List.iter
+    (fun key -> check int (key ^ " is empty") 0 (int_field key aggregate))
+    [ "cost_reported_samples"; "cost_unreported_samples"; "cost_unread_samples"
+    ; "tokens_reported_samples"; "tokens_unreported_samples"; "tokens_unread_samples"
+    ];
+  List.iter
+    (fun key -> null_field key aggregate)
+    [ "total_cost_usd"; "total_tokens"; "p50_latency_ms"; "p95_latency_ms" ]
+
+module Feeds = Dashboard_http_keeper_feeds
+
+let window_result = result int string
+
+(* The route refuses a window outside [1, max] rather than clamping it or
+   reading every day file the store has. *)
+let test_window_bounds () =
+  let max = Feeds.keeper_costs_max_window_minutes in
+  check window_result "absent is the default" (Ok max) (Feeds.keeper_costs_window_of_query None);
+  check window_result "one minute is the least" (Ok 1)
+    (Feeds.keeper_costs_window_of_query (Some "1"));
+  check window_result "the maximum is accepted" (Ok max)
+    (Feeds.keeper_costs_window_of_query (Some (string_of_int max)));
+  List.iter
+    (fun raw ->
+      match Feeds.keeper_costs_window_of_query (Some raw) with
+      | Error _ -> ()
+      | Ok minutes -> failf "window %S was accepted as %d" raw minutes)
+    [ "0"; "-1"; string_of_int (max + 1); string_of_int max_int; "1e12"; "abc"; "" ]
 
 let () =
   run "dashboard_keeper_cost_aggregates"
@@ -521,6 +562,7 @@ let () =
           test_case "malformed rows are counted" `Quick test_malformed_rows_are_counted;
           test_case "an unreadable store is a failure" `Quick
             test_an_unreadable_store_is_a_failure;
+          test_case "window bounds" `Quick test_window_bounds;
           test_case "accepts only current turn rows" `Quick
             test_only_current_turn_rows_count_as_cost_samples;
           test_case "unreported cost is counted, not summed as zero" `Quick

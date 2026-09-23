@@ -47,7 +47,7 @@ let restore_env name = function
 ;;
 
 let skill_config =
-  "[skills]\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
+  "[skills]\nresource-read-max-bytes = 65536\n\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
 ;;
 
 let instruction ~name ~description =

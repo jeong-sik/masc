@@ -3680,9 +3680,6 @@ let handle_keeper_ask_answer ~actor state request reqd =
                 | Some (`List items) -> ask_answer_submissions_of_json items
                 | Some _ | None -> Error "answers (array) is required"
               in
-              (* See task-1662: who answered is the authenticated caller, not a body field -- a self-reported [actor_id] would let the answering client write any name into the durable log. The field is parsed historically and ignored; the responder below carries the token's principal. *)
-              ignore
-                (List.assoc_opt "actor_id" fields : Yojson.Safe.t option);
               let session_id =
                 match List.assoc_opt "session_id" fields with
                 | Some (`String value) -> Some (String.trim value)

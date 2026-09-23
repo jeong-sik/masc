@@ -195,10 +195,10 @@ module KeeperAutonomous = struct
   (** The wording used when neither the fleet nor a keeper configures one.
 
       Read from the binary, not from [<config-root>/prompts]. That runtime
-      copy is derived distribution state: [Managed_asset_sync] overwrites it
-      from this same embedded tree on every boot, and prompt customization
-      lives in [prompt_overrides.json] instead — so the two are the same bytes
-      and reading the copy only adds a way to fail.
+      copy is derived distribution state: [Managed_asset_sync] converges it
+      onto this same embedded tree on every boot, and prompt customization
+      lives in [prompt_overrides.json] instead — so reading the copy only
+      adds a way to fail.
 
       It added a real one. This binding is a value, so it runs at module load;
       the sync that produces the copy runs later, inside [main]. An asset

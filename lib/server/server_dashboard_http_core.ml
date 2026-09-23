@@ -75,6 +75,7 @@ let mission_cache =
         ; "attention_queue", `List []
         ; "agent_briefs", `List []
         ; "keeper_briefs", `List []
+        ; "keepers_unread", `List []
         ; "internal_signals", `List []
         ])
 ;;

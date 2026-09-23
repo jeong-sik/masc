@@ -1608,6 +1608,42 @@ let with_repository_model_catalog f =
        Fun.protect f ~finally:restore)
 ;;
 
+(* xAI documents the effort ladder per model, not per provider: grok-4.3
+   accepts "none" (reasoning can be turned off) and the four levels, while
+   grok-4.5 and later cannot disable reasoning. The catalog row must carry that
+   set, or an effort-carrying request is refused before it is sent
+   ([Undeclared_reasoning_effort_capability]). Sources checked 2026-09-22:
+   https://docs.x.ai/developers/models/grok-4.3 -> none, low, medium, high,
+   xhigh (default low); https://docs.x.ai/developers/models/grok-4.7 -> low,
+   medium, high, xhigh (default high). *)
+let test_xai_grok_4_3_declares_its_effort_ladder () =
+  with_repository_model_catalog (fun () ->
+    let cfg effort =
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~provider_id:"xai"
+        ~model_id:"xai/grok-4.3"
+        ~base_url:"https://api.x.ai/v1"
+        ~reasoning_effort:effort
+        ()
+    in
+    List.iter
+      (fun effort ->
+         match Provider_config.validate_reasoning_effort_request_typed (cfg effort) with
+         | Ok () -> ()
+         | Error rejection ->
+           Alcotest.failf
+             "xai/grok-4.3 should accept %s: %s"
+             (Provider_config.reasoning_effort_to_string effort)
+             (Provider_config.reasoning_effort_request_rejection_to_message rejection))
+      [ Reasoning_effort.None_
+      ; Reasoning_effort.Low
+      ; Reasoning_effort.Medium
+      ; Reasoning_effort.High
+      ; Reasoning_effort.XHigh
+      ])
+;;
+
 let test_validate_output_schema_openai_unscoped_catalog_not_inferred () =
   with_repository_model_catalog (fun () ->
     let cfg =
@@ -2738,6 +2774,10 @@ let () =
             "reasoning effort accepted subset"
             `Quick
             test_validate_reasoning_effort_subset_rejects_unsupported
+        ; Alcotest.test_case
+            "xai/grok-4.3 declares its own effort ladder"
+            `Quick
+            test_xai_grok_4_3_declares_its_effort_ladder
         ; Alcotest.test_case
             "reasoning effort undeclared fails closed"
             `Quick

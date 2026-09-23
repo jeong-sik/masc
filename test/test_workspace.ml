@@ -1554,8 +1554,6 @@ let test_cancel_writes_the_record_the_authority_reads () =
     match Verification.load_request config.Workspace.base_path verification_id with
     | Error e -> Alcotest.fail ("the authority would defer on: " ^ e)
     | Ok (_ : Verification.verification_request) ->
-      (* The record keeps no copy of the reason; the message log is the
-         reader this environment has. *)
       Alcotest.(check bool) "the message log carries the producer's reason" true
         (List.exists
            (fun (message : Types.message) ->

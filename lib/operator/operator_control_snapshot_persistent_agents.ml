@@ -38,7 +38,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "trace_id", field_or_null "trace_id"
                  ; "goal", field_or_null "goal"
                  ; "status", field_or_null "status"
-                 ; "generation", field_or_null "generation"
                  ; "turn_count", field_or_null "turn_count"
                  ; "last_model_used", field_or_null "last_model_used"
                  ; "active_model", field_or_null "active_model"

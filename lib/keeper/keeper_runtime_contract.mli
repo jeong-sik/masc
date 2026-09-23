@@ -7,7 +7,6 @@ val runtime_contract_json_from_fields :
   keeper_name:string ->
   ?trace_id:string ->
   ?session_id:string ->
-  ?generation:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
   ?goal_ids:string list ->
@@ -25,7 +24,6 @@ val runtime_observability_contract_json_from_fields :
   keeper_name:string ->
   ?trace_id:string ->
   ?session_id:string ->
-  ?generation:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
   ?goal_ids:string list ->

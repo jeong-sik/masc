@@ -224,6 +224,7 @@ let test_all_unreported_cost_leaves_total_unknown () =
         turn_row ~ts ~cost:`Null ~latency_ms:300 ~total_tokens:2000;
       ]
   in
+  check_partition aggregate;
   check int "no turn reported a cost" 0
     (int_field "cost_reported_samples" aggregate);
   check int "both turns left their cost out" 2
@@ -302,6 +303,7 @@ let test_all_unreported_tokens_leave_totals_unknown () =
         row_with ~ts ~latency_ms:200 ~cost:(Some `Null) ~usage:unreported_usage;
       ]
   in
+  check_partition aggregate;
   check int "no turn reported tokens" 0
     (int_field "tokens_reported_samples" aggregate);
   check int "both turns left their tokens out" 2

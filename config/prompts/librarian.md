@@ -32,7 +32,11 @@ template_variables: [continuity, working_context, current_memory, conversation_h
 `null`은 그 전제가 현재 기억에 없다는 뜻이며, ID를 지어내거나 빈자리를 무시하지 마세요.
 다른 경로가 살아 있으면 일부 전제가 없는 경로도 설명을 위해 남아 있을 수 있습니다.
 기억을 삭제·흡수할 때 남은 사실의 유일한 근거를 함께 없애는지 살피세요.
-`origin`·`basis` 객체를 `new_claims`에 복사하지 않습니다. 새 claim도 해당 Board
+`first_seen`은 그 기억이 기록된 시각입니다. 한 대상이 움직이는 상태(진행 위치,
+체크포인트, 수치 현황)를 시점마다 따로 적은 기억이 여러 개면, 가장 늦게 기록된 것이
+현재 상태이고 그보다 앞선 것은 낡은 상태입니다. 앞선 기억에만 있는 교훈·제약·결정은
+낡은 것이 아니니, 상태와 함께 지우지 말고 따로 남기세요.
+`origin`·`basis`·`first_seen`을 `new_claims`에 복사하지 않습니다. 새 claim도 해당 Board
 글·댓글을 근거로 삼으면 그 출처 ID를 기존 출력 필드 `board_post_id`·
 `board_comment_id`에 적을 수 있습니다. 묶는다는 이유만으로 출처를 물려주지 마세요.
 

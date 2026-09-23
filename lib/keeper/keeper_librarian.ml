@@ -159,6 +159,10 @@ let basis_for_prompt ~by_identity = function
       ]
 ;;
 
+(* [first_seen] is when the fact was written. Without it a keeper's snapshots
+   of one moving state -- a game position rewritten every step -- read as
+   equals, and none can be told apart as the stale one (#37079). [last_seen]
+   stays out: a re-observation is not a strength signal (RFC-0418). *)
 let current_fact_json ~by_identity index fact =
   `Assoc
     [ wire_field_memory_id, `String (surrogate_id_of_index index)
@@ -169,6 +173,8 @@ let current_fact_json ~by_identity index fact =
           ; wire_field_origin,
             `Assoc [ wire_field_kind, `String (origin_kind_to_string fact.origin.kind) ]
           ; wire_field_basis, basis_for_prompt ~by_identity fact.basis
+          ; ( wire_field_first_seen
+            , `String (Masc_domain.iso8601_of_unix_seconds fact.first_seen) )
           ] )
     ]
 ;;

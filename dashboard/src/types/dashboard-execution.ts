@@ -506,6 +506,7 @@ export interface DashboardPlanningResponse {
     todo?: number
     claimed?: number
     in_progress?: number
+    awaiting_verification?: number
     done?: number
     cancelled?: number
   }

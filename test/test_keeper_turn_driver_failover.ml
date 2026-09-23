@@ -3065,8 +3065,12 @@ let test_a_quota_hint_that_names_no_time_is_recorded_as_observed () =
 ;;
 
 let test_the_production_answer_test_reads_provider_turns () =
-  let yielded = Runtime_agent.yielded_pre_first_token ~session_id:"session" in
-  Alcotest.(check bool) "a pre-first-token yield did not hear the candidate" false
+  let yielded =
+    { (completed_run_result ()) with
+      stop_reason = Runtime_agent.Yielded_to_durable_stimulus { turns_used = 0 }
+    }
+  in
+  Alcotest.(check bool) "a yield before any provider turn did not hear the candidate" false
     (Driver.For_testing.run_result_answered yielded);
   Alcotest.(check bool) "a yield after a provider turn did" true
     (Driver.For_testing.run_result_answered

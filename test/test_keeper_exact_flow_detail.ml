@@ -2,6 +2,7 @@
 
 module Detail = Masc.Keeper_exact_flow_detail
 module Exact_output = Agent_core.Exact_output
+module Http = Agent_core.Llm_provider.Http_client
 
 let test_execution_cause_detail () =
   Alcotest.(check string)
@@ -10,19 +11,37 @@ let test_execution_cause_detail () =
     (Detail.execution_cause_detail
        (Exact_output.Provider_response_refused
           { http_status = 413; refusal = Exact_output.Request_body_refused }));
-  (* The line an operator reads when a lane dies on quota. It carried neither
-     the status nor the kind while a 429 was classified as a bare
-     [Completion_failed]. *)
+  (* The line an operator reads when a lane dies on quota. *)
   Alcotest.(check string)
     "rate limited"
     "provider refused (http_status=429 refusal=rate_limited)"
     (Detail.execution_cause_detail
        (Exact_output.Provider_response_refused
           { http_status = 429; refusal = Exact_output.Rate_limited }));
+  (* A provider error that is not an HTTP refusal names its typed kind, so a
+     "raw_response=none" line still says whether the connection dropped or
+     the provider answered empty (#37899). *)
   Alcotest.(check string)
-    "completion"
-    "completion failed"
-    (Detail.execution_cause_detail Exact_output.Completion_failed);
+    "completion, network"
+    "completion failed (network_error:dns_failure, not sent)"
+    (Detail.execution_cause_detail
+       (Exact_output.Completion_failed
+          { error = Http.NetworkError { message = "resolve failed"; kind = Http.Dns_failure }
+          ; dispatch = Exact_output.No_generation_dispatch
+          }));
+  Alcotest.(check string)
+    "completion, empty"
+    "completion failed (empty_completion:end_turn, sent)"
+    (Detail.execution_cause_detail
+       (Exact_output.Completion_failed
+          { error =
+              Http.ProviderFailure
+                { kind =
+                    Http.Empty_completion { stop_reason = Agent_core.Llm_provider.Types.EndTurn }
+                ; message = ""
+                }
+          ; dispatch = Exact_output.Generation_dispatch_started
+          }));
   Alcotest.(check string)
     "ambiguous"
     "ambiguous output (candidates=2)"
@@ -141,6 +160,21 @@ let test_every_execution_cause_renders_distinctly () =
     ; Clock_required_for_timeout
     ; Frozen_request_mismatch
     ; Completion_failed
+        { error = Http.NetworkError { message = ""; kind = Http.End_of_file }
+        ; dispatch = Generation_dispatch_started
+        }
+    ; Completion_failed
+        { error = Http.TimeoutError { message = ""; phase = Http.Http_operation }
+        ; dispatch = No_generation_dispatch
+        }
+    ; Completion_failed
+        { error = Http.TimeoutError { message = ""; phase = Http.Http_operation }
+        ; dispatch = Generation_dispatch_started
+        }
+    ; Completion_failed
+        { error = Http.ProviderFailure { kind = Http.Hard_quota { retry_after = None }; message = "" }
+        ; dispatch = Generation_dispatch_started
+        }
     ; Response_body_deadline_exceeded
     ; Provider_response_refused { http_status = 413; refusal = Request_body_refused }
     ; Provider_response_refused { http_status = 429; refusal = Rate_limited }
@@ -175,7 +209,12 @@ let test_every_execution_cause_renders_distinctly () =
     "quota refusal and truncated output are not the same string"
     false
     (String.equal
-       (Detail.execution_cause_detail Completion_failed)
+       (Detail.execution_cause_detail
+          (Completion_failed
+             { error =
+                 Http.ProviderFailure { kind = Http.Hard_quota { retry_after = None }; message = "" }
+             ; dispatch = Generation_dispatch_started
+             }))
        (Detail.execution_cause_detail Incomplete_output))
 ;;
 

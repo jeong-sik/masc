@@ -3889,8 +3889,21 @@ let schedule_delivery_summary (row : schedule_row) =
     | None -> "reaction:\xe2\x80\x94"
     | Some status -> "reaction:" ^ status
   in
-  ( Printf.sprintf "%s \xc2\xb7 status:%s" row.sch_schedule_id
-      row.sch_status
+  (* A held occurrence has no wake of its own, so the queue and reaction
+     readings on the next line still describe the previous one. The hold says
+     so on the identity line, next to the status it would otherwise leave
+     reading as a late [due]. The short tag, because the line is already
+     most of a narrow screen; the detail pane carries the full sentence. *)
+  let hold =
+    match row.sch_runner_hold with
+    | None -> ""
+    | Some hold ->
+        " \xc2\xb7 "
+        ^ Render_schedule.schedule_hold_tag
+            ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso)
+  in
+  ( Printf.sprintf "%s \xc2\xb7 status:%s%s" row.sch_schedule_id
+      row.sch_status hold
   , Printf.sprintf "%s \xc2\xb7 %s" queue reaction )
 
 (* Both readers draw this through [data_unreliable_row], which already opens
@@ -4394,6 +4407,14 @@ let schedule_detail_lines ~width (row : schedule_row)
              row.sch_reaction_projection_status)
         "Reaction" reaction
     ]
+  @ (match row.sch_runner_hold with
+     | None -> []
+     | Some hold ->
+         [ field ~style:(Theme.warn ()) "Held"
+             (Render_schedule.schedule_hold_reading
+                ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso))
+         ; field "Held id" hold.Tui_decode.srh_occurrence_id
+         ])
   @ schedule_turn_rows ~field row
   @ (if keeper_wake then
        [ Ansi.dim, ""

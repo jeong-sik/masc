@@ -3308,3 +3308,18 @@ val sgr_left_release : string -> char -> (int * int) option
 (** Plain SGR left release position for screenshot click/drag gestures. *)
 
 val keeper_of_declaration : Keeper_declared_roster.t -> keeper
+
+type schedule_runner_hold =
+  { srh_occurrence_id : string
+      (** The occurrence the schedule runner held back on its newest tick. *)
+  ; srh_due_at_iso : string
+      (** When that occurrence came due. *)
+  }
+(** A schedule the runner is holding because its target Keeper has not yet
+    taken the previous occurrence. The server reads it from the same runner
+    status [/health] reports as [schedule_runner.held]. *)
+
+val decode_schedule_runner_hold :
+  Yojson.Safe.t -> (schedule_runner_hold option, string) result
+(** Reads a schedule row's [runner_hold]. [null] or an absent field is a
+    schedule the runner is not holding; an object must carry both fields. *)

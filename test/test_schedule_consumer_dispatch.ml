@@ -2620,6 +2620,60 @@ let test_dashboard_keeps_unattributed_damage_out_of_exact_evidence () =
     (evidence |> member "matched_record_count" |> to_int)
 ;;
 
+(* #38205: the runner holds a heartbeat interval back while its keeper still
+   carries the previous occurrence. The hold has no signal and no wake, so the
+   schedule row is the only place a reader of the list can learn it, and the
+   row reads it from the same runner status [/health] reports. *)
+let test_dashboard_row_names_the_occurrence_the_runner_holds () =
+  with_workspace
+  @@ fun config ->
+  ignore (persist_keeper_meta config "schedule-keeper" : Keeper_meta_contract.keeper_meta);
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec = 60 })
+      config
+  in
+  let runner_hold () =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+    |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
+    |> Yojson.Safe.Util.member "runner_hold"
+  in
+  let record (result : Schedule_runner.tick_result) =
+    Schedule_runner_status.record_tick_ok ~started_at:0.0 ~finished_at:0.0 result
+  in
+  Schedule_runner_status.reset_for_test ();
+  let first = tick_ok config ~now:201.0 in
+  record first;
+  check bool "a dispatched occurrence is not held" true (runner_hold () = `Null);
+  let next = tick_ok config ~now:261.0 in
+  record next;
+  let held_id =
+    match next.held with
+    | [ signal ] -> Schedule_occurrence_id.to_string signal.occurrence_id
+    | signals -> failf "expected one held occurrence, got %d" (List.length signals)
+  in
+  let open Yojson.Safe.Util in
+  let hold = runner_hold () in
+  check string "the row names the held occurrence" held_id
+    (hold |> member "occurrence_id" |> to_string);
+  check bool "the held occurrence is not the pending one" false
+    (String.equal held_id (single_occurrence_id first));
+  check (float 0.001) "the row carries the held due" 260.0
+    (hold |> member "due_at" |> to_float);
+  (* The TUI reads the row through its own decoder; feed it the real row so a
+     renamed or dropped field fails here rather than on the screen. *)
+  (match Tui_decode.decode_schedule_runner_hold (`Assoc [ "runner_hold", hold ]) with
+   | Ok (Some decoded) ->
+     check string "the TUI decodes the same occurrence" held_id
+       decoded.Tui_decode.srh_occurrence_id;
+     check string "and its due as the server wrote it"
+       (hold |> member "due_at_iso" |> to_string)
+       decoded.Tui_decode.srh_due_at_iso
+   | Ok None -> fail "the TUI read a held row as not held"
+   | Error err -> fail err);
+  Schedule_runner_status.reset_for_test ()
+;;
+
 let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
   with_workspace
   @@ fun config ->
@@ -3156,6 +3210,8 @@ let () =
             test_unattributed_ledger_damage_does_not_block_occurrences
         ; test_case "dashboard keeps unattributed damage out of exact evidence" `Quick
             test_dashboard_keeps_unattributed_damage_out_of_exact_evidence
+        ; test_case "dashboard row names the occurrence the runner holds" `Quick
+            test_dashboard_row_names_the_occurrence_the_runner_holds
         ; test_case "dashboard projects quarantined and unreadable reaction evidence"
             `Quick
             test_dashboard_projects_quarantined_and_unreadable_reaction_evidence

@@ -834,6 +834,7 @@ let decode_schedule_row json =
     optional_nested_int_field json "keeper_reaction_evidence"
       "quarantined_record_count"
   in
+  let* sch_runner_hold = Tui_decode.decode_schedule_runner_hold json in
   Ok
     { sch_schedule_instance_id
     ; sch_schedule_id
@@ -877,6 +878,7 @@ let decode_schedule_row json =
     ; sch_wake_cancelled_recorded_at_iso
     ; sch_reaction_quarantined
     ; sch_reaction_latest_at_iso
+    ; sch_runner_hold
     }
 
 let decode_schedule_rows json_list =

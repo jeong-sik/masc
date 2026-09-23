@@ -10637,9 +10637,14 @@ let load_http_scoped_surfaces ~host ~port ~approval_ticket ~board_sort
   in
   let http_runtime_quota =
     when_needed needs.needs_runtime_quota (fun () ->
-        Result.map
-          (fun (options, _lanes, _assignments) -> options)
-          (Masc_tui_loader.load_runtime_resolved ~host ~port))
+        (* A raise here would fail the whole scoped refresh and drop the
+           transport and ask readings it carries; the picker's loader maps
+           the same raise to [Error] for the same reason. *)
+        match Masc_tui_loader.load_runtime_resolved ~host ~port with
+        | result ->
+            Result.map (fun (options, _lanes, _assignments) -> options) result
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> Error (Printexc.to_string exn))
   in
   { http_transport
   ; http_approvals

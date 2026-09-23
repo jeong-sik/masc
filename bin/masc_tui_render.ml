@@ -325,8 +325,8 @@ let overview_team (state : state) =
         (Overview_team.project ~keepers:overview.ov_keeper_rows
            ~tasks:state.tasks ~attention:overview.ov_attention_items)
 
-(* The quota windows the runtime catalogue reports shut, as one line at the
-   top of the Team block: a shut window is usually why the Keepers under it
+(* The quota windows the runtime catalogue reports shut, as one line under
+   the Team block's stuck rows: a shut window is usually why the Keepers under it
    are stuck, and when it reopens is what the operator waits on. Nothing is
    drawn while every window is open or before the first read -- a line saying
    "all open" on every frame would be texture. A failed read says so. *)
@@ -456,9 +456,17 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~quota_line =
             Ansi.reset
         ]
   in
+  (* The shut-window line explains the stuck rows, so it sits right under
+     them: a viewport with room for one row keeps a stuck Keeper, and the
+     window that stopped it comes next. *)
+  let stuck, others =
+    List.partition
+      (fun (row : Overview_team.row) -> row.group = Overview_team.Needs_you)
+      team.rows
+  in
   let rows =
-    Option.to_list quota_line @ List.map keeper_line team.rows @ parked_line
-    @ holders_line
+    List.map keeper_line stuck @ Option.to_list quota_line
+    @ List.map keeper_line others @ parked_line @ holders_line
   in
   let total = List.length rows in
   let counts =

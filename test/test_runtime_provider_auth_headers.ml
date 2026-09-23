@@ -2961,7 +2961,9 @@ let test_bench_anthropic_lane_sends_high_with_the_embedded_catalog () =
         config.provider_id;
       match Llm_provider.Backend_anthropic.build_request_artifact
               ~config ~messages:[] () with
-      | Error _ -> failf "%s: the Messages request was refused" model_id
+      | Error error -> failf "%s: the Messages request was refused: %s" model_id
+          (Llm_provider.Backend_anthropic.required_output_token_error_message
+             config error)
       | Ok artifact ->
         let body = Llm_provider.Backend_anthropic.request_payload artifact
                    |> Yojson.Safe.from_string in

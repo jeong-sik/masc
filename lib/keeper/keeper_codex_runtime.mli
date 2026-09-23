@@ -101,4 +101,12 @@ module For_testing : sig
   val recovery_failure_of_attempt :
     thread_mode:Runtime_codex_app_server.thread_mode -> gate_continuation:bool ->
     Runtime_codex_app_server.error -> Keeper_official_client_session_store.recovery_failure
+
+  (** Once the shrink sequence has returned an error, a Gate continuation's
+      [Input_rejected Bootstrap_floor_exceeded] recovery on a resumed session is
+      re-recorded [Vendor_session_full No_activity_observed]; anything else is
+      left as it is. *)
+  val conclude_exhausted_gate_resume :
+    gate_continuation:bool -> base_path:string -> keeper_name:string -> runtime_id:string ->
+    unit -> unit
 end

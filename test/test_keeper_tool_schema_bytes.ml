@@ -275,7 +275,13 @@ open Alcotest
    than the preset's min_answered (RFC fusion-seat-routes §2.4). The tool
    declares defer_loading = true, so these bytes reach the wire only on a turn
    that names it. No headroom. *)
-let ceiling_bytes = 121_900
+(* 2026-09-23: 122,494 across 137 tools (+594), measured by this suite built
+   locally at the change. keeper_memory_write takes supersedes: a Keeper replaces its own
+   earlier progress snapshot in one commit instead of adding another copy.
+   One Keeper wrote about 285 near-identical position snapshots in nine hours,
+   and every one of them rode in every later turn's recall. The parameter says
+   where the id comes from, because recall does not show it. No headroom. *)
+let ceiling_bytes = 122_494
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

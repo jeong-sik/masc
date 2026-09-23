@@ -1155,22 +1155,12 @@ let add_routes ~sw ~clock router =
                reqd))
          request reqd)
 
-  |> Http.Router.prefix_get "/api/v1/board/sub-boards/" (fun request reqd ->
+  |> Http.Router.prefix_get board_sub_board_detail_prefix (fun request reqd ->
        with_public_read (fun _state _req reqd ->
-       let path = Http.Request.path request in
-       (match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
-        | None ->
-            Http.Response.json_value ~status:`Bad_request
-              (`Assoc [("error", `String "sub_board_id is required")])
-              reqd
-        | Some sub_board_id ->
-            (match Board_dispatch.get_sub_board ~sub_board_id with
-             | Ok sb ->
-                 Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
-             | Error e ->
-                 Http.Response.json_value ~status:`Not_found
-                   (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
-                   reqd))
+         let status, json =
+           board_sub_board_detail_json ~path:(Http.Request.path request)
+         in
+         Http.Response.json_value ~status json reqd
        ) request reqd)
 
   |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->

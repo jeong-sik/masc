@@ -13,7 +13,7 @@ open Alcotest
 module MAS = Masc.Managed_asset_sync
 
 let result ?(copied = []) ?(overwritten = []) ?(removed = []) ?(failed = []) () =
-  { MAS.copied; overwritten; removed; failed }
+  { MAS.copied; overwritten; removed; operator_edits = []; failed }
 ;;
 
 let contains ~needle haystack =

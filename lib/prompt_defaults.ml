@@ -135,12 +135,8 @@ let init () =
     install_agent_core_tool_guidance ()
   | None -> ()
 
-let bootstrap_runtime ~workspace_path ~base_path =
+let bootstrap_markdown_dir ~workspace_path ~prompt_markdown_dir =
   install_prompt_registry_observers ();
-  Config_dir_resolver.log_warnings ~context:"PromptDefaults" ();
-  let prompt_markdown_dir =
-    resolve_prompt_markdown_dir ~base_path
-  in
   let signature = (workspace_path, prompt_markdown_dir) in
   if !bootstrapped_signature <> Some signature then (
     Prompt_registry.set_markdown_dir prompt_markdown_dir;
@@ -155,5 +151,12 @@ let bootstrap_runtime ~workspace_path ~base_path =
        workspace overrides the six lazily-rendered function fields already
        track at call time. *)
     install_agent_core_tool_guidance ();
-    bootstrapped_signature := Some signature);
+    bootstrapped_signature := Some signature)
+
+let bootstrap_runtime ~workspace_path ~base_path =
+  Config_dir_resolver.log_warnings ~context:"PromptDefaults" ();
+  let prompt_markdown_dir =
+    resolve_prompt_markdown_dir ~base_path
+  in
+  bootstrap_markdown_dir ~workspace_path ~prompt_markdown_dir;
   prompt_markdown_dir

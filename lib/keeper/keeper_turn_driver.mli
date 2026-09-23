@@ -120,9 +120,11 @@ type walk_rest =
     [Fleet_keeper_turn recorder]: a fleet Keeper's turn. It comes back every
     cycle, so a failure it sees names it as the recorder.
     [One_shot_walk]: a walk no cycle repeats, such as a completion review. It
-    records no failure evidence: a mark naming it would have no one to retry
-    it and would hold the candidate behind for every Keeper until restart.
-    An answer it receives still clears the candidate's evidence. *)
+    records no failed-attempt mark (timeout, 5xx, network): a mark naming it
+    would have no one to retry it, and would hold the candidate behind for
+    every Keeper until something else dispatched it and got an answer. Its
+    429 and 402 evidence is recorded as any walk's. An answer it receives
+    still clears the candidate's evidence, whoever recorded it. *)
 type walk_owner =
   | Fleet_keeper_turn of Runtime_candidate_backpressure.recorder
   | One_shot_walk

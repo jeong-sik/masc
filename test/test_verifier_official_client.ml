@@ -32,6 +32,8 @@ declarations = sorted(os.path.relpath(os.path.join(d, f), os.getcwd()) for d, _,
 system_prompt_file = next((sys.argv[i+1] for i, x in enumerate(sys.argv) if x == '--system-prompt-file'), None)
 system_prompt = open(system_prompt_file).read() if system_prompt_file else None
 record({'argv':sys.argv,'cwd':os.getcwd(),'declarations':declarations,'system_prompt':system_prompt})
+if mode == 'exit-before-result':
+    sys.exit(3)
 assert sys.argv[sys.argv.index('--tools')+1] == 'ToolSearch'
 assert '--setting-sources=' in sys.argv
 session = next(x.split('=',1)[1] for x in sys.argv if x.startswith('--session-id='))
@@ -301,6 +303,47 @@ let test_unsafe_slots_refused_before_spawn () =
       (result.verdict = None && result.gate = AR.Evaluator_unavailable);
     check bool (label ^ " no client invocation") false (Sys.file_exists capture)) cases
 
+(* A completion review runs once under a disposable name, so no cycle would
+   ever retry a failure it recorded. A client that exits before its result is
+   a closed connection, which a fleet Keeper's walk records as a failed
+   attempt; the review's walk must leave the slot without one
+   (RFC-0458 §3.4 rule 5, #38327). *)
+let test_failed_review_leaves_no_failed_attempt_mark () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio_context.set_env env;
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  let saved = Runtime.For_testing.snapshot () in
+  let root = Filename.temp_file "verifier-exit-" "" in
+  Unix.unlink root; Unix.mkdir root 0o700;
+  Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
+  let lookup =
+    match VAT.create_goal_proof ~submitted_evidence:[] ~config:(Workspace.default_config root) with
+    | Ok tools -> { AR.schemas = VAT.schemas tools; dispatch = VAT.dispatch tools }
+    | Error detail -> fail detail
+  in
+  let slot = "official.verifier" in
+  let command, capture = fixture_script root ~mode:"exit-before-result" in
+  let config_path = Filename.concat root "runtime.toml" in
+  write config_path (runtime_config command);
+  (match Runtime.init_default ~config_path with Ok () -> () | Error e -> fail e);
+  let result = AR.run ~evaluator_runtime:slot ~sw:(Some sw)
+    ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
+    ~render_prompt:(fun () -> Ok "Report a verdict.")
+    ~lookup ~base_path:root () in
+  check bool "the client was launched" true (Sys.file_exists capture);
+  check bool "the review produced no verdict" true (result.AR.verdict = None);
+  let runtime = match Runtime.get_runtime_by_id slot with
+    | Some runtime -> runtime | None -> fail "the verifier slot resolves" in
+  let failed_attempt =
+    match Runtime_candidate_backpressure.candidate_backpressure
+      ~now:(Unix.gettimeofday ()) ~candidate:runtime.Runtime.candidate_backpressure with
+    | Some { Runtime_candidate_backpressure.failed_attempt; rate_limit = _ } -> failed_attempt
+    | None -> None
+  in
+  check bool "the slot holds no failed-attempt mark" true (Option.is_none failed_attempt)
+
 let () =
   Prompt_registry.set_markdown_dir
     (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts");
@@ -311,4 +354,6 @@ let () =
      "shadow lane", [test_case "verifier uses direct binding while Keeper routing retains its lane" `Quick
        (fun () -> test_review ~shadow_lane:true "valid")];
      "admission", [test_case "unsafe direct clients and lanes never spawn" `Quick
-       test_unsafe_slots_refused_before_spawn]]
+       test_unsafe_slots_refused_before_spawn];
+     "failure evidence", [test_case "a failed review leaves no failed-attempt mark" `Quick
+       test_failed_review_leaves_no_failed_attempt_mark]]

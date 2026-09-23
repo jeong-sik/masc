@@ -3801,6 +3801,36 @@ let test_a_one_shot_walk_records_no_failure () =
       (head_recorded_by keeper_a))
 ;;
 
+(* A one-shot walk records no failed attempt, but an answer it receives is
+   still evidence about the candidate: it clears a mark another Keeper
+   recorded, so every Keeper walks the declared order again. *)
+let test_a_one_shot_walks_answer_clears_another_keepers_mark () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    let (_ : string list) =
+      walk_resilient ~recorder:keeper_a ~head_answers:false [ lane_head; lane_fallback ]
+    in
+    Alcotest.(check bool) "keeper-a recorded the head's failure" true
+      (head_recorded_by keeper_a);
+    let one_shot_attempts = ref [] in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates ~walk_owner:Driver.One_shot_walk
+        ~runtime_id:"resilient" ~runtime_id_of:Fun.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+          one_shot_attempts := !one_shot_attempts @ [ runtime_id ];
+          attempt_without_effect (Ok runtime_id) None)
+        [ lane_head; lane_fallback ]
+    in
+    Alcotest.(check (result string reject)) "the head answers the one-shot walk"
+      (Ok lane_head) (Result.map_error (fun _ -> ()) result);
+    Alcotest.(check (list string)) "the one-shot walk dispatched only the head"
+      [ lane_head ] !one_shot_attempts;
+    Alcotest.(check bool) "the answer clears keeper-a's mark" true
+      (Option.is_none (head_recorder ()));
+    Alcotest.(check (list string)) "keeper-b walks the declared order again"
+      [ lane_head; lane_fallback ] (fresh_order_for keeper_b))
+;;
+
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_core.Agent.After_assistant_collected
@@ -5447,6 +5477,10 @@ let () =
             "a one-shot walk records no failure"
             `Quick
             test_a_one_shot_walk_records_no_failure;
+          Alcotest.test_case
+            "a one-shot walk's answer clears another keeper's mark"
+            `Quick
+            test_a_one_shot_walks_answer_clears_another_keepers_mark;
           Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick

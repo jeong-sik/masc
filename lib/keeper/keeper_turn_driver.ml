@@ -163,7 +163,9 @@ type lane_terminal_error =
 (* Who a walk runs for. A fleet Keeper's turn comes back every cycle, so the
    failures it sees name it as their recorder. A one-shot walk (a completion
    review) never walks again: a mark naming it would have no one to retry it,
-   so it records no failure evidence at all (RFC-0458 §3.4 rule 5). *)
+   so it records no failed-attempt mark (timeout, 5xx, network). Its 429 and
+   402 evidence is recorded as any walk's, and an answer it receives clears
+   the candidate's evidence (RFC-0458 §3.4 rule 5). *)
 type walk_owner =
   | Fleet_keeper_turn of Runtime_candidate_backpressure.recorder
   | One_shot_walk

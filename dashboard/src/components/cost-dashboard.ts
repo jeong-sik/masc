@@ -293,8 +293,12 @@ const keeperTotals = computed(() => {
   let reportedCost = 0
   let costReportedSamples = 0
   let costUnreportedSamples = 0
-  let totalIn = 0
-  let totalOut = 0
+  let costUnreadSamples = 0
+  let reportedIn = 0
+  let reportedOut = 0
+  let tokensReportedSamples = 0
+  let tokensUnreportedSamples = 0
+  let tokensUnreadSamples = 0
   let p50Sum = 0
   let p50Count = 0
   let p95Max = 0
@@ -302,8 +306,12 @@ const keeperTotals = computed(() => {
     if (k.total_cost_usd != null) reportedCost += k.total_cost_usd
     costReportedSamples += k.cost_reported_samples
     costUnreportedSamples += k.cost_unreported_samples
-    totalIn += k.total_input_tokens
-    totalOut += k.total_output_tokens
+    costUnreadSamples += k.cost_unread_samples
+    if (k.total_input_tokens != null) reportedIn += k.total_input_tokens
+    if (k.total_output_tokens != null) reportedOut += k.total_output_tokens
+    tokensReportedSamples += k.tokens_reported_samples
+    tokensUnreportedSamples += k.tokens_unreported_samples
+    tokensUnreadSamples += k.tokens_unread_samples
     if (k.p50_latency_ms != null) {
       p50Sum += k.p50_latency_ms
       p50Count += 1
@@ -313,7 +321,10 @@ const keeperTotals = computed(() => {
   const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
   // No keeper reported a cost in this window: the total is unknown, not $0.
   const totalCost = costReportedSamples > 0 ? reportedCost : null
-  return { totalCost, costUnreportedSamples, totalIn, totalOut, p50Avg, p95Max, count: data.length, totalSuccess: 0, totalError: 0, errorRate: null, avgTtfrc: null, totalCache: 0, totalCacheCreation: 0, totalReasoning: 0, cacheRatio: null, reasoningRatio: null }
+  // Same for tokens: no keeper reported usage means unknown, not 0 tokens.
+  const totalIn = tokensReportedSamples > 0 ? reportedIn : null
+  const totalOut = tokensReportedSamples > 0 ? reportedOut : null
+  return { totalCost, costUnreportedSamples, costUnreadSamples, tokensUnreportedSamples, tokensUnreadSamples, totalIn, totalOut, p50Avg, p95Max, count: data.length, totalSuccess: 0, totalError: 0, errorRate: null, avgTtfrc: null, totalCache: 0, totalCacheCreation: 0, totalReasoning: 0, cacheRatio: null, reasoningRatio: null }
 })
 
 // Keepers whose cost is unknown sort after every keeper with a reported cost.
@@ -325,12 +336,35 @@ function compareKeeperCost(a: KeeperCostMetric, b: KeeperCostMetric): number {
 }
 
 function costTileNote(
-  t: { count: number; costUnreportedSamples?: number },
+  t: { count: number; costUnreportedSamples?: number; costUnreadSamples?: number },
   mode: ViewMode,
 ): string {
   const scope = `${t.count} ${mode === 'model' ? 'runtime lanes' : 'keepers'}`
-  const unreported = t.costUnreportedSamples ?? 0
-  return unreported > 0 ? `${scope} · ${unreported}턴 비용 미보고` : scope
+  return [scope, ...missingSampleNotes('비용', t.costUnreportedSamples ?? 0, t.costUnreadSamples ?? 0)].join(' · ')
+}
+
+function tokenTileNote(t: { count: number; tokensUnreportedSamples?: number; tokensUnreadSamples?: number }): string {
+  return ['aggregated window', ...missingSampleNotes('토큰', t.tokensUnreportedSamples ?? 0, t.tokensUnreadSamples ?? 0)].join(' · ')
+}
+
+// "미보고" is the runtime's null; "못 읽음" is a row the server could not
+// read. Both are turns left out of the sum, and they are said apart.
+function missingSampleNotes(subject: string, unreported: number, unread: number): string[] {
+  const notes: string[] = []
+  if (unreported > 0) notes.push(`${unreported}턴 ${subject} 미보고`)
+  if (unread > 0) notes.push(`${unread}턴 ${subject} 못 읽음`)
+  return notes
+}
+
+function costMissingCell(unreported: number, unread: number, samples: number): string {
+  const parts: string[] = []
+  if (unreported > 0) parts.push(`${unreported}/${samples}턴`)
+  if (unread > 0) parts.push(`못 읽음 ${unread}턴`)
+  return parts.length > 0 ? parts.join(' · ') : '—'
+}
+
+function formatReportedTokens(n: number | null): string {
+  return n == null ? '미보고' : formatCostTokens(n)
 }
 
 function ThRight({ children }: { children: unknown }) {
@@ -479,14 +513,15 @@ function KeeperRow({
   const p95Pct = maxP95 > 0 && p95 != null ? (p95 / maxP95) * 100 : 0
   const overBudget = p95 != null && p95 > 8000
   const unreported = keeper.cost_unreported_samples
+  const unread = keeper.cost_unread_samples
 
   return html`
     <tr class="border-b border-[var(--color-border-default)]/40 align-baseline">
       <th scope="row" class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">
         ${keeper.keeper_name}
       </th>
-      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(inTok)}</td>
-      <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(outTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${inTok == null ? 'text-text-disabled' : ''}">${formatReportedTokens(inTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${outTok == null ? 'text-text-disabled' : ''}">${formatReportedTokens(outTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs ${cost == null ? 'text-text-disabled' : 'text-[var(--color-accent-fg)]'}">
         ${cost == null ? '미보고' : formatCost(cost)}
       </td>
@@ -509,8 +544,8 @@ function KeeperRow({
           ></div>
         </div>
       </td>
-      <td class="px-2 py-1.5 text-right font-mono text-2xs ${unreported > 0 ? 'text-[var(--color-status-warn)]' : 'text-text-muted'}">
-        ${unreported > 0 ? `${unreported}/${keeper.sample_count}턴` : '—'}
+      <td class="px-2 py-1.5 text-right font-mono text-2xs ${unreported + unread > 0 ? 'text-[var(--color-status-warn)]' : 'text-text-muted'}">
+        ${costMissingCell(unreported, unread, keeper.sample_count)}
       </td>
     </tr>
   `
@@ -1095,8 +1130,8 @@ function CostDashboardContent({ view }: { view: CostView }) {
             />
             <${StatTile}
               label="Tokens In / Out"
-              value=${`${formatCostTokens(t.totalIn)} / ${formatCostTokens(t.totalOut)}`}
-              delta=${{ direction: 'flat', text: 'aggregated window' }}
+              value=${`${formatReportedTokens(t.totalIn)} / ${formatReportedTokens(t.totalOut)}`}
+              delta=${{ direction: 'flat', text: tokenTileNote(t) }}
             />
             <${StatTile}
               label="Cache Hit Ratio"

@@ -954,6 +954,66 @@ let test_detail_preserves_outcome_when_original_payloads_are_unavailable () =
         [ "input", "missing_registration"; "output", "missing_completion" ])
 ;;
 
+(* A lane that could not admit is not healthy while it runs.
+
+   The workspace curator with only cli tails admits slots and refuses them
+   anyway (:897), so its [admission_error] rides beside a non-empty slot list
+   -- and the status match did not read that field, which left the lane
+   reading [idle] or [running] with nothing on the row saying otherwise. The
+   table beside this word draws slot names rather than the sentence, so the
+   word is where a reader learns the lane is not right. *)
+let test_a_lane_that_could_not_admit_reads_degraded () =
+  let resolve_lane lane_id =
+    Projection.Configured
+      { admitted_slots = [ lane_id ^ "-primary" ]
+      ; cli_slots = [ lane_id ^ "-cli" ]
+      ; dropped_slots = []
+      ; declared_slots = [ lane_id ^ "-primary" ]
+      ; admission_error = Some "requires admitted exact-output slots"
+      }
+  in
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:0
+      ~exact_runs:[]
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  let status lane =
+    lane_by_id json lane
+    |> Yojson.Safe.Util.member "status"
+    |> Yojson.Safe.Util.to_string
+  in
+  check string "an admission error is a degraded lane" "degraded"
+    (status Runtime.verifier_exact_lane_id);
+  (* And a lane with the same shape and no error keeps the word it had. *)
+  let clean_lane lane_id =
+    Projection.Configured
+      { admitted_slots = [ lane_id ^ "-primary" ]
+      ; cli_slots = [ lane_id ^ "-cli" ]
+      ; dropped_slots = []
+      ; declared_slots = [ lane_id ^ "-primary" ]
+      ; admission_error = None
+      }
+  in
+  let clean =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane:clean_lane
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:0
+      ~exact_runs:[]
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  check string "a lane with no error is not degraded by this" "no_retained_observation"
+    (lane_by_id clean Runtime.verifier_exact_lane_id
+    |> Yojson.Safe.Util.member "status"
+    |> Yojson.Safe.Util.to_string)
+
 let () =
   run
     "server standalone lane projection"
@@ -1010,6 +1070,10 @@ let () =
             "unknown lane and duplicate identity fail explicitly"
             `Quick
             test_unknown_lane_and_duplicate_identity_fail_explicitly
+        ; test_case
+            "a lane that could not admit reads degraded"
+            `Quick
+            test_a_lane_that_could_not_admit_reads_degraded
         ] )
     ]
 ;;

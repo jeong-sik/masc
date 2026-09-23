@@ -4,17 +4,19 @@
 
 ## [0.37.0] - 2026-09-23
 
-> Before you upgrade: read **Upgrade notes**. HTTP callers of the verification verdict, sub-board, schedule and keeper-cost routes, and readers of the startup degradation record, have to change what they send or read. The server, TUI and dashboard have to move together because of the memory health payload (#37856).
+> Before you upgrade: read **Upgrade notes**. HTTP callers of the verification verdict, sub-board, schedule and keeper-cost routes, and readers of the startup degradation record, have to change what they send or read. The server, TUI and dashboard have to move together because of the memory health payload (#37856). The Board attention partition ledger does not read its old schema: read **Fresh state required** before starting the server (#37976).
 
 ### Upgrade notes
 
 - A prompt file under `<config-root>/prompts` that was edited by hand
   before this version is overwritten on the first boot, because no digest
   was recorded for it yet. Move such an edit into a prompt override before
-  upgrading. When rolling back to an earlier binary and then forward again,
-  delete `<config-root>/prompts/managed-assets.json` first, so the returning
-  version overwrites the earlier binary's copies instead of reading them as
-  operator edits (#38204).
+  upgrading (#38204).
+- The first boot of this version reads a `managed-assets.json` under schema
+  `v2` as no manifest: nothing is retired that boot, and a managed prompt
+  file edited by hand since #38162 is overwritten instead of becoming an
+  override. Move such an edit into `prompt_overrides.json` before upgrading
+  (#38210).
 - `POST /api/v1/verification/verdict` requires `verification_id`, the submission the operator read. A request without it, or with unknown or duplicate fields, is refused, and a stale one is answered 409. The TUI and dashboard of this version already send it (#38073).
 - A sub-board `access` value outside `open`, `members_only` and `owner_only` is answered 400 / `Validation_error` on create and update, over HTTP and `masc_board_sub_board_create`, instead of becoming `Open` (#38076).
 - Schedule tools record the authenticated caller as the actor. `requested_by_*`, `scheduled_by_*`, `cancelled_by_*` and `author_*` are gone from the `masc_schedule_create`, `masc_schedule_update`, `masc_schedule_cancel` and `masc_schedule_note_add` schemas, and there is no `operator` default any more. A call that still sends an actor field naming someone other than the caller is refused with `actor_mismatch`, a caller the endpoint cannot name with `caller_unidentified`, and a Keeper changing a schedule it does not own with `not_schedule_owner` (#38054, #38087, #38053).
@@ -24,6 +26,13 @@
 - The TUI says "candidate order" where it said "failover", and the runtime detail panel's `Failover Chain:` label reads `Candidate Chain:`. A script that reads the TUI screen for those words has to follow (#37918).
 - The keeper memory health payload (`/api/v1/dashboard/keeper-memory-health`) carries the Librarian's continuity lag: `continuity_unread_atoms` on each keeper's `librarian` object, and `librarian_continuity_unread_atoms` with `librarian_continuity_unmeasured` in `totals`. The TUI and the dashboard check the payload's key set exactly, so a server and a TUI or dashboard from different sides of this change do not draw the Memory screen, in either direction: the TUI shows the Memory header as failed and the dashboard shows the health panel's error. Upgrade the server together with the TUI and the dashboard, and roll them back together (#37856, #37863).
 
+### Fresh state required
+
+- The Board attention partition ledger moves to schema 7 and reads nothing
+  older: a schema 6 ledger fails to load. Stop the server and confirm it has
+  exited, delete `<base-path>/.masc/board_attention_partitions/`, then start
+  it again; each Keeper rebuilds its roots from the candidate ledger (#37976).
+
 ### Added
 
 - The model catalog and the seed runtime config carry the three models released on 2026-09-22. `claude-opus-5-5` gets its own catalog row (1M/128K, $4/$20, cache read 0.05x, forced tool use refused) — without it the id lands on the `claude-opus-5` row and bills cache reads at double the real rate — plus Claude Code subscription bindings at low..max. `gpt-6-sol` and `gpt-6-luna` get bare catalog rows (efforts `none`,`low`..`max`, from a /v1/responses parameter probe) and Codex subscription bindings at low..max. Release evidence entries for all three (#38118).
@@ -31,6 +40,17 @@
 - A Keeper's GitHub CLI login can ask for the `workflow` scope. The login used to run `gh auth login --web` with no `--scopes`, so every token carried only gh's minimum (`repo`, `read:org`, `gist`) and a push touching `.github/workflows` was refused. `POST /api/v1/keepers/:name/github-login` takes `?scopes=workflow` beside `?hostname=`, on HTTP/1 and h2, and refuses a scope it does not offer with 400. The TUI's Keeper GitHub tab lists the scopes with a digit that ticks each one, and `L` logs in with the ticked ones; none is ticked by default, because a workflow runs with the repository's secrets (#38198).
 - The dashboard's Keeper GitHub CLI panel offers the login scopes as checkboxes, none ticked, and GitHub 로그인 asks for the ticked ones. `workflow` is the one offered: it lets the token change `.github/workflows`, which run with the repository's secrets (#38202).
 - The Memory screen shows how far each keeper's continuity snapshot trails the Librarian's read position, beside the durable drain's unread count: the TUI keeper line says `continuity behind N`, the Memory header and the dashboard totals strip sum it over the fleet. A lag that could not be taken, because there is no snapshot, the file does not read, the snapshot names another trace or it sits ahead of the position, reads as `?` and is counted as unmeasured rather than as zero, and the fleet sum covers only the keepers it was taken for (#37856).
+- Keepers can publish a new Skill with `keeper_skill_publish`. The tool takes
+  `package_id`, the whole `SKILL.md` as `source_text`, and a non-empty
+  `evidence` list, and creates the package in the `project-agents` source
+  through the same Skill editor `create` the operator routes use: same parser,
+  never overwrites (`package_already_exists`), and the catalog snapshot is
+  republished so later turns find the returned reference. Each created package
+  appends one `skill_write` audit row with the Keeper as actor, the reference
+  and the evidence; a write whose outcome is unknown appends an `attempted`
+  row naming the package. Operators remove a Skill with the existing editor
+  delete. The server installs the publisher at boot; without it the tool
+  answers `skill_publish_not_installed` (#38159).
 
 ### Changed
 
@@ -88,8 +108,23 @@
   conflict on `CHANGELOG.md`. `scripts/changelog-fragments.py` checks them in
   CI, refuses a pull request that adds an `[Unreleased]` bullet, and
   `scripts/bump-version.sh` folds them into `[Unreleased]` at release (#38151).
+- A broken `imp.toml` no longer sends a workspace with Keeper history back into setup. The server skips a Keeper whose declaration it cannot load and boots every other one, so imp's declaration, sandbox and model binding are now advisory onboarding checks: bare `masc` prints the reason and opens the workspace. What every Keeper shares still keeps the setup journey: a `runtime.toml` the server cannot load or cannot find (it then boots with no runtime, and the journey's model step is the repair) is reported by a new `runtime_configuration` check in `masc doctor --json` and `/api/v1/setup/status`, and a missing file now keeps the journey too instead of opening a workspace no Keeper can run in. A stale imp assignment is a `runtime.toml` load failure, so it still goes to the journey (#38196).
+- A Board attention root that gives up on a candidate without a judgment
+  (the candidate is permanently absent during quarantine reconciliation) is
+  now `Abandoned`, not `Settled`. `Settled` always means a judgment is on
+  record and no transition leaves it. An `Abandoned` root reopens to `Ready`
+  when its candidate turns out to be alive and still pending (#37976).
+- The runtime detail's `Used by lanes` names every lane that lists the runtime, whichever door the reader opened it from. Opened from a lane's candidate row it named only the lane the reader arrived through -- the header already says that -- so `ollama_cloud.ollama-cloud-deepseek-v4-1-flash`, a fallback in 8 of the live workspace's 11 lanes, read as used by one, while the same runtime opened from the catalog listed all 8. Both doors now read the resolved projection through one function. `Lane position` names its lane (`1 of 2 in primary`), because a position in a list of several lanes did not say which list it counted (#38115).
+- The Tools and Schedules screens now name the section their tab strip
+  highlights: their titles read `MASC Config / Tools` and
+  `MASC Keepers / Schedules`. The strip lit `Config` or `Keepers` while the
+  title said only `Tools` or `Schedules`, and the parent's name appeared
+  nowhere else on the screen, so it was not possible to tell from the screen
+  how you had arrived or where Escape would take you. The help sheet already
+  listed both under those parents (#38157).
+- A Memory row's first cell reads the librarian taxonomy as the closed sum the producer writes. `mf_category` is `Keeper_memory_os_types.category` from the decoder on, so the badge is an exhaustive match over the eight and its word comes from `category_to_string`, the one place that spells them. It was a table of eleven spellings that answered both the word and its colour by matching the string: nine of them (`rule`, `rules`, `persona`, `identity`, `user`, `architecture`, `system`, and the two the callers passed as literals) match nothing any keeper writes, of the fleet's 1768 facts it recognised 749 while 1019 fell through its catch-all, and `preference` was renamed to `PREF` on the row while the detail under it read `preference`. `blocker` -- the one category whose name is an alarm -- now carries the warning colour instead of the style every unknown word got. The two words that are the pane's own rather than a producer's, `SOURCE` and `DROPPED`, are passed as values instead of strings to be recognised. An ordinary fact can no longer carry the word `source` as its category, so the filter collision that guarded is unrepresentable; the test fixtures that used `persona`, `rule`, `architecture`, `note`, `general` and `config`, none of which any keeper writes, now use categories that exist (#38160).
 - The boot asset sync records the SHA-256 of every file it writes in
-  `managed-assets.json` (schema `v2`) and tells a stale distribution copy
+  `managed-assets.json` and tells a stale distribution copy
   from an operator's edit. An edited prompt file becomes that prompt's
   override in `prompt_overrides.json` and the file is reset. Tool and MCP
   edits are still overwritten. Every edit gets a WARN boot line naming the
@@ -97,7 +132,6 @@
   nothing is retired that boot. The capability and lane probes no longer
   write the runtime prompt directory; they read the binary's own prompts
   from a private temporary one (#38162).
-- A broken `imp.toml` no longer sends a workspace with Keeper history back into setup. The server skips a Keeper whose declaration it cannot load and boots every other one, so imp's declaration, sandbox and model binding are now advisory onboarding checks: bare `masc` prints the reason and opens the workspace. What every Keeper shares still keeps the setup journey: a `runtime.toml` the server cannot load or cannot find (it then boots with no runtime, and the journey's model step is the repair) is reported by a new `runtime_configuration` check in `masc doctor --json` and `/api/v1/setup/status`, and a missing file now keeps the journey too instead of opening a workspace no Keeper can run in. A stale imp assignment is a `runtime.toml` load failure, so it still goes to the journey (#38196).
 - A prompt edit the boot sync cannot turn into an override (the key already
   has one, or the file maps to no single key) is kept beside the file as
   `<file>.operator-edit-<first 8 hex of its SHA-256>`, and the file goes
@@ -203,6 +237,34 @@
   handler HTTP/1 uses instead of the post-detail arm, and the h2 Board list,
   post detail, and sub-board detail reads take the public-read gate, so strict
   auth refuses them without a token as HTTP/1 does (#38189).
+- The Overview Tasks header no longer draws a `done` count that is always zero. The list it heads holds only open tasks, so a count of finished tasks folded over it read `0 done` on every frame. The header now reads the last 24 hours of completions from the task flow snapshot the same refresh builds from the whole backlog (`5 done 24h`), and leaves the segment out until that snapshot exists (#38057).
+- A `turn_failures` blocker now says what failed. Its summary read `Keeper turn failed N consecutive cycle(s); inspect the last runtime error before retry.` and named no error, and after a restart there was none to name: the registry rebuilds the blocker from the durable streak, which stores only the count. That is the window from boot until the next successful turn resets the streak. The summary now reads the Keeper's newest execution receipt and, when that receipt is a failed or cancelled turn (a provider wall-clock timeout ends the turn cancelled and still advances the streak), names when it ended, its `terminal_reason_code` and its `error.message` — `last failed turn ended 2026-09-23T00:38:12Z with api_error_rate_limited: Rate limited: …`. With no receipt, a newest receipt that is not a failure, or a receipt store that cannot be read, it says that instead of a cause. The status tool, operator digest, dashboard briefing attention queue and keeper list all carry the new sentence (#38064).
+- The dashboard briefing's keeper briefs carry the keeper's real health. The operator snapshot keeper rows folded the diagnostic into `status` and dropped it, so the briefing, which reads `diagnostic.health_state`, published `health: null` for all 16 live keepers and its pressure order never put a failing keeper first. The rows now carry the diagnostic, including paused rows, and a paused keeper ranks as no pressure since its offline health is an operator's decision. A paused keeper's high context ratio does not lift it either. The execution render reads the same diagnostic from the snapshot instead of re-reading the registry, so its health now follows the snapshot, which is cached for up to ten seconds, and agrees with the `status` on the same row (#38072).
+- The effect judge reads why the box could not be built. A refused observe run is always a box that failed to be built, and the program it would have run never started: the shim child exits before exec on every refusal, and the parent refuses before forking. The judge prompt said the kernel had denied the program's writes and sockets and taught the model to read intent from stderr lines such as `Could not resolve host`, which cannot appear there, while the typed refusal kind the host held was dropped from the approval row. The row now stores `refusal_kind` as one of `socket_rule_not_applied`, `write_rule_not_applied`, `setup_failed` or `unattributed`, read strictly; a setup failure is its own kind rather than folded into the unattributed one. A multi-stage request where one stage's box applied and another stage's box could not be built is no longer recorded as a refusal; it keeps the judge without an observation. The `gate_pending` store version moves to 11, so a v10 store fails install with the existing reset error before any row is read, and deployment preflight now runs the same snapshot check on `gate/pending.json` and names the reset (#38116). (#38102)
+- A Keeper the operator snapshot could not read is reported, not dropped. When building one Keeper's row raised, or its stored metadata did not read, the snapshot logged one line and left the Keeper out, so it vanished from the briefing, the execution render and the TUI Overview with nothing saying so; #38072's first CI run lost all three fixture Keepers that way. The snapshot's `keepers` section now carries `unread` beside its rows, the briefing and execution render expose it as `keepers_unread`, the briefing sections basis carries `keeper_unread_count` beside `keeper_count`, and the Overview counts such a Keeper and names it unreadable (`Keepers: 1 (1 unreadable)`). A Keeper whose metadata is gone is still left out: it was removed, not unread (#38113).
+- The Tools screen printed a bare `composition_skill` for every tool a skill
+  supplied and never said which skill it came from, because it was still
+  reading a field the surface had stopped sending. A tool's origin now reads
+  `composition_skill:shared-catalog`, naming the configured source the skill
+  was loaded from, so a tool from the shared catalog can be told from one
+  loaded locally (#38143).
+- An operator approving a cancel claim now ends the task with the producer's
+  stated reason and keeps the producer's handoff; the operator's approval
+  notes are recorded on the verdict audit event instead of as the reason
+  (#38192).
+- Channels stated a transport's connection twice when the badge spelled two words: a transport that was connected but unavailable showed `CONNECTED / UNAVAILABLE` and then `Runtime state connected` underneath it, repeating the half the badge had already spelled. A badge now answers for every word it spells, so the connection is stated once (#38193).
+- Retained continuations under `<session>/accepted-checkpoints/` no longer
+  pile up. Nothing removed them, so every approval or runtime retry that had
+  finished left its checkpoint behind (71 files, 2.5 GB on one live store).
+  At startup, with the BasePath writer lease held and before any keeper runs,
+  the server now removes each retained file that no unsettled semantic
+  execution names; an unreadable operation store stops the pass with nothing
+  removed (#38199).
+- Rolling back to a binary that records no asset digests and then returning
+  no longer reads that binary's prompt copies as operator edits, so no
+  earlier release's text is saved as a prompt override. The manifest keeps
+  the schema string those binaries read, and they rewrite it without
+  `sha256` (#38210).
 
 ### Internal
 
@@ -211,6 +273,11 @@
   and a rule between them; a row whose time cell is empty draws no clock and no
   `--:--:--` placeholder, and a row continuing the same speaker draws only the
   rule and clock (#37892). (#37946)
+- The connector reader stopped asking for four name fields that nothing in
+  the product sends any more. Channel, server and people name evidence has
+  travelled as one connector name page per kind for some time, and the
+  Connectors screen keeps every row it drew before (#38147).
+- The Channels pane no longer keeps its own copy of the connection badge vocabulary; the list row and the detail badge read the one table, and a test counts badge words spelled inside the pane and requires none. Screen output is unchanged, because the two tables agreed (#38193).
 
 ## [0.36.0] - 2026-09-22
 

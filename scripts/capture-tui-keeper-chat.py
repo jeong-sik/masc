@@ -271,7 +271,7 @@ def operation_payload(request: dict[str, str], succeeded: bool) -> object:
 OVERVIEW = {
     "summary": {"workspace_health": "ok", "cluster": "cluster-v3", "project": "keeper-chat-v3", "active_agents": 1, "incident_count": 0},
     "command_focus": None, "incidents": [], "attention_queue": [], "attention_items": [],
-    "agent_briefs": [], "generated_at": "2026-08-22T00:00:00Z",
+    "agent_briefs": [], "keepers_unread": [], "generated_at": "2026-08-22T00:00:00Z",
 }
 PLANNING = {
     "goals": [], "rollup": {"active_count": 0, "paused_count": 0, "verifying_count": 0, "done_count": 0, "dropped_count": 0},

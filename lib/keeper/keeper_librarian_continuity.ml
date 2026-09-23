@@ -190,7 +190,7 @@ let memory_committed ~config ~keeper_name prepared =
       ~progress:None ~messages:prepared.messages R.All_unread with
     | R.Read {range;_} when range.start_atom = 0 -> Some 0
     | R.Baseline {position;_} -> Some position.end_atom
-    | _ -> None in
+    | R.Read _ | R.Nothing_to_read | R.Position_in_other_trace _ | R.Stop _ -> None in
   Ok (match ordinary, floor with
     | Some receipt, Some floor ->
       String.equal receipt.trace_id prepared.trace_id
@@ -202,7 +202,7 @@ let memory_committed ~config ~keeper_name prepared =
            cut.cut_line = receipt.end_boundary_line && cut.cut_end_atom = receipt.end_atom)
            (R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
               ~messages:prepared.messages prepared.range)
-    | _ -> false)
+    | None, _ | Some _, None -> false)
 let prompt_json prepared =
   `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text);
     "completed_conversation", `List (List.map Agent_core.Checkpoint.message_to_json prepared.unread)]

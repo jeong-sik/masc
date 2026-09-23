@@ -30,6 +30,16 @@ val chat_body_with_previews :
   mode:[ `Rich | `Compact | `Off ] -> entry:Message_layout.entry ->
   width:int -> string
 
+val skill_tone_of_state :
+  Masc_tui_keeper_chat_transcript.skill_state -> Message_layout.skill_tone
+(** Which mark a skill row wears for a given state. Exposed because it is a
+    contract rather than a detail of drawing: the words on the row and the
+    mark beside it answer different questions, and a state landing in the
+    wrong tone makes the mark say something the row does not
+    ([Skill_delivered] drew live, so a finished line read as a working one).
+    [test_tui_chat_queue_wiring] pins the whole table, so a new state has to
+    choose a tone rather than inherit one. *)
+
 val cached_chat_markdown :
   link_previews_mode:[ `Rich | `Compact | `Off ] ->
   theme:Masc_tui_ansi.Chat_theme.snapshot -> entry:Message_layout.entry ->

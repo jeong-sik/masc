@@ -239,7 +239,7 @@ let test_projection_refusal_tries_cli_slots () =
   in
   match execute ~net ~clock ~base_path ~runner with
   | Error error -> fail (Runtime.For_testing.classified_error_detail error)
-  | Ok ((selection, output), slot) ->
+  | Ok (({ Runtime.selection; _ }, output), slot) ->
     check (list string) "projection refusal still walks declared CLI slots"
       [Fixture.cli_primary_runtime; Fixture.cli_secondary_runtime] !attempts;
     check string "the valid CLI answer owns the result" Fixture.cli_secondary_runtime slot;

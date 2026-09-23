@@ -402,6 +402,8 @@ let start_worker ~config ~entry (operation : Keeper_shutdown_types.t) =
                 release_worker operation;
                 Worker_start_rejected (Worker_supervisor_stopping cause))
          with
+         | Eio.Cancel.Cancelled _ as cancelled ->
+           Printexc.raise_with_backtrace cancelled (Printexc.get_raw_backtrace ())
          | exn ->
            release_worker operation;
            Worker_start_rejected (Worker_fork_failed exn)))

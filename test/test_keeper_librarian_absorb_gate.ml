@@ -691,7 +691,7 @@ let test_a_conveyed_verdict_survives_a_later_failure () =
   in
   let outcome = Gate.judge ~evaluate ~facts:[ first; second ]
       ~new_claims:[ merged; other ] ~absorbed in
-  let run = Gate.Evaluated { outcome; evaluations = [] } in
+  let run = Gate.Evaluated { outcome; copy_checks = []; evaluations = [] } in
   Alcotest.(check (list string)) "only completed positive absorptions apply"
     [ id first ]
     (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) (Gate.absorbed_of_run run));
@@ -713,7 +713,7 @@ let test_failure_preserves_unjudged_from_unvisited_groups () =
   let absorbed = absorbed_into merged [ source ] @ [ missing_source; missing_claim ] in
   let outcome = Gate.judge ~evaluate:(fun ~state:_ ~questions:_ -> Error "HTTP 503")
       ~facts:[ source ] ~new_claims:[ merged ] ~absorbed in
-  let run = Gate.Evaluated { outcome; evaluations = [] } in
+  let run = Gate.Evaluated { outcome; copy_checks = []; evaluations = [] } in
   Alcotest.(check int) "all unconfirmed sources remain current" 0
     (List.length (Gate.absorbed_of_run run));
   let report = Gate.run_result_to_yojson run in
@@ -847,7 +847,7 @@ let test_run_records_the_destination_passed_over () =
     } @@ fun () ->
   let first = fact (List.nth sources 0) in
   let absorbed = absorbed_into merged [ first ] in
-  let run = Gate.run ~clock ~keeper_id:"reserve-fixture" ~facts:[ first ]
+  let run = Gate.run ~clock ~keeper_id:"reserve-fixture" ~superseding:[] ~facts:[ first ]
       ~new_claims:[ merged ] ~absorbed () in
   let report = Gate.run_result_to_yojson run in
   match J.member "evaluations" report |> J.to_list with
@@ -904,7 +904,7 @@ let test_run_uses_one_destination_and_model_snapshot () =
   let other = fact "beta ships on fridays and pages the operator" in
   let absorbed = absorbed_into merged [ first ] @ absorbed_into other [ second ] in
   let observations = ref [] in
-  let run = Gate.run ~clock ~keeper_id:"snapshot-fixture" ~facts:[ first; second ]
+  let run = Gate.run ~clock ~keeper_id:"snapshot-fixture" ~superseding:[] ~facts:[ first; second ]
       ~observe:(fun observation -> observations := observation :: !observations)
       ~new_claims:[ merged; other ] ~absorbed () in
   (match run with
@@ -984,7 +984,7 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
     (try
        Eio.Cancel.sub (fun cancellation ->
          Eio.Promise.resolve resolve_context cancellation;
-         match Gate.run ~clock ~keeper_id:"cancel-observation-fixture"
+         match Gate.run ~clock ~keeper_id:"cancel-observation-fixture" ~superseding:[]
              ~observe:(fun observation -> observed := observation :: !observed)
              ~facts:[ first; second ] ~new_claims:[ merged; other ]
              ~absorbed:(absorbed_into merged [ first ] @ absorbed_into other [ second ]) () with
@@ -1041,7 +1041,7 @@ let test_cancelled_next_request_keeps_the_completed_observation () =
 
 let test_skipped_run_publishes_its_completed_observation () =
   let observed = ref [] in
-  let run = Gate.run ~keeper_id:"empty-observation-fixture" ~facts:[] ~new_claims:[]
+  let run = Gate.run ~keeper_id:"empty-observation-fixture" ~superseding:[] ~facts:[] ~new_claims:[]
       ~absorbed:[] ~observe:(fun value -> observed := value :: !observed) () in
   match !observed with
   | [ Gate.Complete result ] ->
@@ -1066,7 +1066,7 @@ let test_an_excluded_keeper_is_applied_as_answered_without_a_request () =
     ; absorb_gate = true
     ; excluded_keepers = [ "kept-home" ]
     } @@ fun () ->
-  match Gate.run ~keeper_id:"kept-home" ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~keeper_id:"kept-home" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Keeper_excluded; absorbed = applied } ->
     Alcotest.(check int) "every absorption is applied" (List.length absorbed) (List.length applied)
   | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
@@ -1089,7 +1089,7 @@ let test_a_gate_declared_on_without_a_lane_keeps_the_sources_current () =
         , [] )
     ; absorb_gate = true
     } @@ fun () ->
-  match Gate.run ~keeper_id:"meant-to-judge" ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~keeper_id:"meant-to-judge" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Lane_disabled; absorbed = applied } ->
     Alcotest.(check int) "no absorption is applied" 0 (List.length applied);
     Alcotest.(check bool) "there was something to withhold" true (absorbed <> [])
@@ -1107,7 +1107,7 @@ let test_a_gate_declared_off_applies_as_answered_even_without_a_lane () =
   Masc_test_deps.with_typesafeai_policy
     { Runtime_schema.default_typesafeai with lane_enabled = false; absorb_gate = false }
   @@ fun () ->
-  match Gate.run ~keeper_id:"told-not-to" ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~keeper_id:"told-not-to" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Absorb_gate_disabled; absorbed = applied } ->
     Alcotest.(check int) "every absorption is applied" (List.length absorbed) (List.length applied)
   | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
@@ -1138,7 +1138,7 @@ let test_rejected_response_retains_every_typed_answer () =
   @@ fun () ->
   let facts = List.map fact sources in
   List.iter (fun (label, expected) ->
-    let run = Gate.run ~clock ~keeper_id:"invalid-answer-fixture" ~facts
+    let run = Gate.run ~clock ~keeper_id:"invalid-answer-fixture" ~superseding:[] ~facts
         ~new_claims:[ merged ] ~absorbed:(absorbed_into merged facts) () in
     Alcotest.(check int) "invalid responses cannot authorize absorption" 0
       (List.length (Gate.absorbed_of_run run));
@@ -1242,6 +1242,577 @@ let test_a_statement_too_large_to_judge_keeps_its_memory_current () =
     (not (List.exists (fun s -> String.length s > Gate.request_bytes_limit) !asked))
 ;;
 
+(* --- The reverse question (RFC-0463 section 2.8) --- *)
+
+(* Two copies of one lesson, and a claim that tried to fold them. The table
+   answers by statement: the sources' own statements are what the forward
+   question asks, the claim's are what the reverse one asks. *)
+let copy_sources =
+  [ fact "alpha deploys every tuesday at nine in the morning, as agreed"
+  ; fact "the alpha deploy runs on tuesdays and starts at nine sharp" ]
+;;
+
+let copy_claim = fact "Alpha deploys on Tuesdays at nine in the morning."
+let new_statement = "Alpha pages the on-call operator when a deploy fails."
+
+let recording evaluate =
+  let states = ref [] in
+  let recorded ~state ~questions =
+    states := state :: !states;
+    evaluate ~state ~questions
+  in
+  recorded, states
+;;
+
+let copy_checks ~evaluate ~claim ~superseding =
+  let absorbed = absorbed_into claim copy_sources in
+  let j = judged (Gate.judge ~evaluate ~facts:copy_sources ~new_claims:[ claim ] ~absorbed) in
+  Alcotest.(check int) "the forward question absorbed nothing" 0 (List.length j.absorbed);
+  let checks =
+    Gate.judge_copies ~evaluate ~facts:copy_sources ~new_claims:[ claim ] ~superseding
+      ~absorbed ~applied:j.absorbed
+  in
+  Gate.Evaluated { outcome = Gate.Judged j; copy_checks = checks; evaluations = [] }, checks
+;;
+
+let only_check = function
+  | [ (check : Gate.copy_check) ] -> check
+  | checks -> Alcotest.failf "one reverse check, got %d" (List.length checks)
+;;
+
+let test_a_claim_its_sources_convey_is_not_applied () =
+  let claim_statements = Gate.statements copy_claim.claim in
+  let evaluate, requests, _ =
+    table ~noul_of:(fun statement -> if List.mem statement claim_statements then 0.9 else 0.1)
+  in
+  let evaluate, states = recording evaluate in
+  let run, checks = copy_checks ~evaluate ~claim:copy_claim ~superseding:[] in
+  let check = only_check checks in
+  (match check.verdict with
+   | Gate.Copy { statements } ->
+     Alcotest.(check (list string)) "the discarded claim keeps its statements for the log"
+       claim_statements statements
+   | Gate.Carries_new_statement _ | Gate.Not_judged _ -> Alcotest.fail "expected a copy");
+  Alcotest.(check (list string)) "named with the memories it tried to absorb"
+    (List.map id copy_sources) check.sources;
+  Alcotest.(check int) "one forward request and one reverse request" 2 !requests;
+  (match !states with
+   | `String reverse_state :: _ ->
+     Alcotest.(check string) "the reverse state is the sources, in the answer's order"
+       (String.concat "\n\n" (List.map (fun (f : Types.fact) -> f.claim) copy_sources))
+       reverse_state
+   | _ -> Alcotest.fail "the reverse request carried no text state");
+  (let open Yojson.Safe.Util in
+   match Gate.run_result_to_yojson run |> member "copy_checks" with
+   | `List [ reported ] ->
+     Alcotest.(check (list string)) "the conveyed statements are reported by name"
+       claim_statements
+       (member "conveyed_statements" reported |> to_list |> List.map to_string);
+     Alcotest.(check bool) "no statement list under the count key" true
+       (member "statements" reported = `Null)
+   | _ -> Alcotest.fail "expected one reported reverse check");
+  let other = fact "gamma restarts nightly and keeps its logs for a week" in
+  Alcotest.(check (list string)) "the copy is left out of the claims applied"
+    [ id other ]
+    (List.map id (Gate.without_copies run [ copy_claim; other ]))
+;;
+
+let test_a_claim_with_a_new_statement_is_applied () =
+  let claim = fact (copy_claim.claim ^ " " ^ new_statement) in
+  let evaluate, _, _ =
+    table ~noul_of:(fun statement ->
+      if String.equal statement new_statement then 0.1
+      else if List.mem statement (Gate.statements claim.claim) then 0.9
+      else 0.1)
+  in
+  let run, checks = copy_checks ~evaluate ~claim ~superseding:[] in
+  (match (only_check checks).verdict with
+   | Gate.Carries_new_statement { statements; not_conveyed } ->
+     Alcotest.(check int) "both statements asked" 2 statements;
+     Alcotest.(check int) "the new one not conveyed" 1 not_conveyed
+   | Gate.Copy _ | Gate.Not_judged _ -> Alcotest.fail "expected a new statement");
+  Alcotest.(check (list string)) "the claim is applied" [ id claim ]
+    (List.map id (Gate.without_copies run [ claim ]))
+;;
+
+let ends_with ~suffix text =
+  let n = String.length suffix in
+  String.length text >= n && String.sub text (String.length text - n) n = suffix
+;;
+
+let test_a_claim_the_judge_cannot_answer_for_is_applied () =
+  let claim_statements = Gate.statements copy_claim.claim in
+  let forward, _, _ = table ~noul_of:(fun _ -> 0.1) in
+  (* The forward question is answered; the reverse one is refused. *)
+  let asks_the_claim (_, question) =
+    match question with
+    | T.Noul { T.instructions; _ } ->
+      List.exists (fun statement -> ends_with ~suffix:statement instructions) claim_statements
+    | T.Choice _ | T.Score _ -> false
+  in
+  let evaluate ~state ~questions =
+    if List.exists asks_the_claim questions then Error "HTTP 529" else forward ~state ~questions
+  in
+  let run, checks = copy_checks ~evaluate ~claim:copy_claim ~superseding:[] in
+  (match (only_check checks).verdict with
+   | Gate.Not_judged (Gate.Request_failed reason) ->
+     Alcotest.(check string) "the refusal is carried" "HTTP 529" reason
+   | Gate.Not_judged
+       ( Gate.Gate_judgment_failed | Gate.Continues_a_dropped_memory
+       | Gate.No_source_fits_the_state | Gate.Statement_too_large | Gate.No_statement )
+   | Gate.Copy _ | Gate.Carries_new_statement _ ->
+     Alcotest.fail "expected the failed reverse request");
+  Alcotest.(check (list string)) "the claim is applied as today" [ id copy_claim ]
+    (List.map id (Gate.without_copies run [ copy_claim ]))
+;;
+
+let test_a_gate_without_a_lane_applies_every_claim () =
+  let absorbed = absorbed_into copy_claim copy_sources in
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    { Runtime_schema.default_typesafeai with
+      lane_enabled = false
+    ; destinations =
+        ( { Runtime_schema.typesafe_destination with endpoint = "http://127.0.0.1:9/never-reached" }
+        , [] )
+    ; absorb_gate = true
+    } @@ fun () ->
+  let run =
+    Gate.run ~keeper_id:"reverse-unavailable" ~superseding:[] ~facts:copy_sources
+      ~new_claims:[ copy_claim ] ~absorbed ()
+  in
+  Alcotest.(check int) "nothing is absorbed" 0 (List.length (Gate.absorbed_of_run run));
+  Alcotest.(check (list string)) "the claim that absorbed nothing is still applied"
+    [ id copy_claim ]
+    (List.map id (Gate.without_copies run [ copy_claim ]))
+;;
+
+let test_a_claim_with_an_absorption_applied_is_not_asked_back () =
+  let claim_statements = Gate.statements copy_claim.claim in
+  let first = List.hd copy_sources in
+  let evaluate, requests, asked =
+    table ~noul_of:(fun statement ->
+      if List.mem statement (Gate.statements first.claim) then 0.9 else 0.1)
+  in
+  let absorbed = absorbed_into copy_claim copy_sources in
+  let j = judged (Gate.judge ~evaluate ~facts:copy_sources ~new_claims:[ copy_claim ] ~absorbed) in
+  Alcotest.(check (list string)) "one source absorbed" [ id first ]
+    (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) j.absorbed);
+  let before = !requests in
+  let checks =
+    Gate.judge_copies ~evaluate ~facts:copy_sources ~new_claims:[ copy_claim ] ~superseding:[]
+      ~absorbed ~applied:j.absorbed
+  in
+  Alcotest.(check int) "no reverse check" 0 (List.length checks);
+  Alcotest.(check int) "no reverse request" before !requests;
+  Alcotest.(check bool) "the claim's statements were never asked" true
+    (not (List.exists (fun statement -> List.mem statement claim_statements) !asked))
+;;
+
+let test_a_claim_that_continues_a_dropped_memory_is_not_asked_back () =
+  let claim_statements = Gate.statements copy_claim.claim in
+  let evaluate, requests, _ =
+    table ~noul_of:(fun statement -> if List.mem statement claim_statements then 0.9 else 0.1)
+  in
+  let run, checks = copy_checks ~evaluate ~claim:copy_claim ~superseding:[ id copy_claim ] in
+  (match (only_check checks).verdict with
+   | Gate.Not_judged Gate.Continues_a_dropped_memory -> ()
+   | Gate.Not_judged
+       ( Gate.Gate_judgment_failed | Gate.Request_failed _ | Gate.No_source_fits_the_state
+       | Gate.Statement_too_large | Gate.No_statement )
+   | Gate.Copy _ | Gate.Carries_new_statement _ ->
+     Alcotest.fail "a revision must not be judged a copy");
+  Alcotest.(check int) "only the forward request" 1 !requests;
+  Alcotest.(check (list string)) "the revision is applied" [ id copy_claim ]
+    (List.map id (Gate.without_copies run [ copy_claim ]))
+;;
+
+(* A current memory written again word for word is a restatement, not a new
+   claim: it is not in [new_claims], so it is never asked back (#38048). *)
+let test_a_restated_memory_is_not_asked_back () =
+  let restated = fact copy_claim.claim in
+  let facts = restated :: copy_sources in
+  let absorbed = absorbed_into restated copy_sources in
+  let evaluate, requests, _ = table ~noul_of:(fun _ -> 0.1) in
+  let j = judged (Gate.judge ~evaluate ~facts ~new_claims:[] ~absorbed) in
+  let before = !requests in
+  let checks =
+    Gate.judge_copies ~evaluate ~facts ~new_claims:[] ~superseding:[] ~absorbed
+      ~applied:j.absorbed
+  in
+  Alcotest.(check int) "no reverse check" 0 (List.length checks);
+  Alcotest.(check int) "no reverse request" before !requests
+;;
+
+(* The reverse question names the memories as what is under review, not a
+   claim. A judge that answers by the question's wording catches a mixup:
+   asked with the claim's wording it says no, with the memories' it says yes. *)
+let test_the_reverse_question_names_the_memories () =
+  let starts_with ~prefix text =
+    String.length text >= String.length prefix
+    && String.sub text 0 (String.length prefix) = prefix
+  in
+  let reverse_criteria = ref [] in
+  let evaluate ~state:_ ~questions =
+    Ok
+      { T.model = "jev-test"
+      ; usage = None
+      ; answers =
+          List.map
+            (fun (qid, question) ->
+               match question with
+               | T.Noul { T.instructions; criteria } ->
+                 if starts_with ~prefix:"The memories under review" instructions
+                 then (
+                   reverse_criteria := criteria :: !reverse_criteria;
+                   qid, T.Noul_answer { T.noul = 0.9 })
+                 else if starts_with ~prefix:"The claim under review" instructions
+                 then qid, T.Noul_answer { T.noul = 0.1 }
+                 else Alcotest.failf "a question in neither direction: %s" instructions
+               | T.Choice _ | T.Score _ -> Alcotest.fail "the gate asks noul questions only")
+            questions
+      }
+  in
+  let _, checks = copy_checks ~evaluate ~claim:copy_claim ~superseding:[] in
+  (match (only_check checks).verdict with
+   | Gate.Copy _ -> ()
+   | Gate.Carries_new_statement _ | Gate.Not_judged _ ->
+     Alcotest.fail "the reverse question was not asked in the memories' wording");
+  match !reverse_criteria with
+  | Some (yes, no) :: _ ->
+    List.iter
+      (fun (label, text) ->
+         Alcotest.(check bool) (label ^ " speaks of the memories") true
+           (starts_with ~prefix:"A reader of these memories" text
+            || starts_with ~prefix:"The memories do not" text))
+      [ "yes", yes; "no", no ]
+  | None :: _ -> Alcotest.fail "the reverse question carried no criteria"
+  | [] -> Alcotest.fail "no reverse question was asked"
+;;
+
+(* A tie absorbs a source in the forward question; in the reverse one it
+   would drop the claim, so it counts as not conveyed. *)
+let test_a_reverse_tie_keeps_the_claim () =
+  let claim_statements = Gate.statements copy_claim.claim in
+  let evaluate, _, _ =
+    table ~noul_of:(fun statement ->
+      if List.mem statement claim_statements then Gate.conveyed_boundary else 0.1)
+  in
+  let run, checks = copy_checks ~evaluate ~claim:copy_claim ~superseding:[] in
+  (match (only_check checks).verdict with
+   | Gate.Carries_new_statement { not_conveyed; _ } ->
+     Alcotest.(check int) "the tied statement is not conveyed" 1 not_conveyed
+   | Gate.Copy _ | Gate.Not_judged _ -> Alcotest.fail "a tie must not make a copy");
+  Alcotest.(check (list string)) "the claim is applied" [ id copy_claim ]
+    (List.map id (Gate.without_copies run [ copy_claim ]))
+;;
+
+(* A claim that cuts into no statement gives the question nothing to ask;
+   that is not evidence of a copy. *)
+let test_a_claim_without_a_statement_is_not_judged () =
+  let blank = fact " \n " in
+  Alcotest.(check (list string)) "the claim cuts into nothing" [] (Gate.statements blank.claim);
+  let evaluate, requests, _ = table ~noul_of:(fun _ -> 0.1) in
+  let run, checks = copy_checks ~evaluate ~claim:blank ~superseding:[] in
+  (match (only_check checks).verdict with
+   | Gate.Not_judged Gate.No_statement -> ()
+   | Gate.Not_judged
+       ( Gate.Gate_judgment_failed | Gate.Continues_a_dropped_memory
+       | Gate.No_source_fits_the_state | Gate.Statement_too_large | Gate.Request_failed _ )
+   | Gate.Copy _ | Gate.Carries_new_statement _ ->
+     Alcotest.fail "expected no statement to judge");
+  Alcotest.(check int) "only the forward request" 1 !requests;
+  Alcotest.(check (list string)) "the claim is applied" [ id blank ]
+    (List.map id (Gate.without_copies run [ blank ]))
+;;
+
+(* --- The reverse question over more than one state ---
+
+   The case this question was written for (#38243) is a claim that named
+   dozens of memories: joined, they are over {!Gate.state_bytes_limit}, so
+   they are asked as several states. These fixtures are over the bound on
+   purpose. The judge answers from the state it is handed: a statement is
+   conveyed exactly when the state holds its words. *)
+
+let filler label =
+  (* About 8,000 bytes of statements that say nothing any claim below says. *)
+  String.concat " "
+    (List.init 220 (fun i -> Printf.sprintf "The %s ledger line %d is kept here." label i))
+;;
+
+let alpha_statement = "Alpha deploys every Tuesday at nine in the morning."
+let beta_statement = "Beta pages the on-call operator when a deploy fails."
+let gamma_statement = "Gamma keeps its release notes for exactly one year."
+
+let statement_of_question = function
+  | T.Noul { T.instructions; _ } ->
+    let prefix = "Statement:\n" in
+    let rec find i =
+      if i + String.length prefix > String.length instructions
+      then Alcotest.fail "no statement in the question"
+      else if String.sub instructions i (String.length prefix) = prefix
+      then String.sub instructions (i + String.length prefix)
+             (String.length instructions - i - String.length prefix)
+      else find (i + 1)
+    in
+    find 0
+  | T.Choice _ | T.Score _ -> Alcotest.fail "the gate asks noul questions only"
+;;
+
+(* Every request, as (state, statements asked), in the order made. *)
+let reading_the_state () =
+  let requests = ref [] in
+  let evaluate ~state ~questions =
+    let state = match state with `String state -> state | _ -> Alcotest.fail "a text state" in
+    let asked = List.map (fun (_, question) -> statement_of_question question) questions in
+    requests := (state, asked) :: !requests;
+    Ok
+      { T.model = "jev-test"
+      ; usage = None
+      ; answers =
+          List.map
+            (fun (qid, question) ->
+               let statement = statement_of_question question in
+               qid, T.Noul_answer { T.noul = (if String_util.contains_substring state statement then 0.9 else 0.1) })
+            questions
+      }
+  in
+  evaluate, fun () -> List.rev !requests
+;;
+
+let reverse_check ~evaluate ~sources ~claim =
+  only_check
+    (Gate.judge_copies ~evaluate ~facts:sources ~new_claims:[ claim ] ~superseding:[]
+       ~absorbed:(absorbed_into claim sources) ~applied:[])
+;;
+
+let test_a_statement_only_the_second_state_conveys_makes_a_copy () =
+  let first = fact (filler "first" ^ " " ^ alpha_statement) in
+  let second = fact (filler "second" ^ " " ^ beta_statement) in
+  Alcotest.(check bool) "the two memories do not fit one state" true
+    (String.length first.claim + String.length second.claim > Gate.state_bytes_limit);
+  let claim = fact (alpha_statement ^ " " ^ beta_statement) in
+  let evaluate, requests = reading_the_state () in
+  let check = reverse_check ~evaluate ~sources:[ first; second ] ~claim in
+  (match check.verdict with
+   | Gate.Copy { statements } ->
+     Alcotest.(check (list string)) "both statements conveyed"
+       [ alpha_statement; beta_statement ] statements
+   | Gate.Carries_new_statement _ | Gate.Not_judged _ ->
+     Alcotest.fail "the second state conveys what the first did not");
+  match requests () with
+  | [ (first_state, first_asked); (second_state, second_asked) ] ->
+    Alcotest.(check string) "the first state is the first memory" first.claim first_state;
+    Alcotest.(check string) "the second state is the second memory" second.claim second_state;
+    Alcotest.(check (list string)) "the first state is asked every statement"
+      [ alpha_statement; beta_statement ] first_asked;
+    Alcotest.(check (list string)) "the second is not asked what the first conveyed"
+      [ beta_statement ] second_asked;
+    Alcotest.(check int) "the check counts both requests" 2 check.requests
+  | made -> Alcotest.failf "expected one request per state, got %d" (List.length made)
+;;
+
+let test_a_statement_no_state_conveys_applies_the_claim () =
+  let first = fact (filler "first" ^ " " ^ alpha_statement) in
+  let second = fact (filler "second" ^ " " ^ beta_statement) in
+  let claim = fact (String.concat " " [ alpha_statement; beta_statement; gamma_statement ]) in
+  let evaluate, requests = reading_the_state () in
+  let check = reverse_check ~evaluate ~sources:[ first; second ] ~claim in
+  (match check.verdict with
+   | Gate.Carries_new_statement { statements; not_conveyed } ->
+     Alcotest.(check int) "three statements" 3 statements;
+     Alcotest.(check int) "the one no memory holds" 1 not_conveyed
+   | Gate.Copy _ | Gate.Not_judged _ -> Alcotest.fail "a statement no state conveys is new");
+  Alcotest.(check (list (list string))) "each state is asked what is still unconveyed"
+    [ [ alpha_statement; beta_statement; gamma_statement ]; [ beta_statement; gamma_statement ] ]
+    (List.map snd (requests ()))
+;;
+
+(* A memory over the state bound alone is never sent. What only it holds
+   looks unconveyed, which applies the claim. *)
+let test_a_memory_over_the_state_bound_is_left_out () =
+  let huge = fact (filler "one" ^ " " ^ filler "two" ^ " " ^ alpha_statement) in
+  Alcotest.(check bool) "the memory alone is over the bound" true
+    (String.length huge.claim > Gate.state_bytes_limit);
+  let small = fact beta_statement in
+  let claim = fact (alpha_statement ^ " " ^ beta_statement) in
+  let evaluate, requests = reading_the_state () in
+  (match (reverse_check ~evaluate ~sources:[ huge; small ] ~claim).verdict with
+   | Gate.Carries_new_statement { not_conveyed; _ } ->
+     Alcotest.(check int) "only the left-out memory's statement is unconveyed" 1 not_conveyed
+   | Gate.Copy _ | Gate.Not_judged _ ->
+     Alcotest.fail "a statement only an unsendable memory holds keeps the claim");
+  Alcotest.(check (list string)) "only the memory that fits is sent" [ small.claim ]
+    (List.map fst (requests ()));
+  let evaluate, requests = reading_the_state () in
+  (match (reverse_check ~evaluate ~sources:[ huge ] ~claim).verdict with
+   | Gate.Not_judged Gate.No_source_fits_the_state -> ()
+   | Gate.Not_judged
+       ( Gate.Gate_judgment_failed | Gate.Continues_a_dropped_memory | Gate.Statement_too_large
+       | Gate.No_statement | Gate.Request_failed _ )
+   | Gate.Copy _ | Gate.Carries_new_statement _ ->
+     Alcotest.fail "no memory fits a state, so nothing can be asked");
+  Alcotest.(check int) "nothing sent" 0 (List.length (requests ()))
+;;
+
+(* A statement that never fits a request beside a state is never asked.
+   Left over alone it is not evidence of anything: the claim is applied as
+   not judged. Left over beside a statement asked and not conveyed, the
+   claim carries a new statement. Both apply the claim; the verdict names
+   which. *)
+let test_a_statement_never_asked_is_told_apart_from_one_not_conveyed () =
+  let oversize = String.make Gate.request_bytes_limit 'x' in
+  let source = fact alpha_statement in
+  let evaluate, requests = reading_the_state () in
+  (match
+     (reverse_check ~evaluate ~sources:[ source ]
+        ~claim:(fact (alpha_statement ^ "\n" ^ oversize))).verdict
+   with
+   | Gate.Not_judged Gate.Statement_too_large -> ()
+   | Gate.Not_judged
+       ( Gate.Gate_judgment_failed | Gate.Continues_a_dropped_memory
+       | Gate.No_source_fits_the_state | Gate.No_statement | Gate.Request_failed _ )
+   | Gate.Copy _ | Gate.Carries_new_statement _ ->
+     Alcotest.fail "the only statement left was never asked");
+  Alcotest.(check (list (list string))) "only the statement that fits is asked"
+    [ [ alpha_statement ] ] (List.map snd (requests ()));
+  let evaluate, _ = reading_the_state () in
+  match
+    (reverse_check ~evaluate ~sources:[ source ]
+       ~claim:(fact (String.concat "\n" [ alpha_statement; gamma_statement; oversize ]))).verdict
+  with
+  | Gate.Carries_new_statement { statements; not_conveyed } ->
+    Alcotest.(check int) "three statements" 3 statements;
+    Alcotest.(check int) "the asked one and the unasked one are left" 2 not_conveyed
+  | Gate.Copy _ | Gate.Not_judged _ ->
+    Alcotest.fail "a statement asked and not conveyed is a new statement"
+;;
+
+(* The runtime leaves a copy out of what it saves (RFC-0463 section 2.8):
+   a real Librarian answer through [run_best_effort], a judge that conveys
+   no memory statement forward and every claim statement back. The claim
+   is not saved, and the memories it named stay current. Without the
+   runtime's [without_copies], the claim would be saved beside them. *)
+let test_the_runtime_does_not_save_a_copy () =
+  let module Librarian = Masc.Keeper_librarian in
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Absorbed = Masc.Keeper_memory_absorbed in
+  let module Fixture = Exact_output_fixture in
+  let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
+  let base_path = Filename.temp_dir "librarian-copy-claim-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root | None -> Sys.getcwd () in
+  Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
+  Masc.Prompt_defaults.init ();
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let keeper_id = "copy-claim-runtime" in
+  let a = fact (List.nth sources 0) in
+  let b = fact (List.nth sources 1) in
+  let untouched = fact "The unrelated service retains its own deployment instructions." in
+  let source : Current.source = { kind = Current.Librarian; trace_id = "fixture" } in
+  let seeded =
+    Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+      ~now:100. ~source ~facts:[ a; b; untouched ] () |> require
+  in
+  let input : Librarian.input =
+    { turn_ref = Ids.Turn_ref.make ~trace_id:"fixture" ~absolute_turn:1
+    ; goal_context = Librarian.No_task
+    ; keeper_instructions = "Keep the service deployment instructions."
+    ; current = Some { Librarian.facts = seeded.facts }
+    ; working_context = Masc.Keeper_librarian_context.empty
+    ; messages = []; tool_observations = []; counterpart_observations = []
+    }
+  in
+  let tokens = List.mapi (fun i f -> id f, Printf.sprintf "m%d" (i + 1)) seeded.facts in
+  let copy = "The alpha service deploys every Tuesday at nine in the morning." in
+  let answer = `Assoc
+    [ "new_claims",
+      `List [ `Assoc [ "claim", `String copy; "category", `String "fact"
+                     ; "absorbs", `List [ `String (List.assoc (id a) tokens)
+                                        ; `String (List.assoc (id b) tokens) ] ] ]
+    ; "dropped", `List []; "working_contexts", `List [] ] in
+  let librarian = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Reply (Fixture.openai_response answer)) in
+  (* Forward questions ([s..]) are answered "not conveyed", so nothing is
+     absorbed; reverse ones ([c..]) "conveyed", so the claim is a copy. *)
+  let jev_requests = ref [] in
+  let handler _conn _request body =
+    let raw = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let qids =
+      Yojson.Safe.from_string raw |> Yojson.Safe.Util.member "questions"
+      |> Yojson.Safe.Util.to_assoc |> List.map fst
+    in
+    jev_requests := qids :: !jev_requests;
+    let answers =
+      List.map
+        (fun qid ->
+           qid, `Assoc [ "type", `String "noul"
+                       ; "noul", `Float (if String.length qid > 0 && qid.[0] = 'c' then 0.9 else 0.0) ])
+        qids
+    in
+    Cohttp_eio.Server.respond_string ~status:`OK
+      ~body:(Yojson.Safe.to_string (`Assoc [ "model", `String "jev-fixture"; "answers", `Assoc answers ]))
+      ()
+  in
+  let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "JEV fixture has no TCP address" in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ())
+      ~on_error:(fun exn -> Alcotest.fail (Printexc.to_string exn)));
+  let resolver = Fixture.resolver_snapshot ~source:"copy-claim-fixture"
+    [ { Fixture.id = "librarian-copy-fixture"; base_url = librarian.base_url } ] in
+  (match Runtime_exact_output_registry.publish
+    ~lanes:[ { Runtime_schema.id = "librarian_exact"
+             ; slot_ids = [ "librarian-copy-fixture" ]
+             ; cli_slot_ids = []
+             ; max_output_tokens = Some 4_096
+             } ] resolver with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail
+       (Runtime_exact_output_registry.publication_error_to_string error));
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "synthetic-jev-key") (fun () ->
+    Masc_test_deps.with_typesafeai_policy
+      { Runtime_schema.default_typesafeai with
+        lane_enabled = true
+      ; destinations =
+          ( { Runtime_schema.endpoint = Printf.sprintf "http://127.0.0.1:%d/evaluate" port
+            ; model = "copy-claim-model"; api_key_env = "TYPESAFEAI_API_KEY" }
+          , [] )
+      ; absorb_gate = true
+      }
+      (fun () ->
+        Masc.Keeper_librarian_runtime.run_best_effort
+          ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some seeded.revision) input));
+  Alcotest.(check int) "real Librarian request" 1 (Fixture.post_count librarian);
+  (match List.rev !jev_requests with
+   | [ forward; reverse ] ->
+     Alcotest.(check bool) "the forward request asks the memories" true
+       (List.for_all (fun qid -> qid.[0] = 's') forward);
+     Alcotest.(check (list string)) "the reverse request asks the claim" [ "c0" ] reverse
+   | made -> Alcotest.failf "expected a forward and a reverse request, got %d" (List.length made));
+  let stored = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+    | Some snapshot -> snapshot
+    | None -> Alcotest.fail "current snapshot is missing" in
+  Alcotest.(check (list string)) "the memories stay current and the copy is not saved"
+    (List.sort String.compare (List.map id seeded.facts))
+    (List.sort String.compare (List.map id stored.facts));
+  Alcotest.(check bool) "no saved memory holds the copy's text" false
+    (List.exists (fun (f : Types.fact) -> String.equal f.claim copy) stored.facts);
+  Alcotest.(check int) "nothing is archived as absorbed" 0
+    (List.length (Absorbed.read ~keepers_dir ~keeper_id |> require))
+;;
+
 let () =
   if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) "--emit-tui-fixtures"
   then run_runtime_evidence ~fixture_dir:Sys.argv.(2) ()
@@ -1305,6 +1876,38 @@ let () =
             test_a_missing_seventeenth_statement_keeps_the_whole_memory
         ; Alcotest.test_case "selection gate and store preserve the original" `Quick
             test_selection_gate_and_store_keep_the_unconveyed_original
+        ] )
+    ; ( "reverse"
+      , [ Alcotest.test_case "a claim its sources convey is not applied" `Quick
+            test_a_claim_its_sources_convey_is_not_applied
+        ; Alcotest.test_case "a claim with a new statement is applied" `Quick
+            test_a_claim_with_a_new_statement_is_applied
+        ; Alcotest.test_case "a claim the judge cannot answer for is applied" `Quick
+            test_a_claim_the_judge_cannot_answer_for_is_applied
+        ; Alcotest.test_case "a gate without a lane applies every claim" `Quick
+            test_a_gate_without_a_lane_applies_every_claim
+        ; Alcotest.test_case "a claim with an absorption applied is not asked back" `Quick
+            test_a_claim_with_an_absorption_applied_is_not_asked_back
+        ; Alcotest.test_case "a claim that continues a dropped memory is not asked back" `Quick
+            test_a_claim_that_continues_a_dropped_memory_is_not_asked_back
+        ; Alcotest.test_case "a restated memory is not asked back" `Quick
+            test_a_restated_memory_is_not_asked_back
+        ; Alcotest.test_case "the reverse question names the memories" `Quick
+            test_the_reverse_question_names_the_memories
+        ; Alcotest.test_case "a reverse tie keeps the claim" `Quick
+            test_a_reverse_tie_keeps_the_claim
+        ; Alcotest.test_case "a claim without a statement is not judged" `Quick
+            test_a_claim_without_a_statement_is_not_judged
+        ; Alcotest.test_case "a statement only the second state conveys makes a copy" `Quick
+            test_a_statement_only_the_second_state_conveys_makes_a_copy
+        ; Alcotest.test_case "a statement no state conveys applies the claim" `Quick
+            test_a_statement_no_state_conveys_applies_the_claim
+        ; Alcotest.test_case "a memory over the state bound is left out" `Quick
+            test_a_memory_over_the_state_bound_is_left_out
+        ; Alcotest.test_case "a statement never asked is told apart from one not conveyed" `Quick
+            test_a_statement_never_asked_is_told_apart_from_one_not_conveyed
+        ; Alcotest.test_case "the runtime does not save a copy" `Quick
+            test_the_runtime_does_not_save_a_copy
         ] )
     ]
 ;;

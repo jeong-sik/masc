@@ -195,6 +195,11 @@ let is_terminal = function
   | Scheduled | Due | Running -> false
 ;;
 
+let modify_allowed = function
+  | Scheduled | Due -> true
+  | Running | Succeeded | Failed | Cancelled | Expired -> false
+;;
+
 let rec canonical_json = function
   | `Assoc fields ->
     fields

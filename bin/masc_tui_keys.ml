@@ -1348,7 +1348,13 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
                  transport, twice-confirmed; a channel rebound to another \
                  Keeper meanwhile is left as is"
       ]
-  | Detail_info | Detail_secrets | Detail_automation | Detail_runs -> []
+  | Detail_info ->
+      [ b Act "Q" "requeue board"
+          ~help:
+            "requeue the oldest blocked Board-attention partition; \
+             its judgment call may run a second time"
+      ]
+  | Detail_secrets | Detail_automation | Detail_runs -> []
 
 (* The single keys a binding's key names, in this table's own notation:
    alternatives apart with "/" ("d/m/s", "Left / Esc"), a key pressed twice

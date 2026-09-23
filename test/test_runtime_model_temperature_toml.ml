@@ -20,10 +20,9 @@
     10. [top-k]/[min-p] fail closed when declared model capabilities say the
         field is unsupported.
 
-    Motivation: Kimi K2.7 (kimi-for-coding) accepts only [temperature = 1.0] and
-    rejects any other value ("only 1 is allowed for this model"). This field lets
-    runtime.toml pin that per model; [Runtime_inference.resolve_temperature]
-    consumes it via [Runtime.temperature_of_runtime_id]. *)
+    The field lets runtime.toml choose a sampling temperature per model;
+    [Runtime_inference.resolve_temperature] consumes it via
+    [Runtime.temperature_of_runtime_id]. *)
 
 open Alcotest
 

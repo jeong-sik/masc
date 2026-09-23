@@ -71,14 +71,10 @@ let judgment_write_json (ctx : 'a context) args =
       then Ok confidence
       else Error "confidence must be a number between 0.0 and 1.0"
     in
-    let keeper_name =
-      match get_string_opt args "keeper_name" with
-      | Some raw ->
-          let trimmed = String.trim raw in
-          if trimmed <> "" then trimmed
-          else normalized_actor ~context_actor:ctx.agent_name None
-      | None -> normalized_actor ~context_actor:ctx.agent_name None
-    in
+    (* The writer is the caller's authenticated name, never a body field:
+       a body field would let any caller record a judgment as another
+       keeper. Same rule as [resolved_actor] for staged actions. *)
+    let keeper_name = normalized_actor ~context_actor:ctx.agent_name None in
     let evidence_refs = Json_util.get_string_list args "evidence_refs"
     in
     let recommended_action = Json_util.get_object args "recommended_action" in

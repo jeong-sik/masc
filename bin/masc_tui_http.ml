@@ -2374,6 +2374,33 @@ let fetch_keeper_github_identity ~(host : string) ~(port : int)
       (Printf.sprintf "/api/v1/keepers/%s/github-identity"
          (percent_encode_path_segment keeper_name))
 
+let board_quarantines_path keeper_name =
+  Printf.sprintf "/api/v1/keepers/%s/board-attention/quarantines"
+    (percent_encode_path_segment keeper_name)
+
+(** GET /api/v1/keepers/:name/board-attention/quarantines — the Keeper's rows
+    of the Board-attention quarantine inventory. *)
+let fetch_keeper_board_quarantines ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:(board_quarantines_path keeper_name)
+
+(** POST /api/v1/keepers/:name/board-attention/quarantines/:partition/recovery
+    — the operator's requeue of one quarantined partition. The server takes
+    the actor from the credential; the body names only which quarantine
+    generation this press was made against. A 5xx here can mean the requeue
+    committed and its wake did not, so it is kept apart from a refusal. *)
+let post_board_quarantine_requeue ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(partition_id : string)
+    ~(request : Masc.Keeper_board_attention_quarantine_command.request) :
+    post_outcome =
+  post_json_outcome ~host ~port
+    ~path:
+      (board_quarantines_path keeper_name
+       ^ "/" ^ percent_encode_path_segment partition_id ^ "/recovery")
+    ~body:
+      (Yojson.Safe.to_string
+         (Masc.Keeper_board_attention_quarantine_command.request_to_json request))
+
 (** GET /api/v1/keepers/oauth/attached-tools — every declared service and
     what it currently offers this Keeper. *)
 let fetch_attached_tools ~(host : string) ~(port : int) ~(keeper_name : string) :

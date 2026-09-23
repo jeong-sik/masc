@@ -731,18 +731,24 @@ let test_overview_event_window_follows_and_preserves_anchor () =
   check int "negative retained count cannot overflow" 0
     (Schedule.overview_event_offset_after_prepend ~retained_count:min_int 1)
 
+(* What the runtime ceiling used to be: a constant of 34. The cases below are
+   about the other columns, so they hold it still. *)
+let old_runtime_ceiling = 34
+
 (* Below the narrowest row the allocation cannot shrink further; the frame
    shows a resize gate at those sizes rather than a roster. *)
 let keeper_minimum_row_width =
   Schedule.keeper_columns_used_width
-    (Schedule.allocate_keeper_columns ~inner_width:0)
+    (Schedule.allocate_keeper_columns ~inner_width:0
+      ~widest_runtime:old_runtime_ceiling)
 
 (* The row must never be wider than the box that holds it: the renderer fits
    each cell to these budgets, so a total over [inner_width] pushes the right
    border off the frame and the border column moves from row to row. *)
 let test_keeper_columns_never_exceed_their_width () =
   for inner_width = 0 to 400 do
-    let columns = Schedule.allocate_keeper_columns ~inner_width in
+    let columns = Schedule.allocate_keeper_columns ~inner_width
+      ~widest_runtime:old_runtime_ceiling in
     let used = Schedule.keeper_columns_used_width columns in
     check bool
       (Printf.sprintf "inner %d fits (used %d)" inner_width used)
@@ -754,7 +760,8 @@ let test_keeper_columns_never_exceed_their_width () =
    width leaves a ragged gap before the border; a total over it overflows. *)
 let test_keeper_columns_consume_the_whole_width () =
   for inner_width = keeper_minimum_row_width to 400 do
-    let columns = Schedule.allocate_keeper_columns ~inner_width in
+    let columns = Schedule.allocate_keeper_columns ~inner_width
+      ~widest_runtime:old_runtime_ceiling in
     check int
       (Printf.sprintf "inner %d is fully allocated" inner_width)
       inner_width
@@ -763,16 +770,58 @@ let test_keeper_columns_consume_the_whole_width () =
 
 (* Columns drop from the right, and identity never drops. *)
 let test_keeper_columns_drop_from_the_right () =
-  let narrow = Schedule.allocate_keeper_columns ~inner_width:70 in
+  let narrow = Schedule.allocate_keeper_columns ~inner_width:70
+      ~widest_runtime:old_runtime_ceiling in
   check bool "no flags when narrow" false narrow.kcol_show_flags;
   check bool "no runtime when narrow" false narrow.kcol_show_runtime;
   check bool "the name still has cells" true (narrow.kcol_name > 0);
-  let medium = Schedule.allocate_keeper_columns ~inner_width:100 in
+  let medium = Schedule.allocate_keeper_columns ~inner_width:100
+      ~widest_runtime:old_runtime_ceiling in
   check bool "flags return first" true medium.kcol_show_flags;
   check bool "runtime is still out" false medium.kcol_show_runtime;
-  let wide = Schedule.allocate_keeper_columns ~inner_width:150 in
+  let wide = Schedule.allocate_keeper_columns ~inner_width:150
+      ~widest_runtime:old_runtime_ceiling in
   check bool "runtime returns when wide" true wide.kcol_show_runtime;
   check bool "a dropped column costs no cells" true (medium.kcol_runtime = 0)
+
+(* The runtime column is the one that holds a long identifier, and it used to
+   stop growing at 34 cells whatever the rows held. Live ids reach 49
+   ([antigravity_subscription.claude-opus-4-6-thinking]), so every long one was
+   elided while the slack the row had left ran on to the task column -- 49
+   cells of it, for a task id the layout's own note calls short by
+   construction. *)
+let test_the_runtime_column_grows_to_the_ids_it_holds () =
+  let long = 49 in
+  let columns =
+    Schedule.allocate_keeper_columns ~inner_width:160 ~widest_runtime:long
+  in
+  check bool "the runtime column has room for the widest id" true
+    (columns.kcol_runtime >= long);
+  (* Not out of the name's cells: identity is what a reader picks a row by,
+     and it is allocated first. *)
+  let at_old_ceiling =
+    Schedule.allocate_keeper_columns ~inner_width:160
+      ~widest_runtime:old_runtime_ceiling
+  in
+  check int "the name keeps the cells it had" at_old_ceiling.kcol_name
+    columns.kcol_name
+
+(* And it stops at what they need. A roster whose runtimes are all short has
+   no use for a wide column, and those cells go on to the task id. *)
+let test_the_runtime_column_stops_at_what_it_holds () =
+  let short =
+    Schedule.allocate_keeper_columns ~inner_width:160 ~widest_runtime:12
+  in
+  let long =
+    Schedule.allocate_keeper_columns ~inner_width:160 ~widest_runtime:49
+  in
+  check bool "short ids take a narrower column" true
+    (short.kcol_runtime < long.kcol_runtime);
+  check bool "and the cells land in the task column" true
+    (short.kcol_task > long.kcol_task);
+  check int "the row still spends every cell" 160
+    (Schedule.keeper_columns_used_width short)
+
 
 (* The name column never shrinks as the terminal widens. A width that added a
    column while narrowing the name would make the same keeper unreadable on the
@@ -780,7 +829,8 @@ let test_keeper_columns_drop_from_the_right () =
 let test_keeper_name_width_never_shrinks_as_the_terminal_grows () =
   let previous = ref 0 in
   for inner_width = keeper_minimum_row_width to 400 do
-    let name = (Schedule.allocate_keeper_columns ~inner_width).kcol_name in
+    let name = (Schedule.allocate_keeper_columns ~inner_width
+      ~widest_runtime:old_runtime_ceiling).kcol_name in
     check bool
       (Printf.sprintf "inner %d keeps the name at least as wide" inner_width)
       true (name >= !previous);
@@ -1720,11 +1770,34 @@ let test_wake_readings_stay_four_separate_answers () =
      = Schedule.Wake_history_failed "boom")
 ;;
 
+(* A held schedule keeps [due] as its status and the previous occurrence's
+   wake as its last wake, so the hold reading is the only thing on the screen
+   saying it waits (#38205). It names the held due and says what it waits for
+   in words, not the wire's field name. *)
+let test_a_held_schedule_says_what_it_waits_for () =
+  let reading = Schedule.schedule_hold_reading ~due:"09-23 12:34" in
+  let has needle =
+    let n = String.length needle and m = String.length reading in
+    let rec go i = i + n <= m && (String.sub reading i n = needle || go (i + 1)) in
+    go 0
+  in
+  check bool "it opens with the word held" true
+    (String.length reading >= 4 && String.sub reading 0 4 = "held");
+  check bool "it names when the held occurrence came due" true (has "09-23 12:34");
+  check bool "it says the keeper has the previous wake" true (has "previous wake");
+  check bool "it does not print the wire field" false (has "runner_hold");
+  let tag = Schedule.schedule_hold_tag ~due:"09-23 12:34" in
+  check bool "the short tag leads the full reading" true
+    (String.length reading >= String.length tag
+     && String.sub reading 0 (String.length tag) = tag)
+;;
+
 (* Slack reaches the name and the runtime before the task id, and both stop at
    a cap so one very wide terminal does not spend eighty cells on a model
    name. *)
 let test_keeper_columns_grow_identifiers_first () =
-  let at width = Schedule.allocate_keeper_columns ~inner_width:width in
+  let at width = Schedule.allocate_keeper_columns ~inner_width:width
+      ~widest_runtime:old_runtime_ceiling in
   let three_hundred = at 300 and four_hundred = at 400 in
   check int "the name stops growing" three_hundred.kcol_name
     four_hundred.kcol_name;
@@ -2110,6 +2183,10 @@ let () =
             test_keeper_name_width_never_shrinks_as_the_terminal_grows
         ; test_case "keeper columns grow identifiers first" `Quick
             test_keeper_columns_grow_identifiers_first
+        ; test_case "the runtime column grows to the ids it holds" `Quick
+            test_the_runtime_column_grows_to_the_ids_it_holds
+        ; test_case "the runtime column stops at what it holds" `Quick
+            test_the_runtime_column_stops_at_what_it_holds
         ; test_case "memory columns never exceed their width" `Quick
             test_memory_columns_never_exceed_their_width
         ; test_case "the memory delta column holds a pair of counts" `Quick
@@ -2198,5 +2275,7 @@ let () =
             test_wake_readings_stay_four_separate_answers
         ; test_case "a board post without a time has no age" `Quick
             test_a_board_post_without_a_time_has_no_age
+        ; test_case "a held schedule says what it waits for" `Quick
+            test_a_held_schedule_says_what_it_waits_for
         ] )
     ]

@@ -822,13 +822,31 @@ let keeper_message_identity ~max_cells state keeper_name =
              Printf.sprintf "%s%s \xc2\xb7 %s \xc2\xb7 " status Ansi.dim
                (Tui_decode.keeper_phase_to_string row.kr_phase)
            in
+           (* What the turn has spent so far, in the same clause shape as the
+              rest of the row. It is an addition to this row, never a claim on
+              it: the counters are drawn whole or not at all, so they can
+              neither cut the runtime id nor arrive as a half-written number
+              that reads as a smaller bill than the real one. *)
+           let usage_clause =
+             match
+               Keeper_chat_transcript.stream_usage_text ~keeper_name
+                 (Option.map (fun live -> live.tl_transcript) state.msg_live)
+             with
+             | None -> ""
+             | Some text -> " \xc2\xb7 " ^ text
+           in
            let prefix_width = Message_layout.display_width prefix in
            if prefix_width >= max_cells then
              fit_width (prefix ^ runtime_id ^ Ansi.reset) max_cells
            else
-             prefix
-             ^ fit_runtime_id (max_cells - prefix_width) runtime_id
-             ^ Ansi.reset)
+             let room = max_cells - prefix_width in
+             let both =
+               Message_layout.display_width runtime_id
+               + Message_layout.display_width usage_clause
+             in
+             if usage_clause <> "" && both <= room then
+               prefix ^ runtime_id ^ usage_clause ^ Ansi.reset
+             else prefix ^ fit_runtime_id room runtime_id ^ Ansi.reset)
 
 
 (** Render message input/conversation view *)

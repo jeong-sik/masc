@@ -48,6 +48,22 @@ type tool_occurrence =
   }
 (** Server-owned live row identity plus optional provider correlations. *)
 
+type stream_usage =
+  { input_tokens : int option
+  ; output_tokens : int option
+  ; cache_read_input_tokens : int option
+  ; cache_creation_input_tokens : int option
+  }
+(** Cumulative token counters a turn reported mid-stream. A field the provider
+    did not report stays [None]: the screen has to be able to say "not
+    reported" rather than draw a zero it was never told. *)
+
+val stream_usage_of_usage_json : Yojson.Safe.t -> stream_usage option
+(** Read one [usage] object, in the shape
+    [Keeper_chat_events.delta_usage_to_json] writes on both the live wire and
+    the journal. [None] when it is not an object or reports no counter at all,
+    so an empty delta becomes no row rather than a row of blanks. *)
+
 (** One thing that happened in the turn, as far as the live view is concerned. *)
 type delta =
   | Run_started
@@ -59,6 +75,8 @@ type delta =
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
   | Stream_model_started of { model : string }
+  | Stream_usage of stream_usage
+      (** Token counters the provider reported for the turn so far. *)
   | Text of string  (** Assistant text to append. *)
   | Thinking of string  (** Reasoning text to append. *)
   | Tool_started of

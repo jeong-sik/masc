@@ -98,29 +98,43 @@ let is_program_name name =
   Filename.check_suffix lower ".exe" || Filename.check_suffix lower ".com"
 ;;
 
-(* Inside a directory the executable is the one named after the directory, or
-   the only .exe/.com there. Two candidates and no name match is a question
-   for the caller, not a guess: DOS game directories carry installers and
-   setup programs beside the game. Returns the executable and the rest of the
+(* Inside a directory the executable is the one the caller named with
+   [boot], else the one named after the directory, else the only .exe/.com
+   there. Two candidates and no name match is a question for the caller, not
+   a guess: DOS game directories carry installers and setup programs beside
+   the game, and a loader chain such as 삼국지3's KOEI.COM -> MAIN.EXE shares
+   its directory with both. Returns the executable and the rest of the
    directory beside it, so its caller reads each file exactly once. *)
-let executable_in dir =
+let executable_in ?boot dir =
   let files =
     List.filter (fun f -> not (Sys.is_directory (Filename.concat dir f))) (entries_of dir)
   in
-  let programs = List.filter is_program_name files in
-  let stem = String.lowercase_ascii (Filename.basename dir) in
-  let named =
-    List.filter (fun f -> String.equal (String.lowercase_ascii (Filename.remove_extension f)) stem) programs
-  in
-  match (named, programs) with
-  | [ one ], _ | [], [ one ] ->
-    Ok (one, List.filter (fun f -> not (String.equal f one)) files)
-  | [], [] -> Error (Printf.sprintf "%s holds no .exe or .com" (Filename.basename dir))
-  | _, many ->
-    Error
-      (Printf.sprintf "%s holds several programs (%s); name the one to boot"
-         (Filename.basename dir)
-         (String.concat ", " many))
+  let beside one = List.filter (fun f -> not (String.equal f one)) files in
+  let folded = String.lowercase_ascii in
+  match boot with
+  | Some wanted ->
+    (* DOS folds case, so BOOT and boot name one file; [files] cannot hold
+       both, because the load refuses a directory where two names fold
+       together. *)
+    (match List.filter (fun f -> String.equal (folded f) (folded wanted)) files with
+     | one :: _ -> Ok (one, beside one)
+     | [] ->
+       Error
+         (Printf.sprintf "%s holds no file named %s" (Filename.basename dir) wanted))
+  | None ->
+    let programs = List.filter is_program_name files in
+    let stem = folded (Filename.basename dir) in
+    let named =
+      List.filter (fun f -> String.equal (folded (Filename.remove_extension f)) stem) programs
+    in
+    (match (named, programs) with
+     | [ one ], _ | [], [ one ] -> Ok (one, beside one)
+     | [], [] -> Error (Printf.sprintf "%s holds no .exe or .com" (Filename.basename dir))
+     | _, many ->
+       Error
+         (Printf.sprintf "%s holds several programs (%s); name the one to boot with boot"
+            (Filename.basename dir)
+            (String.concat ", " many)))
 ;;
 
 (* A program is a name in programs/, never a host path. The machine reads the
@@ -160,10 +174,13 @@ let left_inventory ~root shown =
     shown root
 ;;
 
-let resolve_program ~base_path name =
+let resolve_program ?boot ~base_path name =
   let root = programs_dir ~base_path in
   let trimmed = String.trim name in
+  let boot_escapes = match boot with Some b -> escapes b | None -> false in
   if trimmed = "" then Error "name a program"
+  else if boot_escapes then
+    Error "boot is a file name inside the directory: no paths, and no dots"
   else if escapes trimmed then
     Error
       (Printf.sprintf "%S is not a name in the inventory: no paths, and no dots"
@@ -191,7 +208,7 @@ let resolve_program ~base_path name =
              | Error e -> Error e
              | Ok pair -> gather (pair :: acc) rest)
         in
-        (match executable_in path with
+        (match executable_in ?boot path with
          | Error e -> Error e
          | Ok (exe, others) ->
            (match read_one exe with
@@ -207,6 +224,10 @@ let resolve_program ~base_path name =
                       (fun (a, _) (b, _) -> String.compare a b)
                       ((exe, exe_bytes) :: mounted) ))
                 (gather [] others)))
+      else if Option.is_some boot then
+        Error
+          (Printf.sprintf "%s is one file, not a directory: boot names a file inside a game directory"
+             trimmed)
       else begin
         (* One file boots alone, and is mounted under its own name too — a
            program that opens itself (overlays, self-reading installers)
@@ -257,7 +278,13 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
           ])
       ()
   | Some name ->
-    (match resolve_program ~base_path name with
+    let boot =
+      match get_string_opt args "boot" with
+      | None -> None
+      | Some b when String.trim b = "" -> None
+      | Some b -> Some (String.trim b)
+    in
+    (match resolve_program ?boot ~base_path name with
      | Error message -> reject ~tool_name ~start_time message
      | Ok (program_name, program_bytes, files) ->
        let loaded =

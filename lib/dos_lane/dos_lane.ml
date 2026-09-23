@@ -389,6 +389,14 @@ let eject ~announce () =
 
 let screen () = with_machine (fun st -> Ok (observe st))
 
+type frame = { width : int; height : int; rgb : string }
+
+let capture () =
+  with_machine (fun st ->
+    let width, height = Dos_machine.frame_dims st.m in
+    Ok (observe st, { width; height; rgb = Dos_machine.frame_rgb st.m }))
+;;
+
 let step ~steps ~until_ready =
   with_machine (fun st ->
     match clamp_steps steps with

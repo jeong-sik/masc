@@ -127,7 +127,10 @@ readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
 # e1d7f45 keeps screen_digest and input_requests from ocaml-dos #12, and adds
 # #26: INT 33h reaches the host mouse handler and the mouse is attached by
 # default, so a guest can observe the state injected by Dos_machine.set_mouse.
-readonly OCAML_DOS_SHA="e1d7f45aaed6c556e1d4a78d16c1157f95437f6d"
+# 1c75fbc = ocaml-dos #28: a guest reading the BIOS ring head itself counts as
+# asking for a key, so a game that polls the ring (삼국지3's copy protection
+# and name entry) settles instead of spending every step budget.
+readonly OCAML_DOS_SHA="1c75fbcff4aa215c6a4df342468028264f6d1faa"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

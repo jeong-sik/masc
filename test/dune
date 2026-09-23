@@ -147,6 +147,12 @@
    masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
 
 (test
+ (name test_dos_vision)
+ (modules test_dos_vision)
+ (libraries alcotest unix yojson fs_compat masc masc_test_deps
+   masc.dos_lane masc.multimodal masc.tool_types))
+
+(test
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
  (libraries alcotest masc masc.sse_wire masc_test_deps eio))

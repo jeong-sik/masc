@@ -112,6 +112,37 @@ let test_missing_or_refused_box_receipt_is_not_payload_evidence () =
          trailer_of_status (Unix.WEXITED 127)) ] ]
 ;;
 
+(* Each way the child can fail to build the box reaches the gate as its own
+   kind. A setup failure is not folded into the unattributed kind: the child
+   exited before starting the program, and the judge is told which step
+   failed. *)
+let test_each_box_refusal_keeps_its_kind () =
+  List.iter
+    (fun (boundary, expected) ->
+      let label = Keeper_approval_queue_rules_types.observed_refusal_kind_to_string expected in
+      let stage =
+        Stage.create
+          ~route:boxed
+          ~execution_evidence:(fun () ->
+            [ Masc.Keeper_sandbox_remote.Execution_observed
+                ( { mode = Exec_ssh_protocol.Observe; boundary }
+                , trailer_of_status (Unix.WEXITED 127) )
+            ])
+          ~dispatch:(fun _ -> result (Unix.WEXITED 127))
+      in
+      match Stage.observe stage () with
+      | Gate.Observed_refused { refusal_kind; status; _ } ->
+        check bool (label ^ " kind") true (refusal_kind = expected);
+        check bool (label ^ " status") true (status = Unix.WEXITED 127)
+      | Gate.Observed_result _ | Gate.Observation_unavailable _ ->
+        failf "%s did not reach the gate as a refusal" label)
+    [ Exec_ssh_protocol.Refused_socket, Gate.Socket_rule_not_applied
+    ; Exec_ssh_protocol.Refused_write, Gate.Write_rule_not_applied
+    ; Exec_ssh_protocol.Setup_failed, Gate.Setup_failed
+    ; Exec_ssh_protocol.Refused, Gate.Unattributed
+    ]
+;;
+
 (* No box means no dispatch: the reason travels, the fake dispatch is never
    reached. *)
 let test_no_box_is_unavailable_without_dispatching () =
@@ -641,6 +672,8 @@ let () =
             test_a_non_zero_run_is_returned_with_its_stderr
         ; test_case "missing/refused receipts cannot prove a box" `Quick
             test_missing_or_refused_box_receipt_is_not_payload_evidence
+        ; test_case "each box refusal keeps its kind" `Quick
+            test_each_box_refusal_keeps_its_kind
         ; test_case "no box is unavailable without dispatching" `Quick
             test_no_box_is_unavailable_without_dispatching
         ; test_case "a refused dispatch is unavailable under its tag" `Quick

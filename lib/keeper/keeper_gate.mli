@@ -183,21 +183,18 @@ type cycle_grant
 val cycle_grant_of_resolution :
   Keeper_event_queue.hitl_resolution -> cycle_grant option
 
-(** Why the box refused the observed attempt — the closed reading of the
-    shim's refusal. [Socket_denied] means the payload tried to reach the
-    network and the socket rule denied it: under [Network_none] that is the
-    exact route the keeper's own boundary forecloses, so the gate may
-    reconfirm isolation instead of asking the judge. [Write_denied] is a
-    filesystem-rule refusal (Landlock): a write could have reached a real
-    effect, so it always keeps the judge. [Unspecified] is every refusal the
-    receipt does not name; unreadable refuses towards the judge, never
-    towards the allow. This is a reading of the refusal's own record, not a
-    property the shim types on the wire yet — an empty or unrecognized
-    stderr classifies as [Unspecified], which errs to the judge. *)
-type refusal_kind =
-  | Socket_denied
-  | Write_denied
-  | Unspecified
+(** Why the box could not be built for the observed attempt — the closed
+    reading of the shim's typed acknowledgement, and the same type the
+    approval row stores. In every kind the requested program never started,
+    so a refusal says nothing about what the program would have done; it
+    always keeps the judge. See
+    {!Keeper_approval_queue_rules_types.observed_refusal_kind} for what each
+    kind means. *)
+type refusal_kind = Keeper_approval_queue_rules_types.observed_refusal_kind =
+  | Socket_rule_not_applied
+  | Write_rule_not_applied
+  | Setup_failed
+  | Unattributed
 
 (** What one run of the request inside the executor's box came back as
     (RFC-0422). The caller that owns the sandbox runs it; the Gate only
@@ -217,11 +214,9 @@ type observation =
       ; stderr : string
       ; refusal_kind : refusal_kind
       }
-      (** The shim's typed receipt reports setup failure or refusal. A
-          nonzero payload exit alone cannot construct this outcome. The kind
-          splits the two boundary rules the box can refuse with: only the
-          socket rule may stand in for [Network_none]'s own foreclosed
-          route; a write refusal or an unreadable refusal keeps the judge. *)
+      (** The shim's typed receipt reports that the box could not be built,
+          so the program never started. A nonzero payload exit alone cannot
+          construct this outcome. Every kind keeps the judge. *)
   | Observation_unavailable of string
       (** No box could be built for this request — a profile with no shim, a
           shim that advertises no box, a dispatch the typed gate refused — so
@@ -229,11 +224,13 @@ type observation =
           Never read as clean. *)
 
 val observed_refusal :
+  refusal_kind:refusal_kind ->
   status:Unix.process_status ->
   stderr:string ->
   Keeper_approval_queue_rules_types.observed_refusal
 (** What a refused observe run becomes on the approval row and in the
-    keeper's deferred receipt: the status, and the stderr tail bounded by
+    keeper's deferred receipt: the refusal kind, the status, and the stderr
+    tail bounded by
     [keeper.hitl.observation_stderr_bytes]. The Gate applies it when it
     defers on {!Observed_refused}; the tool_execute runtime applies the same
     function so the keeper reads the same bytes the judge does. *)

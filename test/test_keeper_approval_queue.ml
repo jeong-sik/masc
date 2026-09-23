@@ -1419,8 +1419,9 @@ let test_an_observation_survives_the_row_round_trip () =
        ignore (install_exn ~base_path);
        ensure_keeper_exists ~base_path ~keeper_name;
        let refusal : Rule_types.observed_refusal =
-         { observed_status = Rule_types.Observed_exit 2
-         ; observed_stderr = "sh: 1: cannot create w: Permission denied"
+         { observed_refusal_kind = Rule_types.Setup_failed
+         ; observed_status = Rule_types.Observed_exit 127
+         ; observed_stderr = "masc-exec-shim: Unix.Unix_error(Unix.ENOENT, \"chdir\", \"/w\")"
          ; observed_stderr_omitted_bytes = 0
          }
        in

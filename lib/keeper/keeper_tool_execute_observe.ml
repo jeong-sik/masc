@@ -26,9 +26,7 @@ let unavailable_tag = function
 
 type box_evidence =
   | Acknowledged
-  | Refused
-  | Refused_socket
-  | Refused_write
+  | Refused of Keeper_gate.refusal_kind
   | Unavailable
 
 let box_evidence ~run evidence =
@@ -41,9 +39,13 @@ let box_evidence ~run evidence =
       when mode = expected_mode ->
         (match boundary with
          | Exec_ssh_protocol.Sandbox_applied | Exec_ssh_protocol.Exec_failed -> read rest
-         | Exec_ssh_protocol.Refused_socket -> Refused_socket
-         | Exec_ssh_protocol.Refused_write -> Refused_write
-         | Exec_ssh_protocol.Setup_failed | Exec_ssh_protocol.Refused -> Refused
+         (* Every refusal below ends the child before it starts the
+            program; the kind only says which step of building the box
+            failed. *)
+         | Exec_ssh_protocol.Refused_socket -> Refused Keeper_gate.Socket_rule_not_applied
+         | Exec_ssh_protocol.Refused_write -> Refused Keeper_gate.Write_rule_not_applied
+         | Exec_ssh_protocol.Setup_failed -> Refused Keeper_gate.Setup_failed
+         | Exec_ssh_protocol.Refused -> Refused Keeper_gate.Unattributed
          | Exec_ssh_protocol.Child_ack_unavailable -> Unavailable)
     | _ -> Unavailable
   in
@@ -60,27 +62,9 @@ let observe t () : Keeper_gate.observation =
        | Ok result ->
          (match box_evidence ~run (t.execution_evidence ()) with
           | Acknowledged -> Keeper_gate.Observed_result { run; result }
-          | Refused_socket ->
-            (* The child attributed the refusal to its own seccomp socket
-               filter -- typed, nothing read back out of stderr. *)
+          | Refused refusal_kind ->
             Keeper_gate.Observed_refused
-              { status = result.status
-              ; stderr = result.stderr
-              ; refusal_kind = Keeper_gate.Socket_denied
-              }
-          | Refused_write ->
-            Keeper_gate.Observed_refused
-              { status = result.status
-              ; stderr = result.stderr
-              ; refusal_kind = Keeper_gate.Write_denied
-              }
-          | Refused ->
-            (* An unattributed refusal (older shims) still refuses. *)
-            Keeper_gate.Observed_refused
-              { status = result.status
-              ; stderr = result.stderr
-              ; refusal_kind = Keeper_gate.Unspecified
-              }
+              { status = result.status; stderr = result.stderr; refusal_kind }
           | Unavailable ->
             (* No acknowledgement: the box may or may not have applied.
                That says nothing about a refusal -- say exactly that,

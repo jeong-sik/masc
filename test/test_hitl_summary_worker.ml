@@ -386,8 +386,9 @@ let test_the_judge_sees_what_the_box_refused () =
   install_queue base_path;
   let entry = pending_entry ~base_path () in
   let refusal : QT.observed_refusal =
-    { observed_status = QT.Observed_exit 2
-    ; observed_stderr = "sh: 1: cannot create w: Permission denied"
+    { observed_refusal_kind = QT.Setup_failed
+    ; observed_status = QT.Observed_exit 127
+    ; observed_stderr = "masc-exec-shim: Unix.Unix_error(Unix.ENOENT, \"chdir\", \"/w\")"
     ; observed_stderr_omitted_bytes = 0
     }
   in

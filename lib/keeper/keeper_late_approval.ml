@@ -185,6 +185,9 @@ let take t ?(now = Unix.gettimeofday ()) ~keeper_name ~tool_name ~args () =
             "keeper_late_approval: consumed remembered decision keeper=%s tool=%s decision=%s actor=%s"
             keeper_name entry.remembered_tool_name
             (Registry.decision_to_string entry.remembered_decision)
+            (* sound-partial: allow — the default labels a stamp-less legacy
+               entry of a process-local, restart-empty ledger; it names the
+               log line, it never feeds a decision. *)
             (Option.value entry.remembered_decision_actor ~default:"unattributed");
           t.remembered <-
             List.filter

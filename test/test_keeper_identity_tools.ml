@@ -124,7 +124,7 @@ let transports_of_post post =
 let execute_offered ?(post = never_post) ~base_path
     (offered : Identity_tools.offered_tool) arguments =
   Identity_tools.tool_result_of_call ~read_only:offered.Identity_tools.read_only
-    (Identity_tools.run_call ~transports:(transports_of_post post) ~base_path
+    (Identity_tools.run_call ~transports:(transports_of_post post) ~config:(Masc.Workspace.default_config base_path)
        ~keeper_name:"acme-daycare" ~provider:offered.Identity_tools.provider
        ~remote_name:offered.Identity_tools.remote_name ~arguments ())
 
@@ -514,7 +514,7 @@ let test_github_cli_credential_is_what_gets_sent () =
   write_gh_identity ~base_path ~keeper_name "gho_from_device_login";
   let post, sent = recording_transport () in
   match
-    Identity_tools.run_call ~transports:(transports_of_post post) ~base_path ~keeper_name
+    Identity_tools.run_call ~transports:(transports_of_post post) ~config:(Masc.Workspace.default_config base_path) ~keeper_name
       ~provider:(github_provider ()) ~remote_name:"list_issues"
       ~arguments:(`Assoc []) ()
   with
@@ -531,7 +531,7 @@ let test_github_cli_credential_follows_a_relogin () =
   write_gh_identity ~base_path ~keeper_name "gho_first";
   let post, sent = recording_transport () in
   (match
-     Identity_tools.run_call ~transports:(transports_of_post post) ~base_path ~keeper_name
+     Identity_tools.run_call ~transports:(transports_of_post post) ~config:(Masc.Workspace.default_config base_path) ~keeper_name
        ~provider:(github_provider ()) ~remote_name:"list_issues"
        ~arguments:(`Assoc []) ()
    with
@@ -540,7 +540,7 @@ let test_github_cli_credential_follows_a_relogin () =
   write_gh_identity ~base_path ~keeper_name "gho_second";
   let post, sent = recording_transport () in
   match
-    Identity_tools.run_call ~transports:(transports_of_post post) ~base_path ~keeper_name
+    Identity_tools.run_call ~transports:(transports_of_post post) ~config:(Masc.Workspace.default_config base_path) ~keeper_name
       ~provider:(github_provider ()) ~remote_name:"list_issues"
       ~arguments:(`Assoc []) ()
   with
@@ -558,7 +558,7 @@ let test_an_oauth_provider_ignores_the_gh_credential () =
   write_gh_identity ~base_path ~keeper_name "gho_not_for_atlassian";
   let post, sent = recording_transport () in
   match
-    Identity_tools.run_call ~transports:(transports_of_post post) ~base_path ~keeper_name ~provider:(provider ())
+    Identity_tools.run_call ~transports:(transports_of_post post) ~config:(Masc.Workspace.default_config base_path) ~keeper_name ~provider:(provider ())
       ~remote_name:"getJiraIssue" ~arguments:(`Assoc []) ()
   with
   | Ok _ -> Alcotest.fail "an OAuth provider spent the gh credential"
@@ -765,7 +765,7 @@ let test_an_expected_not_found_does_not_reach_for_the_catalog () =
   project_token ~base_path;
   let post, sent, calls = drifting_transport () in
   match
-    Identity_tools.run_call ~transports:(transports_of_post post) ~base_path ~keeper_name:"acme-daycare"
+    Identity_tools.run_call ~transports:(transports_of_post post) ~config:(Masc.Workspace.default_config base_path) ~keeper_name:"acme-daycare"
       ~provider:(provider ()) ~remote_name:"aToolNobodyOffered"
       ~arguments:(`Assoc []) ()
   with
@@ -1087,7 +1087,7 @@ let test_a_401_is_cleared_by_one_reactive_refresh () =
   in
   match
     Identity_tools.run_call ~transports:{ Identity_tools.mcp_post; token_post; discover }
-      ~base_path ~keeper_name
+      ~config:(Masc.Workspace.default_config base_path) ~keeper_name
       ~provider ~remote_name:"getJiraIssue" ~arguments:(`Assoc []) ()
   with
   | Ok result ->

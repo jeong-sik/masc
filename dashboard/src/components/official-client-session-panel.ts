@@ -5,6 +5,7 @@ import {
   fetchOfficialClientSession,
   resolveOfficialClientSession,
   type DashboardOfficialClientRecoveryDecision,
+  type DashboardOfficialClientRecoveryFailure,
   type DashboardOfficialClientSessionResponse,
 } from '../api/dashboard'
 import { keepers } from '../store'
@@ -26,6 +27,24 @@ function phaseTone(kind: string): 'ok' | 'warn' | 'bad' | 'info' | 'neutral' {
 function timestampText(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
   return new Date(value * 1_000).toLocaleString()
+}
+
+// A full vendor session refuses the same resume again, and the server answers
+// retry_previous with retry_previous_unavailable, so the panel does not offer it.
+function retryPreviousOffered(failure: DashboardOfficialClientRecoveryFailure): boolean {
+  switch (failure) {
+    case 'vendor_session_full_no_activity':
+    case 'vendor_session_full_after_activity':
+      return false
+    case 'transient_spawn_failed':
+    case 'transport_interrupted':
+    case 'protocol_failed':
+    case 'provider_rejected':
+    case 'host_hook_failed':
+    case 'state_persistence_failed':
+    case 'process_restarted':
+      return true
+  }
 }
 
 function compactHash(value: string): string {
@@ -180,14 +199,16 @@ export function OfficialClientSessionPanel() {
                 </div>
                 <div class="mb-3 whitespace-pre-wrap break-words text-xs text-[var(--color-fg-secondary)]">${recovery.detail}</div>
                 <div class="flex flex-wrap gap-2">
-                  <${ActionButton}
+                  ${retryPreviousOffered(recovery.failure)
+                    ? html`<${ActionButton}
                     variant="warn"
                     size="sm"
                     testId="official-client-session-retry-previous"
                     disabled=${resolving.value}
                     ariaBusy=${resolving.value}
                     onClick=${() => void resolve({ resolution: 'retry_previous' })}
-                  >이전 settlement에서 재시도<//>
+                  >이전 settlement에서 재시도<//>`
+                    : null}
                   <${ActionButton}
                     variant="danger"
                     size="sm"

@@ -192,7 +192,9 @@ and handle_transition ~tool_name ~start_time ctx args =
         Some "task_done_requires_claimed_or_started"
       | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
         Some "task_done_requires_current_owner"
-      | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
+      | Masc_domain.Task
+          (Masc_domain.Task_error.InvalidState _
+          | Masc_domain.Task_error.VerificationSuperseded _) ->
         Some "task_done_invalid_lifecycle_state"
       | Masc_domain.Task (Masc_domain.Task_error.NotFound _) ->
         Some "task_done_task_not_found"

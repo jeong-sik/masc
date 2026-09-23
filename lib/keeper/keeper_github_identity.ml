@@ -35,6 +35,7 @@ type login_lane =
   }
 
 let config_dir_name = "github-cli"
+let default_hostname = "github.com"
 
 let config_dir ~config ~keeper_name =
   Filename.concat
@@ -42,14 +43,15 @@ let config_dir ~config ~keeper_name =
     config_dir_name
 ;;
 
-(* Base-path variant for callers that hold only [base_path] (e.g. the chat
-   store's redaction snapshot). Default-cluster on purpose, matching
-   [Common.keepers_runtime_dir_of_base]: the chat store's secret projection
-   roots are already base-path scoped, so this keeps both snapshot sources
-   on the same cluster resolution. *)
+(* Base-path form of [config_dir] for callers that hold only [base_path] (the
+   chat store's redaction snapshot). [hosts.yml] is read where the login wrote
+   it, and the login writes through the cluster-aware [config_dir]; a
+   default-cluster path here would leave a non-default cluster's token out of
+   the redaction snapshot. [Workspace.keepers_runtime_dir_for_base_path]
+   resolves the cluster the same way the process's [Workspace.config] does. *)
 let config_dir_of_base_path ~base_path ~keeper_name =
   Filename.concat
-    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    (Filename.concat (Workspace.keepers_runtime_dir_for_base_path base_path) keeper_name)
     config_dir_name
 ;;
 
@@ -414,8 +416,8 @@ let hosts_file_has_stored_token ~config_dir hosts_path =
    which one was current. Absence is an error naming the fix rather than an
    empty token, because a caller that got "" would send it and read GitHub's
    401 as the provider being down. *)
-let stored_token ~base_path ~keeper_name ~hostname =
-  let config_dir = config_dir_of_base_path ~base_path ~keeper_name in
+let stored_token ~config ~keeper_name ~hostname =
+  let config_dir = config_dir ~config ~keeper_name in
   let hosts_path = Filename.concat config_dir "hosts.yml" in
   match Fs_compat.load_owned_regular_file ~ownership_root:config_dir hosts_path with
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
@@ -648,7 +650,7 @@ let write_git_credential_config ~dir_mode_after ~snapshot =
        in
        (* gh's own setup-git pairs github.com with its gist host. *)
        let hosts =
-         if List.exists (String.equal "github.com") hosts
+         if List.exists (String.equal default_hostname) hosts
             && not (List.exists (String.equal "gist.github.com") hosts)
          then hosts @ [ "gist.github.com" ]
          else hosts
@@ -665,19 +667,6 @@ let write_git_credential_config ~dir_mode_after ~snapshot =
        in
        Unix.chmod snapshot dir_mode_after;
        result)
-;;
-
-let runtime_env_for_tool ~config ~keeper_name env =
-  match existing_config_dir ~config ~keeper_name with
-  | Error _ as error -> error
-  | Ok None ->
-    let snapshot, cleanup = empty_local_tool_config_snapshot () in
-    Ok (overlay_config_env ~config_dir:snapshot env, Unconfigured, cleanup)
-  | Ok (Some path) ->
-    (match copy_local_tool_config_snapshot path with
-     | Error _ as error -> error
-     | Ok (snapshot, cleanup) ->
-       Ok (overlay_config_env ~config_dir:snapshot env, Configured path, cleanup))
 ;;
 
 (* Keeper-lifetime containers cannot mount a per-turn snapshot: turn cleanup
@@ -1148,14 +1137,17 @@ let stream_login ~config ~keeper_name ~make_lane ~is_closed ~send_event =
      | exn -> Error (Printexc.to_string exn))
 ;;
 
-let print_observation ~config ~keeper_name ~hostname =
-  match observe ~config ~keeper_name ~hostname with
+let print_observation_result = function
   | Error message ->
     prerr_endline message;
     false
   | Ok observation ->
     observation_to_yojson observation |> Yojson.Safe.pretty_to_string |> print_endline;
     true
+;;
+
+let print_observation ~config ~keeper_name ~hostname =
+  print_observation_result (observe ~config ~keeper_name ~hostname)
 ;;
 
 let run_inherited ~timeout_sec ~env = function
@@ -1280,8 +1272,8 @@ let run_cli_set_token ~(lane : login_lane) ~base_path ~keeper_name ~token =
     0
 ;;
 
-let run_cli_status ~config ~keeper_name ~hostname =
-  if print_observation ~config ~keeper_name ~hostname then 0 else 1
+let run_cli_status ~observe =
+  if print_observation_result (observe ()) then 0 else 1
 ;;
 
 let run_cli_logout ~config ~keeper_name ~hostname =

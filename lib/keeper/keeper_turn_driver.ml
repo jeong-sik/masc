@@ -95,10 +95,9 @@ let selected_runtime_result ?official_client_settlement (runtime : Runtime.t) ~l
     result
 ;;
 
-(* Whether the candidate answered at all. An attempt that yielded before any
-   provider turn completed -- the pre-first-token yield that
-   [Runtime_agent.yielded_pre_first_token] builds when a person queues behind
-   a silent provider -- did not, so it is no evidence the candidate is back. *)
+(* Whether the candidate answered at all. An attempt that stopped before any
+   provider turn completed did not, so it is no evidence the candidate is
+   back. *)
 let run_result_answered (run_result : Runtime_agent.run_result) =
   match run_result.Runtime_agent.stop_reason with
   | Runtime_agent.Completed -> true
@@ -887,17 +886,16 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Capacity_backpressure; retry_after = _ } ->
           ()
-        (* A credential denial says this candidate could not answer, while a
-           sibling may use another credential. Preserve that typed route into
-           the next walk without inventing an expiry or excluding the path. *)
-        | Keeper_runtime_failure_route.Rotate_now
-            { rotate = Keeper_runtime_failure_route.Auth_failed } ->
-          note_failed_attempt Runtime_candidate_backpressure.Access_refused
         (* These candidates answered, or the failure says nothing durable
-           about their ability to answer a later turn. *)
+           about their ability to answer a later turn (RFC-0458 §3.4, §6).
+           A credential denial rotates to the next candidate within this
+           turn only. Held as evidence it would stay until the head itself
+           answered, which it never gets to do while a sibling answers, so
+           every new turn starts again from the head. *)
         | Keeper_runtime_failure_route.Rotate_now
             { rotate =
-                ( Keeper_runtime_failure_route.Model_unavailable
+                ( Keeper_runtime_failure_route.Auth_failed
+                | Keeper_runtime_failure_route.Model_unavailable
                 | Keeper_runtime_failure_route.Resumable_cli_session
                 | Keeper_runtime_failure_route.Candidates_filtered
                 | Keeper_runtime_failure_route.Runtime_exhausted
@@ -1017,6 +1015,12 @@ let attempt_runtime_candidates
        then lane_terminal (this_candidate terminal_error)
        else if retry_admitted && error_is_retryable
        then loop ~observed_overflow ~repeated_models (idx + 1) rest
+       else if Keeper_internal_error.is_preempted_before_first_token error
+       then
+         (* A person queued behind this turn (#38094). An overflow an earlier
+            candidate saw must not replace it: the turn yields, it does not
+            fail for capacity. *)
+         lane_terminal (this_candidate error)
        else if is_last
        then (
          (* Lane fully exhausted: an overflow seen anywhere in the rotation

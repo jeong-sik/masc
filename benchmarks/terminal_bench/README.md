@@ -34,7 +34,7 @@ MASC 하네스 자체를 Terminal-Bench 4.0.0 전체로 잰다.
 
     harbor run -d terminal-bench/terminal-bench@4.0.0 \
       -i terminal-bench/embedding-drift-monitor \
-      --agent agents.masc_agent:MascAgent -m anthropic/claude-fable-5 \
+      --agent agents.masc_agent:MascAgent -m anthropic/claude-fable-5-1 \
       --ak arm=b -k 1 -n 1 --agent-setup-timeout-multiplier 5 -o results/jobs
 
 ## 전체 실행

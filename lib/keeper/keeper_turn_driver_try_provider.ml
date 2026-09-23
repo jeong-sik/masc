@@ -138,7 +138,16 @@ let turn_start ~config ~keeper_name ~trace_id ~messages =
      | Ok end_atom -> Keeper_carried_front.Turn_boundary { end_atom }
      | Error Librarian_continuity_snapshot.Uncovered_history ->
        Keeper_carried_front.Turn_boundary { end_atom = 0 }
-     | Error error -> unknown (Librarian_continuity_snapshot.error_to_string error))
+     | Error
+         ((Librarian_continuity_snapshot.Unmatched_history
+          | Librarian_continuity_snapshot.Range_stopped _
+          | Librarian_continuity_snapshot.Trace_mismatch
+          | Librarian_continuity_snapshot.History_changed
+          | Librarian_continuity_snapshot.Prefix_changed
+          | Librarian_continuity_snapshot.Invalid_snapshot _
+          | Librarian_continuity_snapshot.Read_failed _
+          | Librarian_continuity_snapshot.Write_failed _) as error) ->
+       unknown (Librarian_continuity_snapshot.error_to_string error))
 ;;
 
 let prepare_continuity ~trace_id ~lines ~messages snapshot =
@@ -299,7 +308,8 @@ let continuity_for_request ~keeper_name ~trace_id ~messages ~snapshot ~lines ~pr
         | Error
             ((Librarian_continuity_snapshot.Trace_mismatch
              | Librarian_continuity_snapshot.History_changed
-             | Librarian_continuity_snapshot.Uncovered_history) as mismatch) ->
+             | Librarian_continuity_snapshot.Uncovered_history
+             | Librarian_continuity_snapshot.Unmatched_history) as mismatch) ->
           (* The history moved on from the snapshot. The Librarian's durable
              position may still fit: goo-yang-bong's did on 2026-09-22 while
              its snapshot did not, and the keeper sent its 12,720 atoms,
@@ -1997,20 +2007,23 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
          with
          | `Attempt_finished attempt_result -> attempt_result
          | `Attempt_preempted ->
-           (* Synthesized zero-turn durable-stimulus yield: nothing was
-              produced, no checkpoint, source wake stays pending and re-runs
-              fresh. Not an error, so no provider rotation and no failure
-              telemetry. *)
-           (* [ctx.session_id] is the turn's trace id, always present on the
-              autonomous lane where preemption is armed; the [None] arm names a
-              deterministic fallback for this zero-turn yield's cosmetic id
-              rather than defaulting an unknown input. *)
-           let session_id =
-             match ctx.session_id with
-             | Some id -> id
-             | None -> ctx.runtime_id
-           in
-           Ok (Runtime_agent.yielded_pre_first_token ~session_id)
+           (* Nothing was produced and nothing failed. This used to be a
+              synthesized zero-turn run result, which the keeper could only
+              read as a run that succeeded without an AfterTurn ordinal, so
+              every preemption became a failed cycle (#38094). It is its own
+              typed value now: the lane walk ends on it (Keeper_turn_driver),
+              the failure route notes no rest against the candidate, and the
+              unified turn settles it as skipped, leaving the source
+              pending. *)
+           Log.Keeper.info ~keeper_name:ctx.keeper_name
+             "%s: autonomous turn yielded to a queued person before the \
+              provider's first event runtime=%s"
+             ctx.keeper_name
+             ctx.runtime_id;
+           Error
+             (Keeper_internal_error.core_error_of_masc_internal_error
+                (Keeper_internal_error.Preempted_before_first_token
+                   { runtime_id = ctx.runtime_id }))
          | `Attempt_stalled ->
            Error
              (Agent_core.Error.Api
@@ -2198,8 +2211,7 @@ let context_overflow_shrink_sequence
            on a live keeper: a 469638-byte reserve against capacities of
            131072 then 65536, three refusals per turn, none of which could
            have succeeded. Returning the original failure here hands the turn
-           to the declared-lane walk, where a candidate with a larger
-           request-body cap is the thing that can actually carry it. *)
+           to the declared-lane walk. *)
         if shrunk_capacity >= capacity
            || not (shrink_admits_history ~capacity:shrunk_capacity)
         then failed
@@ -2217,8 +2229,7 @@ let context_overflow_shrink_sequence
 ;;
 
 (* The refusals that say the request outgrew what carries it: the provider's
-   context overflow, and the two size refusals on the byte axis, masc's own
-   against the declared request-body cap and the provider's without a bound.
+   context overflow and the provider's refusal of the request body.
    Each is answered by moving the carried front, never by rotating first: a
    shorter range of the SAME conversation can still answer the same turn.
    Enumerated so a new variant forces a decision here instead of a silent
@@ -2498,8 +2509,7 @@ let run_try_provider_with_carried_range_eviction
   match ctx.recovery_view, ctx.continuity with
   | Some _, _ | None, Some (Summarized _ | Absorbed _) ->
     (* The validated semantic view owns retained source obligations. Retrying
-       the same view with a shorter range cannot recover it. Final serialized
-       request admission still enforces the request-body cap. *)
+       the same view with a shorter range cannot recover it. *)
     run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate
   | None, Some Without_snapshot ->
     let checkpoint_after = ref None in
@@ -2671,6 +2681,7 @@ let max_tokens_truncation_error error =
       | Keeper_internal_error.Provider_attempt_effect_fenced _
       | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Host_stopped_turn _
+      | Keeper_internal_error.Preempted_before_first_token _
       | Keeper_internal_error.Runtime_connection_closed _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )

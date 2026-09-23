@@ -18053,6 +18053,12 @@ and is loaded on demand through keeper_skill.
         end
       end;
       let input = read_input ~timeout:input_timeout input_reader () in
+      (* The footer's notice answers the last key. The next input is a new
+         key, so the notice goes before anything handles it: it takes the
+         room the key hints need, and a notice left standing after the
+         operator moved on hid the hints of the screen they moved to. A key
+         that has something to say sets its own. *)
+      if Option.is_some input then state.last_action <- None;
       (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
          this input sees the old frame; the next loop would be one key too
          late. *)
@@ -18556,13 +18562,8 @@ and is loaded on demand through keeper_skill.
         | None -> false
       in
       (* Exit confirmation belongs only to two consecutive quit keys. A paste,
-         a mouse report, or any other key means the operator stayed. The
-         footer's "press again to quit" goes with the arm, so it does not
-         promise an exit the next press no longer makes. *)
-      if Option.is_some input && not quit_key && state.quit_armed then begin
-        state.quit_armed <- false;
-        state.last_action <- None
-      end;
+         a mouse report, or any other key means the operator stayed. *)
+      if Option.is_some input && not quit_key then state.quit_armed <- false;
       (* An armed shutdown expires on the next unrelated input. Otherwise it
          waits indefinitely and a later press of the same key -- after the
          cursor has moved, after a refresh -- submits work the operator armed

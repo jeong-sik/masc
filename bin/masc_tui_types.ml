@@ -5596,13 +5596,12 @@ type state = {
      unrelated input clears it; a second [q] exits. *)
   mutable quit_armed: bool;
   (* What the last key the operator pressed actually did, and the clock
-     reading it was set at. These outcomes go to [add_event], and the event
-     log is drawn by Overview alone -- so the operator who pressed [a] on
-     Workspace stood on the one surface that could not answer them, and a
-     registration that succeeded looked the same as an editor that never
-     started. The footer every surface draws answers instead, and only for
-     [last_action_window_s]: an outcome that stayed would go on claiming a
-     keypress the operator has since forgotten making. *)
+     reading it was set at. The session log is drawn by Metrics alone, so the
+     operator who pressed [a] on Workspace could not read there whether the
+     registration landed. The footer every surface draws answers instead,
+     until the next input or for [last_action_window_s], whichever comes
+     first: an outcome that stayed would go on claiming a keypress the
+     operator has moved past. *)
   mutable last_action: (string * float) option;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the

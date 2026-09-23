@@ -25,11 +25,6 @@
 
 ### Internal
 
-- The `tui-chat-design` Skill's `Origin_row` density row now matches the header
-  the TUI draws: the speaker's whole name, a receding clock at the right edge
-  and a rule between them; a row whose time cell is empty draws no clock and no
-  `--:--:--` placeholder, and a row continuing the same speaker draws only the
-  rule and clock (#37892).
 
 ## [0.36.0] - 2026-09-22
 

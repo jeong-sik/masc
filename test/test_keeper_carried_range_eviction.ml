@@ -172,15 +172,18 @@ let test_with_marks_the_refusal_walks_down_to_the_low_water_mark () =
   check (list int) "three blocks left" [ 30 ] trace.evictions
 ;;
 
-(* A refusal agent core cannot attribute is still a refusal of this request:
-   the same bytes draw the same answer, so the range shrinks. 2026-09-18:
-   ollama_cloud answered a 9.5 MB request with prose the classifier leaves
-   unknown, and the turn ended instead of carrying less. *)
-let test_an_unattributed_refusal_shrinks_the_range () =
-  let _, trace =
+(* A refusal agent core cannot attribute names no size: a tool schema
+   error or an unsupported parameter arrives the same way. The range stays
+   whole, the provider is asked once, and the refusal comes back as it was
+   received so the operator and the declared-lane walk both see it. *)
+let test_an_unattributed_refusal_keeps_the_range () =
+  let outcome, trace =
     run ~ledger_of:(fun _ -> Some four_blocks) [ Error unattributed_refusal; Ok "fits" ]
   in
-  check (list int) "the unattributed refusal moved the front" [ 10 ] trace.evictions
+  check bool "the refusal is returned unchanged" true (outcome = Error unattributed_refusal);
+  check int "asked once" 1 trace.attempts;
+  check (list int) "no block evicted" [] trace.evictions;
+  check (list (pair int int)) "nothing halved" [] trace.halvings
 ;;
 
 let test_a_body_refusal_evicts_like_an_overflow () =
@@ -505,6 +508,91 @@ let test_a_ledger_the_history_does_not_hold_does_not_steer_the_retries () =
   Ledger.Table.For_testing.reset ()
 ;;
 
+(* Tick 1: a turn on an accepted 16-atom range is refused for a reason that
+   names no size, and a narrower request would have passed. Tick 2: the next
+   turn composes the whole accepted range again. A narrower request that
+   passed on tick 1 would have been observed into the ledger, and tick 2
+   would start at its cut front. *)
+let test_an_unattributed_refusal_leaves_the_next_turn_its_whole_range () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "unattributed" and runtime_id = "a" and session_id = "trace-unattributed" in
+  let history = exchanges ~from:0 8 in
+  let digest_at = Window.atom_opening_digest history in
+  let observe ~first_atom ~atom_count =
+    let (_ : Ledger.observation) =
+      Ledger.Table.observe ~keeper_name ~runtime_id ~session_id ~digest_at
+        ~request:
+          { (request ~first_atom ~atom_count) with
+            ends = ends_from digest_at ~first_atom ~atom_count }
+        ~usage:
+          (Some
+             { Ledger.input_tokens = (atom_count - first_atom) * 100
+             ; cache_read_input_tokens = 0 })
+    in
+    ()
+  in
+  observe ~first_atom:0 ~atom_count:8;
+  observe ~first_atom:0 ~atom_count:16;
+  let held = ref None in
+  let turn_front () =
+    Option.map
+      (fun (front : Front.seed) -> front.first_atom)
+      (fst
+         (Try_provider.For_testing.carried_front
+            ~ledger:(ref (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id))
+            ~keeper_name ~runtime_id ~session_id ~digest_at
+            ~after_refusal:!held ~cold:(fun () -> None)))
+  in
+  let working = ref (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id) in
+  let sent = ref [] and last = ref None in
+  let tick_1 =
+    Try_provider.carried_range_eviction_sequence
+      ~same_run_retry_authorized:(fun () -> true)
+      ~ledger:(fun () -> !working)
+      ~last_request:(fun () -> !last)
+      ~marks:None
+      ~hold_front:(fun seed -> held := Some seed)
+      ~evict:(function
+        | Range.Evicted { first_atom; front_digest; _ } ->
+          Try_provider.For_testing.move_ledger_front working ~first_atom ~front_digest
+        | Range.Unchanged _ -> false)
+      ~halve:(fun ~first_atom ~atom_count:_ ~retry ->
+        Try_provider.For_testing.halve_front
+          ~digest_at:(Some digest_at)
+          ~move_ledger:(Try_provider.For_testing.move_ledger_front working)
+          ~hold:(fun seed -> held := Some seed)
+          ~first_atom ~retry)
+      ~on_retry:(fun ~retry:_ _ -> ())
+      ~attempt:(fun () ->
+        let front, _ =
+          Try_provider.For_testing.carried_front
+            ~ledger:working ~keeper_name ~runtime_id ~session_id ~digest_at
+            ~after_refusal:!held ~cold:(fun () -> None)
+        in
+        let composed =
+          Try_provider.For_testing.compose_carried_model_input
+            ~measure_message_bytes:(fun _ -> 1) ~front
+            ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim
+            ~base_path:"" ~demote_before:0 ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
+            history
+        in
+        let first_atom = composed.Try_provider.projection.Window.dropped_atoms in
+        last := Some (request ~first_atom ~atom_count:16);
+        sent := first_atom :: !sent;
+        if first_atom = 0
+        then Error unattributed_refusal
+        else (
+          observe ~first_atom ~atom_count:16;
+          Ok first_atom))
+      ()
+  in
+  check bool "tick 1 returns the refusal" true (tick_1 = Error unattributed_refusal);
+  check (list int) "tick 1 sent the whole range once" [ 0 ] (List.rev !sent);
+  check bool "tick 1 held no front" true (Option.is_none !held);
+  check (option int) "tick 2 starts from the whole accepted range" (Some 0) (turn_front ());
+  Ledger.Table.For_testing.reset ()
+;;
+
 (* A refusal moves the front on a candidate with counted usage. Its fallback
    must carry that range both with and without a ledger of its own. A second
    refusal must advance the actual request, even if the fallback's ledger
@@ -592,7 +680,7 @@ let test_a_refused_front_survives_candidate_changes ?(fallback_atoms = 16) ~bloc
   check (list int) "the fallback keeps the front and advances on its own refusal"
     [ 8; 12 ] next_fronts;
   held := None;
-  let refused, refused_fronts = run_candidate "a" (Error unattributed_refusal) in
+  let refused, refused_fronts = run_candidate "a" (Error body_refused_by_provider) in
   check bool "every narrower request can be refused" true (Result.is_error refused);
   check (list int) "refusals reach the newest atom within their turn"
     [ 0; 8; 12; 14; 15 ] refused_fronts;
@@ -830,8 +918,10 @@ let () =
         ; test_case "marks walk to the low-water mark" `Quick
             test_with_marks_the_refusal_walks_down_to_the_low_water_mark
         ; test_case "body refusal evicts" `Quick test_a_body_refusal_evicts_like_an_overflow
-        ; test_case "an unattributed refusal shrinks the range" `Quick
-            test_an_unattributed_refusal_shrinks_the_range
+        ; test_case "an unattributed refusal keeps the range" `Quick
+            test_an_unattributed_refusal_keeps_the_range
+        ; test_case "an unattributed refusal leaves the next turn its whole range" `Quick
+            test_an_unattributed_refusal_leaves_the_next_turn_its_whole_range
         ; test_case "single block halves" `Quick test_a_single_block_halves_the_last_request
         ; test_case "no ledger halves" `Quick test_without_a_ledger_the_range_halves_until_it_fits
         ; test_case "halving ends at one atom" `Quick

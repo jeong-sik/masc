@@ -378,16 +378,20 @@ let reader_unauthenticated = function
    surface shares. What is specific here is the consequence: a refused read
    says nothing about the operation, so the operator needs to know it survived
    and how to come back to it. *)
-let refused_reader_remedy ~credential_sent =
+let refused_reader_remedy ~credential_sent reason =
   Printf.sprintf
     "the operation could not be read back: %s. The operation itself is \
      untouched on the server, so %s, then press Ctrl-R to settle this request."
-    (Masc_tui_credential.refusal_cause ~credential_sent)
+    (Masc_tui_credential.refusal_cause ~credential_sent reason)
     Masc_tui_credential.remedy
 
 let reconciliation_failure_detail ~credential_sent error =
-  if reader_unauthenticated error then refused_reader_remedy ~credential_sent
-  else error_to_string error |> terminal_safe_text
+  match error with
+  | Http_error { body; _ } when reader_unauthenticated error ->
+      refused_reader_remedy ~credential_sent
+        (Masc_tui_credential.server_reason_of_body body)
+  | Http_error _ | Transport_error _ | Protocol_error _ ->
+      error_to_string error |> terminal_safe_text
 
 let stream_error_acceptance_observed = function
   | Stream_interrupted { accepted }

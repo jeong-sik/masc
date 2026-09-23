@@ -63,7 +63,7 @@ val roster_of_reading :
     a surface that only said "the read failed" would leave the whole Keepers
     view inert with no way to tell why. *)
 type roster_failure =
-  | Roster_unauthorized
+  | Roster_unauthorized of Masc_tui_credential.server_reason
   | Roster_unreachable of string
   | Roster_malformed of string
 
@@ -78,7 +78,8 @@ val roster_failure_message : credential_sent:bool -> roster_failure -> string
 
 val roster_failure_of_status : status:int -> body:string -> roster_failure
 (** Classify a non-2xx roster read. Decided on the status code, so a server
-    error whose prose mentions tokens is not reported as a missing token. *)
+    error whose prose mentions tokens is not reported as a missing token; a
+    refusal keeps the server's typed reason from the body. *)
 
 val liveness_of_roster : roster -> string -> liveness
 (** What the roster says about one keeper by name. An incomplete roster can

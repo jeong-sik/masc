@@ -299,6 +299,7 @@ let refusal ~status_code ~body =
   match status_code with
   | 401 | 403 ->
       Masc_tui_credential.refusal ~credential_sent:(operator_token_present ())
+        (Masc_tui_credential.server_reason_of_body body)
   | _ -> Masc.Tui_decode.http_status_error ~status_code ~body
 
 let decode_json ~allow_empty ~status_code ~body =

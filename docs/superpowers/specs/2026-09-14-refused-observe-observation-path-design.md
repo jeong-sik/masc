@@ -143,7 +143,7 @@ re-introduce되지 않는다"). 이 PR이 하는 일은 오직:
   `SECCOMP_IOCTL_NOTIF_SEND`로 EPERM 응답(외부 동작 불변).
 - `Keeper_gate`에 "시도 관찰됨" 증거를 담을 새 타입(예:
   `Observed_refused`에 `attempt : attempt_evidence option` 필드 추가)과,
-  그 증거가 있을 때만 `Socket_denied ∧ Network_none`류 좁은 단축을
+  그 증거(`attempt`)가 소켓 시도를 기록했을 때만 `Network_none`과 묶는 좁은 단축을
   재검토하는 분기. **이 문서의 범위 밖** — review 5192723206의 조건("관찰
   근거가 있을 때만")이 실제로 충족된 뒤에 별도로 제안·리뷰받는다.
 

@@ -47,7 +47,11 @@ let project lanes =
   Yojson.Safe.Util.(json |> member "hitl" |> member "judge_lane")
 
 let lane slot_ids cli_slot_ids : Runtime_schema.exact_output_lane_decl =
-  { id = Masc.Hitl_summary_worker.lane_id; slot_ids; cli_slot_ids }
+  { id = Masc.Hitl_summary_worker.lane_id
+  ; slot_ids
+  ; cli_slot_ids
+  ; max_output_tokens = Some 4_096
+  }
 
 let assert_slots expected json =
   let open Yojson.Safe.Util in

@@ -1602,7 +1602,8 @@ max-concurrent = 1
             ~base_path:config.base_path ~keeper_name = 1);
        let public_before_recovery =
          Option.bind (registered_entry ()).last_failure_reason
-           Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+           (Masc.Keeper_status_bridge.runtime_blocker_surface_of_failure_reason
+               ~latest_receipt:(fun () -> Masc.Keeper_execution_receipt.No_receipt))
          |> Option.map (fun surface -> surface.Masc.Keeper_status_bridge.blocker_class)
        in
        check "native refusal appears on the public status before recovery"

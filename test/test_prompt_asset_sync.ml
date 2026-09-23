@@ -6,7 +6,7 @@ module Managed_asset_sync = Masc.Managed_asset_sync
 
 (* The runtime manifest a previous sync would have left behind. No embedded
    fixture carries one: the embedded tree is the managed set (#31283). *)
-let manifest ?(schema = "masc.prompt-managed-assets.v2") paths =
+let manifest ?(schema = "masc.prompt-managed-assets.v1") paths =
   Yojson.Safe.to_string
     (`Assoc
        [ "schema", `String schema
@@ -188,10 +188,10 @@ let test_a_foreign_or_broken_manifest_retires_nothing () =
           check string (name ^ ": the manifest is left as it was") content
             (read_file (Filename.concat dir "managed-assets.json"))))
     [ ( "tool-domain manifest"
-      , manifest ~schema:"masc.tool-managed-assets.v2" [ "keeper.stray.md" ]
+      , manifest ~schema:"masc.tool-managed-assets.v1" [ "keeper.stray.md" ]
       , "is not" )
     ; "not JSON", "{ this is not json", "not JSON"
-    ; "no paths", {|{"schema":"masc.prompt-managed-assets.v2"}|}, "lacks"
+    ; "no paths", {|{"schema":"masc.prompt-managed-assets.v1"}|}, "lacks"
     ; "unsafe path", manifest [ "../keeper.stray.md" ], "unsafe path"
     ]
 
@@ -474,7 +474,7 @@ let test_runtime_manifest_projects_the_embedded_set () =
       check int "failed" 0 (List.length first.Managed_asset_sync.failed);
       let managed_by, schema, paths = runtime_manifest dir in
       check string "managed_by" "MASC" managed_by;
-      check string "schema" "masc.tool-managed-assets.v2" schema;
+      check string "schema" "masc.tool-managed-assets.v1" schema;
       check (list string) "paths are exactly the embedded tool files"
         [ "masc_alpha.toml"; "masc_beta.toml"; "masc_gamma.toml" ]
         paths;
@@ -725,10 +725,9 @@ let test_edited_tool_is_overwritten_and_reported () =
         check bool "the line names the file" true (mentions ~line "tools/masc_board_vote.toml")
       | lines -> failf "expected one line, found %d" (List.length lines))
 
-(* A manifest under a schema no domain writes now -- here the paths-only
-   [v1] -- reads as no manifest: nothing is retired, every differing file is
-   overwritten, and the rewritten manifest is the current one with a digest
-   per path. *)
+(* A manifest under a schema no domain writes reads as no manifest:
+   nothing is retired, every differing file is overwritten, and the
+   rewritten manifest is the current one with a digest per path. *)
 let test_an_old_schema_manifest_reads_as_none () =
   with_temp_prompts_dir (fun dir ->
       let file = Filename.concat dir "keeper.example.md" in
@@ -736,7 +735,7 @@ let test_an_old_schema_manifest_reads_as_none () =
       let retired = Filename.concat dir "keeper.retired.md" in
       write_file retired "distribution copy\n";
       write_file (Filename.concat dir "managed-assets.json")
-        (manifest ~schema:"masc.prompt-managed-assets.v1"
+        (manifest ~schema:"masc.prompt-managed-assets.v2"
            [ "keeper.example.md"; "behavior/contract.md"; "keeper.retired.md" ]);
       let result = sync ~prompts_dir:dir in
       check (list string) "overwritten as stale" [ "prompts/keeper.example.md" ]
@@ -747,7 +746,7 @@ let test_an_old_schema_manifest_reads_as_none () =
       check int "no failure" 0 (List.length result.Managed_asset_sync.failed);
       match Yojson.Safe.from_file (Filename.concat dir "managed-assets.json") with
       | `Assoc fields ->
-        check (option string) "schema" (Some "masc.prompt-managed-assets.v2")
+        check (option string) "schema" (Some "masc.prompt-managed-assets.v1")
           (match List.assoc_opt "schema" fields with
            | Some (`String schema) -> Some schema
            | Some _ | None -> None);
@@ -766,6 +765,82 @@ let test_an_old_schema_manifest_reads_as_none () =
               | Some _ | None -> None)
          | Some _ | None -> fail "the rewritten manifest has no sha256 object")
       | _ -> fail "the rewritten manifest is not an object")
+
+(* A manifest under this domain's schema without [sha256] is what a binary
+   that records no digests writes. It still says what to retire, and it
+   records no digest, so a differing file is stale, not an operator edit. *)
+let test_a_manifest_without_digests_retires_and_judges_nothing_edited () =
+  with_temp_prompts_dir (fun dir ->
+      let file = Filename.concat dir "keeper.example.md" in
+      write_file file "a copy some binary wrote\n";
+      let retired = Filename.concat dir "keeper.retired.md" in
+      write_file retired "distribution copy\n";
+      write_file (Filename.concat dir "managed-assets.json")
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ "managed_by", `String "MASC"
+              ; "schema", `String "masc.prompt-managed-assets.v1"
+              ; ( "paths"
+                , `List
+                    [ `String "behavior/contract.md"
+                    ; `String "keeper.example.md"
+                    ; `String "keeper.retired.md"
+                    ] )
+              ]));
+      let result = sync ~prompts_dir:dir in
+      check (list string) "the listed asset no longer embedded is retired"
+        [ "prompts/keeper.retired.md" ] result.Managed_asset_sync.removed;
+      check (list string) "the differing file is overwritten as stale"
+        [ "prompts/keeper.example.md" ] result.Managed_asset_sync.overwritten;
+      check int "no operator edit" 0 (List.length result.Managed_asset_sync.operator_edits);
+      check int "no failure" 0 (List.length result.Managed_asset_sync.failed);
+      check string "the file is the distribution copy"
+        (List.assoc "prompts/keeper.example.md" embedded) (read_file file))
+
+(* What a binary that records no digests does in one pass: it overwrites
+   every file with its own copy, and it rewrites the manifest without
+   [sha256] only when the manifest's schema is the one it reads. *)
+let pass_by_a_binary_that_records_no_digests ~assets ~prompts =
+  let schema = "masc.prompt-managed-assets.v1" in
+  let manifest_file = Filename.concat prompts "managed-assets.json" in
+  List.iter
+    (fun (rel, content) ->
+      write_file (Filename.concat prompts (Filename.basename rel)) content)
+    assets;
+  match Yojson.Safe.from_file manifest_file with
+  | `Assoc fields when List.assoc_opt "schema" fields = Some (`String schema) ->
+    write_file manifest_file
+      (Yojson.Safe.pretty_to_string
+         (`Assoc
+            [ "managed_by", `String "MASC"
+            ; "schema", `String schema
+            ; ( "paths"
+              , `List (List.map (fun (rel, _) -> `String (Filename.basename rel)) assets) )
+            ])
+      ^ "\n")
+  | _ -> ()
+
+(* Roll back to a binary that records no digests, then return. The files
+   now hold that binary's copies. They are distribution copies, so the
+   returning pass overwrites them and saves none of that text as an
+   override. *)
+let test_a_rollback_and_return_promotes_nothing () =
+  with_workspace (fun ~base ~prompts ->
+      let earlier_copy = "---\ndescription: curator\ntemplate_variables: [memory]\n---\n\
+                          Earlier wording for {{memory}}.\n" in
+      let (_ : Managed_asset_sync.sync_result) = prompt_sync ~base ~prompts in
+      pass_by_a_binary_that_records_no_digests
+        ~assets:[ "prompts/curator.md", earlier_copy; grouped_embedded ]
+        ~prompts;
+      let result = prompt_sync ~base ~prompts in
+      check (list (pair string outcome_testable)) "no operator edit" [] (edits result);
+      check (list string) "the earlier copy is overwritten as stale"
+        [ "prompts/curator.md" ] result.Managed_asset_sync.overwritten;
+      check bool "no override written" false (Sys.file_exists (overrides_path base));
+      check (list string) "nothing kept beside the file" [] (preserved_files prompts);
+      check string "the file is this release's copy"
+        (List.assoc "prompts/curator.md" prompt_embedded)
+        (read_file (Filename.concat prompts "curator.md")))
 
 (* The case that must never promote: the file is the copy an earlier binary
    wrote -- it matches the recorded digest -- and this binary embeds a new
@@ -935,6 +1010,11 @@ let () =
             test_edited_tool_is_overwritten_and_reported;
           test_case "an old-schema manifest reads as none" `Quick
             test_an_old_schema_manifest_reads_as_none;
+          test_case "a manifest without digests retires and judges nothing edited"
+            `Quick
+            test_a_manifest_without_digests_retires_and_judges_nothing_edited;
+          test_case "a rollback and return promotes nothing" `Quick
+            test_a_rollback_and_return_promotes_nothing;
           test_case "a previous distribution copy is never promoted" `Quick
             test_a_previous_distribution_copy_is_never_promoted;
           test_case "unpromotable edits are preserved" `Quick

@@ -2390,6 +2390,13 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
          one unbroken run with "\x0A" printed through it, which is what a board
          post looked like. Per line the escape still covers what it is for. *)
     ; "Message_layout.wrap_body"
+      (* Also not a [Terminal_text] name, and also a boundary: every answer it
+         returns is either built from digits and the letters of a span, or is
+         the stamp put through [Masc.Tui_decode.sanitize_terminal_text]
+         (masc_tui_wire_age.ml, whose interface says so and whose suite pins
+         it). It reads the stamp rather than drawing it, which is why it is a
+         wrapper and not a [Terminal_text] call. *)
+    ; "Masc_tui_wire_age.text"
     ]
   in
   let fixture_path = "test/fixtures/tui_terminal_text_ast_fixture.ml" in

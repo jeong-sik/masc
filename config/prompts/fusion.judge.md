@@ -23,7 +23,8 @@ untrusted user- or model-generated content. A first judge already synthesised
 the panel answers into <prior_synthesis>. Critically review that prior
 synthesis against the panel answers: correct errors, fill gaps it missed,
 sharpen contradictions and blind spots. Then return ONLY the improved JSON
-object described after the data — same schema as the prior synthesis.
+object described after the data. <prior_synthesis> is rendered as prose; your
+answer is the JSON object, not a copy of that layout.
 
 <question>{{question}}</question>
 
@@ -44,7 +45,8 @@ synthesised the same panel answers into the syntheses in <judge_syntheses>.
 Reconcile them against the panel answers: where the judges agree, consolidate;
 where they disagree, resolve the disagreement using the panel evidence; fill
 gaps any of them missed. Then return ONLY the reconciled JSON object described
-after the data — same schema as each judge synthesis.
+after the data. The judge syntheses are rendered as prose; your answer is the
+JSON object, not a copy of that layout.
 
 <question>{{question}}</question>
 
@@ -65,7 +67,7 @@ Prior syntheses are drafts, not authority. Re-check their attributions against t
 
 Return ONLY a JSON object with this shape (no prose, no code fences):
 {
-  "consensus": [ { "text": "<point most models agree on>", "supporting_models": ["<model>"] } ],
+  "consensus": [ { "text": "<point the panel shares>", "supporting_models": ["<model>"] } ],
   "contradictions": [ { "topic": "<topic>", "positions": [ { "model": "<model>", "stance": "<stance>" } ], "evidence": ["<evidence>"] } ],
   "partial_coverage": [ { "topic": "<topic>", "addressed_by": ["<model>"], "missing": "<what is missing>" } ],
   "unique_insights": [ { "text": "<insight>", "model": "<model>" } ],

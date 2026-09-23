@@ -975,7 +975,8 @@ let log_call
       in
       let safe_input = input_to_json (Observability_redact.redact_json_value input) in
       let safe_output =
-        Observability_redact.redact_preview ~max_len:max_output_len output_text
+        Observability_redact.truncate_json_document
+          ~max_len:max_output_len output_text
       in
       let output_json = blob_aware_output_json safe_output in
       let runtime_contract =

@@ -33,8 +33,13 @@ val create
 val observe : t -> unit -> Keeper_gate.observation
 (** Return the payload's actual status/output only when every dispatched stage
     acknowledged the requested enforced box. Nonzero exits are results, not
-    implicit permission requests. Missing/setup/refused receipts remain
-    unavailable. This does not prove that no syscall was denied, and never
+    implicit permission requests. Every stage's receipt is read. When every
+    stage's box could not be built the answer is
+    {!Keeper_gate.Observed_refused} with the first kind the child named, and
+    nothing started. When some stage's box applied and another stage's box
+    could not be built it is
+    {!Keeper_gate.Observed_partly_refused}. A missing receipt is
+    {!Keeper_gate.Observation_unavailable}. This does not prove that no syscall was denied, and never
     authorizes replay outside the box. *)
 
 val dispatch_authorized

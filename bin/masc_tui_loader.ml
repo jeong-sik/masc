@@ -470,8 +470,17 @@ let decode_attention_item json =
   let* raw_severity = required_string_field json "severity" in
   let* ai_severity = decode_attention_severity raw_severity in
   let* ai_summary = required_string_field json "summary" in
-  let* ai_target_type = required_string_field json "target_type" in
-  let* ai_target_id = optional_string_field json "target_id" in
+  let* target_type = required_string_field json "target_type" in
+  let* target_id = optional_string_field json "target_id" in
+  (* The producers write ["keeper"] with the Keeper's name as the id
+     (lib/dashboard/dashboard_execution.ml, the keeper status bridge). A
+     keeper item without a name names nobody to join on, so it stays with the
+     other targets. *)
+  let ai_target =
+    match (target_type, target_id) with
+    | "keeper", Some name -> Attention_keeper name
+    | _, _ -> Attention_other { target_type; target_id }
+  in
   (* Evidence is free-shaped on the wire (each producer writes its own
      object); the one thing this surface reads out of it is the tool-host
      failure timestamp. An absent or non-object evidence, or one without a
@@ -489,8 +498,7 @@ let decode_attention_item json =
     { ai_kind
     ; ai_severity
     ; ai_summary
-    ; ai_target_type
-    ; ai_target_id
+    ; ai_target
     ; ai_evidence_ts
     }
 
@@ -1141,6 +1149,34 @@ let keeper_liveness_of_briefs briefs =
       | _ -> { counts with klc_unreadable = counts.klc_unreadable + 1 })
     empty briefs
 
+(* One Team row per brief. A row with no name is not a Keeper anyone can act
+   on and is left out; the liveness counts above still count it. A phase or a
+   turn age this build cannot read stays visible as such on its own row
+   rather than failing the whole snapshot for one Keeper. *)
+let overview_keeper_rows_of_briefs briefs =
+  List.filter_map
+    (fun brief ->
+      match Yojson.Safe.Util.member "name" brief with
+      | `String name when String.trim name <> "" ->
+          let okp_phase =
+            match Yojson.Safe.Util.member "phase" brief with
+            | `Null -> Keeper_phase_absent
+            | `String word -> (
+                match Tui_decode.keeper_phase_of_string word with
+                | Some phase -> Keeper_phase phase
+                | None -> Keeper_phase_unreadable word)
+            | other -> Keeper_phase_unreadable (Yojson.Safe.to_string other)
+          in
+          let okp_last_turn_ago_s =
+            match Yojson.Safe.Util.member "last_turn_ago_s" brief with
+            | `Float seconds -> Some seconds
+            | `Int seconds -> Some (float_of_int seconds)
+            | _ -> None
+          in
+          Some { okp_name = name; okp_phase; okp_last_turn_ago_s }
+      | _ -> None)
+    briefs
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =
@@ -1185,6 +1221,7 @@ let load_overview ~(host : string) ~(port : int) :
          a count read from there was a default dressed as a reading. *)
       let ov_keepers = List.length keeper_briefs in
       let ov_keeper_liveness = keeper_liveness_of_briefs keeper_briefs in
+      let ov_keeper_rows = overview_keeper_rows_of_briefs keeper_briefs in
       let ov_mcp_agents = List.length agent_briefs in
       let* ov_generated_at = required_string_field json "generated_at" in
       Ok
@@ -1194,6 +1231,7 @@ let load_overview ~(host : string) ~(port : int) :
           ov_project;
           ov_keepers;
           ov_keeper_liveness;
+          ov_keeper_rows;
           ov_mcp_agents;
           (* The briefing projects one fact onto two lists: an incident is
              also queued for operator attention, as the same JSON row. On the

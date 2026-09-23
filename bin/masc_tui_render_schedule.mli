@@ -61,6 +61,9 @@ end
 
 type overview_allocation = {
   attention_rows : int;
+  team_rows : int;
+      (** Keeper rows in the Team block. The block's title and its closing
+          divider are two more rows, drawn only when this is positive. *)
   task_error_rows : int;
   task_rows : int;
   filler_rows : int;
@@ -70,11 +73,16 @@ type overview_allocation = {
           the middle of it. *)
 }
 
+val overview_team_chrome_rows : int
+(** The Team block's title row and the divider under it, drawn only when
+    [team_rows] is positive. *)
+
 val allocate_overview :
   terminal_rows:int ->
   has_cluster:bool ->
   attention_count:int ->
   event_count:int ->
+  team_count:int ->
   task_count:int ->
   has_task_error:bool ->
   overview_allocation

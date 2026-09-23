@@ -1239,12 +1239,19 @@ type attention_severity =
   | Attention_warning
   | Attention_info
 
+(** What an attention item is about. Parsed once at the decode boundary so a
+    reader that joins items to Keepers matches a constructor instead of
+    comparing the wire word. A target the TUI does not join on keeps its wire
+    words as they came. *)
+type attention_target =
+  | Attention_keeper of string
+  | Attention_other of { target_type: string; target_id: string option }
+
 type attention_item = {
   ai_kind: string;
   ai_severity: attention_severity;
   ai_summary: string;
-  ai_target_type: string;
-  ai_target_id: string option;
+  ai_target: attention_target;
   ai_evidence_ts: float option;
       (** Epoch seconds of the evidence's [log_ts], when the producer stamped
           one (tool-host failures do). The row's age is drawn from it; items
@@ -1880,12 +1887,31 @@ type keeper_liveness_counts = {
   klc_unreadable: int;
 }
 
+(** What a [keeper_briefs] row says about the Keeper's lifecycle phase. The
+    briefing writes [null] for a Keeper with no registry entry (an offline
+    Keeper that never booted this process), which is a different fact from a
+    word this build cannot name; neither is folded into a phase. *)
+type overview_keeper_phase =
+  | Keeper_phase of Tui_decode.keeper_phase
+  | Keeper_phase_absent
+  | Keeper_phase_unreadable of string
+
+(** One [keeper_briefs] row, as the Overview Team block reads it. *)
+type overview_keeper = {
+  okp_name: string;
+  okp_phase: overview_keeper_phase;
+  okp_last_turn_ago_s: float option;
+      (** [None] when the Keeper has not finished a turn this process saw. *)
+}
+
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
   ov_keepers: int;  (** [keeper_briefs] the briefing carried *)
   ov_keeper_liveness: keeper_liveness_counts;
+  ov_keeper_rows: overview_keeper list;
+      (** Every [keeper_briefs] row with a name, in the briefing's order. *)
   ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
   ov_attention_items: attention_item list;
   ov_top_attention: attention_item option;

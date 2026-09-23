@@ -1,0 +1,141 @@
+module Types = Masc_tui_types
+
+type group = Needs_you | Working | Idle | Parked
+
+type detail =
+  | Blocker of { summary : string; held : int }
+  | Phase_word of { word : string; held : int }
+  | Working_on of { task : Tui_decode.task; more : int; awaiting : int }
+  | No_open_task of { awaiting : int }
+
+type row = { keeper : Types.overview_keeper; group : group; detail : detail }
+
+type t = {
+  rows : row list;
+  parked : string list;
+  other_holders : (string * int) list;
+}
+
+(* Held work splits into what the holder is doing and what waits on someone
+   else's verdict; the two answer different questions on the row. *)
+type holding = { working : Tui_decode.task list; awaiting : int }
+
+let holding_of ~tasks name =
+  List.fold_right
+    (fun (task : Tui_decode.task) acc ->
+      match task.status with
+      | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }
+        when String.equal assignee name ->
+          { acc with working = task :: acc.working }
+      | Masc_domain.AwaitingVerification { assignee; _ }
+        when String.equal assignee name ->
+          { acc with awaiting = acc.awaiting + 1 }
+      | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
+      | Masc_domain.AwaitingVerification _ | Masc_domain.Done _
+      | Masc_domain.Cancelled _ ->
+          acc)
+    tasks
+    { working = []; awaiting = 0 }
+
+let held holding = List.length holding.working + holding.awaiting
+
+let first_blocker ~attention name =
+  List.find_map
+    (fun (item : Types.attention_item) ->
+      match item.ai_target with
+      | Types.Attention_keeper target when String.equal target name ->
+          Some item.ai_summary
+      | Types.Attention_keeper _ | Types.Attention_other _ -> None)
+    attention
+
+let stuck ~attention ~holding ~word name =
+  match first_blocker ~attention name with
+  | Some summary -> Blocker { summary; held = held holding }
+  | None -> Phase_word { word; held = held holding }
+
+let alive holding =
+  match holding.working with
+  | task :: rest ->
+      ( Working,
+        Working_on { task; more = List.length rest; awaiting = holding.awaiting }
+      )
+  | [] -> (Idle, No_open_task { awaiting = holding.awaiting })
+
+let classify ~attention ~holding (keeper : Types.overview_keeper) =
+  let name = keeper.okp_name in
+  match keeper.okp_phase with
+  | Types.Keeper_phase phase -> (
+      let word = Keeper_state_machine.phase_to_string phase in
+      match phase with
+      | Keeper_state_machine.Failing | Keeper_state_machine.Crashed ->
+          Some (Needs_you, stuck ~attention ~holding ~word name)
+      | Keeper_state_machine.Running | Keeper_state_machine.Draining
+      | Keeper_state_machine.Restarting ->
+          Some (alive holding)
+      | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
+      | Keeper_state_machine.Offline ->
+          None)
+  | Types.Keeper_phase_unreadable word ->
+      Some (Needs_you, stuck ~attention ~holding ~word name)
+  | Types.Keeper_phase_absent -> (
+      (* No registry entry: the Keeper is not running in this process. Whether
+         that is a stop the operator chose or one they have not seen yet is
+         what the attention list says, so the row follows it. *)
+      match first_blocker ~attention name with
+      | Some summary -> Some (Needs_you, Blocker { summary; held = held holding })
+      | None -> None)
+
+let band = function Needs_you -> 0 | Working -> 1 | Idle -> 2 | Parked -> 3
+
+let project ~keepers ~tasks ~attention =
+  let rows, parked =
+    List.fold_left
+      (fun (rows, parked) (keeper : Types.overview_keeper) ->
+        let holding = holding_of ~tasks keeper.okp_name in
+        match classify ~attention ~holding keeper with
+        | Some (group, detail) -> ({ keeper; group; detail } :: rows, parked)
+        | None -> (rows, keeper.okp_name :: parked))
+      ([], []) keepers
+  in
+  let rows =
+    List.stable_sort
+      (fun left right ->
+        let by_band = Int.compare (band left.group) (band right.group) in
+        if by_band <> 0 then by_band
+        else String.compare left.keeper.okp_name right.keeper.okp_name)
+      rows
+  in
+  let keeper_names =
+    List.map (fun (keeper : Types.overview_keeper) -> keeper.okp_name) keepers
+  in
+  let other_holders =
+    List.fold_left
+      (fun acc (task : Tui_decode.task) ->
+        match Masc_domain.task_assignee_of_status task.status with
+        | Some assignee when not (List.mem assignee keeper_names) ->
+            let count = Option.value ~default:0 (List.assoc_opt assignee acc) in
+            (assignee, count + 1) :: List.remove_assoc assignee acc
+        | Some _ | None -> acc)
+      [] tasks
+    |> List.stable_sort (fun (left_name, left) (right_name, right) ->
+           let by_count = Int.compare right left in
+           if by_count <> 0 then by_count else String.compare left_name right_name)
+  in
+  { rows; parked = List.sort String.compare parked; other_holders }
+
+let drawn_rows t =
+  List.length t.rows
+  + (match t.parked with [] -> 0 | _ :: _ -> 1)
+  + match t.other_holders with [] -> 0 | _ :: _ -> 1
+
+let count t group =
+  match group with
+  | Parked -> List.length t.parked
+  | Needs_you | Working | Idle ->
+      List.length (List.filter (fun row -> row.group = group) t.rows)
+
+let phase_word (keeper : Types.overview_keeper) =
+  match keeper.okp_phase with
+  | Types.Keeper_phase phase -> Keeper_state_machine.phase_to_string phase
+  | Types.Keeper_phase_unreadable word -> word
+  | Types.Keeper_phase_absent -> "no phase"

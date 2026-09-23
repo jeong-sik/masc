@@ -37,7 +37,9 @@ type line =
   | Todo_backlog of backlog
 
 val line_count : Masc.Tui_decode.task list -> backlog -> int
-(** The lines {!lines} draws when nothing is cut. *)
+(** The lines {!lines} draws when nothing is cut. [0] for an empty list:
+    the renderer draws no rows then, and the row budget decides on its own
+    whether an empty or unread note gets one. *)
 
 val lines :
   height:int -> cursor:int -> Masc.Tui_decode.task list -> backlog -> line list

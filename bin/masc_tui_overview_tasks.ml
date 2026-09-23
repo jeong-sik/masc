@@ -71,8 +71,11 @@ let backlog_lines backlog =
   if backlog.todo_count > 0 then [ Todo_backlog backlog ] else []
 
 let line_count tasks backlog =
-  let held = List.length (rows tasks) in
-  max held 1 + List.length (backlog_lines backlog)
+  match tasks with
+  | [] -> 0
+  | _ :: _ ->
+      let held = List.length (rows tasks) in
+      max held 1 + List.length (backlog_lines backlog)
 
 let take count items = List.filteri (fun index _ -> index < count) items
 

@@ -1404,6 +1404,35 @@ let schedule_payload_body = function
        | Some _ | None -> `Assoc [])
   | _ -> `Assoc []
 
+(** Why the store would refuse a modify, read before the editor opens.
+
+    [Schedule_store.Transition_refused] names its own boundary: "the request
+    is [Running] or terminal", terminal being [Schedule_domain.is_terminal].
+    That sentence is the whole rule, so it is asked here rather than restated
+    as a word list -- a status the store adds later lands on the right side
+    of it without this file changing.
+
+    [None] is the answer for a word this build does not name. It is the same
+    promise [sch_status] makes by staying a string: an unrecognised status
+    renders as itself, and it is the server's call, not ours, whether it can
+    be modified. Refusing on a word we cannot read would turn forward
+    compatibility into a locked row. *)
+let schedule_modify_refusal (row : schedule_row) : string option =
+  match Schedule_domain.schedule_status_of_string row.sch_status with
+  | Error _ -> None
+  | Ok status ->
+      let refused =
+        match status with
+        | Schedule_domain.Running -> true
+        | other -> Schedule_domain.is_terminal other
+      in
+      if refused then
+        Some
+          (Printf.sprintf
+             "the store refuses a %s schedule; only scheduled and due rows change"
+             row.sch_status)
+      else None
+
 let schedule_update_form_json (row : schedule_row) =
   let body = schedule_payload_body row.sch_payload in
   let recurrence_kind = schedule_json_string "kind" row.sch_recurrence in
@@ -2190,6 +2219,51 @@ let planning_visible_goals ~filter ~sort (goals : planning_goal list)
           planning_compare_due_asc left.pg_due_date right.pg_due_date
   in
   List.stable_sort compare (List.filter (planning_passes_filter filter) goals)
+
+(* How far a standalone lane's slot history is from its finished runs. The
+   server counts the slots and the runs without one from the same list of
+   finished runs, so the two add up and this is 0. Anything else means the
+   server's projection broke, and the detail draws the difference, positive
+   or negative, rather than rounding it away. Running rows are in neither
+   count: a run that has not finished has not chosen. *)
+let standalone_lane_slot_history_gap (lane : Tui_decode.standalone_lane) =
+  let named =
+    List.fold_left
+      (fun n (sc : Tui_decode.standalone_lane_slot_count) -> n + sc.slsc_count)
+      0 lane.sl_selected_slots
+  in
+  let without = lane.sl_runs_without_slot in
+  let accounted =
+    named + without.slws_vendor_system_one + without.slws_server_restarted
+    + without.slws_no_slot
+  in
+  lane.sl_succeeded_count + lane.sl_failed_count + lane.sl_cancelled_count
+  - accounted
+
+(* What the slot history line says after the slots: the finished runs that
+   named no slot, by the reason the server gives, and then any gap between
+   all the counts and the finished runs. Zero counts say nothing. *)
+let standalone_lane_runs_without_slot_parts (lane : Tui_decode.standalone_lane) =
+  let without = lane.sl_runs_without_slot in
+  let counted label count =
+    if count = 0 then [] else [ Printf.sprintf "%s: %d" label count ]
+  in
+  let no_slot =
+    if without.slws_no_slot = 0 then []
+    else
+      [ Masc_tui_message_layout.count_noun without.slws_no_slot "run" ^ " named no slot" ]
+  in
+  let gap =
+    match standalone_lane_slot_history_gap lane with
+    | 0 -> []
+    | gap when gap > 0 ->
+      [ Printf.sprintf "%s finished in no count"
+          (Masc_tui_message_layout.count_noun gap "run") ]
+    | gap -> [ Printf.sprintf "counts exceed finished runs by %d" (-gap) ]
+  in
+  counted "Vendor System One" without.slws_vendor_system_one
+  @ counted "closed by server restart" without.slws_server_restarted
+  @ no_slot @ gap
 
 type board_sort =
   | Board_hot
@@ -5785,10 +5859,19 @@ type state = {
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_inflight: bool;
+  (* A binding write landed while a load was in flight; read once more when
+     that load answers. *)
+  mutable connectors_reload_after_inflight: bool;
   mutable connectors_scroll: int;
   mutable connectors_cursor: int;
   mutable connectors_binding_cursor: int;
   mutable connector_unbind_armed: (string * string * string) option;
+  (* The first [U] on the Channels tab: whose bindings, and exactly which.
+     The second press sends these and no others, so a binding that appeared
+     after the first press is not removed without being named. *)
+  mutable connector_unbind_all_armed:
+    (string * Masc_tui_connector_unbind.target list) option;
+  mutable connector_unbind_all_inflight: bool;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
@@ -7767,10 +7850,13 @@ let create_state
   connectors = None;
   connectors_error = None;
   connectors_inflight = false;
+  connectors_reload_after_inflight = false;
   connectors_scroll = 0;
   connectors_cursor = 0;
   connectors_binding_cursor = 0;
   connector_unbind_armed = None;
+  connector_unbind_all_armed = None;
+  connector_unbind_all_inflight = false;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;

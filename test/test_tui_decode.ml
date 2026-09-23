@@ -5028,6 +5028,9 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
     ; "last_outcome", (if retained = 0 then `Null else `String "succeeded")
     ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
     ; "selected_slots", `List selected_slots
+    ; ( "runs_without_slot"
+      , `Assoc
+          [ "vendor_system_one", `Int 0; "server_restarted", `Int 0; "no_slot", `Int 0 ] )
     ]
      @ jev)
 

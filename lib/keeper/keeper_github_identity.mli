@@ -146,7 +146,9 @@ val current_tool_identity_revision :
     changes made on the host reach a running container through the bind
     mount. Includes the git credential wiring env; call
     [refresh_git_credential_config] on adoption to keep the derived gitconfig
-    in step with hosts.yml. *)
+    in step with hosts.yml. Always carries the Keeper's commit names
+    ({!Exec_ssh_protocol.keeper_git_author_env}), also for an unconfigured
+    Keeper, whose list holds only those. *)
 val docker_args_persistent :
   config:Workspace.config ->
   keeper_name:string ->
@@ -170,7 +172,8 @@ val existing_config_dir :
     dispatch receives an immutable read-only snapshot, including when the
     Keeper is unconfigured, plus an explicit cleanup capability. A host login
     that happens while a tool is running cannot change that tool's credential
-    authority. Malformed state remains a typed error. *)
+    authority. Malformed state remains a typed error. The args always carry
+    the Keeper's commit names ({!Exec_ssh_protocol.keeper_git_author_env}). *)
 val docker_args_for_tool :
   config:Workspace.config ->
   keeper_name:string ->

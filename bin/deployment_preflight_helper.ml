@@ -1335,8 +1335,29 @@ let memory_os_events_store =
   }
 ;;
 
+let gate_pending_store =
+  { store = "gate pending approvals"
+  ; on_refusal =
+      "install_persistence refuses the whole approval queue at boot and every \
+       gate decision is unavailable; for an unsupported version, reset \
+       gate/pending.json and gate/pending.log.jsonl after the server is \
+       confirmed stopped and before it starts"
+  ; scan =
+      (fun ~base_path ->
+         let path = Masc.Keeper_gate_path.pending ~base_path in
+         Ok
+           (scan_files
+              ~paths:(if Fs_compat.file_exists path then [ path ] else [])
+              ~decode:(fun ~path:_ contents ->
+                match Yojson.Safe.from_string contents with
+                | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
+                | json -> Masc.Keeper_approval_queue.validate_pending_snapshot ~base_path json)))
+  }
+;;
+
 let durable_stores =
   [ keeper_meta_store
+  ; gate_pending_store
   ; official_client_session_store
   ; memory_os_current_store
   ; librarian_range_receipt_store

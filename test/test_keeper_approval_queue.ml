@@ -4250,6 +4250,116 @@ let test_boot_replay_does_not_record_the_decision_again () =
          (resolved_rows_for_id ()))
 ;;
 
+let resolved_rows_for_approval ~base_path id =
+  let history =
+    Keeper_approval.Audit.list_recent_resolved
+      ~base_path
+      ~now_ts:(Unix.gettimeofday ())
+      ~window_minutes:60
+      ()
+    |> resolved_history_exn
+  in
+  let open Yojson.Safe.Util in
+  List.length
+    (List.filter
+       (fun row -> String.equal (row |> member "id" |> to_string) id)
+       history.resolved_rows)
+;;
+
+(* A keeper meta file that is not JSON makes the durable wake enqueue fail
+   after the journal has already moved the approval out of [pending]. *)
+let break_keeper_meta ~base_path ~keeper_name =
+  let meta_path =
+    Masc.Keeper_types_profile.keeper_meta_path
+      (Masc.Workspace.default_config base_path)
+      keeper_name
+  in
+  Out_channel.with_open_text meta_path (fun out -> output_string out "{")
+;;
+
+let resolve_expecting_delivery_failure ~base_path ~id =
+  match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
+  | Error (AQ.Delivery_failed _) -> ()
+  | Ok () -> Alcotest.fail "the wake enqueue was expected to fail"
+  | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
+;;
+
+(* The first completion fails after the journal: the approval is no longer
+   pending, and no [resolved] row was written. The operator's second press is
+   a same-request resubmission; it must record the decision, once, and a
+   third press or a boot replay must not record it again. *)
+let test_resubmission_after_failed_delivery_records_the_decision_once () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-resubmit-ledger" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "resubmit" ])
+       in
+       break_keeper_meta ~base_path ~keeper_name;
+       resolve_expecting_delivery_failure ~base_path ~id;
+       Alcotest.(check int) "a failed delivery records no decision" 0
+         (resolved_rows_for_approval ~base_path id);
+       ensure_keeper_exists ~base_path ~keeper_name;
+       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       Alcotest.(check int) "the second press records the decision" 1
+         (resolved_rows_for_approval ~base_path id);
+       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
+        | Ok () -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       Alcotest.(check int) "a third press does not record it again" 1
+         (resolved_rows_for_approval ~base_path id);
+       AQ.For_testing.reset_runtime_state ();
+       let report = install_exn ~base_path in
+       Alcotest.(check int) "the boot replayed the delivery" 1
+         report.replayed_deliveries;
+       Alcotest.(check int) "the replay does not record it again" 1
+         (resolved_rows_for_approval ~base_path id))
+;;
+
+(* The same failed first completion, then the keeper is gone before the next
+   boot. The replay retires the delivery as having no recipient; the
+   decision it carried must still reach the ledger. *)
+let test_replay_retiring_a_failed_delivery_records_the_decision () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-retire-ledger" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "retire" ])
+       in
+       break_keeper_meta ~base_path ~keeper_name;
+       resolve_expecting_delivery_failure ~base_path ~id;
+       Sys.remove
+         (Masc.Keeper_types_profile.keeper_meta_path
+            (Masc.Workspace.default_config base_path)
+            keeper_name);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       Alcotest.(check int) "the retiring replay records the decision" 1
+         (resolved_rows_for_approval ~base_path id);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       Alcotest.(check int) "a later boot has nothing left to record" 1
+         (resolved_rows_for_approval ~base_path id))
+;;
+
 let test_persisted_delivery_replays_before_origin_wake () =
   let base_path = temp_dir () in
   let keeper_name = "queue-replay-origin" in
@@ -5783,6 +5893,14 @@ let () =
             "a boot replay does not record the decision again"
             `Quick
             test_boot_replay_does_not_record_the_decision_again
+        ; Alcotest.test_case
+            "a resubmission after a failed delivery records the decision once"
+            `Quick
+            test_resubmission_after_failed_delivery_records_the_decision_once
+        ; Alcotest.test_case
+            "a replay retiring a failed delivery records the decision"
+            `Quick
+            test_replay_retiring_a_failed_delivery_records_the_decision
         ; Alcotest.test_case
             "observed delivery preserves grant without replaying wake"
             `Quick

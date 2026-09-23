@@ -4324,13 +4324,22 @@ let remember_rule_for_delivery delivery =
   | Decision.Reject _, true -> Ok (None, [])
 ;;
 
-(* Why a delivery is being completed. The first commit is the operator's
-   decision, and that is what the audit ledger records as [Resolved]. A boot
-   replay or a same-request resubmission sends the wake for that decision
-   again; recording [Resolved] again counted one click as many decisions --
+(* Why a delivery is being completed. The occasion decides how the ledger is
+   asked whether the operator's decision is already recorded, not whether it
+   is recorded: the [Resolved] row is written exactly when the ledger has none
+   for the approval.
+
+   On the first commit the journal has just moved the approval out of
+   [pending], and only [complete_delivery] writes [Resolved], so no row can
+   exist yet and none is read. A boot replay or a same-request resubmission
+   finds a delivery that an earlier completion may or may not have finished.
+   Recording on every such occasion counted one click as many decisions --
    nineteen rows for one approval on 2026-09-22 while its keeper was offline
-   across twenty-one boots (#37964). The wake is re-sent on every occasion;
-   only the ledger row and the operator-facing announcement are not. *)
+   across twenty-one boots (#37964). Recording only on the first commit lost
+   the decision whenever that completion failed after the journal: the
+   operator's second press and every boot replay then found no pending entry,
+   delivered the wake, and never wrote the row. So these occasions read the
+   ledger. *)
 type delivery_occasion =
   | First_commit
   | Boot_replay
@@ -4342,6 +4351,31 @@ let delivery_occasion_to_string = function
   | Same_request_resubmitted -> "same_request_resubmitted"
 ;;
 
+let resolution_evidence ~(occasion : delivery_occasion) delivery =
+  match occasion with
+  | First_commit -> Keeper_approval.Audit.Resolution_not_recorded
+  | Boot_replay | Same_request_resubmitted ->
+    (match
+       Keeper_approval.Audit.find_resolution
+         ~base_path:delivery.entry.audit_base_path
+         ~id:delivery.entry.id
+     with
+     | Ok evidence -> evidence
+     | Error error ->
+       (* An unreadable ledger cannot show the row is there. A second row is
+          a decision counted twice; a missing one leaves the approval shown
+          as waiting for the operator forever. The second is the worse
+          reading, so the row is written. *)
+       Log.Keeper.warn
+         ~keeper_name:delivery.entry.keeper_name
+         "approval_queue: could not read the ledger for a recorded decision \
+          approval=%s occasion=%s; recording it: %s"
+         delivery.entry.id
+         (delivery_occasion_to_string occasion)
+         (Keeper_approval.Audit.read_error_to_string error);
+       Keeper_approval.Audit.Resolution_not_recorded)
+;;
+
 let complete_delivery ~(occasion : delivery_occasion) delivery =
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
@@ -4350,11 +4384,12 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
     | Some actor when String.trim actor <> "" -> Some actor
     | Some _ | None -> None
   in
-  (* The ledger row for the decision, written once. A redelivery says so in
-     the log and returns no receipt: there is no new evidence to hand back. *)
+  (* The ledger row for the decision, written once. When the ledger already
+     holds it, the log says so and no receipt is returned: there is no new
+     evidence to hand back. *)
   let record_resolution ~project_chat =
-    match occasion with
-    | First_commit ->
+    match resolution_evidence ~occasion delivery with
+    | Keeper_approval.Audit.Resolution_not_recorded ->
       [ resolve_entry
           ~project_chat
           ~base_path
@@ -4363,7 +4398,7 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
           ?actor
           delivery.decision
       ]
-    | Boot_replay | Same_request_resubmitted ->
+    | Keeper_approval.Audit.Resolution_recorded ->
       Log.Keeper.info
         ~keeper_name:delivery.entry.keeper_name
         "hitl resolution redelivered approval=%s occasion=%s"

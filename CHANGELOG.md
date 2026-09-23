@@ -61,8 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- Two screens say how long ago rather than what time it was. Both drew the clock alone, on the reading that the header's own clock gives it a distance -- which holds only while the two are the same day. The Clients roster drew a session last seen on 2026-09-21 as `11:49:28` under a header reading `09:31:39` on 2026-09-23, so the only distance a reader could take from it pointed two hours ahead for a row that had been gone a day and a half; the planning trend read `Net change since 09:31:39`, and its baseline is the first successful read of the process and is never replaced, so a screen left open overnight named a moment on a day nobody could identify. Both now draw the span: `1s`, `7h48m`, `1d21h`, and the trend reads `Net change over the last 1d21h`. An empty stamp is `never`; one that will not parse, or that sits ahead of this clock, is shown as it arrived rather than as an age nothing measured (#38034).
-
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result

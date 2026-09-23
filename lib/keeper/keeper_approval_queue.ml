@@ -144,11 +144,6 @@ type persisted_delivery =
   ; rule_expires_at : float option
   ; created_by : string option
   ; grant_consumed : bool
-  ; resolution_recorded : bool
-    (* Whether the operator's decision is on the approval audit ledger as a
-       [Resolved] row. The journal writes [false]; the store update that
-       follows a successful [Resolved] append writes [true]. Every completion
-       of the delivery writes the row exactly when this is [false]. *)
   ; replay_outcome : resolution_replay_outcome option
   }
 
@@ -342,10 +337,7 @@ let install_error_to_string = function
    before its last rewrite are recognised as stale. A binary that knows only
    v9 must not open a v10 store and show a resolved approval as pending, so
    the version moved (RFC main-domain-scheduler-latency §8.5, P4e). *)
-(* 11: every delivery carries [resolution_recorded]. A v10 store has no
-   answer for it, so the loader refuses v10 like any other version and the
-   operator resets the gate store before restarting. *)
-let pending_store_version = 11
+let pending_store_version = 10
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_version = 1
 let replay_results_store_surface = "keeper_gate_replay_results"
@@ -604,7 +596,6 @@ let persisted_delivery_to_yojson delivery =
     ; "rule_expires_at", Json_util.float_opt_to_json delivery.rule_expires_at
     ; "created_by", Json_util.string_opt_to_json delivery.created_by
     ; "grant_consumed", `Bool delivery.grant_consumed
-    ; "resolution_recorded", `Bool delivery.resolution_recorded
     ]
 ;;
 
@@ -1457,7 +1448,6 @@ let persisted_delivery_of_yojson ~base_path json =
           ; "rule_expires_at"
           ; "created_by"
           ; "grant_consumed"
-          ; "resolution_recorded"
           ]
         fields
     in
@@ -1485,12 +1475,6 @@ let persisted_delivery_of_yojson ~base_path json =
       | Some _ -> Error (surface ^ ".grant_consumed must be a boolean")
       | None -> Error (surface ^ ".grant_consumed is required")
     in
-    let* resolution_recorded =
-      match List.assoc_opt "resolution_recorded" fields with
-      | Some (`Bool value) -> Ok value
-      | Some _ -> Error (surface ^ ".resolution_recorded must be a boolean")
-      | None -> Error (surface ^ ".resolution_recorded is required")
-    in
     let* () =
       match decision, grant_consumed with
       | Decision.Approve, (true | false) -> Ok ()
@@ -1506,7 +1490,6 @@ let persisted_delivery_of_yojson ~base_path json =
       ; rule_expires_at
       ; created_by
       ; grant_consumed
-      ; resolution_recorded
       ; replay_outcome = None
       }
   | _ -> Error "gate_pending.delivery must be a JSON object"
@@ -3860,7 +3843,6 @@ let ensure_failed_continuation_chat_projection
 
 let resolve_entry
       ?(before_terminal_publish = fun () -> ())
-      ?(project_chat = true)
       ~base_path
       (entry : pending_approval)
       ~(source : decision_source)
@@ -3891,22 +3873,6 @@ let resolve_entry
       ~exact_attempt:entry.exact_attempt
       ()
   in
-  (if project_chat
-   then
-     match
-       ensure_resolution_chat_projection
-         ~base_path
-         ~keeper_name:entry.keeper_name
-         ~approval_id:entry.id
-         ~tool_name:(Some entry.tool_name)
-         ~decision
-     with
-     | Ok () -> ()
-     | Error reason ->
-       record_resolution_delivery_failure
-         ~keeper_name:entry.keeper_name
-         ~approval_id:entry.id
-         ("chat projection: " ^ reason));
   before_terminal_publish ();
   (try
      Sse.broadcast
@@ -4228,7 +4194,6 @@ let journal_resolution ~id ~decision ~source ~remember_rule ~rule_expires_at ~cr
         ; rule_expires_at
         ; created_by
         ; grant_consumed = false
-        ; resolution_recorded = false
         ; replay_outcome = None
         }
       in
@@ -4342,17 +4307,17 @@ let remember_rule_for_delivery delivery =
   | Decision.Reject _, true -> Ok (None, [])
 ;;
 
-(* Why a delivery is being completed. It names the redelivery in the log; it
-   does not decide whether the decision reaches the audit ledger. The
-   delivery's [resolution_recorded] decides that: a [Resolved] row is written
-   exactly while it is [false], whatever the occasion.
+(* Why a delivery is being completed. The operator's decision reaches the
+   audit ledger as [Resolved] once, when [journal_resolution] has made it
+   durable (see [record_journaled_resolution]); no completion writes that row.
+   The occasion only says why the wake is being sent, and a boot replay or a
+   same-request resubmission logs it as a redelivery.
 
-   Recording on every occasion counted one click as many decisions --
+   Writing the row on every completion counted one click as many decisions --
    nineteen rows for one approval on 2026-09-22 while its keeper was offline
-   across twenty-one boots (#37964). Recording only on the first commit lost
-   the decision whenever that completion failed after the journal: the
-   operator's second press and every boot replay found no pending entry and
-   never wrote the row. *)
+   across twenty-one boots (#37964). Writing it on the first completion, after
+   the wake, lost the decision whenever that wake failed: the operator's second
+   press and every boot replay found no pending entry and never wrote it. *)
 type delivery_occasion =
   | First_commit
   | Boot_replay
@@ -4364,111 +4329,82 @@ let delivery_occasion_to_string = function
   | Same_request_resubmitted -> "same_request_resubmitted"
 ;;
 
-(* Flips [resolution_recorded] on the stored delivery, not on the caller's
-   copy: a grant consumption may have replaced the stored record since the
-   caller read it. A delivery already retired has nothing left to replay. *)
-let mark_resolution_recorded delivery =
-  with_pending_store_lock (fun () ->
-    let delivery_map = Atomic.get deliveries in
-    match SMap.find_opt delivery.entry.id delivery_map with
-    | None -> Ok ()
-    | Some current ->
-      let updated_deliveries =
-        SMap.add
-          current.entry.id
-          { current with resolution_recorded = true }
-          delivery_map
-      in
-      (match
-         persist_snapshot_unlocked
-           ~base_path:current.entry.audit_base_path
-           ~pending_map:(Atomic.get pending)
-           ~delivery_map:updated_deliveries
-       with
-       | Error _ as error -> error
-       | Ok () ->
-         Atomic.set deliveries updated_deliveries;
-         Ok ()))
+(* The ledger row and SSE [resolved] for a decision [journal_resolution] has
+   just made durable. It runs once per journal, before any wake is attempted,
+   so a failed delivery cannot leave the decision off the ledger.
+
+   A failed append does not undo the journal. [Keeper_approval.Audit.record]
+   is an observation boundary: its failure is counted and logged there and
+   comes back in the receipt, and it must not erase or re-open the
+   authoritative decision. The operator's approval stays in force and the
+   missing row is visible as an audit append failure, not as a pending
+   approval the operator must answer again.
+
+   The chat row is not written here. A delivery whose keeper no longer exists
+   is retired without one, and whether the keeper exists is known only when
+   the wake is enqueued; [project_resolution_chat] writes it then. *)
+let record_journaled_resolution delivery =
+  let actor =
+    match delivery.created_by with
+    | Some actor when String.trim actor <> "" -> Some actor
+    | Some _ | None -> None
+  in
+  resolve_entry
+    ~base_path:delivery.entry.audit_base_path
+    delivery.entry
+    ~source:delivery.source
+    ?actor
+    delivery.decision
 ;;
 
-(* The ledger row for the decision. It is written while the delivery says it
-   is not yet recorded, and the flag moves only after the append succeeded,
-   so a failed append is written again by the next completion. When the row
-   is already there, the log says so and no receipt is returned: there is no
-   new evidence to hand back. *)
-let record_resolution_once ~(occasion : delivery_occasion) ~project_chat delivery =
-  if delivery.resolution_recorded
-  then (
-    Log.Keeper.info
+(* The chat row for the decision. [append_approval_lifecycle_once] writes it
+   at most once, so every completion that reaches a live keeper may ask for it:
+   the one that follows a failed first delivery is the one that writes it. *)
+let project_resolution_chat delivery =
+  match
+    ensure_resolution_chat_projection
+      ~base_path:delivery.entry.audit_base_path
       ~keeper_name:delivery.entry.keeper_name
-      "hitl resolution redelivered approval=%s occasion=%s"
-      delivery.entry.id
-      (delivery_occasion_to_string occasion);
-    [])
-  else (
-    let actor =
-      match delivery.created_by with
-      | Some actor when String.trim actor <> "" -> Some actor
-      | Some _ | None -> None
-    in
-    let receipt =
-      resolve_entry
-        ~project_chat
-        ~base_path:delivery.entry.audit_base_path
-        delivery.entry
-        ~source:delivery.source
-        ?actor
-        delivery.decision
-    in
-    (match receipt.Keeper_approval.Audit.write_result with
-     | Error _ -> ()
-     | Ok () ->
-       (match mark_resolution_recorded delivery with
-        | Ok () -> ()
-        | Error storage_error ->
-          (* The row is on the ledger but the delivery still says it is not;
-             the next completion of this delivery writes a second row. *)
-          Log.Keeper.warn
-            ~keeper_name:delivery.entry.keeper_name
-            "approval_queue: resolution recorded but its flag was not stored \
-             approval=%s occasion=%s: %s"
-            delivery.entry.id
-            (delivery_occasion_to_string occasion)
-            (storage_error_to_string storage_error)));
-    [ receipt ])
+      ~approval_id:delivery.entry.id
+      ~tool_name:(Some delivery.entry.tool_name)
+      ~decision:delivery.decision
+  with
+  | Ok () -> ()
+  | Error reason ->
+    record_resolution_delivery_failure
+      ~keeper_name:delivery.entry.keeper_name
+      ~approval_id:delivery.entry.id
+      ("chat projection: " ^ reason)
 ;;
 
 let complete_delivery ~(occasion : delivery_occasion) delivery =
   let id = delivery.entry.id in
   let base_path = delivery.entry.audit_base_path in
-  let record_resolution ~project_chat =
-    record_resolution_once ~occasion ~project_chat delivery
-  in
+  (match occasion with
+   | First_commit -> ()
+   | Boot_replay | Same_request_resubmitted ->
+     Log.Keeper.info
+       ~keeper_name:delivery.entry.keeper_name
+       "hitl resolution redelivered approval=%s occasion=%s"
+       id
+       (delivery_occasion_to_string occasion));
   match resolve_store_readiness_error ~base_path ~approval_id:id with
   | Error _ as error -> error
   | Ok () ->
     if delivery.grant_consumed
-    then
-      (* The keeper already used the grant, so no wake is sent. The decision
-         may still be missing from the ledger: the first completion can fail
-         after the journal and the keeper's retried call consume the grant
-         before any later completion runs. *)
-      Ok
-        { remembered_rule = None
-        ; audit_receipts = record_resolution ~project_chat:true
-        }
+    then (
+      (* The keeper already used the grant, so no wake is sent. *)
+      project_resolution_chat delivery;
+      Ok { remembered_rule = None; audit_receipts = [] })
     else
       (match deliver_resolution ~base_path delivery.entry delivery.decision with
        | Error Keeper_registry_event_queue.Hitl_recipient_absent ->
          (* No Keeper exists with the addressed name, so this resolution has
-            no consumer — ever. Record the resolution evidence and retire the
-            durable delivery; keeping it would replay the same permanent
-            failure at every boot. No always-allow rule is written: the
-            operator approved a grant for a Keeper that is gone. The row
-            goes first: once the delivery is retired nothing completes it
-            again, so a row written after the removal would be lost to a
-            crash between the two. *)
-         let audit_receipts = record_resolution ~project_chat:false in
+            no consumer — ever. The decision is already on the ledger; retire
+            the durable delivery, since keeping it would replay the same
+            permanent failure at every boot. No always-allow rule and no chat
+            row are written: the operator approved a grant for a Keeper that
+            is gone. *)
          (match remove_delivery_from_store delivery with
           | Error storage_error ->
             Error (Persistence_failed { approval_id = id; storage_error })
@@ -4477,7 +4413,7 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
               ~keeper_name:delivery.entry.keeper_name
               "hitl delivery retired: no such keeper approval=%s"
               id;
-            Ok { remembered_rule = None; audit_receipts })
+            Ok { remembered_rule = None; audit_receipts = [] })
        | Error (Keeper_registry_event_queue.Hitl_enqueue_failed reason) ->
          Error (Delivery_failed { approval_id = id; reason })
        | Ok () ->
@@ -4485,25 +4421,16 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
           | Error storage_error ->
             Error (Persistence_failed { approval_id = id; storage_error })
           | Ok (remembered_rule, rule_audit_receipts) ->
-            let finish () =
-              let resolution_audit_receipts =
-                record_resolution ~project_chat:true
-              in
-              signal_resolution_after_commit
-                ~base_path
-                ~keeper_name:delivery.entry.keeper_name
-                ~approval_id:id;
-              Ok
-                { remembered_rule
-                ; audit_receipts =
-                    rule_audit_receipts @ resolution_audit_receipts
-                }
-            in
             (* Both decisions remain authoritative after their wake is sent.
                A waiting direct operation must re-read the exact rejection as
                well as an approval; the wake alone is not the request store.
                A retained rejection is never a consumable approval grant. *)
-            finish ()))
+            project_resolution_chat delivery;
+            signal_resolution_after_commit
+              ~base_path
+              ~keeper_name:delivery.entry.keeper_name
+              ~approval_id:id;
+            Ok { remembered_rule; audit_receipts = rule_audit_receipts }))
 ;;
 
 let delivery_wake_was_observed delivery =
@@ -4680,19 +4607,10 @@ let install_persistence_internal ~after_load ~base_path =
           ; replay_projection_error
           }
       | delivery :: rest ->
-        if delivery.grant_consumed || delivery_wake_was_observed delivery
-        then (
-          (* No wake is sent again. A decision whose first completion failed
-             before its row was written still gets the row. *)
-          (if not delivery.resolution_recorded
-           then
-             ignore
-               (record_resolution_once
-                  ~occasion:Boot_replay
-                  ~project_chat:true
-                  delivery
-                : Keeper_approval.Audit.receipt list));
-          replay count failures rest)
+        if delivery.grant_consumed
+        then replay count failures rest
+        else if delivery_wake_was_observed delivery
+        then replay count failures rest
         else
           (match complete_delivery ~occasion:Boot_replay delivery with
            | Ok _ -> replay (count + 1) failures rest
@@ -4840,7 +4758,16 @@ let resolve_with_policy
               | Error Journal_not_found -> Error (Not_found id)
               | Error (Journal_storage storage_error) ->
                 Error (Persistence_failed { approval_id = id; storage_error })
-              | Ok delivery -> complete_delivery ~occasion:First_commit delivery)
+              | Ok delivery ->
+                let resolution_receipt = record_journaled_resolution delivery in
+                (match complete_delivery ~occasion:First_commit delivery with
+                 | Error _ as error -> error
+                 | Ok result ->
+                   Ok
+                     { result with
+                       audit_receipts =
+                         result.audit_receipts @ [ resolution_receipt ]
+                     }))
            | None ->
              (match SMap.find_opt id (Atomic.get deliveries) with
               | None -> Error (Not_found id)

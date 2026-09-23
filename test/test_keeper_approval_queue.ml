@@ -813,7 +813,6 @@ let delivery_json ~entry ~remember_rule =
     ; "rule_expires_at", `Null
     ; "created_by", `Null
     ; "grant_consumed", `Bool false
-    ; "resolution_recorded", `Bool true
     ]
 ;;
 
@@ -828,7 +827,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 10
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `List []
@@ -3869,7 +3868,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 11
+            [ "version", `Int 10
             ; "generation", `Int 1
             ; "next_sequence", `Int 1
             ; "pending", `String "malformed-pending-array"
@@ -3906,7 +3905,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 11
+               [ "version", `Int 10
                ; "generation", `Int 1
                ; "next_sequence", `Int 1
                ; "pending", `String "malformed-pending-array"
@@ -4015,7 +4014,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 8 is unsupported (current 11); reset \
+                  "gate_pending.version 8 is unsupported (current 10); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -4285,13 +4284,18 @@ let resolve_expecting_delivery_failure ~base_path ~id =
   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
 
-(* The first completion fails after the journal: the approval is no longer
-   pending, and no [resolved] row was written. The operator's second press is
-   a same-request resubmission; it must record the decision, once, and a
-   third press or a boot replay must not record it again. *)
-let test_resubmission_after_failed_delivery_records_the_decision_once () =
+let resolve_exn ~base_path ~id =
+  match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
+;;
+
+(* The decision reaches the ledger when it is journaled, before the wake. A
+   first delivery that fails leaves exactly that one row, and the operator's
+   second press and a boot replay only send the wake again. *)
+let test_failed_first_delivery_already_has_the_decision_on_the_ledger () =
   let base_path = temp_dir () in
-  let keeper_name = "queue-resubmit-ledger" in
+  let keeper_name = "queue-failed-delivery-ledger" in
   Fun.protect
     ~finally:(fun () ->
       AQ.For_testing.reset_runtime_state ();
@@ -4302,35 +4306,28 @@ let test_resubmission_after_failed_delivery_records_the_decision_once () =
          submit
            ~base_path
            ~keeper_name
-           ~input:(`Assoc [ "target", `String "resubmit" ])
+           ~input:(`Assoc [ "target", `String "failed-delivery" ])
        in
        break_keeper_meta ~base_path ~keeper_name;
        resolve_expecting_delivery_failure ~base_path ~id;
-       Alcotest.(check int) "a failed delivery records no decision" 0
+       Alcotest.(check int) "the journaled decision is on the ledger" 1
          (resolved_rows_for_approval ~base_path id);
        ensure_keeper_exists ~base_path ~keeper_name;
-       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
-        | Ok () -> ()
-        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
-       Alcotest.(check int) "the second press records the decision" 1
-         (resolved_rows_for_approval ~base_path id);
-       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
-        | Ok () -> ()
-        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
-       Alcotest.(check int) "a third press does not record it again" 1
+       resolve_exn ~base_path ~id;
+       Alcotest.(check int) "the second press adds no row" 1
          (resolved_rows_for_approval ~base_path id);
        AQ.For_testing.reset_runtime_state ();
        let report = install_exn ~base_path in
        Alcotest.(check int) "the boot replayed the delivery" 1
          report.replayed_deliveries;
-       Alcotest.(check int) "the replay does not record it again" 1
+       Alcotest.(check int) "the replay adds no row" 1
          (resolved_rows_for_approval ~base_path id))
 ;;
 
-(* The same failed first completion, then the keeper is gone before the next
-   boot. The replay retires the delivery as having no recipient; the
-   decision it carried must still reach the ledger. *)
-let test_replay_retiring_a_failed_delivery_records_the_decision () =
+(* The same failed first delivery, then the keeper is gone before the next
+   boot. The replay retires the delivery as having no recipient and writes
+   nothing: the decision was on the ledger from the journal on. *)
+let test_retiring_replay_of_a_failed_delivery_adds_no_row () =
   let base_path = temp_dir () in
   let keeper_name = "queue-retire-ledger" in
   Fun.protect
@@ -4353,19 +4350,18 @@ let test_replay_retiring_a_failed_delivery_records_the_decision () =
             keeper_name);
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path);
-       Alcotest.(check int) "the retiring replay records the decision" 1
+       Alcotest.(check int) "the decision is on the ledger once" 1
          (resolved_rows_for_approval ~base_path id);
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path);
-       Alcotest.(check int) "a later boot has nothing left to record" 1
+       Alcotest.(check int) "a later boot adds no row" 1
          (resolved_rows_for_approval ~base_path id))
 ;;
 
-(* The first completion fails after the journal, and the keeper's retried
-   call consumes the grant before any later completion runs. No wake is sent
-   for a consumed grant, but the decision must still reach the ledger: at the
-   next boot, and not again on a later press. *)
-let test_consumed_grant_after_failed_delivery_records_the_decision () =
+(* The first delivery fails and the keeper's retried call consumes the grant
+   before any later completion runs. A consumed grant is never replayed and
+   gets no wake, but its decision is already on the ledger. *)
+let test_consumed_grant_after_failed_delivery_has_the_decision () =
   let base_path = temp_dir () in
   let keeper_name = "queue-consumed-ledger" in
   let input = `Assoc [ "target", `String "consumed" ] in
@@ -4390,23 +4386,15 @@ let test_consumed_grant_after_failed_delivery_records_the_decision () =
         | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
           Alcotest.fail "the journaled grant was not consumed"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
-       Alcotest.(check int) "consuming the grant records no decision" 0
+       Alcotest.(check int) "the consumed grant's decision is on the ledger" 1
          (resolved_rows_for_approval ~base_path id);
        ensure_keeper_exists ~base_path ~keeper_name;
        AQ.For_testing.reset_runtime_state ();
        let report = install_exn ~base_path in
        Alcotest.(check int) "a consumed grant is not replayed" 0
          report.replayed_deliveries;
-       Alcotest.(check int) "the boot records the decision" 1
-         (resolved_rows_for_approval ~base_path id);
-       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
-        | Ok () -> ()
-        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
-       Alcotest.(check int) "a later press does not record it again" 1
-         (resolved_rows_for_approval ~base_path id);
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       Alcotest.(check int) "nor does a later boot" 1
+       resolve_exn ~base_path ~id;
+       Alcotest.(check int) "a later press adds no row" 1
          (resolved_rows_for_approval ~base_path id))
 ;;
 
@@ -4437,7 +4425,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 10
             ; "generation", `Int 1
             ; "next_sequence", `Int 2
             ; "pending", `List []
@@ -4450,7 +4438,6 @@ let test_persisted_delivery_replays_before_origin_wake () =
                       ; "remember_rule", `Bool false
                       ; "created_by", `Null
                       ; "grant_consumed", `Bool false
-                      ; "resolution_recorded", `Bool true
                       ]
                   ] )
             ]);
@@ -4760,7 +4747,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 11
+             [ "version", `Int 10
             ; "generation", `Int 1
             ; "next_sequence", `Int 4
             ; "pending", `List []
@@ -5945,17 +5932,17 @@ let () =
             `Quick
             test_boot_replay_does_not_record_the_decision_again
         ; Alcotest.test_case
-            "a resubmission after a failed delivery records the decision once"
+            "a failed first delivery already has the decision on the ledger"
             `Quick
-            test_resubmission_after_failed_delivery_records_the_decision_once
+            test_failed_first_delivery_already_has_the_decision_on_the_ledger
         ; Alcotest.test_case
-            "a replay retiring a failed delivery records the decision"
+            "a retiring replay of a failed delivery adds no row"
             `Quick
-            test_replay_retiring_a_failed_delivery_records_the_decision
+            test_retiring_replay_of_a_failed_delivery_adds_no_row
         ; Alcotest.test_case
-            "a grant consumed after a failed delivery still records the decision"
+            "a grant consumed after a failed delivery has the decision"
             `Quick
-            test_consumed_grant_after_failed_delivery_records_the_decision
+            test_consumed_grant_after_failed_delivery_has_the_decision
         ; Alcotest.test_case
             "observed delivery preserves grant without replaying wake"
             `Quick

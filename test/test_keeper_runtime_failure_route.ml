@@ -456,6 +456,30 @@ let test_non_provider_families_judge () =
     Alcotest.failf "mcp error should exhaust protocol, got %s"
       (KFR.route_kind_label other)
 
+(* #38456: the admission check refuses a broken history before provider
+   dispatch. That turn carried nothing to the model, so a Gate continuation
+   riding it must not be settled as answered. *)
+let test_transcript_refusal_is_not_an_answer () =
+  let refused reason tool_use_ids =
+    internal_err
+      (Keeper_internal_error.Incomplete_tool_transcript
+         { reason; detail = "refused before dispatch"; tool_use_ids })
+  in
+  List.iter
+    (fun (label, error) ->
+       match route_of_masc_error error with
+       | KFR.Exhausted_visible_alive { terminal = KFR.Transcript_refused; _ } as route ->
+         Alcotest.(check string) (label ^ ": own route label") "transcript_refused"
+           (KFR.route_class_label route);
+         Alcotest.(check bool) (label ^ ": no provider answer") false
+           (KFR.response_observed route)
+       | other ->
+         Alcotest.failf "%s: a refused transcript routed to %s:%s" label
+           (KFR.route_kind_label other) (KFR.route_class_label other))
+    [ "unresolved tool results", refused Keeper_internal_error.Unresolved_tool_results [ "t1" ]
+    ; "structurally invalid", refused Keeper_internal_error.Structurally_invalid []
+    ]
+
 (* #32956: the heartbeat settles a Gate continuation on a failed turn only
    when the provider answered the request. Every class is named on one side
    so a new class has to be placed. *)
@@ -495,6 +519,7 @@ let test_response_observed_per_class () =
     ; terminal KFR.Deterministic_request
     ; terminal KFR.Context_overflow
     ; terminal KFR.Session_claim_refused
+    ; terminal KFR.Transcript_refused
     ; terminal KFR.Protocol_error
     ; terminal KFR.Config_mismatch
     ; terminal KFR.Provider_integration
@@ -687,6 +712,7 @@ let test_route_resumes_on_same_path_per_class () =
     ; "", terminal KFR.Deterministic_request
     ; "", terminal KFR.Context_overflow
     ; "", terminal KFR.Session_claim_refused
+    ; "", terminal KFR.Transcript_refused
     ; "", terminal KFR.Contract_violation
     ; "", terminal KFR.Protocol_error
     ; "", terminal KFR.Config_mismatch
@@ -766,6 +792,10 @@ let () =
             "every class is placed"
             `Quick
             test_response_observed_per_class
+        ; Alcotest.test_case
+            "a refused transcript is not an answer"
+            `Quick
+            test_transcript_refusal_is_not_an_answer
         ; Alcotest.test_case
             "through route_of_error"
             `Quick

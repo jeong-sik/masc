@@ -130,6 +130,10 @@ type terminal_class =
   | Session_claim_refused
       (** an official client refused its durable session claim before provider
           dispatch; the held recovery requires explicit operator resolution *)
+  | Transcript_refused
+      (** the turn's history was refused before provider dispatch: its tool
+          transcript is incomplete or structurally broken, so no request
+          carried the turn's input *)
   | Contract_violation
       (** completion/progress contract rejections without a recovery hint,
           max-tokens ceiling violations, internal contract rejections *)
@@ -233,14 +237,15 @@ val response_observed : route -> bool
     [MaxTokens]).
 
     [true]: [Empty_completion], the three [No_progress_*] rotations (the
-    accept gate rejected an answer), [Contract_violation] (an incomplete tool
-    transcript or a proven pre-effect tool failure), the five
+    accept gate rejected an answer), [Contract_violation] (a proven
+    pre-effect tool failure, or an effect fence with no effect observed), the five
     [Terminal_effect_*] classes (a tool the model called failed terminally),
     and the two effect fences with [Fenced_effect_attempted] (a tool handler
     was entered, so the model had answered).
 
     [false]: every other [Retry_after_observed] class, every other rotation,
-    [Session_claim_refused], every other unlisted terminal class, and the two
+    [Session_claim_refused], [Transcript_refused], every other unlisted
+    terminal class, and the two
     effect fences with
     [Fenced_observation_unavailable], which the lanes set before any answer.
     [Internal_opaque] is [false] although it also holds an accept rejection

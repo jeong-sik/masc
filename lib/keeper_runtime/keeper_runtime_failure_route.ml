@@ -34,6 +34,7 @@ type terminal_class =
   | Deterministic_request
   | Context_overflow
   | Session_claim_refused
+  | Transcript_refused
   | Contract_violation
   | Protocol_error
   | Config_mismatch
@@ -161,8 +162,11 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      Keep the turn exhausted without implying a response or attempted effect. *)
   | Keeper_internal_error.Official_client_recovery_required _ ->
     exhaust_failure Session_claim_refused
+  (* The admission check refuses the history before provider dispatch
+     ([Keeper_agent_run.provider_transcript_admission]): no request carried
+     the turn's input. *)
   | Keeper_internal_error.Incomplete_tool_transcript _ ->
-    exhaust_failure Contract_violation
+    exhaust_failure Transcript_refused
   | Keeper_internal_error.Terminal_effect_failed
       { failure_class; effect_disposition; _ } ->
     (match effect_disposition with
@@ -455,6 +459,7 @@ let terminal_class_label = function
   | Deterministic_request -> "deterministic_request"
   | Context_overflow -> "context_overflow"
   | Session_claim_refused -> "session_claim_refused"
+  | Transcript_refused -> "transcript_refused"
   | Contract_violation -> "contract_violation"
   | Protocol_error -> "protocol_error"
   | Config_mismatch -> "config_mismatch"
@@ -557,6 +562,9 @@ let response_observed = function
      | Session_claim_refused
      (* the durable local session claim was refused before dispatch; the
         model did not see the turn input or its replay evidence. *)
+     | Transcript_refused
+     (* the history was refused before dispatch; the model did not see the
+        turn input or its replay evidence. *)
      | Protocol_error
      (* an MCP protocol failure; whether an answer arrived is not on the
         route. *)
@@ -580,10 +588,10 @@ let response_observed = function
           keeps its wake. *)
        false
      | Contract_violation
-     (* an incomplete tool transcript or a proven pre-effect tool failure:
-        the model answered and the turn's own contract over that answer
-        failed. The two effect fences reach this class only with
-        [No_effect_observed], which the driver never produces. *)
+     (* a proven pre-effect tool failure: the model answered and the turn's
+        own contract over that answer failed. The two effect fences reach
+        this class only with [No_effect_observed], which the driver never
+        produces. *)
      | Terminal_effect_dependency_unavailable
      | Terminal_effect_policy_rejection
      | Terminal_effect_runtime_failure
@@ -674,6 +682,7 @@ let route_resumes_on_same_path = function
      | Deterministic_request
      | Context_overflow
      | Session_claim_refused
+     | Transcript_refused
      | Contract_violation
      | Protocol_error
      | Config_mismatch

@@ -1468,13 +1468,11 @@ status: reference
 **Fact**
 : Memory OS의 기억 하나. 문장(`claim`), `category`, 처음·마지막으로 본 시각,
   `origin`, `basis`로 이뤄진다. id 필드는 없고 Memory ID는 `claim` 글자의
-  SHA-256이다. 글자가 하나라도 다르면 다른 Fact다. 처음·마지막으로 본 시각
+  SHA-256이다. 글자가 하나라도 다르면 다른 Fact다. 처음·마지막으로 기록된 시각
   (`first_seen`, `last_seen`)은 둘 다 Fact가 기록된 시각(write time)이며, 상태가
   지속된 시각이나 신뢰도·강도(strength) 신호가 아니다. 같은 내용(동일 바이트)으로
   다시 쓰인 Fact는 최초의 `first_seen`을 보존하고 `last_seen`만 전진한다(#38056).
-  움직이는 상태(moving state)의 스냅샷들은 본문이 직접 밝히는 시각(날짜·서수·
-  프레임 번호), 그다음 `last_seen` 순으로 선후를 판정한다.
-  → [Keeper_memory_os_current.insert_or_reobserve](../../lib/keeper/keeper_memory_os_current.ml) · [librarian.md](../../config/prompts/librarian.md)
+  → [Keeper_memory_os_current.insert_or_reobserve](../../lib/keeper/keeper_memory_os_current.ml)
 
 **Origin**
 : Fact를 누가 적었나. `authored`는 Keeper가 `keeper_memory_write`로 직접 적은 것,
@@ -1498,12 +1496,17 @@ status: reference
     Fact와 같은 글자를 다시 쓰는 것은 새 Fact가 아니라 그 Fact다 — 아무것도 더하지
     않고 저장된 Fact를 유지하며, 거절이 아니다. 같은 답이 그 Fact를 `dropped`로도
     적으면 "사라졌다"와 "남는다"를 함께 말한 모순이라 거절한다(`Dropped_memory_id_recreated`).
-    새로운 상태로 대체되어 낡게 된 이전 스냅샷(superseded state)은 새 claim이 그 내용을
-    온전히 대신 담고 있지 않으므로 `absorbs`가 아니라 반드시 `dropped`로 버려야 한다 —
-    내용이 다른 갱신을 `absorbs`로 지정하면 관문(absorb gate)을 통과하지 못한다(#38056).
-    회차 진행 도중 Keeper가 철회(`retract`)하거나 대체(`supersedes`)하여 스냅숏에서
-    사라진 Fact는 흡수 대상(`into`)으로 지목되더라도 되살아나지 않으며, 대상 없는 흡수는
-    취소(`cancelled`)되어 원문들이 현재 Fact로 남는다(#38231).
+    Librarian 프롬프트의 지시(코드가 강제하지 않는다): 한 대상의 움직이는 상태를
+    시점마다 적은 Fact가 여러 개면 claim에 적힌 시점(날짜·순번·프레임 번호)으로 먼저
+    선후를 정하고, 그런 표시가 없으면 `last_seen`이 가장 늦은 것을 현재로 본다. 순서를
+    정할 수 없거나 같은 대상인지 확실하지 않으면 지우지 않는다. 현재가 아닌 상태는
+    `dropped`에 넣고, 현재 상태 claim의 `absorbs`에 넣지 않는다.
+    코드 규칙: absorb gate는 판정 모델에게 흡수된 Fact의 문장마다 새 claim이 그 내용을
+    말하는지 묻는다. 말하지 않는 문장이 하나라도 있으면 그 Fact는 흡수되지 않고 현재
+    Fact로 남는다. 답 전체가 거절되지는 않고 새 claim은 그대로 적용된다(#38056).
+    흡수 대상(`into`)이 잠근 시점의 스냅숏에도, 이번 답의 새 claim에도 없으면(회차 도중
+    Keeper가 그 Fact를 철회하거나 `supersedes`로 대체한 경우) 그 흡수는 적용하지 않는다.
+    원문은 현재 Fact로 남고, 지워진 대상은 되살아나지 않으며, warn 로그만 남는다(#38231).
   - Keeper 직접 갱신: `keeper_memory_write`는 선택 인자 `supersedes`로 자신이 직접
     적은 이전 Fact 하나를 새 claim으로 대체할 수 있다(#38122). 원자적(locked) 한 번의
     커밋으로 이전 Fact를 지우고 새 Fact를 적으며, 저널에 `superseded_by` 사유를 남기고
@@ -1512,7 +1515,7 @@ status: reference
     보고된다. 알 수 없는 id, 이미 지난(non-current) id, `injected` id, 다른 Keeper의
     id, 자기 자신 id, `source_path`와의 동시 지정, 그리고 대체될 Fact를 전제로
     삼는 유도 claim(`supersedes_premise_of_successor`)은 모두 거절되며 아무것도 적지 않는다.
-  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.ml) · [Keeper_memory_os_types](../../lib/keeper/keeper_memory_os_types.mli)
+  → [Keeper_memory_os_current](../../lib/keeper/keeper_memory_os_current.ml) · [Keeper_librarian_absorb_gate](../../lib/keeper/keeper_librarian_absorb_gate.mli) · [librarian.md](../../config/prompts/librarian.md)
 
 **Memory Event**
 : Fact에 일어난 일의 기록(`<keeper>.memory-events.jsonl`). `retrieved`는

@@ -8,7 +8,6 @@
 
 ### Changed
 
-- The Overview draws a Team block: one row per Keeper, answering who is working on what and who is stuck. The briefing already sent a row per Keeper and the Overview only counted them, so seeing which Keeper held which task, or which one had stopped, meant crossing to the Keepers screen and the task list. Stuck Keepers come first with the attention sentence that names them and how many tasks they hold, then working Keepers with their first held task, then idle ones; paused Keepers share one line, and tasks held by assignees outside the fleet (such as an MCP client) are counted on another. Attention targets are parsed once into `Attention_keeper | Attention_other`, so the join is a constructor match rather than a comparison of the wire word (#38078).
 - The Librarian reads a new claim that repeats a current memory word for word
   as that memory instead of refusing the whole pass as
   `duplicate_selected_memory_id`: the stored fact keeps its first sighting and

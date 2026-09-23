@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-09-23
+
+> Before you upgrade: HTTP clients of the verification verdict and sub-board routes must change their requests — see **Upgrade notes**.
+
+### Upgrade notes
+
+- `POST /api/v1/verification/verdict` requires `verification_id`, the submission the operator read; a request without it, or with unknown or duplicate fields, is refused, and a stale one is answered 409 (#38073). The TUI and dashboard already send it.
+- A sub-board `access` value outside `open`, `members_only`, `owner_only` is answered 400 / `Validation_error` on create and update, over HTTP and `masc_board_sub_board_create`, instead of becoming `Open` (#38076).
+
 ### Added
 
 - The model catalog and the seed runtime config carry the three models released on 2026-09-22. `claude-opus-5-5` gets its own catalog row (1M/128K, $4/$20, cache read 0.05x, forced tool use refused) — without it the id lands on the `claude-opus-5` row and bills cache reads at double the real rate — plus Claude Code subscription bindings at low..max. `gpt-6-sol` and `gpt-6-luna` get bare catalog rows (efforts `none`,`low`..`max`, from a /v1/responses parameter probe) and Codex subscription bindings at low..max. Release evidence entries for all three (#38118).
@@ -47,8 +56,22 @@
   different mechanism, is unchanged — its screen strings keep the key name,
   and the glossary now carries a `media_failover` entry fencing it from the
   renamed concept.
+- The TUI reads a connector's `gateway_state` and `poll_state` as closed
+  variants instead of strings. A connector row the TUI cannot read, such as
+  one carrying a state the server's state machines never produce, is refused
+  on its own and drawn as one line naming the connector and the reason; the
+  other rows still load. The TUI decides whether the Channels pane's Runtime
+  state row repeats the connection badge by matching constructors rather than comparing
+  lowercased words. The runtime picker's kind badge width is measured from
+  the badge strings instead of being written as 7 in three places (#38050).
+- Changelog entries arrive as `changelog.d/<PR number>.md` fragments instead
+  of lines under `## [Unreleased]`, so parallel pull requests no longer
+  conflict on `CHANGELOG.md`. `scripts/changelog-fragments.py` checks them in
+  CI, refuses a pull request that adds an `[Unreleased]` bullet, and
+  `scripts/bump-version.sh` folds them into `[Unreleased]` at release (#38151).
 
 ### Fixed
+
 - An autonomous turn that yields to a queued person before its provider's first
   event (RFC-0441) is no longer a failed keeper cycle. The preemption used to
   return a synthesized zero-turn run result that the keeper could only read as
@@ -60,7 +83,6 @@
   `Turn_skipped`, which leaves the admitted source pending and acknowledges no
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
-
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result
@@ -95,7 +117,39 @@
 - The verification queue (`GET /api/v1/verification/requests?view=awaiting`) says which verdict each row waits on: `intent` is `complete` or `cancel`, read from the task the row names, and `null` in the history view, which has no backlog join. A cancellation waits on the same queue as a completion and only an operator's verdict clears it, so a reader could not tell the seven cancel requests waiting since 2026-09-19 from completion requests (#37965).
 - The TUI's Task Review list draws a `VERDICT` column (`complete` or `cancel`) between the task id and the submitter, and the request detail says `Waits on: cancel -- only an operator's verdict clears it` for a cancellation. The list used to draw a cancellation request and a completion request as the same row, so the one row only an operator could clear looked like every other (#37965).
 - A boot replay of a durable HITL delivery, and an operator resubmitting the same decision, no longer write a second `resolved` row to the approval audit ledger or announce the decision again. Both send the wake again and log `hitl resolution redelivered approval=… occasion=boot_replay|same_request_resubmitted`. One approval for an offline keeper had nineteen `resolved` rows across twenty-one boots on 2026-09-22, so a count of the ledger read as nineteen decisions for one click (#37964).
-
+- `keeper_memory_search` absorbed results: `into` now follows a claim that a
+  later librarian pass absorbed to the claim holding it now, and `into_current`
+  judges that claim; under `source=all`, rows whose claim already answers the
+  query are dropped before `limit` is taken, so they no longer hide rows that
+  reach a different claim (#38040).
+- An approval whose first delivery failed still has its decision on the ledger. The `Resolved` row and the SSE `resolved` event went out only after the first wake was enqueued, so when that enqueue failed, the operator's second press and every boot replay found no pending entry, sent the wake and wrote no row; a grant the keeper consumed in between skipped it entirely, and the trust timeline kept showing the approval as waiting for an operator decision. The row and the event now go out once, as soon as the decision is journaled and before any wake is tried; a boot replay or a second press only sends the wake again. A failed append leaves the decision in force and is reported as an audit append failure, as other audit writes are. The chat's decision row is written once, when the wake reaches a live keeper (#38043).
+- An operator can drop or reopen a Goal in `Verifying`. Both were invalid there, so a Goal whose verifier lane never produced a verdict could not leave: `request_complete` only re-armed the same request. `drop` now moves it to `Dropped` and `reopen` returns it to `Executing` and clears the pending proof request; `confirm_completion` stays invalid. A verdict that arrives afterwards is refused and is not recorded, and a review still running for the Goal is cancelled so it no longer holds one of the verifier's four review slots or blocks the Goal's next request. The TUI Goal detail lights `[x]` and `[o]` on a verifying Goal, and the `masc_goal_transition` description lists the verifying transitions (#38047).
+- The Memory health Librarian row no longer loses track of the Librarian when
+  a keeper writes its own memory. The last success is the newest journal line
+  the Librarian committed and the failure shown is the newest Librarian
+  failure after it, so a `keeper_memory_write` or retraction neither blanks
+  "Memory saved" nor hides a failed pass
+  (`server_dashboard_http_keeper_memory_health.ml`). The TUI decodes the pass
+  ending and the failure kind as closed variants, refuses a value it does not
+  know, draws both in plain words ("caught up", "last pass saved nothing",
+  "model call failed") instead of the wire words, and draws the cause of a
+  stopped or crashed pass on its own `Librarian cause` row. A keeper row the
+  TUI cannot decode is refused on its own and drawn as one line naming the
+  keeper and the reason, so a value from a newer server no longer blanks the
+  whole Memory pane (#38049).
+- A resumed Claude Code turn now reaches the model with its current turn context. Claude Code resends the system prompt it recorded at the session's first launch until the conversation is compacted (`--system-prompt-snapshot`, default on), so the temporal line, memory, world state and Librarian working state masc wrote into `--system-prompt-file` on every resume never arrived: one Keeper's model read memory revision 808 and a 13.5-hour-old temporal line while masc had prepared revision 903, across 55 resumes under one recorded prompt hash. The resume prompt now carries that composed context and the operation's historical task reference in front of the goal, as the Antigravity resume does, and the resume system file no longer carries the canonical conversation snapshot the vendor session already holds. The session record says `held_by_vendor_session` instead of `replaced_configuration`, and the turn's input report says the client session held the history; a resume records no window reading for a range it did not send. A context overflow on a resume no longer respawns the same refused input at every shrink step: without a Gate continuation the retry starts fresh with the shrunk range, and a Gate resume ends on the typed overflow (#38075).
+- An access refusal (HTTP 401 or 403) on a lane's head no longer demotes it. The refusal was held as candidate evidence that has no expiry and that only the candidate's own answer clears, so while a sibling answered the head was never dispatched again, and a key restored through the environment did not bring it back before a restart. The refusal now rotates to the next candidate within the turn and leaves no evidence, and every new turn tries the head first (RFC-0458 §3.4, §6) (#38096).
+- `masc start` reclaims a PID lock whose recorded process is a zombie. `kill(pid, 0)` succeeds for an unreaped process, so the takeover treated it as a live holder, the liveness probe failed, `ps` printed `<defunct>`, and every start refused with "alive but does not look like a masc server" while nothing listened on the port. The recorded PID is now read as running, zombie or gone from the `ps` state letter; a zombie is reclaimed like a gone process without a signal, and a live non-masc holder still refuses (#38119).
+- A Remote_ssh Keeper's GitHub identity is now read where its login was
+  written (#38152). The GitHub tab status and `masc keeper-github status` run
+  one `gh` probe on the Keeper's endpoint instead of reading this host's
+  `hosts.yml`, so a successful endpoint login no longer shows as "not
+  configured". Attaching the GitHub MCP identity to a Remote_ssh Keeper is
+  refused with `remote_ssh_github_token_not_on_host` rather than "log it in
+  from the GitHub tab first", since masc does not copy an endpoint token back
+  to the host. Under a non-default cluster, the GitHub MCP token read and the
+  chat-store redaction of `hosts.yml` now use the cluster directory the login
+  writes to.
 
 ## [0.36.0] - 2026-09-22
 

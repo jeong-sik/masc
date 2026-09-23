@@ -647,6 +647,36 @@ let test_unreadable_constitution_stops_turn_and_the_next_tick_resumes () =
       (carries ctx.base_system_prompt)
 ;;
 
+(* #38354: an autonomous turn sends the base prompt the run context built, not
+   a second render. Whatever the caller's callback returns lands in the
+   dynamic context only. *)
+let test_autonomous_turn_sends_the_run_context_base_prompt () =
+  with_run_checkpoint
+  @@ fun ~config ~meta ~base_dir:_ ~session_dir:_ ~checkpoint:_ ~path:_ ~prepare ->
+  match prepare () with
+  | Error error -> fail (prepare_error_to_string error)
+  | Ok ctx ->
+    let world_state = "## Current World State\nfixture frame" in
+    let prompt_ctx =
+      Keeper_run_prompt.build_turn_context ~ctx
+        ~build_turn_prompt:(fun ~base_system_prompt:_ ~messages:_ ->
+          { Keeper_agent_prompt_metrics.dynamic_context = world_state
+          ; dynamic_context_for_tools = None })
+        ~user_message:"Continue." ~config ~meta
+        ~turn_ref:
+          (Ids.Turn_ref.make
+             ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+             ~absolute_turn:2)
+        ~history_user_source:"autonomous"
+        ~user_turn_record:Keeper_run_prompt.Skip_already_checkpointed_user_turn
+        ~start_turn_count:ctx.start_turn_count
+    in
+    check string "the request's system prompt is the run context's base prompt"
+      ctx.base_system_prompt prompt_ctx.Keeper_run_prompt.turn_system_prompt;
+    check string "the callback's text rides the dynamic context"
+      world_state prompt_ctx.Keeper_run_prompt.dynamic_context
+;;
+
 let test_unreadable_path_is_not_an_absent_checkpoint () =
   with_run_checkpoint
   @@ fun ~config:_ ~meta:_ ~base_dir:_ ~session_dir:_ ~checkpoint:_ ~path ~prepare ->
@@ -1946,6 +1976,8 @@ let () =
             (test_checkpoint_read_error_stops_turn ~io_failure:false);
           test_case "an unreadable constitution stops the turn and the next tick resumes"
             `Quick test_unreadable_constitution_stops_turn_and_the_next_tick_resumes;
+          test_case "an autonomous turn sends the run context's base prompt" `Quick
+            test_autonomous_turn_sends_the_run_context_base_prompt;
           test_case "an unreadable path is not an absent checkpoint" `Quick
             test_unreadable_path_is_not_an_absent_checkpoint;
           test_case "a deliberate checkpoint version cut still starts fresh" `Quick

@@ -213,6 +213,10 @@ let create_keeper ~expected_config_revision (ctx : _ context)
          keeper again once the ledger reads is a clean retry. *)
       | Error error ->
         let detail = World_constitution_store.read_error_to_string error in
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels:[("keeper", p.name); ("event", "create_constitution_unreadable")]
+          ();
         Log.Keeper.error "create_keeper failed for name=%s: %s" p.name detail;
         Progress.stop_tracking task_id;
         tool_result_error ~class_:Tool_result.Runtime_failure detail

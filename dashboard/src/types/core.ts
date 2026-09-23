@@ -1509,11 +1509,13 @@ interface KeeperSupervisorDiagnostics {
 
 // --- Keeper Config (structured read-only view) ---
 
-interface KeeperSystemPromptUnavailable {
-  reason: 'constitution_unreadable'
-  path: string
-  detail: string
-}
+// The system prompt a keeper turn would send (#38354). A turn that cannot
+// build it is refused, so the server sends the typed reason instead of text.
+// A shape this client does not know fails only this field.
+export type KeeperSystemPromptPreview =
+  | { state: 'available'; effective: string; assembled: string }
+  | { state: 'unavailable'; reason: 'constitution_unreadable'; path: string; detail: string }
+  | { state: 'decode_failed'; detail: string }
 
 interface KeeperConfigPrompt {
   instructions: string
@@ -1528,11 +1530,7 @@ interface KeeperConfigPrompt {
       text: string
     }
   }
-  effective_system_prompt: string
-  assembled_system_prompt: string
-  // Why the server could not build the system prompt. A keeper turn is
-  // refused for the same reason, so there is no prompt to preview (#38354).
-  system_prompt_unavailable: KeeperSystemPromptUnavailable | null
+  system_prompt: KeeperSystemPromptPreview
   unified_user_message_preview: string
 }
 

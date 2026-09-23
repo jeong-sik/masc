@@ -43,6 +43,27 @@ let keeper_config_revision_json = function
       ]
 ;;
 
+(* The system prompt a turn would send, as one closed union on the wire. A
+   turn that cannot build it is refused (#38354), so there is no text to
+   preview, only the typed reason. [assembled] matches what a turn actually
+   sends: the base prompt with the observation frame riding the per-turn
+   dynamic context. *)
+let system_prompt_json ~world_state = function
+  | Ok effective ->
+    `Assoc
+      [ "state", `String "available"
+      ; "effective", `String effective
+      ; "assembled", `String (effective ^ "\n\n" ^ world_state)
+      ]
+  | Error (World_constitution_store.Unreadable { path; detail }) ->
+    `Assoc
+      [ "state", `String "unavailable"
+      ; "reason", `String "constitution_unreadable"
+      ; "path", `String path
+      ; "detail", `String detail
+      ]
+;;
+
 (** Build a structured config JSON for a single keeper, grouped by category.
     Returns (http_status, json). *)
 let keeper_config_json_once ~config_revision (config : Workspace.config) (name : string)
@@ -123,7 +144,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
          keeper's detail page would consume the live cursor and the next
          real turn would miss those events. Only a turn owns cursor
          advancement. *)
-      let assembled_system_prompt_preview, unified_user_message_preview =
+      let world_state_preview, unified_user_message_preview =
         let observation =
           let pending_board_events, _new_count, _mention_count =
             Keeper_world_observation
@@ -183,32 +204,8 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
           Keeper_unified_prompt.build_prompt_preview ~current_task ~active_goal_summaries
             ~task_skill_surfaces ~workspace_memory ~repository_freshness ~observation ()
         in
-        (* Match what a turn actually sends: the base system prompt with the
-           observation frame riding the per-turn dynamic context (system
-           side), and the persisted user message is the wake marker /
-           utterances only. A turn that cannot build the base prompt is not
-           sent, so neither is an assembled preview of it. *)
-        ( Result.map
-            (fun system_prompt ->
-              system_prompt ^ "\n\n" ^ parts.Keeper_unified_prompt.world_state)
-            effective_system_prompt,
+        ( parts.Keeper_unified_prompt.world_state,
           parts.Keeper_unified_prompt.user_message )
-      in
-      let prompt_text_json = function
-        | Ok text -> `String text
-        | Error (_ : World_constitution_store.read_error) -> `Null
-      in
-      (* The reason the system prompt is absent, as the typed read error the
-         turn is refused with (#38354). [null] when the prompt was built. *)
-      let system_prompt_unavailable_json =
-        match effective_system_prompt with
-        | Ok _ -> `Null
-        | Error (World_constitution_store.Unreadable { path; detail }) ->
-          `Assoc
-            [ "reason", `String "constitution_unreadable"
-            ; "path", `String path
-            ; "detail", `String detail
-            ]
       in
       let prompt =
         `Assoc [
@@ -223,10 +220,9 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
               [
                 ("system", prompt_block_json Prompt_names.keeper);
               ] );
-          ("effective_system_prompt", prompt_text_json effective_system_prompt);
-          ("assembled_system_prompt",
-           prompt_text_json assembled_system_prompt_preview);
-          ("system_prompt_unavailable", system_prompt_unavailable_json);
+          ( "system_prompt",
+            system_prompt_json ~world_state:world_state_preview
+              effective_system_prompt );
           ("unified_user_message_preview", `String unified_user_message_preview);
         ]
       in

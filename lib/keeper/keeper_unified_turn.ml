@@ -874,6 +874,13 @@ let run_keeper_cycle
                   turn sends. Rendering a second one here read the
                   constitution ledger twice per turn, and the two reads could
                   disagree (#38354). *)
+               (* Per cycle, not per candidate, and that is exact: the
+                  callback runs once per [Keeper_agent_run.run_turn], after
+                  [prepare_run_context] and before the candidate walk
+                  ([Keeper_turn_driver.run_named]), and every candidate sends
+                  this one prompt. [do_run] calls [run_turn] once per cycle.
+                  A cycle whose prepare failed never calls it, so the failure
+                  log says [not_sent]. *)
                let sent_system_prompt_bytes = ref None in
                let build_turn_prompt ~base_system_prompt ~messages:_
                  : Keeper_agent_run.turn_prompt

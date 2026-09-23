@@ -102,9 +102,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       system_prompt_blocks: {
         system: { key: 'keeper', source: 'file', text: 'system text' },
       },
-      effective_system_prompt: 'full prompt',
-      assembled_system_prompt: 'assembled prompt',
-      system_prompt_unavailable: null,
+      system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt' },
       unified_user_message_preview: 'world state',
     },
     execution: {
@@ -2460,24 +2458,14 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     expect(link?.classList.contains('set-link')).toBe(true)
   })
 
-  it('shows why the system prompt cannot be built instead of an empty preview (#38354)', async () => {
+  async function openSystemPromptPreview(systemPrompt: KeeperConfig['prompt']['system_prompt']): Promise<void> {
     const base = makeKeeperConfig()
     mocks.fetchKeeperConfig.mockResolvedValueOnce(makeKeeperConfig({
-      prompt: {
-        ...base.prompt,
-        effective_system_prompt: '',
-        assembled_system_prompt: '',
-        system_prompt_unavailable: {
-          reason: 'constitution_unreadable',
-          path: '/base/.masc/constitution/articles.jsonl',
-          detail: 'Sys_error("Is a directory")',
-        },
-      },
+      prompt: { ...base.prompt, system_prompt: systemPrompt },
     }))
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
     await flush()
-
     selectKcfTab(container, '프롬프트')
     await flush()
     const systemTab = Array.from(container.querySelectorAll('button')).find(button =>
@@ -2485,10 +2473,30 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     )
     systemTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flush()
+  }
 
+  it('shows the assembled system prompt when it was built', async () => {
+    await openSystemPromptPreview({ state: 'available', effective: 'full prompt', assembled: 'assembled prompt' })
+    expect(container.textContent).toContain('assembled prompt')
+    expect(container.querySelector('[data-testid="kcf-system-prompt-unavailable"]')).toBeNull()
+  })
+
+  it('shows why the system prompt cannot be built instead of an empty preview (#38354)', async () => {
+    await openSystemPromptPreview({
+      state: 'unavailable',
+      reason: 'constitution_unreadable',
+      path: '/base/.masc/constitution/articles.jsonl',
+      detail: 'Sys_error("Is a directory")',
+    })
     const notice = container.querySelector('[data-testid="kcf-system-prompt-unavailable"]')
     expect(notice?.textContent).toContain('/base/.masc/constitution/articles.jsonl')
     expect(notice?.textContent).toContain('Is a directory')
+  })
+
+  it('shows an undecodable system prompt as a decode failure', async () => {
+    await openSystemPromptPreview({ state: 'decode_failed', detail: 'unknown prompt state "later"' })
+    const notice = container.querySelector('[data-testid="kcf-system-prompt-decode-failed"]')
+    expect(notice?.textContent).toContain('unknown prompt state "later"')
   })
 
   async function openAccessTab(config: KeeperConfig): Promise<void> {

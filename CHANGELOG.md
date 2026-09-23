@@ -207,7 +207,6 @@
 
 ### Fixed
 
-- The Memory fact detail escapes every value it draws. The claim always was, through `Message_layout.wrap_body`, but the seven fields beside it -- the category, the origin, the memory id, a bound path and its file hash, and a dropped row's reason and path -- went to the terminal as the keeper wrote them. The guard that would have caught it, `test_renderers_sanitize_untrusted_terminal_fields`, only ever looked at `bin/masc_tui_render.ml`; it watches the Memory pane's own file now. `Timeline` also takes a row of its own: it shared the Origin row behind a hand-sized slot of fifteen cells, and in the fleet reading the origin carries its keeper, so the shortest keeper name in the fleet already made it seventeen bytes and `Timeline:` lost the space before it on every row. Escaping can only lengthen a value, which the slot had no room for either (#38181).
 - Setup fixture substitutions now fail at the exact changed fixture location instead of silently passing and blaming the wrong field (#37434).
 - The cancel guard now follows complete handler arm lists and recognizes both exception-arm forms, eliminating false positives from comments and distant cancellation arms (#37495).
 - The strict runtime-config check now excludes vendored warning policy from MASC's warning gate without weakening MASC source checks (#37315).

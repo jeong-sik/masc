@@ -37,6 +37,14 @@ type retract_error =
   | Retract_fact_not_found of string
   | Retract_persistence_failed of string
 
+type supersede_error =
+  | Supersede_memory_id_invalid
+  | Supersede_self
+  | Supersede_target_not_current of string
+  | Supersede_target_not_authored of string
+  | Supersede_unsupported_derivation of support_invalidation
+  | Supersede_persistence_failed of string
+
 type retraction =
   { memory_id : string
   ; reason : string
@@ -2328,6 +2336,38 @@ let replace
         ())
 ;;
 
+(* One incoming fact added to a fact list: new claim bytes are appended,
+   bytes already present are a re-observation of that row. Shared by
+   {!upsert_fact} and {!supersede_fact}, so both give a row the same
+   [first_seen] and [last_seen]. *)
+let insert_or_reobserve current_facts (incoming : Keeper_memory_os_types.fact) =
+  let incoming_identity = memory_id incoming in
+  let found = ref false in
+  let facts =
+    List.map
+      (fun existing ->
+         if String.equal (memory_id existing) incoming_identity
+         then (
+           found := true;
+           (* Byte-identical re-observation of an existing row. The exact
+              claim bytes were already on file, so this is not a new fact:
+              preserve the authoritative insertion time and the original
+              origin (an injected copy re-observed must not repaint an
+              authored row) and refresh the observation time. Nothing is
+              counted: seeing the same bytes again says nothing about the
+              fact's worth (RFC-0418). *)
+           { incoming with
+             first_seen = existing.first_seen
+           ; last_seen = Float.max existing.last_seen incoming.last_seen
+           ; origin = existing.origin
+           ; basis = merge_basis existing.basis incoming.basis
+           })
+         else existing)
+      current_facts
+  in
+  if !found then facts else facts @ [ incoming ]
+;;
+
 let upsert_fact
       ?clock
       ~keepers_dir
@@ -2366,31 +2406,7 @@ let upsert_fact
              ; missing_premise_ids = missing_premises_for current_ids derivations
              })
     in
-    let incoming_identity = memory_id incoming in
-    let found = ref false in
-    let facts =
-      List.map
-        (fun existing ->
-           if String.equal (memory_id existing) incoming_identity
-           then (
-             found := true;
-             (* Byte-identical re-observation of an existing row. The exact
-                claim bytes were already on file, so this is not a new fact:
-                preserve the authoritative insertion time and the original
-                origin (an injected copy re-observed must not repaint an
-                authored row) and refresh the observation time. Nothing is
-                counted: seeing the same bytes again says nothing about the
-                fact's worth (RFC-0418). *)
-             { incoming with
-               first_seen = existing.first_seen
-             ; last_seen = Float.max existing.last_seen incoming.last_seen
-             ; origin = existing.origin
-             ; basis = merge_basis existing.basis incoming.basis
-             })
-           else existing)
-        current_facts
-    in
-    let facts = if !found then facts else facts @ [ incoming ] in
+    let facts = insert_or_reobserve current_facts incoming in
     let facts, invalidated = maintain_supported_facts facts in
     let incoming_identity = memory_id incoming in
     match
@@ -2482,6 +2498,80 @@ let retract_fact
           ~invalidated
           ()
         |> Result.map_error (fun detail -> Retract_persistence_failed detail))
+;;
+
+(* A supersession is a retraction and a write that must not be seen apart: a
+   reader between the two would find either both claims or neither. So the
+   target leaves and the successor arrives in one locked update, and the
+   successor goes through the same [insert_or_reobserve] an ordinary write
+   does. *)
+let supersede_fact
+      ?clock
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      ~source
+      ~superseded_memory_id
+      (incoming : Keeper_memory_os_types.fact)
+  =
+  let incoming_identity = memory_id incoming in
+  if not (Keeper_memory_os_types.is_memory_id superseded_memory_id)
+  then Error Supersede_memory_id_invalid
+  else if String.equal incoming_identity superseded_memory_id
+  then Error Supersede_self
+  else
+    update_locked_with_error
+      ?clock
+      ~dropped_statements:
+        [ { Keeper_memory_os_types.memory_id = superseded_memory_id
+          ; reason = "superseded_by " ^ incoming_identity
+          }
+        ]
+      ~store_error:(fun detail -> Supersede_persistence_failed detail)
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      (fun ~snapshot_content:_ previous ->
+      let current_facts =
+        match previous with
+        | None -> []
+        | Some snapshot -> snapshot.facts
+      in
+      let* () =
+        match
+          List.find_opt
+            (fun fact -> String.equal (memory_id fact) superseded_memory_id)
+            current_facts
+        with
+        | None -> Error (Supersede_target_not_current superseded_memory_id)
+        | Some { origin = { kind = Keeper_memory_os_types.Authored; _ }; _ } -> Ok ()
+        | Some { origin = { kind = Keeper_memory_os_types.Injected; _ }; _ } ->
+          Error (Supersede_target_not_authored superseded_memory_id)
+      in
+      let remaining =
+        List.filter
+          (fun fact -> not (String.equal (memory_id fact) superseded_memory_id))
+          current_facts
+      in
+      let facts, invalidated =
+        maintain_supported_facts (insert_or_reobserve remaining incoming)
+      in
+      match
+        List.find_opt
+          (fun invalidation ->
+             String.equal (memory_id invalidation.fact) incoming_identity)
+          invalidated
+      with
+      | Some invalidation -> Error (Supersede_unsupported_derivation invalidation)
+      | None ->
+        make_snapshot_from_maintained
+          ~previous
+          ~now
+          ~source
+          ~facts
+          ~invalidated
+          ()
+        |> Result.map_error (fun detail -> Supersede_persistence_failed detail))
 ;;
 
 let retract_facts

@@ -118,6 +118,18 @@ type memory_write_error_kind =
       (** A source-bound claim already names its file; it cannot also name a
           Board post. *)
   | Unsupported_derivation
+  | Supersedes_invalid
+      (** [supersedes] is not a string holding a memory identity. *)
+  | Supersedes_with_source_path_unsupported
+      (** [supersedes] names an ordinary current fact; a source-bound claim
+          is replaced by writing its [source_path] again. *)
+  | Supersedes_self
+      (** The new claim has the exact bytes of the fact it supersedes. *)
+  | Supersedes_not_current
+      (** No current fact of this keeper has the [supersedes] identity. *)
+  | Supersedes_not_authored
+      (** The [supersedes] fact is current but was not written by this
+          keeper through [keeper_memory_write]. *)
   | Persistence_failed of fact_store
       (** The store did not answer; which store decides what a repeat write
           does. *)
@@ -146,6 +158,7 @@ type memory_write_validation =
       { body : string
       ; source_path : string option
       ; basis : Keeper_memory_os_types.basis
+      ; supersedes : string option
       }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind

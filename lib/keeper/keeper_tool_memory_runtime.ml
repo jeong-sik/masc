@@ -866,6 +866,11 @@ type memory_write_error_kind =
   | Board_ref_with_derivation_unsupported
   | Board_ref_with_source_path_unsupported
   | Unsupported_derivation
+  | Supersedes_invalid
+  | Supersedes_with_source_path_unsupported
+  | Supersedes_self
+  | Supersedes_not_current
+  | Supersedes_not_authored
   | Persistence_failed of fact_store
   | Commit_receipt_inconsistent
   | No_memory_write_error
@@ -882,6 +887,11 @@ let memory_write_error_kind_to_string = function
   | Board_ref_with_derivation_unsupported -> "board_ref_with_derivation_unsupported"
   | Board_ref_with_source_path_unsupported -> "board_ref_with_source_path_unsupported"
   | Unsupported_derivation -> "unsupported_derivation"
+  | Supersedes_invalid -> "supersedes_invalid"
+  | Supersedes_with_source_path_unsupported -> "supersedes_with_source_path_unsupported"
+  | Supersedes_self -> "supersedes_self"
+  | Supersedes_not_current -> "supersedes_not_current"
+  | Supersedes_not_authored -> "supersedes_not_authored"
   | Persistence_failed (Ordinary_current | Source_bound_current) -> "persistence_failed"
   | Commit_receipt_inconsistent -> "commit_receipt_inconsistent"
   | No_memory_write_error -> ""
@@ -903,12 +913,19 @@ let class_of_memory_write_error_kind = function
   | Board_ref_with_derivation_unsupported
   | Board_ref_with_source_path_unsupported
   | Unsupported_derivation
+  | Supersedes_invalid
+  | Supersedes_with_source_path_unsupported
+  | Supersedes_self
+  | Supersedes_not_authored
   | Source_read_failed
       ( Keeper_memory_source_current.Source_path_rejected _
       | Keeper_memory_source_current.Source_missing
       | Keeper_memory_source_current.Source_not_a_regular_file
       | Keeper_memory_source_current.Source_too_large _ ) ->
     Tool_result.Policy_rejection
+  (* Like a retraction of an absent fact: the store moved on since the id was
+     read, which a fresh search answers. *)
+  | Supersedes_not_current -> Tool_result.Workflow_rejection
   | Source_read_failed (Keeper_memory_source_current.Source_io_failed _)
   | Persistence_failed (Ordinary_current | Source_bound_current) ->
     Tool_result.Dependency_unavailable
@@ -942,8 +959,14 @@ let memory_write_failure_effect = function
   | Board_comment_without_post
   | Board_ref_with_derivation_unsupported
   | Board_ref_with_source_path_unsupported
-  | Unsupported_derivation ->
+  | Unsupported_derivation
+  | Supersedes_invalid
+  | Supersedes_with_source_path_unsupported
+  | Supersedes_self ->
     Tool_result.Proven_pre_effect, "The claim was not committed."
+  | Supersedes_not_current | Supersedes_not_authored ->
+    ( Tool_result.Proven_pre_effect
+    , "The claim was not committed and no fact was removed." )
   | Commit_receipt_inconsistent ->
     ( Tool_result.Proven_post_effect
     , "A new snapshot revision was committed, but this claim is not in it. Search \
@@ -1047,6 +1070,32 @@ let memory_write_rejection_fields error_kind =
       "The ids under missing_premise_ids name no fact in the store. Write those \
        premises first and cite the memory_id each write returns, or write this \
        claim without rule_id and premise_ids as the observation it is."
+  | Supersedes_invalid ->
+    at
+      "supersedes"
+      ("supersedes is the memory identity of your own earlier fact this claim \
+        replaces. " ^ premise_id_expectation)
+  | Supersedes_with_source_path_unsupported ->
+    at
+      "supersedes"
+      "A source-bound claim is replaced by writing the same source_path again. \
+       Drop supersedes, or drop source_path to write an ordinary claim."
+  | Supersedes_self ->
+    at
+      "supersedes"
+      "This claim has the same bytes as the fact it names, so it is already \
+       current. Drop supersedes, or change the claim."
+  | Supersedes_not_current ->
+    at
+      "supersedes"
+      "No current fact of yours has this memory_id. Search memory for the fact \
+       you mean to replace and pass the memory_id it returns."
+  | Supersedes_not_authored ->
+    at
+      "supersedes"
+      "This fact is current but you did not write it with keeper_memory_write, \
+       so it cannot be superseded here. Drop supersedes to write the claim \
+       alongside it."
   | Content_empty
   | Source_path_invalid
   | Source_read_failed _
@@ -1069,6 +1118,7 @@ type memory_write_validation =
       { body : string
       ; source_path : string option
       ; basis : Keeper_memory_os_types.basis
+      ; supersedes : string option
       }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind
@@ -1156,11 +1206,27 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
     | `String _, _ -> Error (Derivation_invalid Premise_ids_not_an_array)
     | _, _ -> Error (Derivation_invalid Rule_id_not_a_string)
   in
-  match source_path, derivation, board_ref with
-  | Error error_kind, _, _ | _, Error error_kind, _ | _, _, Error error_kind ->
+  (* The id is taken as sent: [is_memory_id] is the one grammar, and a padded
+     id is not the id a search returned. *)
+  let supersedes =
+    match Safe_ops.safe_member "supersedes" args with
+    | `Null -> Ok None
+    | `String memory_id when Keeper_memory_os_types.is_memory_id memory_id ->
+      Ok (Some memory_id)
+    | _ -> Error Supersedes_invalid
+  in
+  match source_path, derivation, board_ref, supersedes with
+  | Error error_kind, _, _, _
+  | _, Error error_kind, _, _
+  | _, _, Error error_kind, _
+  | _, _, _, Error error_kind ->
     Memory_write_invalid { error_kind; extras = [] }
-  | Ok source_path, Ok basis, Ok board_ref ->
-    if
+  | Ok source_path, Ok basis, Ok board_ref, Ok supersedes ->
+    if Option.is_some supersedes && Option.is_some source_path
+    then
+      Memory_write_invalid
+        { error_kind = Supersedes_with_source_path_unsupported; extras = [] }
+    else if
       Option.is_some source_path
       && (match basis with
           | Keeper_memory_os_types.Observed _ -> false
@@ -1186,7 +1252,7 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
       let body =
         if title = "" then content else Printf.sprintf "**%s** %s" title content
       in
-      Memory_write_ok { body; source_path; basis }
+      Memory_write_ok { body; source_path; basis; supersedes }
 ;;
 
 (* The observed arms echo the stored wire shape; the derived arm reports a
@@ -1206,13 +1272,23 @@ let memory_write_basis_receipt = function
 
    No local importance, recency, or echo heuristic participates. The explicit
    write upserts one exact identity; the Librarian remains responsible for
-   deciding the complete current selection on its next pass. *)
+   deciding the complete current selection on its next pass.
+
+   With [supersedes] the named fact leaves in the same commit the new one
+   arrives; the store refuses a target that is not this keeper's own current
+   authored fact. *)
+type explicit_write_error =
+  | Write_unsupported_derivation of Keeper_memory_os_current.support_invalidation
+  | Write_persistence_failed of string
+  | Write_supersede_refused of memory_write_error_kind
+
 let upsert_explicit_fact
       ~(keepers_dir : string)
       ~(meta : keeper_meta)
       ~(body : string)
       ~(basis : Keeper_memory_os_types.basis)
-  : (Keeper_memory_os_current.t, Keeper_memory_os_current.upsert_error) result
+      ~(supersedes : string option)
+  : (Keeper_memory_os_current.t, explicit_write_error) result
   =
   let keeper_id = meta.name in
   let now = Time_compat.now () in
@@ -1226,16 +1302,39 @@ let upsert_explicit_fact
     ; basis
     }
   in
+  let source : Keeper_memory_os_current.source =
+    { kind = Keeper_memory_os_current.Explicit_write; trace_id }
+  in
   let result =
-    Keeper_memory_os_current.upsert_fact
-      ~keepers_dir
-      ~keeper_id
-      ~now
-      ~source:
-        { kind = Keeper_memory_os_current.Explicit_write
-        ; trace_id
-        }
-      fact
+    match supersedes with
+    | None ->
+      Keeper_memory_os_current.upsert_fact ~keepers_dir ~keeper_id ~now ~source fact
+      |> Result.map_error (function
+        | Keeper_memory_os_current.Unsupported_derivation invalidation ->
+          Write_unsupported_derivation invalidation
+        | Keeper_memory_os_current.Upsert_persistence_failed detail ->
+          Write_persistence_failed detail)
+    | Some superseded_memory_id ->
+      Keeper_memory_os_current.supersede_fact
+        ~keepers_dir
+        ~keeper_id
+        ~now
+        ~source
+        ~superseded_memory_id
+        fact
+      |> Result.map_error (function
+        | Keeper_memory_os_current.Supersede_memory_id_invalid ->
+          Write_supersede_refused Supersedes_invalid
+        | Keeper_memory_os_current.Supersede_self ->
+          Write_supersede_refused Supersedes_self
+        | Keeper_memory_os_current.Supersede_target_not_current _ ->
+          Write_supersede_refused Supersedes_not_current
+        | Keeper_memory_os_current.Supersede_target_not_authored _ ->
+          Write_supersede_refused Supersedes_not_authored
+        | Keeper_memory_os_current.Supersede_unsupported_derivation invalidation ->
+          Write_unsupported_derivation invalidation
+        | Keeper_memory_os_current.Supersede_persistence_failed detail ->
+          Write_persistence_failed detail)
   in
   (match result with
    | Ok _ ->
@@ -1309,7 +1408,7 @@ let keeper_memory_write_with_outcome
   match validate_memory_write_args args with
   | Memory_write_invalid { error_kind; extras } ->
     respond ~ok:false ~error_kind extras
-  | Memory_write_ok { body; source_path; basis } ->
+  | Memory_write_ok { body; source_path; basis; supersedes } ->
     let keepers_dir =
       Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path
@@ -1386,7 +1485,7 @@ let keeper_memory_write_with_outcome
             detail;
           respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ "detail", `String detail ])
      | None ->
-    (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis with
+    (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis ~supersedes with
      | Ok snapshot ->
        let written_fact =
          List.find_opt
@@ -1395,6 +1494,20 @@ let keeper_memory_write_with_outcome
        in
        (match written_fact with
         | Some written_fact ->
+          let written_memory_id = Keeper_memory_os_types.memory_id written_fact in
+          (* The supersession is already committed; its history event names
+             the successor, as a Librarian revision does (RFC-0418). *)
+          Option.iter
+            (fun superseded_memory_id ->
+               record_memory_events
+                 ~keepers_dir
+                 ~meta
+                 ~now:snapshot.updated_at
+                 ~kind:
+                   (Keeper_memory_os_events.Revised
+                      { superseded_by = written_memory_id })
+                 [ superseded_memory_id ])
+            supersedes;
           respond
             ~ok:true
             ~error_kind:No_memory_write_error
@@ -1413,10 +1526,14 @@ let keeper_memory_write_with_outcome
                   (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
             ; "outcome", `String "persisted_current_snapshot"
             ; "store", `String "current_memory_snapshot"
-            ; ( "memory_id"
-              , `String (Keeper_memory_os_types.memory_id written_fact) )
+            ; "memory_id", `String written_memory_id
             ; "basis", memory_write_basis_receipt written_fact.basis
-            ])
+            ]
+             @ Option.fold
+                 ~none:[]
+                 ~some:(fun superseded_memory_id ->
+                   [ "superseded_memory_id", `String superseded_memory_id ])
+                 supersedes)
         | None ->
           let detail = "committed current Memory snapshot omitted the written fact" in
           Log.Keeper.warn
@@ -1428,7 +1545,16 @@ let keeper_memory_write_with_outcome
             ~ok:false
             ~error_kind:Commit_receipt_inconsistent
             [ "revision", `Int snapshot.revision; "detail", `String detail ])
-     | Error (Keeper_memory_os_current.Unsupported_derivation invalidation) ->
+     | Error (Write_supersede_refused error_kind) ->
+       respond
+         ~ok:false
+         ~error_kind
+         (Option.fold
+            ~none:[]
+            ~some:(fun superseded_memory_id ->
+              [ "supersedes", `String superseded_memory_id ])
+            supersedes)
+     | Error (Write_unsupported_derivation invalidation) ->
        respond
          ~ok:false
          ~error_kind:Unsupported_derivation
@@ -1438,7 +1564,7 @@ let keeper_memory_write_with_outcome
                   (fun premise_id -> `String premise_id)
                   invalidation.missing_premise_ids) )
          ]
-     | Error (Keeper_memory_os_current.Upsert_persistence_failed detail) ->
+     | Error (Write_persistence_failed detail) ->
        Log.Keeper.warn
          "explicit current Memory write failed keeper=%s: %s"
          meta.name

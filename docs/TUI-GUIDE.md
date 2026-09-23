@@ -88,6 +88,7 @@ decides whether launching one is worth it.
 | Overview - Tasks panel | works | `.masc/tasks/backlog.json` |
 | Overview - summary, Attention | unavailable | `GET /api/v1/dashboard/briefing` |
 | Overview - transport tail | unavailable | `GET /api/v1/dashboard/transport-health` |
+| Overview - Providers | unavailable | `GET /api/v1/runtime/resolved` |
 | Lanes | unavailable | `GET /api/v1/keepers/composite` |
 | Clients | unavailable | `GET /api/v1/dashboard/clients` |
 | Approvals | unavailable | `GET /api/v1/operator`, `POST /api/v1/operator/confirm` |
@@ -330,6 +331,25 @@ adds nothing.
 Tasks show terminal states in Planning rollups but not in this list. A task
 detail that is open when its task turns terminal stays open - the detail reads
 the full backlog rows, not the active projection.
+
+The Providers section sits between the Team block and the tasks. It reads
+`provider_usage_windows` from `GET /api/v1/runtime/resolved` and draws one
+strip per provider account: a meter per usage window, the value in the unit
+the provider reported, the reset time, and how long ago the provider said so.
+
+```
+ Providers  reported by the provider · since server start 22:39
+ claude_code  5h ▕██████████▊     ▏ 0.67  ↻ 18:10 in 4h12m        heard 3m ago
+              7d ▕███████         ▏ 0.44  ↻ 09-29 13:00 in 5d23h
+ codex        no report since server start
+```
+
+A meter is drawn in the exhausted style only when the value reaches the full
+value of its own unit (`1.0` for a fraction, `100` for a percent). A reset time
+that has passed reads `reset time passed · no newer report`; the meter keeps
+the last reported value. An account whose runtime rows carry
+`quota_exhausted` wears `exhausted (observed)`. A failed read is one line,
+`providers unavailable: <reason>`.
 
 ### Activity
 

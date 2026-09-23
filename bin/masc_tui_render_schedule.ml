@@ -135,6 +135,7 @@ type overview_allocation = {
   attention_rows : int;
   goal_rows : int;
   team_rows : int;
+  providers_rows : int;
   task_error_rows : int;
   task_rows : int;
   filler_rows : int;
@@ -154,8 +155,11 @@ let overview_team_chrome_rows = 2
 (* The divider under the GOALS block. Its headline is one of its rows. *)
 let overview_goal_chrome_rows = 1
 
+(* The Providers section's title row and the divider under it. *)
+let overview_providers_chrome_rows = 2
+
 let allocate_overview ~terminal_rows ~attention_count ~goal_count
-    ~team_count ~task_count ~has_task_error =
+    ~team_count ~providers_count ~task_count ~has_task_error =
   (* Ten rows are invariant chrome. What is left is shared by the Attention
      panel and the task block, and whatever neither needs becomes
      filler so the frame reaches the bottom of the terminal.
@@ -229,9 +233,29 @@ let allocate_overview ~terminal_rows ~attention_count ~goal_count
   let team_block_rows =
     if team_rows > 0 then team_rows + overview_team_chrome_rows else 0
   in
+  (* The Providers section is served after GOALS and Team and before the
+     tasks, in the order it is drawn. GOALS and Team say what the fleet is
+     doing; how full each provider account is explains a stuck Keeper in
+     Team, so it is read after Team and is worth nothing without it. Nothing
+     in the backlog below says it, so it comes ahead of the tasks. *)
+  let providers_rows =
+    if providers_count <= 0 then 0
+    else
+      let room =
+        available - attention_rows - reserved_task_rows - goal_block_rows
+        - team_block_rows - overview_providers_chrome_rows
+      in
+      if room <= 0 then 0 else min providers_count room
+  in
+  let providers_block_rows =
+    if providers_rows > 0 then providers_rows + overview_providers_chrome_rows
+    else 0
+  in
   let task_block_rows =
     min desired_task_block_rows
-      (max 0 (available - attention_rows - goal_block_rows - team_block_rows))
+      (max 0
+         (available - attention_rows - goal_block_rows - team_block_rows
+        - providers_block_rows))
   in
   let task_error_rows = min desired_task_error_rows task_block_rows in
   let task_rows =
@@ -240,10 +264,16 @@ let allocate_overview ~terminal_rows ~attention_count ~goal_count
   let filler_rows =
     max 0
       (available - attention_rows - goal_block_rows - team_block_rows
-     - task_error_rows - task_rows)
+     - providers_block_rows - task_error_rows - task_rows)
   in
-  { attention_rows; goal_rows; team_rows; task_error_rows; task_rows;
-    filler_rows }
+  { attention_rows
+  ; goal_rows
+  ; team_rows
+  ; providers_rows
+  ; task_error_rows
+  ; task_rows
+  ; filler_rows
+  }
 
 (* Detail lines under the Team block (a repository's pull requests) are worth
    drawing but not worth a backlog row: they take only rows that would

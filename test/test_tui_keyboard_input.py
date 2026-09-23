@@ -12316,6 +12316,9 @@ def runtime_resolved_response(*, runtime_a_in_two_lanes: bool = False) -> HttpRe
             # the declared list is what the editor writes back.
             "media_failover": [],
             "media_failover_declared": [],
+            # The Overview's Providers section decodes these two strictly.
+            "provider_usage_windows_since": 1790179140.2,
+            "provider_usage_windows": [],
             "runtimes": [
                 runtime_a,
                 runtime_resolved_runtime("runtime-b", "Resolved B", "model-b"),

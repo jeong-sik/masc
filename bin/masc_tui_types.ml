@@ -1983,6 +1983,14 @@ type overview_goals_reading =
   | Goals_read of Tui_decode.overview_goal list
   | Goals_failed of string
 
+(** The Overview's reading of the provider usage windows on the same
+    [/api/v1/runtime/resolved] document. Decoded apart from the runtime rows,
+    so a row this build cannot read does not hide what the providers said. *)
+type overview_providers_reading =
+  | Providers_unread
+  | Providers_read of Tui_decode.provider_usage_windows
+  | Providers_failed of string
+
 (** One open pull request as [GET /api/v1/repositories/pulls] reports it
     (RFC-0465). The check and review words are parsed at decode; a word this
     build cannot name makes the row undecodable rather than a default. *)
@@ -2927,10 +2935,9 @@ let rec surface_needs ~keeper_pane_drawn surface =
   else needs
 
 and surface_needs_of_surface : surface -> surface_needs = function
-  (* The Team block names the quota windows that are shut. The catalogue is
-     43 KB and answers in under two milliseconds on the live runtime, and
-     only this surface draws the windows beside the Keepers they stop.
-     The goal tree is read only here too: the GOALS section is its reader. *)
+  (* The Providers section draws each account's usage windows from the
+     runtime catalogue. Only this surface draws them. The goal tree is read
+     only here too: the GOALS section is its reader. *)
   | Overview ->
       { nothing with
         needs_transport = true
@@ -5649,6 +5656,7 @@ type state = {
      picker's [runtime_catalog] so a refresh behind the Overview never moves
      the rows under an open picker's cursor. *)
   mutable overview_quota: overview_quota_reading;
+  mutable overview_providers: overview_providers_reading;
   mutable overview_pulls: overview_pulls_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
@@ -7784,6 +7792,7 @@ let create_state
   runtime_pick_cursor = 0;
   runtime_catalog = [];
   overview_quota = Quota_unread;
+  overview_providers = Providers_unread;
   overview_pulls = Overview_pulls_unread;
   overview_goals = Goals_unread;
   runtime_lanes = [];

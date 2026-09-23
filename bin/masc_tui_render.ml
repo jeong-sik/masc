@@ -29,6 +29,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Overview_team = Masc_tui_overview_team
 module Overview_goals = Masc_tui_overview_goals
+module Overview_providers = Masc_tui_overview_providers
 module Repository_pulls = Masc_tui_repository_pulls
 module Layout = Masc_tui_layout
 module Agenda = Masc_tui_agenda
@@ -322,67 +323,18 @@ let overview_team (state : state) =
         (Overview_team.project ~keepers:overview.ov_keeper_rows
            ~tasks:state.tasks ~attention:overview.ov_attention_items)
 
-(* The quota windows the runtime catalogue reports shut, as one line under
-   the Team block's stuck rows: a shut window is usually why the Keepers under it
-   are stuck, and when it reopens is what the operator waits on. Nothing is
-   drawn while every window is open or before the first read -- a line saying
-   "all open" on every frame would be texture. A failed read says so. *)
-(* A failed quota read is said, but as a detail line: it explains no stuck
-   row, so it takes only rows the Overview had spare. *)
-let overview_quota_unread_line (state : state) =
-  match state.overview_quota with
-  | Quota_failed err ->
-      Some
-        (Printf.sprintf "%squota windows unread: %s%s" Ansi.dim
-           (Terminal_text.single_line err) Ansi.reset)
-  | Quota_unread | Quota_read _ -> None
-
-let overview_quota_line (state : state) ~now =
-  match state.overview_quota with
-  | Quota_unread | Quota_failed _ -> None
-  | Quota_read options -> (
-      match Overview_team.shut_windows options with
-      | [] -> None
-      | windows ->
-          let window_text (window : Overview_team.shut_window) =
-            let scope =
-              match window.sw_scope with
-              | Some scope -> Terminal_text.single_line scope
-              | None -> "unscoped"
-            in
-            let reopen =
-              match window.sw_resets_at with
-              | None -> "reopening time not reported"
-              | Some at when at <= now -> "reopen due, not yet re-read"
-              | Some at ->
-                  let tm = Unix.gmtime at in
-                  Printf.sprintf "reopens %02d:%02dZ, in %s" tm.Unix.tm_hour
-                    tm.Unix.tm_min
-                    (keeper_lane_idle_text (int_of_float (at -. now)))
-            in
-            Printf.sprintf "%s%s%s (%d runtime%s) %s" (Theme.warn ()) scope
-              Ansi.reset window.sw_runtimes
-              (if window.sw_runtimes = 1 then "" else "s")
-              reopen
-          in
-          Some
-            (Printf.sprintf "%s\xe2\x8f\xb8%s quota shut: %s" (Theme.warn ())
-               Ansi.reset
-               (String.concat " \xc2\xb7 " (List.map window_text windows))))
-
 let overview_pulls_lines (state : state) = Repository_pulls.lines state.overview_pulls
 
-(* Lines under the Team block that explain no Keeper row: an unread quota
-   and the pull request summary. *)
-let overview_team_detail_lines (state : state) =
-  Option.to_list (overview_quota_unread_line state) @ overview_pulls_lines state
+(* Lines under the Team block that explain no Keeper row: the pull request
+   summary. *)
+let overview_team_detail_lines (state : state) = overview_pulls_lines state
 
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the name lines and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line ~detail_lines ~pr_tag_of_keeper =
+    ~detail_lines ~pr_tag_of_keeper =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -483,7 +435,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
   (* Detail lines come last: the layout gives them only rows nothing else
      wanted, so a short viewport cuts them before any Keeper. *)
   let rows =
-    List.map keeper_line stuck @ Option.to_list quota_line
+    List.map keeper_line stuck
     @ List.map keeper_line others
     @ names_line "?" "no phase" team.no_phase
     @ names_line off_glyph "paused" team.paused
@@ -567,6 +519,12 @@ let overview_attention (state : state) =
   | None -> []
   | Some overview -> overview.ov_attention_items
 
+(* The Providers section, drawn between the Team block and the tasks. *)
+let overview_providers_section (state : state) ~cols =
+  Overview_providers.section ~providers:state.overview_providers
+    ~runtimes:state.overview_quota ~now:(Unix.gettimeofday ())
+    ~width:(framed_inner_width cols)
+
 (** Project the shared Overview row budget and its sanitized variable inputs. *)
 let overview_layout (state : state) ~terminal_rows =
   let all_attention = overview_attention state in
@@ -574,16 +532,19 @@ let overview_layout (state : state) ~terminal_rows =
   let team_count =
     match overview_team state with
     | None -> 0
-    | Some team ->
-        Overview_team.drawn_rows team
-        + Option.fold ~none:0 ~some:(fun _ -> 1)
-            (overview_quota_line state ~now:(Unix.gettimeofday ()))
+    | Some team -> Overview_team.drawn_rows team
+  in
+  let providers_count =
+    match overview_providers_section state ~cols:(snd (get_terminal_size ())) with
+    | None -> 0
+    | Some section -> List.length section.Overview_providers.lines
   in
   let allocate attention_items =
     Render_schedule.allocate_overview ~terminal_rows
       ~attention_count:(List.length attention_items)
       ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
       ~team_count
+      ~providers_count
       ~task_count:
         (Overview_tasks.line_count state.tasks
            (Overview_tasks.backlog state.tasks_domain))
@@ -857,12 +818,22 @@ let render_overview (state : state) =
        let title, lines =
          overview_team_lines team ~team_rows:row_budget.team_rows
            ~flow:state.task_flow ~cols
-           ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
            ~detail_lines:(overview_team_detail_lines state)
            ~pr_tag_of_keeper:(Repository_pulls.keeper_tag state.overview_pulls)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;
+       box_divider buf cols
+   | Some _ | None -> ());
+
+  (* Providers section: each provider account's usage windows, as reported. *)
+  (match overview_providers_section state ~cols with
+   | Some section when row_budget.providers_rows > 0 ->
+       Buffer.add_string buf (fit_width section.Overview_providers.title cols ^ "\n");
+       List.iter (box_line buf cols)
+         (List.filteri
+            (fun index _ -> index < row_budget.providers_rows)
+            section.Overview_providers.lines);
        box_divider buf cols
    | Some _ | None -> ());
 

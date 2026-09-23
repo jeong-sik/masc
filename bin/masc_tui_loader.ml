@@ -1070,6 +1070,22 @@ let load_runtime_resolved ~(host : string) ~(port : int) :
   | Error err -> Error ("runtime catalogue load failed: " ^ err)
   | Ok json -> Tui_decode.decode_runtime_resolved_full json
 
+(** One read of [/api/v1/runtime/resolved] for the Overview: the runtime rows
+    and the provider usage windows. The two decode apart, and a failed fetch
+    fails both with one reason. *)
+let load_overview_runtime_resolved ~(host : string) ~(port : int) :
+    (Tui_decode.runtime_option list, string) result
+    * (Tui_decode.provider_usage_windows, string) result =
+  match fetch_runtime_resolved ~host ~port with
+  | Error err ->
+      let reason = "runtime catalogue load failed: " ^ err in
+      (Error reason, Error reason)
+  | Ok json ->
+      ( Result.map
+          (fun (options, _lanes, _assignments) -> options)
+          (Tui_decode.decode_runtime_resolved_full json)
+      , Tui_decode.decode_provider_usage_windows json )
+
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
   rsl_probe : (Tui_decode.runtime_probe_snapshot, string) result;

@@ -2968,8 +2968,14 @@ let render_planning_list (state : state) =
          (match state.planning_baseline with
           | None -> "  Trend: waiting for the first successful reading"
           | Some first ->
-              Printf.sprintf "  Net change since %s: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
-                (Terminal_text.clock_timestamp first.pl_generated_at)
+              (* How long the reading has been running, not the clock it
+                 started at. The baseline is the first successful read of
+                 this process and is never replaced, so on a screen left open
+                 overnight "since 09:31:39" named a moment on a day the
+                 reader had no way to identify. *)
+              Printf.sprintf
+                "  Net change over the last %s: Goals done %+d · Tasks done %+d · Goal reviews pending %+d"
+                (Masc_tui_wire_age.text ~now:now_unix first.pl_generated_at)
                 (p.pl_rollup.pr_done - first.pl_rollup.pr_done)
                 (p.pl_backlog.pb_done - first.pl_backlog.pb_done)
                 (p.pl_rollup.pr_verifying - first.pl_rollup.pr_verifying));
@@ -6267,7 +6273,7 @@ let render_clients (state : state) =
                  header reading 09:31:39 on 2026-09-23, and the distance a
                  reader could take from that pointed two hours ahead. A span
                  carries its own day. *)
-              (Masc_tui_last_seen.text ~now:now_s row.cr_last_seen)
+              (Masc_tui_wire_age.text ~now:now_s row.cr_last_seen)
           in
           (* Inactive rows stay in the roster -- "who left" is part of the
              reading -- but they recede, the way the empty-state rows do. *)

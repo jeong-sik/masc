@@ -5294,9 +5294,9 @@
  (libraries alcotest masc_tui_message_layout masc_tui_table))
 
 (test
- (name test_tui_last_seen)
- (modules test_tui_last_seen)
- (libraries alcotest masc_tui_last_seen))
+ (name test_tui_wire_age)
+ (modules test_tui_wire_age)
+ (libraries alcotest masc_tui_wire_age))
 
 (test
  (name test_operator_attention_summary)

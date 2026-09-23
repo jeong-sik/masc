@@ -3,7 +3,7 @@ open Alcotest
 (* 2026-09-23T00:31:39Z, the instant the live screen below was drawn. *)
 let now = 1790123499.
 
-let text = Masc_tui_last_seen.text ~now
+let text = Masc_tui_wire_age.text ~now
 
 (* The defect this closes. The cell drew the clock alone, so a dashboard
    session last seen on 2026-09-21 at 11:49 local read as 11:49 today --
@@ -39,8 +39,8 @@ let test_a_fallback_neutralises_an_escape () =
     (String.exists (fun c -> Char.code c = 0x1b) drawn)
 
 let () =
-  run "tui last seen"
-    [ ( "how long ago a row was seen"
+  run "tui wire age"
+    [ ( "how long ago a wire stamp was"
       , [ test_case "a stamp from another day says how long ago" `Quick
             test_a_stamp_from_another_day_says_how_long_ago
         ; test_case "a stamp from today says the same way" `Quick

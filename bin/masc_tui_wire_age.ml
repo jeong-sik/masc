@@ -1,14 +1,15 @@
-(* How long ago a row was last seen, for a column that sits under the
-   screen's own clock.
+(* How long ago a wire timestamp was, for a screen that draws its own clock.
 
-   The cell used to draw the clock alone, on the reading that the header's
-   clock gives it a distance. That holds only while the two are the same day.
+   Cells and phrases used to draw the clock alone, on the reading that the
+   header's clock gives it a distance. That holds only while the two are the
+   same day.
    On the live workspace a dashboard session last seen on 2026-09-21 drew
    "11:49:28" under a header reading 09:31:39 on 2026-09-23 -- the only
    distance a reader could take from that pointed two hours ahead, for a row
    that had been gone a day and a half.
 
-   A span carries its own day, so no row needs the header to be read. *)
+   A span carries its own day, so nothing that draws it needs the header to
+   be read. *)
 
 module Message_layout = Masc_tui_message_layout
 

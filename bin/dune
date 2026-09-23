@@ -641,9 +641,9 @@
 ;; refusals (empty, unparseable, ahead of the clock) have a test that does not
 ;; go through a screen.
 (library
- (name masc_tui_last_seen)
+ (name masc_tui_wire_age)
  (wrapped false)
- (modules masc_tui_last_seen)
+ (modules masc_tui_wire_age)
  (libraries masc masc.time_codec masc_tui_message_layout))
 
 (library
@@ -1623,7 +1623,7 @@
   masc_tui_acting
   masc_tui_command
   masc_tui_gate_text
-   masc_tui_last_seen
+   masc_tui_wire_age
   masc_tui_preset_text
   masc_tui_mcp
   masc_tui_keeper_chat_transcript

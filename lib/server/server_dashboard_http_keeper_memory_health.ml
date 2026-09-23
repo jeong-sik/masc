@@ -239,12 +239,12 @@ let rec walk_newest_first ~newest_failure = function
    success. The answer is the newest Librarian commit and whatever Librarian
    failure came after it, wherever in the journal that commit sits.
 
-   The journal is append-only and one keeper's runs to a few MB, and the tail
-   reader takes a line count, so the read starts at the last line and doubles
-   the window until the walk reaches a Librarian commit or the reader returns
-   fewer lines than asked -- the start of the file. The starting window is not
-   a cap: it bounds nothing, and a request reads back only as far as its
-   answer. *)
+   The tail reader takes a line count, so the read starts at the last line
+   and doubles the window until the walk reaches a Librarian commit or the
+   reader returns fewer lines than asked -- the start of the file. There is
+   no cap: a request reads back as far as its answer. A keeper the Librarian
+   never committed for is therefore read to the start on every request; the
+   journal only grows, so that cost grows with it. *)
 let librarian_journal_outcome ~keepers_dir ~keeper_id =
   let rec read ~window =
     let lines =

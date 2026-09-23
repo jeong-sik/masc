@@ -2872,6 +2872,79 @@ api_key_env = ""
       error
   | Ok _ -> fail "provider contract silently accepted a string"
 
+(* #37849. A config that names a provider reads bare rows only when that
+   provider declares serves_bare_rows. The runtime mirrors the Terminal-Bench
+   anthropic lane: reasoning-effort = "high" and a capabilities block that keeps
+   the binding on the catalogued branch. The model id carries a date suffix that
+   only the bare row's prefix covers, since a scoped row would need the exact
+   id. *)
+let bare_rows_runtime ~provider_id ~model_id =
+  let toml = Printf.sprintf
+    {|[runtime]
+default = "%s.probe"
+[providers.%s]
+protocol = "messages-http"
+endpoint = "http://127.0.0.1:1"
+[providers.%s.credentials]
+type = "inline"
+value = "fixture-no-account"
+[models.probe]
+api-name = "%s"
+tools-support = true
+reasoning-effort = "high"
+thinking-support = true
+[models.probe.capabilities]
+max-output-tokens = 64000
+[%s.probe]
+max-tokens = 4096
+|} provider_id provider_id provider_id model_id provider_id
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors -> failf "bare rows config failed: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) ->
+           e.path ^ ": " ^ e.message) errors))
+  | Ok cfg ->
+    match cfg.bindings with
+    | [ binding ] -> cfg, binding
+    | _ -> fail "expected one bare rows binding"
+
+let test_declared_provider_reads_bare_rows_only_when_it_serves_them () =
+  let cfg, binding = bare_rows_runtime ~provider_id:"fixture-provider"
+      ~model_id:"fixture-model-20260901" in
+  let catalog declaration = Printf.sprintf {|[[providers]]
+id = "fixture-provider"
+kind = "anthropic"
+capabilities_base = "anthropic"
+base_url = "https://fixture.invalid"
+request_path = "/v1/messages"
+api_key_env = ""
+%s
+
+[[models]]
+id_prefix = "fixture-model"
+base = "anthropic"
+accepted_reasoning_efforts = ["low", "high"]
+|} declaration in
+  List.iter (fun (declaration, serves) ->
+    with_model_catalog (catalog declaration) (fun () ->
+      match Runtime_adapter.binding_to_provider_config cfg binding with
+      | Error error ->
+        failf "%S: the binding was refused before the effort check: %s"
+          declaration error
+      | Ok config ->
+        check bool
+          (Printf.sprintf "%S: high reaches the bare row's ladder" declaration)
+          serves
+          (Result.is_ok
+             (Llm_provider.Provider_config.validate_reasoning_effort_request config)))
+  ) [ "", false; "serves_bare_rows = false", false; "serves_bare_rows = true", true ];
+  match Llm_provider.Model_catalog.of_toml_string ~source:"serves-bare-rows-type"
+      (catalog "serves_bare_rows = \"true\"") with
+  | Error error -> check string "the declaration rejects a string"
+      "provider entry \"fixture-provider\" field \"serves_bare_rows\" expected bool"
+      error
+  | Ok _ -> fail "serves_bare_rows silently accepted a string"
+
 let () =
   run "runtime_provider_auth_headers"
     [ ( "provider_config"
@@ -2883,6 +2956,8 @@ let () =
             `Quick test_parallel_policy_wrong_type_is_rejected
         ; test_case "parallel policy requires a canonical provider contract"
             `Quick test_parallel_policy_requires_provider_contract
+        ; test_case "a declared provider reads bare rows only when it serves them"
+            `Quick test_declared_provider_reads_bare_rows_only_when_it_serves_them
         ; test_case
             "runtime binding materialization preserves failure reason"
             `Quick

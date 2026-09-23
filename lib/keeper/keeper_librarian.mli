@@ -66,6 +66,9 @@ type revision =
 
 type selection =
   { new_claims : Keeper_memory_os_types.fact list
+    (** The memories the answer adds. A claim that writes a current memory
+        again as it stands adds nothing and is not here; two claims with the
+        same text are one. *)
   ; dropped : Keeper_memory_os_types.dropped_statement list
     (** One statement per retired memory. The librarian names only what
         changes; a current memory it does not name here stays, which is what
@@ -75,7 +78,8 @@ type selection =
   ; absorbed : Keeper_memory_os_types.absorbed_statement list
     (** One statement per current memory a new claim names in [absorbs]
         (RFC-0456 §4.2). Each is current, in no [dropped] statement, and
-        absorbed by one claim only; [into] is that claim's identity. *)
+        absorbed by one claim only; [into] is that claim's identity, which is
+        the current memory itself when the claim restated one. *)
   ; facts : Keeper_memory_os_types.fact list
   ; revisions : revision list
   ; working_state : string option
@@ -107,7 +111,13 @@ type parse_error =
   | Missing_required_fields
   | Claim_schema_mismatch
   | Dropped_schema_mismatch
-  | Duplicate_selected_memory_id of string
+  | Dropped_memory_id_recreated of string
+      (** A claim's text is a memory the same answer drops, directly or as the
+          target of its own [supersedes]: the answer says both "gone" and
+          "kept". A claim that writes a kept current memory again as it stands
+          is that memory unchanged, not this error. *)
+  | Absorbed_memory_id_restated of string
+      (** A claim's text is a memory another claim of the same answer absorbs. *)
   | Unknown_dropped_memory_id of string
   | Duplicate_dropped_memory_id of string
   | Supersedes_unknown_memory_id of string

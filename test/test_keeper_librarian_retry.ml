@@ -447,33 +447,112 @@ let test_an_answer_naming_only_changes_keeps_the_rest () =
       (List.map Memory.memory_id selection.facts)
 ;;
 
-let test_new_claim_cannot_collide_with_retained_identity () =
-  match
-    parse
-      (selection_json ~new_claims:[ new_claim ~claim:"keep A" () ] ())
-  with
-  | Error (Librarian.Duplicate_selected_memory_id identity)
-    when String.equal identity current_a_id -> ()
-  | Error error ->
-    failf "wrong collision error: %s" (Librarian.parse_error_to_string error)
-  | Ok _ -> fail "retained/new identity collision accepted"
-;;
-
-let test_new_claim_cannot_recreate_dropped_current_identity () =
+(* [memory_id] is the claim's own bytes, so a claim that writes a kept current
+   memory again as it stands is that memory. It adds nothing, the stored fact
+   keeps its first sighting, and the rest of the answer still applies. *)
+let test_a_restated_current_memory_is_kept_and_the_rest_applies () =
   match
     parse
       (selection_json
-         ~dropped:[ dropped_json "m1"; dropped_json "m2" ]
-         ~new_claims:[ new_claim ~claim:"keep A" () ]
+         ~dropped:[]
+         ~new_claims:[ new_claim ~claim:"keep A" (); new_claim ~claim:"add C" () ]
          ())
   with
-  | Error (Librarian.Duplicate_selected_memory_id identity)
-    when String.equal identity current_a_id -> ()
   | Error error ->
-    failf
-      "wrong dropped-current collision error: %s"
-      (Librarian.parse_error_to_string error)
-  | Ok _ -> fail "dropped current identity was recreated as a new claim"
+    failf "restated memory rejected the pass: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    check (list string) "only the genuinely new claim is added"
+      [ "add C" ]
+      (List.map (fun (f : Memory.fact) -> f.claim) selection.new_claims);
+    check int "the fact count grows by one" 3 (List.length selection.facts);
+    (match
+       List.find_opt
+         (fun f -> String.equal (Memory.memory_id f) current_a_id)
+         selection.facts
+     with
+     | Some kept ->
+       check (float 0.) "the restated memory keeps its first sighting"
+         current_a.first_seen kept.first_seen
+     | None -> fail "the restated memory left the facts")
+;;
+
+(* A restated memory can gather others: they go into its existing id, and its
+   own id in [absorbs] asks for nothing. *)
+let test_a_restated_memory_absorbs_into_its_existing_id () =
+  match
+    parse
+      (selection_json
+         ~dropped:[]
+         ~new_claims:
+           [ absorbing_claim ~claim:"keep A" (`List [ `String "m1"; `String "m2" ]) () ]
+         ())
+  with
+  | Error error ->
+    failf "restated absorbing memory rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    check (list (pair string string)) "B goes into A; A does not go into itself"
+      [ current_b_id, current_a_id ]
+      (List.map
+         (fun (a : Memory.absorbed_statement) -> a.absorbed, a.into)
+         selection.absorbed);
+    check (list string) "A stays as the one memory"
+      [ current_a_id ]
+      (List.map Memory.memory_id selection.facts);
+    check int "no new claim" 0 (List.length selection.new_claims)
+;;
+
+(* Two claims with the same text are one memory: one claim, the absorbs of both. *)
+let test_two_claims_with_the_same_text_are_one () =
+  match
+    parse
+      (selection_json
+         ~dropped:[]
+         ~new_claims:
+           [ absorbing_claim ~claim:"add C" (`List [ `String "m1" ]) ()
+           ; absorbing_claim ~claim:"add C" (`List [ `String "m2" ]) ()
+           ]
+         ())
+  with
+  | Error error ->
+    failf "same-text claims rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    let into = Memory.memory_id (fact ~claim:"add C") in
+    check int "one claim" 1 (List.length selection.new_claims);
+    check (list (pair string string)) "both memories go into it"
+      [ current_a_id, into; current_b_id, into ]
+      (List.map
+         (fun (a : Memory.absorbed_statement) -> a.absorbed, a.into)
+         selection.absorbed)
+;;
+
+(* Dropping a memory and claiming it in the same answer says both "gone" and
+   "kept". A correction that names the memory it drops with the same text is
+   that shape too. *)
+let test_new_claim_cannot_recreate_dropped_current_identity () =
+  expect_parse_error "drop and re-add the same text"
+    (Librarian.Dropped_memory_id_recreated current_a_id)
+    (selection_json
+       ~dropped:[ dropped_json "m1"; dropped_json "m2" ]
+       ~new_claims:[ new_claim ~claim:"keep A" () ]
+       ());
+  expect_parse_error "a correction that changes nothing"
+    (Librarian.Dropped_memory_id_recreated current_a_id)
+    (selection_json
+       ~dropped:[ dropped_json "m1" ]
+       ~new_claims:[ superseding_claim ~claim:"keep A" (`String "m1") () ]
+       ())
+;;
+
+let test_a_memory_absorbed_elsewhere_cannot_be_restated () =
+  expect_parse_error "absorbed by one claim, restated by another"
+    (Librarian.Absorbed_memory_id_restated current_a_id)
+    (selection_json
+       ~dropped:[]
+       ~new_claims:
+         [ new_claim ~claim:"keep A" ()
+         ; absorbing_claim (`List [ `String "m1" ]) ()
+         ]
+       ())
 ;;
 
 (* The two arrays stay required even when both are empty: an answer missing a
@@ -1429,8 +1508,14 @@ let () =
             test_rendered_fact_states_when_it_was_recorded
         ; test_case "an answer naming only changes keeps the rest" `Quick
             test_an_answer_naming_only_changes_keeps_the_rest
-        ; test_case "current/new collision rejects" `Quick
-            test_new_claim_cannot_collide_with_retained_identity
+        ; test_case "a restated current memory is kept and the rest applies" `Quick
+            test_a_restated_current_memory_is_kept_and_the_rest_applies
+        ; test_case "a restated memory absorbs into its existing id" `Quick
+            test_a_restated_memory_absorbs_into_its_existing_id
+        ; test_case "two claims with the same text are one" `Quick
+            test_two_claims_with_the_same_text_are_one
+        ; test_case "a memory absorbed elsewhere cannot be restated" `Quick
+            test_a_memory_absorbed_elsewhere_cannot_be_restated
         ; test_case "dropped/new recreation rejects" `Quick
             test_new_claim_cannot_recreate_dropped_current_identity
         ; test_case "selection without dropped field rejects" `Quick

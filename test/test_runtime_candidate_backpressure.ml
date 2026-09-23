@@ -4,6 +4,9 @@
 
 module State = Runtime_candidate_backpressure_state
 
+let keeper_a = State.keeper_recorder ~keeper_name:"keeper-a"
+let keeper_b = State.keeper_recorder ~keeper_name:"keeper-b"
+
 let rate_limit_after ~now state = (State.observe ~now state).State.rate_limit
 
 let test_rate_limit_hint_expires_exactly () =
@@ -43,10 +46,11 @@ let test_rate_limit_delayed_observation_keeps_newer_hint () =
 (* RFC-0458 §3.4: a failed attempt names no time, so no clock ends it. *)
 let test_failed_attempt_has_no_expiry () =
   let noted =
-    State.note_failed_attempt ~noted_at:10. ~failure:State.Provider_timeout State.empty
+    State.note_failed_attempt ~noted_at:10. ~failure:State.Provider_timeout
+      ~recorded_by:keeper_a State.empty
   in
   match (State.observe ~now:1e12 noted).State.failed_attempt with
-  | Some (State.Failed_attempt { noted_at; failure = State.Provider_timeout }) ->
+  | Some (State.Failed_attempt { noted_at; failure = State.Provider_timeout; recorded_by = _ }) ->
       Alcotest.(check (float 0.)) "original observation retained" 10. noted_at
   | Some (State.Failed_attempt { failure = State.Server_error | State.Network_transient; _ })
   | None ->
@@ -55,15 +59,42 @@ let test_failed_attempt_has_no_expiry () =
 
 let test_failed_attempt_delayed_observation_keeps_newer () =
   let newer =
-    State.note_failed_attempt ~noted_at:20. ~failure:State.Network_transient State.empty
+    State.note_failed_attempt ~noted_at:20. ~failure:State.Network_transient
+      ~recorded_by:keeper_a State.empty
   in
-  let delayed = State.note_failed_attempt ~noted_at:10. ~failure:State.Server_error newer in
+  let delayed =
+    State.note_failed_attempt ~noted_at:10. ~failure:State.Server_error
+      ~recorded_by:keeper_b newer
+  in
   match delayed.State.failed_attempt with
-  | Some (State.Failed_attempt { noted_at; failure = State.Network_transient }) ->
-      Alcotest.(check (float 0.)) "newer observation kept" 20. noted_at
+  | Some (State.Failed_attempt { noted_at; failure = State.Network_transient; recorded_by }) ->
+      Alcotest.(check (float 0.)) "newer observation kept" 20. noted_at;
+      Alcotest.(check bool) "an older failure does not take over the recorder" true
+        (State.same_recorder recorded_by keeper_a)
   | Some (State.Failed_attempt { failure = State.Server_error | State.Provider_timeout; _ })
   | None ->
       Alcotest.fail "an older failure replaced a newer one"
+;;
+
+(* RFC-0458 §3.4 (2026-09-23): the Keeper that saw the candidate fail last is
+   the recorder, because its next cycle is the one that tries it again. *)
+let test_a_newer_failure_names_its_own_recorder () =
+  let first =
+    State.note_failed_attempt ~noted_at:10. ~failure:State.Provider_timeout
+      ~recorded_by:keeper_a State.empty
+  in
+  let renewed =
+    State.note_failed_attempt ~noted_at:20. ~failure:State.Server_error
+      ~recorded_by:keeper_b first
+  in
+  match renewed.State.failed_attempt with
+  | Some (State.Failed_attempt { noted_at; recorded_by; failure = _ }) ->
+      Alcotest.(check (float 0.)) "the newer failure is held" 20. noted_at;
+      Alcotest.(check bool) "it names the Keeper that saw it" true
+        (State.same_recorder recorded_by keeper_b);
+      Alcotest.(check bool) "not the earlier one" false
+        (State.same_recorder recorded_by keeper_a)
+  | None -> Alcotest.fail "the newer failure was dropped"
 ;;
 
 (* The two observations answer different questions, so neither erases the
@@ -73,7 +104,7 @@ let test_a_rate_limit_and_a_failed_attempt_are_held_independently () =
   let both =
     State.empty
     |> State.note_rate_limit ~noted_at:10. ~retry_after:(Some 5.)
-    |> State.note_failed_attempt ~noted_at:12. ~failure:State.Server_error
+    |> State.note_failed_attempt ~noted_at:12. ~failure:State.Server_error ~recorded_by:keeper_a
   in
   Alcotest.(check bool) "the later failure keeps the hinted rate limit" true
     (Option.is_some (rate_limit_after ~now:14. both));
@@ -105,7 +136,8 @@ let test_a_candidate_cell_holds_the_observation_until_success () =
     (Option.is_none
        (Runtime_candidate_backpressure.candidate_backpressure ~now:1e12 ~candidate));
   Runtime_candidate_backpressure.note_failed_attempt ~candidate
-    ~failure:Runtime_candidate_backpressure.Provider_timeout;
+    ~failure:Runtime_candidate_backpressure.Provider_timeout
+    ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"keeper-a");
   Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 1.);
   Alcotest.(check bool) "a timeout is held after the rate-limit hint elapses" true
     (Option.is_some
@@ -149,6 +181,8 @@ let () =
             test_failed_attempt_has_no_expiry
         ; Alcotest.test_case "a delayed failed attempt keeps the newer one" `Quick
             test_failed_attempt_delayed_observation_keeps_newer
+        ; Alcotest.test_case "a newer failure names its own recorder" `Quick
+            test_a_newer_failure_names_its_own_recorder
         ; Alcotest.test_case "rate limit and failed attempt are independent" `Quick
             test_a_rate_limit_and_a_failed_attempt_are_held_independently
         ; Alcotest.test_case "a candidate cell holds the observation until success" `Quick

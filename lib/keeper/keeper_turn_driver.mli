@@ -116,6 +116,19 @@ type walk_rest =
       ; resting_runtime_id : string
       }
 
+(** Whose walk orders the lane (RFC-0458 §3.4, 2026-09-23).
+    [Fresh_walk_by recorder]: a turn without a deferred suffix, run for the
+    Keeper [recorder] names. A failed attempt that Keeper recorded does not
+    demote its candidate, so the Keeper's next cycle tries the head once more
+    and the answer renews or clears the mark; without this the fallback kept
+    answering and the head never came back until restart (#38174).
+    Failed attempts other Keepers recorded still demote.
+    [Continuing_walk]: a failed turn's deferred suffix or a rotation inside a
+    walk. Every failed attempt demotes. *)
+type walk_start =
+  | Fresh_walk_by of Runtime_candidate_backpressure.recorder
+  | Continuing_walk
+
 (** A deferred suffix in the order the next turn walks it. *)
 val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
 
@@ -143,7 +156,8 @@ type assignment_refusal =
       (** The configured identity has no capability catalog entry. *)
 
 val assignment_refusal_to_string : assignment_refusal -> string
-val assignment_walk_order : now:float -> string -> (walk_order, assignment_refusal) result
+val assignment_walk_order :
+  now:float -> walk:walk_start -> string -> (walk_order, assignment_refusal) result
 
 (** A fresh walk of an assignment, ordered as a turn without a deferred suffix
     orders it: {!assignment_walk_order}'s head and its rest. *)
@@ -437,6 +451,7 @@ module For_testing : sig
 
   val modality_reroute_candidates :
     now:float ->
+    walk:walk_start ->
     deferred_runtime_lane:deferred_runtime_lane option ->
     first_candidate:Runtime.t ->
     remaining_runtimes:Runtime.t list ->
@@ -523,6 +538,7 @@ module For_testing : sig
     ?model_of:('candidate -> string option) ->
     ?candidate_backpressure_of:('candidate -> Runtime_candidate_backpressure.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
+    recorder:Runtime_candidate_backpressure.recorder ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
     emit_runtime_manifest:

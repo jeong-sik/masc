@@ -20,8 +20,13 @@ type attempt_failure = State.attempt_failure =
   | Network_transient
   | Provider_timeout
 
+type recorder = State.recorder
+
+let keeper_recorder = State.keeper_recorder
+let same_recorder = State.same_recorder
+
 type failed_attempt = State.failed_attempt =
-  | Failed_attempt of { noted_at : float; failure : attempt_failure }
+  | Failed_attempt of { noted_at : float; failure : attempt_failure; recorded_by : recorder }
 
 type candidate_backpressure = State.candidate_backpressure =
   { rate_limit : rate_limit option
@@ -61,10 +66,10 @@ let note_rate_limit ~candidate ~retry_after =
   (* See update_candidate: CAS publishes the observation; discard its read-back value, not an error. *)
   ignore (update_candidate candidate (State.note_rate_limit ~noted_at ~retry_after))
 
-let note_failed_attempt ~candidate ~failure =
+let note_failed_attempt ~candidate ~failure ~recorded_by =
   let noted_at = now () in
   (* See update_candidate: CAS publishes the observation; discard its read-back value, not an error. *)
-  ignore (update_candidate candidate (State.note_failed_attempt ~noted_at ~failure))
+  ignore (update_candidate candidate (State.note_failed_attempt ~noted_at ~failure ~recorded_by))
 
 let note_candidate_success ~candidate = Atomic.set candidate.backpressure State.empty
 

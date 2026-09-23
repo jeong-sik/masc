@@ -494,7 +494,13 @@ let forecast ~config ~keeper_name =
          (Keeper_carried_front.read_seed ~config ~keeper_name ~trace_id).seed)
        in
        let walk, candidates =
-         match Keeper_turn_driver.assignment_walk_order ~now assignment_id with
+         (* The walk this Keeper's next turn takes: a failed attempt it
+            recorded itself does not move the head (RFC-0458 §3.4). *)
+         let walk =
+           Keeper_turn_driver.Fresh_walk_by
+             (Runtime_candidate_backpressure.keeper_recorder ~keeper_name:meta.name)
+         in
+         match Keeper_turn_driver.assignment_walk_order ~now ~walk assignment_id with
          | Error refusal -> Error refusal, []
          | Ok { Keeper_turn_driver.lane_id; declared; order } ->
            ( Ok { lane_id; declared }

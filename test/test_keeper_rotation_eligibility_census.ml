@@ -25,12 +25,15 @@ let second_candidate = "second.model"
 
 let emit_manifest_ignored ?status:_ ?decision:_ _event = ()
 
+let test_recorder = Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"census-test"
+
+
 (* Attempted candidate ids, in order, for a lane whose first candidate fails
    with [error]. *)
 let attempted_candidates error =
   let attempts = ref [] in
   let _result =
-    Driver.For_testing.attempt_runtime_candidates
+    Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
       ~runtime_id:"census"
       ~runtime_id_of:(fun candidate -> candidate)
       ~emit_runtime_manifest:emit_manifest_ignored
@@ -561,7 +564,7 @@ let test_request_refusal_preserves_retry_authority () =
    | _ -> Alcotest.fail "provider prose was reclassified as capacity");
   List.iter (fun (label, allow_retry, effect_disposition, expected) ->
     let attempts = ref [] in
-    let result = Driver.For_testing.attempt_runtime_candidates
+    let result = Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
       ~runtime_id:"request-refusal" ~runtime_id_of:Fun.id
       ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> allow_retry)
       ~emit_runtime_manifest:emit_manifest_ignored
@@ -578,7 +581,7 @@ let test_request_refusal_preserves_retry_authority () =
     ; "effect already attempted", true, Masc.Keeper_provider_attempt_effect.Effect_attempted, 1
     ; "effect unknown", true, Masc.Keeper_provider_attempt_effect.Observation_unavailable, 1 ];
   let attempts = ref 0 in
-  let result = Driver.For_testing.attempt_runtime_candidates
+  let result = Driver.For_testing.attempt_runtime_candidates ~recorder:test_recorder
     ~runtime_id:"all-refused" ~runtime_id_of:Fun.id
     ~emit_runtime_manifest:emit_manifest_ignored
     ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ ->

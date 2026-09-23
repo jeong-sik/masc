@@ -6,8 +6,15 @@ type attempt_failure =
   | Network_transient
   | Provider_timeout
 
+type recorder = Keeper_recorder of { keeper_name : string }
+
+let keeper_recorder ~keeper_name = Keeper_recorder { keeper_name }
+
+let same_recorder (Keeper_recorder left) (Keeper_recorder right) =
+  String.equal left.keeper_name right.keeper_name
+
 type failed_attempt =
-  | Failed_attempt of { noted_at : float; failure : attempt_failure }
+  | Failed_attempt of { noted_at : float; failure : attempt_failure; recorded_by : recorder }
 
 type candidate_backpressure =
   { rate_limit : rate_limit option
@@ -27,11 +34,11 @@ let note_rate_limit ~noted_at ~retry_after current =
   | Some (Unknown_scope_rate_limit _) | None ->
       { current with rate_limit = Some (Unknown_scope_rate_limit { noted_at; retry_after }) }
 
-let note_failed_attempt ~noted_at ~failure current =
+let note_failed_attempt ~noted_at ~failure ~recorded_by current =
   match current.failed_attempt with
   | Some (Failed_attempt existing) when existing.noted_at > noted_at -> current
   | Some (Failed_attempt _) | None ->
-      { current with failed_attempt = Some (Failed_attempt { noted_at; failure }) }
+      { current with failed_attempt = Some (Failed_attempt { noted_at; failure; recorded_by }) }
 
 let observe ~now current =
   match current.rate_limit with

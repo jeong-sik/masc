@@ -18,10 +18,21 @@ type attempt_failure =
 (** The failure routes that say the candidate did not answer, and that are
     neither the candidate's rate limit nor MASC's own capacity. *)
 
+type recorder
+(** The Keeper whose walk recorded a failed attempt. Compared only for
+    identity: the recorder's next cycle walks the head again, every other
+    walk keeps it behind (RFC-0458 §3.4, 2026-09-23). *)
+
+val keeper_recorder : keeper_name:string -> recorder
+
+val same_recorder : recorder -> recorder -> bool
+
 type failed_attempt =
-  | Failed_attempt of { noted_at : float; failure : attempt_failure }
+  | Failed_attempt of { noted_at : float; failure : attempt_failure; recorded_by : recorder }
 (** The attempted candidate failed without answering. There is no time at
-    which this stops being true; only an answer from the candidate ends it. *)
+    which this stops being true; only an answer from the candidate ends it.
+    [recorded_by] names the Keeper whose walk saw it; that Keeper's next
+    attempt on the candidate renews or clears it. *)
 
 type candidate_backpressure =
   { rate_limit : rate_limit option
@@ -41,10 +52,12 @@ val note_rate_limit :
     ends that rate limit. The failed attempt, if any, is kept. *)
 
 val note_failed_attempt :
-  noted_at:float -> failure:attempt_failure ->
+  noted_at:float -> failure:attempt_failure -> recorded_by:recorder ->
   candidate_backpressure -> candidate_backpressure
-(** Record the failed attempt unless a newer one is already held. The rate
-    limit, if any, is kept. *)
+(** Record the failed attempt unless a newer one is already held. A newer
+    failure replaces the recorder too: the Keeper that saw the candidate fail
+    last is the one whose next cycle tries it again. The rate limit, if any,
+    is kept. *)
 
 val observe : now:float -> candidate_backpressure -> candidate_backpressure
 (** A usable provider hint ends the rate limit after that delay. Without one,

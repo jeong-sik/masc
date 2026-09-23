@@ -160,6 +160,18 @@ type lane_terminal_error =
    non-rotating error before resolvable alternatives are tried. Order is
    therefore resolvable-active, then resolvable-exhausted, then unresolvable —
    declared relative order preserved within each class (PR #28219 review). *)
+(* Whose walk is ordering the lane. A failed attempt holds until its candidate
+   answers, and while a sibling answers the candidate is never dispatched to
+   answer; the lane stayed on its fallback until restart (#38174). So the
+   Keeper that recorded the failure walks the declared order on its next fresh
+   walk: its next cycle tries the head once more, which renews or clears the
+   mark. Every other walk -- another Keeper's, the retry of the failed turn, a
+   rotation inside a walk -- still sends the candidate back (RFC-0458 §3.4,
+   2026-09-23). *)
+type walk_start =
+  | Fresh_walk_by of Runtime_candidate_backpressure.recorder
+  | Continuing_walk
+
 type demotion =
   | Not_demoted
   | Failed_without_rest
@@ -172,7 +184,7 @@ type demotion =
    (RFC-0458 §3.4). It is also what keeps a released rate limit promoting its
    path past the ones still resting, even while a failed attempt keeps it
    behind the ones that answered. *)
-let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_backpressure_of candidates =
+let demote_unavailable_candidates ~now ~walk ~quota_scope_of ~candidate_backpressure_of candidates =
   let demotion candidate =
     let quota_exhausted =
       Option.fold ~none:false
@@ -187,8 +199,17 @@ let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_backpressure_o
     | true, (Some _ | None)
     | false, Some { Runtime_candidate_backpressure.rate_limit = Some _; failed_attempt = _ } ->
       Told_to_rest
-    | false, Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = Some _ } ->
-      Failed_without_rest
+    | false,
+      Some
+        { Runtime_candidate_backpressure.rate_limit = None
+        ; failed_attempt =
+            Some (Runtime_candidate_backpressure.Failed_attempt { recorded_by; _ })
+        } ->
+      (match walk with
+       | Fresh_walk_by walker
+         when Runtime_candidate_backpressure.same_recorder walker recorded_by ->
+         Not_demoted
+       | Fresh_walk_by _ | Continuing_walk -> Failed_without_rest)
     | false, Some { Runtime_candidate_backpressure.rate_limit = None; failed_attempt = None }
     | false, None ->
       Not_demoted
@@ -209,11 +230,11 @@ let demote_unavailable_candidates ~now ~quota_scope_of ~candidate_backpressure_o
   in_place Not_demoted @ in_place Failed_without_rest @ in_place Told_to_rest
 ;;
 
-let quota_ordered_runtime_ids ~now runtime_ids =
+let quota_ordered_runtime_ids ~now ~walk runtime_ids =
   (* Resolve once so both kinds of ordering evidence use the same catalog row. *)
   let resolved = List.map (fun id -> id, Runtime.get_runtime_by_id id) runtime_ids in
   let resolvable, unresolvable = List.partition (fun (_, rt) -> Option.is_some rt) resolved in
-  let ordered = demote_unavailable_candidates ~now
+  let ordered = demote_unavailable_candidates ~now ~walk
     ~quota_scope_of:(fun (_, rt) -> Option.map Runtime.quota_scope_of_runtime rt)
     ~candidate_backpressure_of:(fun (_, rt) ->
       Option.map (fun (rt : Runtime.t) -> rt.candidate_backpressure) rt)
@@ -222,7 +243,7 @@ let quota_ordered_runtime_ids ~now runtime_ids =
 ;;
 
 let quota_ordered_deferred_runtime_lane ~now hint =
-  match quota_ordered_runtime_ids ~now (deferred_runtime_ids hint) with
+  match quota_ordered_runtime_ids ~now ~walk:Continuing_walk (deferred_runtime_ids hint) with
   | next_runtime_id :: later_runtime_ids ->
     { hint with next_runtime_id; later_runtime_ids }
   | [] -> hint
@@ -368,12 +389,12 @@ let assignment_refusal_to_string = function
     "capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing
 ;;
 
-let assignment_walk_order ~now assignment_id =
+let assignment_walk_order ~now ~walk assignment_id =
   match Runtime.resolve_assignment assignment_id with
   | `Lane lane ->
     let lane_id = Runtime_lane.id lane in
     let declared = Runtime_lane.ordered_candidates lane in
-    Ok { lane_id; declared; order = quota_ordered_runtime_ids ~now declared }
+    Ok { lane_id; declared; order = quota_ordered_runtime_ids ~now ~walk declared }
   | `Unavailable missing -> Error (Catalog_unavailable missing)
   | `Missing -> Error Assignment_missing
 ;;
@@ -381,7 +402,9 @@ let assignment_walk_order ~now assignment_id =
 (* An assignment the walk would refuse still names a path whose rest the
    failure wait reads; it rests as its own single candidate. *)
 let assignment_walk_rest ~now assignment_id =
-  match assignment_walk_order ~now assignment_id with
+  (* Whose walk it is only moves a failed attempt, and a failed attempt never
+     rests (RFC-0458 §3.4), so every walker reaches the same rest. *)
+  match assignment_walk_order ~now ~walk:Continuing_walk assignment_id with
   | Ok { order = head :: later; _ } -> walk_rest ~now ~head ~later
   | Ok { order = []; _ } | Error (Assignment_missing | Catalog_unavailable _) ->
     Walk_head_serving { runtime_id = assignment_id }
@@ -569,6 +592,7 @@ let attempt_runtime_candidates
     ?model_of
     ?candidate_backpressure_of
     ?candidate_dispatchable
+    ~recorder
     ~runtime_id ~runtime_id_of
     ~(emit_runtime_manifest :
        ?status:string ->
@@ -668,6 +692,7 @@ let attempt_runtime_candidates
     in
     demote_unavailable_candidates
       ~now:(Unix.gettimeofday ())
+      ~walk:Continuing_walk
       ~quota_scope_of ~candidate_backpressure_of
       dispatchable
     @ undispatchable
@@ -844,7 +869,9 @@ let attempt_runtime_candidates
        in
        let note_failed_attempt failure =
          Option.iter
-           (fun candidate -> Runtime_candidate_backpressure.note_failed_attempt ~candidate ~failure)
+           (fun candidate ->
+              Runtime_candidate_backpressure.note_failed_attempt
+                ~candidate ~failure ~recorded_by:recorder)
            attempt_candidate_backpressure
        in
        (* The evidence follows the failure route, the one classification of
@@ -1165,7 +1192,7 @@ let dedupe_runtimes_preserve_order runtimes =
    deferred lane offers no candidates: its walk dispatches the frozen suffix
    ([lane_candidate_ids] in [run_agent_turn]), so a decision that moved the
    head would be recorded as a reroute the walk never performs. *)
-let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
+let modality_reroute_candidates ~now ~walk ~deferred_runtime_lane ~first_candidate
     ~remaining_runtimes =
   match deferred_runtime_lane with
   | Some _ -> []
@@ -1173,6 +1200,7 @@ let modality_reroute_candidates ~now ~deferred_runtime_lane ~first_candidate
     dedupe_runtimes_preserve_order (first_candidate :: remaining_runtimes)
     |> demote_unavailable_candidates
          ~now
+         ~walk
          ~quota_scope_of:(fun (runtime : Runtime.t) ->
            Some (Runtime.quota_scope_of_runtime runtime))
          ~candidate_backpressure_of:(fun (runtime : Runtime.t) ->
@@ -1735,11 +1763,13 @@ let run_named
     | Some rejects -> rejects
     | None -> ref []
   in
+  let recorder = Runtime_candidate_backpressure.keeper_recorder ~keeper_name in
   let demote_quota_exhausted candidates =
     quota_ordered_runtime_ids
       (* NDT-OK: scheduling intentionally compares the stored expiry with
          wall clock; the ordering read receives one explicit [now]. *)
       ~now:(Unix.gettimeofday ())
+      ~walk:(Fresh_walk_by recorder)
       candidates
   in
   let* lane_candidate_ids =
@@ -1810,6 +1840,7 @@ let run_named
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
          ordering read receives one explicit [now], as the lane's does above. *)
       ~now:(Unix.gettimeofday ())
+      ~walk:(Fresh_walk_by recorder)
       ~deferred_runtime_lane
       ~first_candidate
       ~remaining_runtimes
@@ -1893,6 +1924,7 @@ let run_named
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
     ~pre_tool_rejects
+    ~recorder
     ?retry_deferral:runtime_retry_deferral
     ~tool_results_saved:(fun () ->
       Keeper_turn_driver_try_provider.tool_results_saved checkpoint_progress)

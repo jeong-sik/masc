@@ -3654,6 +3654,79 @@ let test_server_refusal_advances_once_to_successor status =
       | _ -> fail "HTTP server refusal lost its typed cause")
 ;;
 
+(* A sent request that gets no answer within its binding's deadline advances to
+   the declared successor, which carries its own deadline. The server answers
+   every POST after a delay; only the first candidate's deadline is shorter
+   than that delay, and loopback connects well inside it, so the deadline
+   falls after dispatch. *)
+let test_sent_timeout_advances_once_to_successor () =
+  let timed_out_id = "sent-timeout-first" in
+  let successor_id = "sent-timeout-successor" in
+  let (result, advances, observed_advance), posts =
+    with_server
+      ~response_delay_s:1.5
+      ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry
+          ~connect_timeout_s:(Some 0.5)
+          ~id:timed_out_id
+          ~base_url
+          ~native:true
+          ~json:true
+          ()
+      ; catalog_entry ~id:successor_id ~base_url ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    let flow = start_flow (frozen_flow snapshot [ timed_out_id; successor_id ]) in
+    let advances = ref 0 in
+    let observed_advance = ref None in
+    let result =
+      execute_with_accepting_test_validator
+        ~clock
+        ~net
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ -> Ok ())
+        ~before_advance:(fun ~failed ~next ->
+          let failed_candidate, failure = flow_execution_failure failed in
+          observed_advance
+          := Some
+               ( candidate_id failed_candidate
+               , next.identity.candidate_id
+               , failure.EO.cause
+               , EO.receipt_phase failure.receipt
+               , EO.receipt_dispatch_count failure.receipt );
+          incr advances;
+          Ok ())
+        flow
+    in
+    result, !advances, !observed_advance
+  in
+  (match observed_advance with
+   | Some (failed, next, cause, phase, dispatch_count) ->
+     check string "the timed-out candidate" timed_out_id failed;
+     check string "the declared successor" successor_id next;
+     (match cause with
+      | EO.Completion_failed
+          { error = Http_client.TimeoutError { phase = Http_client.Http_operation; _ }; _ }
+        -> ()
+      | _ -> fail "the first candidate did not end on its sent-request deadline");
+     check bool "the timed-out request was dispatched" true (phase = EO.Dispatch_started);
+     check int "the timed-out candidate records one dispatch" 1 dispatch_count
+   | None -> fail "a sent-request timeout did not request an advance");
+  check int "one advance to the successor" 1 advances;
+  check int "both candidates reach the server" 2 posts;
+  match result with
+  | Ok success ->
+    check
+      string
+      "the successor answers"
+      successor_id
+      (candidate_id (EO.flow_success_candidate success))
+  | Error _ -> fail "the flow ended on the first candidate's deadline"
+;;
+
 let check_body_deadline_transcript success =
   let durable =
     match EO.snapshot_validated_flow_evidence
@@ -4628,6 +4701,10 @@ let () =
             (fun () -> test_server_refusal_advances_once_to_successor 520)
         ; test_case "HTTP 529 advances once to the declared successor" `Quick
             (fun () -> test_server_refusal_advances_once_to_successor 529)
+        ; test_case
+            "a sent request past its deadline advances once to the declared successor"
+            `Quick
+            test_sent_timeout_advances_once_to_successor
         ; test_case "HTTP 200 body deadline advances with truthful evidence" `Quick
             (test_body_deadline_advances_after_settlement ~http_status:200 ~settle:true)
         ; test_case "HTTP 201 body deadline uses the same successor contract" `Quick

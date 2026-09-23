@@ -1816,6 +1816,16 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
 let execution_failure_may_advance (error : execution_error) =
   match error.cause, receipt_phase error.receipt with
   | Completion_failed _, Before_dispatch -> receipt_dispatch_count error.receipt = 0
+  (* The request went out and this binding did not answer within its own
+     deadline. How long a binding takes is a property of the binding, as its
+     quota is: the successor carries its own deadline and may serve the same
+     input. Exact requests have no tools and no domain validator ran, so the
+     one unanswered dispatch is the only thing left behind, and the receipt
+     keeps it as a fact. On the Librarian lane (2026-09-23) 51 of 85 failed
+     runs ended this way at the first slot, and their successors were never
+     tried. *)
+  | Completion_failed { error = Http_client.TimeoutError _; _ }, Dispatch_started ->
+    receipt_dispatch_count error.receipt = 1
   | Response_body_deadline_exceeded, Response_received ->
     (* No domain validator ran for this incomplete response. Advance through
        the caller's existing settlement callback, retaining the dispatched

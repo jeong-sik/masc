@@ -221,7 +221,7 @@ rg -n 'String\.(equal|compare|starts_with|ends_with|contains)' lib/keeper/keeper
 | D4 | 프롬프트가 "오래 쓸 지식"만 남기라고 한다. 턴 진행과 현재 상태는 저장하지 말라고 한다. 읽은 위치를 지나간 "하던 일"은 어디에도 남지 않는다 | `config/prompts/librarian.md` §남길 지식과 증거 | §7 (라) |
 | D5 | "이 턴이 이력의 어디까지인가"가 저장되지 않는다. 프롬프트의 `turn=%d` 는 턴 번호가 아니라 메시지 순번이다 | `keeper_turn_driver_try_provider.ml` `initial_message_index`, `keeper_librarian.ml` `format_messages_for_prompt` | §4.6 의 턴 끝 기록 |
 | D6 | 도구 결과와 호출은 `[... omitted]` 로만 받고 thinking 은 빠진다. 공식 클라이언트 턴은 assistant 메시지 1개만 받는다 | `keeper_librarian.ml` `text_of_content`, `keeper_agent_run_finalize_response.ml` `librarian_messages` | 공식 클라이언트는 §4.8. 도구 결과 본문은 §6 |
-| D8 | 어느 슬롯에서든 provider 가 Timeout, Network_error, Context_overflow, Overloaded, Server_error 같은 거절을 돌려주면 다음 슬롯으로 넘어가지 않고 회차가 끝난다 | `exact_output.ml` `execution_failure_may_advance` | #36979 |
+| D8 | 보낸 요청이 한 슬롯에서 실패하면 다음 슬롯으로 넘어가는지를 한 표가 정한다. `Overloaded`·`Server_error`·`Rate_limited`·`Payment_required`·`Request_body_refused` 거절과, 보낸 뒤 그 슬롯의 기한 안에 답이 없던 시간 초과는 넘어간다. 보낸 뒤의 `Network_error` 와 `Context_overflow` 거절은 아직 회차를 끝낸다 | `exact_output.ml` `execution_failure_may_advance` | 시간 초과 #38418, 무기한 대기 #36979. 네트워크 오류·컨텍스트 초과는 남음 |
 
 이미 고쳐진 것은 다시 설계하지 않는다: 점호 제거와 `absorbs`(RFC-0456, #36936·#36937·#36948). 라이브에서 code-reviewer 의 facts 가 378개(09-16)에서 231개(09-18)로 줄었고 흡수 기록은 91건이다.
 

@@ -305,18 +305,49 @@ let append_signal config signal =
          (Unix.error_message err))
 ;;
 
-let append_new_signals config candidates =
+(* A seen key is one occurrence id: a digest of the schedule instance, its
+   schedule id, its due time and its payload. A tick can emit a key only for
+   a request the ledger currently holds, at that request's current due time
+   and payload (see [candidates]). So a key stays reachable only while it is
+   the current occurrence of a stored request. Every other key can never be
+   produced again:
+   - its schedule was forgotten or pruned from the ledger, and a schedule id
+     used again gets a fresh [schedule_instance_id] ([Schedule_domain]);
+   - its schedule was edited, which also takes a fresh instance id
+     ([Schedule_store.update_request]);
+   - its recurring schedule moved on, and [Schedule_domain.next_due_after]
+     only returns a due time after [now], while an emitted occurrence was
+     due at or before the [now] that emitted it.
+   Dropping those keys therefore cannot let a later tick emit a signal
+   twice. [state] is what this tick's [Schedule_store.refresh_due] returned,
+   read before this lock. The server maintenance loop is the one runner on
+   a base path and runs its ticks one after another, so no other tick can
+   advance a schedule and record its new key in between. *)
+let current_occurrence_keys (state : Schedule_store.state) =
+  let keys = Hashtbl.create (List.length state.schedules) in
+  List.iter
+    (fun request ->
+       Hashtbl.replace keys (Schedule_occurrence_id.to_string (occurrence_id request)) ())
+    state.schedules;
+  keys
+;;
+
+let append_new_signals config ~(state : Schedule_store.state) candidates =
   Workspace_utils.mkdir_p (schedules_dir config);
   Workspace_utils.with_file_lock config (signal_seen_path config) (fun () ->
     let* seen = read_seen config in
+    (* Dedupe against the whole list read from disk, pruned keys included, so
+       this tick's candidates are judged exactly as before the prune. *)
     let seen_tbl = Hashtbl.create (List.length seen + List.length candidates) in
     List.iter (fun key -> Hashtbl.replace seen_tbl key ()) seen;
+    let current = current_occurrence_keys state in
+    let kept = List.filter (fun key -> Hashtbl.mem current key) seen in
+    let pruned = List.compare_lengths kept seen < 0 in
     let emitted_rev = ref [] in
-    let seen_rev = ref (List.rev seen) in
-    (* The key list only grows when a signal is emitted, and it holds every
-       occurrence the store has ever signalled (6,242 keys, 430 KB on a live
-       root). A tick that emits nothing would rewrite the same list, so it
-       writes nothing.
+    let seen_rev = ref (List.rev kept) in
+    (* The file is rewritten only when this tick changed its contents: it
+       pruned a key or emitted a signal. A tick that does neither writes
+       nothing.
        This same write also closes #26686 item 3: [loop]'s [Error] arm below
        calls it before returning, so a signal whose JSONL row already landed
        (its [append_signal] succeeded) is recorded seen even when a later
@@ -325,9 +356,9 @@ let append_new_signals config candidates =
        discarded [seen_rev] entirely and the next tick re-appended every
        signal this one had already committed to the JSONL store. *)
     let persist_progress () =
-      match !emitted_rev with
-      | [] -> Ok ()
-      | _ :: _ -> write_seen config (List.rev !seen_rev)
+      match !emitted_rev, pruned with
+      | [], false -> Ok ()
+      | [], true | _ :: _, _ -> write_seen config (List.rev !seen_rev)
     in
     let rec loop = function
       | [] ->
@@ -518,7 +549,7 @@ let tick ?consumer ?clock config ~now ~retention_days =
       | None -> [], all_candidates
     in
     let candidate_signals = List.map snd active in
-    let* emitted = append_new_signals config candidate_signals in
+    let* emitted = append_new_signals config ~state candidate_signals in
     let held = List.map snd deferred in
     (match consumer with
      | Some consumer ->

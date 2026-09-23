@@ -1,6 +1,8 @@
 module Reading = Masc.Tui_decode
 module Terminal_text = Masc_tui_ansi.Terminal_text
 
+let unbind_all_key = "U"
+
 type target = {
   connector_id : string;
   connector_name : string;
@@ -150,3 +152,17 @@ let offer_prompt ~keeper_name ~confirm_key ~unreadable targets =
     (if List.length targets = 1 then "" else "s")
     (String.concat ", " (List.map target_label targets))
     (unreadable_note unreadable)
+
+let still_bound ~keeper_name targets =
+  Printf.sprintf "%s still holds %d channel binding%s; %s %s on its Channels \
+                  tab removes them"
+    (Terminal_text.single_line keeper_name)
+    (List.length targets)
+    (if List.length targets = 1 then "" else "s")
+    unbind_all_key unbind_all_key
+
+let offer_read_failed ~keeper_name ~detail =
+  Printf.sprintf
+    "could not read %s's channel bindings to offer removing them: %s"
+    (Terminal_text.single_line keeper_name)
+    (Terminal_text.single_line detail)

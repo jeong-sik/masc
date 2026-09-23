@@ -158,6 +158,12 @@ let test_offer_leads_with_the_key () =
     (Unbind.offer_prompt ~keeper_name:"sangsu" ~confirm_key:"U"
        ~unreadable:[ "Teams" ] targets)
 
+let test_elsewhere_the_offer_only_informs () =
+  let targets = Unbind.targets ~keeper_name:"sangsu" (snapshot ()) in
+  check string "names the count and where to remove them"
+    "sangsu still holds 3 channel bindings; U U on its Channels tab removes them"
+    (Unbind.still_bound ~keeper_name:"sangsu" targets)
+
 let () =
   run "masc_tui_connector_unbind"
     [ ( "unbind all"
@@ -173,5 +179,7 @@ let () =
         ; test_case "unreadable transport" `Quick
             test_an_unreadable_transport_is_named
         ; test_case "pause offer" `Quick test_offer_leads_with_the_key
+        ; test_case "offer elsewhere" `Quick
+            test_elsewhere_the_offer_only_informs
         ] )
     ]

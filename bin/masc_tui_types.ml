@@ -5636,7 +5636,14 @@ type state = {
   (* A Keeper the operator just paused or shut down, waiting for a fresh
      connector read to learn whether it still holds bindings to offer to
      remove. *)
-  mutable connector_unbind_offer_pending: string option;
+  mutable connector_unbind_offer_pending: string list;
+  (* Set when the unbind-all arm came from the pause offer rather than a
+     keypress: the count of frames presented when it was armed. A key read
+     before a later frame was presented never saw the offer, so it does not
+     answer it. *)
+  mutable connector_unbind_all_offered_at: int option;
+  (* Frames the terminal accepted with changed output. *)
+  mutable frames_presented: int;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
@@ -7596,7 +7603,9 @@ let create_state
   connector_unbind_armed = None;
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
-  connector_unbind_offer_pending = None;
+  connector_unbind_offer_pending = [];
+  connector_unbind_all_offered_at = None;
+  frames_presented = 0;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;

@@ -13492,7 +13492,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       (match action, result with
        | (Keeper_control.Pause | Keeper_control.Shutdown),
          Ok (Keeper_control.Accepted _) ->
-           state.connector_unbind_offer_pending <- Some keeper_name;
+           if not (List.mem keeper_name state.connector_unbind_offer_pending)
+           then
+             state.connector_unbind_offer_pending <-
+               keeper_name :: state.connector_unbind_offer_pending;
            launch_connectors_load state ~mailbox
        | (Keeper_control.Pause | Keeper_control.Shutdown),
          (Ok
@@ -15282,59 +15285,74 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  find 0 snapshot.cs_connectors);
           state.connectors_binding_cursor <- 0;
           state.connector_unbind_armed <- None;
-          (match state.connector_unbind_offer_pending with
-           | None -> ()
-           | Some keeper_name ->
-               state.connector_unbind_offer_pending <- None;
-               let unreadable =
-                 Masc_tui_connector_unbind.unreadable_transports
+          (* Every Keeper paused or shut down since the last read gets its
+             answer from this one. The answering load may have started
+             before the pause landed; a pause does not change bindings, so
+             what it read is still what the Keeper holds. *)
+          let pending = List.rev state.connector_unbind_offer_pending in
+          state.connector_unbind_offer_pending <- [];
+          let unreadable =
+            Masc_tui_connector_unbind.unreadable_transports
+              snapshot.cs_connectors
+          in
+          List.iter
+            (fun keeper_name ->
+               match
+                 Masc_tui_connector_unbind.targets ~keeper_name
                    snapshot.cs_connectors
-               in
-               (match
-                  Masc_tui_connector_unbind.targets ~keeper_name
-                    snapshot.cs_connectors
-                with
-                | [] -> (
-                    (* No readable binding. An unreadable transport may still
-                       hold some, and saying nothing would read as none. *)
-                    match unreadable with
-                    | [] -> ()
-                    | _ :: _ ->
-                        report_action state "system"
-                          (Masc_tui_connector_unbind.nothing_to_unbind
-                             ~keeper_name ~unreadable))
-                | targets -> (
-                    match state.view with
-                    | Keepers (Keeper_list | Keeper_detail) ->
-                        (* Armed exactly as a first [U] would be, so the one
-                           key that answers it goes through the same
-                           confirmation, and any other key drops it. *)
-                        state.connector_unbind_all_armed <-
-                          Some (keeper_name, targets);
-                        report_action state "system"
-                          (Masc_tui_connector_unbind.offer_prompt ~keeper_name
-                             ~confirm_key:"U" ~unreadable targets)
-                    | _ ->
-                        report_action state "system"
-                          (Printf.sprintf
-                             "%s still holds %d channel binding%s; U U on its \
-                              Channels tab removes them"
-                             (Masc_tui_ansi.Terminal_text.single_line
-                                keeper_name)
-                             (List.length targets)
-                             (if List.length targets = 1 then "" else "s")))))
+               with
+               | [] -> (
+                   (* No readable binding. An unreadable transport may still
+                      hold some, and saying nothing would read as none. *)
+                   match unreadable with
+                   | [] -> ()
+                   | _ :: _ ->
+                       report_action state "system"
+                         (Masc_tui_connector_unbind.nothing_to_unbind
+                            ~keeper_name ~unreadable))
+               | targets ->
+                   (* The offer takes the next key only where that key would
+                      mean this Keeper: its row or its detail is the one
+                      selected, and nothing else is armed. Anywhere else a
+                      [U] means something else, so the line only informs. *)
+                   let offer_here =
+                     (match state.view with
+                      | Keepers (Keeper_list | Keeper_detail) -> true
+                      | _ -> false)
+                     && (match selected_keeper state with
+                         | Some keeper -> String.equal keeper.k_name keeper_name
+                         | None -> false)
+                     && Option.is_none state.connector_unbind_all_armed
+                   in
+                   if offer_here then begin
+                     (* Armed exactly as a first [U] would be, so the key that
+                        answers it goes through the same confirmation. The
+                        frame count keeps a key typed before this line was
+                        drawn from answering it. *)
+                     state.connector_unbind_all_armed <-
+                       Some (keeper_name, targets);
+                     state.connector_unbind_all_offered_at <-
+                       Some state.frames_presented;
+                     report_action state "system"
+                       (Masc_tui_connector_unbind.offer_prompt ~keeper_name
+                          ~confirm_key:Masc_tui_connector_unbind.unbind_all_key
+                          ~unreadable targets)
+                   end
+                   else
+                     report_action state "system"
+                       (Masc_tui_connector_unbind.still_bound ~keeper_name
+                          targets))
+            pending
       | Error detail ->
           state.connectors_error <- Some detail;
-          (match state.connector_unbind_offer_pending with
-           | None -> ()
-           | Some keeper_name ->
-               state.connector_unbind_offer_pending <- None;
+          let pending = List.rev state.connector_unbind_offer_pending in
+          state.connector_unbind_offer_pending <- [];
+          List.iter
+            (fun keeper_name ->
                report_action state "error"
-                 (Printf.sprintf
-                    "could not read %s's channel bindings to offer removing \
-                     them: %s"
-                    keeper_name
-                    (Masc_tui_ansi.Terminal_text.single_line detail))))
+                 (Masc_tui_connector_unbind.offer_read_failed ~keeper_name
+                    ~detail))
+            pending)
   | Runtime_surface_loaded (generation, result) ->
       let is_current = generation = state.runtime_surface_generation in
       (match state.runtime_surface_inflight with
@@ -16456,7 +16474,9 @@ let main
         ~write:(output_string stdout)
         ~flush:(fun () -> flush stdout) frame
     with
-    | Frame_presenter.Presented -> commit_presented_approval approval
+    | Frame_presenter.Presented ->
+        state.frames_presented <- state.frames_presented + 1;
+        commit_presented_approval approval
     | Frame_presenter.Unchanged -> ()
   in
   (* Bind the bearer to the workspace actually opened, before any request is
@@ -16724,15 +16744,13 @@ let main
      never read. *)
   let handle_connector_unbind_all () =
     state.connector_unbind_armed <- None;
-    (* An arm names its Keeper: the one the first [U] was pressed for, or the
-       one just paused whose offer is on screen. Only with nothing armed does
-       the cursor decide. *)
+    (* The selected Keeper decides, and a second press confirms only an arm
+       for that same Keeper. The pause offer arms only for the selected
+       Keeper, so it answers here the same way. *)
     let keeper_name =
-      match state.connector_unbind_all_armed, selected_keeper state with
-      | Some (armed_keeper, _), _ -> Some armed_keeper
-      | None, Some keeper -> Some keeper.k_name
-      | None, None -> None
+      Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
     in
+    state.connector_unbind_all_offered_at <- None;
     match keeper_name, state.connectors with
     | None, _ ->
         state.connector_unbind_all_armed <- None;
@@ -16764,7 +16782,8 @@ let main
             state.connector_unbind_all_armed <- Some (keeper_name, targets);
             report_action state "system"
               (Masc_tui_connector_unbind.arm_prompt ~keeper_name
-                 ~confirm_key:"U" ~unreadable targets))
+                 ~confirm_key:Masc_tui_connector_unbind.unbind_all_key
+                 ~unreadable targets))
   in
   let handle_connector_edit () =
     state.connector_unbind_armed <- None;
@@ -18371,7 +18390,19 @@ and is loaded on demand through keeper_skill.
          Not scoped to the Channels tab: an arm the operator left behind on
          another surface is exactly the stale confirmation this cancels. *)
       if cancelled [ "u" ] then state.connector_unbind_armed <- None;
-      if cancelled [ "U" ] then state.connector_unbind_all_armed <- None;
+      if cancelled [ "U" ] then begin
+        state.connector_unbind_all_armed <- None;
+        state.connector_unbind_all_offered_at <- None
+      end;
+      (* A key read before the pause offer reached the screen was typed for
+         something else -- [U] on the list is the runtime picker -- so it
+         drops the offer and keeps its own meaning. *)
+      (match state.connector_unbind_all_offered_at with
+       | Some offered_at
+         when Option.is_some input && state.frames_presented <= offered_at ->
+           state.connector_unbind_all_armed <- None;
+           state.connector_unbind_all_offered_at <- None
+       | Some _ | None -> ());
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
          send. Everything it does not claim reaches the surface with its

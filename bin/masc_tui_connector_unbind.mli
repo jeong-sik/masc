@@ -6,6 +6,9 @@
     names that Keeper, so a channel rebound to another Keeper in between is
     left alone and reported as such. *)
 
+(** The key that arms and confirms unbind-all, and answers the pause offer. *)
+val unbind_all_key : string
+
 (** One binding to remove: where it lives, which channel, and the Keeper the
     snapshot said owns it -- the condition the unbind is sent with. *)
 type target = {
@@ -75,3 +78,10 @@ val nothing_to_unbind : keeper_name:string -> unreadable:string list -> string
 val offer_prompt :
   keeper_name:string -> confirm_key:string -> unreadable:string list ->
   target list -> string
+
+(** The line for a paused Keeper whose offer cannot take the next key here
+    (another view, another Keeper selected, or another arm open). *)
+val still_bound : keeper_name:string -> target list -> string
+
+(** The line when the connector read an offer waited for failed. *)
+val offer_read_failed : keeper_name:string -> detail:string -> string

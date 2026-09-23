@@ -621,13 +621,28 @@ status: reference
   없음과, 토글이 사다리 밖으로 만든 값이다.
   → [Provider_config.reasoning_effort_request_rejection](../../packages/agent_core/lib/llm_provider/provider_config.mli)
 
+**DOS Lane**
+: 서버 안에 사는 DOS 기계 하나. Keeper 는 `masc_dos_*` 도구로 같은 기계에 키를
+  넣고 화면을 읽는다. 시간은 8086 명령 수로 흐르고, 도구를 불러야만 간다.
+  `settled` 는 "프로그램이 키를 물었고 화면이 멈췄다" 이다. 게임 파일은
+  `<.masc>/dos/programs/` 에 두고, 게임이 쓴 세이브는 `<.masc>/dos/saves/` 에
+  남아 다음 로드에서 다시 쓰인다.
+  → [Dos_lane](../../lib/dos_lane/dos_lane.mli)
+
+**조종권 (Controller)**
+: DOS Lane 기계의 시간을 움직일 수 있는 한 사람. 핫시트 게임에서 여러 Keeper
+  가 한 키보드를 번갈아 쓰기 때문에 있다. 쥔 사람만 load·eject·step·press·click·
+  type 을 하고, 다른 사람은 거절되지만 화면은 볼 수 있다. `masc_dos_pass` 로
+  넘기면 보드 글이 다음 사람을 @멘션해 깨운다.
+  → [Dos_lane.pass](../../lib/dos_lane/dos_lane.mli)
+
 **Lane Add-on**
 : 기존 MASC 원장과 실행 환경 위에 붙는 선택적 관측·관계 레이어. MSX Lane의 머신,
-  Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
+  DOS Lane의 머신, Browser Lane의 세션, Keeper의 도구와 턴 소유권을 재사용한다. 패키지 하나가 여러
   Lane 행을 제공할 수 있고, 패키지 worker는 관측 계산만 격리한다. attach·detach와
   Add-on 장애는 기존 Keeper의 권한·도구·진행 중 작업을 축소하지 않으며, 추가 근거는
-  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·`lane_output`·
-  `browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
+  활용·보류·무시할 수 있다. 원천 어댑터는 `snapshot_file`·`msx_capture`·`dos_capture`·
+  `lane_output`·`browser_document`이고, 코어는 도메인 의미를 해석하지 않고 공통 row/coverage를
   검사·표시한다.
   → [설계 계약](../design/lane-addon-v0.md),
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),

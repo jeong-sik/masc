@@ -3,4 +3,4 @@
 (library
  (name dos_lane)
  (public_name masc.dos_lane)
- (libraries ocaml-dos.dosmachine ocaml-dos.cpu86core yojson))
+ (libraries ocaml-dos.dosmachine ocaml-dos.cpu86core yojson masc.masc_random_id))

@@ -210,6 +210,42 @@ let test_native_input_history_is_frozen_with_capture () = with_store (fun dir st
     ignore (msx (Msx_lane.eject ()));
     check string "machine removal preserves input evidence" expected (require (Store.read_jsonl store ref))))
 
+(* The DOS machine as a source: frame, identity and input history read
+   together, the ledger retained exactly as the machine wrote it, and a new
+   load a new identity. The COM prints HI and loops on INT 16h. *)
+let test_dos_capture_retains_the_machines_history () = with_store (fun dir store ->
+  let dos = function Ok value -> value | Error error -> fail (Dos_lane.error_to_string error) in
+  let hello = "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$" in
+  let ledger_dir = Filename.concat dir "dos" in
+  let load () = ignore (dos (Dos_lane.load ~who:"keeper-A" ~ledger_dir
+    ~saves_dir:(Filename.concat dir "saves") ~program_name:"HELLO.COM" ~program_bytes:hello
+    ~files:[] ~announce:ignore)) in
+  load ();
+  Fun.protect ~finally:(fun () -> ignore (Dos_lane.eject ~who:"keeper-A" ~announce:ignore ())) (fun () ->
+    let capture () =
+      require (Sources.acquire ~resolve_lane_output:(fun ~installation_id:_ -> Error "no upstream")
+        ~store ~package:(package dir 2_000_000)
+        ~binding:(binding [`Assoc ["kind",`String "dos_capture";"source_id",`String "dos"]]))
+      |> list |> List.hd |> member "observations" |> list |> List.hd in
+    let reference observation = member "input_ledger" observation |> member "evidence" |> own_reference in
+    ignore (dos (Dos_lane.press ~who:"keeper-A" ~keys:["x"] ~steps:100_000));
+    let before = dos (Dos_lane.capture_with_identity ()) in
+    let observed = capture () in
+    let after = dos (Dos_lane.capture_with_identity ()) in
+    check int "capture does not step" before.observation.steps after.observation.steps;
+    check string "same machine identity" before.incarnation (member "incarnation" observed |> text);
+    check string "the input cursor counts the key" "1" (member "input_cursor" observed |> text);
+    check string "the holder rides along" "keeper-A" (member "controller" observed |> text);
+    let expected = Yojson.Safe.to_string (Dos_lane.entry_json (List.hd before.input_ledger)) ^ "\n" in
+    check string "retained ledger equals the machine's file" expected
+      (In_channel.with_open_bin (Filename.concat ledger_dir "ledger.jsonl") In_channel.input_all);
+    check string "and the retained copy" expected (require (Store.read_jsonl store (reference observed)));
+    ignore (dos (Dos_lane.eject ~who:"keeper-A" ~announce:ignore ()));
+    load ();
+    check bool "a new load is a new identity" false
+      (member "incarnation" (capture ()) = member "incarnation" observed);
+    check string "the old evidence stays" expected (require (Store.read_jsonl store (reference observed)))))
+
 let test_source_activity_does_not_infer_ownership () =
   let interest sources = Sources.refresh_interest (binding sources) |> require in
   let msx = interest [`Assoc ["source_id",`String "screen";"kind",`String "msx_capture"]] in
@@ -220,6 +256,10 @@ let test_source_activity_does_not_infer_ownership () =
     "installation_id",`String "producer";"selection",`String "latest_completed"]] in
   check bool "MSX changes refresh only the declared native MSX source" true
     (Sources.interested msx Sources.Msx_changed);
+  let dos = interest [`Assoc ["source_id",`String "machine";"kind",`String "dos_capture"]] in
+  check bool "DOS changes refresh the declared DOS source" true
+    (Sources.interested dos Sources.Dos_changed);
+  check bool "and MSX changes do not" false (Sources.interested dos Sources.Msx_changed);
   check bool "browser changes refresh only the declared browser source" true
     (Sources.interested browser Sources.Browser_changed);
   List.iter (fun activity ->
@@ -227,7 +267,7 @@ let test_source_activity_does_not_infer_ownership () =
       (Sources.interested dependent activity);
     check bool "owned environment has no invented external source" false
       (Sources.interested (interest []) activity))
-    [Sources.Tool_completed;Sources.Msx_changed;Sources.Browser_changed];
+    [Sources.Tool_completed;Sources.Msx_changed;Sources.Dos_changed;Sources.Browser_changed];
   check bool "unrelated completion does not refresh browser capture" false
     (Sources.interested browser Sources.Tool_completed);
   check bool "browser completion does not refresh MSX capture" false
@@ -239,6 +279,7 @@ let test_source_activity_does_not_infer_ownership () =
 let test_misc_tools_name_the_source_they_move () =
   let label = function
     | Sources.Msx_changed -> "msx"
+    | Sources.Dos_changed -> "dos"
     | Sources.Browser_changed -> "browser"
     | Sources.Tool_completed -> "tool" in
   let activity operation = label (Sources.activity_of_misc_operation operation) in
@@ -246,6 +287,12 @@ let test_misc_tools_name_the_source_they_move () =
     (activity Tool_schemas_misc.Misc_msx_step);
   check string "reading the MSX screen moves nothing" "tool"
     (activity Tool_schemas_misc.Misc_msx_screen);
+  check string "pressing on the DOS machine moves its capture" "dos"
+    (activity Tool_schemas_misc.Misc_dos_press);
+  check string "reading the DOS screen moves nothing" "tool"
+    (activity Tool_schemas_misc.Misc_dos_screen);
+  check string "handing the DOS controller on moves nothing" "tool"
+    (activity Tool_schemas_misc.Misc_dos_pass);
   check string "interacting with a page moves its document" "browser"
     (activity Tool_schemas_misc.Misc_browser_interact);
   check string "listing tabs moves nothing" "tool"
@@ -258,6 +305,7 @@ let test_misc_tools_name_the_source_they_move () =
 let () = run "Lane source provenance" ["acquisition", [
   test_case "activity follows declared typed sources" `Quick test_source_activity_does_not_infer_ownership;
   test_case "native input ledger is captured and retained with frame identity" `Quick test_native_input_history_is_frozen_with_capture;
+  test_case "DOS capture retains the machine's history" `Quick test_dos_capture_retains_the_machines_history;
   test_case "named ports select exact instance lanes and retain whole coverage" `Quick test_named_port_uses_exact_instance_and_keeps_coverage;
   test_case "file rotation keeps original bytes" `Quick test_file_rotation_keeps_exact_original_bytes;
   test_case "combined ingress preserves incomplete coverage" `Quick test_combined_ingress_marks_omitted_sources;

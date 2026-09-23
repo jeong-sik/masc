@@ -85,6 +85,10 @@ type machine = {
          from this is one the program wrote since. *)
   mutable controller : string option;
       (* Who may move this machine's time. See [with_control]. *)
+  incarnation : string;
+      (* A fresh identity per load: an observer holding an older one knows
+         the machine it read was replaced, even when the step count is back
+         where it was. *)
 }
 
 let state : machine option ref = ref None
@@ -434,7 +438,7 @@ let load ~who ~ledger_dir ~saves_dir ~program_name ~program_bytes ~files ~announ
           files;
         let st =
           { m; steps = 0; program = program_name; ledger_path; entries = []; saves_dir; kept
-          ; controller = Some who }
+          ; controller = Some who; incarnation = Random_id.uuid_v7 () }
         in
         state := Some st;
         announce ();
@@ -474,6 +478,26 @@ let capture () =
   with_machine (fun st ->
     let width, height = Dos_machine.frame_dims st.m in
     Ok (observe st, { width; height; rgb = Dos_machine.frame_rgb st.m }))
+;;
+
+type identified_capture = {
+  incarnation : string;
+  observation : observation;
+  frame : frame;
+  input_count : int;
+  input_ledger : entry list;
+}
+
+let capture_with_identity () =
+  with_machine (fun st ->
+    let width, height = Dos_machine.frame_dims st.m in
+    Ok
+      { incarnation = st.incarnation
+      ; observation = observe st
+      ; frame = { width; height; rgb = Dos_machine.frame_rgb st.m }
+      ; input_count = List.length st.entries
+      ; input_ledger = st.entries
+      })
 ;;
 
 let step ~who ~steps ~until_ready =

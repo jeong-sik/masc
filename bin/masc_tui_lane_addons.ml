@@ -605,6 +605,7 @@ let visual_lines ?(failed_note = "") ~height ~width view =
                   | Masc.Lane_addon_sources.Lane_output {installation_id;output_id;_} -> installation_id ^ "/" ^ Option.value ~default:"*" output_id
                   | Masc.Lane_addon_sources.Snapshot_file {id;_}
                   | Masc.Lane_addon_sources.Msx_capture {id}
+                  | Masc.Lane_addon_sources.Dos_capture {id}
                   | Masc.Lane_addon_sources.Browser_document {id;_} -> id) sources) in
             let columns ~active:_ a b c =
               let column = max 1 ((width-6)/3) in
@@ -629,6 +630,7 @@ let visual_lines ?(failed_note = "") ~height ~width view =
                       let id, origin = match source with
                         | S.Snapshot_file {id;path} -> id, "file " ^ path
                         | S.Msx_capture {id} -> id, "MSX capture"
+                        | S.Dos_capture {id} -> id, "DOS capture"
                         | S.Browser_document {id;selection;tab_id;target_id;environment;_} ->
                             let lane = match selection with S.Live _ -> "live" | S.Automation -> "automation" in
                             id,Printf.sprintf "browser %s · tab %d · %s · %s" lane tab_id environment target_id

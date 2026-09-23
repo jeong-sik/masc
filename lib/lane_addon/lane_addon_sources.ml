@@ -14,6 +14,7 @@ type lane_output = {
 type source =
   | Snapshot_file of { id : string; path : string }
   | Msx_capture of { id : string }
+  | Dos_capture of { id : string }
   | Lane_output of { id : string; installation_id : string; output_id : string option }
   | Browser_document of { id : string; selection : browser_selection;
       tab_id : int; target_id : string; environment : string; request_id : string }
@@ -28,6 +29,7 @@ let parse_source = function
            if Filename.is_relative path then Error "snapshot_file path must be absolute"
            else Ok (Snapshot_file {id;path})
        | Some (`String "msx_capture") -> Ok (Msx_capture {id})
+       | Some (`String "dos_capture") -> Ok (Dos_capture {id})
        | Some (`String "lane_output") ->
            let names = List.map fst fields in
            let* () = if List.length names <> List.length (List.sort_uniq String.compare names)
@@ -72,31 +74,33 @@ let parse = function
            loop [] values
        | _ -> Error "binding.sources requires an array of observation sources")
   | _ -> Error "binding requires an object"
-let source_id = function Snapshot_file {id;_} | Msx_capture {id}
+let source_id = function Snapshot_file {id;_} | Msx_capture {id} | Dos_capture {id}
   | Lane_output {id;_} | Browser_document {id;_} -> id
-type activity = Tool_completed | Msx_changed | Browser_changed
+type activity = Tool_completed | Msx_changed | Dos_changed | Browser_changed
 type refresh_interest = source list
 let refresh_interest = parse
 let interested sources activity = List.exists (function
   | Snapshot_file _ -> true
   | Msx_capture _ -> activity=Msx_changed
+  | Dos_capture _ -> activity=Dos_changed
   | Browser_document _ -> activity=Browser_changed
   | Lane_output _ -> false) sources
 (* Which typed activity a finished misc tool stands for, named beside the
    activity it produces. Every operation is listed: a tool added to
    {!Tool_schemas_misc.misc_operation} has to say whether it moves an MSX or a
    browser source, instead of joining the generic arm without a word. Reads
-   (screen, peek, ram_diff, tabs, read) do not move a source, and DOS has no
-   source of its own here. *)
+   (screen, peek, ram_diff, tabs, read) do not move a source, and neither does
+   handing the DOS controller on. *)
 let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = function
   | Misc_msx_load | Misc_msx_eject | Misc_msx_restore | Misc_msx_change_disk
   | Misc_msx_press | Misc_msx_step | Misc_msx_step_until_change -> Msx_changed
+  | Misc_dos_load | Misc_dos_eject | Misc_dos_step | Misc_dos_press
+  | Misc_dos_click | Misc_dos_type -> Dos_changed
   | Misc_browser_session | Misc_browser_goto | Misc_browser_act
   | Misc_browser_interact -> Browser_changed
   | Misc_msx_save | Misc_msx_screen | Misc_msx_peek | Misc_msx_ram_diff
   | Misc_browser_tabs | Misc_browser_read
-  | Misc_dos_load | Misc_dos_eject | Misc_dos_screen | Misc_dos_step
-  | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_peek | Misc_dos_pass
+  | Misc_dos_screen | Misc_dos_peek | Misc_dos_pass
   | Misc_lane_declaration_read | Misc_lane_declaration_save | Misc_lane_attach
   | Misc_lane_inspect | Misc_lane_observe | Misc_lane_slice | Misc_lane_detach
   | Misc_lane_evidence | Misc_lane_act | Misc_lane_action_status | Misc_lane_updates
@@ -200,6 +204,36 @@ let msx_capture ~store ~id =
     "input_ledger", `Assoc ["format", `String "msx-input-jsonl-sequence";
       "entry_count", `Int capture.input_count; "evidence", evidence_json input_ledger]] in
   Ok (envelope ~id ~incarnation:capture.incarnation ~cursor ~complete:true ~detail:`Null [observation])
+(* The DOS machine as a source, the way [msx_capture] reads the MSX one: the
+   frame and the input history captured together under the machine's lock,
+   and retained in the package store. Time is instructions, so the observation
+   carries [steps] where the MSX one carries a frame number. *)
+let dos_capture ~store ~id =
+  let* capture = Eio_unix.run_in_systhread (fun () -> Dos_lane.capture_with_identity ())
+    |> Result.map_error Dos_lane.error_to_string in
+  let frame = capture.Dos_lane.frame in
+  let observed_at = Time_compat.now () in
+  let image = `Assoc ["format", `String "rgb8"; "width", `Int frame.Dos_lane.width;
+    "height", `Int frame.Dos_lane.height; "rgb_base64", `String (Base64.encode_string frame.Dos_lane.rgb)] in
+  let* screen = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store (Yojson.Safe.to_string image)) in
+  let* ledger = Eio_unix.run_in_systhread (fun () ->
+    Lane_addon_store.retain_jsonl store ~history:capture.Dos_lane.incarnation
+      ~entry_count:capture.input_count ~newest_first:capture.input_ledger
+      ~encode:(fun entry -> Yojson.Safe.to_string (Dos_lane.entry_json entry) ^ "\n")) in
+  let input_ledger = ledger.Lane_addon_store.reference in
+  let steps = capture.observation.Dos_lane.steps in
+  let cursor = `String (string_of_int capture.Dos_lane.input_count) in
+  let observation = `Assoc ["id", `String (Printf.sprintf "%s/%d/%.6f" capture.incarnation steps observed_at);
+    "kind", `String "capture"; "observed_at", `Float observed_at; "actor", `Null;
+    "evidence", `List [evidence_json screen; evidence_json input_ledger]; "screen", evidence_json screen;
+    "machine_id", `String "workspace-dos"; "incarnation", `String capture.incarnation;
+    "steps", `Int steps;
+    "program", (match capture.observation.Dos_lane.program with Some p -> `String p | None -> `Null);
+    "controller", (match capture.observation.Dos_lane.controller with Some c -> `String c | None -> `Null);
+    "input_cursor", cursor;
+    "input_ledger", `Assoc ["format", `String "dos-input-jsonl-sequence";
+      "entry_count", `Int capture.input_count; "evidence", evidence_json input_ledger]] in
+  Ok (envelope ~id ~incarnation:capture.incarnation ~cursor ~complete:true ~detail:`Null [observation])
 let browser_document ~store ~max_bytes ~id ~selection ~tab_id ~target_id ~environment ~request_id =
   let route = match selection with
     | Live client -> Browser_lane.Live_route (Some client)
@@ -299,6 +333,7 @@ let acquire ~store ~(package : Lane_addon_types.package) ~resolve_lane_output ~b
     let result = match source with
       | Snapshot_file {id;path} -> snapshot_file ~store ~max_bytes ~id path
       | Msx_capture {id} -> msx_capture ~store ~id
+      | Dos_capture {id} -> dos_capture ~store ~id
       | Lane_output {id;installation_id;output_id} ->
           lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~output_id
       | Browser_document {id;selection;tab_id;target_id;environment;request_id} ->

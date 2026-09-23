@@ -173,6 +173,25 @@ val capture : unit -> (observation * frame, error) result
     vision reads: a VGA game's Korean menus are glyphs in pixels, which
     [frame_ascii]'s luminance cells cannot spell. *)
 
+type identified_capture = {
+  incarnation : string;
+      (** Fresh on every load. Reads and time leave it alone. *)
+  observation : observation;
+  frame : frame;
+  input_count : int;
+  input_ledger : entry list;
+      (** Newest first, every input through [input_count], read with the
+          frame under the same lock. *)
+}
+
+val capture_with_identity : unit -> (identified_capture, error) result
+(** {!capture} with the machine's identity and input history, for a Lane
+    Add-on source ([dos_capture]). Never advances the machine. *)
+
+val entry_json : entry -> Yojson.Safe.t
+(** One ledger line: [{"step", "who", "key"}], the shape written to
+    [ledger.jsonl]. *)
+
 (** {1 The controller}
 
     One machine, several players: a hotseat game such as 삼국지3 asks each

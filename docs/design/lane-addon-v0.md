@@ -47,7 +47,7 @@ run_id는 관측 묶음의 식별자다. 별도의 MASC 실행기나 격리된 �
 각 설치 instance_id는 패키지와 binding, namespace, worker 소유권을 식별한다.
 같은 패키지를 두 번 붙여도 행과 증거 선택이 충돌하지 않는다.
 
-원천 어댑터는 `snapshot_file`, `msx_capture`, `browser_document`다. 패키지는 어댑터가
+원천 어댑터는 `snapshot_file`, `msx_capture`, `dos_capture`, `browser_document`다. 패키지는 어댑터가
 제공한 관측을 읽으며 파일 경로를 임의로 열거나 브라우저를 조작하지 않는다.
 새 의미 패키지를 붙이려고 서버 dispatcher, TUI 메뉴, Dashboard 컴포넌트를 수정해야 하면 실패다.
 새 장치 프로토콜에 필요한 원천 드라이버 개발과 기존 관측에 의미 레이어를 붙이는 일은 구분한다.

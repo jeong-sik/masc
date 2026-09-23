@@ -5689,6 +5689,7 @@ let test_http_success_exposes_failed_resolution_and_rule_delete_audit () =
          match
            Server_dashboard_http.dashboard_gate_rule_delete_http_json
              ~base_path
+             ~deleted_by:"http-test-operator"
              ~args:(`Assoc [ "id", `String rule_id ])
          with
          | Ok json -> json
@@ -5704,6 +5705,80 @@ let test_http_success_exposes_failed_resolution_and_rule_delete_audit () =
          (delete_receipt |> member "recorded" |> to_bool);
        Alcotest.(check string) "delete receipt carries exact append stage" "append"
          (delete_receipt |> member "stage" |> to_string))
+;;
+
+(* #38060: a rule's audit rows name who made it and who removed it. The
+   creator is the principal whose remembered approval produced the rule; the
+   deleter is the principal the delete route authenticated, a different
+   person than the rule's author. *)
+let test_rule_audit_rows_name_creator_and_deleter () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-rule-audit-actor" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       ignore (install_exn ~base_path);
+       let approval_id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "target", `String "rule-actor" ])
+       in
+       let open Yojson.Safe.Util in
+       let rule_id =
+         match
+           Server_dashboard_http.dashboard_gate_resolve_http_json
+             ~base_path
+             ~created_by:"rule-author"
+             ~args:
+               (`Assoc
+                  [ "id", `String approval_id
+                  ; "decision", `String "approve"
+                  ; "remember_rule", `Bool true
+                  ])
+         with
+         | Ok json -> json |> member "rule_id" |> to_string
+         | Error error ->
+           Alcotest.fail
+             (Server_dashboard_http.approval_resolve_http_error_to_string error)
+       in
+       (match
+          Server_dashboard_http.dashboard_gate_rule_delete_http_json
+            ~base_path
+            ~deleted_by:"rule-remover"
+            ~args:(`Assoc [ "id", `String rule_id ])
+        with
+        | Ok json ->
+          Alcotest.(check bool) "rule delete succeeded" true
+            (json |> member "ok" |> to_bool)
+        | Error error -> Alcotest.fail error);
+       let rows =
+         match Keeper_approval.Audit.read_recent ~base_path ~n:50 () with
+         | Ok rows -> rows
+         | Error _ -> Alcotest.fail "audit rows unreadable"
+       in
+       let actor_of event =
+         match
+           List.find_opt
+             (fun row ->
+                String.equal (row |> member "event" |> to_string) event
+                && String.equal (row |> member "id" |> to_string) rule_id)
+             rows
+         with
+         | Some row -> row |> member "actor"
+         | None -> Alcotest.fail ("no audit row for " ^ event)
+       in
+       Alcotest.(check yojson) "rule_created names the rule author"
+         (`String "rule-author")
+         (actor_of "rule_created");
+       Alcotest.(check yojson) "rule_deleted names the authenticated deleter"
+         (`String "rule-remover")
+         (actor_of "rule_deleted"))
 ;;
 
 (* #26126: resolution writes the judge evidence the entry carried onto the
@@ -6161,6 +6236,10 @@ let () =
             "HTTP success exposes failed resolution and rule audit"
             `Quick
             test_http_success_exposes_failed_resolution_and_rule_delete_audit
+        ; Alcotest.test_case
+            "rule audit rows name creator and deleter"
+            `Quick
+            test_rule_audit_rows_name_creator_and_deleter
         ; Alcotest.test_case
             "delivery wire shape drops the request context"
             `Quick

@@ -4519,7 +4519,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        default = \"%s\"\n\
        \n\
        [runtime.exact_output_lanes.auxiliary_exact]\n\
-       slots = [\"%s\"]\n"
+       slots = [\"%s\"]\n\
+       max_output_tokens = 4096\n"
       default
       slot
   in

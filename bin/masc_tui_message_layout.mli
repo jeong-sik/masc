@@ -583,8 +583,9 @@ val wrap_words : max_cells:int -> string -> string list
 val clause_separator : string
 (** What a header row puts between two clauses: [" · "]. *)
 
-val pack_clauses : max_cells:int -> string -> string list
-(** Break a header row at its clause marks so a row ends where a clause ends.
+val pack_clauses : max_cells:int -> string list -> string list
+(** Join [clauses] with {!clause_separator} into rows of at most [max_cells],
+    so a row ends where a clause ends.
     A clause carries its own qualifier -- "0 failures since server start" says
     the count restarts with the server, and a row ending at "0 failures" says a
     running total -- so an arbitrary break inside one changes what the row

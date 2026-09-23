@@ -2557,12 +2557,14 @@ let test_a_turn_span_wraps_inside_the_block_budget () =
    for: it needed 176 cells with every count a single digit, against a frame
    that gives 96 at the 100 columns the PTY harness opens. *)
 let memory_fleet_librarian_clauses =
-  "0 turns unread \xc2\xb7 3 atoms behind in continuity (1 keepers not \
-   measured) \xc2\xb7 0 failures since server start"
+  [ "0 turns unread"
+  ; "3 atoms behind in continuity (1 keeper not measured)"
+  ; "0 failures since server start"
+  ]
 
 let test_a_row_ends_where_a_clause_ends () =
   check (list string) "the break lands on the clause mark"
-    [ "0 turns unread \xc2\xb7 3 atoms behind in continuity (1 keepers not \
+    [ "0 turns unread \xc2\xb7 3 atoms behind in continuity (1 keeper not \
        measured)"
     ; "0 failures since server start"
     ]
@@ -2571,10 +2573,13 @@ let test_a_row_ends_where_a_clause_ends () =
 let test_wrapping_at_spaces_would_change_what_the_row_claims () =
   (* The input that splits the two functions apart. Without it, a packer that
      simply called wrap_words would pass every other assertion here. *)
-  let wrapped = Layout.wrap_words ~max_cells:83 memory_fleet_librarian_clauses in
+  let wrapped =
+    Layout.wrap_words ~max_cells:83
+      (String.concat Layout.clause_separator memory_fleet_librarian_clauses)
+  in
   check (option string) "a space break ends the row at a bare count"
     (Some
-       "0 turns unread \xc2\xb7 3 atoms behind in continuity (1 keepers not \
+       "0 turns unread \xc2\xb7 3 atoms behind in continuity (1 keeper not \
         measured) \xc2\xb7 0 failures")
     (List.nth_opt wrapped 0);
   let packed = Layout.pack_clauses ~max_cells:83 memory_fleet_librarian_clauses in
@@ -2617,8 +2622,16 @@ let test_packing_keeps_every_clause () =
         false (carries_cut_mark packed))
     [ 30; 40; 63; 83; 123 ]
 
+(* The clauses arrive as a list, so a separator inside one clause's own text
+   (a Keeper name, a reason string) is not a place to break. Rejoining the row
+   and splitting it again on the separator would have broken it there. *)
+let test_a_separator_inside_a_clause_is_not_a_break () =
+  check (list string) "the clause stays whole on its row"
+    [ "0 failures"; "a \xc2\xb7 keeper b" ]
+    (Layout.pack_clauses ~max_cells:16 [ "0 failures"; "a \xc2\xb7 keeper b" ])
+
 let test_a_clause_wider_than_the_row_is_wrapped_not_cut () =
-  let rows = Layout.pack_clauses ~max_cells:12 "one clause that is far too wide" in
+  let rows = Layout.pack_clauses ~max_cells:12 [ "one clause that is far too wide" ] in
   check bool "more than one row" true (List.length rows > 1);
   check bool "no cut mark" false (carries_cut_mark (String.concat " " rows));
   check string "the words survive in order" "one clause that is far too wide"
@@ -2638,6 +2651,8 @@ let () =
             test_packing_keeps_every_clause
         ; test_case "a clause wider than the row is wrapped, not cut" `Quick
             test_a_clause_wider_than_the_row_is_wrapped_not_cut
+        ; test_case "a separator inside a clause is not a break" `Quick
+            test_a_separator_inside_a_clause_is_not_a_break
         ] );
       ( "bare links"
       , [ test_case "dressed and bounded" `Quick

@@ -80,16 +80,10 @@ val generate_confirm_token :
       after 10 attempts (...)"] including the current pending-confirm
       count (operator-actionable diagnostic). *)
 
-val resolved_actor_for_args :
-  ?actor_hint:string ->
-  'a context ->
-  Yojson.Safe.t ->
-  (string, string) result
-(** [resolved_actor_for_args ?actor_hint ctx args] picks the actor
-    string in priority order: [actor_hint] (trimmed) -> [args.actor]
-    (trimmed) -> {!normalized_actor} fallback to [ctx.agent_name].
-    Always returns [Ok _]; [string result] is for caller chaining
-    via {!Result.Syntax}. *)
+val resolved_actor : ?actor_hint:string -> 'a context -> string
+(** [resolved_actor ?actor_hint ctx] is the authenticated actor:
+    [actor_hint] (trimmed) when non-empty, else {!normalized_actor}'s
+    fallback to [ctx.agent_name]. The request body is never read. *)
 
 val action_request_of_args :
   ?actor_hint:string ->

@@ -61,10 +61,15 @@ module Terminal_restore = Masc_tui_terminal_restore
 
 (* Tools rows are the exact projection the renderer draws, so their scroll
    bound belongs to that projection rather than a second reconstruction in
-   the state module. Every other counted surface remains state-owned. *)
+   the state module. The Memory overview's header is wrapped to the terminal
+   width, so its chrome is the renderer's too. Every other counted surface
+   remains state-owned. *)
 let scrolled_surface state surface =
   match surface with
   | Tools -> Some (Masc_tui_render.tools_scrolled state)
+  | Memory when Option.is_none state.memory_facts_keeper ->
+      let _, cols = get_terminal_size () in
+      Some (Masc_tui_render_memory.memory_overview_scrolled ~cols state)
   | _ -> Masc_tui_types.scrolled_surface state surface
 ;;
 
@@ -354,7 +359,9 @@ let surface_body_height_at (state : state) ~cursor scrolled =
       ~cursor state
   else
     let scrolled =
-      if state.view = Memory then memory_overview_scrolled ~cursor state
+      if state.view = Memory then
+        let _, cols = get_terminal_size () in
+        Masc_tui_render_memory.memory_overview_scrolled ~cols ~cursor state
       else scrolled
     in
     surface_body_height ~rows:(surface_rows state) scrolled

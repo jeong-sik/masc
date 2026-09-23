@@ -780,6 +780,7 @@ let handle_keeper_board_attention_quarantine_recovery_post
        Command.make
          ~keeper_name
          ~raw_partition_id
+         ~requested_by:agent_name
          recovery_request
      with
      | Error error ->
@@ -801,7 +802,6 @@ let handle_keeper_board_attention_quarantine_recovery_post
        let audit =
          Command.audit
            config
-           ~actor:agent_name
            command
            ~outcome:
              (match result with

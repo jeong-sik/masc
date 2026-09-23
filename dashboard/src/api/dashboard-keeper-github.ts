@@ -4,6 +4,9 @@ import { ensureDevToken } from './dev-token'
 export interface KeeperGithubAuthResult {
   authenticated: boolean
   login: string | null
+  // The OAuth scopes GitHub listed for the token (X-OAuth-Scopes). null when
+  // it listed none: a fine-grained PAT or an App token, or a failed probe.
+  scopes: string[] | null
   error: string | null
 }
 
@@ -51,7 +54,7 @@ function decodeSseFrame(rawFrame: string): { event: string; data: string } | nul
 // The server's list is Keeper_github_identity.all_login_scopes; it refuses a
 // name it does not offer with 400, so a scope missing here is only unoffered,
 // and one added here that the server lacks fails loudly.
-export type KeeperGithubLoginScope = 'workflow'
+export type KeeperGithubLoginScope = 'workflow' | 'write:packages'
 
 export const KEEPER_GITHUB_LOGIN_SCOPES: readonly {
   scope: KeeperGithubLoginScope
@@ -60,6 +63,10 @@ export const KEEPER_GITHUB_LOGIN_SCOPES: readonly {
   {
     scope: 'workflow',
     note: '.github/workflows 를 바꿀 수 있어요. workflow 는 저장소 secrets 로 돌아요.',
+  },
+  {
+    scope: 'write:packages',
+    note: 'GitHub Packages(ghcr.io 이미지 포함)에 올릴 수 있어요. read:packages 도 같이 받아요.',
   },
 ]
 

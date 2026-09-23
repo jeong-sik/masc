@@ -1049,7 +1049,7 @@ let handle_surface_read ~config ~(meta : keeper_meta) ~args =
                 { Keeper_surface_read.slack = bound_slack_channels;
                   discord = bound_discord_channels })
        in
-       Keeper_surface_read.respond ?bindings ~surface ~limit
+       Keeper_surface_read.respond ?bindings ~surface ~limit ~before
          ~has_more:page.Keeper_chat_store.has_more
          ~notes
          page.Keeper_chat_store.messages)

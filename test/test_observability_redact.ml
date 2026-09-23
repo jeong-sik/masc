@@ -351,6 +351,83 @@ let test_github_prefix_no_false_positive () =
       Alcotest.(check string) (input ^ " preserved") input r)
     inputs
 
+(* A JSON tool output larger than the byte budget must stay parseable: the
+   stored value is shrunk at member boundaries and marked, instead of being cut
+   mid-structure so the TUI renders raw bytes (issue #37804). *)
+let test_truncate_json_document_keeps_json_parseable () =
+  let big =
+    `Assoc
+      [ ( "items",
+          `List
+            (List.init 200 (fun i -> `String (Printf.sprintf "member-%d" i))) )
+      ; ("tail", `String (String.make 5000 'x'))
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let out = Observability_redact.truncate_json_document ~max_len:4000 big in
+  Alcotest.(check bool) "within budget" true (String.length out <= 4000);
+  (match Yojson.Safe.from_string out with
+   | _ -> ()
+   | exception Yojson.Json_error e ->
+     Alcotest.fail ("stored value is not JSON: " ^ e));
+  Alcotest.(check bool) "marks the cut" true
+    (String_util.contains_substring out "_truncated")
+
+(* A non-JSON output keeps the historical byte preview so nothing that used to
+   be readable changes shape. *)
+let test_truncate_json_document_passes_non_json_through () =
+  let raw = String.make 5000 'x' in
+  let out = Observability_redact.truncate_json_document ~max_len:4000 raw in
+  Alcotest.(check bool) "non-JSON falls back to the byte preview" true
+    (String_util.contains_substring out "(truncated)")
+
+(* A document that is itself a string spends two characters per escaped byte
+   when serialized, so the budget spent on the raw bytes is not the budget the
+   stored value costs. The shrink is measured on the serialized form and
+   repeated, so the result still fits. *)
+let test_truncate_json_document_string_leaf_fits () =
+  let doc = Yojson.Safe.to_string (`String (String.make 5000 '\n')) in
+  let out = Observability_redact.truncate_json_document ~max_len:200 doc in
+  Alcotest.(check bool)
+    (Printf.sprintf "a string document fits the budget (%d bytes)" (String.length out))
+    true (String.length out <= 200);
+  (match Yojson.Safe.from_string out with
+   | `String _ -> ()
+   | _ -> Alcotest.fail "stored value is not a JSON string"
+   | exception Yojson.Json_error e ->
+     Alcotest.fail ("stored value is not JSON: " ^ e))
+
+(* An array is shrunk at element boundaries and ends with a [_truncated]
+   element, the same marker a cut object carries; the serialized result fits
+   the budget. *)
+let test_truncate_json_document_list_fits () =
+  let doc =
+    `List (List.init 200 (fun i -> `String (Printf.sprintf "element-%d" i)))
+    |> Yojson.Safe.to_string
+  in
+  let out = Observability_redact.truncate_json_document ~max_len:200 doc in
+  Alcotest.(check bool)
+    (Printf.sprintf "an array fits the budget (%d bytes)" (String.length out))
+    true (String.length out <= 200);
+  (match Yojson.Safe.from_string out with
+   | `List items ->
+     Alcotest.(check string) "the cut array ends with the marker element"
+       {|{"_truncated":true}|}
+       (Yojson.Safe.to_string (List.nth items (List.length items - 1)))
+   | _ -> Alcotest.fail "stored value is not a JSON array"
+   | exception Yojson.Json_error e ->
+     Alcotest.fail ("stored value is not JSON: " ^ e))
+
+(* Keys are text too: a credential in a key is redacted, and two keys that
+   redact to the same text both stay, in order. *)
+let test_redact_json_strings_redacts_keys () =
+  let json =
+    `Assoc [ ("https://a:one@x", `Int 1); ("https://b:two@x", `Int 2) ]
+  in
+  let out = Yojson.Safe.to_string (Observability_redact.redact_json_strings json) in
+  Alcotest.(check string) "both members kept, keys redacted"
+    {|{"https[REDACTED]x":1,"https[REDACTED]x":2}|} out
+
 let () =
   Alcotest.run "observability_redact"
     [
@@ -394,6 +471,16 @@ let () =
             test_github_prefix_no_false_positive;
           Alcotest.test_case "ordered passes cover a bearer value holding a url credential" `Quick
             test_ordered_passes_cover_a_bearer_value_holding_a_url_credential;
+          Alcotest.test_case "truncate_json_document keeps json parseable" `Quick
+            test_truncate_json_document_keeps_json_parseable;
+          Alcotest.test_case "truncate_json_document passes non-json through" `Quick
+            test_truncate_json_document_passes_non_json_through;
+          Alcotest.test_case "truncate_json_document string leaf fits the budget" `Quick
+            test_truncate_json_document_string_leaf_fits;
+          Alcotest.test_case "truncate_json_document list fits the budget" `Quick
+            test_truncate_json_document_list_fits;
+          Alcotest.test_case "redact_json_strings redacts keys" `Quick
+            test_redact_json_strings_redacts_keys;
         ] );
       ( "tool_observability",
         [

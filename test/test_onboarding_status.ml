@@ -99,10 +99,6 @@ let declared_is_not_verified () = with_workspace @@ fun base ->
   check bool "persisted history is not sandbox proof" true
     (condition Onboarding_status.Sandbox persisted = Onboarding_status.Needs_verification);
   check string "metadata observation is read-only" valid_meta (read metadata_path);
-  write metadata_path (Yojson.Safe.to_string (Masc_test_deps.current_meta_json_fixture ~name:"someone-else" ()));
-  let wrong_owner = Onboarding_status.inspect ~base_path:(Some base) in
-  check bool "another keeper's metadata is not imp history" true
-    (condition Onboarding_status.Keeper_persistence wrong_owner = Onboarding_status.Invalid);
   write metadata_path "{broken";
   let corrupt = Onboarding_status.inspect ~base_path:(Some base) in
   check bool "corrupt metadata is invalid, not absent" true
@@ -240,6 +236,43 @@ let a_stale_browser_lane_does_not_hold_imp_history_closed () =
   check bool "a model binding imp needs keeps the journey" true
     (Onboarding_status.opening unresolved_model = Onboarding_status.Needs_journey)
 
+(* A workspace whose Keepers were declared by hand never had imp, and bare
+   `masc` walked it back into setup (measured 2026-09-23: sixteen persisted
+   Keepers, opening needs_journey, "Your first Keeper, imp, has not been
+   created."). History belongs to the workspace, not to one name. *)
+let a_workspace_without_imp_opens_its_keepers_history () =
+  browser_lane_fixture ~declared:true () @@ fun base ->
+  let root = Filename.concat base ".masc" in
+  write (Filename.concat root "config/runtime.toml")
+    (read "../scripts/fixtures/release-evidence/runtime.toml");
+  let metadata_dir = Filename.concat root "keepers" in
+  Unix.mkdir metadata_dir 0o700;
+  let persist name =
+    write (Filename.concat metadata_dir (name ^ ".json"))
+      (Yojson.Safe.to_string (Masc_test_deps.current_meta_json_fixture ~name ())) in
+  persist "geek-scout";
+  persist "glossary-maniac";
+  let observed = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "imp is still undeclared" true
+    (condition Onboarding_status.Keeper_declaration observed = Onboarding_status.Needs_setup);
+  check bool "other Keepers' history is persisted history" true
+    (condition Onboarding_status.Keeper_persistence observed = Onboarding_status.Satisfied);
+  check bool "the workspace opens without imp" true
+    (Onboarding_status.opening observed = Onboarding_status.Open_existing_history);
+  (* The server's boot reconcile refuses every Keeper when one metadata file
+     cannot be read, so the readable ones do not make the workspace openable. *)
+  write (Filename.concat metadata_dir "broken-one.json") "{broken";
+  let one_broken = Onboarding_status.inspect ~base_path:(Some base) in
+  check bool "one unreadable Keeper is invalid history" true
+    (condition Onboarding_status.Keeper_persistence one_broken = Onboarding_status.Invalid);
+  check bool "and keeps the journey, as boot would refuse" true
+    (Onboarding_status.opening one_broken = Onboarding_status.Needs_journey);
+  check bool "the unreadable Keeper is named" true
+    (String_util.contains_substring
+       (message Onboarding_status.Keeper_persistence one_broken) "broken-one");
+  check string "observation does not repair it" "{broken"
+    (read (Filename.concat metadata_dir "broken-one.json"))
+
 (* Only the browser lane is advisory. Pinned per id so moving a check imp needs
    to Advisory fails here instead of silently opening a broken conversation. *)
 let only_the_browser_lane_is_advisory () =
@@ -270,5 +303,7 @@ let () = run "Onboarding observations"
                    browser_lane_declared_launcher_follows_the_workspace;
                  test_case "a stale browser lane does not hold imp's history closed" `Quick
                    a_stale_browser_lane_does_not_hold_imp_history_closed;
+                 test_case "a workspace without imp opens its Keepers' history" `Quick
+                   a_workspace_without_imp_opens_its_keepers_history;
                  test_case "only the browser lane is advisory" `Quick
                    only_the_browser_lane_is_advisory]]

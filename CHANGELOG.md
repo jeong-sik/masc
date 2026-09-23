@@ -61,7 +61,6 @@
   message. `Runtime_agent.yielded_pre_first_token` is removed, and the
   preemption now writes one INFO line (#38094).
 
-- The dashboard briefing's keeper briefs carry the keeper's real health. The operator snapshot keeper rows folded the diagnostic into `status` and dropped it, so the briefing, which reads `diagnostic.health_state`, published `health: null` for all 16 live keepers and its pressure order never put a failing keeper first. The rows now carry the diagnostic, including paused rows, and a paused keeper ranks as no pressure since its offline health is an operator's decision. A paused keeper's high context ratio does not lift it either. The execution render reads the same diagnostic from the snapshot instead of re-reading the registry, so its health now follows the snapshot, which is cached for up to ten seconds, and agrees with the `status` on the same row (#38072).
 - The schedule runner no longer writes a `dispatch=deferred` line for every held
   occurrence on every 15-second tick (21,218 lines on 2026-09-22, one
   occurrence 2,394 times). A held occurrence was reported as a dispatch result

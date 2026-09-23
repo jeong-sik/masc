@@ -85,10 +85,8 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_meta_contract.ml
 
 주요 필드 군:
 
-- **Identity**: `name`, `agent_name`, `trace_id`, `trace_history`
-- **Lineage**: `generation`, `trace_id`, `trace_history`, `last_handoff_ts`
+- **Identity**: `id`, `name`, `keeper_id`, and `runtime.trace_id`, which is set once when the Keeper is created
 - **Goal/Task links**: `current_task_id`, typed goal/task transitions
-- **Model**: `runtime_id`, `last_model_used`, derived `active_model`
 - **Capability boundary**: the flat Tool catalog plus the sandbox path
   boundary; external effects pass through the Gate.
 - **Direct address**: `mention_targets`
@@ -101,8 +99,6 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_meta_contract.ml
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
 
 직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증한다.
-
-A successful rollover keeps the same keeper identity, commits a new `trace_id`, and appends the old trace to `trace_history`.
 
 ### 3.2 working_context
  

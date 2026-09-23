@@ -1372,8 +1372,8 @@ status: reference
   `RFC-librarian-lifecycle` §4.6
 
 **Trace ID**
-: Keeper가 지금 쓰는 실행 식별자. 지난 값은 Keeper 메타의 `trace_history`에 쌓인다.
-  Checkpoint의 `session_id` 필드와 `Turn_ref`의 trace id가 이 값이다.
+: Keeper를 만들 때 한 번 정하는 실행 식별자. Checkpoint의 `session_id` 필드와
+  `Turn_ref`의 trace id가 이 값이다.
 
 **Memory OS**
 : Keeper 하나가 오래 들고 가는 기억(Fact)을 저장하고 다시 꺼내 주는 곳.

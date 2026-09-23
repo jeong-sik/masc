@@ -24,7 +24,7 @@ let published =
   ; ( "masc_goal_transition"
   , "Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate).
 
-request_complete no longer completes the Goal directly: it moves executing -> verifying and persists a durable proof request. Verifier verdicts are application-owned typed commits and are deliberately not accepted by this MCP tool. A Goal whose criterion was judged unreachable is refused on request_complete. While verifying, request_complete re-arms the pending proof request, drop moves the Goal to dropped, and reopen returns it to executing and clears the pending request; a verdict that arrives after either is refused."
+request_complete moves executing -> verifying and persists a durable proof request; repeated while verifying, it re-arms that request. drop and reopen also leave verifying. Verifier verdicts are not accepted by this MCP tool. A Goal whose criterion was judged unreachable is refused on request_complete."
   , "{\"type\":\"object\",\"properties\":{\"goal_id\":{\"type\":\"string\"},\"action\":{\"type\":\"string\",\"enum\":[\"request_complete\",\"drop\",\"reopen\"]},\"note\":{\"type\":\"string\"},\"evidence_refs\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"For request_complete: explicit board:<post_id> or fusion:<run_id> references. Their exact source is captured with this proof request. Omit on retry to keep the submitted snapshot; supplying changed evidence creates a new request.\"}},\"required\":[\"goal_id\",\"action\"],\"additionalProperties\":false}" )
   ; ( "masc_goal_upsert"
   , "Create or update flat Goal metadata.

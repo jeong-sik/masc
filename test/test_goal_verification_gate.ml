@@ -576,12 +576,32 @@ let test_reopened_goal_enters_a_new_verification_cycle () =
    | Ok work -> check bool "the verifier can collect the new proof request" true
        (List.exists (fun (work : Goal_verification_agent.For_testing.pending_work) -> work.goal_id = goal_id) work)
    | Error failure -> fail (Goal_verification_agent.For_testing.scan_failure_to_string failure));
-  let pending = ledger_record config goal_id in
-  (match Goal_verification.reopen_goal config ~goal_id ~note:None ~actor:"delayed-reopen" with
-   | Error _ -> ()
-   | Ok _ -> fail "Reopen cannot interrupt a newly pending review");
-  check bool "new pending proof remains byte-for-byte unchanged" true
-    (pending = ledger_record config goal_id);
+  (* Reopen from the new Verifying goes back to Executing and archives the
+     pending request; the stale request cannot be answered afterwards. *)
+  let stale_request, stale_criterion = proof_identity config goal_id in
+  ignore (must_succeed "reopen from verifying" (transition ctx goal_id "reopen"));
+  check string "reopen from verifying returns to execution" "executing" (stored_phase config goal_id);
+  check bool "the pending request is no longer active" true
+    ((ledger_record config goal_id).completion = Goal_verification.Completion_idle);
+  let archived_pending =
+    String.split_on_char '\n' (goal_events_text config)
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map Yojson.Safe.from_string
+    |> List.filter (fun event ->
+      json_state event [ "event_type" ] = "goal_proof_reopened"
+      && (match Yojson.Safe.Util.(event |> member "payload" |> member "previous_completion"
+                                   |> member "request_id") with
+          | `String request_id -> String.equal request_id stale_request
+          | _ -> false))
+  in
+  check int "the pending request is archived once" 1 (List.length archived_pending);
+  ignore (must_fail "stale answer after reopen"
+    (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"
+       ~start_time:0. config ~goal_id ~request_id:stale_request ~criterion:stale_criterion
+       ~verification_run_id:"stale-verifier-run"
+       ~decision:Workspace_goals.Proof_proven ~evidence:"stale proof"));
+  check string "stale answer leaves the goal executing" "executing" (stored_phase config goal_id);
+  ignore (must_succeed "third completion request" (transition ctx goal_id "request_complete"));
   let request_id, criterion = proof_identity config goal_id in
   ignore (must_succeed "second proof"
     (Workspace_goals.commit_verifier_decision ~tool_name:"goal_verifier_commit"

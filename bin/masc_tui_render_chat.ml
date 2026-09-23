@@ -822,14 +822,15 @@ let keeper_message_identity ~max_cells state keeper_name =
              Printf.sprintf "%s%s \xc2\xb7 %s \xc2\xb7 " status Ansi.dim
                (Tui_decode.keeper_phase_to_string row.kr_phase)
            in
-           (* What the request now streaming has spent so far, in the same
-              clause shape as the rest of the row. It is an addition to this row, never a claim on
-              it: the counters are drawn whole or not at all, so they can
-              neither cut the runtime id nor arrive as a half-written number
-              that reads as a smaller bill than the real one. *)
+           (* What the turn has spent so far and why the provider stopped
+              writing, in the same clause shape as the rest of the row. It is
+              an addition to this row, never a claim on it: it is drawn whole
+              or not at all, so it can neither cut the runtime id nor arrive
+              as a half-written number that reads as a smaller bill than the
+              real one, nor as a stop reason cut down to another word. *)
            let usage_clause =
              match
-               Keeper_chat_transcript.stream_usage_text ~keeper_name
+               Keeper_chat_transcript.stream_details_text ~keeper_name
                  (Option.map (fun live -> live.tl_transcript) state.msg_live)
              with
              | None -> ""

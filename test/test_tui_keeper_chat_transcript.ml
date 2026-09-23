@@ -1416,8 +1416,9 @@ let test_runtime_identity_separates_configured_and_observed () =
    nothing. *)
 let test_the_turn_reports_the_tokens_it_has_spent () =
   let usage ?(keeper_name = "keeper.one") transcript =
-    Transcript.stream_usage_text ~keeper_name transcript
+    Transcript.stream_details_text ~keeper_name transcript
   in
+  let counters ?stop_reason usage = Live.Stream_details { usage = Some usage; stop_reason } in
   check (option string) "nothing is claimed without a transcript" None (usage None);
   let t = fresh () in
   check (option string) "a turn that reported no counters says nothing" None
@@ -1426,7 +1427,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
     [ Live.Run_started
     ; Live.Runtime_attempt_started
         { runtime_id = Some "observed-glm"; attempt_index = Some 0 }
-    ; Live.Stream_usage
+    ; counters
         { input_tokens = Some 1200
         ; output_tokens = Some 340
         ; cache_read_input_tokens = None
@@ -1442,7 +1443,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
     (usage ~keeper_name:"keeper.other" (Some t));
   (* Cumulative: a later report replaces the earlier one instead of adding. *)
   feed t
-    [ Live.Stream_usage
+    [ counters
         { input_tokens = Some 1200
         ; output_tokens = Some 900
         ; cache_read_input_tokens = Some 4096
@@ -1451,22 +1452,59 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
     ];
   check (option string) "the latest report stands for the request"
     (Some "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096") (usage (Some t));
-  (* The provider accumulates counters inside one request, and a turn that
-     calls tools asks again after every tool result. Round two therefore
-     starts from no counters: leaving round one's numbers up would call one
-     round's tokens what the turn has spent. *)
-  feed t [ Live.Stream_model_started { model = "glm-5-turbo" } ];
-  check (option string) "a second round starts from no counters" None
+  (* The provider's word for why it stopped writing. [Keeper_turn_outcome.t]
+     cannot say this: a reply cut off at max_tokens is still a visible reply,
+     so without this clause the screen shows a finished answer and no sign
+     that the provider ran out of room. *)
+  feed t [ Live.Stream_details { usage = None; stop_reason = Some "max_tokens" } ];
+  check (option string) "why the provider stopped joins the same clause"
+    (Some
+       "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096 \xc2\xb7 stopped: max_tokens")
     (usage (Some t));
+  (* A delta that carried only counters leaves the reason standing, and the
+     ordinary reason is drawn too: keeping a list of reasons worth hiding
+     would go stale the day a provider adds one. *)
   feed t
-    [ Live.Stream_usage
+    [ counters ~stop_reason:"end_turn"
+        { input_tokens = Some 1200
+        ; output_tokens = Some 950
+        ; cache_read_input_tokens = Some 4096
+        ; cache_creation_input_tokens = None
+        }
+    ];
+  check (option string) "an ordinary stop reason is drawn like any other"
+    (Some
+       "tokens: in 1200 \xc2\xb7 out 950 \xc2\xb7 cache read 4096 \xc2\xb7 stopped: end_turn")
+    (usage (Some t));
+  (* Both facts belong to the request that reported them. A turn that calls
+     tools asks again after every tool result, and the counters accumulate
+     inside one request while the reason arrives at its end. Round two starts
+     from neither: leaving round one's numbers up would call one round's
+     tokens what the turn has spent, and leaving [stopped: tool_use] up would
+     say the provider has stopped while round two is still writing. *)
+  feed t
+    [ counters ~stop_reason:"tool_use"
+        { input_tokens = Some 1200
+        ; output_tokens = Some 980
+        ; cache_read_input_tokens = Some 4096
+        ; cache_creation_input_tokens = None
+        }
+    ; Live.Stream_model_started { model = "glm-5-turbo" }
+    ];
+  check (option string) "a second round starts from neither" None
+    (usage (Some t));
+  feed t [ Live.Text "still writing" ];
+  check (option string) "and text arriving does not bring the old ones back"
+    None (usage (Some t));
+  feed t
+    [ counters
         { input_tokens = Some 30
         ; output_tokens = Some 12
         ; cache_read_input_tokens = None
         ; cache_creation_input_tokens = None
         }
     ];
-  check (option string) "and reports only what that round has spent"
+  check (option string) "it reports only what that round has spent"
     (Some "tokens: in 30 \xc2\xb7 out 12") (usage (Some t));
   (* A new attempt counts its own tokens: carrying the old ones over would
      bill the new runtime for what the failed one spent. *)

@@ -33,12 +33,17 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
-  | Live.Stream_usage usage ->
-      Printf.sprintf "stream_usage(in=%s,out=%s,cache_read=%s,cache_write=%s)"
-        (token_count usage.Live.input_tokens)
-        (token_count usage.Live.output_tokens)
-        (token_count usage.Live.cache_read_input_tokens)
-        (token_count usage.Live.cache_creation_input_tokens)
+  | Live.Stream_details { usage; stop_reason } ->
+      Printf.sprintf "stream_details(%s,stop=%s)"
+        (match usage with
+         | None -> "no usage"
+         | Some usage ->
+             Printf.sprintf "in=%s,out=%s,cache_read=%s,cache_write=%s"
+               (token_count usage.Live.input_tokens)
+               (token_count usage.Live.output_tokens)
+               (token_count usage.Live.cache_read_input_tokens)
+               (token_count usage.Live.cache_creation_input_tokens))
+        (Option.value ~default:"none" stop_reason)
   | Live.Text text -> "text(" ^ text ^ ")"
   | Live.Thinking text -> "thinking(" ^ text ^ ")"
   | Live.Tool_started { occurrence; tool_name } ->
@@ -270,8 +275,8 @@ let occurrence_anon : E.tool_stream_occurrence =
 
 (* Every constructor the server projects to a frame the live view ignores, or
    to no frame at all, plus a tool trio without provider ids. Absent here:
-   [Agent_core_media_delta] (its source kind lives in agent_core, which this
-   test does not link) and [Event_error] (terminal; see [failed_turn]). *)
+   [Agent_core_media_delta] (no renderer draws its URL yet, TUI or dashboard)
+   and [Event_error] (terminal; see [failed_turn]). *)
 let golden : E.keeper_chat_event list =
   [ E.Run_started { run_id = "run-golden"; thread_id = "keeper:keeper.one" }
   ; E.Batch_bound
@@ -330,6 +335,19 @@ let golden : E.keeper_chat_event list =
       }
   ; E.Text_message_end
   ; E.Agent_core_stream_message_delta { stop_reason = None; usage = None }
+    (* Both facts the delta can carry, so the golden comparison says the
+       journal and the wire read them the same way rather than agreeing on an
+       event that carries nothing. *)
+  ; E.Agent_core_stream_message_delta
+      { stop_reason = Some Agent_core.Types.MaxTokens
+      ; usage =
+          Some
+            { Agent_core.Types.input_tokens = Some 1200
+            ; output_tokens = Some 340
+            ; cache_creation_input_tokens = None
+            ; cache_read_input_tokens = Some 900
+            }
+      }
   ; E.Agent_core_stream_message_stop
   ; E.Run_finished { run_id = "run-golden" }
   ]

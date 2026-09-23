@@ -383,12 +383,16 @@ val runtime_identity_text :
     a runtime id and is never shown as one. Another keeper's transcript cannot
     supply the turn identity. *)
 
-val stream_usage_text : keeper_name:string -> t option -> string option
-(** The token counters the request now streaming reported so far, as clauses
-    ([tokens: in 1200 · out 340]). Counters the provider did not report are
-    left out rather than drawn as zero, and [None] means nothing was reported
-    at all, so the row is unchanged from before this was measured. Another
-    keeper's transcript reports nothing. *)
+val stream_details_text : keeper_name:string -> t option -> string option
+(** What the matching turn reported mid-stream, as clauses
+    ([tokens: in 1200 · out 340 · stopped: max_tokens]). Counters the provider
+    did not report are left out rather than drawn as zero; the stop reason is
+    drawn whenever one was reported, including [end_turn], so the screen never
+    holds a list of reasons worth hiding. It is the provider's word for why it
+    stopped writing, which is a different question from the turn outcome masc
+    recorded. [None] means nothing was reported at all, so the row is
+    unchanged from before this was measured. Another keeper's transcript
+    reports nothing. *)
 
 (** The recorded reply (KEEPER_REPLY_DETAILS): the visible text, the typed
     outcome, and the turn it was recorded under. *)

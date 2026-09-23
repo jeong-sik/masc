@@ -17,12 +17,17 @@ let delta_to_string : Live.delta -> string = function
         (Option.value ~default:"none" runtime_id)
         (match attempt_index with Some i -> string_of_int i | None -> "none")
   | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
-  | Live.Stream_usage usage ->
-      Printf.sprintf "stream_usage(in=%s,out=%s,cache_read=%s,cache_write=%s)"
-        (token_count usage.Live.input_tokens)
-        (token_count usage.Live.output_tokens)
-        (token_count usage.Live.cache_read_input_tokens)
-        (token_count usage.Live.cache_creation_input_tokens)
+  | Live.Stream_details { usage; stop_reason } ->
+      Printf.sprintf "stream_details(%s,stop=%s)"
+        (match usage with
+         | None -> "no usage"
+         | Some usage ->
+             Printf.sprintf "in=%s,out=%s,cache_read=%s,cache_write=%s"
+               (token_count usage.Live.input_tokens)
+               (token_count usage.Live.output_tokens)
+               (token_count usage.Live.cache_read_input_tokens)
+               (token_count usage.Live.cache_creation_input_tokens))
+        (Option.value ~default:"none" stop_reason)
   | Live.Text text -> Printf.sprintf "text(%s)" text
   | Live.Thinking text -> Printf.sprintf "thinking(%s)" text
   | Live.Tool_started { occurrence; tool_name } ->
@@ -687,25 +692,39 @@ let test_stream_usage_is_typed () =
      stays None rather than becoming a zero the screen would state as a
      measured fact. *)
   check (list delta) "stream message delta yields the reported token counters"
-    [ Live.Stream_usage
-        { input_tokens = Some 1200
-        ; output_tokens = Some 340
-        ; cache_read_input_tokens = Some 900
-        ; cache_creation_input_tokens = None
+    [ Live.Stream_details
+        { usage =
+            Some
+              { input_tokens = Some 1200
+              ; output_tokens = Some 340
+              ; cache_read_input_tokens = Some 900
+              ; cache_creation_input_tokens = None
+              }
+        ; stop_reason = Some "end_turn"
         }
     ]
     (feed_whole body)
 
-let test_stream_delta_without_usage_is_no_row () =
-  (* The dividing input: a delta that reported no counter at all. Without
-     this, an implementation that answers every message delta with a row of
-     blanks passes the test above. *)
+let test_stream_delta_with_only_a_stop_reason_is_a_row () =
+  (* The counters and the stop reason travel in the same event but not always
+     in the same one: a delta that carries only the reason still says
+     something the screen has no other way to learn, so it is a row with no
+     usage rather than no row. *)
   let body =
     sse
       (custom "KEEPER_STREAM_MESSAGE_DELTA"
-         (`Assoc [ "stop_reason", `String "end_turn" ]))
+         (`Assoc [ "stop_reason", `String "max_tokens" ]))
   in
-  check (list delta) "a delta that reported no counters draws nothing" []
+  check (list delta) "a delta that reported only why it stopped is still a row"
+    [ Live.Stream_details { usage = None; stop_reason = Some "max_tokens" } ]
+    (feed_whole body)
+
+let test_stream_delta_without_usage_is_no_row () =
+  (* The dividing input: a delta that reported neither fact. Without this, an
+     implementation that answers every message delta with a row of blanks
+     passes both tests above. *)
+  let body = sse (custom "KEEPER_STREAM_MESSAGE_DELTA" (`Assoc [])) in
+  check (list delta) "a delta that reported nothing draws nothing" []
     (feed_whole body)
 
 let test_unknown_custom_event_is_reported () =
@@ -735,7 +754,9 @@ let () =
             test_stream_model_started_is_typed
         ; test_case "a turn in flight reports the tokens it has spent" `Quick
             test_stream_usage_is_typed
-        ; test_case "a delta that reported no counters draws nothing" `Quick
+        ; test_case "a delta that reported only why it stopped is still a row"
+            `Quick test_stream_delta_with_only_a_stop_reason_is_a_row
+        ; test_case "a delta that reported nothing draws nothing" `Quick
             test_stream_delta_without_usage_is_no_row
         ] )
     ; ( "acceptance"

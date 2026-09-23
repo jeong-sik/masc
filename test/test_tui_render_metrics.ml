@@ -65,6 +65,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Decode.memory_keeper_
 let make_memory_health ~total_facts ~source_facts ~keepers : Decode.memory_health_snapshot =
   { mhs_generated_at = 1000.0
   ; mhs_keepers = keepers
+  ; mhs_refused_keepers = []
   ; mhs_total_facts = total_facts
   ; mhs_total_observed_facts = total_facts - source_facts
   ; mhs_total_derived_facts = 0

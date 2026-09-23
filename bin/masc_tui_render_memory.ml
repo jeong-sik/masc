@@ -25,13 +25,6 @@ let librarian_pass_end_words = function
   | Pass_stopped _ -> "stopped on an error"
   | Pass_raised _ -> "crashed"
 
-(* The server's account of why a pass stopped or crashed, drawn on its own
-   row because it is the one part of the Librarian row an operator acts on.
-   The other endings carry none. *)
-let librarian_pass_end_cause = function
-  | Pass_stopped cause | Pass_raised cause -> Some cause
-  | Pass_off | Pass_lane_unconfigured | Pass_drained | Pass_not_committed -> None
-
 let librarian_failure_words = function
   | Failure_prompt_render -> "prompt could not be built"
   | Failure_execution_clock_unavailable -> "no clock to run on"
@@ -168,7 +161,9 @@ let memory_context_lines (k : memory_keeper_health) =
       k.mkh_librarian_failures
   in
   let librarian_cause_lines =
-    match Option.bind k.mkh_librarian.mlh_state librarian_pass_end_cause with
+    (* The cause is drawn on its own row because it is the part of the
+       Librarian row an operator acts on. *)
+    match Option.bind k.mkh_librarian.mlh_state memory_librarian_pass_end_cause with
     | Some cause -> [ "  Librarian cause · " ^ Terminal_text.preview_line cause ]
     | None -> []
   in
@@ -619,6 +614,21 @@ let render_memory_body ~cols ~budget (state : state)
    | Some detail ->
        push_styled ~style:(Theme.bad ())
          ("  " ^ Terminal_text.single_line detail);
+       push_divider ());
+  (* A keeper row the decoder refused is drawn as one line naming the keeper
+     and the reason; the rows that decoded are drawn below as usual. *)
+  (match state.memory_health with
+   | Some { mhs_refused_keepers = []; _ } | None -> ()
+   | Some { mhs_refused_keepers = refused; _ } ->
+       List.iter
+         (fun refusal ->
+           push_styled ~style:(Theme.bad ())
+             (Printf.sprintf "  %s · row not read: %s"
+                (match refusal.mkr_keeper_id with
+                 | Some keeper_id -> Terminal_text.single_line keeper_id
+                 | None -> "(keeper id not read)")
+                (Terminal_text.single_line refusal.mkr_reason)))
+         refused;
        push_divider ());
   let cursor =
     if shown = 0 then 0 else max 0 (min state.memory_health_cursor (shown - 1))

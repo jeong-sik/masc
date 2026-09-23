@@ -922,6 +922,10 @@ type memory_librarian_failure_kind =
   | Failure_lane_cancelled
   | Failure_unhandled_exception
 
+(** The server's account of why a pass stopped or crashed; [None] for the
+    endings that carry none. *)
+val memory_librarian_pass_end_cause : memory_librarian_pass_end -> string option
+
 (* RFC librarian-lifecycle §4.9: how far behind the keeper's Librarian is
    standing, and what its last pass and its journal say. [None] in a field is
    "not measured", which the header prints as such; it is not zero. *)
@@ -1009,9 +1013,19 @@ type memory_keeper_health = {
   mkh_alerts : memory_alert list;
 }
 
+(** A keeper row this build could not read, and why. The other rows still
+    decode, so one row from a newer server does not blank the pane.
+    [mkr_keeper_id] is [None] when the row's own [keeper_id] could not be read
+    either. *)
+type memory_keeper_refusal = {
+  mkr_keeper_id : string option;
+  mkr_reason : string;
+}
+
 type memory_health_snapshot = {
   mhs_generated_at : float;
   mhs_keepers : memory_keeper_health list;
+  mhs_refused_keepers : memory_keeper_refusal list;
   mhs_total_facts : int;
   mhs_total_observed_facts : int;
   mhs_total_derived_facts : int;

@@ -2657,9 +2657,18 @@ type memory_keeper_health = {
   mkh_alerts : memory_alert list;
 }
 
+(* A keeper row this build could not read. The rest of the fleet still
+   decodes: one row from a newer server must not blank the pane. [None] when
+   the row's own [keeper_id] could not be read either. *)
+type memory_keeper_refusal = {
+  mkr_keeper_id : string option;
+  mkr_reason : string;
+}
+
 type memory_health_snapshot = {
   mhs_generated_at : float;
   mhs_keepers : memory_keeper_health list;
+  mhs_refused_keepers : memory_keeper_refusal list;
   mhs_total_facts : int;
   mhs_total_observed_facts : int;
   mhs_total_derived_facts : int;
@@ -4906,6 +4915,12 @@ let decode_memory_librarian_failure_kind = function
   | Some "unhandled_exception" -> Ok (Some Failure_unhandled_exception)
   | Some kind -> Error ("unsupported librarian failure kind: " ^ kind)
 
+(* The server's account of why a pass stopped or crashed. The other endings
+   carry none. *)
+let memory_librarian_pass_end_cause = function
+  | Pass_stopped cause | Pass_raised cause -> Some cause
+  | Pass_off | Pass_lane_unconfigured | Pass_drained | Pass_not_committed -> None
+
 let decode_memory_librarian_health keeper_json =
   let* json = required_member keeper_json "librarian" in
   let* () =
@@ -5251,11 +5266,31 @@ let decode_memory_health_snapshot json =
     else Error "memory health observation metadata must be non-negative"
   in
   let* keepers_json = required_list_field json "keepers" in
-  let* mhs_keepers =
-    decode_list "keepers" decode_memory_keeper_health keepers_json
+  (* Each row is decoded on its own and a row that does not decode is kept as
+     a refusal, not dropped and not folded into a default: a pass ending or a
+     failure kind this build does not know stays refused, but only for that
+     keeper. *)
+  let rows =
+    List.mapi
+      (fun index row ->
+         match decode_memory_keeper_health row with
+         | Ok keeper -> Ok keeper
+         | Error reason ->
+           Error
+             { mkr_keeper_id = Result.to_option (required_string_field row "keeper_id")
+             ; mkr_reason = Printf.sprintf "keepers[%d]: %s" index reason
+             })
+      keepers_json
+  in
+  let mhs_keepers = List.filter_map Result.to_option rows in
+  let mhs_refused_keepers =
+    List.filter_map (function Ok _ -> None | Error refusal -> Some refusal) rows
   in
   let* () =
-    let keeper_ids = List.map (fun keeper -> keeper.mkh_keeper_id) mhs_keepers in
+    let keeper_ids =
+      List.map (fun keeper -> keeper.mkh_keeper_id) mhs_keepers
+      @ List.filter_map (fun refusal -> refusal.mkr_keeper_id) mhs_refused_keepers
+    in
     if List.length keeper_ids = List.length (List.sort_uniq String.compare keeper_ids)
     then Ok ()
     else Error "memory health keeper identities must be unique"
@@ -5392,6 +5427,11 @@ let decode_memory_health_snapshot json =
     then Ok ()
     else Error "memory health fleet totals must be non-negative"
   in
+  (* The server's totals and alert summary count every row it sent, including
+     any this build refused, so they can only be checked against the rows when
+     every row decoded. With a refused row the totals are the server's and the
+     refused row is drawn as refused. *)
+  let every_row_read = mhs_refused_keepers = [] in
   let sum field =
     List.fold_left (fun total keeper -> total + field keeper) 0 mhs_keepers
   in
@@ -5401,7 +5441,7 @@ let decode_memory_health_snapshot json =
     | Some total, Some atoms, Some official -> Some (total + atoms + official)
     | _ -> None) (Some 0) mhs_keepers in
   let* () =
-    if mhs_total_librarian_unread_turns = expected_unread then Ok ()
+    if (not every_row_read) || mhs_total_librarian_unread_turns = expected_unread then Ok ()
     else Error "memory health unread total disagrees with keeper rows"
   in
   let expected_continuity_unread, expected_continuity_unmeasured =
@@ -5414,8 +5454,9 @@ let decode_memory_health_snapshot json =
       mhs_keepers
   in
   let* () =
-    if mhs_total_librarian_continuity_unread_atoms = expected_continuity_unread
-       && mhs_total_librarian_continuity_unmeasured = expected_continuity_unmeasured
+    if (not every_row_read)
+       || (mhs_total_librarian_continuity_unread_atoms = expected_continuity_unread
+           && mhs_total_librarian_continuity_unmeasured = expected_continuity_unmeasured)
     then Ok ()
     else Error "memory health continuity lag totals disagree with keeper rows"
   in
@@ -5438,7 +5479,8 @@ let decode_memory_health_snapshot json =
     ]
   in
   let* () =
-    if List.for_all (fun (reported, actual) -> reported = actual) expected_totals
+    if (not every_row_read)
+       || List.for_all (fun (reported, actual) -> reported = actual) expected_totals
     then Ok ()
     else Error "memory health fleet totals disagree with keeper rows"
   in
@@ -5464,7 +5506,8 @@ let decode_memory_health_snapshot json =
   in
   let* () =
     if
-      total_alerts = sum (fun keeper -> List.length keeper.mkh_alerts)
+      (not every_row_read)
+      || total_alerts = sum (fun keeper -> List.length keeper.mkh_alerts)
       && mhs_warn_alerts = observed_warn_alerts
       && mhs_error_alerts = observed_error_alerts
       && keepers_with_alerts = sum (fun keeper -> if keeper.mkh_alerts = [] then 0 else 1)
@@ -5487,6 +5530,7 @@ let decode_memory_health_snapshot json =
   Ok
     { mhs_generated_at
     ; mhs_keepers
+    ; mhs_refused_keepers
     ; mhs_total_facts
     ; mhs_total_observed_facts
     ; mhs_total_derived_facts

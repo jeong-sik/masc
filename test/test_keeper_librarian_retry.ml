@@ -694,9 +694,9 @@ let test_a_restated_memory_still_current_takes_its_absorptions () =
       | Error error -> fail (Librarian.parse_error_to_string error)
     in
     let committed =
-      Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:200.
+      Current.apply_disposition ~keepers_dir ~keeper_id ~now:200.
         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
-        ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
+        ~dropped_statements:selection.dropped ~absorbed:selection.absorbed ~revisions:selection.revisions
         ~new_claims:selection.new_claims
         ()
       |> require
@@ -757,9 +757,9 @@ let test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_i
        |> require
        : Current.t);
     let committed =
-      Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id ~now:200.
+      Current.apply_disposition ~keepers_dir ~keeper_id ~now:200.
         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
-        ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
+        ~dropped_statements:selection.dropped ~absorbed:selection.absorbed ~revisions:selection.revisions
         ~new_claims:selection.new_claims
         ()
       |> require

@@ -77,6 +77,12 @@ val overview_team_chrome_rows : int
 (** The Team block's title row and the divider under it, drawn only when
     [team_rows] is positive. *)
 
+val spend_spare_rows_on_team : overview_allocation -> extra:int -> overview_allocation
+(** Adds up to [extra] Team rows out of [filler_rows] only: rows nothing else
+    on the Overview wanted. A Team block not yet drawn also pays its
+    {!overview_team_chrome_rows} from the filler, and gets nothing unless at
+    least one row is left after them. Every other count is unchanged. *)
+
 val allocate_overview :
   terminal_rows:int ->
   has_cluster:bool ->

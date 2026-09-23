@@ -10358,7 +10358,13 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
             process, master_fd, output, requests, path=VERIFICATION_VERDICT_PATH
         )
         approve_payload = json.loads(approve_body)
-        if approve_payload != {"task_id": "task-901", "verdict": "approve"}:
+        # The verdict names the submission the row showed, so the server can
+        # refuse it when the Task has moved on to another one.
+        if approve_payload != {
+            "task_id": "task-901",
+            "verification_id": "vr-task-901",
+            "verdict": "approve",
+        }:
             raise AssertionError(f"approve body: {approve_payload!r}")
         # Let the approve completion and its queue reload settle before the
         # editor temporarily gives up the alternate screen. Otherwise the
@@ -10383,6 +10389,7 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         reject_payload = json.loads(verdict_bodies()[1])
         if reject_payload != {
             "task_id": "task-901",
+            "verification_id": "vr-task-901",
             "verdict": "reject",
             "reason": "needs a repro",
         }:

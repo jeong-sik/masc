@@ -1588,7 +1588,8 @@ let test_restart_cut_never_commits_a_current_unfinished_turn () =
         ~now:1. ~origin:{ kind = Memory.Authored; trace_id }) claims in
     match Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:1.
         ~source:{ kind = Current.Librarian; trace_id } ~new_claims:facts ~absorbed:[] () with
-    | Ok snapshot -> snapshot | Error detail -> fail detail in
+    | Ok (disposition : Current.disposition) -> disposition.snapshot
+    | Error detail -> fail detail in
   let seed = write_claims ["seed fact"] in
   check int "seed revision" 1 seed.revision;
   let old = List.map message ["old first"; "old middle"; "repeated endpoint"] in

@@ -281,8 +281,24 @@ val committed_official_range
 (** Same snapshot proof as [committed_durable_range], independently retained
     for official-client input in the shared receipt sidecar. *)
 
+type disposition =
+  { snapshot : t  (** the committed snapshot *)
+  ; absorbed_applied : Keeper_memory_os_types.absorbed_statement list
+        (** absorptions this commit applied: the source left the snapshot and
+            its {!Keeper_memory_absorbed} row points into the target. In the
+            answer's order. *)
+  ; absorbed_not_applied : Keeper_memory_os_types.absorbed_statement list
+        (** the other absorptions passed in: the target was neither in the
+            locked snapshot nor among [new_claims] (the source stays current),
+            or the locked snapshot no longer held the source. No row is
+            written for them. *)
+  }
+(** What one [apply_disposition] commit did. The absorptions a caller passed
+    in are what it asked for; these two lists are what the store did, and
+    together they hold every absorption passed in. *)
+
 val apply_disposition
-  :  ?on_committed:(t -> unit)
+  :  ?on_committed:(disposition -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
   -> ?durable_range_id:durable_range_id
@@ -294,7 +310,7 @@ val apply_disposition
   -> source:source
   -> new_claims:Keeper_memory_os_types.fact list
   -> unit
-  -> (t, string) result
+  -> (disposition, string) result
 (** Apply a librarian's decision to whatever the snapshot holds when the lock
     is taken.
 
@@ -336,8 +352,8 @@ val apply_disposition
     a current memory the answer wrote again verbatim. The librarian read the
     snapshot before its provider turn, so that memory may be gone when the lock
     is taken. An absorption whose target the locked snapshot does not hold and
-    [new_claims] does not add is not applied and is logged; its source stays
-    current, the removed memory is not brought back, and no absorbed row points
+    [new_claims] does not add is not applied and is returned in
+    [absorbed_not_applied]; its source stays current, the removed memory is not brought back, and no absorbed row points
     into an id no snapshot has (#38186). *)
 
 val replace

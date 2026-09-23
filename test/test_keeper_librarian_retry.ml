@@ -701,6 +701,17 @@ let test_a_restated_memory_still_current_takes_its_absorptions () =
         ()
       |> require
     in
+    let pairs statements =
+      List.map
+        (fun (statement : Masc.Keeper_memory_os_types.absorbed_statement) ->
+           statement.absorbed ^ "->" ^ statement.into)
+        statements
+    in
+    check (list string) "the commit reports B absorbed into A"
+      [ current_b_id ^ "->" ^ current_a_id ]
+      (pairs committed.absorbed_applied);
+    check (list string) "and nothing left unapplied" [] (pairs committed.absorbed_not_applied);
+    let committed = committed.snapshot in
     check (list string) "A once, B absorbed"
       [ current_a_id ]
       (List.map Memory.memory_id committed.facts);
@@ -753,6 +764,20 @@ let test_a_restated_memory_retracted_during_the_pass_stays_retracted_and_keeps_i
         ()
       |> require
     in
+    let pairs statements =
+      List.map
+        (fun (statement : Masc.Keeper_memory_os_types.absorbed_statement) ->
+           statement.absorbed ^ "->" ^ statement.into)
+        statements
+    in
+    (* The run record reads these lists; a record that said B went into A
+       while B is still current would be wrong. *)
+    check (list string) "the commit reports no absorption applied" []
+      (pairs committed.absorbed_applied);
+    check (list string) "and B into A as not applied"
+      [ current_b_id ^ "->" ^ current_a_id ]
+      (pairs committed.absorbed_not_applied);
+    let committed = committed.snapshot in
     check (list string) "A stays retracted and B stays current"
       [ current_b_id ]
       (List.map Memory.memory_id committed.facts);
@@ -1639,6 +1664,7 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
         ~source:{ kind = Current.Librarian; trace_id = "trace-selection" }
         ~dropped_statements:selection.dropped ~absorbed:selection.absorbed
         ~new_claims:selection.new_claims () |> require
+      |> fun (d : Current.disposition) -> d.snapshot
     in
     let committed = commit reordered
         (selection_json ~dropped:[dropped_json ~reason:"temporary notice is no longer useful" dropped_token] ())

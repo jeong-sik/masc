@@ -572,11 +572,11 @@ let test_memory_surface_keeps_the_starvation_axes () =
   Alcotest.(check bool) "the title names the starving count" true
     (reads ~binding_name:"render_memory" ~fields:[ "mhs_starving_keepers" ] > 0);
   Alcotest.(check bool) "the title keeps source facts separate" true
-    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body" ~fields:[ "mhs_total_source_facts" ] > 0);
+    (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows" ~fields:[ "mhs_total_source_facts" ] > 0);
   Alcotest.(check bool) "the title keeps derived facts separate" true
-    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body" ~fields:[ "mhs_total_derived_facts" ] > 0);
+    (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows" ~fields:[ "mhs_total_derived_facts" ] > 0);
   Alcotest.(check bool) "the title exposes support retractions" true
-    (reads_in ~module_path:render_memory_module ~binding_name:"render_memory_body"
+    (reads_in ~module_path:render_memory_module ~binding_name:"memory_fleet_header_rows"
        ~fields:[ "mhs_total_support_invalidations" ]
      > 0);
   (* The source snapshot has four numbers and the row has one cell for them,
@@ -789,7 +789,7 @@ let test_the_window_is_measured_where_the_cursor_lands () =
     "the cursor-dependent layout is read in one place" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
        ~binding_name:"surface_body_height_at"
-       ~callee:"memory_overview_scrolled")
+       ~callee:"Masc_tui_render_memory.memory_overview_scrolled")
 
 (* A lookup in the body of a drawing loop is paid once per visible row. The
    count is over the whole renderer rather than one binding, because the

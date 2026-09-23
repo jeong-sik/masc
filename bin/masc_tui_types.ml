@@ -8881,7 +8881,10 @@ let selected_memory_keeper (state : state) =
   let rows = visible_memory_keepers state in
   List.nth_opt rows (max 0 (min state.memory_health_cursor (List.length rows - 1)))
 
-let memory_overview_scrolled ?cursor (state : state) =
+(* [header_rows] is how many rows the fleet header above the sort row takes.
+   The renderer wraps it to the frame, so only it knows the number; it passes
+   the length of the rows it draws ([Masc_tui_render_memory.memory_overview_scrolled]). *)
+let memory_overview_scrolled ~header_rows ?cursor (state : state) =
   let keepers = visible_memory_keepers state in
   let count = List.length keepers in
   let cursor = Option.value cursor ~default:state.memory_health_cursor in
@@ -8913,8 +8916,8 @@ let memory_overview_scrolled ?cursor (state : state) =
   { sc_count = count
   ; sc_chrome =
       Masc_tui_frame.chrome_rows
-      (* Totals, Librarian, legend, sort, divider, headings, divider. *)
-      + 7 + context_rows
+      (* The fleet header, then legend, sort, divider, headings, divider. *)
+      + header_rows + 5 + context_rows
       + (if memory_overview_query state <> "" then 1 else 0)
       + (if Option.is_some state.memory_health_error then 2 else 0)
       + refused_rows
@@ -9844,7 +9847,10 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         listing ~error:state.memory_facts_error
           (List.length (memory_fact_rows state))
       else
-        Some (memory_overview_scrolled state)
+        (* The overview's header rows are wrapped to the terminal width, which
+           this module does not read. [Masc_tui.scrolled_surface] answers it
+           from the renderer, as it does for Tools. *)
+        None
   | Changes when Option.is_some (opened_file_change state) -> None
   | Changes ->
       Some

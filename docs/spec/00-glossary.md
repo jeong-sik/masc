@@ -696,6 +696,18 @@ status: reference
 : 외부 효과를 Always Allowed, Auto Judge, HITL 중 설정된 정책으로 판정하는
   경계. pending 판정은 다른 작업을 막지 않는다.
 
+**HITL Delivery Occasion (HITL 전달 계기)**
+: 승인된 HITL 결정을 Keeper 에게 전달할 때, 그 전달이 왜 일어나는지를 가리키는 닫힌 세 값
+  (`Keeper_approval_queue.delivery_occasion`). `First_commit` 은 운영자가 결정을 처음
+  커밋한 경우, `Boot_replay` 는 아직 소비되지 않은 전달을 부팅 때 다시 하는 경우,
+  `Same_request_resubmitted` 는 운영자가 같은 요청을 다시 낸 경우다.
+  승인 원장의 `Resolved` 행과 SSE `resolved` 는 계기와 상관없이 결정이 저널에 적힐 때
+  한 번 나간다. 전달보다 먼저라서 첫 전달이 실패해도 결정은 원장에 있다.
+  계기는 전달만 가른다. `Boot_replay` 와 `Same_request_resubmitted` 는 wake 를 다시 보내고
+  `hitl resolution redelivered approval=… occasion=…` 로그를 남길 뿐 행을 적지 않는다.
+  채팅의 결정 행은 wake 가 살아 있는 Keeper 에게 닿을 때 한 번만 적힌다.
+  → [Keeper_approval_queue.delivery_occasion](../../lib/keeper/keeper_approval_queue.ml)
+
 ## Task Lifecycle
 
 **Created By**

@@ -2168,8 +2168,6 @@ class MissionRun:
                 ),
                 "urgency": "normal",
                 "source": "operator_request",
-                "requested_by_id": "keeper-collaboration-harness",
-                "scheduled_by_id": "keeper-collaboration-harness",
             },
         )
         return post_id

@@ -98,7 +98,7 @@ let notes ~base_dir ~keeper_name : (string * string) list =
           ~path
           ~detail;
         []
-    | exn ->
+    | exn -> (* cancel-guard-ok: Fs_compat.fold_appended_lines is Unix calls, no Eio operation *)
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string PersonNoteStoreFailures)
           ~labels:[ ("operation", "load") ]

@@ -47,7 +47,7 @@ let mention_record_of_json (json : Yojson.Safe.t) : mention_record option =
              source_id; content_preview; created_at; read_at }
   with
   | Yojson.Safe.Util.Type_error _ -> None
-  | exn ->
+  | exn -> (* cancel-guard-ok: Yojson decoding performs no Eio operation *)
       Log.Mention.warn "mention_record_of_json unexpected: %s" (Printexc.to_string exn);
       None
 

@@ -1,0 +1,55 @@
+id = "quiz-grader"
+revision = "0.1.0"
+title = "Answers graded against the record"
+contributions = ["derive", "act"]
+image = "masc-lane-quiz-grader:0.1.0"
+command = ["python3", "server.py"]
+
+[world.actions]
+tool = "lane_act"
+
+[world.outputs.grades]
+lanes = ["quiz/grades", "quiz/score"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+# Two inputs: the questioner's latest output and the same fact deck, read separately.
+binding_schema = '''{
+  "type": "object",
+  "properties": {
+    "sources": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "enum": ["lane_output", "snapshot_file"]},
+          "installation_id": {"type": "string", "minLength": 1,
+            "description": "For lane_output: the quiz-questions installation"},
+          "output_id": {"type": "string", "minLength": 1},
+          "selection": {"type": "string", "const": "latest_completed"},
+          "path": {"type": "string", "minLength": 1,
+            "description": "For snapshot_file: the same deck the questioner reads"}
+        },
+        "required": ["source_id", "kind"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["sources"],
+  "additionalProperties": false
+}'''
+presentation = '''{
+  "description": "Answers compared with the record each question was asked from",
+  "readings": [
+    {"lane_id": "quiz/score", "path": ["correct"], "label": "Correct", "unit": "answers", "format": "number"},
+    {"lane_id": "quiz/score", "path": ["answered"], "label": "Answered", "unit": "answers", "format": "number"}
+  ]
+}'''

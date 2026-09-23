@@ -449,6 +449,40 @@ let test_the_forecast_takes_the_drivers_start () =
     cases
 ;;
 
+(* RFC librarian-lifecycle §4.10: a snapshot that fits is still the
+   Librarian point when the provider last accepted a later start. The range
+   opens at that start and the working state still rides ahead of it, once;
+   the atoms between the snapshot's cut and the accepted start are not sent. *)
+let test_a_start_past_the_snapshot_keeps_the_working_state () =
+  let skipped = text T.User "Fresh unsummarized work" in
+  let accepted_atom = text T.Assistant "The accepted range opens here." in
+  let current = text T.User "This turn's input." in
+  let messages = source @ [skipped; accepted_atom; current] in
+  let digest_at = Window.atom_opening_digest messages in
+  let snapshot, lines = capture_source source in
+  let summarized = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+    | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
+  let accepted : Front.seed =
+    {first_atom = 3; front_digest = Option.get (digest_at 3); source = Front.Turn_record { turn = 5 }} in
+  let projected =
+    Driver.For_testing.request_view ~continuity:summarized ~provider_config
+      ~measure_message_bytes:measure ~accepted:(Some accepted) ~front:None
+      ~history_digest_at:digest_at ~current_turn_results:Driver.Current_turn_verbatim
+      ~base_path:(Filename.get_temp_dir_name ()) ~demote_before:0
+      ~turn_boundary:(Front.Turn_boundary { end_atom = 4 })
+      ~materialize:(fun ~pending:_ messages -> messages) messages in
+  (match projected.composed.origin with
+   | Front.Past_librarian_point
+       { librarian_end_atom; source = Front.Turn_record { turn = 5 } } ->
+     check int "the gap opens at the snapshot's cut" snapshot.Snapshot.end_atom librarian_end_atom
+   | _ -> fail "the request was not attributed to the start past the snapshot");
+  check int "the range opens at the accepted start" 3 projected.composed.projection.dropped_atoms;
+  let sent = without_working_state (wire projected) in
+  check bool "the skipped atom is not sent" false (List.mem skipped sent);
+  check bool "the accepted atom is sent" true (List.mem accepted_atom sent);
+  check bool "this turn's input is sent" true (List.mem current sent)
+;;
+
 let exchange id body =
   [message T.Assistant [T.ToolUse {id; name = "read_file"; input = `Assoc []}];
    { (message T.Tool [T.ToolResult {tool_use_id = id; content = body;
@@ -835,6 +869,8 @@ let () = run "continuity request projection"
                  test_absorbed_history_starts_at_the_librarians_position;
                test_case "the forecast takes the driver's start" `Quick
                  test_the_forecast_takes_the_drivers_start;
+               test_case "a start past the snapshot keeps the working state" `Quick
+                 test_a_start_past_the_snapshot_keeps_the_working_state;
                test_case "an unusable snapshot starts without it" `Quick
                  test_an_unusable_snapshot_starts_without_it;
                test_case "official lanes take the same choice" `Quick

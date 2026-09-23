@@ -347,16 +347,29 @@ let pending_user_lines ?ack_id (messages : Keeper_chat_store.chat_message list) 
     | Keeper_chat_store.Role.Tool, _ -> false)
 ;;
 
-let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
+(* The scope lane: an unmentioned line addressed to this Keeper that it owes
+   an answer. The operator's lines are. A direct Keeper-to-Keeper message
+   ([Surface_ref.Agent], written for masc_keeper_msg / delegate) is too: it
+   was sent to this Keeper, and the watermarked lane is what re-raises it if
+   its turn never answered. Another Keeper's broadcast is standing context
+   for the fleet layer, and connector chatter is ignored (RFC-0468 §3.2). *)
+let is_scope_line (m : Keeper_chat_store.chat_message) : bool =
   match m.speaker with
   | Some (s : Keeper_chat_store.speaker) ->
     (match s.speaker_authority with
      | Keeper_chat_store.Owner -> true
-     (* Another Keeper's line is not the operator addressing this Keeper
-        without an "@name". Unmentioned, it is standing context and falls
-        to the fleet layer below, which already reads [Surface_ref.Agent]
-        rows as direct Keeper-to-Keeper delivery. *)
-     | Keeper_chat_store.External | Keeper_chat_store.Keeper -> false)
+     | Keeper_chat_store.External -> false
+     | Keeper_chat_store.Keeper ->
+       (match m.surface with
+        | Some Surface_ref.Agent -> true
+        | Some
+            ( Surface_ref.Broadcast
+            | Surface_ref.Dashboard _
+            | Surface_ref.Discord _
+            | Surface_ref.Slack _
+            | Surface_ref.Webhook _
+            | Surface_ref.Gate _ )
+        | None -> false))
   | None -> false
 ;;
 
@@ -368,7 +381,7 @@ let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
 let lane_of ~target_ids (m : Keeper_chat_store.chat_message) : pending_kind option =
   if Keeper_lane_mentions.ids_match ~target_ids m.mentions
   then Some Mention
-  else if is_owner_authored m
+  else if is_scope_line m
   then Some Scope
   else None
 ;;

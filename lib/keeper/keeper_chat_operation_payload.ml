@@ -160,15 +160,25 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
       Error "Keeper chat operation surface kind does not match continuation"
 ;;
 
-(* A line from another Keeper and a line from a connector person are two
-   different speakers; one source cannot claim both. *)
-let validate_sender_keeper ~sender_keeper ~channel_user_id =
+(* A sender Keeper is only ever written by the Keeper-to-Keeper submit path,
+   which is the Agent surface with no connector speaker. Any other surface or
+   a connector speaker beside it would name two different speakers. *)
+let validate_sender_keeper ~sender_keeper ~surface ~channel_user_id =
   match sender_keeper with
   | None -> Ok ()
   | Some _ ->
-    if String.trim channel_user_id = ""
-    then Ok ()
-    else Error "Keeper chat operation source cannot carry both a sender Keeper and an external speaker"
+    (match surface with
+     | Surface_ref.Agent ->
+       if String.trim channel_user_id = ""
+       then Ok ()
+       else Error "Keeper chat operation source cannot carry both a sender Keeper and an external speaker"
+     | Surface_ref.Broadcast
+     | Surface_ref.Dashboard _
+     | Surface_ref.Discord _
+     | Surface_ref.Slack _
+     | Surface_ref.Webhook _
+     | Surface_ref.Gate _ ->
+       Error "Keeper chat operation source names a sender Keeper outside the Agent surface")
 ;;
 
 let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
@@ -191,7 +201,7 @@ let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
         ~channel_workspace_id
         ~workspace_id
   in
-  let* () = validate_sender_keeper ~sender_keeper ~channel_user_id in
+  let* () = validate_sender_keeper ~sender_keeper ~surface ~channel_user_id in
   let* user_row_origin =
     match user_row_origin with
     | Keeper_chat_store.Needs_append -> Ok "needs_append"
@@ -333,7 +343,7 @@ let source_of_json json =
       ~channel_workspace_id
       ~workspace_id
   in
-  let* () = validate_sender_keeper ~sender_keeper ~channel_user_id in
+  let* () = validate_sender_keeper ~sender_keeper ~surface ~channel_user_id in
   Ok
     { submitted_by
     ; thread_id

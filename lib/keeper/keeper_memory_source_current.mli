@@ -44,9 +44,10 @@ type projection =
   ; invalidations : invalidation list
   }
 
-(** Why a source file could not be read. The first four are the caller's to
-    fix -- the path, not the store, is wrong; only [Source_io_failed] is the
-    filesystem not answering. *)
+(** Why a source file could not be read. All but [Source_io_failed] are the
+    caller's to fix -- the path, not the store, is wrong; [Source_io_failed]
+    is the filesystem or the endpoint not answering, and revalidation keeps a
+    fact it could not re-read rather than invalidating it. *)
 type source_read_failure =
   | Source_path_rejected of string
       (** Empty, or outside the keeper's read boundary; the boundary's own reason. *)
@@ -110,8 +111,11 @@ val upsert_file_fact :
   -> (t, write_error) result
 
 (** Re-read every current source under the same sandbox resolver used by the
-    write path. Unchanged facts remain current. Changed or unreadable sources
-    are atomically removed and replaced by pending invalidations. Invalidations
+    write path. Unchanged facts remain current. A source that answered as
+    changed, missing or unusable is atomically removed and replaced by a
+    pending invalidation; one that could not be read at all
+    ([Source_io_failed], e.g. a stopped guest) keeps its fact as last
+    verified. Invalidations
     survive subsequent turns until [upsert_file_fact] recreates that path.
     Revalidation takes only the source-store lock: its invalidation rendering
     is strictly shorter than the fact it replaces, so it cannot overcommit the

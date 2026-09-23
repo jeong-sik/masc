@@ -369,16 +369,19 @@ let read_endpoint_source ~config ~meta ~resolved =
   let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read () in
   (* One byte past the limit tells an over-limit source from one exactly at it. *)
   let fetch_bytes = max_source_bytes + 1 in
-  match Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path:resolved with
+  match Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path:resolved with
   | Error detail -> Error (Source_io_failed detail)
   | Ok path ->
+    (* Raw bytes: the text capture rewrites the endpoint root to the host
+       path, which would hash text the file does not hold and could grow a
+       file past the limit. The command bounds its own output with head -c. *)
     (match
-       Keeper_sandbox_read_runner.run_command_with_status
+       Keeper_sandbox_read_backend.run_command_with_capture
          ~ok_exit_codes:[ 0; endpoint_source_missing_exit; endpoint_source_not_regular_exit ]
          ~config
          ~meta
          ~command_argv:(endpoint_source_argv ~path ~max_bytes:fetch_bytes)
-         ~max_bytes:fetch_bytes
+         ~max_bytes:None
          ~timeout_sec
          ()
      with
@@ -606,6 +609,17 @@ let revalidate ?clock ~config ~meta ~keepers_dir ~now () =
                      ; reason = Source_changed
                      }
                      :: invalidations )
+                 | Error (Source_io_failed detail) ->
+                   (* Not being able to ask is not an answer. A stopped guest
+                      or a timed-out endpoint keeps the fact as it was last
+                      verified; only a source that answered as changed,
+                      missing or unusable invalidates it. *)
+                   Log.Keeper.warn
+                     "source-bound memory kept unverified keeper=%s source=%S detail=%s"
+                     meta.Keeper_meta_contract.name
+                     fact.source.path
+                     detail;
+                   fact :: facts, invalidations
                  | Error failure ->
                    Log.Keeper.warn
                      "source-bound memory invalidated keeper=%s source=%S reason=source_unavailable detail=%s"

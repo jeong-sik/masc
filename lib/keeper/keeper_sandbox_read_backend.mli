@@ -120,6 +120,21 @@ val run_command_with_status :
   unit ->
   (Unix.process_status * string, string) result
 
+(** [run_command_with_status] with the capture mode chosen by [max_bytes]:
+    [Some n] captures text, rewriting the endpoint's root to the host path,
+    and keeps at most [n] bytes; [None] keeps the stdout bytes exactly as the
+    command wrote them, so the command itself must bound what it prints. *)
+val run_command_with_capture :
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  ?ok_exit_codes:int list ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  command_argv:string list ->
+  max_bytes:int option ->
+  timeout_sec:float ->
+  unit ->
+  (Unix.process_status * string, string) result
+
 (** [run_command ?ok_exit_codes ~config ~meta ~command_argv
     ~max_bytes ~timeout_sec ()] is a convenience wrapper around
     [run_command_with_status] that drops the returned

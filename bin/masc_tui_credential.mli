@@ -29,8 +29,8 @@ type server_reason =
 
 val server_reason_of_body : string -> server_reason
 (** The server's reason, read from the [auth_error_code] of a 401/403 body and
-    compared against the codes the server writes ({!Masc_error}). A body that
-    is not JSON, or carries no code this client acts on, is {!Rejected}. *)
+    decoded with [Masc_error.Auth_error_code.of_string]. A body that is not
+    JSON, or carries no code this client acts on, is {!Rejected}. *)
 
 val refusal_cause : credential_sent:bool -> server_reason -> string
 (** Why the server refused, as a lowercase clause a caller can place in its own

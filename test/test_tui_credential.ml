@@ -64,22 +64,26 @@ let test_clauses_compose () =
           every_case)
 
 (* The server's typed code is what tells an expired bearer from a rejected one.
-   The codes are compared against the constants the server writes, so a rename
-   on one side cannot leave the other matching a spelling nobody sends. *)
+   The body is written with the server's own [to_string], so the round trip is
+   the one the wire makes. *)
 let test_the_server_reason_comes_from_the_typed_code () =
   let body code = Printf.sprintf {|{"error":"x","auth_error_code":%S}|} code in
+  let of_code code =
+    Credential.server_reason_of_body
+      (body (Masc_error.Auth_error_code.to_string code))
+  in
   check bool "an expired code is Expired" true
-    (Credential.server_reason_of_body (body Masc_error.auth_error_code_token_expired)
-     = Credential.Expired);
+    (of_code Masc_error.Auth_error_code.Token_expired = Credential.Expired);
   check bool "an insufficient role is its own reason" true
-    (Credential.server_reason_of_body
-       (body Masc_error.auth_error_code_insufficient_role)
+    (of_code Masc_error.Auth_error_code.Insufficient_role
      = Credential.Insufficient_role);
+  check bool "an invalid token is a plain refusal" true
+    (of_code Masc_error.Auth_error_code.Invalid_token = Credential.Rejected);
   List.iter
     (fun (label, raw) ->
       check bool (label ^ " is a plain refusal") true
         (Credential.server_reason_of_body raw = Credential.Rejected))
-    [ ("another code", body "invalid_token")
+    [ ("a code the server never writes", body "brand_new_code")
     ; ("no code", {|{"error":"x"}|})
     ; ("a code that is not a string", {|{"auth_error_code":1}|})
     ; ("a body that is not JSON", "forbidden")

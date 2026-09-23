@@ -36,23 +36,32 @@ let self_mint_expiry_hours = 24 * 30
    credential elsewhere -- on 2026-09-23 a Keeper's GitHub identity view read
    as a GitHub account problem. Only the two codes that change what the
    operator should believe are told apart; every other code, and a body with
-   none, is the plain refusal it always was. *)
+   none, is the plain refusal it always was. The code is the server's closed
+   type, matched in full, so a code added there has to be placed here. *)
 type server_reason =
   | Expired
   | Insufficient_role
   | Rejected
 
+let server_reason_of_code : Masc_error.Auth_error_code.t -> server_reason =
+  function
+  | Masc_error.Auth_error_code.Token_expired -> Expired
+  | Masc_error.Auth_error_code.Insufficient_role -> Insufficient_role
+  | Masc_error.Auth_error_code.Invalid_token
+  | Masc_error.Auth_error_code.Same_origin_blocked
+  | Masc_error.Auth_error_code.Actor_mismatch
+  | Masc_error.Auth_error_code.Missing_token
+  | Masc_error.Auth_error_code.Unknown ->
+      Rejected
+
 let server_reason_of_body body =
-  let of_code code =
-    if String.equal code Masc_error.auth_error_code_token_expired then Expired
-    else if String.equal code Masc_error.auth_error_code_insufficient_role then
-      Insufficient_role
-    else Rejected
-  in
   match Yojson.Safe.from_string body with
   | `Assoc fields -> (
       match List.assoc_opt "auth_error_code" fields with
-      | Some (`String code) -> of_code code
+      | Some (`String code) -> (
+          match Masc_error.Auth_error_code.of_string code with
+          | Some code -> server_reason_of_code code
+          | None -> Rejected)
       | Some _ | None -> Rejected)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Rejected

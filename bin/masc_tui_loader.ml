@@ -1191,6 +1191,104 @@ let overview_keeper_rows_of_briefs briefs =
       | _ -> None)
     briefs
 
+(* RFC-0465 pull request snapshot. A row whose check or review word, number,
+   title, branch or draft flag cannot be read is counted with the server's
+   own undecodable rows instead of being drawn with a guessed state. *)
+let decode_open_pull json =
+  let* op_number = required_int_field json "number" in
+  let* op_title = required_string_field json "title" in
+  let* op_head_branch = required_string_field json "head_branch" in
+  let* op_draft =
+    match Yojson.Safe.Util.member "draft" json with
+    | `Bool draft -> Ok draft
+    | _ -> Error "draft is not a boolean"
+  in
+  let* checks = required_string_field json "checks" in
+  let* op_checks =
+    match checks with
+    | "passing" -> Ok Pull_checks_passing
+    | "failing" -> Ok Pull_checks_failing
+    | "running" -> Ok Pull_checks_running
+    | "none" -> Ok Pull_checks_none
+    | other -> Error ("unknown checks " ^ other)
+  in
+  let* review = required_string_field json "review" in
+  let* op_review =
+    match review with
+    | "approved" -> Ok Pull_review_approved
+    | "changes_requested" -> Ok Pull_review_changes_requested
+    | "waiting" -> Ok Pull_review_waiting
+    | "none" -> Ok Pull_review_none
+    | other -> Error ("unknown review " ^ other)
+  in
+  Ok { op_number; op_title; op_head_branch; op_draft; op_checks; op_review }
+
+let decode_repository_pulls json =
+  let* rp_repository = required_string_field json "repository_id" in
+  let* pulls = required_object_field json "pulls" in
+  let* state = required_string_field pulls "state" in
+  let* rp_state =
+    match state with
+    | "not_read" -> Ok Repo_pulls_not_read
+    | "not_github" -> Ok Repo_not_github
+    | "read" ->
+        let* rows = required_list_field pulls "pulls" in
+        let* server_undecodable = required_int_field pulls "undecodable" in
+        let decoded, undecodable =
+          List.fold_right
+            (fun row (decoded, undecodable) ->
+              match decode_open_pull row with
+              | Ok pull -> (pull :: decoded, undecodable)
+              | Error _ -> (decoded, undecodable + 1))
+            rows ([], server_undecodable)
+        in
+        Ok (Repo_pulls_read { pulls = decoded; undecodable })
+    | "failed" ->
+        let* failure = required_object_field pulls "failure" in
+        let* kind = required_string_field failure "kind" in
+        let* message = optional_string_field failure "message" in
+        Ok
+          (Repo_pulls_failed
+             (match message with Some m -> kind ^ ": " ^ m | None -> kind))
+    | other -> Error ("unknown repository pulls state " ^ other)
+  in
+  Ok { rp_repository; rp_state }
+
+let load_repository_pulls ~(host : string) ~(port : int) :
+    (pulls_reader * repository_pulls_row list, string) result =
+  match Masc_tui_http.fetch_repository_pulls ~host ~port with
+  | Error err -> Error ("pull requests load failed: " ^ err)
+  | Ok json ->
+      let* reader_json = required_object_field json "reader" in
+      let* reader_state = required_string_field reader_json "state" in
+      let* reader =
+        match reader_state with
+        | "ready" ->
+            let* keeper = required_string_field reader_json "keeper" in
+            Ok (Pulls_reader_ready keeper)
+        | "not_declared" ->
+            Ok (Pulls_reader_not_ready "no [repositories] pr_reader in runtime.toml")
+        | "declaration_invalid" | "keeper_missing" | "token_unavailable" ->
+            let* reason = optional_string_field reader_json "reason" in
+            let* keeper = optional_string_field reader_json "keeper" in
+            Ok
+              (Pulls_reader_not_ready
+                 (String.concat " "
+                    (List.filter_map Fun.id
+                       [ Some reader_state; keeper; reason ])))
+        | other -> Error ("unknown pull request reader state " ^ other)
+      in
+      let* rows = required_list_field json "repositories" in
+      let* repositories =
+        List.fold_right
+          (fun row acc ->
+            let* acc = acc in
+            let* decoded = decode_repository_pulls row in
+            Ok (decoded :: acc))
+          rows (Ok [])
+      in
+      Ok (reader, repositories)
+
 (** Load overview snapshot from /api/v1/dashboard/briefing *)
 let load_overview ~(host : string) ~(port : int) :
     (overview_snapshot, string) result =

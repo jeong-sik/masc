@@ -367,12 +367,75 @@ let overview_quota_line (state : state) ~now =
                Ansi.reset
                (String.concat " \xc2\xb7 " (List.map window_text windows))))
 
+(* One line per registered GitHub repository the server reads pull requests
+   for (RFC-0465): how many are open and how many need a person -- failing
+   checks, changes requested -- beside the Keepers doing the work. A
+   repository that is not on GitHub has nothing to say and draws nothing. A
+   reader the server cannot use is one line saying why, which is the setup
+   step left to take. *)
+let overview_pulls_lines (state : state) =
+  let dim text = Ansi.dim ^ text ^ Ansi.reset in
+  match state.overview_pulls with
+  | Overview_pulls_unread -> []
+  | Overview_pulls_failed err ->
+      [ dim ("\xe2\x87\x85 pull requests unread: " ^ Terminal_text.single_line err) ]
+  | Overview_pulls_read { reader = Pulls_reader_not_ready reason; _ } ->
+      [ dim ("\xe2\x87\x85 pull requests not read: " ^ Terminal_text.single_line reason) ]
+  | Overview_pulls_read { reader = Pulls_reader_ready _; repositories } ->
+      List.filter_map
+        (fun (row : repository_pulls_row) ->
+          let repository = Terminal_text.single_line row.rp_repository in
+          match row.rp_state with
+          | Repo_not_github -> None
+          | Repo_pulls_not_read ->
+              Some (dim (Printf.sprintf "\xe2\x87\x85 %s  not read yet" repository))
+          | Repo_pulls_failed failure ->
+              Some
+                (Printf.sprintf "%s\xe2\x87\x85%s %s  %snot read: %s%s" (Theme.warn ())
+                   Ansi.reset repository Ansi.dim
+                   (Terminal_text.single_line failure) Ansi.reset)
+          | Repo_pulls_read { pulls; undecodable } ->
+              let count predicate = List.length (List.filter predicate pulls) in
+              let failing =
+                count (fun (pull : open_pull) ->
+                    match pull.op_checks with
+                    | Pull_checks_failing -> true
+                    | Pull_checks_passing | Pull_checks_running | Pull_checks_none -> false)
+              in
+              let changes =
+                count (fun (pull : open_pull) ->
+                    match pull.op_review with
+                    | Pull_review_changes_requested -> true
+                    | Pull_review_approved | Pull_review_waiting | Pull_review_none -> false)
+              in
+              let drafts = count (fun (pull : open_pull) -> pull.op_draft) in
+              let parts =
+                List.filter_map Fun.id
+                  [ Some (Printf.sprintf "%d open" (List.length pulls))
+                  ; (if failing > 0 then
+                       Some (Printf.sprintf "%s%d checks failing%s" (Theme.bad ()) failing Ansi.reset)
+                     else None)
+                  ; (if changes > 0 then
+                       Some (Printf.sprintf "%s%d changes requested%s" (Theme.warn ()) changes Ansi.reset)
+                     else None)
+                  ; (if drafts > 0 then Some (Printf.sprintf "%d draft" drafts) else None)
+                  ; (if undecodable > 0 then
+                       Some (Printf.sprintf "%d unreadable" undecodable)
+                     else None)
+                  ]
+              in
+              Some
+                (Printf.sprintf "%s\xe2\x87\x85%s %s  %s" (Theme.info ()) Ansi.reset
+                   repository
+                   (String.concat " \xc2\xb7 " parts)))
+        repositories
+
 (* The Team block's title and its rows, [team_rows] of them. Every row the
    projection makes is drawn in its band's order and cut from the bottom, so
    what a short viewport loses first is the parked roll call and the holders
    outside the fleet, then idle Keepers -- never a stuck one. *)
 let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
-    ~quota_line =
+    ~quota_line ~pulls_lines =
   let name_cells =
     List.fold_left
       (fun widest (row : Overview_team.row) ->
@@ -466,7 +529,7 @@ let overview_team_lines (team : Overview_team.t) ~team_rows ~flow ~cols
       team.rows
   in
   let rows =
-    List.map keeper_line stuck @ Option.to_list quota_line
+    List.map keeper_line stuck @ Option.to_list quota_line @ pulls_lines
     @ List.map keeper_line others @ parked_line @ holders_line
   in
   let total = List.length rows in
@@ -550,7 +613,8 @@ let overview_layout (state : state) ~terminal_rows =
          | Some team ->
              Overview_team.drawn_rows team
              + Option.fold ~none:0 ~some:(fun _ -> 1)
-                 (overview_quota_line state ~now:(Unix.gettimeofday ())))
+                 (overview_quota_line state ~now:(Unix.gettimeofday ()))
+             + List.length (overview_pulls_lines state))
       ~task_count:(List.length state.tasks)
       ~has_task_error:(Option.is_some tasks_error)
   in
@@ -875,6 +939,7 @@ let render_overview (state : state) =
          overview_team_lines team ~team_rows:row_budget.team_rows
            ~flow:state.task_flow ~cols
            ~quota_line:(overview_quota_line state ~now:(Unix.gettimeofday ()))
+           ~pulls_lines:(overview_pulls_lines state)
        in
        Buffer.add_string buf (fit_width title cols ^ "\n");
        List.iter (box_line buf cols) lines;

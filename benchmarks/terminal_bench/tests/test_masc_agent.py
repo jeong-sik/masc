@@ -316,6 +316,25 @@ def test_claude_code_lane_env_uses_oauth_token(tmp_path, monkeypatch):
     assert "ANTHROPIC_API_KEY" not in env
 
 
+def test_the_failover_arm_hands_keeper_up_the_lane(tmp_path, monkeypatch):
+    # keeper_up writes its runtime_id as the keeper's assignment, so the head
+    # runtime here would pin the keeper to one model (#37952).
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    a = MascAgent(logs_dir=tmp_path, model_name="openrouter/z-ai/glm-5.3", arm="l",
+                  fallback_models="openrouter/deepseek/deepseek-v4-pro")
+    assert a.fallback_runtime_ids == ("openrouter.deepseek/deepseek-v4-pro",)
+    assert a._container_env()["BENCH_RUNTIME_ID"] == "bench"
+
+
+def test_fallback_models_are_refused_at_construction(tmp_path):
+    with pytest.raises(ValueError, match="renders one model"):
+        make_agent(tmp_path, arm="e", fallback_models="anthropic/claude-sonnet-5")
+    with pytest.raises(ValueError, match="at least one fallback"):
+        make_agent(tmp_path, arm="l")
+    with pytest.raises(ValueError, match="provider/model"):
+        make_agent(tmp_path, arm="l", fallback_models="claude-sonnet-5")
+
+
 def test_claude_code_lane_requires_oauth_token(tmp_path, monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     a = MascAgent(logs_dir=tmp_path, model_name="claude_code/claude-sonnet-5", arm="b")

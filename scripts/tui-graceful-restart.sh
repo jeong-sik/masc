@@ -78,8 +78,32 @@ find_surfaces() {
   # surface. Stripping any directory prefix also keeps a `tail -f
   # .../masc-tui-9.log` (comm `tail`) or an editor on bin/masc_tui.ml (comm
   # `less`) from matching -- they are not the binary.
-  ps -axo pid=,comm= 2>/dev/null | awk -v a="$TUI_COMM_A" -v b="$TUI_COMM_B" '
-    { n = $2; sub(/.*\//, "", n); if (n == a || n == b) print $1 }'
+  #
+  # `stat` is read too, so a defunct surface is skipped. A zombie keeps its
+  # comm and answers `kill -0` until its parent reaps it, so without this a
+  # crashed TUI whose parent shell never waited reads as a live surface: it
+  # would be discovered, signalled, outlast the whole --timeout, and block
+  # every restart from then on. Observed: a defunct masc_tui.exe under ppid
+  # 1 held this script off entirely.
+  ps -axo pid=,stat=,comm= 2>/dev/null | awk -v a="$TUI_COMM_A" -v b="$TUI_COMM_B" '
+    substr($2, 1, 1) == "Z" { next }
+    { n = $3; sub(/.*\//, "", n); if (n == a || n == b) print $1 }'
+}
+
+# Does this pid name a process that is still doing something? `kill -0`
+# alone does not answer that: it succeeds for a zombie, which exists in the
+# process table but has already ended. Every "is it still there" question in
+# this script means "still running", so all of them come through here.
+is_zombie() {
+  case "$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')" in
+    Z*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+still_running() {
+  kill -0 "$1" 2>/dev/null || return 1
+  ! is_zombie "$1"
 }
 
 # The prefix of a graceful end's row. Any normal row counts; see header.
@@ -114,7 +138,7 @@ read_exit_row() {
 wait_for_graceful_exit() {
   local pid="$1" waited=0
   while [ "$waited" -lt "$TIMEOUT" ]; do
-    if ! kill -0 "$pid" 2>/dev/null; then
+    if ! still_running "$pid"; then
       local row
       row="$(read_exit_row "$pid")"
       case $? in
@@ -139,12 +163,18 @@ start_fresh() {
     log "starting fresh TUI in the foreground: $TUI_BINARY ${args[*]:-}"
     exec "$TUI_BINARY" "${args[@]}"
   else
-    # Non-interactive: start detached and prove it came up.
+    # Non-interactive: start detached and prove it came up. stdin comes from
+    # /dev/null: a detached surface must not hold the caller's stdin open
+    # (a script chain or CI harness waits for that pipe to close).
     log "starting fresh TUI detached: $TUI_BINARY ${args[*]:-}"
-    nohup "$TUI_BINARY" "${args[@]}" >/dev/null 2>&1 &
+    nohup "$TUI_BINARY" "${args[@]}" </dev/null >/dev/null 2>&1 &
     local fresh_pid=$!
     sleep 2
-    if ! kill -0 "$fresh_pid" 2>/dev/null; then
+    # still_running, not kill -0: a fresh surface that died in those two
+    # seconds is this shell's own unreaped child, and a zombie answers
+    # kill -0. Reporting "is up" for a corpse is the one lie this script
+    # must not tell -- it is the whole point of the wait.
+    if ! still_running "$fresh_pid"; then
       log "ERROR: fresh TUI pid $fresh_pid died immediately; check its per-PID log"
       return 2
     fi
@@ -166,12 +196,20 @@ self_test() {
   mkdir -p "$fixture/bin" "$fixture/.masc/logs"
 
   # A fake `ps` so find_surfaces reads a crafted process table. It must
-  # answer exactly the invocation the script makes: ps -axo pid=,comm=
+  # answer exactly the two invocations the script makes, and refuse anything
+  # else -- a shim that quietly answers a question the script never asks
+  # stops being evidence about the script.
   cat >"$fixture/bin/ps" <<'SHIM'
 #!/usr/bin/env bash
-if [ "$1" = "-axo" ] && [ "$2" = "pid=,comm=" ]; then
+if [ "$1" = "-axo" ] && [ "$2" = "pid=,stat=,comm=" ]; then
   cat "$FAKE_PS_TABLE"
   exit 0
+fi
+if [ "$1" = "-o" ] && [ "$2" = "stat=" ] && [ "$3" = "-p" ] && [ -n "${4:-}" ]; then
+  # Real ps exits 1 when the pid is not in the table; so does this.
+  awk -v p="$4" '$1 == p { print $2; hit = 1 } END { exit(hit ? 0 : 1) }' \
+    "$FAKE_PS_TABLE"
+  exit $?
 fi
 echo "self-test ps shim: unexpected invocation: $*" >&2
 exit 90
@@ -181,17 +219,21 @@ SHIM
   # The traps: 102/103 are the two surface spellings; 104 is a log reader
   # (`tail -f .../masc-tui-9.log`), 105 an editor on the source, 106 the
   # server, 107 the build. 108 is the same surface as 103 but reported by a
-  # `ps` that gives the full path (macOS) -- it must still be found. Only
-  # 102, 103 and 108 may be discovered.
+  # `ps` that gives the full path (macOS) -- it must still be found. 109 and
+  # 110 carry a surface name but are defunct: they are corpses waiting to be
+  # reaped, not surfaces, and signalling one would burn the whole timeout.
+  # Only 102, 103 and 108 may be discovered.
   cat >"$fixture/ps-table" <<'TABLE'
-  101 bash
-  102 masc_tui.exe
-  103 masc-tui
-  104 tail
-  105 less
-  106 masc
-  107 dune
-  108 /usr/local/bin/masc-tui
+  101 Ss bash
+  102 S masc_tui.exe
+  103 S masc-tui
+  104 S tail
+  105 S less
+  106 Sl masc
+  107 R dune
+  108 S /usr/local/bin/masc-tui
+  109 Z masc_tui.exe
+  110 Z+ /usr/local/bin/masc-tui
 TABLE
 
   local failures=0
@@ -210,6 +252,27 @@ TABLE
   BASE_PATH="$fixture"
   REPO_ROOT="$fixture"
   TIMEOUT=1
+  # Done before the shim goes on PATH, because this one needs the real `ps`:
+  # a real corpse, to check that still_running is not fooled the way `kill
+  # -0` is. If this shell reaped the child before we could look, there is no
+  # corpse to ask about and the check is skipped rather than passed -- a
+  # check that cannot reach its subject must not report success.
+  sleep 0 &
+  local corpse=$! corpse_state
+  sleep 1
+  corpse_state="$(ps -o stat= -p "$corpse" 2>/dev/null | tr -d ' ' | cut -c1)"
+  if [ "$corpse_state" = "Z" ]; then
+    if still_running "$corpse"; then
+      check "a real defunct child does not read as running" "running" "ended"
+    else
+      check "a real defunct child does not read as running" "ended" "ended"
+    fi
+  else
+    log "skip: the shell reaped the corpse before it could be asked about" \
+        "(stat [${corpse_state:-none}]); the table cases below still run"
+  fi
+  wait "$corpse" 2>/dev/null
+
   # Exported: the shim is a child process and reads this from its environment.
   export FAKE_PS_TABLE="$fixture/ps-table"
   PATH="$fixture/bin:$PATH"
@@ -217,6 +280,20 @@ TABLE
   local found
   found="$(find_surfaces | tr '\n' ' ' | sed 's/ $//')"
   check "discovery finds the surfaces, path or bare" "$found" "102 103 108"
+
+  # The state column drives the skip, so ask it directly too: if this ever
+  # answers "no" for 109, the line above would go on passing while a corpse
+  # slipped back into discovery through some other difference in the row.
+  if is_zombie 109; then
+    check "a defunct surface reads as defunct" "defunct" "defunct"
+  else
+    check "a defunct surface reads as defunct" "live" "defunct"
+  fi
+  if is_zombie 102; then
+    check "a live surface does not read as defunct" "defunct" "live"
+  else
+    check "a live surface does not read as defunct" "live" "live"
+  fi
 
   local row rc
   printf '[boot lines would be here]\n[masc-tui] exit: normal (signal SIGTERM)\n' \

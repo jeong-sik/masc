@@ -1985,21 +1985,23 @@ let post_schedule_create ~(host : string) ~(port : int)
 
 (** POST /api/v1/verification/verdict — the operator's verdict on a task
     awaiting verification. The route demands a reason with a reject and takes
-    none with an approve, so the variant carries it only where it rides. The
-    route wants a token-bound admin credential — the one this process mints
-    at startup. *)
+    none with an approve, so the variant carries it only where it rides.
+    [verification_id] names the submission the operator was shown; the route
+    refuses the verdict when the Task has moved on to another one. The route
+    wants a token-bound admin credential — the one this process mints at
+    startup. *)
 let post_verification_verdict ~(host : string) ~(port : int)
-    ~(task_id : string) ~(verdict : [ `Approve | `Reject of string ]) :
+    ~(task_id : string) ~(verification_id : string)
+    ~(verdict : [ `Approve | `Reject of string ]) :
     (Yojson.Safe.t, string) result =
+  let binding =
+    [ ("task_id", `String task_id); ("verification_id", `String verification_id) ]
+  in
   let fields =
     match verdict with
-    | `Approve ->
-        [ ("task_id", `String task_id); ("verdict", `String "approve") ]
+    | `Approve -> binding @ [ ("verdict", `String "approve") ]
     | `Reject reason ->
-        [ ("task_id", `String task_id)
-        ; ("verdict", `String "reject")
-        ; ("reason", `String reason)
-        ]
+        binding @ [ ("verdict", `String "reject"); ("reason", `String reason) ]
   in
   post_json ~host ~port ~path:"/api/v1/verification/verdict"
     ~body:(Yojson.Safe.to_string (`Assoc fields))

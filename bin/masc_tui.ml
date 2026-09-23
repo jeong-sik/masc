@@ -6676,7 +6676,8 @@ let row_list (state : state) : row_list option =
   | Overview
     when state.task_focus = Right_pane
          && Option.is_none (task_detail_on_screen state) ->
-      windowed ~count:(List.length state.tasks) ~cursor:state.task_cursor
+      windowed ~count:(List.length (Masc_tui_overview_tasks.rows state.tasks))
+        ~cursor:state.task_cursor
         (fun index -> state.task_cursor <- index)
   (* Under the Actions and Everything filters the ring is read by a cursor,
      not by a scroll: [render_acting] recomputes the scroll from
@@ -8938,7 +8939,8 @@ let selected_surface_reference state =
        | None ->
            Option.map
              (fun (row : Tui_decode.task) -> Link.reference Task row.id)
-             (List.nth_opt state.tasks state.task_cursor))
+             (List.nth_opt (Masc_tui_overview_tasks.rows state.tasks)
+                state.task_cursor))
   | Keepers _ ->
       Option.map
         (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
@@ -20107,7 +20109,7 @@ and is loaded on demand through keeper_skill.
                            if String.equal t.id task_id then Some i
                            else index_of (i + 1) rest
                      in
-                     (match index_of 0 state.tasks with
+                     (match index_of 0 (Masc_tui_overview_tasks.rows state.tasks) with
                       | Some index -> state.task_cursor <- index
                       | None -> ())
                  | Some (_, Masc_tui_types.Palette_board_hearth hearth) ->
@@ -23154,7 +23156,9 @@ and is loaded on demand through keeper_skill.
                 if Option.is_some state.task_detail_id then
                   state.task_detail_scroll <- Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
                 else if state.task_focus = Right_pane
-                        && state.task_cursor < List.length state.tasks - 1 then
+                        && state.task_cursor
+                           < List.length (Masc_tui_overview_tasks.rows state.tasks) - 1
+                then
                   state.task_cursor <- state.task_cursor + 1
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
@@ -23844,7 +23848,10 @@ and is loaded on demand through keeper_skill.
                 (* Only under task focus: Enter while the events own j/k would
                    open whatever row the cursor happens to rest on. *)
                 if state.task_focus = Right_pane then
-                  (match List.nth_opt state.tasks state.task_cursor with
+                  (match
+                     List.nth_opt (Masc_tui_overview_tasks.rows state.tasks)
+                       state.task_cursor
+                   with
                    | Some task ->
                        state.task_detail_id <- Some task.id;
                        state.task_detail_scroll <- 0;
@@ -24265,7 +24272,7 @@ and is loaded on demand through keeper_skill.
                        if String.equal t.id tid then Some i
                        else index_of (i + 1) rest
                  in
-                 (match index_of 0 state.tasks with
+                 (match index_of 0 (Masc_tui_overview_tasks.rows state.tasks) with
                   | Some idx ->
                       state.task_cursor <- idx;
                       state.task_focus <- Right_pane

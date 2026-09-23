@@ -3530,7 +3530,7 @@ def assert_row_budgeted_surfaces(
         process,
         master_fd,
         output,
-        b"task-5",
+        b"5 todo",
         start=0,
         timeout=3.0,
     )
@@ -3552,7 +3552,7 @@ def assert_row_budgeted_surfaces(
     # third item is the last one drawn and the fourth is not. GOALS is served
     # after the panel and the one held task row, so at this height it gets no
     # row (4 spare rows: 3 attention + 1 task) and the count is unchanged.
-    for expected in (b"attention-1", b"attention-3", b"task-1", b"q:quit"):
+    for expected in (b"attention-1", b"attention-3", b"5 todo", b"q:quit"):
         if expected not in overview:
             raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
     if b"attention-4" in overview:

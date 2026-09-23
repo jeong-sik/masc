@@ -38,6 +38,7 @@ module Composer = Masc_tui_composer
 module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
+module Overview_tasks = Masc_tui_overview_tasks
 module Tool_tree = Masc_tui_tool_tree
 module Theme_choice = Masc_tui_theme_choice
 module File_icon = Masc_tui_file_icon
@@ -583,7 +584,9 @@ let overview_layout (state : state) ~terminal_rows =
       ~attention_count:(List.length attention_items)
       ~goal_count:(Overview_goals.wanted_rows state.overview_goals)
       ~team_count
-      ~task_count:(List.length state.tasks)
+      ~task_count:
+        (Overview_tasks.line_count state.tasks
+           (Overview_tasks.backlog state.tasks_domain))
       ~has_task_error:(Option.is_some tasks_error)
   in
   (* An item a drawn Team row carries -- a stuck Keeper's row prints its
@@ -885,35 +888,38 @@ let render_overview (state : state) =
           Printf.sprintf " %sTasks%s (0 open%s)" Ansi.bold Ansi.reset
             done_segment
     else
-      let count = List.length state.tasks in
-      let active_c =
-        List.fold_left
-          (fun acc (t : task) -> match t.status with InProgress _ | Claimed _ -> acc + 1 | _ -> acc)
-          0 state.tasks
+      (* The todo count is the backlog line's, under the rows. *)
+      let count_of matches = List.length (List.filter matches state.tasks) in
+      let in_progress_c =
+        count_of (fun (t : task) ->
+            match t.status with
+            | InProgress _ -> true
+            | Todo | Claimed _ | AwaitingVerification _ | Done _ | Cancelled _ -> false)
       in
       let awaiting_c =
-        List.fold_left
-          (fun acc (t : task) -> match t.status with AwaitingVerification _ -> acc + 1 | _ -> acc)
-          0 state.tasks
+        count_of (fun (t : task) ->
+            match t.status with
+            | AwaitingVerification _ -> true
+            | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ -> false)
       in
-      let todo_c =
-        List.fold_left
-          (fun acc (t : task) -> match t.status with Todo -> acc + 1 | _ -> acc)
-          0 state.tasks
+      let claimed_c =
+        count_of (fun (t : task) ->
+            match t.status with
+            | Claimed _ -> true
+            | Todo | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ -> false)
       in
-      Printf.sprintf " %sTasks%s (%d open%s · %s%d active%s · %s%d awaiting%s · %s%d todo%s)"
+      Printf.sprintf " %sTasks%s (%s%d in progress%s · %s%d awaiting%s · %s%d claimed%s%s)"
         Ansi.bold Ansi.reset
-        count
-        done_segment
-        (Theme.info ()) active_c Ansi.reset
+        (Theme.info ()) in_progress_c Ansi.reset
         (Theme.warn ()) awaiting_c Ansi.reset
-        Ansi.dim todo_c Ansi.reset
+        (Theme.info ()) claimed_c Ansi.reset
+        done_segment
   in
   (* Fitted to the frame, the way the Team title above it is. This title is
      the longest thing the surface writes and it went in raw: at sixty columns
      it read seven cells past the box edge while every other row stopped at
-     it. The segments are ordered so the one a fit gives up last is the one a
-     reader can work out -- todo is open less active less awaiting. *)
+     it. The held counts run in the order of the rows under it, which repeat
+     them, so a narrow fit gives up the done count first. *)
   Buffer.add_string buf (fit_width task_header cols ^ "\n");
 
   (match tasks_error with
@@ -933,24 +939,57 @@ let render_overview (state : state) =
    | Some note when row_budget.task_rows > 0 && List.is_empty state.tasks ->
      box_line buf cols (Ansi.dim ^ note ^ Ansi.reset)
    | Some _ | None -> begin
-    (* The panel is shorter than the list can get, so the cursor can sit below
-       the last visible row; the window follows it the way Board's does. *)
-    let task_scroll_offset =
-      max 0 (state.task_cursor - row_budget.task_rows + 1)
+    (* Held work first, one row each, then the todo backlog as one line.
+       The cursor indexes [Overview_tasks.rows], the order drawn here. *)
+    let now = Unix.gettimeofday () in
+    (* An unread or failed backlog has said so above; "no task in progress"
+       would be a reading it never made. *)
+    let lines =
+      if List.is_empty state.tasks then []
+      else
+        Overview_tasks.lines ~height:row_budget.task_rows
+          ~cursor:state.task_cursor state.tasks
+          (Overview_tasks.backlog state.tasks_domain)
     in
-    let tasks_window = Rows.of_list ~first:task_scroll_offset ~height:row_budget.task_rows state.tasks in
-    for i = 0 to row_budget.task_rows - 1 do
-      let idx = i + task_scroll_offset in
-      match Rows.at tasks_window idx with
-      | None -> ()
-      | Some t -> begin
-        let is_selected = state.task_focus = Right_pane && idx = state.task_cursor in
-        if is_selected then
-          box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ task_line t))
-        else
-          box_line buf cols ("  " ^ task_line t)
-      end
-    done
+    let ages =
+      List.filter_map
+        (function
+          | Overview_tasks.Task_row { task; _ } ->
+              Some
+                (Overview_tasks.age_text ~age_text:keeper_lane_idle_text ~now
+                   (Overview_tasks.held_since task))
+          | Overview_tasks.More_active _ | Overview_tasks.Nothing_active
+          | Overview_tasks.Todo_backlog _ ->
+              None)
+        lines
+    in
+    (* Ages right-aligned to the widest one drawn, so the ids start in one
+       column. *)
+    let age_cells =
+      List.fold_left (fun widest age -> max widest (String.length age)) 0 ages
+    in
+    List.iter
+      (fun line ->
+        match line with
+        | Overview_tasks.Task_row { index; task } ->
+            let age =
+              Overview_tasks.age_text ~age_text:keeper_lane_idle_text ~now
+                (Overview_tasks.held_since task)
+            in
+            let row =
+              Printf.sprintf "%s%*s%s %s" Ansi.dim age_cells age Ansi.reset
+                (task_line task)
+            in
+            if state.task_focus = Right_pane && index = state.task_cursor then
+              box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ row))
+            else box_line buf cols ("  " ^ row)
+        | Overview_tasks.More_active _ | Overview_tasks.Nothing_active
+        | Overview_tasks.Todo_backlog _ ->
+            Option.iter
+              (fun text -> box_line buf cols (Ansi.dim ^ "  " ^ text ^ Ansi.reset))
+              (Overview_tasks.summary_text ~age_text:keeper_lane_idle_text ~now
+                 line))
+      lines
   end);
 
   (* Carry the frame to the bottom of the terminal. Without this the surface
@@ -1197,7 +1236,8 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
       write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Tasks"
         ~focused:false
         ~labels:
-          (List.map (fun (row : Tui_decode.task) -> row.title) state.tasks)
+          (List.map (fun (row : Tui_decode.task) -> row.title)
+             (Overview_tasks.rows state.tasks))
         ~selected:state.task_cursor;
       let answer =
         task_detail_pane state ~rows ~cols:(cols - left_cols) task right_buf

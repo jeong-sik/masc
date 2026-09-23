@@ -3613,6 +3613,11 @@
  (libraries alcotest masc_tui_task_selection masc.masc_types))
 
 (test
+ (name test_tui_overview_tasks)
+ (modules test_tui_overview_tasks)
+ (libraries alcotest masc masc.masc_types masc_tui_overview_tasks))
+
+(test
  (name test_tui_keeper_chat_transcript)
  (modules test_tui_keeper_chat_transcript)
  (libraries

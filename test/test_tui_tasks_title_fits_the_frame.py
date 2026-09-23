@@ -10,8 +10,9 @@ import test_tui_keyboard_input as h
 SOURCE_MODULES = ("bin/masc_tui_render.ml",)
 
 # The title is written "Tasks" bold, then the counts, so the two are not
-# contiguous bytes. The first count is, and only this row carries it.
-TITLE = b"5 open"
+# contiguous bytes. The first count is, and only this row carries it: the
+# line under it that says nothing is held reads "no task in progress".
+TITLE = b"0 in progress"
 SGR = re.compile(rb"\x1b\[[0-9;]*m")
 OSC = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
@@ -30,9 +31,9 @@ def cells(row: bytes) -> int:
 def run(executable: str) -> None:
     def interact(process, fd, _slave, output, _base_path):
         h.wait_for_output(process, fd, output, b"MASC Overview", start=0, timeout=15)
-        # Five open tasks, so the title draws its long form:
-        # " Tasks (5 open . 0 done 24h . 0 active . 0 awaiting . 5 todo)",
-        # which is 61 cells.
+        # Five todo tasks and none held; the title draws
+        # " Tasks (0 in progress . 0 awaiting . 0 claimed . 0 done 24h)",
+        # which is 60 cells.
         h.wait_for_output(process, fd, output, TITLE, start=0, timeout=20)
         for columns in (50, 56, 100):
             # Wait on the row this measures, not on the title above it: the

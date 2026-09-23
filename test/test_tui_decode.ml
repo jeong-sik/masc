@@ -2062,20 +2062,28 @@ let system_log_snapshot_json entries =
 (* Verification requests. The shape is [Dashboard_verification.request_to_json]
    -- fields are asserted against what that writer emits, not against a shape
    invented here. *)
+(* The queue's shape. The writer puts both [intent] and [cancellation_reason]
+   on every row and spells an absent one [`Null], so both keys are here; a
+   caller that wants the key gone passes [~omit_cancellation_reason:true],
+   which is the shape a build older than the reason copy wrote. *)
 let verification_request_json ?(evidence = [ "artifact:reports/proof.json" ])
-    ?(evidence_error = `Null) ?(intent = `String "complete") () =
+    ?(evidence_error = `Null) ?(intent = `String "complete")
+    ?(cancellation_reason = `Null) ?(omit_cancellation_reason = false) () =
   `Assoc
-    [ ("request_id", `String "vr-1")
-    ; ("task_id", `String "task-470")
-    ; ("task_title", `String "wire the approval gate")
-    ; ("created_at", `String "2026-08-23T09:00:00Z")
-    ; ("submitted_by", `String "keeper.one")
-    ; ("intent", intent)
-    ; ("completion_contract", `List [ `String "tests pass" ])
-    ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
-    ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
-    ; ("evidence_projection_error", evidence_error)
-    ]
+    ([ ("request_id", `String "vr-1")
+     ; ("task_id", `String "task-470")
+     ; ("task_title", `String "wire the approval gate")
+     ; ("created_at", `String "2026-08-23T09:00:00Z")
+     ; ("submitted_by", `String "keeper.one")
+     ; ("intent", intent)
+     ; ("completion_contract", `List [ `String "tests pass" ])
+     ; ("required_artifacts", `List [ `String "artifact:reports/proof.json" ])
+     ; ("submitted_evidence", `List (List.map (fun s -> `String s) evidence))
+     ; ("evidence_projection_error", evidence_error)
+     ]
+    @
+    if omit_cancellation_reason then []
+    else [ ("cancellation_reason", cancellation_reason) ])
 
 let verification_snapshot_json ?(total = 3) ?(view = "awaiting") ?(offset = 0)
     ?(truncated = false) ?(unresolved = []) ?backlog_error ?backlog_recovery
@@ -6434,40 +6442,90 @@ let test_decode_verification_separates_a_stale_queue_from_a_failed_one () =
    an operator, so reading it as a completion hid the one row that needed
    the operator most. [null] is the history view, and a name outside the
    pair is refused rather than read as either. *)
+(* The row says which question it asks. Nothing read [intent], so the column
+   was blank on every row and the detail pane told every reader the row was
+   "not joined (history view)" -- on a live queue whose eight rows all carried
+   the field, seven of them "cancel".
+
+   [cancellation_reason] answers a different question and its absence answers
+   neither: a stop submitted before the record kept that copy has none, so
+   reading absence as "completion" would put a completion claim on a row that
+   is a stop. That is the shape the last case pins. *)
 let test_decode_verification_reads_which_verdict_the_row_waits_on () =
   let decode json =
     match Tui_decode.decode_verification_snapshot json with
-    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> Ok r
+    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r
     | Ok _ -> Alcotest.fail "expected one request"
-    | Error err -> Error err
-  in
-  let intent_of json =
-    match decode json with
-    | Ok r -> r.Tui_decode.vr_intent
     | Error err -> Alcotest.failf "decode failed: %s" err
   in
-  Alcotest.(check bool) "a cancel row waits on a cancel verdict" true
-    (intent_of
+  let ask json = (decode json).Tui_decode.vr_ask in
+  let one request = verification_snapshot_json [ request ] in
+  Alcotest.(check bool) "a stop carries the case it makes" true
+    (ask
+       (one
+          (verification_request_json ~intent:(`String "cancel")
+             ~cancellation_reason:(`String "the issue it followed was closed")
+             ()))
+     = Tui_decode.Asks_cancellation (Some "the issue it followed was closed"));
+  Alcotest.(check bool) "a completion is the intent that says so" true
+    (ask (one (verification_request_json ())) = Tui_decode.Asks_completion);
+  Alcotest.(check bool) "a stop whose reason the record did not keep" true
+    (ask (one (verification_request_json ~intent:(`String "cancel") ()))
+     = Tui_decode.Asks_cancellation None);
+  Alcotest.(check bool) "and the same with the key gone" true
+    (ask
+       (one
+          (verification_request_json ~intent:(`String "cancel")
+             ~omit_cancellation_reason:true ()))
+     = Tui_decode.Asks_cancellation None)
+
+(* A row the backlog join found nothing for says so. Folding it into either
+   verdict is the queue inventing an answer the record does not hold, and on a
+   stop that answer is the one an operator acts on. *)
+let test_decode_verification_leaves_an_unjoined_row_unstated () =
+  let ask json =
+    match Tui_decode.decode_verification_snapshot json with
+    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r.Tui_decode.vr_ask
+    | Ok _ -> Alcotest.fail "expected one request"
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  Alcotest.(check bool) "a null intent states nothing" true
+    (ask (verification_snapshot_json [ verification_request_json ~intent:`Null () ])
+     = Tui_decode.Ask_unstated);
+  Alcotest.(check bool) "and neither does a missing key" true
+    (ask
        (verification_snapshot_json
-          [ verification_request_json ~intent:(`String "cancel") () ])
-     = Some Masc_domain.Cancel_task);
-  Alcotest.(check bool) "a complete row waits on a completion" true
-    (intent_of
-       (verification_snapshot_json [ verification_request_json () ])
-     = Some Masc_domain.Complete_task);
-  Alcotest.(check bool) "the history view carries no intent" true
-    (intent_of
+          [ (match verification_request_json ~intent:`Null () with
+             | `Assoc fields ->
+                 `Assoc (List.filter (fun (k, _) -> k <> "intent") fields)
+             | other -> other)
+          ])
+     = Tui_decode.Ask_unstated);
+  (* A null intent beside a reason is still not a stop this build can claim:
+     the field that names the verdict is the one that was empty. *)
+  Alcotest.(check bool) "a reason does not supply the missing verdict" true
+    (ask
        (verification_snapshot_json
-          [ verification_request_json ~intent:`Null () ])
-     = None);
-  Alcotest.(check bool) "a name outside the pair is refused" true
-    (match
-       decode
-         (verification_snapshot_json
-            [ verification_request_json ~intent:(`String "stop") () ])
-     with
-     | Error _ -> true
-     | Ok _ -> false)
+          [ verification_request_json ~intent:`Null
+              ~cancellation_reason:(`String "the issue it followed was closed")
+              ()
+          ])
+     = Tui_decode.Ask_unstated)
+
+(* A word outside the pair reaches the screen as that word rather than as
+   either verdict, so a vocabulary a newer server adds is visible here. *)
+let test_decode_verification_keeps_a_word_it_does_not_know () =
+  let ask json =
+    match Tui_decode.decode_verification_snapshot json with
+    | Ok { Tui_decode.vs_requests = [ r ]; _ } -> r.Tui_decode.vr_ask
+    | Ok _ -> Alcotest.fail "expected one request"
+    | Error err -> Alcotest.failf "decode failed: %s" err
+  in
+  Alcotest.(check bool) "the word itself" true
+    (ask
+       (verification_snapshot_json
+          [ verification_request_json ~intent:(`String "supersede") () ])
+     = Tui_decode.Unrecognised_ask "supersede")
 
 let test_decode_verification_keeps_no_evidence_apart_from_unreadable () =
   (* An empty list means nothing was submitted. Evidence that exists but could
@@ -10627,6 +10685,10 @@ let () =
           test_decode_verification_keeps_no_evidence_apart_from_unreadable;
         Alcotest.test_case "the row says which verdict it waits on" `Quick
           test_decode_verification_reads_which_verdict_the_row_waits_on;
+        Alcotest.test_case "an unjoined row states no verdict" `Quick
+          test_decode_verification_leaves_an_unjoined_row_unstated;
+        Alcotest.test_case "a word it does not know is kept" `Quick
+          test_decode_verification_keeps_a_word_it_does_not_know;
       ] );
     ( "decode_system_logs",
       [

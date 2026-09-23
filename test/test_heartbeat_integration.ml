@@ -2473,7 +2473,12 @@ let test_update_keeper_defers_lane_swap_while_turn_in_flight () =
       in
       (* A keeper's own turn holds the slot while its tools run: invoking
          the update from inside the admitted closure reproduces the
-         mid-turn self masc_keeper_up of #26542 structurally. *)
+         mid-turn self masc_keeper_up of #26542 structurally. The lane that
+         keeper runs on is registered; a deferral promises that lane reads
+         the update on its next turn. *)
+      let running_lane =
+        Masc.Keeper_registry.register_offline ~base_path:config.base_path name meta
+      in
       (match
          Keeper_owner_registry.run_maintenance_if_idle
            ~base_path:config.base_path
@@ -2505,9 +2510,12 @@ let test_update_keeper_defers_lane_swap_while_turn_in_flight () =
         | Ok None -> fail "keeper metadata disappeared"
         | Error detail -> fail detail
       in
-      check string "metadata commit preceded the rejection"
+      check string "metadata commit preceded the deferral"
         "rejected mid-turn intent"
         after.instructions;
+      ignore
+        (Masc.Keeper_registry.unregister_exact running_lane
+          : Masc.Keeper_registry.unregister_exact_result);
       (match Keeper_meta_store.read_effective_meta config name with
        | Ok (Some effective) ->
          check (option string) "new image is materialized for the next turn"

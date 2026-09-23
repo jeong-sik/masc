@@ -111,22 +111,46 @@ let runtime_synced_result ~keeper_name (updated : keeper_meta) runtime_sync =
         @ [ "meta", Keeper_meta_json.meta_to_json updated ]))
 ;;
 
-(* Every editable field is read per turn or per cycle except one: the egress
-   proxy is forked only when a lane starts in the policy network mode
-   ([Keeper_keepalive.fork_egress_proxy]). A lane that started in another mode
-   has no proxy, so a policy-mode update that skips the lane restart would
-   leave every policy turn without its gateway, and nothing restarts the lane
-   after the turn ends. The registry's bound port is the lane's own answer;
-   comparing old and new meta would miss an earlier update that also skipped
-   the restart. *)
-let running_lane_lacks_policy_proxy ~base_path (updated : keeper_meta) =
-  match updated.network_mode with
-  | Keeper_types_profile_sandbox.Network_none
-  | Keeper_types_profile_sandbox.Network_inherit -> false
-  | Keeper_types_profile_sandbox.Network_policy ->
-    (match Keeper_registry.get ~base_path updated.name with
-     | None -> false
-     | Some entry -> Option.is_none (Atomic.get entry.egress_proxy_port))
+(* Why a turn-in-flight swap refusal cannot be reported as deferred. Every
+   editable field is read per turn or per cycle, so a running lane picks the
+   update up without a restart -- but only a running lane, and not the egress
+   proxy: it is forked only when a lane starts in the policy network mode
+   ([Keeper_keepalive.fork_egress_proxy]). Nothing restarts the lane after the
+   turn ends. The registry's bound port is the lane's own answer; comparing
+   old and new meta would miss an earlier update that also skipped the
+   restart. *)
+type deferral_blocker =
+  | No_running_lane
+  | Policy_lane_without_egress_proxy
+
+let deferral_blocker ~base_path (updated : keeper_meta) =
+  match Keeper_registry.get ~base_path updated.name with
+  | None -> Some No_running_lane
+  | Some entry ->
+    (match updated.network_mode with
+     | Keeper_types_profile_sandbox.Network_none
+     | Keeper_types_profile_sandbox.Network_inherit -> None
+     | Keeper_types_profile_sandbox.Network_policy ->
+       (match Atomic.get entry.egress_proxy_port with
+        | Some _ -> None
+        | None -> Some Policy_lane_without_egress_proxy))
+;;
+
+let deferral_blocker_message ~keeper_name = function
+  | No_running_lane ->
+    Printf.sprintf
+      "keeper %s configuration was saved and published, but a turn holds the \
+       keeper's slot and no keepalive lane is running, so none was started. \
+       Call masc_keeper_up again when the keeper is idle."
+      keeper_name
+  | Policy_lane_without_egress_proxy ->
+    Printf.sprintf
+      "keeper %s configuration was saved and published, but a turn holds the \
+       keeper's slot, so the keepalive lane was not restarted. The running \
+       lane has no egress proxy, and network_mode=policy needs one: it takes \
+       effect only when the lane restarts. Call masc_keeper_up again when the \
+       keeper is idle."
+      keeper_name
 ;;
 
 (* The lane swap tears down the registry entry a live turn's finalize path
@@ -188,8 +212,17 @@ let rec swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
     rollback ~operation_id;
     Error (Swap_turn_in_flight info)
   | Ok (Keeper_owner.Shutdown_already_reserved
-      { in_flight = Some info; _ }) ->
-    Error (Swap_turn_in_flight info)
+      { in_flight = Some _; _ }) ->
+    (* Another operation's fence stays in place and blocks admissions, so
+       the next turn is not this update's to promise. *)
+    Error
+      (Swap_failed
+         (tool_result_error ~class_:Tool_result.Workflow_rejection
+            (Printf.sprintf
+               "keeper %s configuration was saved, but another shutdown \
+                operation holds the keeper and a turn is in flight; the \
+                keepalive lane was not restarted."
+               keeper_name)))
   | Ok (Keeper_owner.Shutdown_reserved { in_flight = None; _ }) ->
     let stop_outcome =
       match swap () with
@@ -406,20 +439,12 @@ let finish_published_update ~supersession ctx updated =
       (match swap_keepalive_lane_fenced ctx updated with
        | Error (Swap_failed result) -> Update_refused result
        | Error (Swap_turn_in_flight info) ->
-         if running_lane_lacks_policy_proxy ~base_path:ctx.config.base_path
-              updated
-         then
-           Update_refused
-             (tool_result_error ~class_:Tool_result.Workflow_rejection
-                (Printf.sprintf
-                   "keeper %s configuration was saved and published, but a \
-                    turn holds the keeper's slot, so the keepalive lane was \
-                    not restarted. The running lane has no egress proxy, and \
-                    network_mode=policy needs one: it takes effect only when \
-                    the lane restarts. Call masc_keeper_up again when the \
-                    keeper is idle."
-                   updated.name))
-         else (
+         (match deferral_blocker ~base_path:ctx.config.base_path updated with
+          | Some blocker ->
+            Update_refused
+              (tool_result_error ~class_:Tool_result.Workflow_rejection
+                 (deferral_blocker_message ~keeper_name:updated.name blocker))
+          | None ->
            (* The owner publication above already carries the new profile;
               the turn holding the slot finishes on the meta it was admitted
               with and the next admitted turn reads the published one. *)

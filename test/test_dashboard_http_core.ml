@@ -5783,11 +5783,36 @@ let post_config_mid_turn ~sw ~clock ~config ~name body =
   | Ok (`Busy _) -> fail "Owner unexpectedly busy before the test turn"
   | Ok (`Ran response) -> response
 
+(* The lane a mid-turn update leaves running. [proxy_port] stands for the
+   egress proxy a lane forks when it starts in the policy network mode. *)
+let register_running_lane ?proxy_port config name =
+  let meta =
+    match Masc.Keeper_meta_store.read_meta config name with
+    | Ok (Some meta) -> meta
+    | Ok None -> fail "keeper metadata missing"
+    | Error error -> fail error
+  in
+  let entry =
+    Masc.Keeper_registry.register_offline ~base_path:config.Workspace.base_path
+      name meta
+  in
+  Atomic.set entry.Masc.Keeper_registry.egress_proxy_port proxy_port
+
+let unregister_lane config name =
+  match Masc.Keeper_registry.get ~base_path:config.Workspace.base_path name with
+  | None -> ()
+  | Some entry ->
+    ignore
+      (Masc.Keeper_registry.unregister_exact entry
+        : Masc.Keeper_registry.unregister_exact_result)
+
 let test_config_post_mid_turn_defers_runtime_sync () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-mid-turn" in
   prepare_config_sync_keeper ~sw config name;
   let toml_path = write_config_sync_toml config name in
+  register_running_lane config name;
+  Fun.protect ~finally:(fun () -> unregister_lane config name) @@ fun () ->
   let raw, json =
     post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
       {|{"activation_mode":"autonomous"}|}
@@ -5806,6 +5831,13 @@ let test_config_post_mid_turn_defers_runtime_sync () =
    | Ok doc ->
      check (option string) "activation committed" (Some "autonomous")
        (Keeper_toml_loader.toml_string_opt doc "keeper.activation_mode"));
+  (* The running lane reads its meta from the registry each turn; the update
+     reached it without a restart. *)
+  (match Masc.Keeper_registry.get ~base_path:config.base_path name with
+   | None -> fail "the running lane disappeared"
+   | Some entry ->
+     check bool "running lane sees the new activation mode" true
+       (Masc.Keeper_activation_mode.spontaneous entry.meta.activation_mode));
   (* The caller that reads 200 and moves on is right: a second POST built
      from a fresh read goes through without a revision conflict. *)
   let again_raw, again_json =
@@ -5816,34 +5848,49 @@ let test_config_post_mid_turn_defers_runtime_sync () =
   check string "second write is also deferred" "deferred_until_turn_end"
     (again_json |> member "runtime_sync" |> to_string)
 
-let test_config_post_mid_turn_policy_without_proxy_still_fails () =
+let expect_mid_turn_sync_failure ~label ~message_needle (raw, json) =
+  expect_http_status (label ^ " is HTTP 503") 503 raw;
+  let open Yojson.Safe.Util in
+  check string (label ^ ": typed runtime sync failure") "keeper_runtime_sync_failed"
+    (json |> member "error" |> member "code" |> to_string);
+  check bool (label ^ ": write itself applied") true
+    (json |> member "config_applied" |> to_bool);
+  check string (label ^ ": runtime sync failed") "failed"
+    (json |> member "runtime_sync" |> to_string);
+  check bool (label ^ ": refusal names its reason") true
+    (String_util.contains_substring
+       (json |> member "error" |> member "detail" |> to_string)
+       message_needle)
+
+let test_config_post_mid_turn_without_lane_still_fails () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-mid-turn-no-lane" in
+  prepare_config_sync_keeper ~sw config name;
+  let (_ : string) = write_config_sync_toml config name in
+  post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
+    {|{"activation_mode":"autonomous"}|}
+  |> expect_mid_turn_sync_failure ~label:"no running lane"
+       ~message_needle:"no keepalive lane is running"
+
+let test_config_post_mid_turn_policy_needs_the_lanes_proxy () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-mid-turn-policy" in
   prepare_config_sync_keeper ~sw config name;
   let (_ : string) = write_config_sync_toml config name in
-  let meta =
-    match Masc.Keeper_meta_store.read_meta config name with
-    | Ok (Some meta) -> meta
-    | Ok None -> fail "keeper metadata missing"
-    | Error error -> fail error
-  in
-  (* A lane registered without an egress proxy: the proxy is forked only
-     when a lane starts in the policy network mode. *)
-  let (_ : Masc.Keeper_registry.registry_entry) =
-    Masc.Keeper_registry.register_offline ~base_path:config.base_path name meta
-  in
+  register_running_lane config name;
+  Fun.protect ~finally:(fun () -> unregister_lane config name) @@ fun () ->
+  let policy = {|{"sandbox_profile":"microvm","network_mode":"policy"}|} in
+  post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name policy
+  |> expect_mid_turn_sync_failure ~label:"policy without a proxy"
+       ~message_needle:"no egress proxy";
+  unregister_lane config name;
+  register_running_lane ~proxy_port:40123 config name;
   let raw, json =
-    post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name
-      {|{"sandbox_profile":"microvm","network_mode":"policy"}|}
+    post_config_mid_turn ~sw ~clock:(Eio.Stdenv.clock env) ~config ~name policy
   in
-  expect_http_status "policy without a proxy is HTTP 503" 503 raw;
-  let open Yojson.Safe.Util in
-  check string "typed runtime sync failure" "keeper_runtime_sync_failed"
-    (json |> member "error" |> member "code" |> to_string);
-  check bool "write itself applied" true
-    (json |> member "config_applied" |> to_bool);
-  check string "runtime sync failed" "failed"
-    (json |> member "runtime_sync" |> to_string)
+  expect_http_status "policy with a running proxy is HTTP 200" 200 raw;
+  check string "policy with a running proxy is deferred" "deferred_until_turn_end"
+    Yojson.Safe.Util.(json |> member "runtime_sync" |> to_string)
 
 let test_config_post_materializes_missing_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -6007,18 +6054,9 @@ let test_config_post_round_trips_typed_tools_patch () =
        check (option string) "TOML native" (Some "full")
          (Keeper_toml_loader.toml_string_opt doc "keeper.tools.native");
        (* The POST above restarts this keeper's keepalive lane, and that lane
-          takes the turn slot once it runs. A second POST arriving after it
-          does gets keeper_turn_in_flight instead of 200 -- the handler
-          behaving correctly, and this assertion racing it. CI logged exactly
-          that refusal on the line before this check, and the same commit
-          passed at 19:02 and failed at 19:10.
-
-          The race does not reproduce locally: the suite passes eight runs in
-          a row both with and without this call, and sleeping a second in its
-          place does not lose it either. So this is the mechanism CI named,
-          not a mechanism reproduced here. What the call does buy regardless
-          is that the second POST starts from the state the first one found,
-          instead of from whatever the lane reached in between. *)
+          takes the turn slot once it runs. Stopping it here makes the second
+          POST start from the state the first one found, instead of from
+          whatever the lane reached in between. *)
        ignore
          (Masc.Keeper_keepalive.stop_keepalive_and_await
             ~base_path:config.base_path
@@ -6706,8 +6744,10 @@ let () =
             test_config_post_restarts_from_atomic_toml;
           test_case "config POST mid-turn defers runtime sync" `Quick
             test_config_post_mid_turn_defers_runtime_sync;
-          test_case "config POST mid-turn policy without proxy fails" `Quick
-            test_config_post_mid_turn_policy_without_proxy_still_fails;
+          test_case "config POST mid-turn without a lane fails" `Quick
+            test_config_post_mid_turn_without_lane_still_fails;
+          test_case "config POST mid-turn policy needs the lane's proxy" `Quick
+            test_config_post_mid_turn_policy_needs_the_lanes_proxy;
           test_case "config POST requires expected revision" `Quick
             test_config_post_requires_expected_revision;
           test_case "stale config POST loses with typed 409" `Quick

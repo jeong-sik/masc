@@ -205,6 +205,21 @@ let consume_deferred_runtime_lane_hint hint_ref expected =
   | None | Some _ -> false
 ;;
 
+(* A deferred runtime lane was recorded for one runtime assignment. A config
+   update that changes [runtime_id] while a turn holds the slot does not
+   restart the lane, so the loop-local hint can outlive its assignment; the
+   next cycle would keep walking the old assignment's candidates. The hint is
+   dropped once the current assignment differs, as a lane restart does. *)
+let deferred_runtime_lane_for_assignment hint_ref ~assignment_id =
+  match !hint_ref with
+  | Some (hint : Keeper_turn_driver.deferred_runtime_lane)
+    when String.equal hint.assignment_id assignment_id -> Some hint
+  | Some _ ->
+    hint_ref := None;
+    None
+  | None -> None
+;;
+
 (* The next dispatch after a failed turn. The decision is
    [Keeper_turn_driver.next_dispatch_after_failure], which the chat lane's
    deferred retry also reads; this maps it onto the heartbeat's sleep. The
@@ -1426,7 +1441,11 @@ let run_heartbeat_loop
             ~now:(cadence_now ())
             ~interval:(float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()))
             !periodic_cadence in
-        let deferred_runtime_lane = !deferred_runtime_lane_ref in
+        let deferred_runtime_lane =
+          deferred_runtime_lane_for_assignment
+            deferred_runtime_lane_ref
+            ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta_current)
+        in
         let wake = cycle_wake ~periodic_due ~deferred_runtime_lane in
         let turn_outcome =
           if not admitted_turn
@@ -1650,6 +1669,7 @@ let run_heartbeat_loop
 module For_testing = struct
   let retain_connector_attention_sources = retain_connector_attention_sources
   let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
+  let deferred_runtime_lane_for_assignment = deferred_runtime_lane_for_assignment
   let batch_disposition_records_continuation =
     batch_disposition_records_continuation
   ;;

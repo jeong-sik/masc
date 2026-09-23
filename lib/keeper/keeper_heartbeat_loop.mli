@@ -364,4 +364,11 @@ module For_testing : sig
     Keeper_turn_driver.deferred_runtime_lane option ref ->
     Keeper_turn_driver.deferred_runtime_lane ->
     bool
+
+  (** The hint when it was recorded for [assignment_id]; otherwise the hint is
+      cleared and [None] returned. *)
+  val deferred_runtime_lane_for_assignment :
+    Keeper_turn_driver.deferred_runtime_lane option ref ->
+    assignment_id:string ->
+    Keeper_turn_driver.deferred_runtime_lane option
 end

@@ -7,7 +7,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperInputPolicy, KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, SandboxProfile } from '../types'
+import type { KeeperInputPolicy, KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, KeeperConfigRuntimeSync, SandboxProfile } from '../types'
 import { UNKNOWN_NETWORK_MODE, UNKNOWN_SANDBOX_PROFILE } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
@@ -478,7 +478,7 @@ export async function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
   expectedConfigRevision: KeeperConfigRevision,
-): Promise<KeeperConfig> {
+): Promise<KeeperConfig & { runtime_sync: KeeperConfigRuntimeSync }> {
   await ensureDevToken()
   return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
@@ -488,9 +488,10 @@ export async function patchKeeperConfig(
     },
   ).then(raw => {
     const config = normalizeKeeperConfig(raw, name)
-    if (config.runtime_sync === undefined) {
+    const runtimeSync = config.runtime_sync
+    if (runtimeSync === undefined) {
       throw new Error('Invalid keeper config response: runtime_sync is required after a save')
     }
-    return config
+    return { ...config, runtime_sync: runtimeSync }
   })
 }

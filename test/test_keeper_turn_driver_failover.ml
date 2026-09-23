@@ -4714,6 +4714,28 @@ let test_deferred_hint_refs_are_not_shared () =
     true
     (Option.is_some !second)
 
+let test_deferred_hint_is_dropped_when_assignment_changes () =
+  let failure = retryable_network_error "checkpoint failure" in
+  let hint =
+    Driver.For_testing.make_deferred_runtime_lane
+      ~assignment_id:"lane.one"
+      ~failed_runtime_id:"runtime.a"
+      ~next_runtime_id:"runtime.b"
+      ~later_runtime_ids:[]
+      ~failure
+  in
+  let hint_ref = ref (Some hint) in
+  let for_assignment =
+    Masc.Keeper_heartbeat_loop.For_testing.deferred_runtime_lane_for_assignment
+  in
+  Alcotest.(check bool) "same assignment keeps its hint" true
+    (Option.is_some (for_assignment hint_ref ~assignment_id:"lane.one"));
+  Alcotest.(check bool) "hint survives a matching read" true
+    (Option.is_some !hint_ref);
+  Alcotest.(check bool) "changed assignment gets no hint" true
+    (Option.is_none (for_assignment hint_ref ~assignment_id:"lane.two"));
+  Alcotest.(check bool) "stale hint is cleared" true (Option.is_none !hint_ref)
+
 let rec remove_tree path =
   match Unix.lstat path with
   | { st_kind = Unix.S_DIR; _ } ->
@@ -5292,6 +5314,10 @@ let () =
             "deferred hint refs are not shared"
             `Quick
             test_deferred_hint_refs_are_not_shared;
+          Alcotest.test_case
+            "deferred hint is dropped when the assignment changes"
+            `Quick
+            test_deferred_hint_is_dropped_when_assignment_changes;
           Alcotest.test_case
             "deferred hint survives restart and settles durably"
             `Quick

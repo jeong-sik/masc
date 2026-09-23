@@ -515,6 +515,41 @@ let test_rewrite_target_is_the_librarian_position () = with_source @@ fun _env c
   check (option int) "the target is the Librarian's position" (Some 2) first.catch_up_end_atom
 
 
+(* A snapshot file cut off mid-write cannot be decoded. It is derived state,
+   so the next pass rebuilds it from atom 0 and the commit replaces the file;
+   the rebuilt snapshot carries a catch-up target, so a request does not start
+   back at its early end. Before, every pass stopped on the decode error and
+   nothing ever replaced the file. *)
+let test_an_undecodable_snapshot_is_rebuilt () = with_source @@ fun _env config save _append boundary ->
+  let one = [message "first"] in
+  let two = one @ [message "second"] in
+  save two; boundary ~fresh:true 1 one; boundary ~fresh:false 2 two;
+  let file = P.path ~config ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname file);
+  Out_channel.with_open_bin file (fun channel -> output_string channel {|{"origin":"witn|});
+  check bool "the torn file is still refused by read" true (Result.is_error (P.read ~config ~keeper_name));
+  let prepared =
+    match P.prepare_source ~config ~keeper_name ~trace_id () |> get with
+    | P.Ready prepared -> prepared
+    | P.No_source (P.Drained | P.Source_unreadable | P.Empty_range) -> fail "no source to rebuild" in
+  check int "the rebuild starts at atom 0" 0 (P.start_atom prepared);
+  check bool "no working state is invented" true
+    (U.member "previous_working_state" (P.prompt_json prepared) = `Null);
+  let rebuilt = commit config prepared "after the first turn" in
+  check int "the rebuilt snapshot ends at the first turn" 1 rebuilt.end_atom;
+  check (option int) "a request does not start at its early end" (Some 2) rebuilt.catch_up_end_atom;
+  check bool "the commit replaced the torn file" true
+    (P.read ~config ~keeper_name |> get = Some rebuilt)
+
+(* A snapshot path that cannot be read is an I/O failure, not a decode
+   failure: nothing is rebuilt over it. *)
+let test_an_unreadable_snapshot_stays_an_error () = with_source @@ fun _env config save _append boundary ->
+  let one = [message "first"] in
+  save one; boundary ~fresh:true 1 one;
+  Fs_compat.mkdir_p (P.path ~config ~keeper_name);
+  check bool "an unreadable snapshot stops the pass" true
+    (Result.is_error (P.prepare_source ~config ~keeper_name ~trace_id ()))
+
 let narrowing_marks = [ 'a'; 'b'; 'c'; 'd'; 'e'; 'f'; 'g'; 'h' ]
 let narrowing_atom_count = List.length narrowing_marks
 
@@ -983,6 +1018,8 @@ let () = run "production continuity pair"
   ["cycle",[test_case "completed turns are work units" `Quick test_completed_turn_work_units;
     test_case "a rewrite from atom 0 follows its target" `Quick test_rewrite_from_zero_follows_its_target;
     test_case "the rewrite target is the Librarian's position" `Quick test_rewrite_target_is_the_librarian_position;
+    test_case "an undecodable snapshot is rebuilt" `Quick test_an_undecodable_snapshot_is_rebuilt;
+    test_case "an unreadable snapshot stays an error" `Quick test_an_unreadable_snapshot_stays_an_error;
     test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
     test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
     test_case "a refused width carries to the next pass" `Quick test_refused_width_carries_to_the_next_pass;

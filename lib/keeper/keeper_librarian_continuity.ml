@@ -5,11 +5,22 @@ module C = Keeper_checkpoint_store
 module W = Runtime_model_input_tail_window
 let ( let* ) = Result.bind
 
+(* What the continuity file holds. The snapshot is derived from the
+   checkpoint and the boundary log, so one that cannot be decoded -- a torn
+   write, a format an older or newer binary wrote -- is rebuilt from atom 0
+   like an absent one, and the rebuilt snapshot replaces it on commit. A file
+   that cannot be read at all is an I/O failure, not a decode failure, and
+   stays an error. *)
+type stored =
+  | Absent
+  | Saved of S.t
+  | Undecodable of { reason : string }
+
 type prepared =
   { trace_id : string
   ; lines : (int * (B.record, B.read_error) result) list
   ; messages : Agent_core.Types.message list
-  ; previous : S.t option
+  ; previous : stored
   ; previous_state : string option
   ; recovery_receipt : Keeper_memory_os_current.durable_range_id option
   ; range : R.range
@@ -33,17 +44,40 @@ let path_in ~keepers_dir ~keeper_name =
   Filename.concat (Filename.concat keepers_dir keeper_name) "librarian-continuity.json"
 let path ~config ~keeper_name =
   path_in ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
-let read_in ~keepers_dir ~keeper_name =
+let load_in ~keepers_dir ~keeper_name =
   let file = path_in ~keepers_dir ~keeper_name in
   match Fs_compat.exact_path_kind ~follow:false file with
-  | Fs_compat.Exact_missing -> Ok None
-  | Fs_compat.Exact_kind _ -> S.load ~path:file |> Result.map Option.some |> Result.map_error S.error_to_string
+  | Fs_compat.Exact_missing -> Ok Absent
   | Fs_compat.Exact_unknown -> Error "continuity snapshot path cannot be inspected"
+  | Fs_compat.Exact_kind _ ->
+    (match S.load ~path:file with
+     | Ok snapshot -> Ok (Saved snapshot)
+     | Error (S.Invalid_snapshot reason) -> Ok (Undecodable { reason })
+     | Error
+         ((S.Read_failed _ | S.Write_failed _ | S.Uncovered_history | S.Unmatched_history
+          | S.Range_stopped _ | S.Trace_mismatch | S.History_changed | S.Prefix_changed) as error) ->
+       Error (S.error_to_string error))
+let load ~config ~keeper_name =
+  load_in ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+let read_in ~keepers_dir ~keeper_name =
+  let* stored = load_in ~keepers_dir ~keeper_name in
+  match stored with
+  | Absent -> Ok None
+  | Saved snapshot -> Ok (Some snapshot)
+  | Undecodable { reason } -> Error (S.error_to_string (S.Invalid_snapshot reason))
 let read ~config ~keeper_name =
   read_in ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
 let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
   let* lines = B.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
-  let* previous = read ~config ~keeper_name in
+  let* stored = load ~config ~keeper_name in
+  let previous = match stored with
+    | Saved snapshot -> Some snapshot
+    | Absent -> None
+    | Undecodable { reason } ->
+      Log.Keeper.warn ~keeper_name
+        "continuity snapshot %s cannot be decoded (%s); rebuilding it from atom 0, the commit replaces the file"
+        (path ~config ~keeper_name) reason;
+      None in
   let progress = Option.map (fun (snapshot : S.t) ->
     {Keeper_librarian_progress.position =
       {trace_id=snapshot.trace_id;end_atom=snapshot.end_atom;last_atom_digest=snapshot.last_atom_digest};
@@ -138,7 +172,7 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
           | Some cut -> Ok cut
           | None -> Error "continuity source has no covering completed boundary" in
         let unread = R.slice messages {range with R.start_atom; end_atom} in
-        Ok (Ready {trace_id;lines;messages;previous;previous_state;recovery_receipt;range;covering_cut;start_atom;end_atom;unread;
+        Ok (Ready {trace_id;lines;messages;previous=stored;previous_state;recovery_receipt;range;covering_cut;start_atom;end_atom;unread;
                   catch_up_target})
 
 (* The reason an empty source was empty is dropped here: a caller that only
@@ -225,6 +259,6 @@ let commit ~config ~keeper_name ~prepared ~working_state =
   let file = path ~config ~keeper_name in
   Fs_compat.mkdir_p (Filename.dirname file);
   File_lock_eio.with_lock file (fun () ->
-    let* current = read ~config ~keeper_name in
+    let* current = load ~config ~keeper_name in
     if current <> prepared.previous then Error "continuity snapshot changed during generation"
     else let* () = S.save ~path:file snapshot |> Result.map_error S.error_to_string in Ok snapshot)

@@ -246,10 +246,11 @@ let working_state_text (snapshot : Librarian_continuity_snapshot.t) =
    checked against the boundary log, or covers bytes that have changed is one
    that does not fit, never a reason to refuse the turn (#37762). A refused
    turn also ran no Librarian round, so a snapshot whose covered bytes changed
-   was never written again. A snapshot file or a boundary log that cannot be
-   read stops the Librarian's continuity pass as well, so those stay until the
-   file is fixed; they are warnings because each names a file to fix rather
-   than a history that moved on. A covered prefix or a read position that
+   was never written again. A snapshot file that cannot be decoded is rebuilt
+   by the Librarian's next continuity pass, which replaces it on commit. A
+   snapshot file or a boundary log that cannot be read stops that pass, so
+   those stay until the file is fixed; they are warnings because each names a
+   file to fix rather than a history that moved on. A covered prefix or a read position that
    changes while the request is in flight is still refused, by
    [validate_continuity].
 

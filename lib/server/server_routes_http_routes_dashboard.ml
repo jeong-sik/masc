@@ -414,18 +414,7 @@ let runtime_config_raw_json
          ; "commit", runtime_config_commit_json receipt
          ])
 
-(* Line count for the audit [lines] metric. [String.split_on_char '\n'] counts a
-   trailing newline as an extra empty line ("a\nb\n" -> 3 elements), so count
-   newline-separated lines treating a final '\n' as terminating the last line
-   rather than starting a new one ("a\nb\n" -> 2). *)
-let runtime_config_line_count text =
-  if String.length text = 0
-  then 0
-  else (
-    let newlines =
-      String.fold_left (fun n c -> if Char.equal c '\n' then n + 1 else n) 0 text
-    in
-    if Char.equal text.[String.length text - 1] '\n' then newlines else newlines + 1)
+let runtime_config_line_count = Server_skill_write_audit.line_count
 
 (* RFC fusion-seat-routes §2.5 — the typed fusion write. The client sends the
    revision it read with the settings; the edit re-checks it inside the config
@@ -996,28 +985,14 @@ let audit_runtime_config_write
       (Printexc.to_string exn)
 
 let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome =
-  try
-    Audit_log.log_action
-      (Mcp_server.workspace_config state)
-      ~agent_id:agent_name
-      ~action:(Audit_log.Custom "skill_write")
-      ~details:
-        (`Assoc
-          [ "reference", Skill_reference.to_yojson reference
-          ; "candidate_revision",
-            `String
-              (Skill_reference.content_revision_of_source_text source_text
-               |> Skill_reference.content_revision_to_string)
-          ; "bytes", `Int (String.length source_text)
-          ; "lines", `Int (runtime_config_line_count source_text)
-          ; "status", `String status
-          ])
-      ~outcome
-      ()
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Dashboard.warn "Skill write audit failed: %s" (Printexc.to_string exn)
+  Server_skill_write_audit.record
+    (Mcp_server.workspace_config state)
+    ~agent_id:agent_name
+    ~reference
+    ~source_text
+    ~status
+    ~outcome
+    ()
 ;;
 
 let audit_skill_delete state agent_name ~reference ~status ~recovery ~outcome =

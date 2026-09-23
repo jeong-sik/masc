@@ -46,6 +46,15 @@ val runtime_agents_fn :
 val keeper_registered_fn :
   (base_path:string -> agent_name:string -> bool) Atomic.t
 
+(** Publishes one new Skill package for a Keeper through the Skill editor.
+    The server installs it at boot; the default refuses with
+    [Workspace_skill_publish.Not_installed]. *)
+val keeper_skill_publish_fn :
+  (Workspace_utils_backend_setup.config ->
+   Workspace_skill_publish.request ->
+   (Workspace_skill_publish.outcome, Workspace_skill_publish.error) result)
+    Atomic.t
+
 (** Whether a schedule keeper_wake target has durable keeper metadata.
     [Ok true] = registered, [Ok false] = absent, [Error] = read failure.
     Default allows every target; the runtime installs the

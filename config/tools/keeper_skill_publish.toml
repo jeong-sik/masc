@@ -1,0 +1,29 @@
+name = "keeper_skill_publish"
+description = """
+Publish a new Skill package into the workspace's project-agents Skill source. \
+The SKILL.md is checked by the same parser as the operator Skill editor and \
+keeper_skill_validate, then the Skill catalog is republished so later turns \
+can find it. Never overwrites: an existing package name is refused. Operators \
+can delete a published Skill afterwards. Each publish records you, the \
+reference, and evidence in the audit log."""
+additional_properties = false
+
+[[params]]
+name = "package_id"
+type = "string"
+required = true
+description = "New Skill package directory name. Must match the SKILL.md name."
+
+[[params]]
+name = "source_text"
+type = "string"
+required = true
+description = "The complete SKILL.md text, frontmatter included."
+
+[[params]]
+name = "evidence"
+type = "array"
+required = true
+items = { type = "string" }
+min_items = 1
+description = "Where this procedure worked: Memory fact ids, turn references, or tool call references. Recorded, not judged."

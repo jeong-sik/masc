@@ -762,6 +762,8 @@ status: reference
   생성되지는 않는다. 현재 발행·사용 경로는 [Skills](../SKILLS.md)를 따른다.
   `keeper_skill_validate`는 export한 문서를 정적 검증하며, 실행 성공·안전성·발행을
   뜻하지 않는다. 입력과 발행 경계도 위 [Skills](../SKILLS.md) 문서를 따른다.
+  `keeper_skill_publish`는 Keeper가 `project-agents` source에 새 Skill을 만들고
+  바로 발행하는 도구다. 이미 있는 이름은 덮어쓰지 않고, 지우는 건 운영자가 한다.
   → [Keeper_skill_catalog](../../lib/keeper/keeper_skill_catalog.mli),
   [Skill_reference](../../lib/skill_reference/skill_reference.mli)
 

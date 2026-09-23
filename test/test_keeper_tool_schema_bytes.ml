@@ -275,7 +275,11 @@ open Alcotest
    than the preset's min_answered (RFC fusion-seat-routes §2.4). The tool
    declares defer_loading = true, so these bytes reach the wire only on a turn
    that names it. No headroom. *)
-let ceiling_bytes = 121_900
+(* 2026-09-23: +998 bytes, measured locally by this test at the
+   keeper_skill_publish branch (122,898 bytes / 138 tools). The new
+   keeper_skill_publish tool lets a Keeper publish a Skill package it wrote
+   (RFC keeper-self-authored-skills). No headroom. *)
+let ceiling_bytes = 122_898
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -362,6 +366,8 @@ let all_surface_golden_names =
   ; "keeper_person_note_set"
   (* A Keeper can statically validate an artifact-backed Skill draft. *)
   ; "keeper_skill_validate"
+  (* A Keeper can publish a new Skill package; operators delete afterwards. *)
+  ; "keeper_skill_publish"
   ; "keeper_spawn"
   ; "keeper_spawn_read"
   ; "keeper_spawn_stop"

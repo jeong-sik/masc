@@ -26,13 +26,19 @@ type expired_ask =
    from becoming a permanent credential: past [ttl_sec] the entry is stale
    and treated as no memory. *)
 
-type remembered =
-  { remembered_keeper_name : string
-  ; remembered_tool_name : string
-  ; remembered_args_fingerprint : string
-  ; remembered_decision : Registry.decision
-  ; remembered_answered_at : float
-  }
+type remembered = {
+  remembered_keeper_name : string
+; remembered_tool_name : string
+; remembered_args_fingerprint : string
+; remembered_decision : Registry.decision
+  (* The authenticated caller who made the decision, recorded at the HTTP
+     boundary (task-1662). [None] only for entries predating the stamp; the
+     memory is process-local and rebuilt empty on restart, so in practice
+     every live entry is [Some] — the field stays an option so the record
+     shape never reorders under an existing serialized form. *)
+; remembered_decision_actor : string option
+; remembered_answered_at : float
+}
 
 (* How long a remembered answer still counts as the decision the operator
    just made.
@@ -115,7 +121,7 @@ let same_identity (left : remembered) ~keeper_name ~tool_name ~args_fingerprint 
   && String.equal left.remembered_args_fingerprint args_fingerprint
 
 let remember_late t ?(now = Unix.gettimeofday ()) ~keeper_name ~tool_call_id
-    decision () =
+    ~actor decision () =
   Stdlib.Mutex.protect t.mutex (fun () ->
       reap_locked t ~now;
       (* [expired] is newest-first, and so is this match: if a provider ever
@@ -139,6 +145,7 @@ let remember_late t ?(now = Unix.gettimeofday ()) ~keeper_name ~tool_call_id
             ; remembered_tool_name = ask.expired_tool_name
             ; remembered_args_fingerprint = ask.expired_args_fingerprint
             ; remembered_decision = decision
+            ; remembered_decision_actor = actor
             ; remembered_answered_at = now
             }
           in
@@ -171,7 +178,14 @@ let take t ?(now = Unix.gettimeofday ()) ~keeper_name ~tool_name ~args () =
       | Some entry ->
           (* Consumed by the one call it settles: the next identical call is
              asked about again, because the operator said yes to this call,
-             not to every call that looks like it. *)
+             not to every call that looks like it. The actor stamp is the
+             only consumer-visible trace of who made the decision, so it is
+             read here rather than left to rot unread in the record. *)
+          Log.Keeper.info
+            "keeper_late_approval: consumed remembered decision keeper=%s tool=%s decision=%s actor=%s"
+            keeper_name entry.remembered_tool_name
+            (Registry.decision_to_string entry.remembered_decision)
+            (Option.value entry.remembered_decision_actor ~default:"unattributed"); (* NDT-OK: the actor is a stored record field, not parsed input; the default only labels a log line *)
           t.remembered <-
             List.filter
               (fun existing ->

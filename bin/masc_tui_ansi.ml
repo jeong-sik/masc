@@ -481,7 +481,7 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Tool -> Theme.quiet_origin ()
     | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_live ->
       Theme.info ()
-    | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_used ->
+    | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_settled ->
       Theme.ok ()
     | Masc_tui_message_layout.Skill Masc_tui_message_layout.Skill_attention ->
       Theme.warn ()

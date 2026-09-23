@@ -86,12 +86,16 @@ let prepare_source ?end_atom ~config ~keeper_name ~trace_id () =
           let position = progress.position in
           String.equal position.trace_id trace_id && position.end_atom >= 1
           && W.atom_opening_digest messages (position.end_atom - 1) = Some position.last_atom_digest in
-        match
-          Keeper_librarian_progress.read
-            ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
-        with
+        let keepers_dir = Workspace.keepers_runtime_dir config in
+        match Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name with
         | Ok (Some progress) when position_fits progress -> progress.position.end_atom
-        | Ok (Some _) | Ok None | Error _ -> range.end_atom in
+        | Ok (Some _) | Ok None -> range.end_atom
+        | Error error ->
+          Log.Keeper.warn ~keeper_name
+            "continuity catch-up target falls back to this range's end: %s unreadable: %s"
+            (Keeper_librarian_progress.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+            (Keeper_librarian_progress.read_error_to_string error);
+          range.end_atom in
       let catch_up_target = match fitting_previous with
         | Some ((snapshot : S.t), _) ->
           Option.map (fun _ -> start_without_snapshot ()) snapshot.catch_up_end_atom
@@ -186,7 +190,7 @@ let memory_committed ~config ~keeper_name prepared =
       ~progress:None ~messages:prepared.messages R.All_unread with
     | R.Read {range;_} when range.start_atom = 0 -> Some 0
     | R.Baseline {position;_} -> Some position.end_atom
-    | _ -> None in
+    | R.Read _ | R.Nothing_to_read | R.Position_in_other_trace _ | R.Stop _ -> None in
   Ok (match ordinary, floor with
     | Some receipt, Some floor ->
       String.equal receipt.trace_id prepared.trace_id
@@ -198,7 +202,7 @@ let memory_committed ~config ~keeper_name prepared =
            cut.cut_line = receipt.end_boundary_line && cut.cut_end_atom = receipt.end_atom)
            (R.cut_lines ~trace_id:prepared.trace_id ~lines:prepared.lines
               ~messages:prepared.messages prepared.range)
-    | _ -> false)
+    | None, _ | Some _, None -> false)
 let prompt_json prepared =
   `Assoc ["previous_working_state", (match prepared.previous_state with None -> `Null | Some text -> `String text);
     "completed_conversation", `List (List.map Agent_core.Checkpoint.message_to_json prepared.unread)]

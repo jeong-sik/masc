@@ -2363,6 +2363,13 @@ id = "claude"
 # 2026-09-19: documented request suppression, independent of model capability.
 # https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use
 supports_parallel_tool_suppression = true
+# Anthropic's own API: the claude-* bare rows above describe exactly the models
+# it serves, so a config naming this provider reads them by prefix. No row is
+# scoped to "claude", and before this every such config fell to the Anthropic
+# preset and was refused any reasoning effort (#37849). deepseek-anthropic
+# below takes the same wire but answers claude-* ids with its own models, so it
+# does not declare this.
+serves_bare_rows = true
 kind = "anthropic"
 base_url = "https://api.anthropic.com"
 request_path = "/v1/messages"
